@@ -77,7 +77,9 @@ pub(crate) enum LocalBinding {
 
 impl LocalBinding {
     pub fn value(self) -> ValueId {
-        match self { LocalBinding::Ssa(v) | LocalBinding::Var(v) => v }
+        match self {
+            LocalBinding::Ssa(v) | LocalBinding::Var(v) => v,
+        }
     }
 }
 
@@ -93,12 +95,16 @@ pub(crate) enum BodyContext {
 
 impl BodyContext {
     pub fn is_protocol_extension(&self) -> bool {
-        matches!(self, BodyContext::ProtocolExtension | BodyContext::ProtocolExtensionInit { .. })
+        matches!(
+            self,
+            BodyContext::ProtocolExtension | BodyContext::ProtocolExtensionInit { .. }
+        )
     }
 
     pub fn init_self_addr(&self) -> Option<ValueId> {
         match self {
-            BodyContext::Initializer { self_addr } | BodyContext::ProtocolExtensionInit { self_addr } => Some(*self_addr),
+            BodyContext::Initializer { self_addr }
+            | BodyContext::ProtocolExtensionInit { self_addr } => Some(*self_addr),
             _ => None,
         }
     }
@@ -107,7 +113,10 @@ impl BodyContext {
 #[derive(Clone)]
 pub(crate) enum ScopeEntry {
     Owned(ValueId),
-    Var { addr: ValueId, ty: TyId },
+    Var {
+        addr: ValueId,
+        ty: TyId,
+    },
     /// @guaranteed borrow needing EndBorrow at scope exit.
     Borrow(ValueId),
 }
@@ -137,7 +146,9 @@ pub(crate) struct LiveTracker {
 
 impl LiveTracker {
     pub fn from_live(live: &[(ValueId, TyId, Ownership)]) -> Self {
-        Self { slots: live.to_vec() }
+        Self {
+            slots: live.to_vec(),
+        }
     }
 
     /// Current values to forward as block args.
@@ -147,7 +158,10 @@ impl LiveTracker {
 
     /// Type descriptors for creating block params.
     pub fn descs(&self) -> Vec<(TyId, Ownership)> {
-        self.slots.iter().map(|&(_, ty, ownership)| (ty, ownership)).collect()
+        self.slots
+            .iter()
+            .map(|&(_, ty, ownership)| (ty, ownership))
+            .collect()
     }
 
     /// Update slots when entering a new block whose params replace old values.
@@ -179,6 +193,9 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub deferred_end_borrows: Vec<ValueId>,
     pub temp_counter: u32,
     pub current_span: Option<Span>,
+    /// Remaining use count per SSA local — decremented on each lower_expr.
+    /// When the count hits zero, the local is moved instead of copied.
+    local_use_counts: HashMap<HirLocalId, usize>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -194,7 +211,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             hir: HirRef::Borrowed(hir),
             typed: typed.map(TypedRef::Borrowed),
             func_entity,
-            body_context: if in_protocol_extension { BodyContext::ProtocolExtension } else { BodyContext::Normal },
+            body_context: if in_protocol_extension {
+                BodyContext::ProtocolExtension
+            } else {
+                BodyContext::Normal
+            },
             body: OssaBody::new(),
             current_block: None,
             local_map: HashMap::new(),
@@ -204,6 +225,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             deferred_end_borrows: Vec::new(),
             temp_counter: 0,
             current_span: None,
+            local_use_counts: HashMap::new(),
         }
     }
 
@@ -212,7 +234,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn lower_body(&mut self) {
-        let locals: Vec<_> = self.hir.locals.iter().map(|(id, l)| (id, l.clone())).collect();
+        // Build use counts for SSA locals — enables move-on-last-use.
+        self.local_use_counts = self.count_local_uses();
+
+        let locals: Vec<_> = self
+            .hir
+            .locals
+            .iter()
+            .map(|(id, l)| (id, l.clone()))
+            .collect();
         let params_len = self.hir.params.len();
         let statements: Vec<_> = self.hir.statements.clone();
 
@@ -229,17 +259,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // MutBorrow params (mutating self, mutating args) receive an address
         // and are bound as LocalBinding::Var — reads go through Load, field
         // assignments use the address directly.
-        let param_conventions: Vec<ParamConvention> = self.ctx.module.functions
+        let param_conventions: Vec<ParamConvention> = self
+            .ctx
+            .module
+            .functions
             .get(&self.func_entity)
             .map(|f| f.params.iter().map(|p| p.convention).collect())
             .unwrap_or_default();
-        let is_init_body = self.ctx.module.functions.get(&self.func_entity)
-            .map(|f| matches!(f.kind, kestrel_mir_3::item::function::FunctionKind::Initializer { .. }))
+        let is_init_body = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .map(|f| {
+                matches!(
+                    f.kind,
+                    kestrel_mir_3::item::function::FunctionKind::Initializer { .. }
+                )
+            })
             .unwrap_or(false);
         for (i, (hir_id, _local)) in locals.iter().enumerate() {
-            if i >= params_len { break; }
+            if i >= params_len {
+                break;
+            }
             let ty = self.resolve_local_type(*hir_id);
-            let convention = param_conventions.get(i).copied()
+            let convention = param_conventions
+                .get(i)
+                .copied()
                 .unwrap_or(ParamConvention::Borrow);
             match convention {
                 ParamConvention::MutBorrow => {
@@ -247,29 +293,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         ty,
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
+                        span: None,
                     });
                     self.local_map.insert(*hir_id, LocalBinding::Var(val));
                     if is_init_body && i == 0 {
                         self.body_context = match self.body_context {
-                            BodyContext::ProtocolExtension => BodyContext::ProtocolExtensionInit { self_addr: val },
+                            BodyContext::ProtocolExtension => {
+                                BodyContext::ProtocolExtensionInit { self_addr: val }
+                            },
                             _ => BodyContext::Initializer { self_addr: val },
                         };
                     }
-                }
+                },
                 ParamConvention::Borrow => {
                     let val = self.body.alloc_value(ValueDef {
                         ty,
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
+                        span: None,
                     });
                     self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
-                }
+                },
                 ParamConvention::Consuming => {
                     let ownership = self.ownership_for(ty);
                     let val = self.alloc_value(ty, ownership);
                     self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
                     self.track_owned(val);
-                }
+                },
             }
         }
         self.body.param_count = params_len;
@@ -324,7 +374,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.body.alloc_block()
     }
 
-    pub fn new_block_with_params(&mut self, params: &[(TyId, Ownership)]) -> (BlockId, Vec<ValueId>) {
+    pub fn new_block_with_params(
+        &mut self,
+        params: &[(TyId, Ownership)],
+    ) -> (BlockId, Vec<ValueId>) {
         let block = self.body.alloc_block();
         let mut values = Vec::new();
         for &(ty, ownership) in params {
@@ -345,7 +398,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn is_terminated(&self) -> bool {
         self.current_block
-            .map(|b| !matches!(self.body.block(b).terminator.kind, TerminatorKind::Unreachable))
+            .map(|b| {
+                !matches!(
+                    self.body.block(b).terminator.kind,
+                    TerminatorKind::Unreachable
+                )
+            })
             .unwrap_or(true)
     }
 
@@ -375,6 +433,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         matches!(self.local_map.get(hir_id), Some(LocalBinding::Var(_)))
     }
 
+    /// Count how many times each local appears as `HirExpr::Local` in the body.
+    fn count_local_uses(&self) -> HashMap<HirLocalId, usize> {
+        let mut counts = HashMap::new();
+        for (_, expr) in self.hir.exprs.iter() {
+            if let HirExpr::Local(id, _) = expr {
+                *counts.entry(*id).or_default() += 1;
+            }
+        }
+        counts
+    }
+
+    /// Returns true if this SSA local is referenced exactly once in the HIR,
+    /// meaning this reference is the only use and the value can be moved.
+    fn is_single_use(&self, hir_id: HirLocalId) -> bool {
+        self.local_use_counts.get(&hir_id).copied().unwrap_or(0) == 1
+    }
+
     pub fn map_local(&mut self, hir_id: HirLocalId) -> ValueId {
         if let Some(&binding) = self.local_map.get(&hir_id) {
             return binding.value();
@@ -389,10 +464,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn is_copy_type(&self, ty: TyId) -> bool {
-        let wc = self.ctx.module.functions.get(&self.func_entity)
+        let wc = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
             .and_then(|f| f.where_clause.as_ref());
         matches!(
-            kestrel_mir_3::ty_query::copy_behavior(&self.ctx.module.ty_arena, &self.ctx.module, ty, wc),
+            kestrel_mir_3::ty_query::copy_behavior(
+                &self.ctx.module.ty_arena,
+                &self.ctx.module,
+                ty,
+                wc
+            ),
             CopyBehavior::Bitwise
         )
     }
@@ -410,7 +494,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             Ownership::Owned => ValueDef::owned(ty),
             Ownership::Guaranteed => panic!("use alloc_guaranteed for @guaranteed"),
         };
-        self.body.alloc_value(def)
+        // Stamp the value with the current expr/stmt span, mirroring push_inst —
+        // gives verifier ICEs a precise location for this value's definition.
+        self.body
+            .alloc_value(def.with_span(self.current_span.clone()))
     }
 
     pub fn alloc_value_auto(&mut self, ty: TyId) -> ValueId {
@@ -419,7 +506,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn alloc_guaranteed(&mut self, ty: TyId, source: ValueId) -> ValueId {
-        self.body.alloc_value(ValueDef::guaranteed(ty, source))
+        self.body
+            .alloc_value(ValueDef::guaranteed(ty, source).with_span(self.current_span.clone()))
     }
 
     // ================================================================
@@ -427,12 +515,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn push_scope(&mut self) {
-        self.scope_stack.push(ScopeFrame { entries: Vec::new() });
+        self.scope_stack.push(ScopeFrame {
+            entries: Vec::new(),
+        });
     }
 
     pub fn track_var(&mut self, address: ValueId, content_ty: TyId) {
         if let Some(frame) = self.scope_stack.last_mut() {
-            frame.entries.push(ScopeEntry::Var { addr: address, ty: content_ty });
+            frame.entries.push(ScopeEntry::Var {
+                addr: address,
+                ty: content_ty,
+            });
         }
     }
 
@@ -441,7 +534,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return;
         }
         if let Some(frame) = self.scope_stack.last_mut() {
-            let already = frame.entries.iter().any(|e| matches!(e, ScopeEntry::Owned(v) if *v == value));
+            let already = frame
+                .entries
+                .iter()
+                .any(|e| matches!(e, ScopeEntry::Owned(v) if *v == value));
             if !already {
                 frame.entries.push(ScopeEntry::Owned(value));
             }
@@ -450,7 +546,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn consume(&mut self, value: ValueId) {
         for scope in self.scope_stack.iter_mut().rev() {
-            if let Some(pos) = scope.entries.iter().position(|e| matches!(e, ScopeEntry::Owned(v) if *v == value)) {
+            if let Some(pos) = scope
+                .entries
+                .iter()
+                .position(|e| matches!(e, ScopeEntry::Owned(v) if *v == value))
+            {
                 scope.entries.remove(pos);
                 return;
             }
@@ -465,7 +565,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     fn untrack_borrow(&mut self, value: ValueId) {
         for scope in self.scope_stack.iter_mut().rev() {
-            if let Some(pos) = scope.entries.iter().position(|e| matches!(e, ScopeEntry::Borrow(v) if *v == value)) {
+            if let Some(pos) = scope
+                .entries
+                .iter()
+                .position(|e| matches!(e, ScopeEntry::Borrow(v) if *v == value))
+            {
                 scope.entries.remove(pos);
                 return;
             }
@@ -478,10 +582,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn destroy_scope_except(&mut self, keep: &[ValueId]) {
         if let Some(scope) = self.scope_stack.last_mut() {
-            let borrows: Vec<ValueId> = scope.entries.iter().rev()
-                .filter_map(|e| match e { ScopeEntry::Borrow(v) => Some(*v), _ => None })
+            let borrows: Vec<ValueId> = scope
+                .entries
+                .iter()
+                .rev()
+                .filter_map(|e| match e {
+                    ScopeEntry::Borrow(v) => Some(*v),
+                    _ => None,
+                })
                 .collect();
-            let to_destroy: Vec<ValueId> = scope.entries.iter().rev()
+            let to_destroy: Vec<ValueId> = scope
+                .entries
+                .iter()
+                .rev()
                 .filter_map(|e| match e {
                     ScopeEntry::Owned(v) if !keep.contains(v) => Some(*v),
                     _ => None,
@@ -502,7 +615,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn destroy_scopes_to_depth(&mut self, target_depth: usize, keep: &[ValueId]) {
-        let entries: Vec<ScopeEntry> = self.scope_stack[target_depth..].iter().rev()
+        let entries: Vec<ScopeEntry> = self.scope_stack[target_depth..]
+            .iter()
+            .rev()
             .flat_map(|scope| scope.entries.iter().rev().cloned())
             .collect();
         // End borrows first — they may reference values we're about to destroy.
@@ -515,11 +630,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             match entry {
                 ScopeEntry::Owned(v) if !keep.contains(v) => {
                     self.push_inst(InstKind::DestroyValue { operand: *v });
-                }
+                },
                 ScopeEntry::Var { addr, ty } => {
-                    self.push_inst(InstKind::DestroyAddr { address: *addr, ty: *ty });
-                }
-                _ => {}
+                    self.push_inst(InstKind::DestroyAddr {
+                        address: *addr,
+                        ty: *ty,
+                    });
+                },
+                _ => {},
             }
         }
     }
@@ -548,7 +666,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.scope_stack.truncate(snapshot.scopes.len());
         for (i, frame) in self.scope_stack.iter_mut().enumerate() {
             // Borrows can't cross block boundaries — strip on restore.
-            frame.entries = snapshot.scopes[i].iter()
+            frame.entries = snapshot.scopes[i]
+                .iter()
                 .filter(|e| !matches!(e, ScopeEntry::Borrow(_)))
                 .cloned()
                 .collect();
@@ -585,7 +704,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn jump_to_merge(&mut self, merge_block: BlockId, result: ValueId) {
         let result = if self.body.value(result).ownership == Ownership::Guaranteed {
             self.emit_copy_value(result)
-        } else { result };
+        } else {
+            result
+        };
         let tracker_vals = self.tracker.values();
         let mut keep = vec![result];
         keep.extend(&tracker_vals);
@@ -637,6 +758,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let ty = self.body.value(operand).ty;
         let result = self.alloc_guaranteed(ty, operand);
         self.push_inst(InstKind::BeginBorrow { result, operand });
+        self.track_borrow(result);
         result
     }
 
@@ -645,7 +767,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// copy whose destruction runs drop shims (breaking refcount for RcBox etc.)
     pub fn emit_begin_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.alloc_guaranteed(ty, address);
-        self.push_inst(InstKind::BeginBorrowAddr { result, address, ty });
+        self.push_inst(InstKind::BeginBorrowAddr {
+            result,
+            address,
+            ty,
+        });
+        self.track_borrow(result);
         result
     }
 
@@ -667,16 +794,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let ty = self.body.value(operand).ty;
         let result = self.alloc_guaranteed(ty, operand);
         self.push_inst(InstKind::BeginMutBorrow { result, operand });
+        self.track_borrow(result);
         result
     }
 
     pub fn emit_begin_mut_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.alloc_guaranteed(ty, address);
-        self.push_inst(InstKind::BeginMutBorrowAddr { result, address, ty });
+        self.push_inst(InstKind::BeginMutBorrowAddr {
+            result,
+            address,
+            ty,
+        });
+        self.track_borrow(result);
         result
     }
 
     pub fn emit_end_mut_borrow(&mut self, operand: ValueId) {
+        self.untrack_borrow(operand);
         self.push_inst(InstKind::EndMutBorrow { operand });
     }
 
@@ -687,17 +821,34 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
-
     pub fn emit_op2(&mut self, op: Op, lhs: ValueId, rhs: ValueId, result_ty: TyId) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);
-        self.push_inst(InstKind::Op2 { result, op, lhs, rhs });
+        self.push_inst(InstKind::Op2 {
+            result,
+            op,
+            lhs,
+            rhs,
+        });
         self.track_owned(result);
         result
     }
 
-    pub fn emit_op3(&mut self, op: Op, a: ValueId, b: ValueId, c: ValueId, result_ty: TyId) -> ValueId {
+    pub fn emit_op3(
+        &mut self,
+        op: Op,
+        a: ValueId,
+        b: ValueId,
+        c: ValueId,
+        result_ty: TyId,
+    ) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);
-        self.push_inst(InstKind::Op3 { result, op, a, b, c });
+        self.push_inst(InstKind::Op3 {
+            result,
+            op,
+            a,
+            b,
+            c,
+        });
         self.track_owned(result);
         result
     }
@@ -722,28 +873,51 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
-    pub fn emit_enum_variant(&mut self, enum_ty: TyId, variant: VariantIdx, payload: Vec<ValueId>) -> ValueId {
+    pub fn emit_enum_variant(
+        &mut self,
+        enum_ty: TyId,
+        variant: VariantIdx,
+        payload: Vec<ValueId>,
+    ) -> ValueId {
         let result = self.alloc_value(enum_ty, Ownership::Owned);
         for &v in &payload {
             self.consume(v);
         }
-        self.push_inst(InstKind::Enum { result, enum_ty, variant, payload });
+        self.push_inst(InstKind::Enum {
+            result,
+            enum_ty,
+            variant,
+            payload,
+        });
         self.track_owned(result);
         result
     }
 
-    pub fn emit_struct_extract(&mut self, operand: ValueId, field: FieldIdx, result_ty: TyId) -> ValueId {
+    pub fn emit_struct_extract(
+        &mut self,
+        operand: ValueId,
+        field: FieldIdx,
+        result_ty: TyId,
+    ) -> ValueId {
         let operand_ownership = self.body.value(operand).ownership;
         if operand_ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
-            self.push_inst(InstKind::StructExtract { result, operand, field });
+            self.push_inst(InstKind::StructExtract {
+                result,
+                operand,
+                field,
+            });
             result
         } else {
             // Borrow → extract (@guaranteed) → copy (@owned). Operand stays alive
             // for the tracker and further extractions.
             let borrow = self.emit_begin_borrow(operand);
             let field_ref = self.alloc_guaranteed(result_ty, borrow);
-            self.push_inst(InstKind::StructExtract { result: field_ref, operand: borrow, field });
+            self.push_inst(InstKind::StructExtract {
+                result: field_ref,
+                operand: borrow,
+                field,
+            });
             let result = self.emit_copy_value(field_ref);
             self.emit_end_borrow(borrow);
             result
@@ -754,13 +928,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let operand_ownership = self.body.value(operand).ownership;
         if operand_ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
-            self.push_inst(InstKind::TupleExtract { result, operand, index });
+            self.push_inst(InstKind::TupleExtract {
+                result,
+                operand,
+                index,
+            });
             result
         } else {
             // Borrow → extract (@guaranteed) → copy (@owned). Operand stays alive.
             let borrow = self.emit_begin_borrow(operand);
             let elem_ref = self.alloc_guaranteed(result_ty, borrow);
-            self.push_inst(InstKind::TupleExtract { result: elem_ref, operand: borrow, index });
+            self.push_inst(InstKind::TupleExtract {
+                result: elem_ref,
+                operand: borrow,
+                index,
+            });
             let result = self.emit_copy_value(elem_ref);
             self.emit_end_borrow(borrow);
             result
@@ -796,7 +978,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // The expand pass uses the pointer's pointee type to decide which
         // drop shim to call for StoreAssign; using the struct type would
         // destroy the whole struct starting at the field's address.
-        let field_ty = if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(ty) {
+        let field_ty = if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(ty)
+        {
             let entity = *entity;
             let type_args = type_args.clone();
             if let Some(raw_ft) = self.ctx.resolve_field_ty(entity, field) {
@@ -819,7 +1002,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         };
         let ptr_ty = self.ctx.module.ty_arena.pointer(field_ty);
         let result = self.alloc_value(ptr_ty, Ownership::Owned);
-        self.push_inst(InstKind::FieldAddr { result, base, ty, field });
+        self.push_inst(InstKind::FieldAddr {
+            result,
+            base,
+            ty,
+            field,
+        });
         self.track_owned(result);
         result
     }
@@ -827,7 +1015,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_store_init(&mut self, address: ValueId, value: ValueId) {
         let value = if self.body.value(value).ownership == Ownership::Guaranteed {
             self.emit_copy_value(value)
-        } else { value };
+        } else {
+            value
+        };
         self.push_inst(InstKind::StoreInit { address, value });
         self.consume(value);
     }
@@ -835,7 +1025,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_store_assign(&mut self, address: ValueId, value: ValueId) {
         let value = if self.body.value(value).ownership == Ownership::Guaranteed {
             self.emit_copy_value(value)
-        } else { value };
+        } else {
+            value
+        };
         self.push_inst(InstKind::StoreAssign { address, value });
         self.consume(value);
     }
@@ -849,7 +1041,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.alloc_value(ty, Ownership::Owned);
-        self.push_inst(InstKind::Take { result, address, ty });
+        self.push_inst(InstKind::Take {
+            result,
+            address,
+            ty,
+        });
         self.track_owned(result);
         result
     }
@@ -864,12 +1060,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
-    pub fn emit_apply_partial(&mut self, func: Entity, captures: Vec<ValueId>, result_ty: TyId) -> ValueId {
+    pub fn emit_apply_partial(
+        &mut self,
+        func: Entity,
+        captures: Vec<ValueId>,
+        result_ty: TyId,
+    ) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);
         for &v in &captures {
             self.consume(v);
         }
-        self.push_inst(InstKind::ApplyPartial { result, func, captures });
+        self.push_inst(InstKind::ApplyPartial {
+            result,
+            func,
+            captures,
+        });
         self.track_owned(result);
         result
     }
@@ -888,7 +1093,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let ownership = self.ownership_for(ty);
             self.alloc_value(ty, ownership)
         });
-        let mut borrows: Vec<ValueId> = args.iter()
+        let mut borrows: Vec<ValueId> = args
+            .iter()
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
             .map(|a| a.value)
             .collect();
@@ -897,11 +1103,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 borrows.push(cv);
             }
         }
-        let consuming: Vec<ValueId> = args.iter()
+        let consuming: Vec<ValueId> = args
+            .iter()
             .filter(|a| a.convention == ParamConvention::Consuming)
             .map(|a| a.value)
             .collect();
-        self.push_inst(InstKind::Call { result, callee, args });
+        self.push_inst(InstKind::Call {
+            result,
+            callee,
+            args,
+        });
         for v in consuming {
             self.consume(v);
         }
@@ -939,7 +1150,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn set_terminator(&mut self, kind: TerminatorKind) {
         self.drain_deferred_borrows();
-        let term = Terminator { kind, span: self.current_span.clone() };
+        // End any scope-tracked borrows before the terminator — borrows
+        // can't cross block boundaries.
+        let all_borrows: Vec<ValueId> = self
+            .scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for scope in &mut self.scope_stack {
+            scope
+                .entries
+                .retain(|e| !matches!(e, ScopeEntry::Borrow(_)));
+        }
+        for v in all_borrows {
+            self.push_inst(InstKind::EndBorrow { operand: v });
+        }
+        let term = Terminator {
+            kind,
+            span: self.current_span.clone(),
+        };
         if let Some(block_id) = self.current_block {
             self.body.block_mut(block_id).terminator = term;
         }
@@ -971,7 +1204,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_switch(&mut self, discriminant: ValueId, cases: Vec<SwitchArm>) {
-        self.set_terminator(TerminatorKind::Switch { discriminant, cases });
+        self.set_terminator(TerminatorKind::Switch {
+            discriminant,
+            cases,
+        });
     }
 
     pub fn emit_panic(&mut self, msg: &str) {
@@ -993,7 +1229,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     Some(LocalBinding::Var(addr)) => Some(addr),
                     _ => None,
                 }
-            }
+            },
             kestrel_hir::body::HirExpr::Field { base, name, .. } => {
                 let base_addr = self.try_field_addr_chain(base)?;
                 let base_ty = self.resolve_expr_type(base);
@@ -1002,10 +1238,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     MirTy::Named { entity, .. } => Some(*entity),
                     _ => None,
                 };
-                let field_idx = struct_entity
-                    .and_then(|e| self.ctx.resolve_field_idx(e, field_name))?;
+                let field_idx =
+                    struct_entity.and_then(|e| self.ctx.resolve_field_idx(e, field_name))?;
                 Some(self.emit_field_addr(base_addr, base_ty, field_idx))
-            }
+            },
             _ => None,
         }
     }
@@ -1024,7 +1260,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         match &expr {
             HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
                 self.map_local(*hir_local)
-            }
+            },
             _ => self.lower_expr(expr_id),
         }
     }
@@ -1040,7 +1276,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let val = self.map_local(*hir_local);
                 self.consume(val);
                 val
-            }
+            },
             _ => self.lower_expr(expr_id),
         }
     }
@@ -1063,19 +1299,48 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Prepare a call argument from an HIR expression, respecting var locals.
     /// For MutBorrow on var locals / MutBorrow params, emits BeginMutBorrowAddr
     /// so mutations write through to the original storage.
-    pub fn prepare_call_arg_for_expr(&mut self, expr_id: HirExprId, convention: ParamConvention) -> CallArg {
+    pub fn prepare_call_arg_for_expr(
+        &mut self,
+        expr_id: HirExprId,
+        convention: ParamConvention,
+    ) -> CallArg {
         if convention == ParamConvention::MutBorrow {
             if let Some(addr) = self.try_var_addr(expr_id) {
                 let ty = self.resolve_expr_type(expr_id);
                 let borrow = self.emit_begin_mut_borrow_addr(addr, ty);
-                return CallArg { value: borrow, convention };
+                return CallArg {
+                    value: borrow,
+                    convention,
+                };
             }
         }
         if convention == ParamConvention::Borrow {
             if let Some(addr) = self.try_var_addr(expr_id) {
                 let ty = self.resolve_expr_type(expr_id);
                 let borrow = self.emit_begin_borrow_addr(addr, ty);
-                return CallArg { value: borrow, convention };
+                return CallArg {
+                    value: borrow,
+                    convention,
+                };
+            }
+        }
+        // Single-use SSA local with Consuming convention: move directly,
+        // bypassing the emit_value_use copy. Only safe at function top-level
+        // scope — loops re-execute the block, and conditional branches need
+        // the value alive for the other arm's cleanup/forwarding.
+        if convention == ParamConvention::Consuming && self.scope_stack.len() == 1 {
+            let expr = self.hir.exprs[expr_id].clone();
+            if let HirExpr::Local(hir_local, _) = &expr {
+                if !self.is_var_local(hir_local) && self.is_single_use(*hir_local) {
+                    let val = self.map_local(*hir_local);
+                    if self.body.value(val).ownership == Ownership::Owned {
+                        self.consume(val);
+                        return CallArg {
+                            value: val,
+                            convention,
+                        };
+                    }
+                }
             }
         }
         let val = self.lower_expr(expr_id);
@@ -1087,17 +1352,31 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         match convention {
             ParamConvention::Borrow => {
                 let borrow = self.emit_begin_borrow(value);
-                CallArg { value: borrow, convention }
-            }
+                CallArg {
+                    value: borrow,
+                    convention,
+                }
+            },
             ParamConvention::MutBorrow => {
                 let borrow = self.emit_begin_mut_borrow(value);
-                CallArg { value: borrow, convention }
-            }
+                CallArg {
+                    value: borrow,
+                    convention,
+                }
+            },
             ParamConvention::Consuming => {
-                let copy = self.emit_copy_value(value);
-                self.consume(copy);
-                CallArg { value: copy, convention }
-            }
+                if self.body.value(value).ownership == Ownership::Owned {
+                    self.consume(value);
+                    CallArg { value, convention }
+                } else {
+                    let copy = self.emit_copy_value(value);
+                    self.consume(copy);
+                    CallArg {
+                        value: copy,
+                        convention,
+                    }
+                }
+            },
         }
     }
 
@@ -1109,12 +1388,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(typed) = self.typed.as_ref()
             && let Some(resolved_args) = typed.type_args.get(&expr_id)
         {
-            return resolved_args.iter().map(|ty| lower_resolved_ty(self.ctx, ty)).collect();
+            return resolved_args
+                .iter()
+                .map(|ty| lower_resolved_ty(self.ctx, ty))
+                .collect();
         }
         Vec::new()
     }
 
-    pub fn prepend_receiver_type_args(&self, receiver_ty: TyId, method_args: Vec<TyId>) -> Vec<TyId> {
+    pub fn prepend_receiver_type_args(
+        &self,
+        receiver_ty: TyId,
+        method_args: Vec<TyId>,
+    ) -> Vec<TyId> {
         let parent_args = match self.ctx.module.ty_arena.get(receiver_ty) {
             MirTy::Named { type_args, .. } => type_args.clone(),
             _ => Vec::new(),
@@ -1196,11 +1482,17 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
     use kestrel_name_res::ExtensionTargetEntity;
     use kestrel_type_infer::InferBody;
 
-    let Some(hir) = ctx.query.query(LowerBody { entity: hir_entity, root: ctx.root }) else {
+    let Some(hir) = ctx.query.query(LowerBody {
+        entity: hir_entity,
+        root: ctx.root,
+    }) else {
         return;
     };
 
-    let typed = ctx.query.query(InferBody { entity: hir_entity, root: ctx.root });
+    let typed = ctx.query.query(InferBody {
+        entity: hir_entity,
+        root: ctx.root,
+    });
 
     let in_protocol_extension = ctx.world.parent_of(hir_entity).is_some_and(|parent| {
         matches!(
@@ -1208,7 +1500,10 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
             Some(kestrel_ast_builder::NodeKind::Extension)
         ) && ctx
             .query
-            .query(ExtensionTargetEntity { extension: parent, root: ctx.root })
+            .query(ExtensionTargetEntity {
+                extension: parent,
+                root: ctx.root,
+            })
             .is_some_and(|target| {
                 matches!(
                     ctx.world.get::<kestrel_ast_builder::NodeKind>(target),
@@ -1217,7 +1512,13 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
             })
     });
 
-    let mut bctx = OssaBodyCtx::new(ctx, &hir, typed.as_ref(), func_entity, in_protocol_extension);
+    let mut bctx = OssaBodyCtx::new(
+        ctx,
+        &hir,
+        typed.as_ref(),
+        func_entity,
+        in_protocol_extension,
+    );
     bctx.lower_body();
     let ossa_body = bctx.body;
 

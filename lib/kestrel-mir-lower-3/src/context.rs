@@ -2,9 +2,7 @@
 
 use kestrel_ast_builder::{Callable, EnclosingContainer, Name, NodeKind, Subscript};
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
-use kestrel_mir_3::{
-    FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey,
-};
+use kestrel_mir_3::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
 use kestrel_name_res::ExtensionTargetEntity;
 
 use crate::name::qualified_name;
@@ -74,11 +72,7 @@ impl<'w> LowerCtx<'w> {
     }
 
     /// Resolve an enum case name to its VariantIdx within a lowered EnumDef.
-    pub fn resolve_variant_idx(
-        &self,
-        enum_entity: Entity,
-        case_name: &str,
-    ) -> Option<VariantIdx> {
+    pub fn resolve_variant_idx(&self, enum_entity: Entity, case_name: &str) -> Option<VariantIdx> {
         let def = self.module.enums.get(&enum_entity)?;
         let idx = def.cases.iter().position(|c| c.name == case_name)?;
         Some(VariantIdx::new(idx))
@@ -133,9 +127,11 @@ impl<'w> LowerCtx<'w> {
 
     /// Find a `NodeKind::Setter` child of a Field or Subscript entity.
     pub fn find_setter_child(&self, parent: Entity) -> Option<Entity> {
-        self.world.children_of(parent).iter().copied().find(|&e| {
-            self.world.get::<NodeKind>(e) == Some(&NodeKind::Setter)
-        })
+        self.world
+            .children_of(parent)
+            .iter()
+            .copied()
+            .find(|&e| self.world.get::<NodeKind>(e) == Some(&NodeKind::Setter))
     }
 
     /// Consume the context and return the built MIR module.
@@ -179,7 +175,7 @@ impl QueryFn for IsProtocolMethod {
                     NodeKind::Protocol => Some(target),
                     _ => None,
                 }
-            }
+            },
             _ => None,
         }
     }

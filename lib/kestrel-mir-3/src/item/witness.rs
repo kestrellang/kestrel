@@ -12,11 +12,17 @@ pub struct WitnessMethodKey {
 
 impl WitnessMethodKey {
     pub fn new(name: impl Into<String>, labels: Vec<Option<String>>) -> Self {
-        Self { name: name.into(), labels }
+        Self {
+            name: name.into(),
+            labels,
+        }
     }
 
     pub fn simple(name: impl Into<String>) -> Self {
-        Self { name: name.into(), labels: vec![] }
+        Self {
+            name: name.into(),
+            labels: vec![],
+        }
     }
 }
 
@@ -29,7 +35,11 @@ pub struct WitnessMethodBinding {
 
 impl WitnessMethodBinding {
     pub fn new(key: WitnessMethodKey, func: Entity, type_args: Vec<TyId>) -> Self {
-        Self { key, func, type_args }
+        Self {
+            key,
+            func,
+            type_args,
+        }
     }
 }
 

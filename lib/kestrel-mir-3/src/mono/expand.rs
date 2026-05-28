@@ -45,18 +45,31 @@ pub fn expand_destroy_copy(
     }
 
     // Collect not-Copyable nominals — CopyValue on these is a move, not a copy.
-    let not_copyable: HashSet<Entity> = module.structs.values()
+    let not_copyable: HashSet<Entity> = module
+        .structs
+        .values()
         .filter(|s| matches!(s.type_info.copy, CopyBehavior::None))
         .map(|s| s.source)
-        .chain(module.enums.values()
-            .filter(|e| matches!(e.type_info.copy, CopyBehavior::None))
-            .map(|e| e.source))
+        .chain(
+            module
+                .enums
+                .values()
+                .filter(|e| matches!(e.type_info.copy, CopyBehavior::None))
+                .map(|e| e.source),
+        )
         .collect();
 
     for fi in 0..module.functions.len() {
         let source = module.functions[fi].source;
         let skip_nominal = method_to_nominal.get(&source).copied();
-        expand_function(&mut module.functions[fi], &module.ty_arena, &shim_lookup, &clone_lookup, skip_nominal, &not_copyable);
+        expand_function(
+            &mut module.functions[fi],
+            &module.ty_arena,
+            &shim_lookup,
+            &clone_lookup,
+            skip_nominal,
+            &not_copyable,
+        );
     }
 }
 
@@ -74,7 +87,9 @@ fn build_method_to_nominal_map(
     // Collect nominal entities that have drop shims or clone behavior
     let mut relevant: HashSet<Entity> = HashSet::new();
     for s in module.structs.values() {
-        if s.type_info.drop != DropBehavior::None || matches!(s.type_info.copy, CopyBehavior::Clone(_)) {
+        if s.type_info.drop != DropBehavior::None
+            || matches!(s.type_info.copy, CopyBehavior::Clone(_))
+        {
             relevant.insert(s.source);
         }
     }
@@ -118,31 +133,47 @@ fn build_clone_lookup(
         match &f.kind {
             FunctionKind::CloneShim { nominal } => {
                 clone_func_to_parent.insert(f.entity, *nominal);
-            }
+            },
             FunctionKind::Method { parent, .. } if f.name.ends_with(".clone") => {
                 clone_func_to_parent.insert(f.entity, *parent);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
     if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-        eprintln!("[clone_lookup] clone_func_to_parent: {} entries", clone_func_to_parent.len());
+        eprintln!(
+            "[clone_lookup] clone_func_to_parent: {} entries",
+            clone_func_to_parent.len()
+        );
         for (func_entity, parent) in &clone_func_to_parent {
-            let name = generic_functions.get(func_entity).map(|f| f.name.as_str()).unwrap_or("?");
-            let parent_name = module.entity_names.get(parent).map(|s| s.as_str()).unwrap_or("?");
+            let name = generic_functions
+                .get(func_entity)
+                .map(|f| f.name.as_str())
+                .unwrap_or("?");
+            let parent_name = module
+                .entity_names
+                .get(parent)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
             eprintln!("  clone func: {name} → parent={parent_name}");
         }
     }
 
     // Collect entities that don't need clone shim calls:
     // Bitwise types (trivial copy) and not-Copyable types (move, never clone).
-    let skip_clone_nominals: HashSet<Entity> = module.structs.values()
+    let skip_clone_nominals: HashSet<Entity> = module
+        .structs
+        .values()
         .filter(|s| matches!(s.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
         .map(|s| s.source)
-        .chain(module.enums.values()
-            .filter(|e| matches!(e.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
-            .map(|e| e.source))
+        .chain(
+            module
+                .enums
+                .values()
+                .filter(|e| matches!(e.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
+                .map(|e| e.source),
+        )
         .collect();
 
     let mut lookup = DropShimLookup::new();
@@ -150,17 +181,20 @@ fn build_clone_lookup(
         if let Some(&nominal) = clone_func_to_parent.get(&mf.source) {
             if skip_clone_nominals.contains(&nominal) {
                 if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                    eprintln!("[clone_lookup] SKIPPED (bitwise/not-copyable): {} source={:?} nominal={:?} type_args={:?}", mf.name, mf.source, nominal, mf.type_args);
+                    eprintln!(
+                        "[clone_lookup] SKIPPED (bitwise/not-copyable): {} source={:?} nominal={:?} type_args={:?}",
+                        mf.name, mf.source, nominal, mf.type_args
+                    );
                 }
                 continue;
             }
             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                eprintln!("[clone_lookup] ADDED: {} source={:?} nominal={:?} type_args={:?}", mf.name, mf.source, nominal, mf.type_args);
+                eprintln!(
+                    "[clone_lookup] ADDED: {} source={:?} nominal={:?} type_args={:?}",
+                    mf.name, mf.source, nominal, mf.type_args
+                );
             }
-            lookup.insert(
-                (nominal, mf.type_args.clone()),
-                MonoFuncId::new(mi),
-            );
+            lookup.insert((nominal, mf.type_args.clone()), MonoFuncId::new(mi));
         }
     }
 
@@ -189,10 +223,7 @@ fn build_drop_shim_lookup(
 
     for (mi, mf) in module.functions.iter().enumerate() {
         if let Some(&nominal) = shim_to_nominal.get(&mf.source) {
-            lookup.insert(
-                (nominal, mf.type_args.clone()),
-                MonoFuncId::new(mi),
-            );
+            lookup.insert((nominal, mf.type_args.clone()), MonoFuncId::new(mi));
         }
     }
 
@@ -232,7 +263,10 @@ fn expand_function(
                     // Skip destroy on values that were moved (not-Copyable copy_value).
                     if moved_values.contains(&remapped) {
                         if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                            eprintln!("[expand] SKIP destroy on moved value {remapped:?} (orig {operand:?}) in {}", func.name);
+                            eprintln!(
+                                "[expand] SKIP destroy on moved value {remapped:?} (orig {operand:?}) in {}",
+                                func.name
+                            );
                         }
                         continue;
                     }
@@ -260,10 +294,10 @@ fn expand_function(
                                     span: inst.span,
                                 });
                             }
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
-                }
+                },
 
                 // DestroyAddr: load the value from the address, then call the drop shim.
                 // Expands to: take %tmp = *%addr; call __drop$T(%tmp)
@@ -278,7 +312,11 @@ fn expand_function(
                             if let Some(&shim_id) = shim_lookup.get(&key) {
                                 let tmp = body.alloc_value(ValueDef::owned(ty));
                                 new_insts.push(Instruction {
-                                    kind: InstKind::Take { result: tmp, address, ty },
+                                    kind: InstKind::Take {
+                                        result: tmp,
+                                        address,
+                                        ty,
+                                    },
                                     span: span.clone(),
                                 });
                                 new_insts.push(Instruction {
@@ -295,7 +333,7 @@ fn expand_function(
                             }
                         }
                     }
-                }
+                },
 
                 // StoreAssign: destroy the old value at the address, then store the new one.
                 // Expands to: take %tmp = *%addr; call __drop$T(%tmp); store_init %addr, %new
@@ -315,7 +353,11 @@ fn expand_function(
                                 if let Some(&shim_id) = shim_lookup.get(&key) {
                                     let tmp = body.alloc_value(ValueDef::owned(pointee));
                                     new_insts.push(Instruction {
-                                        kind: InstKind::Take { result: tmp, address, ty: pointee },
+                                        kind: InstKind::Take {
+                                            result: tmp,
+                                            address,
+                                            ty: pointee,
+                                        },
                                         span: span.clone(),
                                     });
                                     new_insts.push(Instruction {
@@ -335,11 +377,14 @@ fn expand_function(
                         }
                     }
                     new_insts.push(Instruction {
-                        kind: if expanded { InstKind::StoreInit { address, value } }
-                              else { InstKind::StoreAssign { address, value } },
+                        kind: if expanded {
+                            InstKind::StoreInit { address, value }
+                        } else {
+                            InstKind::StoreAssign { address, value }
+                        },
                         span,
                     });
-                }
+                },
 
                 InstKind::CopyValue { result, operand } => {
                     let result = *result;
@@ -354,18 +399,28 @@ fn expand_function(
                             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                                 let found = clone_lookup.get(&key).is_some();
                                 if !found {
-                                    eprintln!("[expand] CopyValue on Named {entity:?} — NOT in clone_lookup (type_args={:?})", type_args);
+                                    eprintln!(
+                                        "[expand] CopyValue on Named {entity:?} — NOT in clone_lookup (type_args={:?})",
+                                        type_args
+                                    );
                                 }
                             }
                             if let Some(&clone_id) = clone_lookup.get(&key) {
                                 if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                                    eprintln!("[expand] CopyValue EXPANDED to clone call for {entity:?} in func {}", func.name);
+                                    eprintln!(
+                                        "[expand] CopyValue EXPANDED to clone call for {entity:?} in func {}",
+                                        func.name
+                                    );
                                 }
                                 let remapped_operand = remap_value(operand, &value_remap);
 
-                                let ptr_ty = ty_arena.find(|t| matches!(t, MirTy::Pointer(p) if *p == value_def.ty))
-                                    .expect("Pointer type should be pre-interned for cloneable types");
-                                let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, remapped_operand));
+                                let ptr_ty = ty_arena
+                                    .find(|t| matches!(t, MirTy::Pointer(p) if *p == value_def.ty))
+                                    .expect(
+                                        "Pointer type should be pre-interned for cloneable types",
+                                    );
+                                let borrow_val = body
+                                    .alloc_value(ValueDef::guaranteed(ptr_ty, remapped_operand));
 
                                 new_insts.push(Instruction::new(InstKind::BeginBorrow {
                                     result: borrow_val,
@@ -396,7 +451,10 @@ fn expand_function(
                         if not_copyable.contains(entity) {
                             let target = remap_value(operand, &value_remap);
                             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                                eprintln!("[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}", func.name);
+                                eprintln!(
+                                    "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
+                                    func.name
+                                );
                             }
                             value_remap.insert(result, target);
                             moved_values.insert(target);
@@ -419,13 +477,13 @@ fn expand_function(
                         remap_inst_operands(&mut kept.kind, &value_remap);
                         new_insts.push(kept);
                     }
-                }
+                },
 
                 _ => {
                     let mut kept = inst;
                     remap_inst_operands(&mut kept.kind, &value_remap);
                     new_insts.push(kept);
-                }
+                },
             }
         }
 
@@ -465,55 +523,53 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
         | InstKind::DestructureTuple { operand, .. }
         | InstKind::DestructureEnum { operand, .. } => {
             *operand = remap_value(*operand, remap);
-        }
+        },
 
         InstKind::Load { address, .. } => {
             *address = remap_value(*address, remap);
-        }
+        },
         InstKind::CopyAddr { address, .. }
         | InstKind::Take { address, .. }
         | InstKind::BeginBorrowAddr { address, .. }
         | InstKind::BeginMutBorrowAddr { address, .. }
         | InstKind::DestroyAddr { address, .. } => {
             *address = remap_value(*address, remap);
-        }
-        InstKind::StoreInit { address, value }
-        | InstKind::StoreAssign { address, value } => {
+        },
+        InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
             *address = remap_value(*address, remap);
             *value = remap_value(*value, remap);
-        }
+        },
 
         InstKind::Op1 { arg, .. } => {
             *arg = remap_value(*arg, remap);
-        }
+        },
         InstKind::Op2 { lhs, rhs, .. } => {
             *lhs = remap_value(*lhs, remap);
             *rhs = remap_value(*rhs, remap);
-        }
+        },
         InstKind::Op3 { a, b, c, .. } => {
             *a = remap_value(*a, remap);
             *b = remap_value(*b, remap);
             *c = remap_value(*c, remap);
-        }
+        },
 
-        InstKind::Literal { .. } | InstKind::GlobalRef { .. } => {}
+        InstKind::Literal { .. } | InstKind::GlobalRef { .. } => {},
 
         InstKind::Struct { fields, .. } => {
             for (_, v) in fields.iter_mut() {
                 *v = remap_value(*v, remap);
             }
-        }
-        InstKind::Tuple { elements, .. }
-        | InstKind::Array { elements, .. } => {
+        },
+        InstKind::Tuple { elements, .. } | InstKind::Array { elements, .. } => {
             for v in elements.iter_mut() {
                 *v = remap_value(*v, remap);
             }
-        }
+        },
         InstKind::Enum { payload, .. } => {
             for v in payload.iter_mut() {
                 *v = remap_value(*v, remap);
             }
-        }
+        },
 
         InstKind::Call { args, callee, .. } => {
             for arg in args.iter_mut() {
@@ -522,21 +578,21 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
             match callee {
                 Callee::Thin(v) | Callee::Thick(v) => {
                     *v = remap_value(*v, remap);
-                }
-                _ => {}
+                },
+                _ => {},
             }
-        }
+        },
         InstKind::ApplyPartial { captures, .. } => {
             for v in captures.iter_mut() {
                 *v = remap_value(*v, remap);
             }
-        }
+        },
 
         InstKind::FieldAddr { base, .. } => {
             *base = remap_value(*base, remap);
-        }
+        },
 
-        InstKind::Uninit { .. } => {}
+        InstKind::Uninit { .. } => {},
     }
 }
 
@@ -554,12 +610,12 @@ fn remap_terminator(
     match kind {
         TerminatorKind::Return(v) => {
             *v = remap_value(*v, remap);
-        }
+        },
         TerminatorKind::Jump { args, .. } => {
             for v in args.iter_mut() {
                 *v = remap_value(*v, remap);
             }
-        }
+        },
         TerminatorKind::Branch {
             condition,
             then_args,
@@ -573,7 +629,7 @@ fn remap_terminator(
             for v in else_args.iter_mut() {
                 *v = remap_value(*v, remap);
             }
-        }
+        },
         TerminatorKind::Switch {
             discriminant,
             cases,
@@ -584,8 +640,8 @@ fn remap_terminator(
                     *v = remap_value(*v, remap);
                 }
             }
-        }
-        TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {}
+        },
+        TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {},
     }
 }
 
@@ -595,8 +651,8 @@ mod tests {
     use crate::block::BasicBlock;
     use crate::body::OssaBody;
     use crate::inst::Instruction;
-    use crate::item::function::{FunctionDef, FunctionKind};
     use crate::item::TypeParamDef;
+    use crate::item::function::{FunctionDef, FunctionKind};
     use crate::mono::types::{MonoFunction, MonoModule};
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::{ParamConvention, TyArena};
@@ -650,8 +706,13 @@ mod tests {
         let unit = module.ty_arena.unit();
         let body = make_body(
             vec![
-                Instruction::new(InstKind::Literal { result: ValueId::new(1), value: Immediate::i64(42) }),
-                Instruction::new(InstKind::DestroyValue { operand: ValueId::new(1) }),
+                Instruction::new(InstKind::Literal {
+                    result: ValueId::new(1),
+                    value: Immediate::i64(42),
+                }),
+                Instruction::new(InstKind::DestroyValue {
+                    operand: ValueId::new(1),
+                }),
             ],
             ValueId::new(0),
             vec![ValueDef::owned(unit), ValueDef::owned(i64_ty)],
@@ -660,7 +721,10 @@ mod tests {
         expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
-        assert!(matches!(body.blocks[0].insts[0].kind, InstKind::Literal { .. }));
+        assert!(matches!(
+            body.blocks[0].insts[0].kind,
+            InstKind::Literal { .. }
+        ));
     }
 
     #[test]
@@ -669,33 +733,54 @@ mod tests {
         let unit = module.ty_arena.unit();
         let named_ty = module.ty_arena.named(entity(10), vec![]);
         let body = make_body(
-            vec![Instruction::new(InstKind::DestroyValue { operand: ValueId::new(1) })],
+            vec![Instruction::new(InstKind::DestroyValue {
+                operand: ValueId::new(1),
+            })],
             ValueId::new(0),
             vec![ValueDef::owned(unit), ValueDef::owned(named_ty)],
         );
         let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::owned(unit)]);
-        module.add_function(make_mono_func("__drop$MyStruct", entity(20), vec![], unit, Some(shim_body)));
+        module.add_function(make_mono_func(
+            "__drop$MyStruct",
+            entity(20),
+            vec![],
+            unit,
+            Some(shim_body),
+        ));
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
         let mut generic_functions = indexmap::IndexMap::new();
-        generic_functions.insert(entity(20), FunctionDef {
-            entity: entity(20),
-            name: "__drop$MyStruct".into(),
-            kind: FunctionKind::DropShim { nominal: entity(10) },
-            type_params: vec![], params: vec![], ret: unit,
-            where_clause: None, body: None, extern_info: None,
-        });
+        generic_functions.insert(
+            entity(20),
+            FunctionDef {
+                entity: entity(20),
+                name: "__drop$MyStruct".into(),
+                kind: FunctionKind::DropShim {
+                    nominal: entity(10),
+                },
+                type_params: vec![],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: None,
+                extern_info: None,
+            },
+        );
         expand_destroy_copy(&mut module, &generic_functions);
         let test_func = module.functions.iter().find(|f| f.name == "test").unwrap();
         let body = test_func.body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
         match &body.blocks[0].insts[0].kind {
-            InstKind::Call { callee, args, result } => {
+            InstKind::Call {
+                callee,
+                args,
+                result,
+            } => {
                 assert!(matches!(callee, Callee::Resolved(id) if id.index() == 0));
                 assert_eq!(args.len(), 1);
                 assert_eq!(args[0].value, ValueId::new(1));
                 assert_eq!(args[0].convention, ParamConvention::Consuming);
                 assert!(result.is_none());
-            }
+            },
             other => panic!("expected Call, got {:?}", other),
         }
     }
@@ -708,8 +793,14 @@ mod tests {
         let v3_ty = module.ty_arena.i64();
         let body = make_body(
             vec![
-                Instruction::new(InstKind::Literal { result: ValueId::new(1), value: Immediate::i64(42) }),
-                Instruction::new(InstKind::CopyValue { result: ValueId::new(2), operand: ValueId::new(1) }),
+                Instruction::new(InstKind::Literal {
+                    result: ValueId::new(1),
+                    value: Immediate::i64(42),
+                }),
+                Instruction::new(InstKind::CopyValue {
+                    result: ValueId::new(2),
+                    operand: ValueId::new(1),
+                }),
                 Instruction::new(InstKind::Op1 {
                     result: ValueId::new(3),
                     op: crate::op::Op::Neg(crate::op::IntBits::I64),
@@ -717,7 +808,12 @@ mod tests {
                 }),
             ],
             ValueId::new(0),
-            vec![ValueDef::owned(unit), ValueDef::owned(i64_ty), ValueDef::owned(i64_ty), ValueDef::owned(v3_ty)],
+            vec![
+                ValueDef::owned(unit),
+                ValueDef::owned(i64_ty),
+                ValueDef::owned(i64_ty),
+                ValueDef::owned(v3_ty),
+            ],
         );
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
         expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
@@ -735,15 +831,25 @@ mod tests {
         let unit = module.ty_arena.unit();
         let named_ty = module.ty_arena.named(entity(10), vec![]);
         let body = make_body(
-            vec![Instruction::new(InstKind::CopyValue { result: ValueId::new(2), operand: ValueId::new(1) })],
+            vec![Instruction::new(InstKind::CopyValue {
+                result: ValueId::new(2),
+                operand: ValueId::new(1),
+            })],
             ValueId::new(0),
-            vec![ValueDef::owned(unit), ValueDef::owned(named_ty), ValueDef::owned(named_ty)],
+            vec![
+                ValueDef::owned(unit),
+                ValueDef::owned(named_ty),
+                ValueDef::owned(named_ty),
+            ],
         );
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
         expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
-        assert!(matches!(body.blocks[0].insts[0].kind, InstKind::CopyValue { .. }));
+        assert!(matches!(
+            body.blocks[0].insts[0].kind,
+            InstKind::CopyValue { .. }
+        ));
     }
 
     #[test]
@@ -753,18 +859,38 @@ mod tests {
         let unit = module.ty_arena.unit();
         let mut block = BasicBlock::new();
         block.insts = vec![
-            Instruction::new(InstKind::Literal { result: ValueId::new(1), value: Immediate::i64(99) }),
-            Instruction::new(InstKind::CopyValue { result: ValueId::new(2), operand: ValueId::new(1) }),
-            Instruction::new(InstKind::CopyValue { result: ValueId::new(3), operand: ValueId::new(2) }),
+            Instruction::new(InstKind::Literal {
+                result: ValueId::new(1),
+                value: Immediate::i64(99),
+            }),
+            Instruction::new(InstKind::CopyValue {
+                result: ValueId::new(2),
+                operand: ValueId::new(1),
+            }),
+            Instruction::new(InstKind::CopyValue {
+                result: ValueId::new(3),
+                operand: ValueId::new(2),
+            }),
         ];
         block.terminator = Terminator::new(TerminatorKind::Return(ValueId::new(3)));
         let body = OssaBody {
-            values: vec![ValueDef::owned(unit), ValueDef::owned(i64_ty), ValueDef::owned(i64_ty), ValueDef::owned(i64_ty)],
+            values: vec![
+                ValueDef::owned(unit),
+                ValueDef::owned(i64_ty),
+                ValueDef::owned(i64_ty),
+                ValueDef::owned(i64_ty),
+            ],
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
         };
-        module.add_function(make_mono_func("test", entity(1), vec![], i64_ty, Some(body)));
+        module.add_function(make_mono_func(
+            "test",
+            entity(1),
+            vec![],
+            i64_ty,
+            Some(body),
+        ));
         expand_destroy_copy(&mut module, &indexmap::IndexMap::new());
         let body = module.functions[0].body.as_ref().unwrap();
         assert_eq!(body.blocks[0].insts.len(), 1);
@@ -781,22 +907,38 @@ mod tests {
         let i64_ty = module.ty_arena.i64();
         let named_ty = module.ty_arena.named(entity(10), vec![i64_ty]);
         let body = make_body(
-            vec![Instruction::new(InstKind::DestroyValue { operand: ValueId::new(1) })],
+            vec![Instruction::new(InstKind::DestroyValue {
+                operand: ValueId::new(1),
+            })],
             ValueId::new(0),
             vec![ValueDef::owned(unit), ValueDef::owned(named_ty)],
         );
         let shim_body = make_body(vec![], ValueId::new(0), vec![ValueDef::owned(unit)]);
-        module.add_function(make_mono_func("__drop$Array_Int64", entity(20), vec![i64_ty], unit, Some(shim_body)));
+        module.add_function(make_mono_func(
+            "__drop$Array_Int64",
+            entity(20),
+            vec![i64_ty],
+            unit,
+            Some(shim_body),
+        ));
         module.add_function(make_mono_func("test", entity(1), vec![], unit, Some(body)));
         let mut generic_functions = indexmap::IndexMap::new();
-        generic_functions.insert(entity(20), FunctionDef {
-            entity: entity(20),
-            name: "__drop$Array".into(),
-            kind: FunctionKind::DropShim { nominal: entity(10) },
-            type_params: vec![TypeParamDef::new(entity(30), "T")],
-            params: vec![], ret: unit,
-            where_clause: None, body: None, extern_info: None,
-        });
+        generic_functions.insert(
+            entity(20),
+            FunctionDef {
+                entity: entity(20),
+                name: "__drop$Array".into(),
+                kind: FunctionKind::DropShim {
+                    nominal: entity(10),
+                },
+                type_params: vec![TypeParamDef::new(entity(30), "T")],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: None,
+                extern_info: None,
+            },
+        );
         expand_destroy_copy(&mut module, &generic_functions);
         let test_func = module.functions.iter().find(|f| f.name == "test").unwrap();
         let body = test_func.body.as_ref().unwrap();

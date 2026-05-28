@@ -91,11 +91,11 @@ fn synthesize_init_thunk(ctx: &mut LowerCtx, static_entity: Entity, static_ty: T
 /// Create the master `__kestrel_init_statics()` that calls each thunk
 /// and stores the result into the corresponding global.
 fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, Entity, TyId)]) -> Entity {
+    use kestrel_mir_3::Immediate;
     use kestrel_mir_3::callee::Callee;
     use kestrel_mir_3::inst::{InstKind, Instruction};
     use kestrel_mir_3::terminator::{Terminator, TerminatorKind};
     use kestrel_mir_3::value::ValueDef;
-    use kestrel_mir_3::Immediate;
 
     let entity = ctx.next_synthetic_entity();
     ctx.module.register_name(entity, INIT_STATICS_NAME);
@@ -110,37 +110,47 @@ fn synthesize_master_init(ctx: &mut LowerCtx, thunks: &[(Entity, Entity, TyId)])
     body.entry = entry;
 
     for &(static_entity, thunk_entity, static_ty) in thunks {
-
         // tmp = call __init$...()
         let tmp = body.alloc_value(ValueDef::owned(static_ty));
-        body.block_mut(entry).insts.push(Instruction::new(InstKind::Call {
-            result: Some(tmp),
-            callee: Callee::direct(thunk_entity),
-            args: vec![],
-        }));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::Call {
+                result: Some(tmp),
+                callee: Callee::direct(thunk_entity),
+                args: vec![],
+            }));
 
         // addr = global_ref static_entity
         let ptr_ty = ctx.module.ty_arena.pointer(static_ty);
         let addr = body.alloc_value(ValueDef::owned(ptr_ty));
-        body.block_mut(entry).insts.push(Instruction::new(
-            InstKind::GlobalRef { result: addr, entity: static_entity },
-        ));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::GlobalRef {
+                result: addr,
+                entity: static_entity,
+            }));
 
         // store_init addr, tmp
-        body.block_mut(entry).insts.push(Instruction::new(
-            InstKind::StoreInit { address: addr, value: tmp },
-        ));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::StoreInit {
+                address: addr,
+                value: tmp,
+            }));
         // Consume the address pointer (trivial — expand pass removes this)
-        body.block_mut(entry).insts.push(Instruction::new(
-            InstKind::DestroyValue { operand: addr },
-        ));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::DestroyValue { operand: addr }));
     }
 
     // return ()
     let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
-    body.block_mut(entry).insts.push(Instruction::new(
-        InstKind::Literal { result: unit_val, value: Immediate::unit() },
-    ));
+    body.block_mut(entry)
+        .insts
+        .push(Instruction::new(InstKind::Literal {
+            result: unit_val,
+            value: Immediate::unit(),
+        }));
     body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
 
     ctx.module.functions.get_mut(&entity).unwrap().body = Some(body);
@@ -166,14 +176,14 @@ fn extract_literal_initializer(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Opti
                     MirTy::I32 => Immediate::i32(v),
                     _ => Immediate::i64(v),
                 })
-            }
+            },
             AstLiteral::Float(s) => {
                 let v: f64 = s.parse().ok()?;
                 Some(match ctx.module.ty_arena.get(ty) {
                     MirTy::F32 => Immediate::f32(v),
                     _ => Immediate::f64(v),
                 })
-            }
+            },
             AstLiteral::Bool(v) => Some(Immediate::bool(*v)),
             _ => None,
         },

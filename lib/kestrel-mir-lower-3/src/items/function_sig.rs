@@ -5,13 +5,13 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams,
-    WhereClause as AstWhereClause, WhereConstraint as AstWhereConstraint,
+    Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams, WhereClause as AstWhereClause,
+    WhereConstraint as AstWhereConstraint,
 };
 use kestrel_hecs::Entity;
 use kestrel_mir_3::item::function::{
-    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef,
-    WhereClause, WhereConstraint,
+    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, WhereClause,
+    WhereConstraint,
 };
 use kestrel_mir_3::{ParamConvention, TyId, TypeParamDef, ValueId};
 use kestrel_name_res::resolve_type::{ResolveTypePath, TypeResolution};
@@ -147,11 +147,11 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
         NodeKind::Initializer => {
             let parent = ctx.world.parent_of(entity).unwrap_or(ctx.root);
             FunctionKind::Initializer { parent }
-        }
+        },
         NodeKind::Deinit => {
             let parent = ctx.world.parent_of(entity).unwrap_or(ctx.root);
             FunctionKind::Deinit { parent }
-        }
+        },
         NodeKind::Function => {
             let Some(parent) = ctx.world.parent_of(entity) else {
                 return FunctionKind::Free;
@@ -171,11 +171,11 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                     } else {
                         FunctionKind::StaticMethod { parent }
                     }
-                }
+                },
                 Some(NodeKind::Protocol) => FunctionKind::Free,
                 _ => FunctionKind::Free,
             }
-        }
+        },
         NodeKind::Field | NodeKind::Subscript | NodeKind::Setter => {
             let parent = accessor_enclosing_container(ctx, entity).unwrap_or(ctx.root);
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
@@ -190,7 +190,7 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
             } else {
                 FunctionKind::Free
             }
-        }
+        },
         _ => FunctionKind::Free,
     }
 }
@@ -333,7 +333,7 @@ fn lower_where_constraint(
                     proto_type_arg_entities,
                 ));
             }
-        }
+        },
         AstWhereConstraint::NegativeBound {
             subject, protocol, ..
         } => {
@@ -347,20 +347,16 @@ fn lower_where_constraint(
                 subject_entity,
                 protocol_entity,
             ));
-        }
+        },
         AstWhereConstraint::Equality { .. } => {
             // Deferred — not consulted by copy-behavior check
-        }
+        },
     }
 }
 
 /// Extract protocol type argument entities from an AST type like `SeqIndex[T]`.
 /// Returns entity IDs for each type arg that resolves to a type parameter.
-fn extract_type_arg_entities(
-    ctx: &LowerCtx,
-    ast_ty: &AstType,
-    context: Entity,
-) -> Vec<Entity> {
+fn extract_type_arg_entities(ctx: &LowerCtx, ast_ty: &AstType, context: Entity) -> Vec<Entity> {
     let AstType::Named { segments, .. } = ast_ty else {
         return Vec::new();
     };
@@ -374,11 +370,7 @@ fn extract_type_arg_entities(
         .collect()
 }
 
-fn resolve_ast_type_to_entity(
-    ctx: &LowerCtx,
-    ast_ty: &AstType,
-    context: Entity,
-) -> Option<Entity> {
+fn resolve_ast_type_to_entity(ctx: &LowerCtx, ast_ty: &AstType, context: Entity) -> Option<Entity> {
     let AstType::Named { segments, .. } = ast_ty else {
         return None;
     };
@@ -401,7 +393,7 @@ fn resolve_self_type_for_function(ctx: &mut LowerCtx, func_entity: Entity) -> Ty
         match ctx.world.get::<NodeKind>(entity).cloned() {
             Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
                 return crate::ty::build_self_type(ctx, entity);
-            }
+            },
             Some(NodeKind::Extension) => {
                 // Extension target: resolve the target entity
                 if let Some(target) = ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
@@ -411,7 +403,7 @@ fn resolve_self_type_for_function(ctx: &mut LowerCtx, func_entity: Entity) -> Ty
                     return crate::ty::build_self_type(ctx, target);
                 }
                 return ctx.module.ty_arena.error();
-            }
+            },
             _ => current = ctx.world.parent_of(entity),
         }
     }

@@ -102,7 +102,10 @@ fn check_value_uniqueness(
                         "value {:?} defined as block param in {:?} but already defined in {:?}",
                         param.value, block_id, prev_block,
                     ),
-                    span: None,
+                    span: body
+                        .values
+                        .get(param.value.index())
+                        .and_then(|vd| vd.span.clone()),
                     func_name: func_name.to_string(),
                     entity,
                 });
@@ -187,11 +190,8 @@ fn check_operands_defined(
                 errors.push(VerifyError {
                     block: block_id,
                     inst: None,
-                    message: format!(
-                        "terminator operand {:?} used but never defined",
-                        operand,
-                    ),
-                    span: None,
+                    message: format!("terminator operand {:?} used but never defined", operand,),
+                    span: block.terminator.span.clone(),
                     func_name: func_name.to_string(),
                     entity,
                 });
@@ -274,13 +274,32 @@ impl<'a> BlockVerifier<'a> {
     }
 
     fn err(&mut self, inst: Option<u32>, message: String) {
-        let span = inst.and_then(|i| {
+        let span = self.inst_span(inst);
+        self.push_err(inst, span, message);
+    }
+
+    /// Like `err`, but when the triggering instruction has no span (e.g. errors
+    /// raised from a terminator or block exit), fall back to the defining span
+    /// of `value`. This is the common case for ownership/leak errors that name a
+    /// specific value but fire at a block boundary where there's no instruction.
+    fn err_val(&mut self, inst: Option<u32>, value: ValueId, message: String) {
+        let span = self
+            .inst_span(inst)
+            .or_else(|| self.body.value(value).span.clone());
+        self.push_err(inst, span, message);
+    }
+
+    fn inst_span(&self, inst: Option<u32>) -> Option<Span> {
+        inst.and_then(|i| {
             self.body
                 .block(self.block_id)
                 .insts
                 .get(i as usize)
                 .and_then(|inst| inst.span.clone())
-        });
+        })
+    }
+
+    fn push_err(&mut self, inst: Option<u32>, span: Option<Span>, message: String) {
         self.errors.push(VerifyError {
             block: self.block_id,
             inst,
@@ -314,8 +333,9 @@ impl<'a> BlockVerifier<'a> {
                     .map(|(borrow_val, _)| *borrow_val)
                     .collect();
                 if !blocking.is_empty() {
-                    self.err(
+                    self.err_val(
                         inst,
+                        v,
                         format!(
                             "cannot consume {:?}: active borrow(s) {:?} depend on it",
                             v, blocking,
@@ -324,16 +344,16 @@ impl<'a> BlockVerifier<'a> {
                 }
                 self.owned.insert(v, ValueState::Consumed);
                 true
-            }
+            },
             Some(ValueState::Consumed) => {
-                self.err(inst, format!("value {:?} consumed more than once", v));
+                self.err_val(inst, v, format!("value {:?} consumed more than once", v));
                 false
-            }
+            },
             None => {
                 // Value not tracked in this block — likely defined elsewhere.
                 // We still flag it so the caller sees it.
                 true
-            }
+            },
         }
     }
 
@@ -344,7 +364,7 @@ impl<'a> BlockVerifier<'a> {
             return;
         }
         if let Some(ValueState::Consumed) = self.owned.get(&v) {
-            self.err(inst, format!("use of consumed value {:?}", v));
+            self.err_val(inst, v, format!("use of consumed value {:?}", v));
         }
     }
 
@@ -361,8 +381,9 @@ impl<'a> BlockVerifier<'a> {
             .map(|(bv, _)| *bv)
             .collect();
         if !mut_borrows.is_empty() {
-            self.err(
+            self.err_val(
                 inst,
+                v,
                 format!(
                     "cannot read {:?}: active mut borrow(s) {:?}",
                     v, mut_borrows,
@@ -393,7 +414,7 @@ impl<'a> BlockVerifier<'a> {
             match ak {
                 AddrKind::Whole(InitState::Uninit) => {
                     errs.push(format!("address {:?} is uninit", addr));
-                }
+                },
                 AddrKind::SubField { fields, .. } => {
                     for (f, st) in fields {
                         if *st == InitState::Uninit {
@@ -403,8 +424,8 @@ impl<'a> BlockVerifier<'a> {
                             ));
                         }
                     }
-                }
-                AddrKind::Whole(InitState::Init) => {}
+                },
+                AddrKind::Whole(InitState::Init) => {},
             }
         }
         for msg in errs {
@@ -441,11 +462,11 @@ impl<'a> BlockVerifier<'a> {
                         err_msg = Some(format!("address {:?} already uninit", addr));
                     }
                     *st = InitState::Uninit;
-                }
+                },
                 AddrKind::SubField { .. } => {
                     // Whole uninit of a sub-field tracked addr.
                     *ak = AddrKind::Whole(InitState::Uninit);
-                }
+                },
             }
         }
         if let Some(msg) = err_msg {
@@ -479,17 +500,16 @@ impl<'a> BlockVerifier<'a> {
             match ak {
                 AddrKind::Whole(st) => {
                     if *st == InitState::Init {
-                        err_msg = Some(format!(
-                            "store_init on address {:?} but already init", addr,
-                        ));
+                        err_msg =
+                            Some(format!("store_init on address {:?} but already init", addr,));
                     }
                     *st = InitState::Init;
-                }
+                },
                 AddrKind::SubField { .. } => {
                     // Whole store on sub-field tracked address (e.g. var local
                     // initialized with a complete struct value) — all fields init.
                     *ak = AddrKind::Whole(InitState::Init);
-                }
+                },
             }
         }
         if let Some(msg) = err_msg {
@@ -503,10 +523,11 @@ impl<'a> BlockVerifier<'a> {
             match ak {
                 AddrKind::Whole(InitState::Uninit) => {
                     err_msg = Some(format!(
-                        "store_assign on address {:?} but it is uninit", addr,
+                        "store_assign on address {:?} but it is uninit",
+                        addr,
                     ));
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         if let Some(msg) = err_msg {
@@ -530,7 +551,10 @@ impl<'a> BlockVerifier<'a> {
                 if let Some(src) = def.borrow_source {
                     self.borrows.insert(
                         param.value,
-                        BorrowInfo { source: src, is_mut: false },
+                        BorrowInfo {
+                            source: src,
+                            is_mut: false,
+                        },
                     );
                 }
             }
@@ -554,39 +578,53 @@ impl<'a> BlockVerifier<'a> {
             InstKind::CopyValue { result, operand } => {
                 self.assert_readable(*operand, idx);
                 self.define_owned(*result);
-            }
+            },
             InstKind::MoveValue { result, operand } => {
                 self.try_consume(*operand, idx);
                 self.define_owned(*result);
-            }
+            },
             InstKind::DestroyValue { operand } => {
                 self.try_consume(*operand, idx);
-            }
+            },
 
             // -- Borrowing --
             InstKind::BeginBorrow { result, operand } => {
                 self.assert_live(*operand, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*operand);
-                self.borrows.insert(*result, BorrowInfo { source, is_mut: false });
-            }
+                self.borrows.insert(
+                    *result,
+                    BorrowInfo {
+                        source,
+                        is_mut: false,
+                    },
+                );
+            },
             InstKind::EndBorrow { operand } => {
                 self.borrows.remove(operand);
-            }
+            },
             InstKind::BeginMutBorrow { result, operand } => {
                 self.assert_live(*operand, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*operand);
-                self.borrows.insert(*result, BorrowInfo { source, is_mut: true });
-            }
+                self.borrows.insert(
+                    *result,
+                    BorrowInfo {
+                        source,
+                        is_mut: true,
+                    },
+                );
+            },
             InstKind::EndMutBorrow { operand } => {
                 self.borrows.remove(operand);
-            }
+            },
 
             // -- Memory access --
             InstKind::Load { result, address } => {
                 self.addr_require_init(*address, idx);
                 self.define_owned(*result);
-            }
-            InstKind::CopyAddr { result: _, address, .. } => {
+            },
+            InstKind::CopyAddr {
+                result: _, address, ..
+            } => {
                 self.addr_require_init(*address, idx);
                 // Result is @owned, register it.
                 if let Some(r) = kind.result() {
@@ -594,8 +632,10 @@ impl<'a> BlockVerifier<'a> {
                         self.define_owned(r);
                     }
                 }
-            }
-            InstKind::Take { result: _, address, .. } => {
+            },
+            InstKind::Take {
+                result: _, address, ..
+            } => {
                 self.addr_require_init(*address, idx);
                 self.addr_set_uninit(*address, idx);
                 if let Some(r) = kind.result() {
@@ -603,36 +643,52 @@ impl<'a> BlockVerifier<'a> {
                         self.define_owned(r);
                     }
                 }
-            }
-            InstKind::BeginBorrowAddr { result, address, .. } => {
+            },
+            InstKind::BeginBorrowAddr {
+                result, address, ..
+            } => {
                 self.addr_require_init(*address, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*address);
-                self.borrows.insert(*result, BorrowInfo { source, is_mut: false });
-            }
-            InstKind::BeginMutBorrowAddr { result, address, .. } => {
+                self.borrows.insert(
+                    *result,
+                    BorrowInfo {
+                        source,
+                        is_mut: false,
+                    },
+                );
+            },
+            InstKind::BeginMutBorrowAddr {
+                result, address, ..
+            } => {
                 self.addr_require_init(*address, idx);
                 let source = self.body.value(*result).borrow_source.unwrap_or(*address);
-                self.borrows.insert(*result, BorrowInfo { source, is_mut: true });
-            }
+                self.borrows.insert(
+                    *result,
+                    BorrowInfo {
+                        source,
+                        is_mut: true,
+                    },
+                );
+            },
             InstKind::StoreInit { address, value } => {
                 // The stored value is consumed.
                 self.try_consume(*value, idx);
                 self.addr_store_init(*address, idx);
-            }
+            },
             InstKind::StoreAssign { address, value } => {
                 self.try_consume(*value, idx);
                 self.addr_store_assign(*address, idx);
-            }
+            },
             InstKind::DestroyAddr { address, .. } => {
                 self.addr_require_init(*address, idx);
                 self.addr_set_uninit(*address, idx);
-            }
+            },
 
             // -- Discriminant (non-consuming read, produces @owned i32) --
             InstKind::Discriminant { result, operand } => {
                 self.assert_readable(*operand, idx);
                 self.define_owned(*result);
-            }
+            },
 
             // -- Computation (non-consuming reads of scalar operands) --
             InstKind::Op1 { result, op: _, arg } => {
@@ -641,10 +697,21 @@ impl<'a> BlockVerifier<'a> {
                     self.define_owned(*result);
                 } else {
                     let source = self.body.value(*result).borrow_source.unwrap_or(*arg);
-                    self.borrows.insert(*result, BorrowInfo { source, is_mut: false });
+                    self.borrows.insert(
+                        *result,
+                        BorrowInfo {
+                            source,
+                            is_mut: false,
+                        },
+                    );
                 }
-            }
-            InstKind::Op2 { result, op, lhs, rhs } => {
+            },
+            InstKind::Op2 {
+                result,
+                op,
+                lhs,
+                rhs,
+            } => {
                 self.assert_readable(*lhs, idx);
                 if matches!(op, crate::Op::PtrWrite(_)) {
                     // PtrWrite moves the rhs into the destination address.
@@ -653,21 +720,27 @@ impl<'a> BlockVerifier<'a> {
                     self.assert_readable(*rhs, idx);
                 }
                 self.define_owned(*result);
-            }
-            InstKind::Op3 { result, op: _, a, b, c } => {
+            },
+            InstKind::Op3 {
+                result,
+                op: _,
+                a,
+                b,
+                c,
+            } => {
                 self.assert_readable(*a, idx);
                 self.assert_readable(*b, idx);
                 self.assert_readable(*c, idx);
                 self.define_owned(*result);
-            }
+            },
 
             // -- Constants --
             InstKind::Literal { result, .. } => {
                 self.define_owned(*result);
-            }
+            },
             InstKind::GlobalRef { result, .. } => {
                 self.define_owned(*result);
-            }
+            },
 
             // -- Aggregate construction: operands that are @owned are consumed --
             InstKind::Struct { result, fields, .. } => {
@@ -679,7 +752,7 @@ impl<'a> BlockVerifier<'a> {
                 if self.body.value(*result).ownership == Ownership::Owned {
                     self.define_owned(*result);
                 }
-            }
+            },
             InstKind::Tuple { result, elements } => {
                 for v in elements {
                     if self.body.value(*v).ownership == Ownership::Owned {
@@ -689,8 +762,10 @@ impl<'a> BlockVerifier<'a> {
                 if self.body.value(*result).ownership == Ownership::Owned {
                     self.define_owned(*result);
                 }
-            }
-            InstKind::Enum { result, payload, .. } => {
+            },
+            InstKind::Enum {
+                result, payload, ..
+            } => {
                 for v in payload {
                     if self.body.value(*v).ownership == Ownership::Owned {
                         self.try_consume(*v, idx);
@@ -699,8 +774,10 @@ impl<'a> BlockVerifier<'a> {
                 if self.body.value(*result).ownership == Ownership::Owned {
                     self.define_owned(*result);
                 }
-            }
-            InstKind::Array { result, elements, .. } => {
+            },
+            InstKind::Array {
+                result, elements, ..
+            } => {
                 for v in elements {
                     if self.body.value(*v).ownership == Ownership::Owned {
                         self.try_consume(*v, idx);
@@ -709,12 +786,18 @@ impl<'a> BlockVerifier<'a> {
                 if self.body.value(*result).ownership == Ownership::Owned {
                     self.define_owned(*result);
                 }
-            }
+            },
 
             // -- Aggregate extraction --
-            InstKind::StructExtract { result, operand, .. }
-            | InstKind::TupleExtract { result, operand, .. }
-            | InstKind::EnumPayload { result, operand, .. } => {
+            InstKind::StructExtract {
+                result, operand, ..
+            }
+            | InstKind::TupleExtract {
+                result, operand, ..
+            }
+            | InstKind::EnumPayload {
+                result, operand, ..
+            } => {
                 let op_ownership = self.body.value(*operand).ownership;
                 if op_ownership == Ownership::Owned {
                     // Consuming extraction.
@@ -724,7 +807,7 @@ impl<'a> BlockVerifier<'a> {
                 if self.body.value(*result).ownership == Ownership::Owned {
                     self.define_owned(*result);
                 }
-            }
+            },
 
             // -- Destructuring: operand is consumed (single consume of aggregate) --
             InstKind::DestructureStruct { results, operand }
@@ -735,15 +818,17 @@ impl<'a> BlockVerifier<'a> {
                         self.define_owned(*r);
                     }
                 }
-            }
-            InstKind::DestructureEnum { results, operand, .. } => {
+            },
+            InstKind::DestructureEnum {
+                results, operand, ..
+            } => {
                 self.try_consume(*operand, idx);
                 for r in results {
                     if self.body.value(*r).ownership == Ownership::Owned {
                         self.define_owned(*r);
                     }
                 }
-            }
+            },
 
             // -- Calls --
             InstKind::Call { result, args, .. } => {
@@ -751,10 +836,10 @@ impl<'a> BlockVerifier<'a> {
                     match arg.convention {
                         ParamConvention::Consuming => {
                             self.try_consume(arg.value, idx);
-                        }
+                        },
                         ParamConvention::Borrow | ParamConvention::MutBorrow => {
                             self.assert_live(arg.value, idx);
-                        }
+                        },
                     }
                 }
                 if let Some(r) = result {
@@ -764,8 +849,10 @@ impl<'a> BlockVerifier<'a> {
                         self.define_owned(*r);
                     }
                 }
-            }
-            InstKind::ApplyPartial { result, captures, .. } => {
+            },
+            InstKind::ApplyPartial {
+                result, captures, ..
+            } => {
                 // Captures are consumed (they are moved into the closure).
                 for v in captures {
                     if self.body.value(*v).ownership == Ownership::Owned {
@@ -775,15 +862,20 @@ impl<'a> BlockVerifier<'a> {
                 if self.body.value(*result).ownership == Ownership::Owned {
                     self.define_owned(*result);
                 }
-            }
+            },
 
             // -- Address projection --
-            InstKind::FieldAddr { result, base, field, .. } => {
+            InstKind::FieldAddr {
+                result,
+                base,
+                field,
+                ..
+            } => {
                 self.define_owned(*result);
                 if self.addrs.contains_key(base) {
                     self.field_addr_map.insert(*result, (*base, *field));
                 }
-            }
+            },
 
             // -- Uninit: creates sub-field tracking --
             InstKind::Uninit { result, ty } => {
@@ -795,15 +887,14 @@ impl<'a> BlockVerifier<'a> {
                     for i in 0..count {
                         fields.insert(FieldIdx::new(i), InitState::Uninit);
                     }
-                    self.addrs.insert(
-                        *result,
-                        AddrKind::SubField { ty: *ty, fields },
-                    );
+                    self.addrs
+                        .insert(*result, AddrKind::SubField { ty: *ty, fields });
                 } else {
                     // Non-struct type: whole tracking, starts uninit.
-                    self.addrs.insert(*result, AddrKind::Whole(InitState::Uninit));
+                    self.addrs
+                        .insert(*result, AddrKind::Whole(InitState::Uninit));
                 }
-            }
+            },
         }
     }
 
@@ -828,8 +919,11 @@ impl<'a> BlockVerifier<'a> {
 
             // Check 6: arg count must match target block param count.
             if args.len() != target_block.params.len() {
-                self.err(
+                // No single value to blame — use the terminator's own span.
+                let span = block.terminator.span.clone();
+                self.push_err(
                     None,
+                    span,
                     format!(
                         "terminator passes {} args to {:?} but block expects {} params",
                         args.len(),
@@ -844,8 +938,9 @@ impl<'a> BlockVerifier<'a> {
             for (i, (arg_val, param)) in args.iter().zip(target_block.params.iter()).enumerate() {
                 let arg_def = self.body.value(*arg_val);
                 if arg_def.ty != param.ty {
-                    self.err(
+                    self.err_val(
                         None,
+                        *arg_val,
                         format!(
                             "block arg {} to {:?}: type mismatch (value {:?} has {:?}, param expects {:?})",
                             i, target, arg_val, arg_def.ty, param.ty,
@@ -853,8 +948,9 @@ impl<'a> BlockVerifier<'a> {
                     );
                 }
                 if arg_def.ownership != param.ownership {
-                    self.err(
+                    self.err_val(
                         None,
+                        *arg_val,
                         format!(
                             "block arg {} to {:?}: ownership mismatch (value {:?} is {:?}, param expects {:?})",
                             i, target, arg_val, arg_def.ownership, param.ownership,
@@ -874,11 +970,11 @@ impl<'a> BlockVerifier<'a> {
         match term {
             TerminatorKind::Branch { condition, .. } => {
                 self.assert_live(*condition, None);
-            }
+            },
             TerminatorKind::Switch { discriminant, .. } => {
                 self.assert_live(*discriminant, None);
-            }
-            _ => {}
+            },
+            _ => {},
         }
 
         // Consume forwarded @owned values.
@@ -905,9 +1001,11 @@ impl<'a> BlockVerifier<'a> {
             .collect();
         for v in unconsumed {
             let vd = &self.body.values[v.index()];
-            self.err(
+            let (ty, own) = (vd.ty, vd.ownership);
+            self.err_val(
                 None,
-                format!("@owned value {:?} is live at block exit but never consumed (ty={:?}, own={:?})", v, vd.ty, vd.ownership),
+                v,
+                format!("@owned value {:?} is live at block exit but never consumed (ty={:?}, own={:?})", v, ty, own),
             );
         }
 
@@ -924,8 +1022,9 @@ impl<'a> BlockVerifier<'a> {
             .copied()
             .collect();
         for borrow_val in open_borrows {
-            self.err(
+            self.err_val(
                 None,
+                borrow_val,
                 format!(
                     "@guaranteed borrow {:?} is still active at block exit without EndBorrow or forwarding",
                     borrow_val,
@@ -973,7 +1072,10 @@ mod tests {
         b.register_name(entity, "OwnedStruct");
         let ty = b.named(entity, vec![]);
         let mut def = StructDef::new(entity, "OwnedStruct");
-        def.type_info = TypeInfo { copy: CopyBehavior::None, ..TypeInfo::default() };
+        def.type_info = TypeInfo {
+            copy: CopyBehavior::None,
+            ..TypeInfo::default()
+        };
         b.add_struct(def);
         (ty, entity)
     }
@@ -988,7 +1090,10 @@ mod tests {
         for i in 0..n {
             def.add_field(FieldDef::new(format!("field_{}", i), i64_ty));
         }
-        def.type_info = TypeInfo { copy: CopyBehavior::None, ..TypeInfo::default() };
+        def.type_info = TypeInfo {
+            copy: CopyBehavior::None,
+            ..TypeInfo::default()
+        };
         b.add_struct(def);
         (ty, entity)
     }
@@ -1058,7 +1163,10 @@ mod tests {
         let callee_entity = b.fresh_entity();
         b.emit_call(
             Callee::direct(callee_entity),
-            vec![CallArg { value: borrow_val, convention: ParamConvention::Borrow }],
+            vec![CallArg {
+                value: borrow_val,
+                convention: ParamConvention::Borrow,
+            }],
             None,
         );
         b.emit_end_borrow(borrow_val);
@@ -1083,21 +1191,21 @@ mod tests {
             let body = b.body_mut();
             let blk = body.block_mut(entry);
             blk.params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
             blk.params.push(crate::block::BlockParam {
-                value: cond, ty: bool_ty, ownership: Ownership::Owned,
+                value: cond,
+                ty: bool_ty,
+                ownership: Ownership::Owned,
             });
         }
 
-        let (bb1, bb1_params) = b.new_block_with_params(&[
-            (owned_ty, Ownership::Owned),
-            (bool_ty, Ownership::Owned),
-        ]);
-        let (bb2, bb2_params) = b.new_block_with_params(&[
-            (owned_ty, Ownership::Owned),
-            (bool_ty, Ownership::Owned),
-        ]);
+        let (bb1, bb1_params) =
+            b.new_block_with_params(&[(owned_ty, Ownership::Owned), (bool_ty, Ownership::Owned)]);
+        let (bb2, bb2_params) =
+            b.new_block_with_params(&[(owned_ty, Ownership::Owned), (bool_ty, Ownership::Owned)]);
 
         b.emit_branch(cond, bb1, vec![x, cond], bb2, vec![x, cond]);
 
@@ -1131,7 +1239,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1141,7 +1251,9 @@ mod tests {
         let errors = run_verify(b);
         assert!(!errors.is_empty(), "expected unconsumed error");
         assert!(
-            errors.iter().any(|e| e.message.contains("live at block exit")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("live at block exit")),
             "expected 'live at block exit' message, got: {:?}",
             errors,
         );
@@ -1157,7 +1269,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1169,7 +1283,9 @@ mod tests {
         let errors = run_verify(b);
         assert!(!errors.is_empty(), "expected unconsumed error for y");
         assert!(
-            errors.iter().any(|e| e.message.contains("live at block exit")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("live at block exit")),
             "expected live at block exit, got: {:?}",
             errors,
         );
@@ -1192,7 +1308,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("live at block exit")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("live at block exit")),
             "expected unconsumed call result, got: {:?}",
             errors,
         );
@@ -1212,7 +1330,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1223,7 +1343,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("consumed more than once")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
             "expected double consume error, got: {:?}",
             errors,
         );
@@ -1239,7 +1361,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1251,7 +1375,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("consumed more than once")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
             "expected double consume error, got: {:?}",
             errors,
         );
@@ -1267,7 +1393,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1275,7 +1403,10 @@ mod tests {
         let wrapper_ty = b.named(wrapper_entity, vec![]);
         let mut wrapper_def = StructDef::new(wrapper_entity, "Wrapper");
         wrapper_def.add_field(FieldDef::new("inner", owned_ty));
-        wrapper_def.type_info = TypeInfo { copy: CopyBehavior::None, ..TypeInfo::default() };
+        wrapper_def.type_info = TypeInfo {
+            copy: CopyBehavior::None,
+            ..TypeInfo::default()
+        };
         b.add_struct(wrapper_def);
 
         let s = b.emit_struct(wrapper_ty, vec![(FieldIdx::new(0), x)]);
@@ -1286,7 +1417,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("consumed more than once")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
             "expected double consume, got: {:?}",
             errors,
         );
@@ -1306,7 +1439,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1318,7 +1453,10 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("use of consumed value") || e.message.contains("consumed more than once")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("use of consumed value")
+                    || e.message.contains("consumed more than once")),
             "expected use-after-consume error, got: {:?}",
             errors,
         );
@@ -1334,7 +1472,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1347,7 +1487,10 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("use of consumed value") || e.message.contains("consumed")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("use of consumed value")
+                    || e.message.contains("consumed")),
             "expected use-after-move error, got: {:?}",
             errors,
         );
@@ -1363,14 +1506,19 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
         let callee = b.fresh_entity();
         b.emit_call(
             Callee::direct(callee),
-            vec![CallArg { value: x, convention: ParamConvention::Consuming }],
+            vec![CallArg {
+                value: x,
+                convention: ParamConvention::Consuming,
+            }],
             None,
         );
         let y = b.emit_copy_value(x);
@@ -1400,7 +1548,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1411,7 +1561,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("still active at block exit")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("still active at block exit")),
             "expected open borrow error, got: {:?}",
             errors,
         );
@@ -1427,7 +1579,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1438,7 +1592,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("still active at block exit")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("still active at block exit")),
             "expected open mut borrow error, got: {:?}",
             errors,
         );
@@ -1456,10 +1612,14 @@ mod tests {
             let body = b.body_mut();
             let blk = body.block_mut(entry);
             blk.params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
             blk.params.push(crate::block::BlockParam {
-                value: x2, ty: owned_ty, ownership: Ownership::Owned,
+                value: x2,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1473,7 +1633,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("still active at block exit")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("still active at block exit")),
             "expected borrow not ended, got: {:?}",
             errors,
         );
@@ -1493,7 +1655,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1521,7 +1685,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1549,7 +1715,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1563,7 +1731,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("active mut borrow")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("active mut borrow")),
             "expected read-during-mut-borrow error, got: {:?}",
             errors,
         );
@@ -1578,10 +1748,8 @@ mod tests {
         let mut b = OssaBuilder::new("test");
         let i64_ty = b.i64();
 
-        let (target, _params) = b.new_block_with_params(&[
-            (i64_ty, Ownership::Owned),
-            (i64_ty, Ownership::Owned),
-        ]);
+        let (target, _params) =
+            b.new_block_with_params(&[(i64_ty, Ownership::Owned), (i64_ty, Ownership::Owned)]);
 
         let lit = b.emit_literal(Immediate::i64(42));
         b.emit_jump(target, vec![lit]);
@@ -1592,7 +1760,10 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("passes 1 args") && e.message.contains("expects 2 params")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("passes 1 args")
+                    && e.message.contains("expects 2 params")),
             "expected arg count mismatch, got: {:?}",
             errors,
         );
@@ -1615,7 +1786,10 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("passes 2 args") && e.message.contains("expects 1 params")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("passes 2 args")
+                    && e.message.contains("expects 1 params")),
             "expected arg count mismatch, got: {:?}",
             errors,
         );
@@ -1630,11 +1804,13 @@ mod tests {
         let guaranteed_param = b.new_guaranteed_value(owned_ty, ValueId::new(0));
         {
             let body = b.body_mut();
-            body.block_mut(target).params.push(crate::block::BlockParam {
-                value: guaranteed_param,
-                ty: owned_ty,
-                ownership: Ownership::Guaranteed,
-            });
+            body.block_mut(target)
+                .params
+                .push(crate::block::BlockParam {
+                    value: guaranteed_param,
+                    ty: owned_ty,
+                    ownership: Ownership::Guaranteed,
+                });
         }
 
         let entry = b.current_block();
@@ -1642,7 +1818,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1654,7 +1832,9 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(
-            errors.iter().any(|e| e.message.contains("ownership mismatch")),
+            errors
+                .iter()
+                .any(|e| e.message.contains("ownership mismatch")),
             "expected ownership mismatch, got: {:?}",
             errors,
         );
@@ -1839,7 +2019,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 
@@ -1866,10 +2048,11 @@ mod tests {
         {
             let cur = b.current_block();
             let blk = b.body_mut().block_mut(cur);
-            blk.insts.push(crate::inst::Instruction::new(InstKind::Literal {
-                result: lit,
-                value: Immediate::i64(2),
-            }));
+            blk.insts
+                .push(crate::inst::Instruction::new(InstKind::Literal {
+                    result: lit,
+                    value: Immediate::i64(2),
+                }));
         }
 
         let unit = b.emit_literal(Immediate::unit());
@@ -1898,7 +2081,9 @@ mod tests {
         {
             let body = b.body_mut();
             body.block_mut(entry).params.push(crate::block::BlockParam {
-                value: x, ty: owned_ty, ownership: Ownership::Owned,
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
             });
         }
 

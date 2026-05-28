@@ -46,7 +46,9 @@ impl OssaBodyCtx<'_, '_> {
         args.iter()
             .enumerate()
             .map(|(i, arg)| {
-                let conv = conventions.get(offset + i).copied()
+                let conv = conventions
+                    .get(offset + i)
+                    .copied()
                     .unwrap_or(ParamConvention::Borrow);
                 self.prepare_call_arg_for_expr(arg.value, conv)
             })
@@ -92,18 +94,16 @@ impl OssaBodyCtx<'_, '_> {
         for (di, default_entity) in defaults.into_iter().enumerate() {
             let param_ty = resolve_type_annotation(self.ctx, default_entity);
             let default_val = self.lower_default_arg_inline(default_entity, param_ty);
-            let conv = conventions.get(conv_offset + explicit_count + di).copied()
+            let conv = conventions
+                .get(conv_offset + explicit_count + di)
+                .copied()
                 .unwrap_or(ParamConvention::Borrow);
             let arg = self.prepare_call_arg(default_val, conv);
             call_args.push(arg);
         }
     }
 
-    fn lower_default_arg_inline(
-        &mut self,
-        default_entity: Entity,
-        _param_ty: TyId,
-    ) -> ValueId {
+    fn lower_default_arg_inline(&mut self, default_entity: Entity, _param_ty: TyId) -> ValueId {
         let Some(default_hir) = self.ctx.query.query(LowerBody {
             entity: default_entity,
             root: self.ctx.root,
@@ -122,11 +122,17 @@ impl OssaBodyCtx<'_, '_> {
         let saved_local_map = std::mem::take(&mut self.local_map);
 
         // Create values for the default body's HIR locals
-        let default_locals: Vec<_> = self.hir.locals.iter().map(|(id, l)| (id, l.clone())).collect();
+        let default_locals: Vec<_> = self
+            .hir
+            .locals
+            .iter()
+            .map(|(id, l)| (id, l.clone()))
+            .collect();
         for (hir_id, _local) in &default_locals {
             let ty = self.resolve_local_type(*hir_id);
             let val = self.alloc_value_auto(ty);
-            self.local_map.insert(*hir_id, crate::body::LocalBinding::Ssa(val));
+            self.local_map
+                .insert(*hir_id, crate::body::LocalBinding::Ssa(val));
         }
 
         let result = if let Some(tail_id) = tail {
@@ -147,7 +153,11 @@ impl OssaBodyCtx<'_, '_> {
         // Try MIR FunctionDef first
         if let Some(callee) = self.ctx.module.functions.get(&callee_entity) {
             if callee.extern_info.is_some() {
-                return callee.params.iter().map(|_| ParamConvention::Consuming).collect();
+                return callee
+                    .params
+                    .iter()
+                    .map(|_| ParamConvention::Consuming)
+                    .collect();
             }
             return callee.params.iter().map(|p| p.convention).collect();
         }
@@ -155,7 +165,10 @@ impl OssaBodyCtx<'_, '_> {
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return Vec::new();
         };
-        let is_extern = self.ctx.world.get::<Attributes>(callee_entity)
+        let is_extern = self
+            .ctx
+            .world
+            .get::<Attributes>(callee_entity)
             .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
         conventions_from_callable(callable, is_extern)
     }
@@ -180,12 +193,15 @@ impl OssaBodyCtx<'_, '_> {
         protocol: Entity,
         method: &WitnessMethodKey,
     ) -> Option<Entity> {
-        let members = self.ctx.query.query(kestrel_name_res::ProtocolMembersByName {
-            protocol,
-            name: method.name.clone(),
-            context: self.ctx.root,
-            root: self.ctx.root,
-        });
+        let members = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ProtocolMembersByName {
+                protocol,
+                name: method.name.clone(),
+                context: self.ctx.root,
+                root: self.ctx.root,
+            });
         for member in &members {
             if let Some(callable) = self.ctx.world.get::<Callable>(member.entity) {
                 let member_labels: Vec<Option<&str>> =
@@ -217,9 +233,9 @@ impl OssaBodyCtx<'_, '_> {
             type_args = self.resolve_type_args(callee_expr);
         }
 
-        let has_error = type_args.iter().any(|&a| {
-            matches!(self.ctx.module.ty_arena.get(a), MirTy::Error)
-        });
+        let has_error = type_args
+            .iter()
+            .any(|&a| matches!(self.ctx.module.ty_arena.get(a), MirTy::Error));
         if has_error || (type_args.is_empty() && !is_init) {
             if let Some(fallback) = self.extract_explicit_type_args(callee_expr) {
                 type_args = fallback;
@@ -240,13 +256,17 @@ impl OssaBodyCtx<'_, '_> {
         match expr {
             HirExpr::Def(_, args, _) if !args.is_empty() => {
                 Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
-            }
-            HirExpr::OverloadSet { type_args, .. } if !type_args.is_empty() => {
-                Some(type_args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
-            }
-            HirExpr::MethodCall { type_args: Some(args), .. } if !args.is_empty() => {
-                Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect())
-            }
+            },
+            HirExpr::OverloadSet { type_args, .. } if !type_args.is_empty() => Some(
+                type_args
+                    .iter()
+                    .map(|ty| lower_type(self.ctx, ty))
+                    .collect(),
+            ),
+            HirExpr::MethodCall {
+                type_args: Some(args),
+                ..
+            } if !args.is_empty() => Some(args.iter().map(|ty| lower_type(self.ctx, ty)).collect()),
             _ => None,
         }
     }
@@ -274,14 +294,17 @@ impl OssaBodyCtx<'_, '_> {
             match self.ctx.world.get::<NodeKind>(parent) {
                 Some(NodeKind::Struct | NodeKind::Enum) => parent,
                 Some(NodeKind::Extension) => {
-                    match self.ctx.query.query(kestrel_name_res::ExtensionTargetEntity {
-                        extension: parent,
-                        root: self.ctx.root,
-                    }) {
+                    match self
+                        .ctx
+                        .query
+                        .query(kestrel_name_res::ExtensionTargetEntity {
+                            extension: parent,
+                            root: self.ctx.root,
+                        }) {
                         Some(target) => target,
                         None => return Vec::new(),
                     }
-                }
+                },
                 _ => return Vec::new(),
             }
         };
@@ -295,7 +318,7 @@ impl OssaBodyCtx<'_, '_> {
                     MirTy::Named { type_args, .. } if !type_args.is_empty() => type_args.clone(),
                     _ => Vec::new(),
                 }
-            }
+            },
         }
     }
 

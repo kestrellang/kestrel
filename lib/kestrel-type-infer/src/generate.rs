@@ -166,6 +166,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 let arg_tvs = gen_call_args(ctx, hir, args);
                 let result_tv = ctx.fresh();
                 ctx.overloaded_call(vec![*entity], vec![], arg_tvs, result_tv, id, span.clone());
+                // Early return bypasses the generic insert at the end of gen_expr,
+                // so record the expression type here — otherwise MIR lowering finds
+                // no type for the enum-case construction and falls back to Error.
+                ctx.expr_types.insert(id, result_tv);
                 return result_tv;
             }
 

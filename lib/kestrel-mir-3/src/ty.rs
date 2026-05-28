@@ -91,23 +91,51 @@ impl TyArena {
         self.types.is_empty()
     }
 
-    pub fn i8(&mut self) -> TyId { self.intern(MirTy::I8) }
-    pub fn i16(&mut self) -> TyId { self.intern(MirTy::I16) }
-    pub fn i32(&mut self) -> TyId { self.intern(MirTy::I32) }
-    pub fn i64(&mut self) -> TyId { self.intern(MirTy::I64) }
-    pub fn f16(&mut self) -> TyId { self.intern(MirTy::F16) }
-    pub fn f32(&mut self) -> TyId { self.intern(MirTy::F32) }
-    pub fn f64(&mut self) -> TyId { self.intern(MirTy::F64) }
-    pub fn bool(&mut self) -> TyId { self.intern(MirTy::Bool) }
-    pub fn never(&mut self) -> TyId { self.intern(MirTy::Never) }
-    pub fn str_ty(&mut self) -> TyId { self.intern(MirTy::Str) }
-    pub fn unit(&mut self) -> TyId { self.intern(MirTy::Tuple(vec![])) }
-    pub fn pointer(&mut self, pointee: TyId) -> TyId { self.intern(MirTy::Pointer(pointee)) }
-    pub fn tuple(&mut self, elems: Vec<TyId>) -> TyId { self.intern(MirTy::Tuple(elems)) }
+    pub fn i8(&mut self) -> TyId {
+        self.intern(MirTy::I8)
+    }
+    pub fn i16(&mut self) -> TyId {
+        self.intern(MirTy::I16)
+    }
+    pub fn i32(&mut self) -> TyId {
+        self.intern(MirTy::I32)
+    }
+    pub fn i64(&mut self) -> TyId {
+        self.intern(MirTy::I64)
+    }
+    pub fn f16(&mut self) -> TyId {
+        self.intern(MirTy::F16)
+    }
+    pub fn f32(&mut self) -> TyId {
+        self.intern(MirTy::F32)
+    }
+    pub fn f64(&mut self) -> TyId {
+        self.intern(MirTy::F64)
+    }
+    pub fn bool(&mut self) -> TyId {
+        self.intern(MirTy::Bool)
+    }
+    pub fn never(&mut self) -> TyId {
+        self.intern(MirTy::Never)
+    }
+    pub fn str_ty(&mut self) -> TyId {
+        self.intern(MirTy::Str)
+    }
+    pub fn unit(&mut self) -> TyId {
+        self.intern(MirTy::Tuple(vec![]))
+    }
+    pub fn pointer(&mut self, pointee: TyId) -> TyId {
+        self.intern(MirTy::Pointer(pointee))
+    }
+    pub fn tuple(&mut self, elems: Vec<TyId>) -> TyId {
+        self.intern(MirTy::Tuple(elems))
+    }
     pub fn named(&mut self, entity: Entity, type_args: Vec<TyId>) -> TyId {
         self.intern(MirTy::Named { entity, type_args })
     }
-    pub fn error(&mut self) -> TyId { self.intern(MirTy::Error) }
+    pub fn error(&mut self) -> TyId {
+        self.intern(MirTy::Error)
+    }
 }
 
 impl Default for TyArena {

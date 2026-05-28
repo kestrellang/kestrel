@@ -47,7 +47,10 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
                 func_idx: 0,
                 block: None,
                 inst: None,
-                message: format!("MonoStruct({:?}, {:?}) missing layout", s.source, s.type_args),
+                message: format!(
+                    "MonoStruct({:?}, {:?}) missing layout",
+                    s.source, s.type_args
+                ),
                 span: None,
             });
         }
@@ -81,7 +84,10 @@ fn verify_function(
             func_idx: fi,
             block: None,
             inst: None,
-            message: format!("MonoFunction '{}' has no body and no extern_info", func.name),
+            message: format!(
+                "MonoFunction '{}' has no body and no extern_info",
+                func.name
+            ),
             span: None,
         });
         return;
@@ -89,15 +95,43 @@ fn verify_function(
 
     // Check param types
     for (pi, param) in func.params.iter().enumerate() {
-        check_type_concrete(module, fi, None, None, None, param.ty, errors, &format!("param {pi}"));
+        check_type_concrete(
+            module,
+            fi,
+            None,
+            None,
+            None,
+            param.ty,
+            errors,
+            &format!("param {pi}"),
+        );
     }
-    check_type_concrete(module, fi, None, None, None, func.ret, errors, "return type");
+    check_type_concrete(
+        module,
+        fi,
+        None,
+        None,
+        None,
+        func.ret,
+        errors,
+        "return type",
+    );
 
     let Some(body) = &func.body else { return };
 
-    // Check value types
+    // Check value types — inherit the value's defining span (T1: interned types
+    // can't carry a span, so the best location is where the value was defined).
     for (vi, value) in body.values.iter().enumerate() {
-        check_type_concrete(module, fi, None, None, None, value.ty, errors, &format!("value {vi}"));
+        check_type_concrete(
+            module,
+            fi,
+            None,
+            None,
+            value.span.as_ref(),
+            value.ty,
+            errors,
+            &format!("value {vi}"),
+        );
     }
 
     // Walk blocks
@@ -105,10 +139,20 @@ fn verify_function(
     for (bi, block) in body.blocks.iter().enumerate() {
         let block_id = BlockId::new(bi);
 
-        // Check block param types
+        // Check block param types — inherit the param value's defining span.
         for (pi, param) in block.params.iter().enumerate() {
+            let pspan = body
+                .values
+                .get(param.value.index())
+                .and_then(|vd| vd.span.as_ref());
             check_type_concrete(
-                module, fi, Some(block_id), None, None, param.ty, errors,
+                module,
+                fi,
+                Some(block_id),
+                None,
+                pspan,
+                param.ty,
+                errors,
                 &format!("block {bi} param {pi}"),
             );
         }
@@ -119,39 +163,102 @@ fn verify_function(
                 // Check callees are resolved
                 InstKind::Call { callee, .. } => {
                     check_callee(fi, block_id, ii, inst_span, callee, func_count, errors);
-                }
+                },
 
                 // Check FunctionRef is rewritten to MonoFunctionRef
                 InstKind::Literal { value, .. } => {
-                    check_literal(module, fi, block_id, ii, inst_span, &value.kind, func_count, errors);
-                }
+                    check_literal(
+                        module,
+                        fi,
+                        block_id,
+                        ii,
+                        inst_span,
+                        &value.kind,
+                        func_count,
+                        errors,
+                    );
+                },
 
                 // Walk InstKind variants with embedded TyId for concreteness
                 InstKind::Struct { ty, .. } => {
-                    check_type_concrete(module, fi, Some(block_id), Some(ii), inst_span, *ty, errors, "Struct type");
-                }
+                    check_type_concrete(
+                        module,
+                        fi,
+                        Some(block_id),
+                        Some(ii),
+                        inst_span,
+                        *ty,
+                        errors,
+                        "Struct type",
+                    );
+                },
                 InstKind::Enum { enum_ty, .. } => {
-                    check_type_concrete(module, fi, Some(block_id), Some(ii), inst_span, *enum_ty, errors, "Enum type");
-                }
+                    check_type_concrete(
+                        module,
+                        fi,
+                        Some(block_id),
+                        Some(ii),
+                        inst_span,
+                        *enum_ty,
+                        errors,
+                        "Enum type",
+                    );
+                },
                 InstKind::Array { element_ty, .. } => {
-                    check_type_concrete(module, fi, Some(block_id), Some(ii), inst_span, *element_ty, errors, "Array element type");
-                }
+                    check_type_concrete(
+                        module,
+                        fi,
+                        Some(block_id),
+                        Some(ii),
+                        inst_span,
+                        *element_ty,
+                        errors,
+                        "Array element type",
+                    );
+                },
                 InstKind::CopyAddr { ty, .. }
                 | InstKind::Take { ty, .. }
                 | InstKind::BeginBorrowAddr { ty, .. }
                 | InstKind::BeginMutBorrowAddr { ty, .. }
                 | InstKind::DestroyAddr { ty, .. } => {
-                    check_type_concrete(module, fi, Some(block_id), Some(ii), inst_span, *ty, errors, "address type");
-                }
+                    check_type_concrete(
+                        module,
+                        fi,
+                        Some(block_id),
+                        Some(ii),
+                        inst_span,
+                        *ty,
+                        errors,
+                        "address type",
+                    );
+                },
                 InstKind::FieldAddr { ty, .. } => {
-                    check_type_concrete(module, fi, Some(block_id), Some(ii), inst_span, *ty, errors, "FieldAddr type");
-                }
+                    check_type_concrete(
+                        module,
+                        fi,
+                        Some(block_id),
+                        Some(ii),
+                        inst_span,
+                        *ty,
+                        errors,
+                        "FieldAddr type",
+                    );
+                },
                 InstKind::Uninit { ty, .. } => {
-                    check_type_concrete(module, fi, Some(block_id), Some(ii), inst_span, *ty, errors, "Uninit type");
-                }
+                    check_type_concrete(
+                        module,
+                        fi,
+                        Some(block_id),
+                        Some(ii),
+                        inst_span,
+                        *ty,
+                        errors,
+                        "Uninit type",
+                    );
+                },
 
                 // All other instructions: no additional mono verification needed
-                _ => {}
+                _ => {},
             }
         }
     }
@@ -175,7 +282,7 @@ fn check_callee(
                 message: "Callee::Direct not resolved to Callee::Resolved".into(),
                 span: span.cloned(),
             });
-        }
+        },
         Callee::Witness { .. } => {
             errors.push(MonoVerifyError {
                 func_idx: fi,
@@ -184,7 +291,7 @@ fn check_callee(
                 message: "Callee::Witness not resolved".into(),
                 span: span.cloned(),
             });
-        }
+        },
         Callee::Resolved(id) => {
             if id.index() >= func_count {
                 errors.push(MonoVerifyError {
@@ -199,8 +306,8 @@ fn check_callee(
                     span: span.cloned(),
                 });
             }
-        }
-        Callee::Thin(_) | Callee::Thick(_) => {}
+        },
+        Callee::Thin(_) | Callee::Thick(_) => {},
     }
 }
 
@@ -224,7 +331,7 @@ fn check_literal(
                 message: "ImmediateKind::FunctionRef not resolved to MonoFunctionRef".into(),
                 span: span.cloned(),
             });
-        }
+        },
         ImmediateKind::MonoFunctionRef(id) => {
             if id.index() >= func_count {
                 errors.push(MonoVerifyError {
@@ -239,11 +346,20 @@ fn check_literal(
                     span: span.cloned(),
                 });
             }
-        }
+        },
         ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
-            check_type_concrete(module, fi, Some(block), Some(ii), span, *ty, errors, "immediate type");
-        }
-        _ => {}
+            check_type_concrete(
+                module,
+                fi,
+                Some(block),
+                Some(ii),
+                span,
+                *ty,
+                errors,
+                "immediate type",
+            );
+        },
+        _ => {},
     }
 }
 
@@ -266,7 +382,7 @@ fn check_type_concrete(
                 message: format!("TypeParam({e:?}) in {context}"),
                 span: span.cloned(),
             });
-        }
+        },
         MirTy::AssociatedProjection { .. } => {
             errors.push(MonoVerifyError {
                 func_idx: fi,
@@ -275,27 +391,27 @@ fn check_type_concrete(
                 message: format!("AssociatedProjection in {context}"),
                 span: span.cloned(),
             });
-        }
+        },
         MirTy::Pointer(inner) => {
             check_type_concrete(module, fi, block, inst, span, *inner, errors, context);
-        }
+        },
         MirTy::Tuple(elems) => {
             for &elem in elems {
                 check_type_concrete(module, fi, block, inst, span, elem, errors, context);
             }
-        }
+        },
         MirTy::Named { type_args, .. } => {
             for &arg in type_args {
                 check_type_concrete(module, fi, block, inst, span, arg, errors, context);
             }
-        }
+        },
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             for (p, _) in params {
                 check_type_concrete(module, fi, block, inst, span, *p, errors, context);
             }
             check_type_concrete(module, fi, block, inst, span, *ret, errors, context);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -357,15 +473,18 @@ mod tests {
             body: Some(body),
             extern_info: None,
         });
-        module.structs.insert((entity(2), vec![]), MonoStruct {
-            source: entity(2),
-            type_args: vec![],
-            fields: vec![],
-            type_info: TypeInfo {
-                layout: Some(Layout::Struct(StructLayout::new())),
-                ..TypeInfo::none()
+        module.structs.insert(
+            (entity(2), vec![]),
+            MonoStruct {
+                source: entity(2),
+                type_args: vec![],
+                fields: vec![],
+                type_info: TypeInfo {
+                    layout: Some(Layout::Struct(StructLayout::new())),
+                    ..TypeInfo::none()
+                },
             },
-        });
+        );
 
         let result = verify_mono(&module);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
@@ -390,7 +509,12 @@ mod tests {
 
         let result = verify_mono(&module);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("TypeParam")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("TypeParam"))
+        );
     }
 
     #[test]
@@ -466,7 +590,12 @@ mod tests {
 
         let result = verify_mono(&module);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("FunctionRef")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("FunctionRef"))
+        );
     }
 
     #[test]
@@ -500,22 +629,35 @@ mod tests {
 
         let result = verify_mono(&module);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("out of bounds")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("out of bounds"))
+        );
     }
 
     #[test]
     fn verify_struct_missing_layout() {
         let mut module = make_module();
-        module.structs.insert((entity(1), vec![]), MonoStruct {
-            source: entity(1),
-            type_args: vec![],
-            fields: vec![],
-            type_info: TypeInfo::none(),
-        });
+        module.structs.insert(
+            (entity(1), vec![]),
+            MonoStruct {
+                source: entity(1),
+                type_args: vec![],
+                fields: vec![],
+                type_info: TypeInfo::none(),
+            },
+        );
 
         let result = verify_mono(&module);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("missing layout")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("missing layout"))
+        );
     }
 
     #[test]
@@ -593,6 +735,11 @@ mod tests {
 
         let result = verify_mono(&module);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("TypeParam")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("TypeParam"))
+        );
     }
 }

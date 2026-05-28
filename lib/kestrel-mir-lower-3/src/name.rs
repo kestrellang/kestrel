@@ -31,8 +31,8 @@ pub fn qualified_name(world: &World, entity: Entity) -> String {
                             parts.push(seg);
                         }
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         current = world.parent_of(e);

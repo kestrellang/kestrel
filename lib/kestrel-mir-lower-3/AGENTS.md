@@ -55,6 +55,21 @@ one arm and calls `lower_irrefutable_destructure` instead. This emits
 bindings directly in the current block — no branching, no snapshot,
 no restore — so `local_map` entries survive for subsequent code.
 
+## Trust `resolve_expr_type` — but it depends on inference recording the expr
+
+`resolve_expr_type` returns `Error` whenever inference left no `expr_types`
+entry for the expression. That is usually an **upstream bug in
+`kestrel-type-infer/generate.rs`**, not something to paper over here: any
+branch of `gen_expr` that does an early `return` must call
+`ctx.expr_types.insert(id, tv)` itself, because the generic insert only runs on
+the fall-through path. A historical instance: generic enum-case constructors
+(`Wrapper[Wrapper[Resource]].Some(..)`) early-returned without inserting, so the
+constructed value reached MIR as a bare `Named` with no type_args and then
+failed drop-shim monomorphization (`type arg arity mismatch for __drop$Enum`).
+Fixed at the source. When you see `resolve_expr_type` → `Error` for a
+well-typed program, look upstream first rather than reconstructing the type
+from HIR here.
+
 ## var_locals
 
 `var_locals` are mutable locals stored at stack addresses via `uninit` +

@@ -5,14 +5,14 @@ use kestrel_hecs::Entity;
 use crate::block::BlockParam;
 use crate::body::OssaBody;
 use crate::inst::{InstKind, Instruction};
+use crate::item::CopyBehavior;
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::item::witness::{WitnessDef, WitnessMethodBinding, WitnessMethodKey};
-use crate::item::CopyBehavior;
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
+use crate::ty::TyArena;
 use crate::ty::{MirTy, ParamConvention};
 use crate::ty_query::find_cloneable_protocol;
 use crate::value::{Ownership, ValueDef};
-use crate::ty::TyArena;
 use crate::{FieldIdx, MirModule, TyId, ValueId, VariantIdx};
 
 /// Synthesize `__clone$T` functions for all structs/enums that aren't `not Copyable`.
@@ -28,7 +28,9 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         if s.type_info.copy == CopyBehavior::None {
             continue;
         }
-        let tp_ty_ids: Vec<TyId> = s.type_params.iter()
+        let tp_ty_ids: Vec<TyId> = s
+            .type_params
+            .iter()
             .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
             .collect();
         let named_ty = module.ty_arena.intern(MirTy::Named {
@@ -41,7 +43,9 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         if e.type_info.copy == CopyBehavior::None {
             continue;
         }
-        let tp_ty_ids: Vec<TyId> = e.type_params.iter()
+        let tp_ty_ids: Vec<TyId> = e
+            .type_params
+            .iter()
             .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
             .collect();
         let named_ty = module.ty_arena.intern(MirTy::Named {
@@ -55,7 +59,9 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     module.ty_arena.i32();
 
     // Collect types that already have a user-written Cloneable witness
-    let has_user_clone: std::collections::HashSet<Entity> = module.witnesses.iter()
+    let has_user_clone: std::collections::HashSet<Entity> = module
+        .witnesses
+        .iter()
         .filter(|w| w.protocol == cloneable_proto)
         .filter_map(|w| {
             if let MirTy::Named { entity, .. } = module.ty_arena.get(w.implementing_type) {
@@ -68,7 +74,9 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
 
     // Build worklist: all structs/enums that don't already have a user clone.
     // Skip closure envs and types with unresolvable fields.
-    let closure_env_entities: std::collections::HashSet<Entity> = module.functions.values()
+    let closure_env_entities: std::collections::HashSet<Entity> = module
+        .functions
+        .values()
         .filter_map(|f| match &f.kind {
             FunctionKind::ClosureCall { env_struct } => Some(*env_struct),
             _ => None,
@@ -119,14 +127,23 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // Register each shim as a Cloneable witness
     for (&type_entity, &shim_entity) in &shim_map {
         let func = &module.functions[&shim_entity];
-        let tp_ty_ids: Vec<TyId> = func.type_params.iter()
-            .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
-                .expect("TypeParam should be interned"))
+        let tp_ty_ids: Vec<TyId> = func
+            .type_params
+            .iter()
+            .map(|tp| {
+                module
+                    .ty_arena
+                    .find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+                    .expect("TypeParam should be interned")
+            })
             .collect();
-        let self_ty = module.ty_arena.find(|t| {
-            matches!(t, MirTy::Named { entity, type_args }
+        let self_ty = module
+            .ty_arena
+            .find(|t| {
+                matches!(t, MirTy::Named { entity, type_args }
                 if *entity == type_entity && *type_args == tp_ty_ids)
-        }).expect("Named type should be interned");
+            })
+            .expect("Named type should be interned");
 
         let mut witness = WitnessDef::new(cloneable_proto, self_ty);
         witness.add_method(WitnessMethodBinding::new(
@@ -141,7 +158,9 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // Types with only primitive fields stay Bitwise — the expand pass handles them.
     for (&type_entity, _) in &shim_map {
         // Compute predicate with shared borrow, then mutate separately
-        let needs_struct = module.structs.get(&type_entity)
+        let needs_struct = module
+            .structs
+            .get(&type_entity)
             .map(|s| needs_clone_shim_struct(s, &module.ty_arena))
             .unwrap_or(false);
         if needs_struct {
@@ -150,7 +169,9 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
             continue;
         }
 
-        let needs_enum = module.enums.get(&type_entity)
+        let needs_enum = module
+            .enums
+            .get(&type_entity)
             .map(|e| needs_clone_shim_enum(e, &module.ty_arena))
             .unwrap_or(false);
         if needs_enum {
@@ -181,14 +202,23 @@ fn generate_struct_clone_shim(
 ) -> FunctionDef {
     let name = format!("__clone${}", struct_def.name);
 
-    let tp_ty_ids: Vec<TyId> = struct_def.type_params.iter()
-        .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
-            .expect("TypeParam should be interned"))
+    let tp_ty_ids: Vec<TyId> = struct_def
+        .type_params
+        .iter()
+        .map(|tp| {
+            module
+                .ty_arena
+                .find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+                .expect("TypeParam should be interned")
+        })
         .collect();
-    let self_ty = module.ty_arena.find(|t| {
-        matches!(t, MirTy::Named { entity, type_args }
+    let self_ty = module
+        .ty_arena
+        .find(|t| {
+            matches!(t, MirTy::Named { entity, type_args }
             if *entity == struct_def.entity && *type_args == tp_ty_ids)
-    }).expect("struct type should be interned");
+        })
+        .expect("struct type should be interned");
 
     let mut body = OssaBody::new();
 
@@ -198,6 +228,7 @@ fn generate_struct_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        span: None,
     });
     body.param_count = 1;
 
@@ -239,9 +270,16 @@ fn generate_struct_clone_shim(
     body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(result_val));
 
     let mut func = FunctionDef::new(shim_entity, name, self_ty);
-    func.kind = FunctionKind::CloneShim { nominal: struct_def.entity };
+    func.kind = FunctionKind::CloneShim {
+        nominal: struct_def.entity,
+    };
     func.type_params = struct_def.type_params.clone();
-    func.params.push(ParamDef::new("self", self_val, self_ty, ParamConvention::Borrow));
+    func.params.push(ParamDef::new(
+        "self",
+        self_val,
+        self_ty,
+        ParamConvention::Borrow,
+    ));
     func.body = Some(body);
     func
 }
@@ -253,18 +291,33 @@ fn generate_enum_clone_shim(
 ) -> FunctionDef {
     let name = format!("__clone${}", enum_def.name);
 
-    let tp_ty_ids: Vec<TyId> = enum_def.type_params.iter()
-        .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
-            .expect("TypeParam should be interned"))
+    let tp_ty_ids: Vec<TyId> = enum_def
+        .type_params
+        .iter()
+        .map(|tp| {
+            module
+                .ty_arena
+                .find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+                .expect("TypeParam should be interned")
+        })
         .collect();
-    let self_ty = module.ty_arena.find(|t| {
-        matches!(t, MirTy::Named { entity, type_args }
+    let self_ty = module
+        .ty_arena
+        .find(|t| {
+            matches!(t, MirTy::Named { entity, type_args }
             if *entity == enum_def.entity && *type_args == tp_ty_ids)
-    }).expect("enum type should be interned");
+        })
+        .expect("enum type should be interned");
 
-    let i32_ty = module.ty_arena.find(|t| matches!(t, MirTy::I32))
-        .unwrap_or_else(|| module.ty_arena.find(|t| matches!(t, MirTy::I8))
-            .expect("integer type should be interned"));
+    let i32_ty = module
+        .ty_arena
+        .find(|t| matches!(t, MirTy::I32))
+        .unwrap_or_else(|| {
+            module
+                .ty_arena
+                .find(|t| matches!(t, MirTy::I8))
+                .expect("integer type should be interned")
+        });
 
     let mut body = OssaBody::new();
 
@@ -273,6 +326,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        span: None,
     });
     body.param_count = 1;
 
@@ -301,8 +355,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Owned,
     });
-    body.block_mut(exit_block).terminator =
-        Terminator::new(TerminatorKind::Return(exit_result));
+    body.block_mut(exit_block).terminator = Terminator::new(TerminatorKind::Return(exit_result));
 
     // Per-variant blocks — EnumPayload on @guaranteed, CopyValue to clone
     let mut switch_arms = Vec::new();
@@ -316,6 +369,7 @@ fn generate_enum_clone_shim(
             ty: self_ty,
             ownership: Ownership::Guaranteed,
             borrow_source: None,
+            span: None,
         });
         let variant_disc = body.alloc_value(ValueDef::owned(i32_ty));
         body.block_mut(variant_block).params.push(BlockParam {
@@ -330,7 +384,9 @@ fn generate_enum_clone_shim(
         });
 
         let mut variant_insts = Vec::new();
-        variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: variant_disc }));
+        variant_insts.push(Instruction::new(InstKind::DestroyValue {
+            operand: variant_disc,
+        }));
 
         // EnumPayload on @guaranteed → @guaranteed projections
         let mut cloned_payloads = Vec::new();
@@ -361,11 +417,10 @@ fn generate_enum_clone_shim(
         }));
 
         body.block_mut(variant_block).insts = variant_insts;
-        body.block_mut(variant_block).terminator =
-            Terminator::new(TerminatorKind::Jump {
-                target: exit_block,
-                args: vec![cloned_enum],
-            });
+        body.block_mut(variant_block).terminator = Terminator::new(TerminatorKind::Jump {
+            target: exit_block,
+            args: vec![cloned_enum],
+        });
 
         switch_arms.push(SwitchArm {
             pattern: crate::SwitchCase::Variant(variant_idx),
@@ -380,6 +435,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        span: None,
     });
     let wildcard_disc = body.alloc_value(ValueDef::owned(i32_ty));
     body.block_mut(wildcard_block).params.push(BlockParam {
@@ -393,18 +449,19 @@ fn generate_enum_clone_shim(
         ownership: Ownership::Owned,
     });
     let mut wildcard_insts = Vec::new();
-    wildcard_insts.push(Instruction::new(InstKind::DestroyValue { operand: wildcard_disc }));
+    wildcard_insts.push(Instruction::new(InstKind::DestroyValue {
+        operand: wildcard_disc,
+    }));
     let wildcard_copy = body.alloc_value(ValueDef::owned(self_ty));
     wildcard_insts.push(Instruction::new(InstKind::CopyValue {
         result: wildcard_copy,
         operand: wildcard_self,
     }));
     body.block_mut(wildcard_block).insts = wildcard_insts;
-    body.block_mut(wildcard_block).terminator =
-        Terminator::new(TerminatorKind::Jump {
-            target: exit_block,
-            args: vec![wildcard_copy],
-        });
+    body.block_mut(wildcard_block).terminator = Terminator::new(TerminatorKind::Jump {
+        target: exit_block,
+        args: vec![wildcard_copy],
+    });
     switch_arms.push(SwitchArm {
         pattern: crate::SwitchCase::Wildcard,
         target: wildcard_block,
@@ -418,9 +475,16 @@ fn generate_enum_clone_shim(
     });
 
     let mut func = FunctionDef::new(shim_entity, name, self_ty);
-    func.kind = FunctionKind::CloneShim { nominal: enum_def.entity };
+    func.kind = FunctionKind::CloneShim {
+        nominal: enum_def.entity,
+    };
     func.type_params = enum_def.type_params.clone();
-    func.params.push(ParamDef::new("self", self_val, self_ty, ParamConvention::Borrow));
+    func.params.push(ParamDef::new(
+        "self",
+        self_val,
+        self_ty,
+        ParamConvention::Borrow,
+    ));
     func.body = Some(body);
     func
 }
@@ -428,46 +492,48 @@ fn generate_enum_clone_shim(
 fn ty_contains_unresolvable(ty: TyId, arena: &TyArena) -> bool {
     match arena.get(ty) {
         MirTy::AssociatedProjection { .. } => true,
-        MirTy::Named { type_args, .. } => type_args.iter().any(|&t| ty_contains_unresolvable(t, arena)),
+        MirTy::Named { type_args, .. } => type_args
+            .iter()
+            .any(|&t| ty_contains_unresolvable(t, arena)),
         MirTy::Pointer(inner) => ty_contains_unresolvable(*inner, arena),
         MirTy::Tuple(elems) => elems.iter().any(|&t| ty_contains_unresolvable(t, arena)),
         MirTy::FuncThick { params, ret, .. } => {
-            params.iter().any(|&(t, _)| ty_contains_unresolvable(t, arena))
+            params
+                .iter()
+                .any(|&(t, _)| ty_contains_unresolvable(t, arena))
                 || ty_contains_unresolvable(*ret, arena)
-        }
+        },
         _ => false,
     }
 }
 
-fn has_unresolvable_fields_struct(
-    s: &crate::item::struct_def::StructDef,
-    arena: &TyArena,
-) -> bool {
-    s.fields.iter().any(|f| ty_contains_unresolvable(f.ty, arena))
+fn has_unresolvable_fields_struct(s: &crate::item::struct_def::StructDef, arena: &TyArena) -> bool {
+    s.fields
+        .iter()
+        .any(|f| ty_contains_unresolvable(f.ty, arena))
 }
 
-fn has_unresolvable_fields_enum(
-    e: &crate::item::enum_def::EnumDef,
-    arena: &TyArena,
-) -> bool {
-    e.cases.iter().any(|c| c.payload_fields.iter().any(|f| ty_contains_unresolvable(f.ty, arena)))
+fn has_unresolvable_fields_enum(e: &crate::item::enum_def::EnumDef, arena: &TyArena) -> bool {
+    e.cases.iter().any(|c| {
+        c.payload_fields
+            .iter()
+            .any(|f| ty_contains_unresolvable(f.ty, arena))
+    })
 }
 
 /// A struct needs a clone shim only if it has at least one Named or TypeParam
 /// field — those might need deep cloning. All-primitive structs are trivially
 /// bitwise-copyable and don't need a shim.
-fn needs_clone_shim_struct(
-    s: &crate::item::struct_def::StructDef,
-    arena: &TyArena,
-) -> bool {
-    s.fields.iter().any(|f| matches!(arena.get(f.ty), MirTy::Named { .. } | MirTy::TypeParam(_)))
+fn needs_clone_shim_struct(s: &crate::item::struct_def::StructDef, arena: &TyArena) -> bool {
+    s.fields
+        .iter()
+        .any(|f| matches!(arena.get(f.ty), MirTy::Named { .. } | MirTy::TypeParam(_)))
 }
 
-fn needs_clone_shim_enum(
-    e: &crate::item::enum_def::EnumDef,
-    arena: &TyArena,
-) -> bool {
+fn needs_clone_shim_enum(e: &crate::item::enum_def::EnumDef, arena: &TyArena) -> bool {
     e.cases.iter().any(|c| {
-        c.payload_fields.iter().any(|f| matches!(arena.get(f.ty), MirTy::Named { .. } | MirTy::TypeParam(_)))
+        c.payload_fields
+            .iter()
+            .any(|f| matches!(arena.get(f.ty), MirTy::Named { .. } | MirTy::TypeParam(_)))
     })
 }

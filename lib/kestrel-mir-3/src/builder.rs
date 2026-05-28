@@ -3,15 +3,15 @@ use kestrel_hecs::Entity;
 use crate::block::BlockParam;
 use crate::body::OssaBody;
 use crate::callee::Callee;
+use crate::immediate::Immediate;
 use crate::inst::{CallArg, InstKind, Instruction};
-use crate::item::struct_def::StructDef;
 use crate::item::enum_def::EnumDef;
 use crate::item::protocol::ProtocolDef;
+use crate::item::struct_def::StructDef;
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::MirTy;
 use crate::value::{Ownership, ValueDef};
 use crate::{BlockId, FieldIdx, MirModule, Op, TyId, ValueId, VariantIdx};
-use crate::immediate::Immediate;
 
 /// Builder for constructing OSSA bodies programmatically.
 pub struct OssaBuilder {
@@ -27,7 +27,12 @@ impl OssaBuilder {
         let mut body = OssaBody::new();
         let entry = body.alloc_block();
         body.entry = entry;
-        Self { module, body, current_block: entry, next_entity: 1 }
+        Self {
+            module,
+            body,
+            current_block: entry,
+            next_entity: 1,
+        }
     }
 
     pub fn fresh_entity(&mut self) -> Entity {
@@ -42,23 +47,45 @@ impl OssaBuilder {
 
     // -- Type interning --
 
-    pub fn ty(&mut self, ty: MirTy) -> TyId { self.module.ty_arena.intern(ty) }
-    pub fn i64(&mut self) -> TyId { self.module.ty_arena.i64() }
-    pub fn i32(&mut self) -> TyId { self.module.ty_arena.i32() }
-    pub fn bool(&mut self) -> TyId { self.module.ty_arena.bool() }
-    pub fn unit(&mut self) -> TyId { self.module.ty_arena.unit() }
-    pub fn str_ty(&mut self) -> TyId { self.module.ty_arena.str_ty() }
-    pub fn never(&mut self) -> TyId { self.module.ty_arena.never() }
-    pub fn pointer(&mut self, pointee: TyId) -> TyId { self.module.ty_arena.pointer(pointee) }
+    pub fn ty(&mut self, ty: MirTy) -> TyId {
+        self.module.ty_arena.intern(ty)
+    }
+    pub fn i64(&mut self) -> TyId {
+        self.module.ty_arena.i64()
+    }
+    pub fn i32(&mut self) -> TyId {
+        self.module.ty_arena.i32()
+    }
+    pub fn bool(&mut self) -> TyId {
+        self.module.ty_arena.bool()
+    }
+    pub fn unit(&mut self) -> TyId {
+        self.module.ty_arena.unit()
+    }
+    pub fn str_ty(&mut self) -> TyId {
+        self.module.ty_arena.str_ty()
+    }
+    pub fn never(&mut self) -> TyId {
+        self.module.ty_arena.never()
+    }
+    pub fn pointer(&mut self, pointee: TyId) -> TyId {
+        self.module.ty_arena.pointer(pointee)
+    }
     pub fn named(&mut self, entity: Entity, type_args: Vec<TyId>) -> TyId {
         self.module.ty_arena.named(entity, type_args)
     }
 
     // -- Type metadata --
 
-    pub fn add_struct(&mut self, def: StructDef) { self.module.add_struct(def); }
-    pub fn add_enum(&mut self, def: EnumDef) { self.module.add_enum(def); }
-    pub fn add_protocol(&mut self, def: ProtocolDef) { self.module.add_protocol(def); }
+    pub fn add_struct(&mut self, def: StructDef) {
+        self.module.add_struct(def);
+    }
+    pub fn add_enum(&mut self, def: EnumDef) {
+        self.module.add_enum(def);
+    }
+    pub fn add_protocol(&mut self, def: ProtocolDef) {
+        self.module.add_protocol(def);
+    }
 
     // -- Value allocation --
 
@@ -86,7 +113,10 @@ impl OssaBuilder {
     }
 
     /// Create a block with typed, ownership-annotated params. Returns (block_id, param_value_ids).
-    pub fn new_block_with_params(&mut self, params: &[(TyId, Ownership)]) -> (BlockId, Vec<ValueId>) {
+    pub fn new_block_with_params(
+        &mut self,
+        params: &[(TyId, Ownership)],
+    ) -> (BlockId, Vec<ValueId>) {
         let block = self.body.alloc_block();
         let mut values = Vec::new();
         for &(ty, ownership) in params {
@@ -95,7 +125,11 @@ impl OssaBuilder {
                 Ownership::Guaranteed => panic!("use add_guaranteed_block_param for @guaranteed"),
             };
             let val = self.body.alloc_value(def);
-            self.body.block_mut(block).params.push(BlockParam { value: val, ty, ownership });
+            self.body.block_mut(block).params.push(BlockParam {
+                value: val,
+                ty,
+                ownership,
+            });
             values.push(val);
         }
         (block, values)
@@ -112,7 +146,10 @@ impl OssaBuilder {
     // -- Instruction emission --
 
     fn emit(&mut self, kind: InstKind) {
-        self.body.block_mut(self.current_block).insts.push(Instruction::new(kind));
+        self.body
+            .block_mut(self.current_block)
+            .insts
+            .push(Instruction::new(kind));
     }
 
     pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
@@ -163,25 +200,41 @@ impl OssaBuilder {
 
     pub fn emit_copy_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.new_value(ty, Ownership::Owned);
-        self.emit(InstKind::CopyAddr { result, address, ty });
+        self.emit(InstKind::CopyAddr {
+            result,
+            address,
+            ty,
+        });
         result
     }
 
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.new_value(ty, Ownership::Owned);
-        self.emit(InstKind::Take { result, address, ty });
+        self.emit(InstKind::Take {
+            result,
+            address,
+            ty,
+        });
         result
     }
 
     pub fn emit_begin_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.new_guaranteed_value(ty, address);
-        self.emit(InstKind::BeginBorrowAddr { result, address, ty });
+        self.emit(InstKind::BeginBorrowAddr {
+            result,
+            address,
+            ty,
+        });
         result
     }
 
     pub fn emit_begin_mut_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.new_guaranteed_value(ty, address);
-        self.emit(InstKind::BeginMutBorrowAddr { result, address, ty });
+        self.emit(InstKind::BeginMutBorrowAddr {
+            result,
+            address,
+            ty,
+        });
         result
     }
 
@@ -212,13 +265,31 @@ impl OssaBuilder {
 
     pub fn emit_op2(&mut self, op: Op, lhs: ValueId, rhs: ValueId, result_ty: TyId) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
-        self.emit(InstKind::Op2 { result, op, lhs, rhs });
+        self.emit(InstKind::Op2 {
+            result,
+            op,
+            lhs,
+            rhs,
+        });
         result
     }
 
-    pub fn emit_op3(&mut self, op: Op, a: ValueId, b: ValueId, c: ValueId, result_ty: TyId) -> ValueId {
+    pub fn emit_op3(
+        &mut self,
+        op: Op,
+        a: ValueId,
+        b: ValueId,
+        c: ValueId,
+        result_ty: TyId,
+    ) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
-        self.emit(InstKind::Op3 { result, op, a, b, c });
+        self.emit(InstKind::Op3 {
+            result,
+            op,
+            a,
+            b,
+            c,
+        });
         result
     }
 
@@ -248,60 +319,126 @@ impl OssaBuilder {
         result
     }
 
-    pub fn emit_enum(&mut self, enum_ty: TyId, variant: VariantIdx, payload: Vec<ValueId>) -> ValueId {
+    pub fn emit_enum(
+        &mut self,
+        enum_ty: TyId,
+        variant: VariantIdx,
+        payload: Vec<ValueId>,
+    ) -> ValueId {
         let result = self.new_value(enum_ty, Ownership::Owned);
-        self.emit(InstKind::Enum { result, enum_ty, variant, payload });
+        self.emit(InstKind::Enum {
+            result,
+            enum_ty,
+            variant,
+            payload,
+        });
         result
     }
 
-    pub fn emit_array(&mut self, element_ty: TyId, elements: Vec<ValueId>, array_ty: TyId) -> ValueId {
+    pub fn emit_array(
+        &mut self,
+        element_ty: TyId,
+        elements: Vec<ValueId>,
+        array_ty: TyId,
+    ) -> ValueId {
         let result = self.new_value(array_ty, Ownership::Owned);
-        self.emit(InstKind::Array { result, element_ty, elements });
+        self.emit(InstKind::Array {
+            result,
+            element_ty,
+            elements,
+        });
         result
     }
 
-    pub fn emit_struct_extract(&mut self, operand: ValueId, field: FieldIdx, result_ty: TyId) -> ValueId {
+    pub fn emit_struct_extract(
+        &mut self,
+        operand: ValueId,
+        field: FieldIdx,
+        result_ty: TyId,
+    ) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
-        self.emit(InstKind::StructExtract { result, operand, field });
+        self.emit(InstKind::StructExtract {
+            result,
+            operand,
+            field,
+        });
         result
     }
 
     pub fn emit_tuple_extract(&mut self, operand: ValueId, index: u32, result_ty: TyId) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
-        self.emit(InstKind::TupleExtract { result, operand, index });
+        self.emit(InstKind::TupleExtract {
+            result,
+            operand,
+            index,
+        });
         result
     }
 
-    pub fn emit_enum_payload(&mut self, operand: ValueId, variant: VariantIdx, field: FieldIdx, result_ty: TyId) -> ValueId {
+    pub fn emit_enum_payload(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field: FieldIdx,
+        result_ty: TyId,
+    ) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
-        self.emit(InstKind::EnumPayload { result, operand, variant, field });
+        self.emit(InstKind::EnumPayload {
+            result,
+            operand,
+            variant,
+            field,
+        });
         result
     }
 
-    pub fn emit_destructure_struct(&mut self, operand: ValueId, field_types: &[(TyId, Ownership)]) -> Vec<ValueId> {
+    pub fn emit_destructure_struct(
+        &mut self,
+        operand: ValueId,
+        field_types: &[(TyId, Ownership)],
+    ) -> Vec<ValueId> {
         let results: Vec<ValueId> = field_types
             .iter()
             .map(|&(ty, ownership)| self.new_value(ty, ownership))
             .collect();
-        self.emit(InstKind::DestructureStruct { results: results.clone(), operand });
+        self.emit(InstKind::DestructureStruct {
+            results: results.clone(),
+            operand,
+        });
         results
     }
 
-    pub fn emit_destructure_tuple(&mut self, operand: ValueId, elem_types: &[(TyId, Ownership)]) -> Vec<ValueId> {
+    pub fn emit_destructure_tuple(
+        &mut self,
+        operand: ValueId,
+        elem_types: &[(TyId, Ownership)],
+    ) -> Vec<ValueId> {
         let results: Vec<ValueId> = elem_types
             .iter()
             .map(|&(ty, ownership)| self.new_value(ty, ownership))
             .collect();
-        self.emit(InstKind::DestructureTuple { results: results.clone(), operand });
+        self.emit(InstKind::DestructureTuple {
+            results: results.clone(),
+            operand,
+        });
         results
     }
 
-    pub fn emit_destructure_enum(&mut self, operand: ValueId, variant: VariantIdx, field_types: &[(TyId, Ownership)]) -> Vec<ValueId> {
+    pub fn emit_destructure_enum(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field_types: &[(TyId, Ownership)],
+    ) -> Vec<ValueId> {
         let results: Vec<ValueId> = field_types
             .iter()
             .map(|&(ty, ownership)| self.new_value(ty, ownership))
             .collect();
-        self.emit(InstKind::DestructureEnum { results: results.clone(), operand, variant });
+        self.emit(InstKind::DestructureEnum {
+            results: results.clone(),
+            operand,
+            variant,
+        });
         results
     }
 
@@ -312,20 +449,38 @@ impl OssaBuilder {
         result_ty: Option<(TyId, Ownership)>,
     ) -> Option<ValueId> {
         let result = result_ty.map(|(ty, ownership)| self.new_value(ty, ownership));
-        self.emit(InstKind::Call { result, callee, args });
+        self.emit(InstKind::Call {
+            result,
+            callee,
+            args,
+        });
         result
     }
 
-    pub fn emit_apply_partial(&mut self, func: Entity, captures: Vec<ValueId>, result_ty: TyId) -> ValueId {
+    pub fn emit_apply_partial(
+        &mut self,
+        func: Entity,
+        captures: Vec<ValueId>,
+        result_ty: TyId,
+    ) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
-        self.emit(InstKind::ApplyPartial { result, func, captures });
+        self.emit(InstKind::ApplyPartial {
+            result,
+            func,
+            captures,
+        });
         result
     }
 
     pub fn emit_field_addr(&mut self, base: ValueId, ty: TyId, field: FieldIdx) -> ValueId {
         let ptr_ty = self.pointer(ty);
         let result = self.new_value(ptr_ty, Ownership::Owned);
-        self.emit(InstKind::FieldAddr { result, base, ty, field });
+        self.emit(InstKind::FieldAddr {
+            result,
+            base,
+            ty,
+            field,
+        });
         result
     }
 
@@ -368,7 +523,10 @@ impl OssaBuilder {
 
     pub fn emit_switch(&mut self, discriminant: ValueId, cases: Vec<SwitchArm>) {
         self.body.block_mut(self.current_block).terminator =
-            Terminator::new(TerminatorKind::Switch { discriminant, cases });
+            Terminator::new(TerminatorKind::Switch {
+                discriminant,
+                cases,
+            });
     }
 
     pub fn emit_panic(&mut self, message: impl Into<String>) {

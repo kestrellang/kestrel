@@ -22,8 +22,11 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
             if has_type_params(&module.ty_arena, &field_tys) {
                 continue;
             }
-            if let Some(layout) = compute_struct_layout(&module.ty_arena, module, &field_tys, target) {
-                module.structs.get_mut(&entity).unwrap().type_info.layout = Some(Layout::Struct(layout));
+            if let Some(layout) =
+                compute_struct_layout(&module.ty_arena, module, &field_tys, target)
+            {
+                module.structs.get_mut(&entity).unwrap().type_info.layout =
+                    Some(Layout::Struct(layout));
                 progress = true;
             }
         }
@@ -39,11 +42,17 @@ pub fn run_layout_pass(module: &mut MirModule, target: &TargetConfig) {
                 .iter()
                 .map(|c| c.payload_fields.iter().map(|f| f.ty).collect())
                 .collect();
-            if case_fields.iter().any(|fields| has_type_params(&module.ty_arena, fields)) {
+            if case_fields
+                .iter()
+                .any(|fields| has_type_params(&module.ty_arena, fields))
+            {
                 continue;
             }
-            if let Some(layout) = compute_enum_layout(&module.ty_arena, module, &case_fields, target) {
-                module.enums.get_mut(&entity).unwrap().type_info.layout = Some(Layout::Enum(layout));
+            if let Some(layout) =
+                compute_enum_layout(&module.ty_arena, module, &case_fields, target)
+            {
+                module.enums.get_mut(&entity).unwrap().type_info.layout =
+                    Some(Layout::Enum(layout));
                 progress = true;
             }
         }
@@ -65,17 +74,17 @@ fn ty_contains_param(arena: &TyArena, ty: TyId) -> bool {
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             elems.iter().any(|&e| ty_contains_param(arena, e))
-        }
+        },
         MirTy::Named { type_args, .. } => {
             let args = type_args.clone();
             args.iter().any(|&a| ty_contains_param(arena, a))
-        }
+        },
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             let ret = *ret;
             let params = params.clone();
             params.iter().any(|&(t, _)| ty_contains_param(arena, t))
                 || ty_contains_param(arena, ret)
-        }
+        },
         _ => false,
     }
 }
@@ -113,7 +122,6 @@ pub fn size_and_align_of(
         return Some(sa);
     }
     match arena.get(ty) {
-
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             if elems.is_empty() {
@@ -126,7 +134,7 @@ pub fn size_and_align_of(
             }
             layout.pad_to_align();
             Some((layout.size, layout.align))
-        }
+        },
 
         MirTy::Named { entity, type_args } => {
             if !type_args.is_empty() {
@@ -146,7 +154,7 @@ pub fn size_and_align_of(
                 return None;
             }
             None
-        }
+        },
 
         _ => None,
     }
@@ -259,7 +267,7 @@ mod tests {
                 assert_eq!(sl.size, 16);
                 assert_eq!(sl.align, 8);
                 assert_eq!(sl.field_offsets, vec![0, 8]);
-            }
+            },
             _ => panic!("expected Struct layout"),
         }
     }
@@ -282,7 +290,7 @@ mod tests {
                 assert_eq!(sl.field_offsets, vec![0, 8]);
                 assert_eq!(sl.size, 16);
                 assert_eq!(sl.align, 8);
-            }
+            },
             _ => panic!("expected Struct layout"),
         }
     }
@@ -300,7 +308,7 @@ mod tests {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 0);
                 assert_eq!(sl.align, 1);
-            }
+            },
             _ => panic!("expected Struct layout"),
         }
     }
@@ -330,7 +338,7 @@ mod tests {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 16);
                 assert_eq!(sl.field_offsets, vec![0, 8]);
-            }
+            },
             _ => panic!("expected Struct layout"),
         }
     }
@@ -372,7 +380,7 @@ mod tests {
                 assert!(el.size > 0);
                 assert!(el.payload_offset >= 1);
                 assert_eq!(el.variant_layouts.len(), 2);
-            }
+            },
             _ => panic!("expected Enum layout"),
         }
     }
@@ -393,7 +401,7 @@ mod tests {
             Layout::Enum(el) => {
                 assert_eq!(el.discriminant_width, IntBits::I8);
                 assert_eq!(el.size, 1);
-            }
+            },
             _ => panic!("expected Enum layout"),
         }
     }
@@ -414,7 +422,7 @@ mod tests {
             Layout::Struct(sl) => {
                 assert_eq!(sl.size, 8);
                 assert_eq!(sl.align, 8);
-            }
+            },
             _ => panic!("expected Struct layout"),
         }
     }
@@ -428,11 +436,26 @@ mod tests {
         let f64_ty = module.ty_arena.f64();
         let unit_ty = module.ty_arena.unit();
         let t = target();
-        assert_eq!(size_and_align_of(&module.ty_arena, &module, bool_ty, &t), Some((1, 1)));
-        assert_eq!(size_and_align_of(&module.ty_arena, &module, i32_ty, &t), Some((4, 4)));
-        assert_eq!(size_and_align_of(&module.ty_arena, &module, i64_ty, &t), Some((8, 8)));
-        assert_eq!(size_and_align_of(&module.ty_arena, &module, f64_ty, &t), Some((8, 8)));
-        assert_eq!(size_and_align_of(&module.ty_arena, &module, unit_ty, &t), Some((0, 1)));
+        assert_eq!(
+            size_and_align_of(&module.ty_arena, &module, bool_ty, &t),
+            Some((1, 1))
+        );
+        assert_eq!(
+            size_and_align_of(&module.ty_arena, &module, i32_ty, &t),
+            Some((4, 4))
+        );
+        assert_eq!(
+            size_and_align_of(&module.ty_arena, &module, i64_ty, &t),
+            Some((8, 8))
+        );
+        assert_eq!(
+            size_and_align_of(&module.ty_arena, &module, f64_ty, &t),
+            Some((8, 8))
+        );
+        assert_eq!(
+            size_and_align_of(&module.ty_arena, &module, unit_ty, &t),
+            Some((0, 1))
+        );
     }
 
     #[test]

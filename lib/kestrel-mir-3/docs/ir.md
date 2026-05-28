@@ -78,12 +78,39 @@ pub struct ValueDef {
     /// to enforce "source not consumed while any value with this
     /// provenance is live."
     pub borrow_source: Option<ValueId>,
+    /// Source location of the defining expression, when known. Metadata
+    /// only — gives verifier ICEs a precise span when the error fires at
+    /// a block boundary (no triggering instruction). Synthetic values
+    /// (shim/thunk temporaries) carry None.
+    pub span: Option<Span>,
 }
 ```
 
 The function body maintains a flat `Vec<ValueDef>` indexed by `ValueId`.
 Every instruction that produces a result allocates a new `ValueId`
 before emission.
+
+### Spans: instructions carry them, types can't
+
+Source spans live on **instructions** (`Instruction.span`), **terminators**
+(`Terminator.span`), and now **value definitions** (`ValueDef.span`). They do
+**not** live on types: `TyId`s are interned in a content-addressed `TyArena`
+(one `TyId` per structural type, shared module-wide), so a type has no single
+source location to attach. Any diagnostic needing a span for a *type* inherits
+it from the enclosing instruction, or — for a value — from that value's
+defining span.
+
+`ValueDef.span` is deliberately **excluded from `PartialEq`** (hand-written
+impl): it is metadata, never identity. Two values that agree on
+type/ownership/borrow_source are equal regardless of span, so adding spans
+cannot perturb dedup or any equality-keyed pass.
+
+The lowerer stamps the current expr/stmt span into every value it allocates
+(`OssaBodyCtx::alloc_value` / `alloc_guaranteed`, mirroring `push_inst`). The
+OSSA verifier's `err_val` helper prefers the triggering instruction's span and
+falls back to the offending value's defining span — this is what gives
+block-exit errors ("@owned value never consumed", "borrow still active at block
+exit") a real location instead of collapsing to the function `DeclSpan`.
 
 ## Basic Block
 

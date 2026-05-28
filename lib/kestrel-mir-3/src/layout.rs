@@ -9,11 +9,19 @@ pub struct StructLayout {
 
 impl StructLayout {
     pub fn new() -> Self {
-        Self { size: 0, align: 1, field_offsets: Vec::new() }
+        Self {
+            size: 0,
+            align: 1,
+            field_offsets: Vec::new(),
+        }
     }
 
     pub fn scalar(size: u64, align: u64) -> Self {
-        Self { size, align, field_offsets: Vec::new() }
+        Self {
+            size,
+            align,
+            field_offsets: Vec::new(),
+        }
     }
 
     pub fn append_field(&mut self, field_layout: StructLayout) -> u64 {

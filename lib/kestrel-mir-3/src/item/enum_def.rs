@@ -12,11 +12,23 @@ pub struct EnumCaseDef {
 
 impl EnumCaseDef {
     pub fn new(name: impl Into<String>, discriminant: u32) -> Self {
-        Self { name: name.into(), discriminant, payload_fields: Vec::new() }
+        Self {
+            name: name.into(),
+            discriminant,
+            payload_fields: Vec::new(),
+        }
     }
 
-    pub fn with_payload(name: impl Into<String>, discriminant: u32, payload_fields: Vec<FieldDef>) -> Self {
-        Self { name: name.into(), discriminant, payload_fields }
+    pub fn with_payload(
+        name: impl Into<String>,
+        discriminant: u32,
+        payload_fields: Vec<FieldDef>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            discriminant,
+            payload_fields,
+        }
     }
 }
 

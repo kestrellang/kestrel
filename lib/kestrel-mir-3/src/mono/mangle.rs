@@ -1,9 +1,9 @@
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
+use crate::TyId;
 use crate::mono::types::MonoParam;
 use crate::ty::{MirTy, ParamConvention, TyArena};
-use crate::TyId;
 
 /// Mangle a monomorphized function name using the v0 scheme.
 ///
@@ -88,7 +88,7 @@ fn mangle_param(
     match param.convention {
         ParamConvention::Borrow => out.push('r'),
         ParamConvention::MutBorrow => out.push('m'),
-        ParamConvention::Consuming => {}
+        ParamConvention::Consuming => {},
     }
     mangle_type(arena, entity_names, param.ty, out);
 }
@@ -148,13 +148,13 @@ fn mangle_type(
                 mangle_type(arena, entity_names, *elem, out);
             }
             out.push('E');
-        }
+        },
 
         MirTy::Pointer(inner) => {
             let inner = *inner;
             out.push('P');
             mangle_type(arena, entity_names, inner, out);
-        }
+        },
 
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
@@ -171,7 +171,7 @@ fn mangle_type(
                 }
                 out.push('E');
             }
-        }
+        },
 
         MirTy::FuncThin { params, ret } => {
             let params = params.clone();
@@ -184,7 +184,7 @@ fn mangle_type(
             }
             mangle_type(arena, entity_names, ret, out);
             out.push('E');
-        }
+        },
 
         MirTy::FuncThick { params, ret } => {
             let params = params.clone();
@@ -197,7 +197,7 @@ fn mangle_type(
             }
             mangle_type(arena, entity_names, ret, out);
             out.push('E');
-        }
+        },
 
         MirTy::TypeParam(e) => {
             let name = entity_names.get(e).map(|s| s.as_str()).unwrap_or("?");
@@ -205,11 +205,21 @@ fn mangle_type(
                 "mangle_type: TypeParam({:?}, name={}) reached the mangler — monomorphization bug",
                 e, name
             );
-        }
-        MirTy::AssociatedProjection { base, protocol, assoc_type } => {
+        },
+        MirTy::AssociatedProjection {
+            base,
+            protocol,
+            assoc_type,
+        } => {
             let base_ty = arena.get(*base);
-            let proto_name = entity_names.get(protocol).map(|s| s.as_str()).unwrap_or("?");
-            let assoc_name = entity_names.get(assoc_type).map(|s| s.as_str()).unwrap_or("?");
+            let proto_name = entity_names
+                .get(protocol)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
+            let assoc_name = entity_names
+                .get(assoc_type)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
             eprintln!("DIAG mangle_type: AssociatedProjection {{");
             eprintln!("  base: {:?} ({:?})", base, base_ty);
             eprintln!("  protocol: {:?} ({})", protocol, proto_name);
@@ -220,7 +230,7 @@ fn mangle_type(
                 "mangle_type: abstract type {:?} reached the mangler — monomorphization bug",
                 arena.get(ty)
             );
-        }
+        },
     }
 }
 
@@ -368,7 +378,10 @@ mod tests {
         let i32 = a.i32();
         let b = a.bool();
         let ft = a.intern(MirTy::FuncThin {
-            params: vec![(i32, ParamConvention::Consuming), (i32, ParamConvention::Consuming)],
+            params: vec![
+                (i32, ParamConvention::Consuming),
+                (i32, ParamConvention::Consuming),
+            ],
             ret: b,
         });
         let mut out = String::new();

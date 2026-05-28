@@ -12,8 +12,8 @@ use crate::{FieldIdx, VariantIdx};
 
 pub use enum_def::{EnumCaseDef, EnumDef};
 pub use function::{
-    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef,
-    WhereClause, WhereConstraint,
+    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, WhereClause,
+    WhereConstraint,
 };
 pub use protocol::{AssociatedTypeDef, ProtocolDef, ProtocolMethodDef};
 pub use static_def::{FileConstantData, StaticDef};
@@ -28,7 +28,10 @@ pub struct TypeParamDef {
 
 impl TypeParamDef {
     pub fn new(entity: Entity, name: impl Into<String>) -> Self {
-        Self { entity, name: name.into() }
+        Self {
+            entity,
+            name: name.into(),
+        }
     }
 }
 
@@ -61,11 +64,19 @@ pub struct TypeInfo {
 
 impl TypeInfo {
     pub fn none() -> Self {
-        Self { copy: CopyBehavior::Bitwise, drop: DropBehavior::None, layout: None }
+        Self {
+            copy: CopyBehavior::Bitwise,
+            drop: DropBehavior::None,
+            layout: None,
+        }
     }
 
     pub fn bitwise() -> Self {
-        Self { copy: CopyBehavior::Bitwise, drop: DropBehavior::None, layout: None }
+        Self {
+            copy: CopyBehavior::Bitwise,
+            drop: DropBehavior::None,
+            layout: None,
+        }
     }
 }
 

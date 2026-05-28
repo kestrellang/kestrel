@@ -438,8 +438,13 @@ impl Compiler {
         let generic_functions = mir.functions.clone();
 
         let mut mono = kestrel_mir_3::mono::monomorphize(mir, &target).map_err(|errs| {
+            let detail = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
             kestrel_codegen_cranelift_3::CodegenError::Unsupported(format!(
-                "monomorphization failed with {} error(s)", errs.len(),
+                "monomorphization failed with {} error(s): {detail}", errs.len(),
             ))
         })?;
 

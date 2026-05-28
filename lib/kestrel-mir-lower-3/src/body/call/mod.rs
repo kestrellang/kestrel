@@ -9,7 +9,9 @@ use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
 use kestrel_mir_3::terminator::{SwitchArm, SwitchCase};
-use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx};
+use kestrel_mir_3::{
+    FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
+};
 
 use super::OssaBodyCtx;
 use crate::ty::lower_type;
@@ -46,7 +48,9 @@ impl OssaBodyCtx<'_, '_> {
         let result_ty = self.resolve_expr_type(expr_id);
 
         if self.body_context.is_protocol_extension() {
-            if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(receiver_ty).clone() {
+            if let MirTy::Named { entity, type_args } =
+                self.ctx.module.ty_arena.get(receiver_ty).clone()
+            {
                 if type_args.is_empty()
                     && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
                 {
@@ -55,12 +59,13 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
-        let resolved_entity = self.typed.as_ref()
+        let resolved_entity = self
+            .typed
+            .as_ref()
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
 
-        let is_static = resolved_entity
-            .is_some_and(|e| self.ctx.world.get::<Static>(e).is_some());
+        let is_static = resolved_entity.is_some_and(|e| self.ctx.world.get::<Static>(e).is_some());
 
         let Some(resolved) = resolved_entity else {
             return self.emit_literal(Immediate::error());
@@ -75,11 +80,17 @@ impl OssaBodyCtx<'_, '_> {
                 MirTy::Named { entity, .. } => Some(*entity),
                 _ => None,
             };
-            let field_info = struct_entity
-                .and_then(|se| self.ctx.resolve_field_idx(se, method_name).map(|idx| (se, idx)));
+            let field_info = struct_entity.and_then(|se| {
+                self.ctx
+                    .resolve_field_idx(se, method_name)
+                    .map(|idx| (se, idx))
+            });
             if let Some((se, field_idx)) = field_info {
                 if let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx) {
-                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::FuncThick { .. } | MirTy::FuncThin { .. }) {
+                    if matches!(
+                        self.ctx.module.ty_arena.get(field_ty),
+                        MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+                    ) {
                         let base_val = self.lower_expr_for_borrow(receiver_expr);
                         let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
                         let call_args = self.lower_call_args_default(args);
@@ -105,7 +116,10 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Function-typed receiver: indirect call (all Borrow by ABI)
-        if matches!(self.ctx.module.ty_arena.get(receiver_ty), MirTy::FuncThick { .. } | MirTy::FuncThin { .. }) {
+        if matches!(
+            self.ctx.module.ty_arena.get(receiver_ty),
+            MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+        ) {
             let receiver_val = self.lower_expr(receiver_expr);
             let call_args = self.lower_call_args_default(args);
             let callee = match self.ctx.module.ty_arena.get(receiver_ty) {
@@ -133,7 +147,10 @@ impl OssaBodyCtx<'_, '_> {
         let mut call_args = if is_static {
             self.lower_call_args(args, &conventions, 0)
         } else {
-            let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+            let recv_conv = conventions
+                .first()
+                .copied()
+                .unwrap_or(ParamConvention::Borrow);
             let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
             let mut a = vec![receiver_arg];
             a.extend(self.lower_call_args(args, &conventions, 1));
@@ -141,10 +158,22 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Field-subscript rewrite — may update receiver_ty
-        if let Some(&field_entity) = self.typed.as_ref().and_then(|t| t.field_subscripts.get(&expr_id)) {
-            let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
-            let (new_receiver_ty, new_args) =
-                self.rewrite_field_subscript(receiver_ty, call_args, field_entity, method_name, recv_conv);
+        if let Some(&field_entity) = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.field_subscripts.get(&expr_id))
+        {
+            let recv_conv = conventions
+                .first()
+                .copied()
+                .unwrap_or(ParamConvention::Borrow);
+            let (new_receiver_ty, new_args) = self.rewrite_field_subscript(
+                receiver_ty,
+                call_args,
+                field_entity,
+                method_name,
+                recv_conv,
+            );
             receiver_ty = new_receiver_ty;
             call_args = new_args;
         }
@@ -166,7 +195,13 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         let conv_offset = if is_static { 0 } else { 1 };
-        self.expand_default_args(&mut call_args, resolved, args.len(), &conventions, conv_offset);
+        self.expand_default_args(
+            &mut call_args,
+            resolved,
+            args.len(),
+            &conventions,
+            conv_offset,
+        );
 
         self.emit_call_returning(callee, call_args, result_ty)
     }
@@ -186,7 +221,11 @@ impl OssaBodyCtx<'_, '_> {
 
         // Stored field: extract the field value and use it as the receiver
         if let Some(field_idx) = self.ctx.resolve_field_idx(recv_entity, field_name) {
-            let field_ty = self.ctx.module.structs.get(&recv_entity)
+            let field_ty = self
+                .ctx
+                .module
+                .structs
+                .get(&recv_entity)
                 .and_then(|s| s.fields.get(field_idx.index()))
                 .map(|f| f.ty);
 
@@ -202,7 +241,9 @@ impl OssaBodyCtx<'_, '_> {
                         subst.type_params.insert(tp.entity, arg);
                     }
                     field_ty = kestrel_mir_3::substitute::substitute(
-                        &mut self.ctx.module.ty_arena, field_ty, &subst,
+                        &mut self.ctx.module.ty_arena,
+                        field_ty,
+                        &subst,
                     );
                 }
             }
@@ -261,7 +302,10 @@ impl OssaBodyCtx<'_, '_> {
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
-        let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+        let recv_conv = conventions
+            .first()
+            .copied()
+            .unwrap_or(ParamConvention::Borrow);
         let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
         let mut call_args = vec![receiver_arg];
         call_args.extend(self.lower_call_args(args, &conventions, 1));
@@ -288,9 +332,17 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let result_ty = self.resolve_expr_type(expr_id);
 
-        let entity = if let Some(&resolved) = self.typed.as_ref().and_then(|t| t.resolutions.get(&expr_id)) {
+        let entity = if let Some(&resolved) = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+        {
             resolved
-        } else if let Some(&resolved) = self.typed.as_ref().and_then(|t| t.resolutions.get(&callee_expr)) {
+        } else if let Some(&resolved) = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&callee_expr))
+        {
             resolved
         } else if let HirExpr::Def(e, _, _) = &self.hir.exprs[callee_expr] {
             *e
@@ -311,7 +363,16 @@ impl OssaBodyCtx<'_, '_> {
             return self.lower_indirect_call(expr_id, callee_expr, args);
         }
         if !has_callable
-            && !matches!(entity_kind, Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Initializer | NodeKind::Function))
+            && !matches!(
+                entity_kind,
+                Some(
+                    NodeKind::Struct
+                        | NodeKind::Enum
+                        | NodeKind::Protocol
+                        | NodeKind::Initializer
+                        | NodeKind::Function
+                )
+            )
         {
             return self.lower_indirect_call(expr_id, callee_expr, args);
         }
@@ -327,7 +388,10 @@ impl OssaBodyCtx<'_, '_> {
             return self.emit_struct_construct(entity, args, result_ty);
         }
 
-        let has_receiver = self.ctx.world.get::<Callable>(entity)
+        let has_receiver = self
+            .ctx
+            .world
+            .get::<Callable>(entity)
             .is_some_and(|c| c.receiver.is_some());
 
         // Resolve conventions and build callee before lowering args
@@ -365,12 +429,21 @@ impl OssaBodyCtx<'_, '_> {
         let conv_offset = if has_receiver { 1 } else { 0 };
         let mut call_args = self.lower_call_args(args, &conventions, conv_offset);
         if has_receiver {
-            let recv_conv = conventions.first().copied().unwrap_or(ParamConvention::Borrow);
+            let recv_conv = conventions
+                .first()
+                .copied()
+                .unwrap_or(ParamConvention::Borrow);
             let receiver_arg = self.prepare_call_arg_for_expr(callee_expr, recv_conv);
             call_args.insert(0, receiver_arg);
         }
 
-        self.expand_default_args(&mut call_args, entity, args.len(), &conventions, conv_offset);
+        self.expand_default_args(
+            &mut call_args,
+            entity,
+            args.len(),
+            &conventions,
+            conv_offset,
+        );
 
         self.emit_call_returning(callee, call_args, result_ty)
     }
@@ -390,17 +463,28 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         let result_ty = self.resolve_enum_case_type(expr_id, callee_expr, entity);
-        let case_name = self.ctx.world.get::<kestrel_ast_builder::Name>(entity)
+        let case_name = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Name>(entity)
             .map(|n| n.0.clone())
             .unwrap_or_else(|| panic!("ICE: enum case {:?} has no Name", entity));
-        let enum_entity = self.ctx.world.parent_of(entity)
+        let enum_entity = self
+            .ctx
+            .world
+            .parent_of(entity)
             .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", entity));
-        let variant_idx = self.ctx.resolve_variant_idx(enum_entity, &case_name)
-            .unwrap_or_else(|| panic!("ICE: variant '{}' not found in enum {:?}", case_name, enum_entity));
+        let variant_idx = self
+            .ctx
+            .resolve_variant_idx(enum_entity, &case_name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "ICE: variant '{}' not found in enum {:?}",
+                    case_name, enum_entity
+                )
+            });
 
-        let payload: Vec<ValueId> = args.iter()
-            .map(|arg| self.lower_expr(arg.value))
-            .collect();
+        let payload: Vec<ValueId> = args.iter().map(|arg| self.lower_expr(arg.value)).collect();
 
         Some(self.emit_enum_variant(result_ty, variant_idx, payload))
     }
@@ -411,7 +495,8 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
         result_ty: TyId,
     ) -> ValueId {
-        let fields: Vec<(FieldIdx, ValueId)> = args.iter()
+        let fields: Vec<(FieldIdx, ValueId)> = args
+            .iter()
             .enumerate()
             .map(|(i, arg)| {
                 let val = self.lower_expr(arg.value);
@@ -431,7 +516,13 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let init_effect = self.ctx.world.get::<InitEffect>(entity).cloned();
         if init_effect.is_some() {
-            return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect.unwrap());
+            return self.emit_failable_init_call(
+                entity,
+                type_args,
+                args,
+                result_ty,
+                init_effect.unwrap(),
+            );
         }
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
@@ -488,18 +579,22 @@ impl OssaBodyCtx<'_, '_> {
         let (inner_ty, enum_entity, success_name, failure_name) = match &effect {
             InitEffect::Failable => {
                 let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
+                        (*entity, type_args[0])
+                    },
                     _ => panic!("failable init result_ty must be Optional[T]"),
                 };
                 (inner, entity, "Some", "None")
-            }
+            },
             InitEffect::Throwing => {
                 let (entity, inner) = match self.ctx.module.ty_arena.get(result_ty) {
-                    MirTy::Named { entity, type_args } if !type_args.is_empty() => (*entity, type_args[0]),
+                    MirTy::Named { entity, type_args } if !type_args.is_empty() => {
+                        (*entity, type_args[0])
+                    },
                     _ => panic!("throwing init result_ty must be Result[T, E]"),
                 };
                 (inner, entity, "Ok", "Err")
-            }
+            },
         };
 
         // Allocate self as Pointer[T], not Pointer[Optional[T]]
@@ -517,12 +612,12 @@ impl OssaBodyCtx<'_, '_> {
             _ => unit_ty,
         };
         let init_ret_ty = match &effect {
-            InitEffect::Failable => {
-                self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty])
-            }
-            InitEffect::Throwing => {
-                self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty, err_ty])
-            }
+            InitEffect::Failable => self.ctx.module.ty_arena.named(enum_entity, vec![unit_ty]),
+            InitEffect::Throwing => self
+                .ctx
+                .module
+                .ty_arena
+                .named(enum_entity, vec![unit_ty, err_ty]),
         };
 
         let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
@@ -553,9 +648,13 @@ impl OssaBodyCtx<'_, '_> {
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
 
         // Resolve variant indices
-        let success_idx = self.ctx.resolve_variant_idx(enum_entity, success_name)
+        let success_idx = self
+            .ctx
+            .resolve_variant_idx(enum_entity, success_name)
             .unwrap_or(VariantIdx::new(0));
-        let failure_idx = self.ctx.resolve_variant_idx(enum_entity, failure_name)
+        let failure_idx = self
+            .ctx
+            .resolve_variant_idx(enum_entity, failure_name)
             .unwrap_or(VariantIdx::new(1));
 
         // Extract discriminant as I32 for switching (same pattern as match lowering)
@@ -574,10 +673,21 @@ impl OssaBodyCtx<'_, '_> {
         let (failure_block, failure_params) = self.new_block_with_params(&descs);
         let (merge_block, merge_param_vals) = self.new_block_with_params(&merge_descs);
 
-        self.emit_switch(disc, vec![
-            SwitchArm { pattern: SwitchCase::Variant(success_idx), target: success_block, args: live_vals.clone() },
-            SwitchArm { pattern: SwitchCase::Variant(failure_idx), target: failure_block, args: live_vals.clone() },
-        ]);
+        self.emit_switch(
+            disc,
+            vec![
+                SwitchArm {
+                    pattern: SwitchCase::Variant(success_idx),
+                    target: success_block,
+                    args: live_vals.clone(),
+                },
+                SwitchArm {
+                    pattern: SwitchCase::Variant(failure_idx),
+                    target: failure_block,
+                    args: live_vals.clone(),
+                },
+            ],
+        );
 
         let snapshot = self.snapshot_scope();
 
@@ -609,9 +719,8 @@ impl OssaBodyCtx<'_, '_> {
             let rebound_init_ret = init_ret_pos
                 .map(|pos| failure_params[pos])
                 .unwrap_or(init_ret);
-            let error_payload = self.emit_enum_payload(
-                rebound_init_ret, failure_idx, FieldIdx::new(0), err_ty,
-            );
+            let error_payload =
+                self.emit_enum_payload(rebound_init_ret, failure_idx, FieldIdx::new(0), err_ty);
             self.emit_enum_variant(result_ty, failure_idx, vec![error_payload])
         };
         let tracker_vals = self.tracker.values();
@@ -654,7 +763,11 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
-        if let Some(&resolved) = self.typed.as_ref().and_then(|t| t.resolutions.get(&callee_expr)) {
+        if let Some(&resolved) = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&callee_expr))
+        {
             return Some(resolved);
         }
         match &self.hir.exprs[callee_expr] {
@@ -676,9 +789,13 @@ impl OssaBodyCtx<'_, '_> {
         let inferred = self.resolve_expr_type(expr_id);
         match self.ctx.module.ty_arena.get(inferred).clone() {
             MirTy::Named { type_args, .. } if type_args.is_empty() => {
-                let parent = self.ctx.world.parent_of(case_entity)
-                    .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", case_entity));
-                let is_generic = self.ctx.world
+                let parent =
+                    self.ctx.world.parent_of(case_entity).unwrap_or_else(|| {
+                        panic!("ICE: enum case {:?} has no parent", case_entity)
+                    });
+                let is_generic = self
+                    .ctx
+                    .world
                     .get::<kestrel_ast_builder::TypeParams>(parent)
                     .is_some_and(|tp| !tp.0.is_empty());
                 if is_generic {
@@ -689,7 +806,7 @@ impl OssaBodyCtx<'_, '_> {
                     }
                 }
                 inferred
-            }
+            },
             MirTy::Error => {
                 if let Some(parent) = self.ctx.world.parent_of(case_entity) {
                     self.ctx.register_name(parent);
@@ -698,7 +815,7 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     inferred
                 }
-            }
+            },
             _ => inferred,
         }
     }

@@ -29,12 +29,12 @@ pub fn copy_behavior(
             let elems = elems.clone();
             for &elem in &elems {
                 match copy_behavior(arena, module, elem, where_clause) {
-                    CopyBehavior::Bitwise => {}
+                    CopyBehavior::Bitwise => {},
                     other => return other,
                 }
             }
             CopyBehavior::Bitwise
-        }
+        },
 
         MirTy::Named { entity, .. } => {
             let entity = *entity;
@@ -45,7 +45,7 @@ pub fn copy_behavior(
                 return e.type_info.copy.clone();
             }
             CopyBehavior::Bitwise
-        }
+        },
 
         MirTy::TypeParam(entity) => {
             let entity = *entity;
@@ -63,7 +63,7 @@ pub fn copy_behavior(
                             if is_copyable_protocol(module, *protocol) {
                                 return CopyBehavior::Bitwise;
                             }
-                        }
+                        },
                         WhereConstraint::NotImplements {
                             type_param,
                             protocol,
@@ -71,13 +71,13 @@ pub fn copy_behavior(
                             if is_copyable_protocol(module, *protocol) {
                                 return CopyBehavior::None;
                             }
-                        }
-                        _ => {}
+                        },
+                        _ => {},
                     }
                 }
             }
             CopyBehavior::Bitwise
-        }
+        },
 
         MirTy::FuncThick { .. } => CopyBehavior::None,
         MirTy::AssociatedProjection { .. } => CopyBehavior::Bitwise,
@@ -103,7 +103,7 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             elems.iter().any(|&e| needs_drop(arena, module, e))
-        }
+        },
 
         MirTy::Named { entity, .. } => {
             let entity = *entity;
@@ -114,7 +114,7 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
                 return e.type_info.drop != DropBehavior::None;
             }
             false
-        }
+        },
 
         MirTy::TypeParam(_) => true,
         MirTy::AssociatedProjection { .. } => true,
@@ -123,14 +123,23 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 }
 
 pub fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module.protocols.get(&entity).is_some_and(|p| p.name.ends_with("Cloneable"))
+    module
+        .protocols
+        .get(&entity)
+        .is_some_and(|p| p.name.ends_with("Cloneable"))
 }
 
 pub fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module.protocols.get(&entity).is_some_and(|p| p.name.ends_with("Copyable"))
+    module
+        .protocols
+        .get(&entity)
+        .is_some_and(|p| p.name.ends_with("Copyable"))
 }
 
 pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
-    module.protocols.values().find(|p| p.name.ends_with("Cloneable")).map(|p| p.entity)
+    module
+        .protocols
+        .values()
+        .find(|p| p.name.ends_with("Cloneable"))
+        .map(|p| p.entity)
 }
-

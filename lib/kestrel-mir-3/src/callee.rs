@@ -23,11 +23,19 @@ pub enum Callee {
 
 impl Callee {
     pub fn direct(func: Entity) -> Self {
-        Self::Direct { func, type_args: vec![], self_type: None }
+        Self::Direct {
+            func,
+            type_args: vec![],
+            self_type: None,
+        }
     }
 
     pub fn direct_with_args(func: Entity, type_args: Vec<TyId>, self_type: Option<TyId>) -> Self {
-        Self::Direct { func, type_args, self_type }
+        Self::Direct {
+            func,
+            type_args,
+            self_type,
+        }
     }
 
     /// Extract the ValueId for indirect callees (Thin/Thick).

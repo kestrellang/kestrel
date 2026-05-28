@@ -4,13 +4,13 @@ use std::fmt;
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
+use crate::TyId;
 use crate::item::function::FunctionDef;
 use crate::item::protocol::ProtocolDef;
 use crate::item::witness::WitnessDef;
 use crate::item::witness::WitnessMethodKey;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
-use crate::TyId;
 
 // -- Error type --
 
@@ -45,10 +45,7 @@ impl fmt::Display for MonoError {
                 protocol_name,
                 type_description,
                 ..
-            } => write!(
-                f,
-                "no witness for {type_description}: {protocol_name}"
-            ),
+            } => write!(f, "no witness for {type_description}: {protocol_name}"),
             MonoError::MethodNotFound {
                 protocol_name,
                 method,
@@ -123,7 +120,7 @@ pub fn match_pattern(
                 bindings.insert(entity, concrete);
                 true
             }
-        }
+        },
 
         // Named types: entity must match, recurse on type_args
         (
@@ -142,7 +139,7 @@ pub fn match_pattern(
                     .iter()
                     .zip(args2.iter())
                     .all(|(&p, &c)| match_pattern(arena, p, c, bindings))
-        }
+        },
 
         // Structural recursion on wrapper types
         (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(arena, a, b, bindings),
@@ -152,7 +149,7 @@ pub fn match_pattern(
                 && a.iter()
                     .zip(b.iter())
                     .all(|(&p, &c)| match_pattern(arena, p, c, bindings))
-        }
+        },
 
         (
             MirTy::FuncThin {
@@ -180,7 +177,7 @@ pub fn match_pattern(
                     .zip(p2.iter())
                     .all(|((pt, _), (ct, _))| match_pattern(arena, *pt, *ct, bindings))
                 && match_pattern(arena, r1, r2, bindings)
-        }
+        },
 
         // Primitives and other leaves: exact equality (already handled by TyId == at top)
         _ => false,
@@ -206,7 +203,8 @@ pub fn find_witness_with_method(
 ) -> Result<(usize, HashMap<Entity, TyId>), MonoError> {
     // Extract the protocol's type args from the call-site method_type_args.
     // For `Convertible[Int64].init(from:)`, method_type_args[0] = Int64.
-    let proto_param_count = protocols.get(&protocol)
+    let proto_param_count = protocols
+        .get(&protocol)
         .map(|p| p.type_params.len())
         .unwrap_or(0);
     let expected_proto_args = &method_type_args[..method_type_args.len().min(proto_param_count)];
@@ -268,9 +266,11 @@ fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[T
     if witness.proto_type_args.len() != expected.len() {
         return false;
     }
-    witness.proto_type_args.iter().zip(expected.iter()).all(|(&w, &e)| {
-        matches!(arena.get(w), MirTy::TypeParam(_)) || w == e
-    })
+    witness
+        .proto_type_args
+        .iter()
+        .zip(expected.iter())
+        .all(|(&w, &e)| matches!(arena.get(w), MirTy::TypeParam(_)) || w == e)
 }
 
 /// Resolve a `Callee::Witness` to a concrete function entity + type_args + self_type.
@@ -285,15 +285,18 @@ pub fn resolve_witness_call(
     self_type: TyId,
     method_type_args: &[TyId],
 ) -> Result<ResolvedWitnessCall, MonoError> {
-    let (witness_idx, bindings) =
-        find_witness_with_method(arena, witnesses, protocols, protocol, method, self_type, method_type_args)?;
+    let (witness_idx, bindings) = find_witness_with_method(
+        arena,
+        witnesses,
+        protocols,
+        protocol,
+        method,
+        self_type,
+        method_type_args,
+    )?;
 
     let witness = &witnesses[witness_idx];
-    let binding = witness
-        .methods
-        .iter()
-        .find(|m| m.key == *method)
-        .unwrap();
+    let binding = witness.methods.iter().find(|m| m.key == *method).unwrap();
 
     // Build substitution from pattern match bindings.
     // match_pattern(witness.implementing_type, self_type) gives us
@@ -322,7 +325,10 @@ pub fn resolve_witness_call(
                 }
             }
             // Also map the protocol's own type param entity directly
-            subst.type_params.entry(proto_tp.entity).or_insert(concrete_arg);
+            subst
+                .type_params
+                .entry(proto_tp.entity)
+                .or_insert(concrete_arg);
         }
     }
 
@@ -335,9 +341,9 @@ pub fn resolve_witness_call(
     let needs_self = if let Some(func) = concrete_func {
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
-        func.params.first().is_some_and(|p| {
-            matches!(arena.get(p.ty), MirTy::TypeParam(e) if !known_tps.contains(e))
-        })
+        func.params.first().is_some_and(
+            |p| matches!(arena.get(p.ty), MirTy::TypeParam(e) if !known_tps.contains(e)),
+        )
     } else {
         false
     };
@@ -393,21 +399,31 @@ pub fn resolve_associated_type(
 ) -> Option<TyId> {
     let verbose = std::env::var("VERBOSE_DEBUG_OUTPUT").is_ok();
     if verbose {
-        eprintln!("  resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
-            protocol, self_type, arena.get(self_type).clone(), assoc_entity);
+        eprintln!(
+            "  resolve_assoc_type: proto={:?} self={:?} ({:?}) assoc={:?}",
+            protocol,
+            self_type,
+            arena.get(self_type).clone(),
+            assoc_entity
+        );
     }
     for witness in witnesses {
         if witness.protocol != protocol {
             continue;
         }
         if verbose {
-            eprintln!("    witness: impl={:?} ({:?}) bindings={:?}",
-                witness.implementing_type, arena.get(witness.implementing_type).clone(),
-                witness.type_bindings);
+            eprintln!(
+                "    witness: impl={:?} ({:?}) bindings={:?}",
+                witness.implementing_type,
+                arena.get(witness.implementing_type).clone(),
+                witness.type_bindings
+            );
         }
         let mut bindings = HashMap::new();
         if !match_pattern(arena, witness.implementing_type, self_type, &mut bindings) {
-            if verbose { eprintln!("    -> no match"); }
+            if verbose {
+                eprintln!("    -> no match");
+            }
             continue;
         }
         for &(entity, bound_ty) in &witness.type_bindings {

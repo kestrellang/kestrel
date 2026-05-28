@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use kestrel_hecs::Entity;
 
-use crate::immediate::Immediate;
 use crate::TyId;
+use crate::immediate::Immediate;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileConstantData {

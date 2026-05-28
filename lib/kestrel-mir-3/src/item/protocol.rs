@@ -13,7 +13,11 @@ pub struct AssociatedTypeDef {
 
 impl AssociatedTypeDef {
     pub fn new(entity: Entity, name: impl Into<String>) -> Self {
-        Self { entity, name: name.into(), default: None }
+        Self {
+            entity,
+            name: name.into(),
+            default: None,
+        }
     }
 }
 

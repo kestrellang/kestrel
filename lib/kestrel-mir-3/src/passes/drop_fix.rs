@@ -59,14 +59,18 @@ fn fix_structs(module: &mut MirModule) -> bool {
         let s = module.structs.get_mut(&entity).unwrap();
         match &mut s.type_info.drop {
             DropBehavior::None => {
-                ktrace!("drop-fix", "promoting struct '{}' to droppable (fields: {:?})",
-                    s.name, droppable_fields);
+                ktrace!(
+                    "drop-fix",
+                    "promoting struct '{}' to droppable (fields: {:?})",
+                    s.name,
+                    droppable_fields
+                );
                 s.type_info.drop = DropBehavior::StructDrop {
                     deinit: None,
                     fields: droppable_fields,
                 };
                 changed = true;
-            }
+            },
             DropBehavior::StructDrop { fields, .. } => {
                 for field in droppable_fields {
                     if !fields.contains(&field) {
@@ -74,8 +78,8 @@ fn fix_structs(module: &mut MirModule) -> bool {
                         changed = true;
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     changed
@@ -115,7 +119,7 @@ fn fix_enums(module: &mut MirModule) -> bool {
                     variants: droppable_variants,
                 };
                 changed = true;
-            }
+            },
             DropBehavior::EnumDrop { variants, .. } => {
                 for (variant, fields_to_add) in droppable_variants {
                     if let Some((_, fields)) = variants.iter_mut().find(|(v, _)| *v == variant) {
@@ -130,8 +134,8 @@ fn fix_enums(module: &mut MirModule) -> bool {
                         changed = true;
                     }
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
     changed

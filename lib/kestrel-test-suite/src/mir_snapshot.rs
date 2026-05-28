@@ -6,13 +6,14 @@
 
 use std::path::Path;
 
-use kestrel_mir_2::MirModule;
+use kestrel_mir_3::MirModule;
+use kestrel_mir_3::display::{display_module, display_module_filtered};
 
 /// Check the MIR output against a golden snapshot file.
 ///
 /// - `test_path`: path to the `.ks` test file (snapshot stored alongside)
-/// - `mir`: the lowered MIR module
-/// - `filter`: optional function name to extract (by `FunctionDef.name`)
+/// - `mir`: the lowered MIR-3 (OSSA) module
+/// - `filter`: optional function-name substring to restrict output to
 /// - `snapshot_name`: optional override for the snapshot filename
 pub fn check_mir_snapshot(
     test_path: &Path,
@@ -20,10 +21,20 @@ pub fn check_mir_snapshot(
     filter: Option<&str>,
     snapshot_name: Option<&str>,
 ) -> Result<(), String> {
-    let actual = if let Some(func_name) = filter {
-        extract_function_mir(mir, func_name)?
-    } else {
-        format!("{}", mir.display())
+    let actual = match filter {
+        Some(func_name) => {
+            let rendered = display_module_filtered(mir, func_name);
+            if rendered.trim().is_empty() {
+                let available: Vec<&str> =
+                    mir.functions.values().map(|f| f.name.as_str()).collect();
+                return Err(format!(
+                    "Function matching '{}' not found in MIR. Available: {:?}",
+                    func_name, available
+                ));
+            }
+            rendered
+        }
+        None => display_module(mir),
     };
 
     let snapshot_dir = test_path.parent().unwrap().join("snapshots");
@@ -65,60 +76,5 @@ pub fn check_mir_snapshot(
             expected.trim(),
             actual.trim()
         ))
-    }
-}
-
-/// Extract the MIR display text for a single function by name.
-///
-/// Renders the full module, then finds the `fn <name>` block and
-/// returns everything from that line through its closing `}`.
-fn extract_function_mir(mir: &MirModule, func_name: &str) -> Result<String, String> {
-    let full = format!("{}", mir.display());
-
-    // Find the function by matching `fn <name>` (MIR-2 format)
-    let mut result_lines: Vec<&str> = Vec::new();
-    let mut inside = false;
-    let mut brace_depth: i32 = 0;
-
-    for line in full.lines() {
-        if !inside {
-            let trimmed = line.trim();
-            if trimmed.starts_with("fn ") {
-                // Extract the function name from `fn <name>(...`
-                let after_fn = &trimmed[3..];
-                let name_end = after_fn
-                    .find(|c: char| c == '(' || c == '[' || c == ' ')
-                    .unwrap_or(after_fn.len());
-                let name = &after_fn[..name_end];
-                if name == func_name || name.ends_with(&format!(".{}", func_name)) {
-                    inside = true;
-                    brace_depth = line.chars().filter(|&c| c == '{').count() as i32
-                        - line.chars().filter(|&c| c == '}').count() as i32;
-                    result_lines.push(line);
-                    if brace_depth == 0 {
-                        // Single-line (extern or bodyless) — done
-                        break;
-                    }
-                    continue;
-                }
-            }
-        } else {
-            brace_depth += line.chars().filter(|&c| c == '{').count() as i32;
-            brace_depth -= line.chars().filter(|&c| c == '}').count() as i32;
-            result_lines.push(line);
-            if brace_depth <= 0 {
-                break;
-            }
-        }
-    }
-
-    if result_lines.is_empty() {
-        let available: Vec<&str> = mir.functions.iter().map(|f| f.name.as_str()).collect();
-        Err(format!(
-            "Function '{}' not found in MIR. Available: {:?}",
-            func_name, available
-        ))
-    } else {
-        Ok(result_lines.join("\n"))
     }
 }

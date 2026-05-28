@@ -5,8 +5,14 @@ use crate::{FloatBits, IntBits, MonoFuncId, TyId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImmediateKind {
-    IntLiteral { bits: IntBits, value: i128 },
-    FloatLiteral { bits: FloatBits, value: f64 },
+    IntLiteral {
+        bits: IntBits,
+        value: i128,
+    },
+    FloatLiteral {
+        bits: FloatBits,
+        value: f64,
+    },
     BoolLiteral(bool),
     StringLiteral(String),
     StringPointer(String),
@@ -35,25 +41,75 @@ impl Immediate {
         Self { kind }
     }
 
-    pub fn i8(value: i128) -> Self { Self::new(ImmediateKind::IntLiteral { bits: IntBits::I8, value }) }
-    pub fn i16(value: i128) -> Self { Self::new(ImmediateKind::IntLiteral { bits: IntBits::I16, value }) }
-    pub fn i32(value: i128) -> Self { Self::new(ImmediateKind::IntLiteral { bits: IntBits::I32, value }) }
-    pub fn i64(value: i128) -> Self { Self::new(ImmediateKind::IntLiteral { bits: IntBits::I64, value }) }
-    pub fn f32(value: f64) -> Self { Self::new(ImmediateKind::FloatLiteral { bits: FloatBits::F32, value }) }
-    pub fn f64(value: f64) -> Self { Self::new(ImmediateKind::FloatLiteral { bits: FloatBits::F64, value }) }
-    pub fn bool(value: bool) -> Self { Self::new(ImmediateKind::BoolLiteral(value)) }
-    pub fn string(s: impl Into<String>) -> Self { Self::new(ImmediateKind::StringLiteral(s.into())) }
-    pub fn string_pointer(s: impl Into<String>) -> Self { Self::new(ImmediateKind::StringPointer(s.into())) }
-    pub fn unit() -> Self { Self::new(ImmediateKind::Unit) }
-
-    pub fn function_ref(func: Entity, type_args: Vec<TyId>, self_type: Option<TyId>) -> Self {
-        Self::new(ImmediateKind::FunctionRef { func, type_args, self_type })
+    pub fn i8(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I8,
+            value,
+        })
+    }
+    pub fn i16(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I16,
+            value,
+        })
+    }
+    pub fn i32(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I32,
+            value,
+        })
+    }
+    pub fn i64(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I64,
+            value,
+        })
+    }
+    pub fn f32(value: f64) -> Self {
+        Self::new(ImmediateKind::FloatLiteral {
+            bits: FloatBits::F32,
+            value,
+        })
+    }
+    pub fn f64(value: f64) -> Self {
+        Self::new(ImmediateKind::FloatLiteral {
+            bits: FloatBits::F64,
+            value,
+        })
+    }
+    pub fn bool(value: bool) -> Self {
+        Self::new(ImmediateKind::BoolLiteral(value))
+    }
+    pub fn string(s: impl Into<String>) -> Self {
+        Self::new(ImmediateKind::StringLiteral(s.into()))
+    }
+    pub fn string_pointer(s: impl Into<String>) -> Self {
+        Self::new(ImmediateKind::StringPointer(s.into()))
+    }
+    pub fn unit() -> Self {
+        Self::new(ImmediateKind::Unit)
     }
 
-    pub fn null_ptr(ty: TyId) -> Self { Self::new(ImmediateKind::NullPtr(ty)) }
-    pub fn size_of(ty: TyId) -> Self { Self::new(ImmediateKind::SizeOf(ty)) }
-    pub fn align_of(ty: TyId) -> Self { Self::new(ImmediateKind::AlignOf(ty)) }
-    pub fn error() -> Self { Self::new(ImmediateKind::Error) }
+    pub fn function_ref(func: Entity, type_args: Vec<TyId>, self_type: Option<TyId>) -> Self {
+        Self::new(ImmediateKind::FunctionRef {
+            func,
+            type_args,
+            self_type,
+        })
+    }
+
+    pub fn null_ptr(ty: TyId) -> Self {
+        Self::new(ImmediateKind::NullPtr(ty))
+    }
+    pub fn size_of(ty: TyId) -> Self {
+        Self::new(ImmediateKind::SizeOf(ty))
+    }
+    pub fn align_of(ty: TyId) -> Self {
+        Self::new(ImmediateKind::AlignOf(ty))
+    }
+    pub fn error() -> Self {
+        Self::new(ImmediateKind::Error)
+    }
 
     pub fn ty(&self, arena: &mut TyArena) -> TyId {
         match &self.kind {
@@ -73,9 +129,11 @@ impl Immediate {
             ImmediateKind::StringPointer(_) => {
                 let i8 = arena.i8();
                 arena.pointer(i8)
-            }
+            },
             ImmediateKind::Unit => arena.unit(),
-            ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => *ty,
+            ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => {
+                *ty
+            },
             ImmediateKind::FloatInfinity(bits) | ImmediateKind::FloatNan(bits) => match bits {
                 FloatBits::F16 => arena.f16(),
                 FloatBits::F32 => arena.f32(),

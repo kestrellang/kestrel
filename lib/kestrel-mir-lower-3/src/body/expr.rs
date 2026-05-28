@@ -74,32 +74,31 @@ impl OssaBodyCtx<'_, '_> {
                     let val = self.map_local(*hir_local);
                     self.emit_value_use(val)
                 }
-            }
+            },
 
             HirExpr::Tuple { elements, .. } => {
-                let elems: Vec<ValueId> = elements
-                    .iter()
-                    .map(|&e| self.lower_expr(e))
-                    .collect();
+                let elems: Vec<ValueId> = elements.iter().map(|&e| self.lower_expr(e)).collect();
                 let ty = self.resolve_expr_type(expr_id);
                 self.emit_tuple(ty, elems)
-            }
+            },
 
             HirExpr::Field { base, name, .. } => {
                 self.lower_field_access(expr_id, *base, name.as_str_or_empty())
-            }
+            },
 
             HirExpr::TupleIndex { base, index, .. } => {
                 let base_val = self.lower_expr_for_borrow(*base);
                 let result_ty = self.resolve_expr_type(expr_id);
                 self.emit_tuple_extract(base_val, *index, result_ty)
-            }
+            },
 
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
 
             HirExpr::OverloadSet { candidates, .. } => {
-                if let Some(&resolved) =
-                    self.typed.as_ref().and_then(|t| t.resolutions.get(&expr_id))
+                if let Some(&resolved) = self
+                    .typed
+                    .as_ref()
+                    .and_then(|t| t.resolutions.get(&expr_id))
                 {
                     self.ctx.register_name(resolved);
                     let type_args = self.resolve_type_args(expr_id);
@@ -110,16 +109,14 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     self.emit_literal(Immediate::error())
                 }
-            }
+            },
 
             HirExpr::ImplicitMember { name, args, .. } => {
                 self.lower_implicit_member(expr_id, name.as_str_or_empty(), args.as_deref())
-            }
+            },
 
             // === Calls — delegate to call module (stubbed until Phase D) ===
-            HirExpr::Call { callee, args, .. } => {
-                self.lower_call_expr(expr_id, *callee, args)
-            }
+            HirExpr::Call { callee, args, .. } => self.lower_call_expr(expr_id, *callee, args),
             HirExpr::MethodCall {
                 receiver,
                 method,
@@ -157,9 +154,7 @@ impl OssaBodyCtx<'_, '_> {
                 ..
             } => self.lower_if(expr_id, *condition, then_body, else_body.as_ref()),
 
-            HirExpr::Loop { body, label, .. } => {
-                self.lower_loop(body, label.as_deref())
-            }
+            HirExpr::Loop { body, label, .. } => self.lower_loop(body, label.as_deref()),
             HirExpr::Break { label, .. } => self.lower_break(label.as_deref()),
             HirExpr::Continue { label, .. } => self.lower_continue(label.as_deref()),
 
@@ -170,7 +165,9 @@ impl OssaBodyCtx<'_, '_> {
                     self.emit_literal(Immediate::unit())
                 };
                 // @guaranteed values can't be returned — copy to @owned first
-                let ret_val = if self.body.value(ret_val).ownership == kestrel_mir_3::value::Ownership::Guaranteed {
+                let ret_val = if self.body.value(ret_val).ownership
+                    == kestrel_mir_3::value::Ownership::Guaranteed
+                {
                     let owned = self.emit_copy_value(ret_val);
                     self.emit_end_borrow(ret_val);
                     owned
@@ -181,28 +178,23 @@ impl OssaBodyCtx<'_, '_> {
                 self.destroy_scopes_to_depth(0, &[ret_val]);
                 self.emit_ret(ret_val);
                 self.emit_literal(Immediate::unit())
-            }
+            },
 
-            HirExpr::Assign { target, value, .. } => {
-                self.lower_assign(expr_id, *target, *value)
-            }
+            HirExpr::Assign { target, value, .. } => self.lower_assign(expr_id, *target, *value),
 
             HirExpr::Match {
-                scrutinee, arms, source, ..
+                scrutinee,
+                arms,
+                source,
+                ..
             } => self.lower_match(expr_id, *scrutinee, arms, *source),
 
             // === Literals — delegate to literal module (stubbed until Phase E) ===
-            HirExpr::Array { elements, .. } => {
-                self.lower_array_literal(expr_id, elements)
-            }
-            HirExpr::Dict { entries, .. } => {
-                self.lower_dict_literal(expr_id, entries)
-            }
+            HirExpr::Array { elements, .. } => self.lower_array_literal(expr_id, elements),
+            HirExpr::Dict { entries, .. } => self.lower_dict_literal(expr_id, entries),
 
             // === Closure — delegate to closure module (stubbed until Phase E) ===
-            HirExpr::Closure { params, body, .. } => {
-                self.lower_closure_expr(expr_id, params, body)
-            }
+            HirExpr::Closure { params, body, .. } => self.lower_closure_expr(expr_id, params, body),
 
             HirExpr::Block { body, .. } => self.lower_hir_block(body),
 
@@ -228,9 +220,7 @@ impl OssaBodyCtx<'_, '_> {
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
 
-        let is_callable = resolved.is_some_and(|e| {
-            self.ctx.world.get::<Callable>(e).is_some()
-        });
+        let is_callable = resolved.is_some_and(|e| self.ctx.world.get::<Callable>(e).is_some());
         let is_static = resolved.is_some_and(|e| {
             self.ctx
                 .world
@@ -332,7 +322,11 @@ impl OssaBodyCtx<'_, '_> {
         let field_idx = struct_entity
             .and_then(|se| self.ctx.resolve_field_idx(se, field_name))
             .unwrap_or_else(|| {
-                debug_assert!(false, "ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
+                debug_assert!(
+                    false,
+                    "ICE: stored field '{}' not found on struct {:?}",
+                    field_name, struct_entity
+                );
                 FieldIdx::new(0)
             });
 
@@ -360,7 +354,7 @@ impl OssaBodyCtx<'_, '_> {
                 }
                 let type_args = self.resolve_type_args(expr_id);
                 self.emit_literal(Immediate::function_ref(entity, type_args, None))
-            }
+            },
             Some(NodeKind::EnumCase) => {
                 let ty = self.resolve_expr_type(expr_id);
                 let case_name = self
@@ -374,12 +368,17 @@ impl OssaBodyCtx<'_, '_> {
                     .world
                     .parent_of(entity)
                     .unwrap_or_else(|| panic!("ICE: enum case {:?} has no parent", entity));
-                let variant_idx = self.ctx.resolve_variant_idx(enum_entity, &case_name)
+                let variant_idx = self
+                    .ctx
+                    .resolve_variant_idx(enum_entity, &case_name)
                     .unwrap_or_else(|| {
-                        panic!("ICE: variant '{}' not found in enum {:?}", case_name, enum_entity)
+                        panic!(
+                            "ICE: variant '{}' not found in enum {:?}",
+                            case_name, enum_entity
+                        )
                     });
                 self.emit_enum_variant(ty, variant_idx, vec![])
-            }
+            },
             Some(NodeKind::Field) => {
                 if self.ctx.world.get::<Callable>(entity).is_some() {
                     // Computed property getter call (no receiver)
@@ -392,10 +391,10 @@ impl OssaBodyCtx<'_, '_> {
                     let ty = self.resolve_expr_type(expr_id);
                     self.emit_load(addr, ty)
                 }
-            }
+            },
             Some(NodeKind::TypeParameter | NodeKind::TypeAlias) => {
                 self.emit_literal(Immediate::unit())
-            }
+            },
             _ => self.emit_literal(Immediate::error()),
         }
     }
@@ -417,18 +416,13 @@ impl OssaBodyCtx<'_, '_> {
             .as_ref()
             .and_then(|t| t.resolutions.get(&expr_id))
             .copied();
-        let is_enum_case = resolved.is_none_or(|e| {
-            self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::EnumCase)
-        });
+        let is_enum_case =
+            resolved.is_none_or(|e| self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::EnumCase));
 
         if is_enum_case {
             // Enum case with optional payload
             let payload: Vec<ValueId> = args
-                .map(|a| {
-                    a.iter()
-                        .map(|arg| self.lower_expr(arg.value))
-                        .collect()
-                })
+                .map(|a| a.iter().map(|arg| self.lower_expr(arg.value)).collect())
                 .unwrap_or_default();
 
             let enum_entity = match self.ctx.module.ty_arena.get(result_ty) {
@@ -438,9 +432,14 @@ impl OssaBodyCtx<'_, '_> {
                     name, other
                 ),
             };
-            let variant_idx = self.ctx.resolve_variant_idx(enum_entity, name)
+            let variant_idx = self
+                .ctx
+                .resolve_variant_idx(enum_entity, name)
                 .unwrap_or_else(|| {
-                    panic!("ICE: variant '{}' not found in enum {:?}", name, enum_entity)
+                    panic!(
+                        "ICE: variant '{}' not found in enum {:?}",
+                        name, enum_entity
+                    )
                 });
 
             self.emit_enum_variant(result_ty, variant_idx, payload)
@@ -517,10 +516,13 @@ impl OssaBodyCtx<'_, '_> {
                         }
                         self.tracker.rebind(&[old], &[rhs]);
                     }
-                    self.local_map.insert(hir_local, super::LocalBinding::Ssa(rhs));
+                    self.local_map
+                        .insert(hir_local, super::LocalBinding::Ssa(rhs));
                 }
-            }
-            HirExpr::Field { ref base, ref name, .. } => {
+            },
+            HirExpr::Field {
+                ref base, ref name, ..
+            } => {
                 let base = *base;
                 let field_name = name.as_str_or_empty().to_string();
                 let base_ty = self.resolve_expr_type(base);
@@ -532,7 +534,11 @@ impl OssaBodyCtx<'_, '_> {
                 let field_idx = struct_entity
                     .and_then(|e| self.ctx.resolve_field_idx(e, &field_name))
                     .unwrap_or_else(|| {
-                        debug_assert!(false, "ICE: stored field '{}' not found on struct {:?}", field_name, struct_entity);
+                        debug_assert!(
+                            false,
+                            "ICE: stored field '{}' not found on struct {:?}",
+                            field_name, struct_entity
+                        );
                         kestrel_mir_3::FieldIdx::new(0)
                     });
 
@@ -552,19 +558,23 @@ impl OssaBodyCtx<'_, '_> {
                     self.emit_store_init(addr, rhs);
                     self.emit_end_mut_borrow(base_addr);
                 }
-            }
+            },
             HirExpr::Def(entity, _, _) => {
                 // Static/global stored field: covers both `static var` members
                 // and module-level globals (which lack the Static component).
-                let is_global = self.ctx.world.get::<kestrel_ast_builder::Static>(entity).is_some()
+                let is_global = self
+                    .ctx
+                    .world
+                    .get::<kestrel_ast_builder::Static>(entity)
+                    .is_some()
                     || self.ctx.module.statics.contains_key(&entity);
                 if is_global {
                     self.ctx.register_name(entity);
                     let addr = self.emit_global_ref(entity);
                     self.emit_store_assign(addr, rhs);
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
         self.emit_literal(Immediate::unit())
     }
@@ -585,11 +595,11 @@ impl OssaBodyCtx<'_, '_> {
         match target {
             HirExpr::Field { base, name, .. } => {
                 self.try_lower_field_setter(target_id, value_id, base, name.as_str_or_empty())
-            }
+            },
             HirExpr::Def(entity, _, _) => self.try_lower_def_setter(value_id, entity),
             HirExpr::Call { callee, args, .. } => {
                 self.try_lower_call_setter(target_id, value_id, callee, &args)
-            }
+            },
             HirExpr::MethodCall {
                 receiver,
                 method,
@@ -621,10 +631,11 @@ impl OssaBodyCtx<'_, '_> {
             .copied()?;
 
         let is_field = self.ctx.world.get::<NodeKind>(resolved) == Some(&NodeKind::Field);
-        let parent_is_protocol = is_field
-            && self.ctx.world.parent_of(resolved).is_some_and(|p| {
-                self.ctx.world.get::<NodeKind>(p) == Some(&NodeKind::Protocol)
-            });
+        let parent_is_protocol =
+            is_field
+                && self.ctx.world.parent_of(resolved).is_some_and(|p| {
+                    self.ctx.world.get::<NodeKind>(p) == Some(&NodeKind::Protocol)
+                });
         let has_callable = self.ctx.world.get::<Callable>(resolved).is_some();
         let has_settable = self.ctx.world.get::<Settable>(resolved).is_some();
 
@@ -768,9 +779,8 @@ impl OssaBodyCtx<'_, '_> {
             // Use prepare_call_arg_for_expr to get the var address directly
             // (via try_var_addr) instead of lower_expr which emits CopyAddr —
             // a shallow copy that breaks COW refcounting.
-            let mut call_args = vec![
-                self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow),
-            ];
+            let mut call_args =
+                vec![self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow)];
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
@@ -837,9 +847,8 @@ impl OssaBodyCtx<'_, '_> {
                         .is_some_and(|n| n.0 == method_name)
             })
         });
-        let is_computed_property = prefix_entity.is_some_and(|e| {
-            self.ctx.world.get::<Callable>(e).is_some()
-        });
+        let is_computed_property =
+            prefix_entity.is_some_and(|e| self.ctx.world.get::<Callable>(e).is_some());
         if is_computed_property {
             return None;
         }
@@ -861,12 +870,7 @@ impl OssaBodyCtx<'_, '_> {
         // Substitute struct type params → receiver's concrete type args
         if let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(receiver_ty) {
             let type_args = type_args.clone();
-            if let Some(sdef) = self
-                .ctx
-                .module
-                .structs
-                .get(&recv_entity)
-            {
+            if let Some(sdef) = self.ctx.module.structs.get(&recv_entity) {
                 let mut subst = kestrel_mir_3::SubstMap::new();
                 for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
                     subst.type_params.insert(tp.entity, arg);
@@ -885,7 +889,10 @@ impl OssaBodyCtx<'_, '_> {
         let field_arg = if let Some(recv_addr) = self.try_var_addr(receiver) {
             let field_addr = self.emit_field_addr(recv_addr, receiver_ty, field_idx);
             let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
-            CallArg { value: borrow, convention: ParamConvention::MutBorrow }
+            CallArg {
+                value: borrow,
+                convention: ParamConvention::MutBorrow,
+            }
         } else {
             let receiver_val = self.lower_expr(receiver);
             let field_val = self.emit_struct_extract(receiver_val, field_idx, field_ty);
@@ -915,6 +922,4 @@ impl OssaBodyCtx<'_, '_> {
         }
         Some(self.emit_literal(Immediate::unit()))
     }
-
-
 }

@@ -59,16 +59,18 @@ impl TerminatorKind {
     /// Returns all successor block IDs.
     pub fn successors(&self) -> SmallVec<[BlockId; 2]> {
         match self {
-            TerminatorKind::Return(_)
-            | TerminatorKind::Panic(_)
-            | TerminatorKind::Unreachable => SmallVec::new(),
+            TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {
+                SmallVec::new()
+            },
             TerminatorKind::Jump { target, .. } => SmallVec::from_elem(*target, 1),
-            TerminatorKind::Branch { then_block, else_block, .. } => {
+            TerminatorKind::Branch {
+                then_block,
+                else_block,
+                ..
+            } => {
                 smallvec::smallvec![*then_block, *else_block]
-            }
-            TerminatorKind::Switch { cases, .. } => {
-                cases.iter().map(|arm| arm.target).collect()
-            }
+            },
+            TerminatorKind::Switch { cases, .. } => cases.iter().map(|arm| arm.target).collect(),
         }
     }
 
@@ -78,22 +80,28 @@ impl TerminatorKind {
             TerminatorKind::Return(v) => SmallVec::from_elem(*v, 1),
             TerminatorKind::Jump { args, .. } => args.iter().copied().collect(),
             TerminatorKind::Branch {
-                condition, then_args, else_args, ..
+                condition,
+                then_args,
+                else_args,
+                ..
             } => {
                 let mut ops = SmallVec::new();
                 ops.push(*condition);
                 ops.extend(then_args.iter().copied());
                 ops.extend(else_args.iter().copied());
                 ops
-            }
-            TerminatorKind::Switch { discriminant, cases } => {
+            },
+            TerminatorKind::Switch {
+                discriminant,
+                cases,
+            } => {
                 let mut ops = SmallVec::new();
                 ops.push(*discriminant);
                 for arm in cases {
                     ops.extend(arm.args.iter().copied());
                 }
                 ops
-            }
+            },
             TerminatorKind::Panic(_) | TerminatorKind::Unreachable => SmallVec::new(),
         }
     }
@@ -101,23 +109,28 @@ impl TerminatorKind {
     /// Returns (successor_block, args) pairs for block argument checking.
     pub fn successor_args(&self) -> SmallVec<[(BlockId, &[ValueId]); 2]> {
         match self {
-            TerminatorKind::Return(_)
-            | TerminatorKind::Panic(_)
-            | TerminatorKind::Unreachable => SmallVec::new(),
+            TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {
+                SmallVec::new()
+            },
             TerminatorKind::Jump { target, args } => {
                 smallvec::smallvec![(*target, args.as_slice())]
-            }
+            },
             TerminatorKind::Branch {
-                then_block, then_args, else_block, else_args, ..
+                then_block,
+                then_args,
+                else_block,
+                else_args,
+                ..
             } => {
                 smallvec::smallvec![
                     (*then_block, then_args.as_slice()),
                     (*else_block, else_args.as_slice()),
                 ]
-            }
-            TerminatorKind::Switch { cases, .. } => {
-                cases.iter().map(|arm| (arm.target, arm.args.as_slice())).collect()
-            }
+            },
+            TerminatorKind::Switch { cases, .. } => cases
+                .iter()
+                .map(|arm| (arm.target, arm.args.as_slice()))
+                .collect(),
         }
     }
 }

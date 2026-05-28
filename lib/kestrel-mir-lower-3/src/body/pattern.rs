@@ -36,8 +36,10 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         // Irrefutable single-arm destructures (let/param) don't need branching.
         // Emit bindings directly so local_map entries survive past the match.
-        if matches!(source, MatchSource::LetDestructure | MatchSource::ParamDestructure)
-            && arms.len() == 1
+        if matches!(
+            source,
+            MatchSource::LetDestructure | MatchSource::ParamDestructure
+        ) && arms.len() == 1
         {
             return self.lower_irrefutable_destructure(expr_id, scrutinee_expr, &arms[0]);
         }
@@ -69,7 +71,11 @@ impl OssaBodyCtx<'_, '_> {
         let snapshot = self.snapshot_scope();
 
         self.emit_decision_tree_threaded(
-            &tree, scrutinee_val, scrutinee_ty, arms, result_ty,
+            &tree,
+            scrutinee_val,
+            scrutinee_ty,
+            arms,
+            result_ty,
             join_block,
         );
 
@@ -132,10 +138,8 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     Vec::new()
                 }
-            }
-            DecisionTree::Guard { success, .. } => {
-                Self::extract_irrefutable_bindings(success)
-            }
+            },
+            DecisionTree::Guard { success, .. } => Self::extract_irrefutable_bindings(success),
             DecisionTree::Failure => Vec::new(),
         }
     }
@@ -153,14 +157,20 @@ impl OssaBodyCtx<'_, '_> {
     ) {
         match tree {
             DecisionTree::Switch {
-                path, ty, cases, default,
+                path,
+                ty,
+                cases,
+                default,
             } => {
-                let (test_val, _test_ty) =
-                    self.apply_access_path(scrutinee, scrutinee_ty, path);
+                let (test_val, _test_ty) = self.apply_access_path(scrutinee, scrutinee_ty, path);
 
                 if cases.len() == 1 && default.is_none() {
                     self.emit_decision_tree_threaded(
-                        &cases[0].1, scrutinee, scrutinee_ty, arms, result_ty,
+                        &cases[0].1,
+                        scrutinee,
+                        scrutinee_ty,
+                        arms,
+                        result_ty,
                         join_block,
                     );
                     return;
@@ -172,8 +182,8 @@ impl OssaBodyCtx<'_, '_> {
                     && matches!(&cases[1].0, Constructor::False)
                 {
                     let branch_snapshot = self.snapshot_scope();
-                    let current_live: Vec<ValueId> = self.all_live_tracked()
-                        .iter().map(|&(v, _, _)| v).collect();
+                    let current_live: Vec<ValueId> =
+                        self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                     let local_descs: Vec<(TyId, Ownership)> = current_live
                         .iter()
                         .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
@@ -183,15 +193,21 @@ impl OssaBodyCtx<'_, '_> {
                     let (false_block, false_params) = self.new_block_with_params(&local_descs);
                     self.emit_branch(
                         test_val,
-                        true_block, current_live.clone(),
-                        false_block, current_live.clone(),
+                        true_block,
+                        current_live.clone(),
+                        false_block,
+                        current_live.clone(),
                     );
 
                     self.switch_to(true_block);
                     self.rebind_scope_values(&current_live, &true_params);
                     let rebound = rebound_value(scrutinee, &current_live, &true_params);
                     self.emit_decision_tree_threaded(
-                        &cases[0].1, rebound, scrutinee_ty, arms, result_ty,
+                        &cases[0].1,
+                        rebound,
+                        scrutinee_ty,
+                        arms,
+                        result_ty,
                         join_block,
                     );
 
@@ -200,50 +216,89 @@ impl OssaBodyCtx<'_, '_> {
                     self.rebind_scope_values(&current_live, &false_params);
                     let rebound = rebound_value(scrutinee, &current_live, &false_params);
                     self.emit_decision_tree_threaded(
-                        &cases[1].1, rebound, scrutinee_ty, arms, result_ty,
+                        &cases[1].1,
+                        rebound,
+                        scrutinee_ty,
+                        arms,
+                        result_ty,
                         join_block,
                     );
                     return;
                 }
 
                 // String literal chain
-                if cases.iter().any(|(c, _)| matches!(c, Constructor::StringLiteral(_))) {
+                if cases
+                    .iter()
+                    .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
+                {
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     let mut current_scrutinee = scrutinee;
+                    // Snapshot before the chain so each iteration starts clean.
+                    let chain_snapshot = self.snapshot_scope();
+                    let chain_live: Vec<ValueId> =
+                        self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
+                    let chain_descs: Vec<(TyId, Ownership)> = chain_live
+                        .iter()
+                        .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                        .collect();
                     for (ctor, subtree) in cases.iter() {
-                        let Constructor::StringLiteral(lit) = ctor else { continue };
+                        let Constructor::StringLiteral(lit) = ctor else {
+                            continue;
+                        };
                         let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
-                        let str_snapshot = self.snapshot_scope();
-                        let str_live: Vec<ValueId> = self.all_live_tracked()
-                            .iter().map(|&(v, _, _)| v).collect();
+                        // Use the chain-level live set (not the inflated post-test set)
+                        // so intermediates from emit_string_match_test are destroyed
+                        // in each arm rather than forwarded and accumulated.
+                        let str_live: Vec<ValueId> =
+                            self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                         let str_descs: Vec<(TyId, Ownership)> = str_live
                             .iter()
                             .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                             .collect();
                         let (hit_block, hit_params) = self.new_block_with_params(&str_descs);
-                        let (miss_block, miss_params) = self.new_block_with_params(&str_descs);
+                        let (miss_block, miss_params) = self.new_block_with_params(&chain_descs);
                         self.emit_branch(
                             cmp,
-                            hit_block, str_live.clone(),
-                            miss_block, str_live.clone(),
+                            hit_block,
+                            str_live.clone(),
+                            miss_block,
+                            chain_live.clone(),
                         );
 
                         self.switch_to(hit_block);
                         self.rebind_scope_values(&str_live, &hit_params);
+                        // Destroy test intermediates — they're only needed
+                        // for the branch condition, not the arm body.
+                        let chain_set: std::collections::HashSet<ValueId> =
+                            chain_live.iter().copied().collect();
+                        for (old, new) in str_live.iter().zip(hit_params.iter()) {
+                            if !chain_set.contains(old) {
+                                self.emit_destroy_value(*new);
+                            }
+                        }
                         let rebound = rebound_value(current_scrutinee, &str_live, &hit_params);
                         self.emit_decision_tree_threaded(
-                            subtree, rebound, scrutinee_ty, arms, result_ty,
+                            subtree,
+                            rebound,
+                            scrutinee_ty,
+                            arms,
+                            result_ty,
                             join_block,
                         );
 
-                        self.restore_scope(&str_snapshot);
+                        self.restore_scope(&chain_snapshot);
                         self.switch_to(miss_block);
-                        self.rebind_scope_values(&str_live, &miss_params);
-                        current_scrutinee = rebound_value(current_scrutinee, &str_live, &miss_params);
+                        self.rebind_scope_values(&chain_live, &miss_params);
+                        current_scrutinee =
+                            rebound_value(current_scrutinee, &chain_live, &miss_params);
                     }
                     if let Some(def_tree) = default {
                         self.emit_decision_tree_threaded(
-                            def_tree, current_scrutinee, scrutinee_ty, arms, result_ty,
+                            def_tree,
+                            current_scrutinee,
+                            scrutinee_ty,
+                            arms,
+                            result_ty,
                             join_block,
                         );
                     } else {
@@ -257,8 +312,8 @@ impl OssaBodyCtx<'_, '_> {
 
                 // Snapshot and live set after discriminant so it's included
                 let branch_snapshot = self.snapshot_scope();
-                let switch_live: Vec<ValueId> = self.all_live_tracked()
-                    .iter().map(|&(v, _, _)| v).collect();
+                let switch_live: Vec<ValueId> =
+                    self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                 let switch_descs: Vec<(TyId, Ownership)> = switch_live
                     .iter()
                     .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
@@ -270,14 +325,18 @@ impl OssaBodyCtx<'_, '_> {
                     let pattern = constructor_to_switch_case(self, ctor);
                     let (block, params) = self.new_block_with_params(&switch_descs);
                     switch_arms.push(SwitchArm {
-                        pattern, target: block, args: switch_live.clone(),
+                        pattern,
+                        target: block,
+                        args: switch_live.clone(),
                     });
                     case_blocks.push((block, params));
                 }
                 let default_block = default.as_ref().map(|_| {
                     let (block, params) = self.new_block_with_params(&switch_descs);
                     switch_arms.push(SwitchArm {
-                        pattern: SwitchCase::Wildcard, target: block, args: switch_live.clone(),
+                        pattern: SwitchCase::Wildcard,
+                        target: block,
+                        args: switch_live.clone(),
                     });
                     (block, params)
                 });
@@ -289,7 +348,8 @@ impl OssaBodyCtx<'_, '_> {
                 // they won't be forwarded to the merge block.
                 let tracker_set: std::collections::HashSet<ValueId> =
                     self.tracker.values().into_iter().collect();
-                let extra_vals: Vec<ValueId> = switch_live.iter()
+                let extra_vals: Vec<ValueId> = switch_live
+                    .iter()
                     .filter(|v| !tracker_set.contains(v))
                     .copied()
                     .collect();
@@ -297,7 +357,9 @@ impl OssaBodyCtx<'_, '_> {
                 for (i, ((_, subtree), (block_id, params))) in
                     cases.iter().zip(case_blocks.iter()).enumerate()
                 {
-                    if i > 0 { self.restore_scope(&branch_snapshot); }
+                    if i > 0 {
+                        self.restore_scope(&branch_snapshot);
+                    }
                     self.switch_to(*block_id);
                     self.rebind_scope_values(&switch_live, params);
                     // Destroy values that aren't in the tracker (e.g., discriminant)
@@ -308,7 +370,11 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     let rebound = rebound_value(scrutinee, &switch_live, params);
                     self.emit_decision_tree_threaded(
-                        subtree, rebound, scrutinee_ty, arms, result_ty,
+                        subtree,
+                        rebound,
+                        scrutinee_ty,
+                        arms,
+                        result_ty,
                         join_block,
                     );
                 }
@@ -324,13 +390,20 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     let rebound = rebound_value(scrutinee, &switch_live, &def_params);
                     self.emit_decision_tree_threaded(
-                        def_tree, rebound, scrutinee_ty, arms, result_ty,
+                        def_tree,
+                        rebound,
+                        scrutinee_ty,
+                        arms,
+                        result_ty,
                         join_block,
                     );
                 }
-            }
+            },
 
-            DecisionTree::Success { arm_index, bindings } => {
+            DecisionTree::Success {
+                arm_index,
+                bindings,
+            } => {
                 self.push_scope();
                 self.emit_bindings(bindings, scrutinee, scrutinee_ty);
                 if let Some(arm) = arms.get(*arm_index) {
@@ -340,27 +413,36 @@ impl OssaBodyCtx<'_, '_> {
                     }
                 }
                 self.pop_scope();
-            }
+            },
 
-            DecisionTree::Guard { arm_index, bindings, success, failure } => {
+            DecisionTree::Guard {
+                arm_index,
+                bindings,
+                success,
+                failure,
+            } => {
                 self.push_scope();
                 self.emit_bindings(bindings, scrutinee, scrutinee_ty);
                 if let Some(arm) = arms.get(*arm_index) {
                     if let Some(guard_expr) = arm.guard {
                         let guard_val = self.lower_expr(guard_expr);
                         let guard_snapshot = self.snapshot_scope();
-                        let guard_live: Vec<ValueId> = self.all_live_tracked()
-                            .iter().map(|&(v, _, _)| v).collect();
+                        let guard_live: Vec<ValueId> =
+                            self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                         let guard_descs: Vec<(TyId, Ownership)> = guard_live
                             .iter()
                             .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                             .collect();
-                        let (success_block, success_params) = self.new_block_with_params(&guard_descs);
-                        let (failure_block, failure_params) = self.new_block_with_params(&guard_descs);
+                        let (success_block, success_params) =
+                            self.new_block_with_params(&guard_descs);
+                        let (failure_block, failure_params) =
+                            self.new_block_with_params(&guard_descs);
                         self.emit_branch(
                             guard_val,
-                            success_block, guard_live.clone(),
-                            failure_block, guard_live.clone(),
+                            success_block,
+                            guard_live.clone(),
+                            failure_block,
+                            guard_live.clone(),
                         );
 
                         self.switch_to(success_block);
@@ -368,7 +450,11 @@ impl OssaBodyCtx<'_, '_> {
                         let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                         self.pop_scope();
                         self.emit_decision_tree_threaded(
-                            success, rebound, scrutinee_ty, arms, result_ty,
+                            success,
+                            rebound,
+                            scrutinee_ty,
+                            arms,
+                            result_ty,
                             join_block,
                         );
 
@@ -378,26 +464,33 @@ impl OssaBodyCtx<'_, '_> {
                         let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
                         self.pop_scope();
                         self.emit_decision_tree_threaded(
-                            failure, rebound, scrutinee_ty, arms, result_ty,
+                            failure,
+                            rebound,
+                            scrutinee_ty,
+                            arms,
+                            result_ty,
                             join_block,
                         );
                         return;
                     } else {
                         self.emit_decision_tree_threaded(
-                            success, scrutinee, scrutinee_ty, arms, result_ty,
+                            success,
+                            scrutinee,
+                            scrutinee_ty,
+                            arms,
+                            result_ty,
                             join_block,
                         );
                     }
                 }
                 self.pop_scope();
-            }
+            },
 
             DecisionTree::Failure => {
                 self.emit_panic("match failure: non-exhaustive patterns");
-            }
+            },
         }
     }
-
 }
 
 /// Find the rebound version of `val` after a rebind from `old` to `new`.
@@ -418,16 +511,10 @@ impl OssaBodyCtx<'_, '_> {
     /// extraction — the result has the correct ownership (@owned for
     /// non-trivial types). For @owned results, we copy so the binding
     /// has its own lifetime independent of the scrutinee.
-    fn emit_bindings(
-        &mut self,
-        bindings: &[Binding],
-        scrutinee: ValueId,
-        scrutinee_ty: TyId,
-    ) {
+    fn emit_bindings(&mut self, bindings: &[Binding], scrutinee: ValueId, scrutinee_ty: TyId) {
         for binding in bindings {
             let hir_local = binding.local_id;
-            let (extracted, _) =
-                self.apply_access_path(scrutinee, scrutinee_ty, &binding.path);
+            let (extracted, _) = self.apply_access_path(scrutinee, scrutinee_ty, &binding.path);
 
             let ownership = self.body.value(extracted).ownership;
 
@@ -439,7 +526,8 @@ impl OssaBodyCtx<'_, '_> {
                 extracted
             };
 
-            self.local_map.insert(hir_local, super::LocalBinding::Ssa(bound_val));
+            self.local_map
+                .insert(hir_local, super::LocalBinding::Ssa(bound_val));
         }
     }
 
@@ -475,41 +563,38 @@ impl OssaBodyCtx<'_, '_> {
                     if let Some((_, variant_idx)) = pending_downcast.take() {
                         let (field_idx, field_ty) =
                             self.resolve_enum_payload_field(current_ty, variant_idx, name);
-                        current = self.emit_enum_payload(
-                            current, variant_idx, field_idx, field_ty,
-                        );
+                        current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
                         current_ty = field_ty;
                     } else {
-                        let (field_idx, field_ty) =
-                            self.resolve_struct_field(current_ty, name);
+                        let (field_idx, field_ty) = self.resolve_struct_field(current_ty, name);
                         current = self.emit_struct_extract(current, field_idx, field_ty);
                         current_ty = field_ty;
                     }
-                }
+                },
                 PathElement::Index(i) => {
                     if let Some((_, variant_idx)) = pending_downcast.take() {
                         let field_idx = FieldIdx::new(*i);
                         let field_ty = self.resolve_enum_payload_field_by_index(
-                            current_ty, variant_idx, field_idx,
+                            current_ty,
+                            variant_idx,
+                            field_idx,
                         );
-                        current = self.emit_enum_payload(
-                            current, variant_idx, field_idx, field_ty,
-                        );
+                        current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
                         current_ty = field_ty;
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
                         current = self.emit_tuple_extract(current, *i as u32, elem_ty);
                         current_ty = elem_ty;
                     }
-                }
+                },
                 PathElement::Downcast(variant_name) => {
                     let entity = self.ty_entity(current_ty);
                     let variant_idx = entity
                         .and_then(|e| self.ctx.resolve_variant_idx(e, variant_name))
                         .unwrap_or(VariantIdx::new(0));
                     pending_downcast = Some((variant_name.clone(), variant_idx));
-                }
-                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => {}
+                },
+                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => {},
             }
         }
         (current, current_ty)
@@ -578,7 +663,10 @@ impl OssaBodyCtx<'_, '_> {
         if self.body.value(operand).ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
             self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
-                result, operand, variant, field,
+                result,
+                operand,
+                variant,
+                field,
             });
             result
         } else {
@@ -586,7 +674,10 @@ impl OssaBodyCtx<'_, '_> {
             let borrow = self.emit_begin_borrow(operand);
             let field_ref = self.alloc_guaranteed(result_ty, borrow);
             self.push_inst(kestrel_mir_3::inst::InstKind::EnumPayload {
-                result: field_ref, operand: borrow, variant, field,
+                result: field_ref,
+                operand: borrow,
+                variant,
+                field,
             });
             let result = self.emit_copy_value(field_ref);
             self.emit_end_borrow(borrow);
@@ -611,13 +702,11 @@ impl OssaBodyCtx<'_, '_> {
     /// Looks up the struct definition and finds the field by name.
     /// Applies type substitution if the struct is generic and the
     /// current type has concrete type arguments.
-    fn resolve_struct_field(
-        &mut self,
-        struct_ty: TyId,
-        field_name: &str,
-    ) -> (FieldIdx, TyId) {
+    fn resolve_struct_field(&mut self, struct_ty: TyId, field_name: &str) -> (FieldIdx, TyId) {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(struct_ty) {
-            MirTy::Named { entity, type_args, .. } => (Some(*entity), type_args.clone()),
+            MirTy::Named {
+                entity, type_args, ..
+            } => (Some(*entity), type_args.clone()),
             _ => (None, vec![]),
         };
 
@@ -652,9 +741,7 @@ impl OssaBodyCtx<'_, '_> {
     /// Resolve a tuple element index to its type.
     fn resolve_tuple_element(&self, tuple_ty: TyId, index: usize) -> TyId {
         match self.ctx.module.ty_arena.get(tuple_ty) {
-            MirTy::Tuple(elements) => {
-                elements.get(index).copied().unwrap_or(tuple_ty)
-            }
+            MirTy::Tuple(elements) => elements.get(index).copied().unwrap_or(tuple_ty),
             _ => tuple_ty,
         }
     }
@@ -671,14 +758,20 @@ impl OssaBodyCtx<'_, '_> {
         field_name: &str,
     ) -> (FieldIdx, TyId) {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(enum_ty) {
-            MirTy::Named { entity, type_args, .. } => (Some(*entity), type_args.clone()),
+            MirTy::Named {
+                entity, type_args, ..
+            } => (Some(*entity), type_args.clone()),
             _ => (None, vec![]),
         };
 
         if let Some(entity) = entity {
             if let Some(edef) = self.ctx.module.enums.get(&entity) {
                 if let Some(case) = edef.cases.get(variant_idx.index()) {
-                    if let Some(idx) = case.payload_fields.iter().position(|f| f.name == field_name) {
+                    if let Some(idx) = case
+                        .payload_fields
+                        .iter()
+                        .position(|f| f.name == field_name)
+                    {
                         let mut field_ty = case.payload_fields[idx].ty;
 
                         // Substitute generic type params if needed
@@ -712,7 +805,9 @@ impl OssaBodyCtx<'_, '_> {
         field_idx: FieldIdx,
     ) -> TyId {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(enum_ty) {
-            MirTy::Named { entity, type_args, .. } => (Some(*entity), type_args.clone()),
+            MirTy::Named {
+                entity, type_args, ..
+            } => (Some(*entity), type_args.clone()),
             _ => (None, vec![]),
         };
 
@@ -770,7 +865,7 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
                     )
                 });
             SwitchCase::Variant(idx)
-        }
+        },
         Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v),
         Constructor::IntRange { start, end } => SwitchCase::IntRange {
             start: start.unwrap_or(i64::MIN),

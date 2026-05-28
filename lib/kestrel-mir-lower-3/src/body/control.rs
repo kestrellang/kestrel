@@ -42,8 +42,10 @@ impl OssaBodyCtx<'_, '_> {
 
         self.emit_branch(
             cond_val,
-            then_block, live_vals.clone(),
-            else_block, live_vals.clone(),
+            then_block,
+            live_vals.clone(),
+            else_block,
+            live_vals.clone(),
         );
 
         let snapshot = self.snapshot_scope();
@@ -199,7 +201,10 @@ impl OssaBodyCtx<'_, '_> {
 
     fn find_loop(&self, label: Option<&str>) -> Option<&LoopInfo> {
         match label {
-            Some(label) => self.loop_stack.iter().rev()
+            Some(label) => self
+                .loop_stack
+                .iter()
+                .rev()
                 .find(|l| l.label.as_deref() == Some(label)),
             None => self.loop_stack.last(),
         }
@@ -208,7 +213,10 @@ impl OssaBodyCtx<'_, '_> {
     fn collect_current_for_values(&self, expected: &[ValueId]) -> Vec<ValueId> {
         let all_tracked = self.all_live_tracked();
         if all_tracked.len() >= expected.len() {
-            all_tracked[..expected.len()].iter().map(|&(v, _, _)| v).collect()
+            all_tracked[..expected.len()]
+                .iter()
+                .map(|&(v, _, _)| v)
+                .collect()
         } else {
             let mut vals: Vec<_> = all_tracked.iter().map(|&(v, _, _)| v).collect();
             while vals.len() < expected.len() {
@@ -219,6 +227,11 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     fn header_param_values(&self, header: BlockId) -> Vec<ValueId> {
-        self.body.block(header).params.iter().map(|p| p.value).collect()
+        self.body
+            .block(header)
+            .params
+            .iter()
+            .map(|p| p.value)
+            .collect()
     }
 }

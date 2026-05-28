@@ -12,7 +12,9 @@ use kestrel_hir::body::{HirDictEntry, HirExprId, HirLiteral};
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::inst::CallArg;
 use kestrel_mir_3::item::function::FunctionKind;
-use kestrel_mir_3::{Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId};
+use kestrel_mir_3::{
+    Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
+};
 
 use super::OssaBodyCtx;
 use crate::ty::resolve_callable_types;
@@ -39,7 +41,7 @@ impl OssaBodyCtx<'_, '_> {
                         return self.emit_init_literal_call(callee, vec![ptr, len], result_ty);
                     }
                     return self.lower_literal_primitive(lit, result_ty);
-                }
+                },
                 HirLiteral::Null => {
                     if let Some(init) = self.find_null_literal_init(entity) {
                         self.ctx.register_name(init);
@@ -48,8 +50,8 @@ impl OssaBodyCtx<'_, '_> {
                         return self.emit_init_literal_call(callee, vec![], result_ty);
                     }
                     return self.lower_literal_primitive(lit, result_ty);
-                }
-                _ => {}
+                },
+                _ => {},
             }
 
             let (label, protocol) = match lit {
@@ -118,9 +120,10 @@ impl OssaBodyCtx<'_, '_> {
         let one = self.emit_literal(Immediate::i64(1));
         let self_ptr = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
         // Build call args: &mut self (the pointer), then literal args
-        let mut call_args = vec![
-            CallArg { value: self_ptr, convention: ParamConvention::MutBorrow },
-        ];
+        let mut call_args = vec![CallArg {
+            value: self_ptr,
+            convention: ParamConvention::MutBorrow,
+        }];
         for arg in args {
             call_args.push(self.prepare_call_arg(arg, ParamConvention::Borrow));
         }
@@ -139,11 +142,7 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Lower `[a, b, c]` — either via the type's buffer-pointer init or as
     /// an error fallback.
-    pub fn lower_array_literal(
-        &mut self,
-        expr_id: HirExprId,
-        elements: &[HirExprId],
-    ) -> ValueId {
+    pub fn lower_array_literal(&mut self, expr_id: HirExprId, elements: &[HirExprId]) -> ValueId {
         let result_ty = self.resolve_expr_type(expr_id);
 
         if let Some(val) = self.try_array_literal_via_init(elements, result_ty) {
@@ -204,9 +203,18 @@ impl OssaBodyCtx<'_, '_> {
         let one = self.emit_literal(Immediate::i64(1));
         let self_val = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
         let call_args = vec![
-            CallArg { value: self_val, convention: ParamConvention::MutBorrow },
-            CallArg { value: ptr, convention: ParamConvention::Consuming },
-            CallArg { value: count, convention: ParamConvention::Consuming },
+            CallArg {
+                value: self_val,
+                convention: ParamConvention::MutBorrow,
+            },
+            CallArg {
+                value: ptr,
+                convention: ParamConvention::Consuming,
+            },
+            CallArg {
+                value: count,
+                convention: ParamConvention::Consuming,
+            },
         ];
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -222,11 +230,7 @@ impl OssaBodyCtx<'_, '_> {
     // ================================================================
 
     /// Lower `[k1: v1, k2: v2]` — buffer-pointer init with `(K, V)` tuples.
-    pub fn lower_dict_literal(
-        &mut self,
-        expr_id: HirExprId,
-        entries: &[HirDictEntry],
-    ) -> ValueId {
+    pub fn lower_dict_literal(&mut self, expr_id: HirExprId, entries: &[HirDictEntry]) -> ValueId {
         let result_ty = self.resolve_expr_type(expr_id);
 
         if let Some(val) = self.try_dict_literal_via_init(entries, result_ty) {
@@ -295,9 +299,18 @@ impl OssaBodyCtx<'_, '_> {
         let one = self.emit_literal(Immediate::i64(1));
         let self_val = self.emit_op1(Op::StackAlloc(result_ty), one, ptr_ty);
         let call_args = vec![
-            CallArg { value: self_val, convention: ParamConvention::MutBorrow },
-            CallArg { value: ptr, convention: ParamConvention::Consuming },
-            CallArg { value: count, convention: ParamConvention::Consuming },
+            CallArg {
+                value: self_val,
+                convention: ParamConvention::MutBorrow,
+            },
+            CallArg {
+                value: ptr,
+                convention: ParamConvention::Consuming,
+            },
+            CallArg {
+                value: count,
+                convention: ParamConvention::Consuming,
+            },
         ];
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -318,13 +331,10 @@ impl OssaBodyCtx<'_, '_> {
         protocol: kestrel_hir::Builtin,
         predicate: impl Fn(&Callable) -> bool,
     ) -> Option<Entity> {
-        let proto_entity =
-            self.ctx
-                .query
-                .query(kestrel_name_res::ResolveBuiltin {
-                    builtin: protocol,
-                    root: self.ctx.root,
-                })?;
+        let proto_entity = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: protocol,
+            root: self.ctx.root,
+        })?;
         kestrel_name_res::find_protocol_witness_init(
             &self.ctx.query,
             struct_entity,
@@ -357,10 +367,7 @@ impl OssaBodyCtx<'_, '_> {
         self.find_literal_protocol_init(
             struct_entity,
             kestrel_hir::Builtin::ExpressibleByStringLiteral,
-            |c| {
-                c.params.len() == 2
-                    && c.params[0].label.as_deref() == Some("stringLiteral")
-            },
+            |c| c.params.len() == 2 && c.params[0].label.as_deref() == Some("stringLiteral"),
         )
     }
 
@@ -383,7 +390,10 @@ impl OssaBodyCtx<'_, '_> {
             self.init_parent_matches(parent, entity)
                 && f.params.len() == 3
                 && matches!(f.params[0].convention, ParamConvention::MutBorrow)
-                && matches!(self.ctx.module.ty_arena.get(f.params[1].ty), MirTy::Pointer(_))
+                && matches!(
+                    self.ctx.module.ty_arena.get(f.params[1].ty),
+                    MirTy::Pointer(_)
+                )
                 && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
         })?;
 
@@ -432,7 +442,7 @@ impl OssaBodyCtx<'_, '_> {
                 let k = type_args[0];
                 let v = type_args[1];
                 self.ctx.module.ty_arena.tuple(vec![k, v])
-            }
+            },
             _ => return None,
         };
         Some((init_func.entity, pair_ty, type_args))

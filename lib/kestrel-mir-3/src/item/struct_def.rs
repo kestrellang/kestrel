@@ -12,7 +12,10 @@ pub struct FieldDef {
 
 impl FieldDef {
     pub fn new(name: impl Into<String>, ty: TyId) -> Self {
-        Self { name: name.into(), ty }
+        Self {
+            name: name.into(),
+            ty,
+        }
     }
 }
 

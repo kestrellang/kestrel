@@ -2,7 +2,7 @@ use kestrel_hecs::Entity;
 
 use crate::body::OssaBody;
 use crate::ty::ParamConvention;
-use crate::{ValueId, TyId};
+use crate::{TyId, ValueId};
 
 use super::TypeParamDef;
 
@@ -129,11 +129,18 @@ impl WhereConstraint {
         protocol: Entity,
         protocol_type_args: Vec<Entity>,
     ) -> Self {
-        Self::Implements { type_param, protocol, protocol_type_args }
+        Self::Implements {
+            type_param,
+            protocol,
+            protocol_type_args,
+        }
     }
 
     pub fn not_implements(type_param: Entity, protocol: Entity) -> Self {
-        Self::NotImplements { type_param, protocol }
+        Self::NotImplements {
+            type_param,
+            protocol,
+        }
     }
 }
 
@@ -144,7 +151,9 @@ pub struct WhereClause {
 
 impl WhereClause {
     pub fn new() -> Self {
-        Self { constraints: Vec::new() }
+        Self {
+            constraints: Vec::new(),
+        }
     }
 
     pub fn add_constraint(&mut self, constraint: WhereConstraint) {

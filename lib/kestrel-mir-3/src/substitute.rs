@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use kestrel_hecs::Entity;
 
-use crate::ty::{MirTy, TyArena, TyId};
 use crate::ParamConvention;
+use crate::ty::{MirTy, TyArena, TyId};
 
 #[derive(Debug, Clone, Default)]
 pub struct SubstMap {
@@ -46,7 +46,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
 
         MirTy::AssociatedProjection {
             base,
@@ -65,7 +65,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
 
         MirTy::Pointer(pointee) => {
             let sub_pointee = substitute(arena, pointee, subst);
@@ -74,7 +74,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
 
         MirTy::Tuple(elems) => {
             let sub_elems: Vec<_> = elems.iter().map(|&e| substitute(arena, e, subst)).collect();
@@ -83,7 +83,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
 
         MirTy::Named { entity, type_args } => {
             let sub_args: Vec<_> = type_args
@@ -95,7 +95,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
 
         MirTy::FuncThin { params, ret } => {
             let sub_params: Vec<(TyId, ParamConvention)> = params
@@ -111,7 +111,7 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
 
         MirTy::FuncThick { params, ret } => {
             let sub_params: Vec<(TyId, ParamConvention)> = params
@@ -127,6 +127,6 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             } else {
                 ty
             }
-        }
+        },
     }
 }

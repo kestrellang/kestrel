@@ -90,7 +90,10 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
             ownership: Ownership::Owned,
         });
         thunk_def.params.push(ParamDef::new(
-            "_env", env_val, env_ty, ParamConvention::Consuming,
+            "_env",
+            env_val,
+            env_ty,
+            ParamConvention::Consuming,
         ));
         body.param_count += 1;
 
@@ -108,6 +111,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: param.ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                span: None,
             });
             body.block_mut(entry).params.push(BlockParam {
                 value: val,
@@ -115,14 +119,20 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ownership: Ownership::Owned,
             });
             thunk_def.params.push(ParamDef::new(
-                &param.name, val, param.ty, ParamConvention::Consuming,
+                &param.name,
+                val,
+                param.ty,
+                ParamConvention::Consuming,
             ));
             body.param_count += 1;
 
             // The thunk receives params as Consuming (by-value for scalars).
             // Forward args must also be Consuming so compile_resolved_call
             // spills scalars to stack when the target expects ByRef (Borrow).
-            forward_args.push(CallArg { value: val, convention: ParamConvention::Consuming });
+            forward_args.push(CallArg {
+                value: val,
+                convention: ParamConvention::Consuming,
+            });
         }
 
         let callee = Callee::direct_with_args(*target, forward_type_args, None);
@@ -132,7 +142,9 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
 
         // Destroy unused env pointer (no captures)
         if !needs_env {
-            insts.push(Instruction::new(InstKind::DestroyValue { operand: env_val }));
+            insts.push(Instruction::new(InstKind::DestroyValue {
+                operand: env_val,
+            }));
         }
 
         if is_unit {
@@ -147,13 +159,13 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 value: Immediate::unit(),
             }));
             body.block_mut(entry).insts = insts;
-            body.block_mut(entry).terminator =
-                Terminator::new(TerminatorKind::Return(unit_val));
+            body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
         } else {
             let result_val = body.alloc_value(ValueDef {
                 ty: ret_ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                span: None,
             });
             insts.push(Instruction::new(InstKind::Call {
                 result: Some(result_val),
@@ -161,8 +173,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 args: forward_args,
             }));
             body.block_mut(entry).insts = insts;
-            body.block_mut(entry).terminator =
-                Terminator::new(TerminatorKind::Return(result_val));
+            body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(result_val));
         }
 
         thunk_def.body = Some(body);
@@ -187,8 +198,8 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body::OssaBody;
     use crate::block::BlockParam;
+    use crate::body::OssaBody;
     use crate::value::ValueDef;
 
     /// Build a minimal function with an OSSA body (just returns unit).
@@ -210,6 +221,7 @@ mod tests {
                 ty: *pty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                span: None,
             });
             body.block_mut(entry).params.push(BlockParam {
                 value: val,
@@ -222,23 +234,26 @@ mod tests {
 
         let unit_ty = module.ty_arena.unit();
         let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
-        body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
-            result: unit_val,
-            value: Immediate::unit(),
-        }));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::Literal {
+                result: unit_val,
+                value: Immediate::unit(),
+            }));
         let ret_val = if module.ty_arena.get(ret_ty) == &MirTy::Tuple(vec![]) {
             unit_val
         } else {
             // For non-unit returns, just return a literal (simplified for tests)
             let rv = body.alloc_value(ValueDef::owned(ret_ty));
-            body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
-                result: rv,
-                value: Immediate::i64(0),
-            }));
+            body.block_mut(entry)
+                .insts
+                .push(Instruction::new(InstKind::Literal {
+                    result: rv,
+                    value: Immediate::i64(0),
+                }));
             rv
         };
-        body.block_mut(entry).terminator =
-            Terminator::new(TerminatorKind::Return(ret_val));
+        body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(ret_val));
 
         func.body = Some(body);
         module.add_function(func);
@@ -259,19 +274,22 @@ mod tests {
             ret: i64_ty,
         });
         let result_val = body.alloc_value(ValueDef::owned(thick_ty));
-        body.block_mut(entry).insts.push(Instruction::new(InstKind::ApplyPartial {
-            result: result_val,
-            func: target,
-            captures: vec![],
-        }));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::ApplyPartial {
+                result: result_val,
+                func: target,
+                captures: vec![],
+            }));
 
         let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
-        body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
-            result: unit_val,
-            value: Immediate::unit(),
-        }));
-        body.block_mut(entry).terminator =
-            Terminator::new(TerminatorKind::Return(unit_val));
+        body.block_mut(entry)
+            .insts
+            .push(Instruction::new(InstKind::Literal {
+                result: unit_val,
+                value: Immediate::unit(),
+            }));
+        body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
 
         let mut func = FunctionDef::new(caller_entity, "caller", unit_ty);
         func.body = Some(body);
@@ -285,10 +303,16 @@ mod tests {
 
         let add_entity = Entity::from_raw(1);
         module.register_name(add_entity, "add");
-        add_stub_function(&mut module, add_entity, "add", i64_ty, vec![
-            ("a".into(), i64_ty, ParamConvention::Consuming),
-            ("b".into(), i64_ty, ParamConvention::Consuming),
-        ]);
+        add_stub_function(
+            &mut module,
+            add_entity,
+            "add",
+            i64_ty,
+            vec![
+                ("a".into(), i64_ty, ParamConvention::Consuming),
+                ("b".into(), i64_ty, ParamConvention::Consuming),
+            ],
+        );
 
         let caller = Entity::from_raw(2);
         add_caller_with_apply(&mut module, caller, add_entity);
@@ -296,10 +320,9 @@ mod tests {
         let mut next_entity = 100;
         run_thunk_pass(&mut module, &mut next_entity);
 
-        let thunk = module
-            .functions
-            .values()
-            .find(|f| matches!(&f.kind, FunctionKind::Thunk { original } if *original == add_entity));
+        let thunk = module.functions.values().find(
+            |f| matches!(&f.kind, FunctionKind::Thunk { original } if *original == add_entity),
+        );
         assert!(thunk.is_some(), "thunk should be generated");
 
         let thunk = thunk.unwrap();
@@ -318,9 +341,13 @@ mod tests {
 
         let target = Entity::from_raw(1);
         module.register_name(target, "target");
-        add_stub_function(&mut module, target, "target", i64_ty, vec![
-            ("x".into(), i64_ty, ParamConvention::Consuming),
-        ]);
+        add_stub_function(
+            &mut module,
+            target,
+            "target",
+            i64_ty,
+            vec![("x".into(), i64_ty, ParamConvention::Consuming)],
+        );
 
         // Two ApplyPartial references in one caller
         let caller_entity = Entity::from_raw(2);
@@ -336,25 +363,30 @@ mod tests {
             body.entry = entry;
 
             let r1 = body.alloc_value(ValueDef::owned(thick_ty));
-            body.block_mut(entry).insts.push(Instruction::new(InstKind::ApplyPartial {
-                result: r1,
-                func: target,
-                captures: vec![],
-            }));
+            body.block_mut(entry)
+                .insts
+                .push(Instruction::new(InstKind::ApplyPartial {
+                    result: r1,
+                    func: target,
+                    captures: vec![],
+                }));
             let r2 = body.alloc_value(ValueDef::owned(thick_ty));
-            body.block_mut(entry).insts.push(Instruction::new(InstKind::ApplyPartial {
-                result: r2,
-                func: target,
-                captures: vec![],
-            }));
+            body.block_mut(entry)
+                .insts
+                .push(Instruction::new(InstKind::ApplyPartial {
+                    result: r2,
+                    func: target,
+                    captures: vec![],
+                }));
 
             let uv = body.alloc_value(ValueDef::owned(unit_ty));
-            body.block_mut(entry).insts.push(Instruction::new(InstKind::Literal {
-                result: uv,
-                value: Immediate::unit(),
-            }));
-            body.block_mut(entry).terminator =
-                Terminator::new(TerminatorKind::Return(uv));
+            body.block_mut(entry)
+                .insts
+                .push(Instruction::new(InstKind::Literal {
+                    result: uv,
+                    value: Immediate::unit(),
+                }));
+            body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(uv));
 
             let mut func = FunctionDef::new(caller_entity, "caller", unit_ty);
             func.body = Some(body);
@@ -379,9 +411,13 @@ mod tests {
 
         let target = Entity::from_raw(1);
         module.register_name(target, "target");
-        add_stub_function(&mut module, target, "target", i64_ty, vec![
-            ("x".into(), i64_ty, ParamConvention::Consuming),
-        ]);
+        add_stub_function(
+            &mut module,
+            target,
+            "target",
+            i64_ty,
+            vec![("x".into(), i64_ty, ParamConvention::Consuming)],
+        );
 
         // Pre-existing thunk
         let thunk_entity = Entity::from_raw(2);
@@ -426,9 +462,13 @@ mod tests {
 
         let target = Entity::from_raw(1);
         module.register_name(target, "compute");
-        add_stub_function(&mut module, target, "compute", i64_ty, vec![
-            ("x".into(), i64_ty, ParamConvention::Consuming),
-        ]);
+        add_stub_function(
+            &mut module,
+            target,
+            "compute",
+            i64_ty,
+            vec![("x".into(), i64_ty, ParamConvention::Consuming)],
+        );
 
         let caller = Entity::from_raw(2);
         add_caller_with_apply(&mut module, caller, target);

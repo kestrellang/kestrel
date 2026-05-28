@@ -1,7 +1,9 @@
 //! Witness generation — creates WitnessDef entries from conformance data.
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, Name, NodeKind, Settable, Subscript as SubscriptMarker, TypeParams};
+use kestrel_ast_builder::{
+    Callable, Name, NodeKind, Settable, Subscript as SubscriptMarker, TypeParams,
+};
 use kestrel_hecs::Entity;
 use kestrel_mir_3::item::witness::{WitnessDef, WitnessMethodBinding};
 use kestrel_mir_3::{MirTy, SubstMap, TyId, TypeParamDef, WitnessMethodKey, substitute};
@@ -165,8 +167,7 @@ fn lower_witnesses_for_type(
             .collect();
 
         for (method_key, method_name, member) in &method_entries {
-            let expected_param_types =
-                expected_param_types_for(ctx, member.entity, &proto_subst);
+            let expected_param_types = expected_param_types_for(ctx, member.entity, &proto_subst);
 
             let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
             let candidates = ctx.query.query(TypeMembersByName {
@@ -214,10 +215,19 @@ fn lower_witnesses_for_type(
             // `extend Equatable: NotEqual[Self]` provides the conformance,
             // search the extension's children for the method implementation.
             // Only applies when the extension targets a protocol, not a concrete type.
-            let source_is_protocol_ext = matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension))
-                && *source != type_entity
-                && ctx.query.query(ExtensionTargetEntity { extension: *source, root: ctx.root })
-                    .is_some_and(|target| matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol)));
+            let source_is_protocol_ext = matches!(
+                ctx.world.get::<NodeKind>(*source),
+                Some(NodeKind::Extension)
+            ) && *source != type_entity
+                && ctx
+                    .query
+                    .query(ExtensionTargetEntity {
+                        extension: *source,
+                        root: ctx.root,
+                    })
+                    .is_some_and(|target| {
+                        matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol))
+                    });
             if source_is_protocol_ext {
                 let ext_children: Vec<Entity> = ctx.world.children_of(*source).to_vec();
                 let ext_impl = if method_name.ends_with(".set") {
@@ -259,7 +269,15 @@ fn lower_witnesses_for_type(
         }
 
         // Bind associated types
-        bind_associated_types(ctx, &mut witness, type_entity, &extensions, *protocol, *source, impl_ty);
+        bind_associated_types(
+            ctx,
+            &mut witness,
+            type_entity,
+            &extensions,
+            *protocol,
+            *source,
+            impl_ty,
+        );
 
         ctx.module.add_witness(witness);
     }
@@ -381,7 +399,7 @@ fn matches_candidate(
                 && expected_param_types
                     .map(|expected| candidate_param_types_match(ctx, child, expected))
                     .unwrap_or(true)
-        }
+        },
         NodeKind::Field if ctx.world.get::<Callable>(child).is_some() => {
             let name = ctx
                 .world
@@ -393,13 +411,13 @@ fn matches_candidate(
                 && expected_param_types
                     .map(|expected| candidate_param_types_match(ctx, child, expected))
                     .unwrap_or(true)
-        }
+        },
         NodeKind::Initializer if method_name == "init" => {
             candidate_labels_match(ctx, child, required_labels)
                 && expected_param_types
                     .map(|expected| candidate_param_types_match(ctx, child, expected))
                     .unwrap_or(true)
-        }
+        },
         _ => false,
     }
 }
@@ -425,21 +443,15 @@ fn candidate_labels_match(
     }
 }
 
-fn candidate_param_types_match(
-    ctx: &mut LowerCtx,
-    candidate: Entity,
-    expected: &[TyId],
-) -> bool {
+fn candidate_param_types_match(ctx: &mut LowerCtx, candidate: Entity, expected: &[TyId]) -> bool {
     let tys = resolve_callable_types(ctx, candidate);
     if tys.len() != expected.len() {
         return false;
     }
-    tys.iter()
-        .zip(expected)
-        .all(|(got, want)| match got {
-            Some(g) => *g == *want,
-            None => true,
-        })
+    tys.iter().zip(expected).all(|(got, want)| match got {
+        Some(g) => *g == *want,
+        None => true,
+    })
 }
 
 fn get_param_labels(ctx: &LowerCtx, method_entity: Entity) -> Option<Vec<Option<String>>> {
@@ -490,11 +502,7 @@ fn bind_associated_types(
     }
 }
 
-fn find_associated_type(
-    ctx: &mut LowerCtx,
-    parent: Entity,
-    assoc_entity: Entity,
-) -> Option<TyId> {
+fn find_associated_type(ctx: &mut LowerCtx, parent: Entity, assoc_entity: Entity) -> Option<TyId> {
     let target_name = ctx.world.get::<Name>(assoc_entity)?.0.clone();
     for &child in ctx.world.children_of(parent) {
         if ctx.world.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {

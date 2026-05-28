@@ -25,21 +25,24 @@ impl OssaBodyCtx<'_, '_> {
                         let ty = self.resolve_local_type(*local);
                         let addr = self.emit_uninit(ty);
                         self.emit_store_init(addr, init_val);
-                        self.local_map.insert(*local, super::LocalBinding::Var(addr));
+                        self.local_map
+                            .insert(*local, super::LocalBinding::Var(addr));
                         self.track_var(addr, ty);
                     } else {
-                        self.local_map.insert(*local, super::LocalBinding::Ssa(init_val));
+                        self.local_map
+                            .insert(*local, super::LocalBinding::Ssa(init_val));
                     }
                 } else if is_var {
                     let ty = self.resolve_local_type(*local);
                     let addr = self.emit_uninit(ty);
-                    self.local_map.insert(*local, super::LocalBinding::Var(addr));
+                    self.local_map
+                        .insert(*local, super::LocalBinding::Var(addr));
                     self.track_var(addr, ty);
                 }
-            }
+            },
             HirStmt::Expr { expr, .. } => {
                 self.lower_expr(*expr);
-            }
+            },
             HirStmt::Deinit {
                 local: Some(hir_local),
                 ..
@@ -47,15 +50,18 @@ impl OssaBodyCtx<'_, '_> {
                 if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
-                    self.push_inst(kestrel_mir_3::inst::InstKind::DestroyAddr { address: addr, ty });
+                    self.push_inst(kestrel_mir_3::inst::InstKind::DestroyAddr {
+                        address: addr,
+                        ty,
+                    });
                 } else {
                     let val = self.map_local(*hir_local);
                     self.emit_destroy_value(val);
                 }
-            }
+            },
             HirStmt::Deinit { local: None, .. } => {
                 // Unresolved deinit — nothing to do
-            }
+            },
         }
 
         self.current_span = prev_span;
@@ -66,6 +72,6 @@ fn stmt_span(stmt: &HirStmt) -> Span {
     match stmt {
         HirStmt::Let { span, .. } | HirStmt::Expr { span, .. } | HirStmt::Deinit { span, .. } => {
             span.clone()
-        }
+        },
     }
 }

@@ -107,9 +107,7 @@ impl<'m> CodegenCtx<'m> {
 
     pub fn is_main_function(&self, func: &MonoFunction) -> bool {
         let name = self.module.resolve_name(func.source);
-        name == "main"
-            || (name.ends_with(".main")
-                && name.matches('.').count() == 1)
+        name == "main" || name.ends_with(".main")
     }
 
     // -- Statics --

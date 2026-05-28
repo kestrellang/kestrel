@@ -104,11 +104,11 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
         | HirTy::Protocol { entity, args, .. } => {
             let type_args: Vec<TyId> = args.iter().map(|a| lower_type(ctx, a)).collect();
             lower_named_type(ctx, *entity, type_args)
-        }
+        },
         HirTy::Tuple(elems, _) => {
             let elems: Vec<TyId> = elems.iter().map(|e| lower_type(ctx, e)).collect();
             ctx.module.ty_arena.tuple(elems)
-        }
+        },
         HirTy::Function { params, ret, .. } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
@@ -119,15 +119,13 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
                 params: lowered_params,
                 ret: lowered_ret,
             })
-        }
+        },
         HirTy::Param(entity, _) => {
             ctx.register_name(*entity);
             ctx.intern(MirTy::TypeParam(*entity))
-        }
+        },
         HirTy::AliasUse { .. } => ctx.module.ty_arena.error(),
-        HirTy::AssocProjection { base, assoc, .. } => {
-            lower_assoc_projection(ctx, base, *assoc)
-        }
+        HirTy::AssocProjection { base, assoc, .. } => lower_assoc_projection(ctx, base, *assoc),
         HirTy::Opaque { .. } => ctx.module.ty_arena.error(),
         HirTy::Never(_) => ctx.module.ty_arena.never(),
         HirTy::Infer(_) => ctx.module.ty_arena.error(),
@@ -147,11 +145,11 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
         ResolvedTy::Named { entity, args } => {
             let mir_args: Vec<TyId> = args.iter().map(|a| lower_resolved_ty(ctx, a)).collect();
             lower_named_type(ctx, *entity, mir_args)
-        }
+        },
         ResolvedTy::Param { entity } => {
             ctx.register_name(*entity);
             ctx.intern(MirTy::TypeParam(*entity))
-        }
+        },
         ResolvedTy::SelfType { entity } => build_self_type(ctx, *entity),
         ResolvedTy::AssocProjection { base, assoc } => {
             let base_ty = lower_resolved_ty(ctx, base);
@@ -164,11 +162,11 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
                 protocol,
                 assoc_type: *assoc,
             })
-        }
+        },
         ResolvedTy::Tuple(elems) => {
             let lowered: Vec<TyId> = elems.iter().map(|t| lower_resolved_ty(ctx, t)).collect();
             ctx.module.ty_arena.tuple(lowered)
-        }
+        },
         ResolvedTy::Function { params, ret } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
@@ -179,14 +177,13 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
                 params: lowered_params,
                 ret: lowered_ret,
             })
-        }
+        },
         ResolvedTy::Opaque {
             origin,
             origin_args,
             ..
         } => {
-            let is_cycle =
-                OPAQUE_RESOLVE_STACK.with(|stack| !stack.borrow_mut().insert(*origin));
+            let is_cycle = OPAQUE_RESOLVE_STACK.with(|stack| !stack.borrow_mut().insert(*origin));
             if is_cycle {
                 return ctx.module.ty_arena.error();
             }
@@ -214,7 +211,7 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
 
             OPAQUE_RESOLVE_STACK.with(|stack| stack.borrow_mut().remove(origin));
             result
-        }
+        },
         ResolvedTy::Never => ctx.module.ty_arena.never(),
         ResolvedTy::Error => ctx.module.ty_arena.error(),
     }
@@ -297,17 +294,13 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
         "ptr" => {
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.pointer(inner))
-        }
+        },
         _ => None,
     }
 }
 
 /// Walk HirTy, replacing Opaque nodes with the concrete type from inference.
-fn lower_type_replacing_opaque(
-    ctx: &mut LowerCtx,
-    ty: &HirTy,
-    concrete: &ResolvedTy,
-) -> TyId {
+fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &ResolvedTy) -> TyId {
     match ty {
         HirTy::Opaque { .. } => lower_resolved_ty(ctx, concrete),
         HirTy::Struct { entity, args, .. }
@@ -324,7 +317,7 @@ fn lower_type_replacing_opaque(
                 })
                 .collect();
             lower_named_type(ctx, *entity, type_args)
-        }
+        },
         HirTy::Tuple(elems, _) => {
             let lowered: Vec<TyId> = elems
                 .iter()
@@ -337,7 +330,7 @@ fn lower_type_replacing_opaque(
                 })
                 .collect();
             ctx.module.ty_arena.tuple(lowered)
-        }
+        },
         HirTy::Function { params, ret, .. } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
@@ -359,7 +352,7 @@ fn lower_type_replacing_opaque(
                 params: lowered_params,
                 ret: lowered_ret,
             })
-        }
+        },
         HirTy::AssocProjection { base, assoc, .. } if contains_opaque(base) => {
             let base_ty = lower_type_replacing_opaque(ctx, base, concrete);
             let Some(protocol) = ctx.world.parent_of(*assoc) else {
@@ -371,7 +364,7 @@ fn lower_type_replacing_opaque(
                 protocol,
                 assoc_type: *assoc,
             })
-        }
+        },
         _ => lower_type(ctx, ty),
     }
 }
@@ -386,7 +379,7 @@ fn contains_opaque(ty: &HirTy) -> bool {
         HirTy::Tuple(elems, _) => elems.iter().any(contains_opaque),
         HirTy::Function { params, ret, .. } => {
             params.iter().any(contains_opaque) || contains_opaque(ret)
-        }
+        },
         HirTy::AssocProjection { base, .. } => contains_opaque(base),
         _ => false,
     }
@@ -408,7 +401,7 @@ fn substitute_resolved_ty(
                 }
             }
             ty.clone()
-        }
+        },
         ResolvedTy::Named {
             entity,
             args: ty_args,
@@ -495,7 +488,7 @@ mod tests {
                 assert_eq!(elems.len(), 2);
                 assert_eq!(ctx.module.ty_arena.get(elems[0]), &MirTy::I64);
                 assert_eq!(ctx.module.ty_arena.get(elems[1]), &MirTy::Bool);
-            }
+            },
             other => panic!("expected Tuple, got {other:?}"),
         }
     }
@@ -510,7 +503,10 @@ mod tests {
         let ty = lower_type(&mut ctx, &hir);
         assert_eq!(
             ctx.module.ty_arena.get(ty),
-            &MirTy::Named { entity, type_args: vec![] }
+            &MirTy::Named {
+                entity,
+                type_args: vec![]
+            }
         );
     }
 
@@ -568,10 +564,7 @@ mod tests {
             }
         });
 
-        assert!(
-            total_count > 0,
-            "should have found some fields to resolve"
-        );
+        assert!(total_count > 0, "should have found some fields to resolve");
         assert!(
             error_count < total_count / 2,
             "too many unresolved field types: {error_count}/{total_count}"
@@ -638,9 +631,7 @@ mod tests {
         for &entity in entities {
             let kind = world.get::<NodeKind>(entity);
             if kind == Some(&NodeKind::Field)
-                && world
-                    .get::<kestrel_ast_builder::Callable>(entity)
-                    .is_none()
+                && world.get::<kestrel_ast_builder::Callable>(entity).is_none()
                 && world.get::<kestrel_ast_builder::Static>(entity).is_none()
             {
                 visitor(entity);

@@ -1,8 +1,8 @@
 use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
-use crate::item::function::ExternInfo;
 use crate::item::TypeInfo;
+use crate::item::function::ExternInfo;
 use crate::op::IntBits;
 use crate::ty::{ParamConvention, TyArena};
 use crate::{MonoFuncId, TyId};
@@ -16,11 +16,19 @@ pub struct InstantiationKey {
 
 impl InstantiationKey {
     pub fn new(func_entity: Entity, type_args: Vec<TyId>, self_type: Option<TyId>) -> Self {
-        Self { func_entity, type_args, self_type }
+        Self {
+            func_entity,
+            type_args,
+            self_type,
+        }
     }
 
     pub fn concrete(func_entity: Entity) -> Self {
-        Self { func_entity, type_args: Vec::new(), self_type: None }
+        Self {
+            func_entity,
+            type_args: Vec::new(),
+            self_type: None,
+        }
     }
 }
 
@@ -87,7 +95,12 @@ pub struct MonoParam {
 
 impl MonoParam {
     pub fn new(name: impl Into<String>, ty: TyId, convention: ParamConvention) -> Self {
-        Self { name: name.into(), ty, convention, label: None }
+        Self {
+            name: name.into(),
+            ty,
+            convention,
+            label: None,
+        }
     }
 
     pub fn with_label(
@@ -96,7 +109,12 @@ impl MonoParam {
         convention: ParamConvention,
         label: Option<String>,
     ) -> Self {
-        Self { name: name.into(), ty, convention, label }
+        Self {
+            name: name.into(),
+            ty,
+            convention,
+            label,
+        }
     }
 }
 
@@ -108,7 +126,10 @@ pub struct MonoField {
 
 impl MonoField {
     pub fn new(name: impl Into<String>, ty: TyId) -> Self {
-        Self { name: name.into(), ty }
+        Self {
+            name: name.into(),
+            ty,
+        }
     }
 }
 
@@ -122,7 +143,12 @@ pub struct MonoStruct {
 
 impl MonoStruct {
     pub fn new(source: Entity, type_args: Vec<TyId>) -> Self {
-        Self { source, type_args, fields: Vec::new(), type_info: TypeInfo::none() }
+        Self {
+            source,
+            type_args,
+            fields: Vec::new(),
+            type_info: TypeInfo::none(),
+        }
     }
 }
 
@@ -135,7 +161,11 @@ pub struct MonoEnumCase {
 
 impl MonoEnumCase {
     pub fn new(name: impl Into<String>, discriminant: u32) -> Self {
-        Self { name: name.into(), discriminant, payload_fields: Vec::new() }
+        Self {
+            name: name.into(),
+            discriminant,
+            payload_fields: Vec::new(),
+        }
     }
 }
 
@@ -166,7 +196,6 @@ impl MonoEnum {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -247,7 +276,9 @@ mod tests {
     fn mono_module_resolve_name() {
         let arena = TyArena::new();
         let mut module = MonoModule::new(arena);
-        module.entity_names.insert(entity(1), "std.Array".to_string());
+        module
+            .entity_names
+            .insert(entity(1), "std.Array".to_string());
         assert_eq!(module.resolve_name(entity(1)), "std.Array");
         assert_eq!(module.resolve_name(entity(999)), "<unknown>");
     }
@@ -291,5 +322,4 @@ mod tests {
         assert_eq!(c.discriminant, 1);
         assert_eq!(c.payload_fields.len(), 1);
     }
-
 }

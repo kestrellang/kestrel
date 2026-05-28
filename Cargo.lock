@@ -1312,6 +1312,7 @@ dependencies = [
  "kestrel-compiler-driver",
  "kestrel-hecs",
  "kestrel-mir-2",
+ "kestrel-mir-3",
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-type-infer",

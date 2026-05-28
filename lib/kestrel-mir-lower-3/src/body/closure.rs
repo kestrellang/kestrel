@@ -15,17 +15,13 @@
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
-use kestrel_hir::body::{
-    HirBlock, HirClosureParam, HirExpr, HirExprId, HirStmt, HirStmtId,
-};
+use kestrel_hir::body::{HirBlock, HirClosureParam, HirExpr, HirExprId, HirStmt, HirStmtId};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir_3::value::ValueDef;
-use kestrel_mir_3::{
-    FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId,
-};
+use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
 
 use super::{LocalBinding, LoopInfo, OssaBodyCtx, ScopeFrame};
 
@@ -52,23 +48,25 @@ impl OssaBodyCtx<'_, '_> {
         let closure_ty = self.resolve_expr_type(expr_id);
 
         // Identify captured locals
-        let closure_param_locals: HashSet<HirLocalId> =
-            params.iter().map(|p| p.local).collect();
+        let closure_param_locals: HashSet<HirLocalId> = params.iter().map(|p| p.local).collect();
         let captured_locals = self.find_captures(body, &closure_param_locals);
 
         let closure_idx = self.ctx.closure_counter;
         self.ctx.closure_counter += 1;
-        let parent_name = self.ctx.module.functions.get(&self.func_entity)
+        let parent_name = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
             .map(|f| f.name.clone())
             .unwrap_or_default();
         let closure_name = format!("{}.closure.{}", parent_name, closure_idx);
 
         // Determine param and return types from the closure's function type
         let (param_tys, ret_ty) = match self.ctx.module.ty_arena.get(closure_ty) {
-            MirTy::FuncThick { params, ret } => (
-                params.iter().map(|(ty, _)| *ty).collect::<Vec<_>>(),
-                *ret,
-            ),
+            MirTy::FuncThick { params, ret } => {
+                (params.iter().map(|(ty, _)| *ty).collect::<Vec<_>>(), *ret)
+            },
             _ => {
                 let p: Vec<TyId> = params
                     .iter()
@@ -76,7 +74,7 @@ impl OssaBodyCtx<'_, '_> {
                     .collect();
                 let unit = self.ctx.module.ty_arena.unit();
                 (p, unit)
-            }
+            },
         };
 
         // Create env struct for captures
@@ -86,7 +84,11 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.module.register_name(env_entity, &env_struct_name);
 
             let mut env_def = StructDef::new(env_entity, &env_struct_name);
-            env_def.type_params = self.ctx.module.functions.get(&self.func_entity)
+            env_def.type_params = self
+                .ctx
+                .module
+                .functions
+                .get(&self.func_entity)
                 .map(|f| f.type_params.clone())
                 .unwrap_or_default();
             for &captured in &captured_locals {
@@ -112,11 +114,17 @@ impl OssaBodyCtx<'_, '_> {
         self.ctx.module.register_name(closure_entity, &closure_name);
 
         let mut func_def = FunctionDef::new(closure_entity, &closure_name, ret_ty);
-        func_def.type_params = self.ctx.module.functions.get(&self.func_entity)
+        func_def.type_params = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
             .map(|f| f.type_params.clone())
             .unwrap_or_default();
         func_def.kind = if let Some(env_entity) = env_struct_entity {
-            FunctionKind::ClosureCall { env_struct: env_entity }
+            FunctionKind::ClosureCall {
+                env_struct: env_entity,
+            }
         } else {
             FunctionKind::Closure {
                 parent_func: self.func_entity,
@@ -129,7 +137,10 @@ impl OssaBodyCtx<'_, '_> {
         // Env parameter — first value in the closure body.
         // Type is Pointer[EnvStruct] or Pointer[Unit] for no-capture closures.
         let env_ty = if let Some(env_entity) = env_struct_entity {
-            let tp_entities: Vec<kestrel_hecs::Entity> = self.ctx.module.functions
+            let tp_entities: Vec<kestrel_hecs::Entity> = self
+                .ctx
+                .module
+                .functions
                 .get(&self.func_entity)
                 .map(|f| f.type_params.iter().map(|tp| tp.entity).collect())
                 .unwrap_or_default();
@@ -146,13 +157,21 @@ impl OssaBodyCtx<'_, '_> {
 
         // Env param is the first ValueId (index 0) in the closure body
         let env_val = closure_body.alloc_value(ValueDef::owned(env_ty));
-        func_def.params.push(ParamDef::new("env", env_val, env_ty, ParamConvention::Consuming));
+        func_def.params.push(ParamDef::new(
+            "env",
+            env_val,
+            env_ty,
+            ParamConvention::Consuming,
+        ));
         closure_body.param_count += 1;
 
         // Closure params — sequential ValueIds after env
         let mut closure_local_map: HashMap<HirLocalId, LocalBinding> = HashMap::new();
         for (i, cp) in params.iter().enumerate() {
-            let ty = param_tys.get(i).copied().unwrap_or_else(|| self.ctx.module.ty_arena.error());
+            let ty = param_tys
+                .get(i)
+                .copied()
+                .unwrap_or_else(|| self.ctx.module.ty_arena.error());
             let val = closure_body.alloc_value(ValueDef::owned(ty));
             func_def.params.push(ParamDef::new(
                 &self.hir.locals[cp.local].name,
@@ -232,7 +251,8 @@ impl OssaBodyCtx<'_, '_> {
                     self.local_map.insert(captured, LocalBinding::Ssa(loaded));
                     self.emit_destroy_value(owned_field);
                 } else {
-                    self.local_map.insert(captured, LocalBinding::Ssa(owned_field));
+                    self.local_map
+                        .insert(captured, LocalBinding::Ssa(owned_field));
                 }
             }
 
@@ -342,11 +362,11 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(expr) = value {
                     self.collect_captures_expr(*expr, closure_params, captures, seen);
                 }
-            }
+            },
             HirStmt::Expr { expr, .. } => {
                 self.collect_captures_expr(*expr, closure_params, captures, seen);
-            }
-            HirStmt::Deinit { .. } => {}
+            },
+            HirStmt::Deinit { .. } => {},
         }
     }
 
@@ -365,23 +385,23 @@ impl OssaBodyCtx<'_, '_> {
                 {
                     captures.push(*local_id);
                 }
-            }
+            },
             HirExpr::Call { callee, args, .. } => {
                 self.collect_captures_expr(*callee, closure_params, captures, seen);
                 for arg in args {
                     self.collect_captures_expr(arg.value, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::MethodCall { receiver, args, .. }
             | HirExpr::ProtocolCall { receiver, args, .. } => {
                 self.collect_captures_expr(*receiver, closure_params, captures, seen);
                 for arg in args {
                     self.collect_captures_expr(arg.value, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
                 self.collect_captures_expr(*base, closure_params, captures, seen);
-            }
+            },
             HirExpr::If {
                 condition,
                 then_body,
@@ -393,10 +413,10 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(eb) = else_body {
                     self.collect_captures_block(eb, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::Loop { body, .. } => {
                 self.collect_captures_block(body, closure_params, captures, seen);
-            }
+            },
             HirExpr::Match {
                 scrutinee, arms, ..
             } => {
@@ -407,49 +427,49 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     self.collect_captures_expr(arm.body, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::Block { body, .. } => {
                 self.collect_captures_block(body, closure_params, captures, seen);
-            }
+            },
             HirExpr::Assign { target, value, .. } => {
                 self.collect_captures_expr(*target, closure_params, captures, seen);
                 self.collect_captures_expr(*value, closure_params, captures, seen);
-            }
+            },
             HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
                 for &e in elements {
                     self.collect_captures_expr(e, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::Dict { entries, .. } => {
                 for entry in entries {
                     self.collect_captures_expr(entry.key, closure_params, captures, seen);
                     self.collect_captures_expr(entry.value, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::Return { value, .. } => {
                 if let Some(v) = value {
                     self.collect_captures_expr(*v, closure_params, captures, seen);
                 }
-            }
+            },
             HirExpr::ImplicitMember { args, .. } => {
                 if let Some(call_args) = args {
                     for arg in call_args {
                         self.collect_captures_expr(arg.value, closure_params, captures, seen);
                     }
                 }
-            }
+            },
             HirExpr::Sugar { inner, .. } => {
                 self.collect_captures_expr(*inner, closure_params, captures, seen);
-            }
+            },
             HirExpr::Closure { body, .. } => {
                 self.collect_captures_block(body, closure_params, captures, seen);
-            }
+            },
             HirExpr::Literal { .. }
             | HirExpr::Def(..)
             | HirExpr::OverloadSet { .. }
             | HirExpr::Break { .. }
             | HirExpr::Continue { .. }
-            | HirExpr::Error { .. } => {}
+            | HirExpr::Error { .. } => {},
         }
     }
 }

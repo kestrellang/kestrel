@@ -16,7 +16,12 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
     for s in module.structs.values() {
         for field in &s.fields {
             if is_error(&module, field.ty) {
-                emit(ctx, &mut n, s.entity, format!("field '{}.{}'", s.name, field.name));
+                emit(
+                    ctx,
+                    &mut n,
+                    s.entity,
+                    format!("field '{}.{}'", s.name, field.name),
+                );
             }
         }
     }
@@ -44,7 +49,12 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
 
     for f in module.functions.values() {
         if is_error(&module, f.ret) {
-            emit(ctx, &mut n, f.entity, format!("return type of '{}'", f.name));
+            emit(
+                ctx,
+                &mut n,
+                f.entity,
+                format!("return type of '{}'", f.name),
+            );
         }
         for p in &f.params {
             if is_error(&module, p.ty) {
@@ -76,8 +86,10 @@ fn emit(ctx: &LowerCtx, n: &mut usize, entity: Entity, location: String) {
         .with_message(format!(
             "internal compiler error: unresolved MIR type at {location}"
         ))
-        .with_labels(vec![Label::primary(span.file_id, span.range())
-            .with_message("an earlier phase should have diagnosed this")])
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range())
+                .with_message("an earlier phase should have diagnosed this"),
+        ])
         .with_notes(vec![
             "this indicates a missing `UnresolvedTypeParam` diagnostic in type inference; \
              please file a bug with the program that triggered it"

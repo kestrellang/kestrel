@@ -26,68 +26,196 @@ impl Instruction {
     }
 
     pub fn with_span(kind: InstKind, span: Span) -> Self {
-        Self { kind, span: Some(span) }
+        Self {
+            kind,
+            span: Some(span),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InstKind {
     // -- Value lifecycle --
-    CopyValue { result: ValueId, operand: ValueId },
-    MoveValue { result: ValueId, operand: ValueId },
-    DestroyValue { operand: ValueId },
+    CopyValue {
+        result: ValueId,
+        operand: ValueId,
+    },
+    MoveValue {
+        result: ValueId,
+        operand: ValueId,
+    },
+    DestroyValue {
+        operand: ValueId,
+    },
 
     // -- Borrowing --
-    BeginBorrow { result: ValueId, operand: ValueId },
-    EndBorrow { operand: ValueId },
-    BeginMutBorrow { result: ValueId, operand: ValueId },
-    EndMutBorrow { operand: ValueId },
+    BeginBorrow {
+        result: ValueId,
+        operand: ValueId,
+    },
+    EndBorrow {
+        operand: ValueId,
+    },
+    BeginMutBorrow {
+        result: ValueId,
+        operand: ValueId,
+    },
+    EndMutBorrow {
+        operand: ValueId,
+    },
 
     // -- Memory access --
-    Load { result: ValueId, address: ValueId },
-    CopyAddr { result: ValueId, address: ValueId, ty: TyId },
-    Take { result: ValueId, address: ValueId, ty: TyId },
-    BeginBorrowAddr { result: ValueId, address: ValueId, ty: TyId },
-    BeginMutBorrowAddr { result: ValueId, address: ValueId, ty: TyId },
-    StoreInit { address: ValueId, value: ValueId },
-    StoreAssign { address: ValueId, value: ValueId },
-    DestroyAddr { address: ValueId, ty: TyId },
+    Load {
+        result: ValueId,
+        address: ValueId,
+    },
+    CopyAddr {
+        result: ValueId,
+        address: ValueId,
+        ty: TyId,
+    },
+    Take {
+        result: ValueId,
+        address: ValueId,
+        ty: TyId,
+    },
+    BeginBorrowAddr {
+        result: ValueId,
+        address: ValueId,
+        ty: TyId,
+    },
+    BeginMutBorrowAddr {
+        result: ValueId,
+        address: ValueId,
+        ty: TyId,
+    },
+    StoreInit {
+        address: ValueId,
+        value: ValueId,
+    },
+    StoreAssign {
+        address: ValueId,
+        value: ValueId,
+    },
+    DestroyAddr {
+        address: ValueId,
+        ty: TyId,
+    },
 
     // -- Enum discriminant --
-    Discriminant { result: ValueId, operand: ValueId },
+    Discriminant {
+        result: ValueId,
+        operand: ValueId,
+    },
 
     // -- Computation --
-    Op1 { result: ValueId, op: Op, arg: ValueId },
-    Op2 { result: ValueId, op: Op, lhs: ValueId, rhs: ValueId },
-    Op3 { result: ValueId, op: Op, a: ValueId, b: ValueId, c: ValueId },
+    Op1 {
+        result: ValueId,
+        op: Op,
+        arg: ValueId,
+    },
+    Op2 {
+        result: ValueId,
+        op: Op,
+        lhs: ValueId,
+        rhs: ValueId,
+    },
+    Op3 {
+        result: ValueId,
+        op: Op,
+        a: ValueId,
+        b: ValueId,
+        c: ValueId,
+    },
 
     // -- Constants --
-    Literal { result: ValueId, value: Immediate },
-    GlobalRef { result: ValueId, entity: Entity },
+    Literal {
+        result: ValueId,
+        value: Immediate,
+    },
+    GlobalRef {
+        result: ValueId,
+        entity: Entity,
+    },
 
     // -- Aggregates: construction --
-    Struct { result: ValueId, ty: TyId, fields: Vec<(FieldIdx, ValueId)> },
-    Tuple { result: ValueId, elements: Vec<ValueId> },
-    Enum { result: ValueId, enum_ty: TyId, variant: VariantIdx, payload: Vec<ValueId> },
-    Array { result: ValueId, element_ty: TyId, elements: Vec<ValueId> },
+    Struct {
+        result: ValueId,
+        ty: TyId,
+        fields: Vec<(FieldIdx, ValueId)>,
+    },
+    Tuple {
+        result: ValueId,
+        elements: Vec<ValueId>,
+    },
+    Enum {
+        result: ValueId,
+        enum_ty: TyId,
+        variant: VariantIdx,
+        payload: Vec<ValueId>,
+    },
+    Array {
+        result: ValueId,
+        element_ty: TyId,
+        elements: Vec<ValueId>,
+    },
 
     // -- Aggregates: destructuring --
-    StructExtract { result: ValueId, operand: ValueId, field: FieldIdx },
-    TupleExtract { result: ValueId, operand: ValueId, index: u32 },
-    EnumPayload { result: ValueId, operand: ValueId, variant: VariantIdx, field: FieldIdx },
-    DestructureStruct { results: Vec<ValueId>, operand: ValueId },
-    DestructureTuple { results: Vec<ValueId>, operand: ValueId },
-    DestructureEnum { results: Vec<ValueId>, operand: ValueId, variant: VariantIdx },
+    StructExtract {
+        result: ValueId,
+        operand: ValueId,
+        field: FieldIdx,
+    },
+    TupleExtract {
+        result: ValueId,
+        operand: ValueId,
+        index: u32,
+    },
+    EnumPayload {
+        result: ValueId,
+        operand: ValueId,
+        variant: VariantIdx,
+        field: FieldIdx,
+    },
+    DestructureStruct {
+        results: Vec<ValueId>,
+        operand: ValueId,
+    },
+    DestructureTuple {
+        results: Vec<ValueId>,
+        operand: ValueId,
+    },
+    DestructureEnum {
+        results: Vec<ValueId>,
+        operand: ValueId,
+        variant: VariantIdx,
+    },
 
     // -- Calls --
-    Call { result: Option<ValueId>, callee: Callee, args: Vec<CallArg> },
-    ApplyPartial { result: ValueId, func: Entity, captures: Vec<ValueId> },
+    Call {
+        result: Option<ValueId>,
+        callee: Callee,
+        args: Vec<CallArg>,
+    },
+    ApplyPartial {
+        result: ValueId,
+        func: Entity,
+        captures: Vec<ValueId>,
+    },
 
     // -- Address projection --
-    FieldAddr { result: ValueId, base: ValueId, ty: TyId, field: FieldIdx },
+    FieldAddr {
+        result: ValueId,
+        base: ValueId,
+        ty: TyId,
+        field: FieldIdx,
+    },
 
     // -- Special --
-    Uninit { result: ValueId, ty: TyId },
+    Uninit {
+        result: ValueId,
+        ty: TyId,
+    },
 }
 
 impl InstKind {
@@ -137,16 +265,14 @@ impl InstKind {
         match self {
             InstKind::DestructureStruct { results, .. }
             | InstKind::DestructureTuple { results, .. }
-            | InstKind::DestructureEnum { results, .. } => {
-                results.iter().copied().collect()
-            }
+            | InstKind::DestructureEnum { results, .. } => results.iter().copied().collect(),
             other => {
                 if let Some(r) = other.result() {
                     SmallVec::from_elem(r, 1)
                 } else {
                     SmallVec::new()
                 }
-            }
+            },
         }
     }
 
@@ -166,28 +292,24 @@ impl InstKind {
             | InstKind::EnumPayload { operand, .. }
             | InstKind::DestructureStruct { operand, .. }
             | InstKind::DestructureTuple { operand, .. }
-            | InstKind::DestructureEnum { operand, .. } => {
-                SmallVec::from_elem(*operand, 1)
-            }
+            | InstKind::DestructureEnum { operand, .. } => SmallVec::from_elem(*operand, 1),
             InstKind::Load { address, .. } => SmallVec::from_elem(*address, 1),
             InstKind::CopyAddr { address, .. }
             | InstKind::Take { address, .. }
             | InstKind::BeginBorrowAddr { address, .. }
             | InstKind::BeginMutBorrowAddr { address, .. }
-            | InstKind::DestroyAddr { address, .. } => {
-                SmallVec::from_elem(*address, 1)
-            }
-            InstKind::StoreInit { address, value }
-            | InstKind::StoreAssign { address, value } => {
+            | InstKind::DestroyAddr { address, .. } => SmallVec::from_elem(*address, 1),
+            InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
                 smallvec::smallvec![*address, *value]
-            }
+            },
             InstKind::Op1 { arg, .. } => SmallVec::from_elem(*arg, 1),
             InstKind::Op2 { lhs, rhs, .. } => smallvec::smallvec![*lhs, *rhs],
             InstKind::Op3 { a, b, c, .. } => smallvec::smallvec![*a, *b, *c],
             InstKind::Literal { .. } | InstKind::GlobalRef { .. } => SmallVec::new(),
             InstKind::Struct { fields, .. } => fields.iter().map(|(_, v)| *v).collect(),
-            InstKind::Tuple { elements, .. }
-            | InstKind::Array { elements, .. } => elements.iter().copied().collect(),
+            InstKind::Tuple { elements, .. } | InstKind::Array { elements, .. } => {
+                elements.iter().copied().collect()
+            },
             InstKind::Enum { payload, .. } => payload.iter().copied().collect(),
             InstKind::Call { args, .. } => args.iter().map(|a| a.value).collect(),
             InstKind::ApplyPartial { captures, .. } => captures.iter().copied().collect(),

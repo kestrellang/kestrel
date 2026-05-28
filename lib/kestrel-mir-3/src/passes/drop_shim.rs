@@ -19,7 +19,9 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
 
     // Pre-intern Named types so shim generation can find them.
     for s in module.structs.values() {
-        let type_args: Vec<TyId> = s.type_params.iter()
+        let type_args: Vec<TyId> = s
+            .type_params
+            .iter()
             .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
             .collect();
         module.ty_arena.intern(MirTy::Named {
@@ -28,7 +30,9 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
         });
     }
     for e in module.enums.values() {
-        let type_args: Vec<TyId> = e.type_params.iter()
+        let type_args: Vec<TyId> = e
+            .type_params
+            .iter()
             .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
             .collect();
         module.ty_arena.intern(MirTy::Named {
@@ -42,8 +46,13 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
 
     // Pre-intern Pointer(Named(entity)) for types with deinit (needed by BeginMutBorrow)
     for s in module.structs.values() {
-        if let DropBehavior::StructDrop { deinit: Some(_), .. } = &s.type_info.drop {
-            let tp_ty_ids: Vec<TyId> = s.type_params.iter()
+        if let DropBehavior::StructDrop {
+            deinit: Some(_), ..
+        } = &s.type_info.drop
+        {
+            let tp_ty_ids: Vec<TyId> = s
+                .type_params
+                .iter()
                 .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
                 .collect();
             let named_ty = module.ty_arena.intern(MirTy::Named {
@@ -54,8 +63,13 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
         }
     }
     for e in module.enums.values() {
-        if let DropBehavior::EnumDrop { deinit: Some(_), .. } = &e.type_info.drop {
-            let tp_ty_ids: Vec<TyId> = e.type_params.iter()
+        if let DropBehavior::EnumDrop {
+            deinit: Some(_), ..
+        } = &e.type_info.drop
+        {
+            let tp_ty_ids: Vec<TyId> = e
+                .type_params
+                .iter()
                 .map(|tp| module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
                 .collect();
             let named_ty = module.ty_arena.intern(MirTy::Named {
@@ -129,16 +143,27 @@ fn generate_struct_shim(
 ) -> (FunctionDef, Vec<Entity>) {
     let name = format!("__drop${}", struct_def.name);
 
-    let tp_ty_ids: Vec<TyId> = struct_def.type_params.iter()
-        .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
-            .expect("TypeParam should be interned"))
+    let tp_ty_ids: Vec<TyId> = struct_def
+        .type_params
+        .iter()
+        .map(|tp| {
+            module
+                .ty_arena
+                .find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+                .expect("TypeParam should be interned")
+        })
         .collect();
-    let self_ty = module.ty_arena.find(|t| {
-        matches!(t, MirTy::Named { entity, type_args }
+    let self_ty = module
+        .ty_arena
+        .find(|t| {
+            matches!(t, MirTy::Named { entity, type_args }
             if *entity == struct_def.entity && *type_args == tp_ty_ids)
-    }).expect("struct type should be interned");
+        })
+        .expect("struct type should be interned");
 
-    let unit_ty = module.ty_arena.find(|t| matches!(t, MirTy::Tuple(e) if e.is_empty()))
+    let unit_ty = module
+        .ty_arena
+        .find(|t| matches!(t, MirTy::Tuple(e) if e.is_empty()))
         .expect("unit type should be interned");
 
     let DropBehavior::StructDrop { deinit, fields } = &struct_def.type_info.drop else {
@@ -212,6 +237,7 @@ fn generate_struct_shim(
             ty: field_def.ty,
             ownership,
             borrow_source: None,
+            span: None,
         }));
     }
     insts.push(Instruction::new(InstKind::DestructureStruct {
@@ -244,9 +270,16 @@ fn generate_struct_shim(
     body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(unit_val));
 
     let mut func = FunctionDef::new(shim_entity, name, unit_ty);
-    func.kind = FunctionKind::DropShim { nominal: struct_def.entity };
+    func.kind = FunctionKind::DropShim {
+        nominal: struct_def.entity,
+    };
     func.type_params = struct_def.type_params.clone();
-    func.params.push(ParamDef::new("self", self_val, self_ty, ParamConvention::Consuming));
+    func.params.push(ParamDef::new(
+        "self",
+        self_val,
+        self_ty,
+        ParamConvention::Consuming,
+    ));
     func.body = Some(body);
 
     (func, field_type_entities)
@@ -260,16 +293,27 @@ fn generate_enum_shim(
 ) -> (FunctionDef, Vec<Entity>) {
     let name = format!("__drop${}", enum_def.name);
 
-    let tp_ty_ids: Vec<TyId> = enum_def.type_params.iter()
-        .map(|tp| module.ty_arena.find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
-            .expect("TypeParam should be interned"))
+    let tp_ty_ids: Vec<TyId> = enum_def
+        .type_params
+        .iter()
+        .map(|tp| {
+            module
+                .ty_arena
+                .find(|t| matches!(t, MirTy::TypeParam(e) if *e == tp.entity))
+                .expect("TypeParam should be interned")
+        })
         .collect();
-    let self_ty = module.ty_arena.find(|t| {
-        matches!(t, MirTy::Named { entity, type_args }
+    let self_ty = module
+        .ty_arena
+        .find(|t| {
+            matches!(t, MirTy::Named { entity, type_args }
             if *entity == enum_def.entity && *type_args == tp_ty_ids)
-    }).expect("enum type should be interned");
+        })
+        .expect("enum type should be interned");
 
-    let unit_ty = module.ty_arena.find(|t| matches!(t, MirTy::Tuple(e) if e.is_empty()))
+    let unit_ty = module
+        .ty_arena
+        .find(|t| matches!(t, MirTy::Tuple(e) if e.is_empty()))
         .expect("unit type should be interned");
 
     let DropBehavior::EnumDrop { deinit, variants } = &enum_def.type_info.drop else {
@@ -295,7 +339,9 @@ fn generate_enum_shim(
 
     // Optional deinit call
     if let Some(deinit_entity) = deinit {
-        let ptr_ty = module.ty_arena.find(|t| matches!(t, MirTy::Pointer(p) if *p == self_ty))
+        let ptr_ty = module
+            .ty_arena
+            .find(|t| matches!(t, MirTy::Pointer(p) if *p == self_ty))
             .expect("Pointer type should be interned");
         let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, self_val));
         entry_insts.push(Instruction::new(InstKind::BeginMutBorrow {
@@ -316,9 +362,15 @@ fn generate_enum_shim(
     }
 
     // Discriminant — non-consuming read of the tag
-    let i32_ty = module.ty_arena.find(|t| matches!(t, MirTy::I32))
-        .unwrap_or_else(|| module.ty_arena.find(|t| matches!(t, MirTy::I8))
-            .expect("integer type should be interned"));
+    let i32_ty = module
+        .ty_arena
+        .find(|t| matches!(t, MirTy::I32))
+        .unwrap_or_else(|| {
+            module
+                .ty_arena
+                .find(|t| matches!(t, MirTy::I8))
+                .expect("integer type should be interned")
+        });
     let disc_val = body.alloc_value(ValueDef::owned(i32_ty));
     entry_insts.push(Instruction::new(InstKind::Discriminant {
         result: disc_val,
@@ -328,12 +380,13 @@ fn generate_enum_shim(
     // Exit block — returns unit
     let exit_block = body.alloc_block();
     let exit_unit = body.alloc_value(ValueDef::owned(unit_ty));
-    body.block_mut(exit_block).insts.push(Instruction::new(InstKind::Literal {
-        result: exit_unit,
-        value: Immediate::unit(),
-    }));
-    body.block_mut(exit_block).terminator =
-        Terminator::new(TerminatorKind::Return(exit_unit));
+    body.block_mut(exit_block)
+        .insts
+        .push(Instruction::new(InstKind::Literal {
+            result: exit_unit,
+            value: Immediate::unit(),
+        }));
+    body.block_mut(exit_block).terminator = Terminator::new(TerminatorKind::Return(exit_unit));
 
     // Build per-variant blocks. Each arm receives both self and the discriminant
     // as block args so both @owned values are consumed by forwarding.
@@ -359,12 +412,15 @@ fn generate_enum_shim(
         let mut variant_insts = Vec::new();
 
         // Destroy the forwarded discriminant — no longer needed.
-        variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: variant_disc }));
+        variant_insts.push(Instruction::new(InstKind::DestroyValue {
+            operand: variant_disc,
+        }));
 
         // Destructure the enum for this variant. All payload values are @owned.
         let case_def = &enum_def.cases[variant_idx.index()];
         let payload_count = case_def.payload_fields.len();
-        let droppable_set: std::collections::HashSet<FieldIdx> = field_indices.iter().copied().collect();
+        let droppable_set: std::collections::HashSet<FieldIdx> =
+            field_indices.iter().copied().collect();
         let mut payload_vals = Vec::with_capacity(payload_count);
         for (i, pf) in case_def.payload_fields.iter().enumerate() {
             let fi = FieldIdx::new(i);
@@ -377,6 +433,7 @@ fn generate_enum_shim(
                 ty: pf.ty,
                 ownership,
                 borrow_source: None,
+                span: None,
             }));
         }
         variant_insts.push(Instruction::new(InstKind::DestructureEnum {
@@ -399,11 +456,10 @@ fn generate_enum_shim(
         }
 
         body.block_mut(variant_block).insts = variant_insts;
-        body.block_mut(variant_block).terminator =
-            Terminator::new(TerminatorKind::Jump {
-                target: exit_block,
-                args: vec![],
-            });
+        body.block_mut(variant_block).terminator = Terminator::new(TerminatorKind::Jump {
+            target: exit_block,
+            args: vec![],
+        });
 
         switch_arms.push(SwitchArm {
             pattern: crate::SwitchCase::Variant(*variant_idx),
@@ -426,17 +482,20 @@ fn generate_enum_shim(
         ty: i32_ty,
         ownership: Ownership::Owned,
     });
-    body.block_mut(wildcard_block).insts.push(
-        Instruction::new(InstKind::DestroyValue { operand: wildcard_disc }),
-    );
-    body.block_mut(wildcard_block).insts.push(
-        Instruction::new(InstKind::DestroyValue { operand: wildcard_self }),
-    );
-    body.block_mut(wildcard_block).terminator =
-        Terminator::new(TerminatorKind::Jump {
-            target: exit_block,
-            args: vec![],
-        });
+    body.block_mut(wildcard_block)
+        .insts
+        .push(Instruction::new(InstKind::DestroyValue {
+            operand: wildcard_disc,
+        }));
+    body.block_mut(wildcard_block)
+        .insts
+        .push(Instruction::new(InstKind::DestroyValue {
+            operand: wildcard_self,
+        }));
+    body.block_mut(wildcard_block).terminator = Terminator::new(TerminatorKind::Jump {
+        target: exit_block,
+        args: vec![],
+    });
     switch_arms.push(SwitchArm {
         pattern: crate::SwitchCase::Wildcard,
         target: wildcard_block,
@@ -450,9 +509,16 @@ fn generate_enum_shim(
     });
 
     let mut func = FunctionDef::new(shim_entity, name, unit_ty);
-    func.kind = FunctionKind::DropShim { nominal: enum_def.entity };
+    func.kind = FunctionKind::DropShim {
+        nominal: enum_def.entity,
+    };
     func.type_params = enum_def.type_params.clone();
-    func.params.push(ParamDef::new("self", self_val, self_ty, ParamConvention::Consuming));
+    func.params.push(ParamDef::new(
+        "self",
+        self_val,
+        self_ty,
+        ParamConvention::Consuming,
+    ));
     func.body = Some(body);
 
     (func, field_type_entities)
@@ -470,7 +536,11 @@ fn patch_shim_callees(module: &mut MirModule, shim_map: &HashMap<Entity, Entity>
         for block in &mut body.blocks {
             for inst in &mut block.insts {
                 if let InstKind::Call {
-                    callee: Callee::Direct { func: callee_entity, .. },
+                    callee:
+                        Callee::Direct {
+                            func: callee_entity,
+                            ..
+                        },
                     ..
                 } = &mut inst.kind
                     && let Some(&shim_entity) = shim_map.get(callee_entity)
@@ -510,7 +580,12 @@ mod tests {
     fn verify_shim(module: &MirModule, func: &FunctionDef) {
         let body = func.body.as_ref().unwrap();
         let errors = crate::verify::verify_ossa(body, module, &func.name, func.entity);
-        assert!(errors.is_empty(), "verifier errors in {}: {:?}", func.name, errors);
+        assert!(
+            errors.is_empty(),
+            "verifier errors in {}: {:?}",
+            func.name,
+            errors
+        );
     }
 
     // ---- Struct with droppable fields, no deinit ----
@@ -527,7 +602,10 @@ mod tests {
         inner_def.add_field(FieldDef::new("data", i64_ty));
         inner_def.type_info = TypeInfo {
             copy: CopyBehavior::None,
-            drop: DropBehavior::StructDrop { deinit: None, fields: vec![] },
+            drop: DropBehavior::StructDrop {
+                deinit: None,
+                fields: vec![],
+            },
             layout: None,
         };
         module.add_struct(inner_def);
@@ -559,9 +637,13 @@ mod tests {
         ));
         let body = outer_shim.body.as_ref().unwrap();
         // Should have: DestructureStruct + DestroyValue(field 0) + Literal(unit)
-        let has_destructure = body.blocks[0].insts.iter()
+        let has_destructure = body.blocks[0]
+            .insts
+            .iter()
             .any(|i| matches!(&i.kind, InstKind::DestructureStruct { .. }));
-        let has_destroy = body.blocks[0].insts.iter()
+        let has_destroy = body.blocks[0]
+            .insts
+            .iter()
             .any(|i| matches!(&i.kind, InstKind::DestroyValue { .. }));
         assert!(has_destructure, "should have DestructureStruct");
         assert!(has_destroy, "should have DestroyValue for droppable field");
@@ -588,7 +670,10 @@ mod tests {
         inner_def.add_field(FieldDef::new("data", i64_ty));
         inner_def.type_info = TypeInfo {
             copy: CopyBehavior::None,
-            drop: DropBehavior::StructDrop { deinit: None, fields: vec![] },
+            drop: DropBehavior::StructDrop {
+                deinit: None,
+                fields: vec![],
+            },
             layout: None,
         };
         module.add_struct(inner_def);
@@ -615,7 +700,11 @@ mod tests {
 
         // Add a stub FunctionDef for the deinit so the module is consistent
         let deinit_unit = module.ty_arena.unit();
-        module.add_function(FunctionDef::new(deinit_entity, "MyType.deinit", deinit_unit));
+        module.add_function(FunctionDef::new(
+            deinit_entity,
+            "MyType.deinit",
+            deinit_unit,
+        ));
 
         let mut next_entity = 100;
         synthesize_drop_shims(&mut module, &mut next_entity);
@@ -624,11 +713,15 @@ mod tests {
         let body = shim.body.as_ref().unwrap();
 
         // Should have: BeginMutBorrow, Call(deinit), EndMutBorrow, DestructureStruct, DestroyValue, Literal
-        let has_borrow = body.blocks[0].insts.iter()
+        let has_borrow = body.blocks[0]
+            .insts
+            .iter()
             .any(|i| matches!(&i.kind, InstKind::BeginMutBorrow { .. }));
         let has_call = body.blocks[0].insts.iter()
             .any(|i| matches!(&i.kind, InstKind::Call { callee: Callee::Direct { func, .. }, .. } if *func == deinit_entity));
-        let has_end_borrow = body.blocks[0].insts.iter()
+        let has_end_borrow = body.blocks[0]
+            .insts
+            .iter()
             .any(|i| matches!(&i.kind, InstKind::EndMutBorrow { .. }));
         assert!(has_borrow, "should have BeginMutBorrow");
         assert!(has_call, "should have deinit Call");
@@ -653,7 +746,10 @@ mod tests {
         inner_def.add_field(FieldDef::new("data", i64_ty));
         inner_def.type_info = TypeInfo {
             copy: CopyBehavior::None,
-            drop: DropBehavior::StructDrop { deinit: None, fields: vec![] },
+            drop: DropBehavior::StructDrop {
+                deinit: None,
+                fields: vec![],
+            },
             layout: None,
         };
         module.add_struct(inner_def);
@@ -663,7 +759,8 @@ mod tests {
         let _enum_ty = module.ty_arena.named(enum_entity, vec![]);
         let mut enum_def = EnumDef::new(enum_entity, "Result");
         enum_def.add_case(EnumCaseDef::with_payload(
-            "Ok", 0,
+            "Ok",
+            0,
             vec![FieldDef::new("value", inner_ty)],
         ));
         enum_def.add_case(EnumCaseDef::new("Err", 1));
@@ -671,9 +768,7 @@ mod tests {
             copy: CopyBehavior::None,
             drop: DropBehavior::EnumDrop {
                 deinit: None,
-                variants: vec![
-                    (VariantIdx::new(0), vec![FieldIdx::new(0)]),
-                ],
+                variants: vec![(VariantIdx::new(0), vec![FieldIdx::new(0)])],
             },
             layout: None,
         };
@@ -709,7 +804,10 @@ mod tests {
         c_def.add_field(FieldDef::new("val", i64_ty));
         c_def.type_info = TypeInfo {
             copy: CopyBehavior::None,
-            drop: DropBehavior::StructDrop { deinit: None, fields: vec![] },
+            drop: DropBehavior::StructDrop {
+                deinit: None,
+                fields: vec![],
+            },
             layout: None,
         };
         module.add_struct(c_def);

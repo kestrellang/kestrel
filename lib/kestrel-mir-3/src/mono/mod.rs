@@ -22,10 +22,10 @@ use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::InstKind;
+use crate::item::enum_def::EnumDef;
 use crate::item::function::{FunctionDef, FunctionKind};
 use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
-use crate::item::enum_def::EnumDef;
 use crate::item::witness::WitnessDef;
 use crate::item::{Layout, TargetConfig};
 use crate::layout::StructLayout;
@@ -33,7 +33,6 @@ use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
 use crate::value::Ownership;
 use crate::{MirModule, MonoFuncId, TyId};
-
 
 /// Check if a function needs self_type in its InstantiationKey.
 ///
@@ -132,12 +131,26 @@ pub fn monomorphize(
         // Safety net: resolve any residual projections in key type_args/self_type.
         // Phase 1 should produce fully-resolved keys, but deep_resolve catches
         // edge cases where substitute() couldn't resolve nested projections.
-        let resolved_type_args: Vec<TyId> = key.type_args
+        let resolved_type_args: Vec<TyId> = key
+            .type_args
             .iter()
-            .map(|&ta| collect::substitute_and_resolve(&mut mono_module.ty_arena, &witnesses, ta, &SubstMap::new()))
+            .map(|&ta| {
+                collect::substitute_and_resolve(
+                    &mut mono_module.ty_arena,
+                    &witnesses,
+                    ta,
+                    &SubstMap::new(),
+                )
+            })
             .collect();
-        let resolved_self = key.self_type
-            .map(|st| collect::substitute_and_resolve(&mut mono_module.ty_arena, &witnesses, st, &SubstMap::new()));
+        let resolved_self = key.self_type.map(|st| {
+            collect::substitute_and_resolve(
+                &mut mono_module.ty_arena,
+                &witnesses,
+                st,
+                &SubstMap::new(),
+            )
+        });
 
         let mangled_name = mangle::mangle_function(
             &mono_module.ty_arena,
@@ -197,13 +210,27 @@ fn monomorphize_body(
         .get(&key.func_entity)
         .expect("instantiation key must reference a valid function");
 
-    let subst = collect::build_subst(func, &key.type_args, key.self_type, arena, protocols, witnesses);
+    let subst = collect::build_subst(
+        func,
+        &key.type_args,
+        key.self_type,
+        arena,
+        protocols,
+        witnesses,
+    );
 
     // Substitute param and return types
     let params: Vec<MonoParam> = func
         .params
         .iter()
-        .map(|p| MonoParam::with_label(&p.name, substitute(arena, p.ty, &subst), p.convention, p.external_label.clone()))
+        .map(|p| {
+            MonoParam::with_label(
+                &p.name,
+                substitute(arena, p.ty, &subst),
+                p.convention,
+                p.external_label.clone(),
+            )
+        })
         .collect();
     let ret = substitute(arena, func.ret, &subst);
 
@@ -276,7 +303,13 @@ fn monomorphize_body(
     let resolve = |arena: &mut TyArena, ty: TyId| -> TyId {
         collect::substitute_and_resolve(arena, witnesses, ty, &subst)
     };
-    let params: Vec<MonoParam> = params.into_iter().map(|mut p| { p.ty = resolve(arena, p.ty); p }).collect();
+    let params: Vec<MonoParam> = params
+        .into_iter()
+        .map(|mut p| {
+            p.ty = resolve(arena, p.ty);
+            p
+        })
+        .collect();
     let ret = resolve(arena, ret);
     for value in &mut mono_body.values {
         value.ty = resolve(arena, value.ty);
@@ -321,34 +354,34 @@ fn substitute_inst(
         | InstKind::FieldAddr { ty, .. }
         | InstKind::Uninit { ty, .. } => {
             *ty = substitute(arena, *ty, subst);
-        }
+        },
 
         // Aggregate construction
         InstKind::Struct { ty, .. } => {
             *ty = substitute(arena, *ty, subst);
-        }
+        },
         InstKind::Enum { enum_ty, .. } => {
             *enum_ty = substitute(arena, *enum_ty, subst);
-        }
+        },
         InstKind::Array { element_ty, .. } => {
             *element_ty = substitute(arena, *element_ty, subst);
-        }
+        },
 
         // Ops with embedded type
         InstKind::Op1 { op, .. } => {
             substitute_op_type(arena, op, subst);
-        }
+        },
         InstKind::Op2 { op, .. } => {
             substitute_op_type(arena, op, subst);
-        }
+        },
         InstKind::Op3 { op, .. } => {
             substitute_op_type(arena, op, subst);
-        }
+        },
 
         // Constants
         InstKind::Literal { value, .. } => {
             substitute_immediate(arena, &mut value.kind, subst);
-        }
+        },
 
         // Calls
         InstKind::Call { callee, .. } => {
@@ -365,10 +398,10 @@ fn substitute_inst(
                 inst_idx,
                 resolved_witnesses,
             );
-        }
+        },
 
         // All other InstKinds carry only ValueId — no substitution needed
-        _ => {}
+        _ => {},
     }
 }
 
@@ -376,7 +409,7 @@ fn substitute_immediate(arena: &mut TyArena, kind: &mut ImmediateKind, subst: &S
     match kind {
         ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
             *ty = substitute(arena, *ty, subst);
-        }
+        },
         ImmediateKind::FunctionRef {
             type_args,
             self_type,
@@ -388,8 +421,8 @@ fn substitute_immediate(arena: &mut TyArena, kind: &mut ImmediateKind, subst: &S
             if let Some(st) = self_type {
                 *st = substitute(arena, *st, subst);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -407,8 +440,8 @@ fn substitute_op_type(arena: &mut TyArena, op: &mut crate::op::Op, subst: &Subst
         | Op::AlignOf(ty)
         | Op::StackAlloc(ty) => {
             *ty = substitute(arena, *ty, subst);
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -451,7 +484,7 @@ fn substitute_callee_and_resolve(
                     }
                 }
             }
-        }
+        },
         Callee::Witness {
             protocol,
             method,
@@ -484,8 +517,8 @@ fn substitute_callee_and_resolve(
                     ),
                 );
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -500,7 +533,11 @@ fn resolve_witnesses_to_direct(body_result: &mut MonoBodyResult) {
     };
     for (bi, block) in body.blocks.iter_mut().enumerate() {
         for (ii, inst) in block.insts.iter_mut().enumerate() {
-            if let InstKind::Call { callee: callee @ Callee::Witness { .. }, .. } = &mut inst.kind {
+            if let InstKind::Call {
+                callee: callee @ Callee::Witness { .. },
+                ..
+            } = &mut inst.kind
+            {
                 if let Some(target_key) = body_result.resolved_witnesses.get(&(bi, ii)) {
                     *callee = Callee::Direct {
                         func: target_key.func_entity,
@@ -528,7 +565,7 @@ fn rewrite_callees(
             match &mut inst.kind {
                 InstKind::Call { callee, .. } => {
                     rewrite_callee(callee, bi, ii, &body_result.resolved_witnesses, func_id_map);
-                }
+                },
                 InstKind::Literal { value, .. } => {
                     if let ImmediateKind::FunctionRef {
                         func,
@@ -541,8 +578,8 @@ fn rewrite_callees(
                             value.kind = ImmediateKind::MonoFunctionRef(mono_id);
                         }
                     }
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
     }
@@ -561,23 +598,19 @@ fn rewrite_callee(
             type_args,
             self_type,
         } => {
-            let key = InstantiationKey::new(
-                *func,
-                type_args.clone(),
-                *self_type,
-            );
+            let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
             if let Some(&mono_id) = func_id_map.get(&key) {
                 *callee = Callee::Resolved(mono_id);
             }
-        }
+        },
         Callee::Witness { .. } => {
             if let Some(target_key) = resolved_witnesses.get(&(block_idx, inst_idx))
                 && let Some(&mono_id) = func_id_map.get(target_key)
             {
                 *callee = Callee::Resolved(mono_id);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -590,7 +623,10 @@ fn resolve_types_and_layouts(
     witnesses: &[WitnessDef],
     mono_bodies: &[MonoBodyResult],
     target: &TargetConfig,
-) -> (IndexMap<MonoTypeKey, MonoStruct>, IndexMap<MonoTypeKey, MonoEnum>) {
+) -> (
+    IndexMap<MonoTypeKey, MonoStruct>,
+    IndexMap<MonoTypeKey, MonoEnum>,
+) {
     // Collect all concrete Named types from monomorphized bodies
     let mut concrete_types: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
@@ -618,17 +654,21 @@ fn resolve_types_and_layouts(
             match kind {
                 ConcreteTypeKind::Struct(struct_entity) => {
                     let sdef = &structs[struct_entity];
-                    let subst = build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), type_args);
+                    let subst =
+                        build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), type_args);
 
                     let mut layout = StructLayout::new();
                     let mut all_resolved = true;
                     let mut fields = Vec::new();
 
                     for field in &sdef.fields {
-                        let concrete_ty = collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
+                        let concrete_ty =
+                            collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                         fields.push(MonoField::new(&field.name, concrete_ty));
 
-                        if let Some((size, align)) = mono_size_and_align(arena, concrete_ty, target, &layout_cache) {
+                        if let Some((size, align)) =
+                            mono_size_and_align(arena, concrete_ty, target, &layout_cache)
+                        {
                             layout.append_field(StructLayout::scalar(size, align));
                         } else {
                             all_resolved = false;
@@ -646,10 +686,11 @@ fn resolve_types_and_layouts(
                         mono_structs.insert((*entity, type_args.clone()), ms);
                         progress = true;
                     }
-                }
+                },
                 ConcreteTypeKind::Enum(enum_entity) => {
                     let edef = &enums[enum_entity];
-                    let subst = build_type_subst(edef.type_params.iter().map(|tp| tp.entity), type_args);
+                    let subst =
+                        build_type_subst(edef.type_params.iter().map(|tp| tp.entity), type_args);
 
                     let mut all_resolved = true;
                     let mut cases = Vec::new();
@@ -659,9 +700,12 @@ fn resolve_types_and_layouts(
                         let mut case_layout = StructLayout::new();
                         let mut mono_fields = Vec::new();
                         for field in &case.payload_fields {
-                            let concrete_ty = collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
+                            let concrete_ty =
+                                collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                             mono_fields.push(MonoField::new(&field.name, concrete_ty));
-                            if let Some((size, align)) = mono_size_and_align(arena, concrete_ty, target, &layout_cache) {
+                            if let Some((size, align)) =
+                                mono_size_and_align(arena, concrete_ty, target, &layout_cache)
+                            {
                                 case_layout.append_field(StructLayout::scalar(size, align));
                             } else {
                                 all_resolved = false;
@@ -681,14 +725,18 @@ fn resolve_types_and_layouts(
                     if all_resolved {
                         let enum_layout = build_enum_layout(&variant_layouts, edef.cases.len());
                         layout_cache.insert(cache_key, (enum_layout.size, enum_layout.align));
-                        let mut me = MonoEnum::new(*entity, type_args.clone(), enum_layout.discriminant_width);
+                        let mut me = MonoEnum::new(
+                            *entity,
+                            type_args.clone(),
+                            enum_layout.discriminant_width,
+                        );
                         me.cases = cases;
                         me.type_info = edef.type_info.clone();
                         me.type_info.layout = Some(Layout::Enum(enum_layout.clone()));
                         mono_enums.insert((*entity, type_args.clone()), me);
                         progress = true;
                     }
-                }
+                },
             }
         }
 
@@ -729,24 +777,24 @@ fn collect_named_types(
             match &inst.kind {
                 InstKind::Struct { ty, .. } => {
                     collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                }
+                },
                 InstKind::Enum { enum_ty, .. } => {
                     collect_named_type_from_ty(arena, *enum_ty, out, structs, enums);
-                }
+                },
                 InstKind::Array { element_ty, .. } => {
                     collect_named_type_from_ty(arena, *element_ty, out, structs, enums);
-                }
-                InstKind::Literal { value, .. } => {
-                    match &value.kind {
-                        ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
-                            collect_named_type_from_ty(arena, *ty, out, structs, enums);
-                        }
-                        _ => {}
-                    }
-                }
+                },
+                InstKind::Literal { value, .. } => match &value.kind {
+                    ImmediateKind::SizeOf(ty)
+                    | ImmediateKind::AlignOf(ty)
+                    | ImmediateKind::NullPtr(ty) => {
+                        collect_named_type_from_ty(arena, *ty, out, structs, enums);
+                    },
+                    _ => {},
+                },
                 // CopyAddr/Take/BeginBorrowAddr/BeginMutBorrowAddr/DestroyAddr/FieldAddr/Uninit
                 // carry ty but those are address types (Pointer), not Named
-                _ => {}
+                _ => {},
             }
         }
     }
@@ -775,16 +823,16 @@ fn collect_named_type_from_ty(
             for &arg in &type_args {
                 collect_named_type_from_ty(arena, arg, out, structs, enums);
             }
-        }
+        },
         MirTy::Pointer(inner) => {
             collect_named_type_from_ty(arena, *inner, out, structs, enums);
-        }
+        },
         MirTy::Tuple(elems) => {
             for &elem in elems {
                 collect_named_type_from_ty(arena, elem, out, structs, enums);
             }
-        }
-        _ => {}
+        },
+        _ => {},
     }
 }
 
@@ -825,12 +873,12 @@ fn mono_size_and_align(
             }
             layout.pad_to_align();
             Some((layout.size, layout.align))
-        }
+        },
 
         MirTy::Named { entity, type_args } => {
             let key = (*entity, type_args.clone());
             layout_cache.get(&key).copied()
-        }
+        },
 
         _ => None,
     }
@@ -843,8 +891,8 @@ mod tests {
     use crate::body::OssaBody;
     use crate::callee::Callee;
     use crate::inst::{CallArg, InstKind, Instruction};
-    use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
     use crate::item::TypeParamDef;
+    use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
@@ -881,11 +929,7 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(
-                vec![],
-                ret_val,
-                vec![ValueDef::owned(unit)],
-            )),
+            body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
         module.add_function(func);
@@ -946,7 +990,10 @@ mod tests {
                 type_args: vec![i64_ty],
                 self_type: None,
             },
-            args: vec![CallArg { value: arg_val, convention: ParamConvention::Consuming }],
+            args: vec![CallArg {
+                value: arg_val,
+                convention: ParamConvention::Consuming,
+            }],
         });
 
         let main_fn = FunctionDef {
@@ -981,19 +1028,27 @@ mod tests {
         assert_eq!(mono.functions.len(), 2);
 
         // The identity function should have concrete params
-        let identity = mono.functions.iter().find(|f| f.source == entity(2)).unwrap();
+        let identity = mono
+            .functions
+            .iter()
+            .find(|f| f.source == entity(2))
+            .unwrap();
         assert_eq!(identity.params.len(), 1);
         assert_eq!(identity.params[0].ty, i64_ty);
         assert_eq!(identity.ret, i64_ty);
 
         // The call in main should be Resolved
-        let main = mono.functions.iter().find(|f| f.source == entity(1)).unwrap();
+        let main = mono
+            .functions
+            .iter()
+            .find(|f| f.source == entity(1))
+            .unwrap();
         let body = main.body.as_ref().unwrap();
         let call = &body.blocks[0].insts[0];
         match &call.kind {
             InstKind::Call { callee, .. } => {
                 assert!(matches!(callee, Callee::Resolved(_)));
-            }
+            },
             _ => panic!("expected call"),
         }
     }
@@ -1010,7 +1065,12 @@ mod tests {
             name: "malloc".into(),
             kind: FunctionKind::Free,
             type_params: vec![],
-            params: vec![ParamDef::new("size", ValueId::new(0), i64_ty, ParamConvention::Consuming)],
+            params: vec![ParamDef::new(
+                "size",
+                ValueId::new(0),
+                i64_ty,
+                ParamConvention::Consuming,
+            )],
             ret: ptr,
             where_clause: None,
             body: None,

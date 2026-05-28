@@ -49,7 +49,7 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) {
                     assoc_def.default = Some(default_ty);
                 }
                 def.associated_types.push(assoc_def);
-            }
+            },
             NodeKind::Function => {
                 let method_name = ctx
                     .world
@@ -91,11 +91,11 @@ pub fn lower_protocol(ctx: &mut LowerCtx, entity: Entity) {
                 let mut method_def = ProtocolMethodDef::new(method_name, params, ret_ty);
                 method_def.type_params = method_type_params;
                 def.methods.push(method_def);
-            }
+            },
             NodeKind::Subscript => {
                 // Subscripts handled in a later phase
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 

@@ -54,7 +54,11 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
         }
 
         let discriminant = def.cases.len() as u32;
-        def.add_case(EnumCaseDef::with_payload(case_name, discriminant, payload_fields));
+        def.add_case(EnumCaseDef::with_payload(
+            case_name,
+            discriminant,
+            payload_fields,
+        ));
     }
 
     ctx.module.add_enum(def);

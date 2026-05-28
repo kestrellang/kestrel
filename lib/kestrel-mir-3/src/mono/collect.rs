@@ -3,19 +3,19 @@ use std::collections::{HashMap, VecDeque};
 use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
+use crate::TyId;
+use crate::callee::Callee;
+use crate::immediate::ImmediateKind;
+use crate::inst::InstKind;
+use crate::item::enum_def::EnumDef;
 use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
-use crate::item::enum_def::EnumDef;
 use crate::item::witness::WitnessDef;
 use crate::mono::types::InstantiationKey;
 use crate::mono::witness::{self, MonoError};
-use crate::callee::Callee;
-use crate::inst::InstKind;
-use crate::immediate::ImmediateKind;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
-use crate::TyId;
 
 // -- Collection result --
 
@@ -42,11 +42,20 @@ impl WitnessCache {
         }
     }
 
-    fn insert(&mut self, protocol: Entity, self_type: TyId, idx: usize, bindings: HashMap<Entity, TyId>) {
-        self.resolved.insert((protocol, self_type), WitnessCacheEntry {
-            witness_idx: idx,
-            bindings,
-        });
+    fn insert(
+        &mut self,
+        protocol: Entity,
+        self_type: TyId,
+        idx: usize,
+        bindings: HashMap<Entity, TyId>,
+    ) {
+        self.resolved.insert(
+            (protocol, self_type),
+            WitnessCacheEntry {
+                witness_idx: idx,
+                bindings,
+            },
+        );
     }
 }
 
@@ -61,7 +70,15 @@ pub fn collect_all(
     arena: &mut TyArena,
     entity_names: &IndexMap<Entity, String>,
 ) -> Result<CollectionResult, Vec<MonoError>> {
-    let mut ctx = CollectionContext::new(functions, structs, enums, protocols, witnesses, arena, entity_names);
+    let mut ctx = CollectionContext::new(
+        functions,
+        structs,
+        enums,
+        protocols,
+        witnesses,
+        arena,
+        entity_names,
+    );
     ctx.collect();
 
     if ctx.errors.is_empty() {
@@ -202,7 +219,14 @@ impl<'a> CollectionContext<'a> {
         }
 
         // Build substitution map
-        let subst = build_subst(func, &key.type_args, key.self_type, self.arena, self.protocols, self.witnesses);
+        let subst = build_subst(
+            func,
+            &key.type_args,
+            key.self_type,
+            self.arena,
+            self.protocols,
+            self.witnesses,
+        );
         let parent_self = key.self_type;
         let caller_entity = key.func_entity;
 
@@ -212,37 +236,47 @@ impl<'a> CollectionContext<'a> {
             for inst in &block.insts {
                 match &inst.kind {
                     InstKind::Call { callee, .. } => {
-                        self.scan_callee(callee, &subst, parent_self, caller_entity, inst.span.as_ref());
-                    }
+                        self.scan_callee(
+                            callee,
+                            &subst,
+                            parent_self,
+                            caller_entity,
+                            inst.span.as_ref(),
+                        );
+                    },
                     InstKind::Literal { value, .. } => {
                         self.scan_immediate(&value.kind, &subst, parent_self);
-                    }
+                    },
                     InstKind::ApplyPartial { func, .. } => {
                         self.scan_apply_partial(*func, &subst, parent_self);
-                    }
+                    },
                     InstKind::DestroyValue { operand } => {
                         let operand_ty = body.values[operand.index()].ty;
-                        let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
+                        let concrete_ty =
+                            substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
                         self.discover_drop_shim(concrete_ty, parent_self);
-                    }
+                    },
                     InstKind::DestroyAddr { ty, .. } => {
-                        let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, *ty, &subst);
+                        let concrete_ty =
+                            substitute_and_resolve(self.arena, self.witnesses, *ty, &subst);
                         self.discover_drop_shim(concrete_ty, parent_self);
-                    }
+                    },
                     InstKind::StoreAssign { address, .. } => {
                         // The address is Pointer[T]; discover drop shim for T.
                         let addr_ty = body.values[address.index()].ty;
-                        let concrete_addr = substitute_and_resolve(self.arena, self.witnesses, addr_ty, &subst);
+                        let concrete_addr =
+                            substitute_and_resolve(self.arena, self.witnesses, addr_ty, &subst);
                         if let MirTy::Pointer(pointee) = self.arena.get(concrete_addr) {
                             self.discover_drop_shim(*pointee, parent_self);
                         }
-                    }
+                    },
                     InstKind::CopyValue { operand, .. } => {
                         let operand_ty = body.values[operand.index()].ty;
-                        let concrete_ty = substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
+                        let concrete_ty =
+                            substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
                         self.discover_clone_shim(concrete_ty, parent_self);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
             // No terminator scanning needed — MIR-3 terminators carry ValueId, not Operand
@@ -293,7 +327,10 @@ impl<'a> CollectionContext<'a> {
                     });
 
                 // Skip phantom instantiations
-                if concrete_type_args.iter().any(|&t| has_type_param(self.arena, t)) {
+                if concrete_type_args
+                    .iter()
+                    .any(|&t| has_type_param(self.arena, t))
+                {
                     return;
                 }
                 if let Some(st) = concrete_self
@@ -309,7 +346,7 @@ impl<'a> CollectionContext<'a> {
                 if self.seen.insert(key.clone()) {
                     self.queue.push_back(key);
                 }
-            }
+            },
 
             Callee::Witness {
                 protocol,
@@ -317,7 +354,8 @@ impl<'a> CollectionContext<'a> {
                 self_type,
                 method_type_args,
             } => {
-                let concrete_self = substitute_and_resolve(self.arena, self.witnesses, *self_type, subst);
+                let concrete_self =
+                    substitute_and_resolve(self.arena, self.witnesses, *self_type, subst);
                 let concrete_method_args: Vec<TyId> = method_type_args
                     .iter()
                     .map(|&a| substitute_and_resolve(self.arena, self.witnesses, a, subst))
@@ -349,14 +387,19 @@ impl<'a> CollectionContext<'a> {
                             concrete_self,
                             &concrete_method_args,
                         ) {
-                            self.witness_cache.insert(*protocol, concrete_self, widx, bindings);
+                            self.witness_cache
+                                .insert(*protocol, concrete_self, widx, bindings);
                         }
 
                         if !self.functions.contains_key(&resolved.func_entity) {
                             return;
                         }
 
-                        if resolved.type_args.iter().any(|&t| has_type_param(self.arena, t)) {
+                        if resolved
+                            .type_args
+                            .iter()
+                            .any(|&t| has_type_param(self.arena, t))
+                        {
                             return;
                         }
 
@@ -368,7 +411,7 @@ impl<'a> CollectionContext<'a> {
                         if self.seen.insert(key.clone()) {
                             self.queue.push_back(key);
                         }
-                    }
+                    },
                     Err(e) => {
                         // MethodNotFound for witness dispatch is non-fatal:
                         // the function simply won't be instantiated, and
@@ -376,22 +419,17 @@ impl<'a> CollectionContext<'a> {
                         if !matches!(&e, MonoError::MethodNotFound { .. }) {
                             self.errors.push(e);
                         }
-                    }
+                    },
                 }
-            }
+            },
 
-            Callee::Thin(_) | Callee::Thick(_) | Callee::Resolved(_) => {}
+            Callee::Thin(_) | Callee::Thick(_) | Callee::Resolved(_) => {},
         }
     }
 
     /// Scan an ImmediateKind for FunctionRef — discovers function references
     /// used as values (closures, first-class function pointers).
-    fn scan_immediate(
-        &mut self,
-        imm: &ImmediateKind,
-        subst: &SubstMap,
-        parent_self: Option<TyId>,
-    ) {
+    fn scan_immediate(&mut self, imm: &ImmediateKind, subst: &SubstMap, parent_self: Option<TyId>) {
         if let ImmediateKind::FunctionRef {
             func,
             type_args,
@@ -411,11 +449,7 @@ impl<'a> CollectionContext<'a> {
                 .map(|st| substitute_and_resolve(self.arena, self.witnesses, st, subst))
                 .or(parent_self);
 
-            let key = InstantiationKey::new(
-                *func,
-                concrete_type_args,
-                concrete_self,
-            );
+            let key = InstantiationKey::new(*func, concrete_type_args, concrete_self);
             if self.seen.insert(key.clone()) {
                 self.queue.push_back(key);
             }
@@ -424,12 +458,7 @@ impl<'a> CollectionContext<'a> {
 
     /// Scan an ApplyPartial instruction — discovers the thunk or original
     /// function that a partial application targets.
-    fn scan_apply_partial(
-        &mut self,
-        func: Entity,
-        subst: &SubstMap,
-        parent_self: Option<TyId>,
-    ) {
+    fn scan_apply_partial(&mut self, func: Entity, subst: &SubstMap, parent_self: Option<TyId>) {
         if let Some(callable_entity) = self.apply_partial_callable_for(func) {
             let target = &self.functions[&callable_entity];
             let type_args: Vec<TyId> = target
@@ -438,11 +467,7 @@ impl<'a> CollectionContext<'a> {
                 .filter_map(|tp| subst.type_params.get(&tp.entity).copied())
                 .collect();
 
-            let key = InstantiationKey::new(
-                callable_entity,
-                type_args,
-                parent_self,
-            );
+            let key = InstantiationKey::new(callable_entity, type_args, parent_self);
             if self.seen.insert(key.clone()) {
                 self.queue.push_back(key);
             }
@@ -472,7 +497,13 @@ impl<'a> CollectionContext<'a> {
                 } if *thunk_target == original => Some(func.entity),
                 _ => None,
             })
-            .or_else(|| if self.functions.contains_key(&original) { Some(original) } else { None })
+            .or_else(|| {
+                if self.functions.contains_key(&original) {
+                    Some(original)
+                } else {
+                    None
+                }
+            })
     }
 
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
@@ -480,9 +511,11 @@ impl<'a> CollectionContext<'a> {
         if let MirTy::Named { entity, type_args } = self.arena.get(ty) {
             let entity = *entity;
             let type_args = type_args.clone();
-            if let Some(shim) = self.functions.values().find(|f| {
-                matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity)
-            }) {
+            if let Some(shim) = self
+                .functions
+                .values()
+                .find(|f| matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity))
+            {
                 let key = InstantiationKey::new(shim.entity, type_args, parent_self);
                 if self.seen.insert(key.clone()) {
                     self.queue.push_back(key);
@@ -497,12 +530,18 @@ impl<'a> CollectionContext<'a> {
             let entity = *entity;
             let type_args = type_args.clone();
             // Find clone shim or user clone method
-            let clone_func = self.functions.values().find(|f| {
-                matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity)
-            }).or_else(|| self.functions.values().find(|f| {
-                matches!(&f.kind, FunctionKind::Method { parent, .. } if *parent == entity)
-                    && f.name.ends_with(".clone")
-            }));
+            let clone_func = self
+                .functions
+                .values()
+                .find(
+                    |f| matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity),
+                )
+                .or_else(|| {
+                    self.functions.values().find(|f| {
+                        matches!(&f.kind, FunctionKind::Method { parent, .. } if *parent == entity)
+                            && f.name.ends_with(".clone")
+                    })
+                });
             if let Some(func) = clone_func {
                 let key = InstantiationKey::new(func.entity, type_args, parent_self);
                 if self.seen.insert(key.clone()) {
@@ -586,7 +625,12 @@ pub fn build_subst(
                         continue;
                     }
                     let mut bindings = HashMap::new();
-                    if !witness::match_pattern(arena, wit.implementing_type, concrete_ty, &mut bindings) {
+                    if !witness::match_pattern(
+                        arena,
+                        wit.implementing_type,
+                        concrete_ty,
+                        &mut bindings,
+                    ) {
                         continue;
                     }
                     for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
@@ -606,7 +650,14 @@ pub fn build_subst(
                     break;
                 }
 
-                populate_assoc_types(arena, witnesses, protocols, *protocol, concrete_ty, &mut subst);
+                populate_assoc_types(
+                    arena,
+                    witnesses,
+                    protocols,
+                    *protocol,
+                    concrete_ty,
+                    &mut subst,
+                );
             }
         }
     }
@@ -646,7 +697,10 @@ pub fn detect_implicit_protocol(
         if proto.associated_types.is_empty() {
             continue;
         }
-        let used = func.params.iter().any(|p| references_type_param(arena, p.ty, proto.entity))
+        let used = func
+            .params
+            .iter()
+            .any(|p| references_type_param(arena, p.ty, proto.entity))
             || references_type_param(arena, func.ret, proto.entity);
         if used {
             return Some(proto.entity);
@@ -674,9 +728,9 @@ pub fn populate_assoc_types(
         if subst.assoc_types.contains_key(&assoc_key) {
             continue;
         }
-        if let Some(bound_ty) = witness::resolve_associated_type(
-            arena, witnesses, protocol, concrete_ty, assoc.entity,
-        ) {
+        if let Some(bound_ty) =
+            witness::resolve_associated_type(arena, witnesses, protocol, concrete_ty, assoc.entity)
+        {
             let resolved = substitute(arena, bound_ty, subst);
             // Use deep_resolve for nested projections like
             // FlattenIterator.Item = Iterator.Item(Iterator.Item(I))
@@ -715,7 +769,11 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
             let resolved_base = deep_resolve(arena, witnesses, base, depth + 1);
             if !has_type_param(arena, resolved_base) {
                 if let Some(bound) = witness::resolve_associated_type(
-                    arena, witnesses, protocol, resolved_base, assoc_type,
+                    arena,
+                    witnesses,
+                    protocol,
+                    resolved_base,
+                    assoc_type,
                 ) {
                     return deep_resolve(arena, witnesses, bound, depth + 1);
                 }
@@ -729,22 +787,29 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
             } else {
                 ty
             }
-        }
+        },
         MirTy::Named { entity, type_args } => {
             let new_args: Vec<TyId> = type_args
                 .iter()
                 .map(|&a| deep_resolve(arena, witnesses, a, depth + 1))
                 .collect();
-            if new_args != type_args { arena.named(entity, new_args) } else { ty }
-        }
+            if new_args != type_args {
+                arena.named(entity, new_args)
+            } else {
+                ty
+            }
+        },
         MirTy::Pointer(inner) => {
             let r = deep_resolve(arena, witnesses, inner, depth + 1);
             if r != inner { arena.pointer(r) } else { ty }
-        }
+        },
         MirTy::Tuple(elems) => {
-            let new: Vec<TyId> = elems.iter().map(|&e| deep_resolve(arena, witnesses, e, depth + 1)).collect();
+            let new: Vec<TyId> = elems
+                .iter()
+                .map(|&e| deep_resolve(arena, witnesses, e, depth + 1))
+                .collect();
             if new != elems { arena.tuple(new) } else { ty }
-        }
+        },
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             let is_thin = matches!(arena.get(ty), MirTy::FuncThin { .. });
             let new_params: Vec<(TyId, crate::ty::ParamConvention)> = params
@@ -752,18 +817,27 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                 .map(|&(p, c)| (deep_resolve(arena, witnesses, p, depth + 1), c))
                 .collect();
             let new_ret = deep_resolve(arena, witnesses, ret, depth + 1);
-            let changed = new_params.iter().zip(params.iter()).any(|((np, _), (op, _))| np != op)
+            let changed = new_params
+                .iter()
+                .zip(params.iter())
+                .any(|((np, _), (op, _))| np != op)
                 || new_ret != ret;
             if changed {
                 if is_thin {
-                    arena.intern(MirTy::FuncThin { params: new_params, ret: new_ret })
+                    arena.intern(MirTy::FuncThin {
+                        params: new_params,
+                        ret: new_ret,
+                    })
                 } else {
-                    arena.intern(MirTy::FuncThick { params: new_params, ret: new_ret })
+                    arena.intern(MirTy::FuncThick {
+                        params: new_params,
+                        ret: new_ret,
+                    })
                 }
             } else {
                 ty
             }
-        }
+        },
         _ => ty,
     }
 }
@@ -773,12 +847,18 @@ fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(e) => *e == entity,
         MirTy::Pointer(inner) => references_type_param(arena, *inner, entity),
-        MirTy::Tuple(elems) => elems.iter().any(|&e| references_type_param(arena, e, entity)),
-        MirTy::Named { type_args, .. } => type_args.iter().any(|&a| references_type_param(arena, a, entity)),
+        MirTy::Tuple(elems) => elems
+            .iter()
+            .any(|&e| references_type_param(arena, e, entity)),
+        MirTy::Named { type_args, .. } => type_args
+            .iter()
+            .any(|&a| references_type_param(arena, a, entity)),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-            params.iter().any(|(p, _)| references_type_param(arena, *p, entity))
+            params
+                .iter()
+                .any(|(p, _)| references_type_param(arena, *p, entity))
                 || references_type_param(arena, *ret, entity)
-        }
+        },
         MirTy::AssociatedProjection { base, .. } => references_type_param(arena, *base, entity),
         _ => false,
     }
@@ -793,7 +873,7 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
         MirTy::Named { type_args, .. } => type_args.iter().any(|&a| has_type_param(arena, a)),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
             params.iter().any(|(p, _)| has_type_param(arena, *p)) || has_type_param(arena, *ret)
-        }
+        },
         MirTy::AssociatedProjection { base, .. } => has_type_param(arena, *base),
         _ => false,
     }
@@ -802,17 +882,17 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::body::OssaBody;
-    use crate::value::ValueDef;
     use crate::block::BasicBlock;
-    use crate::inst::{InstKind, Instruction};
-    use crate::terminator::{Terminator, TerminatorKind};
+    use crate::body::OssaBody;
     use crate::callee::Callee;
-    use crate::item::function::{FunctionDef, FunctionKind};
-    use crate::item::struct_def::StructDef;
-    use crate::item::protocol::ProtocolDef;
-    use crate::item::witness::{WitnessDef, WitnessMethodBinding};
+    use crate::inst::{InstKind, Instruction};
     use crate::item::TypeParamDef;
+    use crate::item::function::{FunctionDef, FunctionKind};
+    use crate::item::protocol::ProtocolDef;
+    use crate::item::struct_def::StructDef;
+    use crate::item::witness::{WitnessDef, WitnessMethodBinding};
+    use crate::terminator::{Terminator, TerminatorKind};
+    use crate::value::ValueDef;
 
     fn func_map(funcs: Vec<FunctionDef>) -> IndexMap<Entity, FunctionDef> {
         funcs.into_iter().map(|f| (f.entity, f)).collect()
@@ -823,8 +903,8 @@ mod tests {
     fn proto_map(protos: Vec<ProtocolDef>) -> IndexMap<Entity, ProtocolDef> {
         protos.into_iter().map(|p| (p.entity, p)).collect()
     }
-    use crate::item::WitnessMethodKey;
     use crate::ValueId;
+    use crate::item::WitnessMethodKey;
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
@@ -891,18 +971,27 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
         let result = collect_all(
-            &func_map(vec![func]), &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
-        ).unwrap();
+            &func_map(vec![func]),
+            &struct_map(vec![]),
+            &IndexMap::new(),
+            &proto_map(vec![]),
+            &[],
+            &mut arena,
+            &IndexMap::new(),
+        )
+        .unwrap();
 
         assert_eq!(result.instantiations.len(), 1);
-        assert!(result.instantiations.contains(&InstantiationKey::concrete(entity(1))));
+        assert!(
+            result
+                .instantiations
+                .contains(&InstantiationKey::concrete(entity(1)))
+        );
     }
 
     #[test]
@@ -919,15 +1008,20 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
         let result = collect_all(
-            &func_map(vec![func]), &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
-        ).unwrap();
+            &func_map(vec![func]),
+            &struct_map(vec![]),
+            &IndexMap::new(),
+            &proto_map(vec![]),
+            &[],
+            &mut arena,
+            &IndexMap::new(),
+        )
+        .unwrap();
 
         assert!(result.instantiations.is_empty());
     }
@@ -948,9 +1042,7 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], gen_ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], gen_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
@@ -974,27 +1066,37 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![call_inst], main_ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(
+                vec![call_inst],
+                main_ret_val,
+                vec![ValueDef::owned(unit)],
+            )),
             extern_info: None,
         };
 
         let result = collect_all(
             &func_map(vec![main_fn, generic_fn]),
-            &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[],
+            &struct_map(vec![]),
+            &IndexMap::new(),
+            &proto_map(vec![]),
+            &[],
             &mut arena,
             &IndexMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(result.instantiations.len(), 2);
         // main (concrete) + generic_fn[Int64]
-        assert!(result.instantiations.contains(&InstantiationKey::concrete(entity(1))));
-        assert!(result.instantiations.contains(&InstantiationKey::new(
-            entity(2),
-            vec![i64],
-            None,
-        )));
+        assert!(
+            result
+                .instantiations
+                .contains(&InstantiationKey::concrete(entity(1)))
+        );
+        assert!(
+            result
+                .instantiations
+                .contains(&InstantiationKey::new(entity(2), vec![i64], None,))
+        );
     }
 
     #[test]
@@ -1006,34 +1108,41 @@ mod tests {
         let closure = FunctionDef {
             entity: entity(1),
             name: "closure".into(),
-            kind: FunctionKind::Closure { parent_func: entity(2) },
+            kind: FunctionKind::Closure {
+                parent_func: entity(2),
+            },
             type_params: vec![],
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
         let thunk = FunctionDef {
             entity: entity(3),
             name: "thunk".into(),
-            kind: FunctionKind::Thunk { original: entity(1) },
+            kind: FunctionKind::Thunk {
+                original: entity(1),
+            },
             type_params: vec![],
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
         let result = collect_all(
-            &func_map(vec![closure, thunk]), &struct_map(vec![]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
-        ).unwrap();
+            &func_map(vec![closure, thunk]),
+            &struct_map(vec![]),
+            &IndexMap::new(),
+            &proto_map(vec![]),
+            &[],
+            &mut arena,
+            &IndexMap::new(),
+        )
+        .unwrap();
 
         assert!(result.instantiations.is_empty());
     }
@@ -1057,15 +1166,20 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
         let result = collect_all(
-            &func_map(vec![method]), &struct_map(vec![struct_def]), &IndexMap::new(), &proto_map(vec![]), &[], &mut arena, &IndexMap::new(),
-        ).unwrap();
+            &func_map(vec![method]),
+            &struct_map(vec![struct_def]),
+            &IndexMap::new(),
+            &proto_map(vec![]),
+            &[],
+            &mut arena,
+            &IndexMap::new(),
+        )
+        .unwrap();
 
         // Method on concrete non-generic parent is seeded
         assert_eq!(result.instantiations.len(), 1);
@@ -1101,9 +1215,7 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![], impl_ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(vec![], impl_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
         };
 
@@ -1128,9 +1240,11 @@ mod tests {
             params: vec![],
             ret: unit,
             where_clause: None,
-            body: Some(make_body(vec![call_inst], main_ret_val, vec![
-                ValueDef::owned(unit),
-            ])),
+            body: Some(make_body(
+                vec![call_inst],
+                main_ret_val,
+                vec![ValueDef::owned(unit)],
+            )),
             extern_info: None,
         };
 
@@ -1139,15 +1253,21 @@ mod tests {
 
         let result = collect_all(
             &func_map(vec![main_fn, impl_func]),
-            &struct_map(vec![]), &IndexMap::new(),
+            &struct_map(vec![]),
+            &IndexMap::new(),
             &proto_map(vec![protocol]),
             &[witness],
             &mut arena,
             &names,
-        ).unwrap();
+        )
+        .unwrap();
 
         // main + Int64.equals
         assert_eq!(result.instantiations.len(), 2);
-        assert!(result.instantiations.contains(&InstantiationKey::concrete(impl_func_entity)));
+        assert!(
+            result
+                .instantiations
+                .contains(&InstantiationKey::concrete(impl_func_entity))
+        );
     }
 }
