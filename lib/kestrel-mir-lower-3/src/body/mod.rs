@@ -1201,6 +1201,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.consume(value);
     }
 
+    /// Store a borrowed (`@guaranteed`) value's bits into freshly-`Uninit`
+    /// storage without duplicating ownership — no `CopyValue`, no consume.
+    /// Codegen lowers this to a bitwise `copy_aggregate`/store, so the slot
+    /// ends up aliasing the borrow's underlying storage (for a non-copyable
+    /// value, its `env_ptr`). Sound only when the destination never outlives
+    /// the borrow and is never dropped — e.g. a non-escaping closure's
+    /// capture env, which is caller-stack-allocated and not destroyed. Used to
+    /// borrow-capture a called-not-stored closure (comparator/predicate)
+    /// without the illegal copy of a non-Copyable `@thick` value.
+    pub fn emit_store_init_borrowed(&mut self, address: ValueId, value: ValueId) {
+        debug_assert_eq!(
+            self.body.value(value).ownership,
+            Ownership::Guaranteed,
+            "emit_store_init_borrowed expects a @guaranteed value; use emit_store_init for @owned",
+        );
+        self.push_inst(InstKind::StoreInit { address, value });
+    }
+
     pub fn emit_store_assign(&mut self, address: ValueId, value: ValueId) {
         let value = if self.body.value(value).ownership == Ownership::Guaranteed {
             self.emit_copy_value(value)

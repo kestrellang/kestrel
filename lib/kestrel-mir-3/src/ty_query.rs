@@ -23,6 +23,14 @@ pub fn copy_behavior(
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
+        // INTERIM: closures are treated as POD — a 2-word `{code, env}` value
+        // bit-copied like a raw pointer, never owning its captured env (which
+        // today holds only Copyable captures). This lets a borrowed `self`
+        // hand out copies of a stored closure field (e.g. `SplitWhereView.iter`,
+        // `IntersperseIterator` separator). Must stay in lockstep with the
+        // `needs_drop` arm below — Bitwise + droppable would double-free the env.
+        // NEXT VERSION: closures become Rc-boxed reference types; copy → retain.
+        | MirTy::FuncThick { .. }
         | MirTy::Error => CopyBehavior::Bitwise,
 
         MirTy::Tuple(elems) => {
@@ -79,7 +87,6 @@ pub fn copy_behavior(
             CopyBehavior::Bitwise
         },
 
-        MirTy::FuncThick { .. } => CopyBehavior::None,
         MirTy::AssociatedProjection { .. } => CopyBehavior::Bitwise,
     }
 }
@@ -98,6 +105,11 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
+        // INTERIM: closures are POD — see `copy_behavior`. A FuncThick never
+        // owns its captured env (Copyable captures only, today), so it needs no
+        // drop. Must match the Bitwise arm in `copy_behavior`. NEXT VERSION:
+        // Rc-boxed closures need drop → release.
+        | MirTy::FuncThick { .. }
         | MirTy::Error => false,
 
         MirTy::Tuple(elems) => {
@@ -118,7 +130,6 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
 
         MirTy::TypeParam(_) => true,
         MirTy::AssociatedProjection { .. } => true,
-        MirTy::FuncThick { .. } => true,
     }
 }
 

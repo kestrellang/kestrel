@@ -338,6 +338,25 @@ impl OssaBodyCtx<'_, '_> {
                 FieldIdx::new(0)
             });
 
+        // If the base roots at a var-local (a `mutating`/MutBorrow receiver or
+        // a mutable local, bound to a stack address), project the field's
+        // ADDRESS and read just the field. The fallback path below loads the
+        // whole struct for a var-local base — an illegal copy when the struct
+        // is non-Copyable, even if the field itself is Copyable (e.g.
+        // `IntersperseIterator.next` reading `self.separator`). This is the
+        // address-analog of `emit_struct_extract`: a @guaranteed place for a
+        // non-Copyable field, and a clone (snapshot at read time) for a
+        // Copyable one — the snapshot matters for read-then-mutate sequences
+        // like `let v = self.x; self.x = self.x + 1` where `v` must be the old
+        // value, not an alias of the now-written field.
+        if let Some(base_addr) = self.try_field_addr_chain(base) {
+            let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+            if self.is_non_copyable(result_ty) {
+                return self.emit_begin_borrow_addr(field_addr, result_ty);
+            }
+            return self.emit_copy_addr(field_addr, result_ty);
+        }
+
         let base_val = self.lower_expr_for_borrow(base);
         self.emit_struct_extract(base_val, field_idx, result_ty)
     }

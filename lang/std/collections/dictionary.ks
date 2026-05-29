@@ -1242,7 +1242,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2, "c": 3];
     /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
     /// ```
-    public mutating func removeAll(where predicate: (K, V) -> Bool) {
+    public mutating func removeAll(consuming where predicate: (K, V) -> Bool) {
         self.retain(where: { (k, v) in not predicate(k, v) })
     }
 

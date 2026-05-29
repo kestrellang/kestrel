@@ -28,7 +28,7 @@ use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
-use kestrel_mir_3::value::ValueDef;
+use kestrel_mir_3::value::{Ownership, ValueDef};
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::captures::{CaptureKind, CapturedPlace};
 
@@ -383,16 +383,35 @@ impl OssaBodyCtx<'_, '_> {
                 self.emit_value_use(mir_val)
             }
         } else {
-            // Ref capture: copy value into a stack slot, capture the address.
+            // Ref capture: materialize the value into a stack slot and capture
+            // the slot address (Pointer[cap_ty], matching the env field). How we
+            // fill the slot depends on the captured value's ownership:
+            //   - Var local   → load through its address.
+            //   - @owned      → MOVE into the slot; the env now owns the value.
+            //                   This is how an escaping closure keeps a
+            //                   non-Copyable capture (e.g. a comparator) alive:
+            //                   escaping closure params are `consuming`, so they
+            //                   arrive @owned and are moved, never aliased.
+            //   - @guaranteed → borrow-capture: store the borrowed bits directly
+            //                   (no CopyValue — copying a non-Copyable @thick
+            //                   value is illegal). The slot aliases the borrow's
+            //                   storage. Sound only for a non-escaping closure
+            //                   (e.g. the `and`/`or` short-circuit thunk that
+            //                   captures a called-not-stored predicate); the
+            //                   convention guarantees an escaping closure's
+            //                   captures are @owned and take the move branch.
             let ptr_ty = self.ctx.module.ty_arena.pointer(cap_ty);
             let one = self.emit_literal(Immediate::i64(1));
             let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
-            let copy = if self.is_var_local(&root) {
-                self.emit_copy_addr(mir_val, cap_ty)
+            if self.is_var_local(&root) {
+                let value = self.emit_copy_addr(mir_val, cap_ty);
+                self.emit_store_init(addr, value);
+            } else if self.body.value(mir_val).ownership == Ownership::Owned {
+                let value = self.emit_move_value(mir_val);
+                self.emit_store_init(addr, value);
             } else {
-                self.emit_copy_value(mir_val)
-            };
-            self.emit_store_init(addr, copy);
+                self.emit_store_init_borrowed(addr, mir_val);
+            }
             addr
         }
     }

@@ -869,7 +869,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// var names = ["Alice", "", "Bob", ""];
     /// names.removeAll(where: { (s) in s.isEmpty });  // ["Alice", "Bob"]
     /// ```
-    public mutating func removeAll(where predicate: (T) -> Bool) {
+    public mutating func removeAll(consuming where predicate: (T) -> Bool) {
         self.retain(where: { (x) in predicate(x) == false })
     }
 
