@@ -4,7 +4,7 @@ use kestrel_ast_builder::{Callable, NodeKind, Static, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir_3::{CopyBehavior, DropBehavior, TypeInfo, TypeParamDef};
-use kestrel_semantics::{CopySemantics, NominalCopySemantics};
+use kestrel_semantics::{ConditionalCopyableParams, CopySemantics, NominalCopySemantics};
 
 use crate::context::LowerCtx;
 use crate::ty::resolve_type_annotation;
@@ -19,6 +19,10 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         drop: lower_drop_behavior(ctx, entity),
         layout: None,
     };
+    def.conditionally_copyable = ctx.query.query(ConditionalCopyableParams {
+        entity,
+        root: ctx.root,
+    });
 
     // Stored fields only — skip computed properties and statics
     for &child in ctx.world.children_of(entity) {

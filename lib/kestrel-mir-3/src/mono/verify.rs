@@ -5,7 +5,7 @@ use crate::immediate::ImmediateKind;
 use crate::inst::InstKind;
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::MirTy;
-use crate::{BlockId, TyId};
+use crate::{BlockId, CopyBehavior, TyId};
 
 // -- Verification result --
 
@@ -69,7 +69,80 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
         }
     }
 
+    // Invariant 3b: a Copyable/Cloneable type must not contain a non-Copyable
+    // child. The frontend now enforces the implicit `T: Copyable` bound, so the
+    // bad instantiations this would flag (e.g. `Box[NotCopyable]`) can no longer
+    // be constructed — this is pure defense-in-depth.
+    verify_copyable_containment(module, &mut errors);
+
     MonoVerifyResult { errors }
+}
+
+/// Invariant 3b (defense-in-depth): no `Bitwise`/`Clone` type may contain a
+/// `None` (non-Copyable) child. The frontend classifier maintains this — a
+/// non-copyable child forces the container `NotCopyable` — so this should never
+/// fire in a correct build; it converts a silent inconsistency (a bit-copyable
+/// type aliasing a move-only resource) into a loud verification error.
+fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyError>) {
+    let child_copy = |ty: TyId| -> Option<CopyBehavior> {
+        if let MirTy::Named { entity, type_args } = module.ty_arena.get(ty) {
+            let key = (*entity, type_args.clone());
+            module
+                .structs
+                .get(&key)
+                .map(|s| s.type_info.copy.clone())
+                .or_else(|| module.enums.get(&key).map(|e| e.type_info.copy.clone()))
+        } else {
+            None
+        }
+    };
+
+    for s in module.structs.values() {
+        if !matches!(
+            s.type_info.copy,
+            CopyBehavior::Bitwise | CopyBehavior::Clone(_)
+        ) {
+            continue;
+        }
+        for f in &s.fields {
+            if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
+                errors.push(MonoVerifyError {
+                    func_idx: 0,
+                    block: None,
+                    inst: None,
+                    message: format!(
+                        "Copyable type MonoStruct({:?}, {:?}) contains non-Copyable field '{}'",
+                        s.source, s.type_args, f.name
+                    ),
+                    span: None,
+                });
+            }
+        }
+    }
+    for e in module.enums.values() {
+        if !matches!(
+            e.type_info.copy,
+            CopyBehavior::Bitwise | CopyBehavior::Clone(_)
+        ) {
+            continue;
+        }
+        for case in &e.cases {
+            for f in &case.payload_fields {
+                if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
+                    errors.push(MonoVerifyError {
+                        func_idx: 0,
+                        block: None,
+                        inst: None,
+                        message: format!(
+                            "Copyable type MonoEnum({:?}, {:?}) case '{}' contains non-Copyable field '{}'",
+                            e.source, e.type_args, case.name, f.name
+                        ),
+                        span: None,
+                    });
+                }
+            }
+        }
+    }
 }
 
 fn verify_function(
@@ -425,7 +498,7 @@ mod tests {
     use crate::item::function::ExternInfo;
     use crate::item::{Layout, TypeInfo};
     use crate::layout::StructLayout;
-    use crate::mono::types::{MonoFunction, MonoModule, MonoParam, MonoStruct};
+    use crate::mono::types::{MonoField, MonoFunction, MonoModule, MonoParam, MonoStruct};
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::{ParamConvention, TyArena};
     use crate::value::{Ownership, ValueDef};
@@ -488,6 +561,70 @@ mod tests {
 
         let result = verify_mono(&module);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
+    }
+
+    #[test]
+    fn copyable_containment_flags_non_copyable_child() {
+        let mut module = make_module();
+        let resource_ty = module.ty_arena.named(entity(2), vec![]);
+        // Resource: not Copyable.
+        module.structs.insert(
+            (entity(2), vec![]),
+            MonoStruct {
+                source: entity(2),
+                type_args: vec![],
+                fields: vec![],
+                type_info: TypeInfo {
+                    copy: CopyBehavior::None,
+                    ..TypeInfo::none()
+                },
+            },
+        );
+        // Wrapper: Bitwise (Copyable) but contains a non-Copyable Resource field.
+        module.structs.insert(
+            (entity(3), vec![]),
+            MonoStruct {
+                source: entity(3),
+                type_args: vec![],
+                fields: vec![MonoField {
+                    name: "r".into(),
+                    ty: resource_ty,
+                }],
+                type_info: TypeInfo {
+                    copy: CopyBehavior::Bitwise,
+                    ..TypeInfo::none()
+                },
+            },
+        );
+
+        let mut errors = Vec::new();
+        verify_copyable_containment(&module, &mut errors);
+        assert_eq!(errors.len(), 1, "{:?}", errors);
+        assert!(errors[0].message.contains("non-Copyable field 'r'"));
+    }
+
+    #[test]
+    fn copyable_containment_allows_copyable_child() {
+        let mut module = make_module();
+        let i64t = module.ty_arena.i64();
+        module.structs.insert(
+            (entity(3), vec![]),
+            MonoStruct {
+                source: entity(3),
+                type_args: vec![],
+                fields: vec![MonoField {
+                    name: "x".into(),
+                    ty: i64t,
+                }],
+                type_info: TypeInfo {
+                    copy: CopyBehavior::Bitwise,
+                    ..TypeInfo::none()
+                },
+            },
+        );
+        let mut errors = Vec::new();
+        verify_copyable_containment(&module, &mut errors);
+        assert!(errors.is_empty(), "{:?}", errors);
     }
 
     #[test]

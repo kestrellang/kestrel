@@ -383,10 +383,16 @@ impl OssaBodyCtx<'_, '_> {
                 let (disc_operand, borrow_to_end) = if path.is_empty() {
                     (scrutinee, None)
                 } else if self.body.value(scrutinee).ownership == Ownership::Guaranteed {
-                    (self.apply_access_path(scrutinee, scrutinee_ty, path).0, None)
+                    (
+                        self.apply_access_path(scrutinee, scrutinee_ty, path).0,
+                        None,
+                    )
                 } else {
                     let borrow = self.emit_begin_borrow(scrutinee);
-                    (self.apply_access_path(borrow, scrutinee_ty, path).0, Some(borrow))
+                    (
+                        self.apply_access_path(borrow, scrutinee_ty, path).0,
+                        Some(borrow),
+                    )
                 };
                 let discriminant = self.emit_discriminant(disc_operand);
                 if let Some(borrow) = borrow_to_end {
@@ -452,13 +458,7 @@ impl OssaBodyCtx<'_, '_> {
                         }
                     }
                     let rebound = rebound_value(scrutinee, &switch_live, params);
-                    self.emit_decision_tree_threaded(
-                        subtree,
-                        rebound,
-                        scrutinee_ty,
-                        arms,
-                        exits,
-                    );
+                    self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, arms, exits);
                 }
 
                 if let (Some(def_tree), Some((def_block, def_params))) = (default, default_block) {
@@ -471,13 +471,7 @@ impl OssaBodyCtx<'_, '_> {
                         }
                     }
                     let rebound = rebound_value(scrutinee, &switch_live, &def_params);
-                    self.emit_decision_tree_threaded(
-                        def_tree,
-                        rebound,
-                        scrutinee_ty,
-                        arms,
-                        exits,
-                    );
+                    self.emit_decision_tree_threaded(def_tree, rebound, scrutinee_ty, arms, exits);
                 }
             },
 
@@ -500,7 +494,14 @@ impl OssaBodyCtx<'_, '_> {
                 let guard_expr = arms.get(*arm_index).and_then(|a| a.guard);
                 let Some(guard_expr) = guard_expr else {
                     // No guard expression — behave as a plain success leaf.
-                    self.emit_success_leaf(*arm_index, bindings, scrutinee, scrutinee_ty, arms, exits);
+                    self.emit_success_leaf(
+                        *arm_index,
+                        bindings,
+                        scrutinee,
+                        scrutinee_ty,
+                        arms,
+                        exits,
+                    );
                     return;
                 };
 
@@ -679,7 +680,8 @@ impl OssaBodyCtx<'_, '_> {
                 },
                 PathElement::Field(name) => {
                     let field_ty = if let Some(variant_idx) = pending_downcast.take() {
-                        self.resolve_enum_payload_field(current_ty, variant_idx, name).1
+                        self.resolve_enum_payload_field(current_ty, variant_idx, name)
+                            .1
                     } else {
                         self.resolve_struct_field(current_ty, name).1
                     };
@@ -803,9 +805,11 @@ impl OssaBodyCtx<'_, '_> {
             if path.len() >= 2 && matches!(path[0], PathElement::Downcast(_)) {
                 let comp = match &path[1] {
                     PathElement::Index(i) => Some(*i),
-                    PathElement::Field(name) => {
-                        Some(self.resolve_enum_payload_field(value_ty, variant_idx, name).0.index())
-                    },
+                    PathElement::Field(name) => Some(
+                        self.resolve_enum_payload_field(value_ty, variant_idx, name)
+                            .0
+                            .index(),
+                    ),
                     _ => None,
                 };
                 return (comp, path[2..].to_vec());
@@ -816,7 +820,9 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(first) = path.first() {
             let comp = match first {
                 PathElement::Index(i) => Some(*i),
-                PathElement::Field(name) => Some(self.resolve_struct_field(value_ty, name).0.index()),
+                PathElement::Field(name) => {
+                    Some(self.resolve_struct_field(value_ty, name).0.index())
+                },
                 _ => None,
             };
             return (comp, path[1..].to_vec());

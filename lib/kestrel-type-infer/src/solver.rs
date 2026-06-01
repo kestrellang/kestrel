@@ -17,6 +17,11 @@ use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_name_res::ResolveBuiltin;
+use kestrel_semantics::{
+    ConditionalCopyableParams, CopyRequirement, CopySemantics, NominalCopySemantics,
+    TypeParamCopyRequirement,
+};
 use kestrel_span::Span;
 
 /// Run the full solver: fixpoint loop, literal defaults, final fixpoint,
@@ -1478,8 +1483,20 @@ fn solve_conforms(
             poison_ty_on_failure,
         }),
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
-        TySlot::Resolved(kind) => {
-            if ctx.resolver.conforms_to(kind, protocol) {
+        TySlot::Resolved(_) => {
+            // Per-instantiation Copyable/Cloneable: evaluate conditional
+            // `extend X: Copyable where T: Copyable` against the resolved type
+            // args, so `Box[Int]` is Copyable while `Box[File]` is move-only.
+            let conforms = if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
+                type_conforms_copyable(ctx, resolved, want_cloneable, 0)
+            } else {
+                let kind = match ctx.slot(resolved) {
+                    TySlot::Resolved(k) => k.clone(),
+                    _ => unreachable!(),
+                };
+                ctx.resolver.conforms_to(&kind, protocol)
+            };
+            if conforms {
                 SolveResult::Solved
             } else {
                 if poison_ty_on_failure {
@@ -1489,6 +1506,144 @@ fn solve_conforms(
             }
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
+    }
+}
+
+/// Returns `Some(want_cloneable)` if `protocol` is the Copyable (`false`) or
+/// Cloneable (`true`) builtin, else `None`.
+fn copyable_builtin_kind(ctx: &InferCtx<'_>, protocol: Entity) -> Option<bool> {
+    if ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Copyable,
+        root: ctx.root,
+    }) == Some(protocol)
+    {
+        return Some(false);
+    }
+    if ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Cloneable,
+        root: ctx.root,
+    }) == Some(protocol)
+    {
+        return Some(true);
+    }
+    None
+}
+
+/// Per-instantiation Copyable/Cloneable check. Evaluates conditional
+/// `extend X: Copyable where T: Copyable` conformances against the resolved
+/// type args, recursing into args / tuple elements, so `Box[Int]` is Copyable
+/// while `Box[File]` is move-only. `want_cloneable` selects the Cloneable
+/// (`true`) vs Copyable (`false`) question.
+fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool, depth: u32) -> bool {
+    if depth > 64 {
+        return true; // recursion guard — never block
+    }
+    let resolved = ctx.resolve(tv);
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => return true, // unresolved / error: never block
+    };
+    match kind {
+        TyKind::Error => true,
+        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+            nominal_conforms_copyable(ctx, entity, &args, want_cloneable, depth)
+        },
+        TyKind::SelfType { entity } => {
+            nominal_conforms_copyable(ctx, entity, &[], want_cloneable, depth)
+        },
+        TyKind::Param { entity } => {
+            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
+            match ctx.query_ctx.query(TypeParamCopyRequirement {
+                param: entity,
+                context,
+                root: ctx.root,
+            }) {
+                CopyRequirement::RequiresCloneable => true,
+                CopyRequirement::RequiresCopyable => !want_cloneable,
+                CopyRequirement::MayBeNonCopyable => false,
+            }
+        },
+        TyKind::Tuple(elems) => elems
+            .iter()
+            .all(|&e| type_conforms_copyable(ctx, e, want_cloneable, depth + 1)),
+        // Mirror `hir_type_copy_semantics`: protocol existentials / `some P` /
+        // functions are Copyable; an abstract associated projection is not
+        // known-copyable.
+        TyKind::Protocol { .. }
+        | TyKind::Opaque { .. }
+        | TyKind::Function { .. }
+        | TyKind::Never
+        | TyKind::TypeAlias { .. } => !want_cloneable,
+        // Associated projection (`I.Item`) is Copyable-by-default (implicit
+        // bound), like a type param — matches `hir_type_copy_semantics` and MIR
+        // `ty_query`. Not known to be Cloneable, so only satisfies Copyable.
+        TyKind::AssocProjection { .. } => !want_cloneable,
+    }
+}
+
+/// Copyability of `entity[args]`: the generic classification, refined by a
+/// conditional `extend entity: Copyable/Cloneable where ...` evaluated against
+/// `args` when the base is `not Copyable`.
+fn nominal_conforms_copyable(
+    ctx: &InferCtx<'_>,
+    entity: Entity,
+    args: &[TyVar],
+    want_cloneable: bool,
+    depth: u32,
+) -> bool {
+    let sem = ctx
+        .query_ctx
+        .query(NominalCopySemantics {
+            entity,
+            root: ctx.root,
+        })
+        .semantics;
+    kestrel_debug::ktrace!(
+        "copyable",
+        "nominal {:?} args={:?} sem={:?} want_cloneable={}",
+        entity,
+        args,
+        sem,
+        want_cloneable
+    );
+    match sem {
+        // Cloneable ⟹ satisfies both Cloneable and Copyable.
+        CopySemantics::Cloneable => true,
+        CopySemantics::Copyable => !want_cloneable,
+        CopySemantics::NotCopyable => {
+            // A `not Copyable` base may still be *conditionally* Copyable via
+            // `extend X: Copyable where T: Copyable`. The gating positions come
+            // from the shared `ConditionalCopyableParams` query — the same
+            // source MIR `copy_behavior` and the semantics layer use, so all
+            // three agree per-instantiation.
+            let positions = ctx.query_ctx.query(ConditionalCopyableParams {
+                entity,
+                root: ctx.root,
+            });
+            if positions.is_empty() {
+                return false;
+            }
+            // Copyable: every gating arg must itself be Copyable.
+            let all_copyable = positions.iter().all(|&pos| {
+                args.get(pos)
+                    .is_some_and(|&arg| type_conforms_copyable(ctx, arg, false, depth + 1))
+            });
+            if !all_copyable {
+                return false;
+            }
+            if !want_cloneable {
+                return true;
+            }
+            // Cloneable: in addition, at least one gating arg must itself be
+            // Cloneable. A container of all bit-copyable args is Copyable but
+            // not Cloneable — matching `nominal_instance_copy_semantics`
+            // (Cloneable iff ≥1 Cloneable child) and MIR `instantiated_copy_behavior`
+            // (`Clone(entity)` only when a gating arg is `Clone`).
+            positions.iter().any(|&pos| {
+                args.get(pos)
+                    .is_some_and(|&arg| type_conforms_copyable(ctx, arg, true, depth + 1))
+            })
+        },
     }
 }
 

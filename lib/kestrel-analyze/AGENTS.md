@@ -147,6 +147,7 @@ Current allocations:
 - E422: `disallowed_enum_conformance` (decl/conformance_rules.rs)
 - E423: `conflicting_copyable_opt_out` (decl/conformance_rules.rs)
 - E424: `negative_conformance_requires_language_feature` (decl/conformance_rules.rs)
+- E425: `copyable_with_non_copyable_field` (decl/conformance_rules.rs)
 - E430: `return_type_less_visible` (decl/visibility.rs)
 - E431: `parameter_type_less_visible` (decl/visibility.rs)
 - E432: `aliased_type_less_visible` (decl/visibility.rs)

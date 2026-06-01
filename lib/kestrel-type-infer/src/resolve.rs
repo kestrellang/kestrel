@@ -18,6 +18,10 @@ use kestrel_name_res::{
     ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeMemberSource, TypeMembersByName,
     TypeResolution, expand_protocol_closure_in_place,
 };
+use kestrel_semantics::{
+    CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics,
+    TypeParamCopyRequirement,
+};
 use kestrel_span::Span;
 
 use crate::ty::TyKind;
@@ -455,6 +459,26 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
+        // Copyable / Cloneable are structural (copy-semantics), not *declared*
+        // conformances — `ConformingProtocols` only materializes explicit
+        // conformances + inheritance, so it never reports the implicit Copyable
+        // that default types carry. Answer these two builtins via the
+        // copy-semantics classifier instead, so plain types satisfy Copyable and
+        // only `not Copyable` (or non-copyable-child) types are rejected.
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Copyable,
+            root: self.root,
+        }) {
+            return self.copy_semantics_of(ty) != CopySemantics::NotCopyable;
+        }
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Cloneable,
+            root: self.root,
+        }) {
+            return self.copy_semantics_of(ty) == CopySemantics::Cloneable;
+        }
         match ty {
             TyKind::Struct { entity, .. }
             | TyKind::Enum { entity, .. }
@@ -1925,6 +1949,57 @@ impl WorldResolver<'_> {
         expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
 
         protocols
+    }
+
+    /// Copy-semantics of a resolved `TyKind`, mirroring `hir_type_copy_semantics`
+    /// in kestrel-semantics. Used to answer Copyable/Cloneable conformance
+    /// structurally (those are not declared conformances). Nested args are
+    /// `TyVar`s the resolver cannot resolve, but the entity-based queries
+    /// (`NominalCopySemantics`, `TypeParamCopyRequirement`) don't need them —
+    /// a struct/enum's copy-semantics is a function of its declared fields, and
+    /// invariant 1 prevents instantiating a default-param container with a
+    /// non-copyable arg in the first place, so the generic (arg-independent)
+    /// nominal classification is sufficient here. Only `Tuple` would need the
+    /// elements; it is handled permissively (the MIR layer's element-aware
+    /// `copy_behavior` + `copy_check` backstop a genuinely non-copyable element).
+    fn copy_semantics_of(&self, ty: &TyKind) -> CopySemantics {
+        match ty {
+            TyKind::Struct { entity, .. }
+            | TyKind::Enum { entity, .. }
+            | TyKind::SelfType { entity } => {
+                self.ctx
+                    .query(NominalCopySemantics {
+                        entity: *entity,
+                        root: self.root,
+                    })
+                    .semantics
+            },
+            TyKind::Param { entity } => {
+                let context = self.ctx.parent_of(*entity).unwrap_or(*entity);
+                match self.ctx.query(TypeParamCopyRequirement {
+                    param: *entity,
+                    context,
+                    root: self.root,
+                }) {
+                    CopyRequirement::RequiresCloneable => CopySemantics::Cloneable,
+                    CopyRequirement::RequiresCopyable => CopySemantics::Copyable,
+                    CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
+                }
+            },
+            // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
+            // are Copyable; an abstract associated projection is conservatively
+            // NotCopyable (not known to be copyable).
+            TyKind::Protocol { .. } | TyKind::Opaque { .. } => CopySemantics::Copyable,
+            TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
+            // Tuple elements aren't resolvable here; Function/Never/Error and
+            // reducible aliases never block a Copyable bound. Permissive — the
+            // MIR layer is element-aware for the cases that matter.
+            TyKind::Tuple(_)
+            | TyKind::Function { .. }
+            | TyKind::TypeAlias { .. }
+            | TyKind::Never
+            | TyKind::Error => CopySemantics::Copyable,
+        }
     }
 
     /// Collect only the protocols directly listed as bounds on `param_entity`

@@ -44,13 +44,30 @@ pub fn copy_behavior(
             CopyBehavior::Bitwise
         },
 
-        MirTy::Named { entity, .. } => {
+        MirTy::Named { entity, type_args } => {
             let entity = *entity;
+            let type_args = type_args.clone();
             if let Some(s) = module.structs.get(&entity) {
-                return s.type_info.copy.clone();
+                return instantiated_copy_behavior(
+                    arena,
+                    module,
+                    entity,
+                    &s.type_info.copy,
+                    &s.conditionally_copyable,
+                    &type_args,
+                    where_clause,
+                );
             }
             if let Some(e) = module.enums.get(&entity) {
-                return e.type_info.copy.clone();
+                return instantiated_copy_behavior(
+                    arena,
+                    module,
+                    entity,
+                    &e.type_info.copy,
+                    &e.conditionally_copyable,
+                    &type_args,
+                    where_clause,
+                );
             }
             CopyBehavior::Bitwise
         },
@@ -88,6 +105,50 @@ pub fn copy_behavior(
         },
 
         MirTy::AssociatedProjection { .. } => CopyBehavior::Bitwise,
+    }
+}
+
+/// Refine a type's `copy` behavior for a concrete instantiation. A type whose
+/// base is `not Copyable` (`None`) but which is *conditionally* Copyable
+/// (`struct X: not Copyable` + `extend X: Copyable where T: Copyable`, captured
+/// as `conditionally_copyable` gating positions) gets its behavior from the
+/// gating args, matching the inference solver's per-instantiation conformance:
+/// - any gating arg `None` (move-only) → the container is `None`;
+/// - all gating args `Bitwise` → the container is `Bitwise` (bit-copyable);
+/// - all gating args Copyable but at least one `Clone` (Cloneable) → the
+///   container is `Clone(entity)` (copyable, but element-wise via clone — its
+///   clone shim recurses into the Cloneable field).
+///
+/// For unconditional types (empty gating list) the base behavior is returned
+/// unchanged, so this is inert until a type adopts the conditional pattern.
+fn instantiated_copy_behavior(
+    arena: &TyArena,
+    module: &MirModule,
+    entity: Entity,
+    base: &CopyBehavior,
+    conditionally_copyable: &[usize],
+    type_args: &[TyId],
+    where_clause: Option<&WhereClause>,
+) -> CopyBehavior {
+    if !matches!(base, CopyBehavior::None) || conditionally_copyable.is_empty() {
+        return base.clone();
+    }
+    let mut saw_clone = false;
+    for &pos in conditionally_copyable {
+        match type_args
+            .get(pos)
+            .map(|&arg| copy_behavior(arena, module, arg, where_clause))
+        {
+            Some(CopyBehavior::Bitwise) => {},
+            Some(CopyBehavior::Clone(_)) => saw_clone = true,
+            // Move-only arg, or a missing/out-of-range position: not copyable.
+            _ => return CopyBehavior::None,
+        }
+    }
+    if saw_clone {
+        CopyBehavior::Clone(entity)
+    } else {
+        CopyBehavior::Bitwise
     }
 }
 

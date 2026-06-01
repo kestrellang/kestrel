@@ -37,7 +37,7 @@ import std.result.(Optional)
 ///
 /// A two-case tagged union — discriminant plus the larger of `T` / `E`.
 /// Niche optimisation applies the same way it does to `Optional`.
-public enum Result[T, E]: Tryable {
+public enum Result[T, E]: Tryable, not Copyable {
     /// The success branch — wraps a `T`.
     case Ok(T)
 
@@ -295,6 +295,13 @@ public enum Result[T, E]: Tryable {
 // ============================================================================
 // PROTOCOL CONFORMANCES
 // ============================================================================
+
+/// `Result` is move-only by default (`not Copyable`) so it can carry a
+/// non-Copyable payload (e.g. `Result[File, E]`). It regains bit-copy
+/// semantics only when *both* payloads are themselves Copyable — so
+/// `Result[Int64, Error]` is Copyable while `Result[Array[Int64], E]` stays
+/// move-only.
+extend Result[T, E]: Copyable where T: Copyable, E: Copyable { }
 
 /// `FromResidual[E]` — converts a `try`-propagated error back into
 /// `.Err`, so chains of `try` returning results compose.

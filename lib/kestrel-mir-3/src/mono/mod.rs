@@ -32,7 +32,7 @@ use crate::layout::StructLayout;
 use crate::substitute::{SubstMap, substitute};
 use crate::ty::{MirTy, TyArena};
 use crate::value::Ownership;
-use crate::{MirModule, MonoFuncId, TyId};
+use crate::{CopyBehavior, MirModule, MonoFuncId, TyId};
 
 /// Check if a function needs self_type in its InstantiationKey.
 ///
@@ -745,7 +745,133 @@ fn resolve_types_and_layouts(
         }
     }
 
+    refine_mono_copy_behavior(arena, structs, enums, &mut mono_structs, &mut mono_enums);
+
     (mono_structs, mono_enums)
+}
+
+/// Re-derive per-instantiation `copy` behavior for conditional containers.
+///
+/// `MonoStruct`/`MonoEnum.type_info.copy` is cloned from the *generic* def,
+/// which for a conditional container (`: not Copyable` + `extend …: Copyable
+/// where T: Copyable`) is `None`. For a concrete instantiation the type is
+/// Copyable iff every gating arg (the positions in
+/// `StructDef::conditionally_copyable`) is itself Copyable — so `Result[Int64,
+/// Error]` becomes `Bitwise` while `Result[Array[Int64], E]` stays `None`.
+/// Mirrors `ty_query::instantiated_copy_behavior` but over already-mono types
+/// (args are concrete, so no `where_clause`).
+///
+/// Inert for types with no gating positions. A fixed point handles nesting
+/// (`Result[Optional[Int], E]`): each round refines types whose gating children
+/// are already refined, until no `copy` field changes.
+fn refine_mono_copy_behavior(
+    arena: &TyArena,
+    structs: &IndexMap<Entity, StructDef>,
+    enums: &IndexMap<Entity, EnumDef>,
+    mono_structs: &mut IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &mut IndexMap<MonoTypeKey, MonoEnum>,
+) {
+    loop {
+        // (key, is_struct, new copy) — collected read-only, applied after.
+        let mut updates: Vec<(MonoTypeKey, bool, CopyBehavior)> = Vec::new();
+        for (key, ms) in mono_structs.iter() {
+            let gating = &structs[&ms.source].conditionally_copyable;
+            if gating.is_empty() {
+                continue;
+            }
+            let want =
+                conditional_copy(arena, ms.source, gating, &ms.type_args, mono_structs, mono_enums);
+            if want != ms.type_info.copy {
+                updates.push((key.clone(), true, want));
+            }
+        }
+        for (key, me) in mono_enums.iter() {
+            let gating = &enums[&me.source].conditionally_copyable;
+            if gating.is_empty() {
+                continue;
+            }
+            let want =
+                conditional_copy(arena, me.source, gating, &me.type_args, mono_structs, mono_enums);
+            if want != me.type_info.copy {
+                updates.push((key.clone(), false, want));
+            }
+        }
+        if updates.is_empty() {
+            break;
+        }
+        for (key, is_struct, cb) in updates {
+            if is_struct {
+                if let Some(ms) = mono_structs.get_mut(&key) {
+                    ms.type_info.copy = cb;
+                }
+            } else if let Some(me) = mono_enums.get_mut(&key) {
+                me.type_info.copy = cb;
+            }
+        }
+    }
+}
+
+/// Copyability of a conditional container, mirroring `ty_query`: any gating arg
+/// `None` → `None`; all `Bitwise` → `Bitwise`; all Copyable with ≥1 `Clone` →
+/// `Clone(entity)` (copyable element-wise via the container's clone shim).
+fn conditional_copy(
+    arena: &TyArena,
+    entity: Entity,
+    gating: &[usize],
+    type_args: &[TyId],
+    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+) -> CopyBehavior {
+    let mut saw_clone = false;
+    for &pos in gating {
+        let Some(&arg) = type_args.get(pos) else {
+            return CopyBehavior::None;
+        };
+        match concrete_copy(arena, arg, mono_structs, mono_enums) {
+            CopyBehavior::Bitwise => {},
+            CopyBehavior::Clone(_) => saw_clone = true,
+            CopyBehavior::None => return CopyBehavior::None,
+        }
+    }
+    if saw_clone {
+        CopyBehavior::Clone(entity)
+    } else {
+        CopyBehavior::Bitwise
+    }
+}
+
+/// Copy behavior of an already-monomorphized concrete type. Named types are
+/// looked up in the mono maps (their `copy` is correct, or being refined this
+/// round); primitives/pointers/functions are bit-copyable; a tuple is Bitwise
+/// iff every element is.
+fn concrete_copy(
+    arena: &TyArena,
+    ty: TyId,
+    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+) -> CopyBehavior {
+    match arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            let key = (*entity, type_args.clone());
+            mono_structs
+                .get(&key)
+                .map(|s| s.type_info.copy.clone())
+                .or_else(|| mono_enums.get(&key).map(|e| e.type_info.copy.clone()))
+                .unwrap_or(CopyBehavior::Bitwise)
+        },
+        MirTy::Tuple(elems) => {
+            for &e in elems {
+                if !matches!(
+                    concrete_copy(arena, e, mono_structs, mono_enums),
+                    CopyBehavior::Bitwise
+                ) {
+                    return CopyBehavior::None;
+                }
+            }
+            CopyBehavior::Bitwise
+        },
+        _ => CopyBehavior::Bitwise,
+    }
 }
 
 enum ConcreteTypeKind {

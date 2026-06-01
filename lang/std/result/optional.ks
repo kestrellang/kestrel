@@ -49,7 +49,7 @@ import std.iter.(Iterator)
 /// when one is available (e.g. a non-zero pointer), so `Optional[Pointer]`
 /// is the same size as `Pointer`.
 @builtin(.OptionalEnum)
-public enum Optional[T] {
+public enum Optional[T]: not Copyable {
     /// Wraps a present value of `T`.
     @builtin(.OptionalSomeCase)
     case Some(T)
@@ -518,6 +518,12 @@ public enum Optional[T] {
 // ============================================================================
 // CONDITIONAL EXTENSIONS - EQUATABLE
 // ============================================================================
+
+/// `Optional` is move-only by default (`not Copyable`) so it can wrap a
+/// non-Copyable payload (e.g. `File?`). It regains copy semantics only when the
+/// wrapped type is itself Copyable — so `Int64?` is Copyable while `Array?`
+/// stays move-only.
+extend Optional[T]: Copyable where T: Copyable { }
 
 /// Equatable when the inner type is — `None == None` is true, `Some(a) ==
 /// Some(b)` defers to `T.isEqual`, and a present value is never equal to

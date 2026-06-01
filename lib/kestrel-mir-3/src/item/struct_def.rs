@@ -26,6 +26,12 @@ pub struct StructDef {
     pub type_params: Vec<TypeParamDef>,
     pub fields: Vec<FieldDef>,
     pub type_info: TypeInfo,
+    /// Type-param positions that gate this type's *conditional* Copyable
+    /// conformance (`struct X: not Copyable` + `extend X: Copyable where
+    /// T: Copyable`). Empty unless conditionally copyable. Drives
+    /// per-instantiation `copy_behavior`: `X[args]` is Copyable iff every gating
+    /// `args[i]` is. See `kestrel_semantics::ConditionalCopyableParams`.
+    pub conditionally_copyable: Vec<usize>,
 }
 
 impl StructDef {
@@ -36,6 +42,7 @@ impl StructDef {
             type_params: Vec::new(),
             fields: Vec::new(),
             type_info: TypeInfo::default(),
+            conditionally_copyable: Vec::new(),
         }
     }
 

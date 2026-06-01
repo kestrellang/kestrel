@@ -1334,6 +1334,7 @@ dependencies = [
  "kestrel-lexer",
  "kestrel-name-res",
  "kestrel-parser",
+ "kestrel-semantics",
  "kestrel-span",
  "kestrel-syntax-tree",
 ]

@@ -39,6 +39,11 @@ pub struct EnumDef {
     pub type_params: Vec<TypeParamDef>,
     pub cases: Vec<EnumCaseDef>,
     pub type_info: TypeInfo,
+    /// Type-param positions that gate this type's *conditional* Copyable
+    /// conformance (`enum X: not Copyable` + `extend X: Copyable where
+    /// T: Copyable`). Empty unless conditionally copyable. See
+    /// `kestrel_semantics::ConditionalCopyableParams` and `StructDef`.
+    pub conditionally_copyable: Vec<usize>,
 }
 
 impl EnumDef {
@@ -49,6 +54,7 @@ impl EnumDef {
             type_params: Vec::new(),
             cases: Vec::new(),
             type_info: TypeInfo::default(),
+            conditionally_copyable: Vec::new(),
         }
     }
 

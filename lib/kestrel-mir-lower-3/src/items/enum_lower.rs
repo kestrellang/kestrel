@@ -23,6 +23,12 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
         drop: lower_enum_drop_behavior(ctx, entity),
         layout: None,
     };
+    def.conditionally_copyable = ctx
+        .query
+        .query(kestrel_semantics::ConditionalCopyableParams {
+            entity,
+            root: ctx.root,
+        });
 
     let children: Vec<Entity> = ctx.world.children_of(entity).to_vec();
     for child in children {
