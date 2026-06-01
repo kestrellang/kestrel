@@ -1528,6 +1528,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     convention,
                 };
             }
+            // SSA owned receiver (e.g. a `consuming` func's `self`): borrow the
+            // value in place via lower_expr_for_borrow. lower_expr would emit
+            // copy_value here, stranding the mutation on the throwaway copy while
+            // the loop-carried original never advances — the infinite loop in
+            // Iterator.fold/reduce (`while let .Some = self.next()`).
+            let val = self.lower_expr_for_borrow(expr_id);
+            return self.prepare_call_arg(val, convention);
         }
         if convention == ParamConvention::Borrow {
             if let Some(addr) = self.try_var_addr(expr_id) {
