@@ -69,7 +69,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
     /// The caller must ensure the address holds a valid `T` (correct size,
     /// alignment, and initialised contents) before reading through the
     /// returned pointer.
-    public func cast[T]() -> Pointer[T] {
+    public func cast[T]() -> Pointer[T] where T: not Copyable {
         Pointer(raw: lang.cast_ptr[_, T](self.raw))
     }
 
@@ -133,7 +133,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 /// Non-owning. The pointee's lifetime is the caller's responsibility; the
 /// pointer does not increment any refcount, register with any GC, or
 /// trigger a deinit.
-public struct Pointer[T]: Equatable, Hashable {
+public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
     private var _raw: lang.ptr[T]
 
     /// The wrapped primitive pointer.
@@ -167,11 +167,6 @@ public struct Pointer[T]: Equatable, Hashable {
     /// initialised `T`. Reading past the end of an allocation, after
     /// the pointee has been freed, or through a dangling pointer is
     /// undefined behavior.
-    public var pointee: T {
-        get { lang.ptr_read(self._raw) }
-        set { lang.ptr_write(self._raw, newValue) }
-    }
-
     /// Numeric address — same value as `asRaw().address`.
     public var address: UInt64 {
         UInt64(intLiteral: lang.ptr_to_address(lang.cast_ptr[_, lang.i8](self._raw)))
@@ -182,8 +177,10 @@ public struct Pointer[T]: Equatable, Hashable {
         Bool(boolLiteral: lang.ptr_is_null(lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
-    /// Reads `T` from the address via borrow — `T.deinit` does not run.
-    public func read() -> T {
+    /// Bit-copies `T` out of the address — `T.deinit` does not run. This is
+    /// a copy, so it requires `T: Copyable`; for non-Copyable pointees use
+    /// `with` (borrow) or `move` (consuming read-out).
+    public func read() -> T where T: Copyable {
         lang.ptr_read(self._raw)
     }
 
@@ -225,7 +222,7 @@ public struct Pointer[T]: Equatable, Hashable {
     ///
     /// Same caveats as `RawPointer.cast` — the storage must be valid for
     /// `U` (size, alignment, contents) at the moment of the read/write.
-    public func cast[U]() -> Pointer[U] {
+    public func cast[U]() -> Pointer[U] where U: not Copyable {
         Pointer(raw: lang.cast_ptr[_, U](lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
@@ -252,6 +249,23 @@ public struct Pointer[T]: Equatable, Hashable {
         x = x.multiply(m2);
         x = x.bitwiseXor(x.shiftRight(by: 33));
         hasher.write(ArraySlice(pointer: Pointer(to: x).asRaw().cast[UInt8](), count: 8))
+    }
+}
+
+/// Live, copy-based view of the pointee. The getter bit-copies `T` out of the
+/// address and the setter copies in, so this property is only available when
+/// `T: Copyable`. For non-Copyable pointees, borrow via `with`, read-out via
+/// `move`, or write via `write`.
+///
+/// # Safety
+///
+/// The pointer must be non-null and the storage must hold a valid initialised
+/// `T`. Reading past the end of an allocation, after the pointee has been
+/// freed, or through a dangling pointer is undefined behavior.
+extend Pointer[T] where T: Copyable {
+    public var pointee: T {
+        get { lang.ptr_read(self._raw) }
+        set { lang.ptr_write(self._raw, newValue) }
     }
 }
 

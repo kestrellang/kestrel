@@ -9,7 +9,7 @@
 //! there is no ambient `self.owner` to accidentally leak into name lookup.
 
 use kestrel_ast_builder::{
-    AstType, NodeKind, TypeParams, WhereClause as AstWhereClause, WhereConstraint,
+    AstType, Intrinsic, NodeKind, TypeParams, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::Builtin;
@@ -125,6 +125,15 @@ fn inject_implicit_copyable_bounds(
     // requirement on their params is meaningless (and would pollute the
     // where-clause the conditional-conformance evaluator reads back).
     if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+        return;
+    }
+    // Compiler intrinsics (`lang.ptr_read`, `lang.cast_ptr`, `lang.sizeof`, …)
+    // operate on their type params at the ABI level — reinterpreting addresses,
+    // measuring layout, moving bytes — without ever requiring the param to be
+    // bit-copyable. Injecting `T: Copyable` here wrongly rejects non-Copyable
+    // pointees (e.g. `Pointer[T].isNull` casting `ptr[T]` to `ptr[i8]`). Any
+    // genuine copy an intrinsic performs is enforced downstream by OSSA verify.
+    if ctx.get::<Intrinsic>(entity).is_some() {
         return;
     }
     // A type that opts out of Copyable (`struct X: not Copyable`) never

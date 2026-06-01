@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause, WhereConstraint,
+    Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
@@ -824,6 +824,13 @@ fn collect_child_types(
     for &child in ctx.children_of(entity) {
         match ctx.get::<NodeKind>(child) {
             Some(NodeKind::Field) => {
+                // Computed properties (`var x: T { get … }`) store nothing —
+                // they read/write through accessors — so they never affect
+                // whether the containing type is bit-copyable. Only stored
+                // fields contribute to copy semantics.
+                if ctx.get::<Computed>(child).is_some() {
+                    continue;
+                }
                 if let Some(ty) = ctx.query(LowerTypeAnnotation {
                     entity: child,
                     root,
