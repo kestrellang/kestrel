@@ -123,7 +123,33 @@ impl OssaBodyCtx<'_, '_> {
                 self.tracker.remove(live_vals[i]);
             }
         }
+
+        // Reconcile conditional moves of `var` slots: join each var's per-arm
+        // init-state over the reaching edges and apply it at the merge. The
+        // in-memory drop flag is already correct per-path (set in the took arm).
+        self.fold_var_inits(&reaching);
+
         result_param
+    }
+
+    /// Join per-arm `var` init-states over the reaching edges (lattice via
+    /// `VarInit::join`) and write the result onto the (restored) merge entries.
+    /// A var taken on some-but-not-all edges becomes `MaybeUninit`.
+    pub(crate) fn fold_var_inits(&mut self, reaching: &[&ArmExit]) {
+        for (local, _) in self.scope_var_inits() {
+            let mut joined: Option<super::VarInit> = None;
+            for exit in reaching {
+                if let Some((_, ai)) = exit.var_inits.iter().find(|(l, _)| *l == local) {
+                    joined = Some(match joined {
+                        None => *ai,
+                        Some(j) => j.join(*ai),
+                    });
+                }
+            }
+            if let Some(j) = joined {
+                self.set_var_init(local, j);
+            }
+        }
     }
 
     // ================================================================

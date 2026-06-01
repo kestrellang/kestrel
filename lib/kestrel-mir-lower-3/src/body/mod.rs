@@ -111,12 +111,45 @@ impl BodyContext {
     }
 }
 
+/// Static initialization state of a `var` (address) slot — whether the slot
+/// still owns a value at a given program point. Mirrors Swift's Definite
+/// Initialization availability: `DefInit` (owns a value), `DefUninit` (moved out /
+/// `load [take]`'d), and `MaybeUninit` (consumed on some control-flow paths only),
+/// which is reconciled with a runtime drop flag (Swift's `dynamic_lifetime`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum VarInit {
+    DefInit,
+    MaybeUninit,
+    DefUninit,
+}
+
+impl VarInit {
+    /// Lattice join over reaching control-flow edges.
+    pub fn join(self, other: VarInit) -> VarInit {
+        use VarInit::*;
+        match (self, other) {
+            (DefInit, DefInit) => DefInit,
+            (DefUninit, DefUninit) => DefUninit,
+            _ => MaybeUninit,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum ScopeEntry {
     Owned(ValueId),
     Var {
         addr: ValueId,
         ty: TyId,
+        /// Whether the slot currently owns a value (drives scope-exit destroy).
+        init: VarInit,
+        /// In-memory `Bool` drop-flag slot (original pointer) for a
+        /// conditionally-moved var; `None` for vars that are never conditionally
+        /// moved. `true` in memory = slot owns a value (must drop).
+        flag: Option<ValueId>,
+        /// Stable identity of the slot across block-merge rebinds (`addr` itself is
+        /// stable today, but reads key by the HIR local). `None` for self/params.
+        local: Option<HirLocalId>,
     },
     /// @guaranteed borrow needing EndBorrow at scope exit.
     Borrow(ValueId),
@@ -234,6 +267,9 @@ pub(crate) struct ArmExit {
     pub block: BlockId,
     pub result: ValueId,
     pub slots: Vec<(ValueId, bool)>,
+    /// Static init-state of each in-scope `var` (by HIR local) at this arm's exit,
+    /// for drop-flag reconciliation at the merge.
+    pub var_inits: Vec<(HirLocalId, VarInit)>,
 }
 
 pub(crate) struct OssaBodyCtx<'a, 'w> {
@@ -593,13 +629,175 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         });
     }
 
-    pub fn track_var(&mut self, address: ValueId, content_ty: TyId) {
+    pub fn track_var(
+        &mut self,
+        address: ValueId,
+        content_ty: TyId,
+        local: Option<HirLocalId>,
+        flag: Option<ValueId>,
+    ) {
         if let Some(frame) = self.scope_stack.last_mut() {
             frame.entries.push(ScopeEntry::Var {
                 addr: address,
                 ty: content_ty,
+                init: VarInit::DefInit,
+                flag,
+                local,
             });
         }
+    }
+
+    /// Current static init-state of the `var` slot for HIR `local`, searching
+    /// inner scopes first. Keyed by `HirLocalId` (stable across block-merge
+    /// rebinds), not address. `None` if not a tracked var local.
+    pub fn var_init(&self, local: HirLocalId) -> Option<VarInit> {
+        for scope in self.scope_stack.iter().rev() {
+            for entry in scope.entries.iter().rev() {
+                if let ScopeEntry::Var {
+                    local: Some(l),
+                    init,
+                    ..
+                } = entry
+                {
+                    if *l == local {
+                        return Some(*init);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Set the static init-state of the `var` slot for HIR `local`.
+    pub fn set_var_init(&mut self, local: HirLocalId, new_init: VarInit) {
+        for scope in self.scope_stack.iter_mut().rev() {
+            for entry in scope.entries.iter_mut().rev() {
+                if let ScopeEntry::Var {
+                    local: Some(l),
+                    init,
+                    ..
+                } = entry
+                {
+                    if *l == local {
+                        *init = new_init;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The MIR `Bool` type id.
+    pub fn bool_ty(&mut self) -> TyId {
+        Immediate::bool(false).ty(&mut self.ctx.module.ty_arena)
+    }
+
+    /// Allocate an in-memory drop flag (Swift's `dynamic_lifetime` control
+    /// variable) initialized to `true` (= slot owns a value). Returns the flag
+    /// slot pointer; store/load it via this original pointer in any later block
+    /// (the verifier permits it — see Phase 3 design note). The pointer is
+    /// tracked like the var address: threaded through merges and `DestroyValue`'d
+    /// (a no-op on a trivial `Bool` slot) at scope exit.
+    pub fn alloc_var_flag(&mut self) -> ValueId {
+        let bty = self.bool_ty();
+        let flag = self.emit_uninit(bty);
+        let init = self.emit_literal(Immediate::bool(true));
+        self.emit_store_init(flag, init);
+        flag
+    }
+
+    /// Allocate a drop flag for a non-Copyable var (which may be conditionally
+    /// moved); `None` for Copyable vars (never moved, never need a flag).
+    pub fn maybe_alloc_var_flag(&mut self, ty: TyId) -> Option<ValueId> {
+        if self.is_non_copyable(ty) {
+            Some(self.alloc_var_flag())
+        } else {
+            None
+        }
+    }
+
+    /// Store `full` into a drop-flag slot (`true` = slot owns a value).
+    pub fn store_drop_flag(&mut self, flag: ValueId, full: bool) {
+        let v = self.emit_literal(Immediate::bool(full));
+        self.emit_store_assign(flag, v);
+    }
+
+    pub fn emit_destroy_addr(&mut self, address: ValueId, ty: TyId) {
+        self.push_inst(InstKind::DestroyAddr { address, ty });
+    }
+
+    /// Emit `if load(flag) { destroy_addr(slot) }` — Swift's drop-flag-guarded
+    /// cleanup of a conditionally-moved var. Threads all live owned values
+    /// through the diamond and returns `thread` remapped to the continuation
+    /// block (where `current_block` is left). The `DestroyAddr` consumes no owned
+    /// SSA value, so both edges carry the same live set and the merge is trivial.
+    pub fn emit_guarded_destroy(
+        &mut self,
+        flag: ValueId,
+        slot: ValueId,
+        ty: TyId,
+        thread: &[ValueId],
+    ) -> Vec<ValueId> {
+        let bty = self.bool_ty();
+        let cond = self.emit_load(flag, bty);
+
+        let saved_tracker = self.tracker.clone();
+        self.tracker = LiveTracker::from_live(&self.all_live_tracked());
+        let live = self.tracker.values();
+        let descs = self.tracker.descs();
+
+        let (then_block, then_params) = self.new_block_with_params(&descs);
+        let (else_block, else_params) = self.new_block_with_params(&descs);
+        let (merge_block, merge_params) = self.new_block_with_params(&descs);
+        self.emit_branch(
+            cond,
+            then_block,
+            live.clone(),
+            else_block,
+            live.clone(),
+        );
+
+        // then arm: run the deinit on the slot, then forward the live set.
+        self.switch_to(then_block);
+        self.emit_destroy_addr(slot, ty);
+        self.emit_jump(merge_block, then_params.clone());
+
+        // else arm: forward unchanged.
+        self.switch_to(else_block);
+        self.emit_jump(merge_block, else_params);
+
+        // continuation: rebind scope/tracker to the merge params.
+        self.switch_to(merge_block);
+        self.rebind_scope_values(&live, &merge_params);
+        self.tracker = saved_tracker;
+        self.tracker.rebind(&live, &merge_params);
+
+        thread
+            .iter()
+            .map(|&t| match live.iter().position(|&v| v == t) {
+                Some(pos) => merge_params[pos],
+                None => t,
+            })
+            .collect()
+    }
+
+    /// Drop-flag slot (original pointer) of the `var` for HIR `local`, if any.
+    pub fn var_flag(&self, local: HirLocalId) -> Option<ValueId> {
+        for scope in self.scope_stack.iter().rev() {
+            for entry in scope.entries.iter().rev() {
+                if let ScopeEntry::Var {
+                    local: Some(l),
+                    flag,
+                    ..
+                } = entry
+                {
+                    if *l == local {
+                        return *flag;
+                    }
+                }
+            }
+        }
+        None
     }
 
     pub fn track_owned(&mut self, value: ValueId) {
@@ -714,7 +912,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 ScopeEntry::Owned(v) if !keep.contains(v) => {
                     self.push_inst(InstKind::DestroyValue { operand: *v });
                 },
-                ScopeEntry::Var { addr, ty } => {
+                // DefUninit: the slot was moved out (Swift `load [take]`) and owns
+                // nothing — emitting DestroyAddr would double-free. Skip it.
+                ScopeEntry::Var {
+                    init: VarInit::DefUninit,
+                    ..
+                } => {},
+                ScopeEntry::Var { addr, ty, .. } => {
                     self.push_inst(InstKind::DestroyAddr {
                         address: *addr,
                         ty: *ty,
@@ -806,7 +1010,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             block,
             result,
             slots: self.tracker.slot_states(),
+            var_inits: self.scope_var_inits(),
         })
+    }
+
+    /// Per-`var` static init-state (keyed by HIR local) across all in-scope
+    /// frames, innermost wins. Used to reconcile conditional moves at merges.
+    pub fn scope_var_inits(&self) -> Vec<(HirLocalId, VarInit)> {
+        let mut out: Vec<(HirLocalId, VarInit)> = Vec::new();
+        for scope in self.scope_stack.iter().rev() {
+            for entry in scope.entries.iter().rev() {
+                if let ScopeEntry::Var {
+                    local: Some(l),
+                    init,
+                    ..
+                } = entry
+                {
+                    if !out.iter().any(|(k, _)| k == l) {
+                        out.push((*l, *init));
+                    }
+                }
+            }
+        }
+        out
     }
 
     // ================================================================
@@ -1475,6 +1701,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         match &expr {
             HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
                 self.map_local(*hir_local)
+            },
+            HirExpr::Local(hir_local, _) => {
+                // var-local: borrow the address directly (Swift `load [borrow]`).
+                // Falling through to lower_expr would `emit_copy_addr` — an
+                // illegal copy for a non-Copyable var.
+                let addr = self.map_local(*hir_local);
+                let ty = self.resolve_local_type(*hir_local);
+                self.emit_begin_borrow_addr(addr, ty)
             },
             _ => self.lower_expr(expr_id),
         }

@@ -144,6 +144,11 @@ impl OssaBodyCtx<'_, '_> {
                 self.tracker.remove(live_vals[i]);
             }
         }
+
+        // Reconcile conditional moves of `var` slots across the match arms.
+        let reaching: Vec<&super::ArmExit> = exits.iter().collect();
+        self.fold_var_inits(&reaching);
+
         result_param
     }
 

@@ -65,10 +65,30 @@ impl OssaBodyCtx<'_, '_> {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
                     let ownership = self.ownership_for(ty);
-                    if ownership == kestrel_mir_3::value::Ownership::Owned {
-                        self.emit_copy_addr(addr, ty)
+                    if ownership != kestrel_mir_3::value::Ownership::Owned {
+                        return self.emit_load(addr, ty);
+                    }
+                    // A non-Copyable var read that reaches this value-producing
+                    // (consuming) path can't be copied — move it out (Swift
+                    // `load [take]`) and mark the slot uninitialized. Borrowing
+                    // uses never reach here (they route through
+                    // lower_expr_for_borrow / prepare_call_arg_for_expr). Copyable
+                    // vars still snapshot via copy_addr.
+                    if self.is_non_copyable(ty) {
+                        debug_assert!(
+                            self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
+                            "consuming read of an already-moved var — frontend should reject use-after-move"
+                        );
+                        let v = self.emit_take(addr, ty);
+                        self.set_var_init(*hir_local, super::VarInit::DefUninit);
+                        // Record the move in the in-memory drop flag (if any) so a
+                        // later merge/scope-exit can reconcile divergent paths.
+                        if let Some(flag) = self.var_flag(*hir_local) {
+                            self.store_drop_flag(flag, false);
+                        }
+                        v
                     } else {
-                        self.emit_load(addr, ty)
+                        self.emit_copy_addr(addr, ty)
                     }
                 } else {
                     let val = self.map_local(*hir_local);
@@ -261,14 +281,14 @@ impl OssaBodyCtx<'_, '_> {
                 return self.emit_call_returning(callee, vec![], result_ty);
             } else {
                 let receiver_ty = self.resolve_expr_type(base);
-                let base_val = self.lower_expr(base);
                 let callee = Callee::Witness {
                     protocol,
                     method: WitnessMethodKey::simple(field_name),
                     self_type: receiver_ty,
                     method_type_args,
                 };
-                let arg = self.prepare_call_arg(base_val, ParamConvention::Borrow);
+                // Borrow the receiver place — a var-local base must not be copied.
+                let arg = self.prepare_call_arg_for_expr(base, ParamConvention::Borrow);
                 return self.emit_call_returning(callee, vec![arg], result_ty);
             }
         }
@@ -287,8 +307,10 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             let receiver_ty = self.resolve_expr_type(base);
-            let base_val = self.lower_expr(base);
             let method_type_args = self.resolve_type_args(expr_id);
+            // Borrow the receiver place — a var-local base must not be copied
+            // (e.g. `buf.capacity` on a non-Copyable `var buf`).
+            let arg = self.prepare_call_arg_for_expr(base, ParamConvention::Borrow);
 
             if let Some(protocol) = self.ctx.is_protocol_method(getter_entity) {
                 self.ctx.register_name(protocol);
@@ -299,13 +321,11 @@ impl OssaBodyCtx<'_, '_> {
                     self_type: receiver_ty,
                     method_type_args,
                 };
-                let arg = self.prepare_call_arg(base_val, ParamConvention::Borrow);
                 return self.emit_call_returning(callee, vec![arg], result_ty);
             }
 
             let type_args = self.prepend_receiver_type_args(receiver_ty, method_type_args);
             let callee = Callee::direct_with_args(getter_entity, type_args, None);
-            let arg = self.prepare_call_arg(base_val, ParamConvention::Borrow);
             return self.emit_call_returning(callee, vec![arg], result_ty);
         }
 
@@ -532,8 +552,36 @@ impl OssaBodyCtx<'_, '_> {
         match target_expr {
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(&hir_local) {
-                    let addr = self.local_map[&hir_local].value();
-                    self.emit_store_assign(addr, rhs);
+                    // `rhs` is lowered above (rhs-first) so `x = f(x)` is correct.
+                    match self.var_init(hir_local) {
+                        // Moved-out on all paths: slot is empty, just StoreInit.
+                        Some(super::VarInit::DefUninit) => {
+                            let addr = self.local_map[&hir_local].value();
+                            self.emit_store_init(addr, rhs);
+                            self.set_var_init(hir_local, super::VarInit::DefInit);
+                        },
+                        // Moved on some paths only: flag-guarded drop of the old
+                        // value, then StoreInit. `emit_store_assign` would
+                        // unconditionally drop the (possibly moved-out) slot.
+                        Some(super::VarInit::MaybeUninit) => {
+                            let ty = self.resolve_local_type(hir_local);
+                            let flag = self
+                                .var_flag(hir_local)
+                                .expect("MaybeUninit var must have a drop flag");
+                            let addr = self.local_map[&hir_local].value();
+                            let remapped = self.emit_guarded_destroy(flag, addr, ty, &[rhs]);
+                            let rhs = remapped[0];
+                            let addr = self.local_map[&hir_local].value();
+                            self.emit_store_init(addr, rhs);
+                            self.store_drop_flag(flag, true);
+                            self.set_var_init(hir_local, super::VarInit::DefInit);
+                        },
+                        // Definitely initialized: StoreAssign drops the old value.
+                        _ => {
+                            let addr = self.local_map[&hir_local].value();
+                            self.emit_store_assign(addr, rhs);
+                        },
+                    }
                 } else {
                     let old_val = self.local_map.get(&hir_local).map(|b| b.value());
                     if let Some(old) = old_val {

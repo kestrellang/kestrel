@@ -27,7 +27,8 @@ impl OssaBodyCtx<'_, '_> {
                         self.emit_store_init(addr, init_val);
                         self.local_map
                             .insert(*local, super::LocalBinding::Var(addr));
-                        self.track_var(addr, ty);
+                        let flag = self.maybe_alloc_var_flag(ty);
+                        self.track_var(addr, ty, Some(*local), flag);
                     } else {
                         self.local_map
                             .insert(*local, super::LocalBinding::Ssa(init_val));
@@ -37,7 +38,8 @@ impl OssaBodyCtx<'_, '_> {
                     let addr = self.emit_uninit(ty);
                     self.local_map
                         .insert(*local, super::LocalBinding::Var(addr));
-                    self.track_var(addr, ty);
+                    let flag = self.maybe_alloc_var_flag(ty);
+                    self.track_var(addr, ty, Some(*local), flag);
                 }
             },
             HirStmt::Expr { expr, .. } => {
