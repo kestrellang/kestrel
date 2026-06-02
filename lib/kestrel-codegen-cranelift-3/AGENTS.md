@@ -30,6 +30,27 @@ invariants. It is not exhaustive — when you discover a new rule, add it here.
   handler checks for PtrTo and uses `get_value` on @guaranteed args instead of
   `resolve_scalar`, since the @guaranteed address IS the pointer we want.
 
+## Type layout: `tc.repr` is the single authority
+
+- `TypeCache::repr` / `classify` (`ty.rs`) is the **sole** place that decides a
+  type's Cranelift representation. `build_signature`, `compile_struct`,
+  `compile_struct_extract`, `compile_enum`, `resolve_scalar` — all derive their
+  cl types from it. Never re-derive a layout decision locally; if you need a
+  type's repr, call `repr`.
+- **Single-field newtypes delegate to their field.** A one-field struct's value
+  *is* its field's value (`compile_struct`'s single-field path returns the field
+  directly; `compile_struct_extract` returns the base unchanged). So
+  `classify_named` must report the field's own repr, NOT an integer collapsed by
+  byte size. Collapsing 8→I64 / 4→I32 silently mis-typed float newtypes
+  (`Float64`/`Float32`): the auto clone-shim's signature said `-> i64` while its
+  body returned an `f64`, failing Cranelift verification → trap stub. The fix
+  recurses `self.repr(field_ty)` and uses that scalar; integer-by-size is only a
+  fallback for pure-discriminant enums and structs over a non-scalar field.
+- Invariant pinned by `debug_assert_eq!(base_cl, field_cl)` in
+  `compile_struct_extract`: a single-field newtype's repr must equal its field's
+  repr. If it fires, some layout decision has diverged from `classify_named`
+  again — fix the divergence, don't add a coercion (bitcast/load) to bridge it.
+
 ## Switch on enum values
 
 Always `emit_discriminant(enum_val)` → I32 discriminant, then
