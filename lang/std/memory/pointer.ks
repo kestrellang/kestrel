@@ -134,7 +134,10 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 /// pointer does not increment any refcount, register with any GC, or
 /// trigger a deinit.
 public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
-    private var _raw: lang.ptr[T]
+    // `fileprivate`, not `private`: the conditional `pointee` accessor lives in
+    // `extend Pointer[T] where T: Copyable` (a conditional member can't sit in
+    // the struct body), and an extension can only reach file-scoped members.
+    fileprivate var _raw: lang.ptr[T]
 
     /// The wrapped primitive pointer.
     public var raw: lang.ptr[T] { self._raw }

@@ -1511,7 +1511,7 @@ fn solve_conforms(
 
 /// Returns `Some(want_cloneable)` if `protocol` is the Copyable (`false`) or
 /// Cloneable (`true`) builtin, else `None`.
-fn copyable_builtin_kind(ctx: &InferCtx<'_>, protocol: Entity) -> Option<bool> {
+pub(crate) fn copyable_builtin_kind(ctx: &InferCtx<'_>, protocol: Entity) -> Option<bool> {
     if ctx.query_ctx.query(ResolveBuiltin {
         builtin: Builtin::Copyable,
         root: ctx.root,

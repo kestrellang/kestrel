@@ -192,7 +192,7 @@ fn create_param_types(
 
                         // Emit extension where clause constraints so the solver
                         // knows about bounds like Item: Addable, Item.Output = Item
-                        emit_extension_where_clauses(
+                        emit_container_where_clauses(
                             ctx, query_ctx, parent, target, &args, self_tv,
                         );
 
@@ -202,7 +202,21 @@ fn create_param_types(
                 }
             } else {
                 let fresh_args = fresh_type_args(ctx, query_ctx, parent);
-                ctx.named(parent, fresh_args)
+                let self_tv = ctx.named(parent, fresh_args.clone());
+                // Methods defined directly inside a struct/enum body must see
+                // the container's where clauses — e.g. `struct ChainIterator
+                // [A,B] ... where B.Item = A.Item` — exactly as extension
+                // methods see the extension's. Without this the equality is
+                // invisible in `next()` and `self.second.next(): B.Item` fails
+                // to unify with the `A.Item` return type (adapters.ks).
+                if parent_kind == Some(&NodeKind::Struct)
+                    || parent_kind == Some(&NodeKind::Enum)
+                {
+                    emit_container_where_clauses(
+                        ctx, query_ctx, parent, parent, &fresh_args, self_tv,
+                    );
+                }
+                self_tv
             }
         } else {
             ctx.fresh()
@@ -226,8 +240,9 @@ fn create_param_types(
     }
 
     // Emit the method's own where clause constraints (e.g., `where I: Iterable, V = Array[E]`).
-    // Extension where clauses are handled by emit_extension_where_clauses above;
-    // this handles where clauses declared on the method/init itself.
+    // Container (extension / struct / enum) where clauses are handled by
+    // emit_container_where_clauses above; this handles where clauses declared
+    // on the method/init itself.
     emit_method_where_clauses(ctx, query_ctx, entity);
 
     param_tvs
@@ -282,6 +297,16 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
                 protocol,
                 protocol_type_args,
             } => {
+                // Skip the implicit (and explicit) `Copyable` / `Cloneable`
+                // bound — a call-site obligation, not a body-inference fact.
+                // `Pointer[T].read()` is declared `where T: Copyable` over the
+                // type's `T: not Copyable` param; emitting `Conforms(T,
+                // Copyable)` here makes the abstract param fail conformance and
+                // poisons the body. See the matching skip in
+                // `emit_container_where_clauses`.
+                if solver::copyable_builtin_kind(ctx, protocol).is_some() {
+                    continue;
+                }
                 // Find or create a TyVar for this param
                 let tv = ctx.param(param);
                 ctx.conforms(tv, protocol, span.clone());
@@ -467,15 +492,21 @@ fn fresh_type_args(
         .unwrap_or_default()
 }
 
-/// Emit extension where clause constraints for the method body being inferred.
+/// Emit a type container's where-clause constraints for a method body being
+/// inferred. The container is either an `extend` block or the struct/enum that
+/// directly owns the method — both need their bounds and associated-type
+/// equalities visible inside their methods.
 ///
-/// Extension where clauses (e.g., `extend Iterator where Item: Addable, Item.Output = Item`)
-/// need to be emitted as constraints so the solver knows about bounds on associated types
-/// and type parameters when inferring method bodies inside the extension.
-fn emit_extension_where_clauses(
+/// Examples: `extend Iterator where Item: Addable, Item.Output = Item`, or
+/// `struct ChainIterator[A,B] ... where B.Item = A.Item`. Without these
+/// constraints the solver treats `A.Item` and `B.Item` as unrelated TyVars and
+/// rejects the method body. `where_entity` is queried for the clauses;
+/// `target` supplies the type params bound by `fresh_args` (for a struct method
+/// the two coincide).
+fn emit_container_where_clauses(
     ctx: &mut InferCtx<'_>,
     query_ctx: &QueryContext<'_>,
-    extension: Entity,
+    where_entity: Entity,
     target: Entity,
     fresh_args: &[ty::TyVar],
     self_tv: ty::TyVar,
@@ -491,7 +522,7 @@ fn emit_extension_where_clauses(
     let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::new();
 
     let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
-        entity: extension,
+        entity: where_entity,
         root: ctx.root,
     });
     for clause in clauses {
@@ -501,6 +532,17 @@ fn emit_extension_where_clauses(
                 protocol,
                 protocol_type_args,
             } => {
+                // Skip the implicit `T: Copyable` / `Cloneable` bound that
+                // `WhereClausesOf` injects for every generic param. Those are
+                // call-site obligations, not body-inference facts — emitting
+                // `Conforms(T, Copyable)` here is never needed to resolve types
+                // and wrongly rejects abstract non-Copyable params (e.g.
+                // `Pointer[T].read`/`pointee`/`deepClone`). Extensions never
+                // reach this (injection skips them), so this only narrows the
+                // struct/enum container path.
+                if solver::copyable_builtin_kind(ctx, protocol).is_some() {
+                    continue;
+                }
                 let span = Span::synthetic(0);
                 let subject_tv = get_or_create_subject_tv(
                     ctx,
@@ -625,6 +667,50 @@ fn emit_protocol_assoc_type_where_clauses(
     _self_tv: ty::TyVar,
     span: &Span,
 ) {
+    // A where clause on one associated type can reference a *sibling* in its
+    // RHS — `Iterable` declares `type TargetIterator: Iterator where
+    // TargetIterator.Item = Item`, where the bare `Item` is `Self.Item`.
+    // Without a substitution, that `Item` lowers to a raw `Param` for the
+    // associated-type entity, leaving the body's `T.Item` unrelated to the
+    // equality (the `expected T.Item got T.TargetIterator.Item` mismatch in
+    // array.ks `flatten`). So when — and only when — the protocol has any
+    // associated type carrying a where clause, pre-register `subject.<assoc>`
+    // for *all* of its associated types: the RHS references resolve, and
+    // registering each in `where_clause_assoc_subs` lets the body's own
+    // `T.<assoc>` projections reuse the same TyVar. Protocols whose associated
+    // types are unconstrained (e.g. `Iterator`'s bare `Item`) skip this
+    // entirely — pre-registering there would over-unify `Item` across
+    // independent uses and break `sum`/`product`/etc.
+    let has_assoc_where_clause = query_ctx.children_of(protocol).iter().any(|&child| {
+        query_ctx.get::<kestrel_ast_builder::NodeKind>(child)
+            == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+            && !query_ctx
+                .query(crate::where_clauses::WhereClausesOf {
+                    entity: child,
+                    root: ctx.root,
+                })
+                .is_empty()
+    });
+    if has_assoc_where_clause {
+        for &child in query_ctx.children_of(protocol) {
+            if query_ctx.get::<kestrel_ast_builder::NodeKind>(child)
+                != Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+            {
+                continue;
+            }
+            let assoc_name = query_ctx
+                .get::<kestrel_ast_builder::Name>(child)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            assoc_type_tvs.entry(child).or_insert_with(|| {
+                let tv = ctx.fresh();
+                ctx.associated(subject_tv, &assoc_name, tv, span.clone());
+                ctx.where_clause_assoc_subs.push((child, tv));
+                tv
+            });
+        }
+    }
+
     // Walk the protocol's children looking for TypeAlias entities with where clauses
     for &child in query_ctx.children_of(protocol) {
         if query_ctx.get::<kestrel_ast_builder::NodeKind>(child)

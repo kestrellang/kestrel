@@ -461,7 +461,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if !self.is_terminated() {
             if let Some(tail) = self.hir.tail_expr {
                 let tail_span = expr_span(&self.hir, tail);
-                let value = self.lower_expr(tail);
+                let value = self.lower_expr_for_return(tail);
                 if !self.is_terminated() {
                     // @guaranteed values can't be returned — copy to @owned first
                     let value = if self.body.value(value).ownership == Ownership::Guaranteed {

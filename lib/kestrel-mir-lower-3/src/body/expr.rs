@@ -29,6 +29,48 @@ impl OssaBodyCtx<'_, '_> {
         self.apply_promotion(expr_id, value)
     }
 
+    /// Lower an expression in return/tail position. A bare `var` local there is
+    /// a guaranteed last use, so MOVE it (`load [take]`) rather than the
+    /// clone-then-scope-drop `lower_expr` would emit for a Copyable var read.
+    ///
+    /// The clone+drop pair is wasteful in general, but actively wrong inside a
+    /// `.clone()` method: the `CopyValue→clone` expansion is suppressed there
+    /// (expanding a copy of `T` would recurse `T.clone → copy T → T.clone`), so
+    /// the returned COW value stays a bitwise alias with no refcount bump while
+    /// the scope-exit drop still releases — e.g. `Deque.clone`'s `return d`
+    /// netted zero on the shared `RcBox`, so dropping the "clone" over-released
+    /// the storage. Moving the local balances the books (no copy, no drop).
+    pub fn lower_expr_for_return(&mut self, expr_id: HirExprId) -> ValueId {
+        let local = match &self.hir.exprs[expr_id] {
+            HirExpr::Local(l, _) if self.is_var_local(l) => Some(*l),
+            _ => None,
+        };
+        if let Some(hir_local) = local {
+            let ty = self.resolve_local_type(hir_local);
+            let addr = self.map_local(hir_local);
+            // Only a *true owned* `var` local may be moved: its binding value is
+            // the @owned StackAlloc address it solely owns. A MutBorrow param
+            // (`mutating self`/args) is also bound as `Var`, but its binding
+            // value is @guaranteed — it aliases the caller's storage, so moving
+            // out of it (`return self` in a mutating method) would strand the
+            // caller. Leave those to the cloning path.
+            let owns_storage =
+                self.body.value(addr).ownership == kestrel_mir_3::value::Ownership::Owned;
+            if owns_storage
+                && self.ownership_for(ty) == kestrel_mir_3::value::Ownership::Owned
+                && self.var_init(hir_local) != Some(super::VarInit::DefUninit)
+            {
+                let v = self.emit_take(addr, ty);
+                self.set_var_init(hir_local, super::VarInit::DefUninit);
+                if let Some(flag) = self.var_flag(hir_local) {
+                    self.store_drop_flag(flag, false);
+                }
+                return v;
+            }
+        }
+        self.lower_expr(expr_id)
+    }
+
     /// Apply a recorded `FromValue.from(value)` promotion if type-infer
     /// stored one for this expression.
     fn apply_promotion(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
@@ -195,7 +237,7 @@ impl OssaBodyCtx<'_, '_> {
                 let is_failure_return =
                     !self.init_field_flags.is_empty() && self.is_init_failure_return(value);
                 let ret_val = if let Some(v) = value {
-                    self.lower_expr(*v)
+                    self.lower_expr_for_return(*v)
                 } else {
                     self.emit_literal(Immediate::unit())
                 };
