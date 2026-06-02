@@ -5,7 +5,7 @@ use kestrel_hecs::Entity;
 use crate::callee::Callee;
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind};
-use crate::item::{CopyBehavior, DropBehavior};
+use crate::item::CopyBehavior;
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::{MirTy, ParamConvention};
 use crate::value::{Ownership, ValueDef};
@@ -28,11 +28,12 @@ pub fn expand_destroy_copy(
     let shim_lookup = build_drop_shim_lookup(module, generic_functions);
     let clone_lookup = build_clone_lookup(module, generic_functions);
 
-    // Map method/deinit entities → nominal for types with drop/clone.
-    // Prevents recursive cycles: DestroyValue on T inside T's methods
-    // won't expand to Call(__drop$T), and CopyValue on T inside T's
-    // methods won't expand to Call(T.clone).
-    let method_to_nominal = build_method_to_nominal_map(module, generic_functions);
+    // Map deinit/drop-shim entities → nominal. Suppresses DestroyValue→__drop$T
+    // expansion only inside a type's own drop machinery (its `deinit` and
+    // `__drop$T` shim), breaking the drop-recursion cycle. Ordinary methods —
+    // including consuming methods that own and must drop `self` — are NOT in
+    // this map, so their `destroy_value self` expands normally.
+    let drop_impl_to_nominal = build_drop_impl_to_nominal_map(generic_functions);
 
     // Narrow map for the CopyValue→clone guard: only a type's own clone
     // implementation may suppress cloning a copy of itself (to avoid
@@ -74,14 +75,24 @@ pub fn expand_destroy_copy(
 
     for fi in 0..module.functions.len() {
         let source = module.functions[fi].source;
-        let skip_nominal = method_to_nominal.get(&source).copied();
+        // Per-instantiation drop-recursion guard: skip ONLY a DestroyValue of
+        // this shim's exact monomorphic self type, reconstructed as
+        // (nominal, this instance's type_args). Keying by nominal alone
+        // collapsed every instantiation, so `__drop$Wrapper[Wrapper[T]]` also
+        // skipped dropping its payload of type `Wrapper[T]` (a *different*
+        // instantiation of the same generic) → the recursive drop chain
+        // stopped and nested-enum payloads leaked. (AGENTS.md: key by
+        // (Entity, type_args), never the nominal alone.)
+        let skip_self = drop_impl_to_nominal
+            .get(&source)
+            .map(|&n| (n, module.functions[fi].type_args.clone()));
         let skip_clone_nominal = clone_impl_to_nominal.get(&source).copied();
         expand_function(
             &mut module.functions[fi],
             &module.ty_arena,
             &shim_lookup,
             &clone_lookup,
-            skip_nominal,
+            skip_self.as_ref(),
             skip_clone_nominal,
             &not_copyable,
         );
@@ -91,44 +102,28 @@ pub fn expand_destroy_copy(
 /// Maps (nominal_entity, type_args) -> MonoFuncId for drop shim dispatch.
 type DropShimLookup = HashMap<(Entity, Vec<TyId>), MonoFuncId>;
 
-/// Build func_entity → nominal_entity for methods of droppable/cloneable types.
-/// Prevents recursive expansion cycles: DestroyValue on T inside T's methods
-/// won't expand to Call(__drop$T), and CopyValue on T inside T's methods
-/// won't expand to Call(T.clone).
-fn build_method_to_nominal_map(
-    module: &MonoModule,
+/// Build func_entity → nominal for the *drop machinery only* — a type's
+/// synthesized `__drop$T` shim and its user-written `deinit`.
+///
+/// DestroyValue/DestroyAddr on T is suppressed inside these (instead of
+/// expanding to `call __drop$T`) to break the recursion
+/// `DestroyValue(T)` → `__drop$T` → [drops self / its temporaries] →
+/// `DestroyValue(T)` → … . It must NOT be suppressed in ordinary methods:
+/// a consuming method like `consuming func destroy(self) {}` owns `self` and
+/// has to drop it at end of body — using the broad "all methods of T" map here
+/// silently dropped that `destroy_value self`, so the receiver leaked (its
+/// `deinit` never ran). This mirrors the clone-side narrowing in
+/// `build_clone_impl_to_nominal_map` (see the StringSlice.asSlice double-free).
+fn build_drop_impl_to_nominal_map(
     generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
 ) -> HashMap<Entity, Entity> {
-    // Collect nominal entities that have drop shims or clone behavior
-    let mut relevant: HashSet<Entity> = HashSet::new();
-    for s in module.structs.values() {
-        if s.type_info.drop != DropBehavior::None
-            || matches!(s.type_info.copy, CopyBehavior::Clone(_))
-        {
-            relevant.insert(s.source);
-        }
-    }
-    for e in module.enums.values() {
-        if e.type_info.drop != DropBehavior::None {
-            relevant.insert(e.source);
-        }
-    }
-
     let mut map = HashMap::new();
     for f in generic_functions.values() {
-        let parent = match &f.kind {
-            FunctionKind::Method { parent, .. }
-            | FunctionKind::Deinit { parent }
-            | FunctionKind::Initializer { parent }
-            | FunctionKind::StaticMethod { parent }
-            | FunctionKind::DropShim { nominal: parent }
-            | FunctionKind::CloneShim { nominal: parent } => Some(*parent),
-            _ => None,
-        };
-        if let Some(p) = parent {
-            if relevant.contains(&p) {
-                map.insert(f.entity, p);
-            }
+        match &f.kind {
+            FunctionKind::Deinit { parent } | FunctionKind::DropShim { nominal: parent } => {
+                map.insert(f.entity, *parent);
+            },
+            _ => {},
         }
     }
     map
@@ -274,16 +269,26 @@ fn build_drop_shim_lookup(
     lookup
 }
 
+/// True when `(entity, type_args)` is exactly this shim's own monomorphic self
+/// type — the one case where expanding `DestroyValue → __drop$Self` would
+/// recurse. Compared per-instantiation (full type, not nominal alone) so a
+/// payload that is a *different* instantiation of the same generic still drops.
+fn is_drop_self(skip_self: Option<&(Entity, Vec<TyId>)>, entity: Entity, type_args: &[TyId]) -> bool {
+    matches!(skip_self, Some((e, args)) if *e == entity && args.as_slice() == type_args)
+}
+
 /// Expand DestroyValue/CopyValue in a single function body.
-/// `skip_destroy_nominal`: if this function is a deinit for some nominal type,
-/// DestroyValue on that type is removed instead of expanded to avoid
-/// recursive drop shim → deinit → drop shim cycles.
+/// `skip_self`: if this function is the drop machinery (`deinit`/`__drop$T`) for
+/// a specific monomorphic type, DestroyValue on *that exact type* is removed
+/// instead of expanded, to avoid recursive drop shim → deinit → drop shim
+/// cycles. Other types — including other instantiations of the same generic —
+/// expand normally.
 fn expand_function(
     func: &mut MonoFunction,
     ty_arena: &crate::ty::TyArena,
     shim_lookup: &DropShimLookup,
     clone_lookup: &DropShimLookup,
-    skip_nominal: Option<Entity>,
+    skip_self: Option<&(Entity, Vec<TyId>)>,
     skip_clone_nominal: Option<Entity>,
     not_copyable: &HashSet<(Entity, Vec<TyId>)>,
 ) {
@@ -320,9 +325,10 @@ fn expand_function(
 
                     match ty_arena.get(value_def.ty) {
                         MirTy::Named { entity, type_args } => {
-                            // Skip if we're inside a method of this type — prevents
-                            // drop shim → deinit → method → drop shim recursion.
-                            if skip_nominal == Some(*entity) {
+                            // Skip only this shim's own self type — expanding it
+                            // would recurse into __drop$Self. A payload that is a
+                            // different instantiation of the same generic still drops.
+                            if is_drop_self(skip_self, *entity, type_args) {
                                 continue;
                             }
                             let key = (*entity, type_args.clone());
@@ -352,7 +358,7 @@ fn expand_function(
                     let span = inst.span.clone();
 
                     if let MirTy::Named { entity, type_args } = ty_arena.get(ty) {
-                        if skip_nominal != Some(*entity) {
+                        if !is_drop_self(skip_self, *entity, type_args) {
                             let key = (*entity, type_args.clone());
                             if let Some(&shim_id) = shim_lookup.get(&key) {
                                 let tmp = body.alloc_value(ValueDef::owned(ty));
@@ -393,7 +399,7 @@ fn expand_function(
                     if let MirTy::Pointer(pointee) = ty_arena.get(addr_ty) {
                         let pointee = *pointee;
                         if let MirTy::Named { entity, type_args } = ty_arena.get(pointee) {
-                            if skip_nominal != Some(*entity) {
+                            if !is_drop_self(skip_self, *entity, type_args) {
                                 let key = (*entity, type_args.clone());
                                 if let Some(&shim_id) = shim_lookup.get(&key) {
                                     let tmp = body.alloc_value(ValueDef::owned(pointee));

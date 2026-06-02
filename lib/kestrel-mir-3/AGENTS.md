@@ -17,6 +17,38 @@ It also checks that every operand has a definition (block param or
 instruction result). A value used but never defined crashes codegen with
 "ValueId not in value_map" — the verifier catches this earlier.
 
+## Pass pipeline & stage dumping (`passes/mod.rs`)
+
+`passes::Stage` is the **single source of truth** for the order and identity of
+every observable point in the lowering → codegen pipeline. The variant
+declaration order IS the pipeline order (and equals `Stage::ORDER`); the derived
+`Ord` is what powers the `stop >= Stage::X` gating in `run_pipeline_until`. Ten
+stages, in order:
+
+- pre-mono (→ `MirModule`): `Raw` `DropFix` `Thunk` `DropShim` `CloneShim`
+  `Layout` `Verify` — run by `run_pipeline_until` here.
+- post-mono (→ `mono::MonoModule`): `Mono` `CopyProp` `Expand` — orchestrated by
+  `Compiler::monomorphize_mir3_until` in **kestrel-compiler** (the post-mono
+  passes `eliminate_redundant_copies` + `mono::expand` + `verify_mono` live
+  there, not here).
+
+`run_pipeline` is now a thin wrapper = `run_pipeline_until(.., Stage::Verify)`;
+keep it that way so codegen/`lower_to_mir3` callers are unaffected.
+`run_pipeline_until` gates each pass on `stop >= Stage::<pass>` and runs verify
+ONLY at `Stage::Verify` — earlier stops return no errors so callers can dump a
+not-yet-verified (malformed) module. `Stage::is_pre_mono()` is `self <= Verify`.
+
+Inspect any stage with `kestrel dump mir -s <kebab-name>` (`--list-stages`;
+`-s all` prints every stage). Default/`-s verify` aborts on verify error; every
+other stage is best-effort (prints the module, verify errors → stderr warnings).
+See [[mir3_dump_raw_debugging]].
+
+**When you add or reorder a pass, update all four in lockstep:** the `Stage`
+enum + `Stage::name`/`ORDER` here, the `run_pipeline_until` gate here (or
+`monomorphize_mir3_until` in kestrel-compiler for a post-mono pass), and the
+`DumpStage` clap enum + `to_mir3` mapping in `src/main.rs`. The kebab spelling
+clap derives for `DumpStage` must match `Stage::name()`.
+
 ## Witness resolution
 
 `mono/witness.rs::find_witness_with_method` matches witnesses by
@@ -31,3 +63,21 @@ regardless of which generic instantiation it represents.
 `witness_proto_args_match` treats `TypeParam` entries as wildcards (they
 come from `extend T: Proto[FreeParam]` where the free param has no
 concrete value at witness-construction time).
+
+## Per-type lookups in mono passes: key by `(Entity, type_args)`, never nominal alone
+
+Copy/drop behavior is **per-instantiation**, not per-nominal. A conditionally-
+Copyable generic (`Optional[T]` is `not Copyable` by default, Copyable via
+`extend Optional[T]: Copyable where T: Copyable`) has `type_info.copy = Bitwise`
+for `Optional[Int64]` but `None` for `Optional[File]` — both share one nominal
+`Entity`. So any set/map a mono pass uses to decide copy/drop/clone treatment
+must be keyed by `(Entity, Vec<TyId>)` (like `clone_lookup`/`shim_lookup` in
+`mono/expand.rs`), and looked up with the value's actual `type_args`.
+
+Keying by nominal `.source` collapses all instantiations: one move-only instance
+poisons every instance. `expand_destroy_copy`'s `not_copyable` set hit exactly
+this — it degraded a real `CopyValue` on `Optional[Int64]` into a move-alias, so
+`let x = self.f; self.f = .None; x` (iterators, `take`/`replace`, `Heap.pop`)
+returned the overwritten value. See [[expand_not_copyable_nominal_collapse]].
+This is the MIR-3 face of the same per-instantiation invariant the solver / MIR
+ty_query / semantics enforce ([[per_instantiation_copy_semantics]]).

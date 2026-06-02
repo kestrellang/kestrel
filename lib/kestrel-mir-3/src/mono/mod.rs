@@ -344,6 +344,16 @@ fn substitute_inst(
     inst_idx: usize,
     resolved_witnesses: &mut HashMap<(usize, usize), InstantiationKey>,
 ) {
+    // Embedded types must be `substitute_and_resolve`d, not just `substitute`d:
+    // substitution replaces a projection's TypeParam base with a concrete type
+    // but leaves the projection itself in place (it isn't keyed in the SubstMap's
+    // assoc_types). Only `deep_resolve` runs the witness lookup that turns
+    // `Array[Int64].TargetIterator.Item` into `Int64`. The value/block-param
+    // pass at the call site re-resolves those, but instruction-embedded types
+    // (enum/struct/array construction, addr ops) are only seen here — without
+    // this, a surviving `AssociatedProjection` in e.g. an `Optional` enum payload
+    // fails post-mono verify ("AssociatedProjection in Enum type").
+    let resolve = |arena: &mut TyArena, ty: TyId| collect::substitute_and_resolve(arena, witnesses, ty, subst);
     match kind {
         // Memory access instructions with embedded type
         InstKind::CopyAddr { ty, .. }
@@ -353,34 +363,34 @@ fn substitute_inst(
         | InstKind::DestroyAddr { ty, .. }
         | InstKind::FieldAddr { ty, .. }
         | InstKind::Uninit { ty, .. } => {
-            *ty = substitute(arena, *ty, subst);
+            *ty = resolve(arena, *ty);
         },
 
         // Aggregate construction
         InstKind::Struct { ty, .. } => {
-            *ty = substitute(arena, *ty, subst);
+            *ty = resolve(arena, *ty);
         },
         InstKind::Enum { enum_ty, .. } => {
-            *enum_ty = substitute(arena, *enum_ty, subst);
+            *enum_ty = resolve(arena, *enum_ty);
         },
         InstKind::Array { element_ty, .. } => {
-            *element_ty = substitute(arena, *element_ty, subst);
+            *element_ty = resolve(arena, *element_ty);
         },
 
         // Ops with embedded type
         InstKind::Op1 { op, .. } => {
-            substitute_op_type(arena, op, subst);
+            substitute_op_type(arena, witnesses, op, subst);
         },
         InstKind::Op2 { op, .. } => {
-            substitute_op_type(arena, op, subst);
+            substitute_op_type(arena, witnesses, op, subst);
         },
         InstKind::Op3 { op, .. } => {
-            substitute_op_type(arena, op, subst);
+            substitute_op_type(arena, witnesses, op, subst);
         },
 
         // Constants
         InstKind::Literal { value, .. } => {
-            substitute_immediate(arena, &mut value.kind, subst);
+            substitute_immediate(arena, witnesses, &mut value.kind, subst);
         },
 
         // Calls and partial applications both reference a callable through a
@@ -407,10 +417,16 @@ fn substitute_inst(
     }
 }
 
-fn substitute_immediate(arena: &mut TyArena, kind: &mut ImmediateKind, subst: &SubstMap) {
+fn substitute_immediate(
+    arena: &mut TyArena,
+    witnesses: &[WitnessDef],
+    kind: &mut ImmediateKind,
+    subst: &SubstMap,
+) {
+    let resolve = |arena: &mut TyArena, ty: TyId| collect::substitute_and_resolve(arena, witnesses, ty, subst);
     match kind {
         ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
-            *ty = substitute(arena, *ty, subst);
+            *ty = resolve(arena, *ty);
         },
         ImmediateKind::FunctionRef {
             type_args,
@@ -418,18 +434,24 @@ fn substitute_immediate(arena: &mut TyArena, kind: &mut ImmediateKind, subst: &S
             ..
         } => {
             for ta in type_args.iter_mut() {
-                *ta = substitute(arena, *ta, subst);
+                *ta = resolve(arena, *ta);
             }
             if let Some(st) = self_type {
-                *st = substitute(arena, *st, subst);
+                *st = resolve(arena, *st);
             }
         },
         _ => {},
     }
 }
 
-fn substitute_op_type(arena: &mut TyArena, op: &mut crate::op::Op, subst: &SubstMap) {
+fn substitute_op_type(
+    arena: &mut TyArena,
+    witnesses: &[WitnessDef],
+    op: &mut crate::op::Op,
+    subst: &SubstMap,
+) {
     use crate::op::Op;
+    let resolve = |arena: &mut TyArena, ty: TyId| collect::substitute_and_resolve(arena, witnesses, ty, subst);
     match op {
         Op::PtrFromAddress(ty)
         | Op::PtrRead(ty)
@@ -441,7 +463,7 @@ fn substitute_op_type(arena: &mut TyArena, op: &mut crate::op::Op, subst: &Subst
         | Op::SizeOf(ty)
         | Op::AlignOf(ty)
         | Op::StackAlloc(ty) => {
-            *ty = substitute(arena, *ty, subst);
+            *ty = resolve(arena, *ty);
         },
         _ => {},
     }

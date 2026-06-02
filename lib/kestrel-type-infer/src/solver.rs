@@ -1821,6 +1821,28 @@ fn solve_associated(
                         }
                     } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
                         tv
+                    } else if matches!(
+                        kind,
+                        TyKind::Param { .. } | TyKind::AssocProjection { .. }
+                    ) {
+                        // Abstract container — a type param (`T.Item`) or an
+                        // already-projected base (`T.TargetIterator.Item`) — with
+                        // an abstract associated-type binding. `lower_hir_ty_sub`
+                        // would collapse this to a baseless `TypeAlias(entity)`,
+                        // dropping the base; that leak surfaces in MIR lowering as
+                        // `AssocProjection { base: Self(protocol) }`, which
+                        // monomorphization can't resolve (the protocol's Self is
+                        // in no subst map → mangler panic). Preserve the base as a
+                        // projection so mono resolves it via the witness for the
+                        // concrete substituted base (e.g. `T.TargetIterator` →
+                        // `Array[Int64].TargetIterator` → `ArraySliceIterator`).
+                        //
+                        // Intentionally excludes `SelfType` and bare `TypeAlias`
+                        // containers: projecting off `Self` yields a literal
+                        // `Self.Item` that won't unify with the based form, and a
+                        // bare `TypeAlias` base has already lost its own base.
+                        // Those fall through to the original collapse.
+                        ctx.assoc_projection(container, *entity)
                     } else {
                         lower_hir_ty_sub(
                             ctx,

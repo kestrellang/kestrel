@@ -422,6 +422,24 @@ impl Compiler {
         Ok(mir)
     }
 
+    /// Best-effort lowering to a PRE-MONO `Stage` for inspection (`kestrel dump
+    /// mir -s <stage>`). Runs passes up to `stop`; runs verify only at
+    /// `Stage::Verify`. Returns the module plus any verify errors (empty unless
+    /// `stop == Verify`). Never aborts and never accumulates diagnostics — the
+    /// caller decides whether/how to surface errors.
+    pub fn lower_to_mir3_stage(
+        &self,
+        stop: kestrel_mir_3::passes::Stage,
+    ) -> (kestrel_mir_3::MirModule, Vec<kestrel_mir_3::verify::VerifyError>) {
+        debug_assert!(stop.is_pre_mono());
+        let mut mir = kestrel_mir_lower_3::lower_module(self.world(), self.root());
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let mut next_entity = self.world().entity_count() as u32;
+        let errors =
+            kestrel_mir_3::passes::run_pipeline_until(&mut mir, &target, &mut next_entity, stop);
+        (mir, errors)
+    }
+
     /// Lower to MIR-3, monomorphize, expand, compile, and link to an executable.
     #[allow(clippy::result_large_err)]
     pub fn compile_and_link3(
@@ -477,6 +495,50 @@ impl Compiler {
         }
 
         Ok(mono)
+    }
+
+    /// Run monomorphization up to a POST-MONO `Stage` for inspection (`kestrel
+    /// dump mir -s {mono,copy-prop,expand}`). Best-effort: returns the module
+    /// plus any `verify_mono` errors (populated only at `Stage::Expand`, where
+    /// verification runs). The only hard failure is `mono::monomorphize` itself
+    /// — there'd be no module to show. Mirrors [`Self::monomorphize_mir3`] but
+    /// stops early and does not abort on post-mono verify errors.
+    #[allow(clippy::result_large_err)]
+    pub fn monomorphize_mir3_until(
+        &self,
+        mir: kestrel_mir_3::MirModule,
+        stop: kestrel_mir_3::passes::Stage,
+    ) -> Result<
+        (kestrel_mir_3::mono::MonoModule, Vec<kestrel_mir_3::mono::MonoVerifyError>),
+        kestrel_codegen_cranelift_3::CodegenError,
+    > {
+        debug_assert!(stop.is_post_mono());
+        let target = kestrel_mir_3::TargetConfig::host_64();
+        let generic_functions = mir.functions.clone();
+
+        let mut mono = kestrel_mir_3::mono::monomorphize(mir, &target).map_err(|errs| {
+            let detail = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            kestrel_codegen_cranelift_3::CodegenError::Unsupported(format!(
+                "monomorphization failed with {} error(s): {detail}",
+                errs.len(),
+            ))
+        })?;
+        if stop == kestrel_mir_3::passes::Stage::Mono {
+            return Ok((mono, Vec::new()));
+        }
+
+        kestrel_mir_3::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+        if stop == kestrel_mir_3::passes::Stage::CopyProp {
+            return Ok((mono, Vec::new()));
+        }
+
+        kestrel_mir_3::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
+        let mono_verify = kestrel_mir_3::mono::verify::verify_mono(&mono);
+        Ok((mono, mono_verify.errors))
     }
 
     /// Load all .ks files from a directory, parse and build declarations.

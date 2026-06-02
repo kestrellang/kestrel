@@ -8,6 +8,8 @@
 
 use std::fmt::Write;
 
+use kestrel_hecs::Entity;
+
 use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
@@ -16,6 +18,33 @@ use crate::terminator::{SwitchCase, TerminatorKind};
 use crate::ty::{MirTy, TyArena};
 use crate::value::Ownership;
 use crate::{BlockId, MirModule, TyId, ValueId};
+
+/// The two facts the pretty-printer needs from a module: its type arena and a
+/// way to turn an [`Entity`] into a display name. Both [`MirModule`] (pre-mono)
+/// and [`crate::mono::MonoModule`] (post-mono) satisfy this identically, so the
+/// whole printer is shared across both via `&dyn NameResolver`.
+pub trait NameResolver {
+    fn ty_arena(&self) -> &TyArena;
+    fn resolve_name(&self, entity: Entity) -> &str;
+}
+
+impl NameResolver for MirModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+    fn resolve_name(&self, entity: Entity) -> &str {
+        MirModule::resolve_name(self, entity)
+    }
+}
+
+impl NameResolver for crate::mono::MonoModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+    fn resolve_name(&self, entity: Entity) -> &str {
+        crate::mono::MonoModule::resolve_name(self, entity)
+    }
+}
 
 /// Pretty-print the entire MIR module — all functions with bodies.
 pub fn display_module(module: &MirModule) -> String {
@@ -43,10 +72,36 @@ pub fn display_module_filtered(module: &MirModule, filter: &str) -> String {
     out
 }
 
-/// Pretty-print an entire OSSA body to a string.
-pub fn display_body(body: &OssaBody, module: &MirModule) -> String {
+/// Pretty-print an entire monomorphized module — all functions with bodies.
+pub fn display_mono_module(module: &crate::mono::MonoModule) -> String {
+    display_mono_module_filtered(module, "")
+}
+
+/// Pretty-print mono functions whose name contains `filter` (empty = all).
+pub fn display_mono_module_filtered(module: &crate::mono::MonoModule, filter: &str) -> String {
     let mut out = String::new();
-    let arena = &module.ty_arena;
+    let mut first = true;
+    for func in &module.functions {
+        if let Some(body) = &func.body {
+            if !filter.is_empty() && !func.name.contains(filter) {
+                continue;
+            }
+            if !first {
+                out.push('\n');
+            }
+            first = false;
+            writeln!(out, "; function: {}", func.name).unwrap();
+            out.push_str(&display_body(body, module));
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Pretty-print an entire OSSA body to a string.
+pub fn display_body(body: &OssaBody, module: &dyn NameResolver) -> String {
+    let mut out = String::new();
+    let arena = module.ty_arena();
 
     for (i, block) in body.blocks.iter().enumerate() {
         let bid = BlockId::new(i);
@@ -117,7 +172,7 @@ pub fn ty_to_string(ty: TyId, module: &MirModule) -> String {
     fmt_ty(ty, &module.ty_arena, module)
 }
 
-fn fmt_ty(ty: TyId, arena: &TyArena, module: &MirModule) -> String {
+fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
     match arena.get(ty) {
         MirTy::I8 => "Int8".into(),
         MirTy::I16 => "Int16".into(),
@@ -204,7 +259,7 @@ fn fmt_type_comment(
     value: ValueId,
     body: &OssaBody,
     arena: &TyArena,
-    module: &MirModule,
+    module: &dyn NameResolver,
 ) -> String {
     let def = body.value(value);
     format!(
@@ -236,7 +291,7 @@ fn fmt_inst(
     kind: &InstKind,
     body: &OssaBody,
     arena: &TyArena,
-    module: &MirModule,
+    module: &dyn NameResolver,
 ) {
     match kind {
         // -- Value lifecycle --
@@ -710,7 +765,7 @@ fn fmt_inst(
 // Callee
 // ---------------------------------------------------------------------------
 
-fn fmt_callee(callee: &Callee, arena: &TyArena, module: &MirModule) -> String {
+fn fmt_callee(callee: &Callee, arena: &TyArena, module: &dyn NameResolver) -> String {
     match callee {
         Callee::Direct {
             func,
@@ -775,7 +830,7 @@ fn fmt_callee(callee: &Callee, arena: &TyArena, module: &MirModule) -> String {
 // Immediate
 // ---------------------------------------------------------------------------
 
-fn fmt_immediate(imm: &crate::immediate::Immediate, arena: &TyArena, module: &MirModule) -> String {
+fn fmt_immediate(imm: &crate::immediate::Immediate, arena: &TyArena, module: &dyn NameResolver) -> String {
     match &imm.kind {
         ImmediateKind::IntLiteral { bits, value } => {
             // `i64 42` — bit-width prefix (lowercased Debug) before the value.
@@ -839,7 +894,7 @@ fn fmt_immediate(imm: &crate::immediate::Immediate, arena: &TyArena, module: &Mi
 // Terminators
 // ---------------------------------------------------------------------------
 
-fn fmt_terminator(out: &mut String, kind: &TerminatorKind, _arena: &TyArena, _module: &MirModule) {
+fn fmt_terminator(out: &mut String, kind: &TerminatorKind, _arena: &TyArena, _module: &dyn NameResolver) {
     match kind {
         TerminatorKind::Return(v) => {
             write!(out, "return {}", fmt_value(*v)).unwrap();

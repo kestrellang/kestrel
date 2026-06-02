@@ -5,8 +5,11 @@
 //! module only *emits* that decision; it does not recompute captures.
 //!
 //! Each captured item is one of:
-//! - a **whole local** (`Whole`) — captured by value if Copyable, else by
-//!   reference (a `Pointer[T]` to a stack snapshot);
+//! - a **whole local** (`Whole`) — captured by value if *duplicable* (Copyable
+//!   or Cloneable: the env owns a bitwise copy / clone and the source stays
+//!   live, so capturing an `RcBox` bumps its refcount), else by reference (a
+//!   `Pointer[T]` to a stack snapshot, for move-only `not Copyable` types whose
+//!   sole owner is moved into the env);
 //! - a **projected place** (`Place`, e.g. `self.cap`) — always a Copyable,
 //!   read-only field captured by value. Non-Copyable or written places fall
 //!   back to whole-local capture (so behavior never regresses), because the
@@ -114,8 +117,9 @@ impl OssaBodyCtx<'_, '_> {
                 .map(|f| f.type_params.clone())
                 .unwrap_or_default();
             for (i, &cap_ty) in slot_tys.iter().enumerate() {
-                // Non-copy (whole-local) captures are stored as pointers (by-ref).
-                let field_ty = if self.is_copy_type(cap_ty) {
+                // Move-only (non-duplicable) whole-local captures are stored as
+                // pointers (by-ref); duplicable ones are stored by value.
+                let field_ty = if self.captures_by_value(cap_ty) {
                     cap_ty
                 } else {
                     self.ctx.module.ty_arena.pointer(cap_ty)
@@ -225,26 +229,29 @@ impl OssaBodyCtx<'_, '_> {
         // body_context already set to Normal by the mem::replace above
         self.push_scope();
 
-        // Emit loads from env struct for captured slots.
+        // Materialize captured slots from the env struct.
         //
-        // Copy-captures: env field is T — extract the value directly.
-        // Ref-captures (non-Copyable whole locals): env field is Pointer[T] —
+        // By-value captures (duplicable: Copyable or Cloneable): env field is T
+        // — extract the value directly (copy/clone of the @guaranteed field).
+        // By-ref captures (move-only whole locals): env field is Pointer[T] —
         // extract the pointer, then load through it to get the T value.
         if env_struct_entity.is_some() {
-            // Load the env struct value from the env pointer
             let env_struct_ty = match self.ctx.module.ty_arena.get(env_ty) {
                 MirTy::Pointer(inner) => *inner,
                 _ => unreachable!("env_ty must be Pointer[EnvStruct]"),
             };
-            let env_struct_val = self.emit_load(env_val, env_struct_ty);
 
-            // Borrow the env struct for multi-field extraction.
-            // Each extract from a borrow produces @guaranteed; we copy to get @owned.
-            let env_borrow = self.emit_begin_borrow(env_struct_val);
+            // Borrow the env struct *in place* through the env pointer for
+            // multi-field extraction. We must not load it by value and destroy
+            // it: a by-value capture stores an @owned (cloned) field in the env,
+            // and destroying a per-call snapshot of the env would drop that
+            // field on every call, under-counting the refcount. Each extract
+            // from the borrow is @guaranteed; we copy/clone to get @owned.
+            let env_borrow = self.emit_begin_borrow_addr(env_val, env_struct_ty);
 
             for (i, slot) in slots.iter().enumerate() {
                 let cap_ty = slot_tys[i];
-                let is_ref_capture = !self.is_copy_type(cap_ty);
+                let is_ref_capture = !self.captures_by_value(cap_ty);
                 let field_ty = if is_ref_capture {
                     self.ctx.module.ty_arena.pointer(cap_ty)
                 } else {
@@ -274,7 +281,6 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             self.emit_end_borrow(env_borrow);
-            self.emit_destroy_value(env_struct_val);
         }
 
         // Lower closure body
@@ -344,7 +350,13 @@ impl OssaBodyCtx<'_, '_> {
                 continue;
             }
             let pty = self.resolve_expr_type(cp.repr);
-            if !(self.is_copy_type(pty) && cp.kind == CaptureKind::Read) {
+            // A read-only projected place is kept as a by-value place-capture
+            // when it is *duplicable* (Copyable or Cloneable) — we clone/copy
+            // just the field and borrow the receiver, never duplicating it.
+            // Gating on `is_copy_type` (Bitwise only) here would force a Clone
+            // field to fall back to whole-receiver capture, which can wrongly
+            // consume a move-only receiver. See [[closure_cloneable_capture_clone]].
+            if !(self.captures_by_value(pty) && cp.kind == CaptureKind::Read) {
                 whole_roots.insert(cp.key.root);
             }
         }
@@ -389,11 +401,23 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
+    /// A whole-local capture is by value when the type is *duplicable* — either
+    /// Copyable (bitwise) or Cloneable (has a clone shim). The env then owns a
+    /// copy/clone and the source local stays live (capturing an `RcBox` bumps
+    /// its refcount, leaving the original usable). Only move-only `not Copyable`
+    /// types are captured by reference, moving their sole owner into the env.
+    fn captures_by_value(&self, cap_ty: TyId) -> bool {
+        !self.is_non_copyable(cap_ty)
+    }
+
     fn materialize_whole(&mut self, root: HirLocalId, cap_ty: TyId) -> ValueId {
         let mir_val = self.map_local(root);
-        if self.is_copy_type(cap_ty) {
-            // Copy capture: snapshot the value. Var locals are address-based —
-            // load the value from the address.
+        if self.captures_by_value(cap_ty) {
+            // By-value capture: snapshot the value (bitwise copy or clone).
+            // emit_value_use → emit_copy_value emits a CopyValue, which the
+            // expand pass turns into the type's clone shim for Cloneable Named
+            // types — the source stays live. Var locals are address-based, so
+            // load (and clone) the value from the address instead.
             if self.is_var_local(&root) {
                 self.emit_copy_addr(mir_val, cap_ty)
             } else {

@@ -5,6 +5,9 @@
 //!
 //! Dump kinds today: tokens, cst, mir (=mir3), mir1, mir2, cranelift (=cranelift3),
 //! cranelift1, cranelift2, diagnostics.
+//!
+//! For `mir`/`mir3`, `--stage <s>` (`-s`) selects which pipeline stage to print
+//! (`--list-stages` lists them; `-s all` prints every stage). Default is `verify`.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
@@ -123,12 +126,60 @@ struct DumpArgs {
     kind: DumpKind,
 
     /// Source files (.ks) to process.
-    #[arg(required = true)]
+    #[arg(required_unless_present = "list_stages")]
     files: Vec<String>,
 
     /// Filter output to functions whose name contains this substring.
     #[arg(long = "function", short = 'f')]
     function_filter: Option<String>,
+
+    /// For `mir`/`mir3`: which pipeline stage to print (see `--list-stages`).
+    /// Defaults to `verify`. `all` prints every stage.
+    #[arg(long = "stage", short = 's', value_enum)]
+    stage: Option<DumpStage>,
+
+    /// List the MIR-3 pipeline stages (for `--stage`) and exit.
+    #[arg(long = "list-stages")]
+    list_stages: bool,
+}
+
+/// Stage selector for `kestrel dump mir -s <stage>`. Variants map 1:1 onto
+/// [`kestrel_mir_3::passes::Stage`]; `All` is the meta-stage that prints them
+/// all. clap derives the kebab spellings (`DropFix` → `drop-fix`), which match
+/// `Stage::name()`.
+#[derive(ValueEnum, Clone, Copy)]
+enum DumpStage {
+    Raw,
+    DropFix,
+    Thunk,
+    DropShim,
+    CloneShim,
+    Layout,
+    Verify,
+    Mono,
+    CopyProp,
+    Expand,
+    All,
+}
+
+impl DumpStage {
+    /// The corresponding pipeline stage, or `None` for `All`.
+    fn to_mir3(self) -> Option<kestrel_mir_3::passes::Stage> {
+        use kestrel_mir_3::passes::Stage;
+        Some(match self {
+            DumpStage::Raw => Stage::Raw,
+            DumpStage::DropFix => Stage::DropFix,
+            DumpStage::Thunk => Stage::Thunk,
+            DumpStage::DropShim => Stage::DropShim,
+            DumpStage::CloneShim => Stage::CloneShim,
+            DumpStage::Layout => Stage::Layout,
+            DumpStage::Verify => Stage::Verify,
+            DumpStage::Mono => Stage::Mono,
+            DumpStage::CopyProp => Stage::CopyProp,
+            DumpStage::Expand => Stage::Expand,
+            DumpStage::All => return None,
+        })
+    }
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -260,6 +311,17 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 // ============================================================================
 
 fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
+    // `--list-stages`: print the MIR-3 pipeline stages and exit (no files needed).
+    if args.list_stages {
+        print_stage_list();
+        return Ok(());
+    }
+    // `--stage` only makes sense for the MIR-3 dump.
+    if args.stage.is_some() && !matches!(args.kind, DumpKind::Mir) {
+        eprintln!("error: --stage is only valid with `mir` (alias `mir3`)");
+        return Err(ExitCode::FAILURE);
+    }
+
     // Tokens and CST are per-file lex/parse — no stdlib, no inference.
     if matches!(args.kind, DumpKind::Tokens | DumpKind::Cst) {
         return dump_syntax(args.kind, &args.files, globals.verbose);
@@ -272,19 +334,7 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
     match args.kind {
         DumpKind::Mir => {
-            let mir = if std::env::var_os("KESTREL_MIR3_RAW").is_some() {
-                compiler.lower_to_mir3_raw()
-            } else {
-                compiler.lower_to_mir3().map_err(|e| {
-                    eprintln!("error: {e}");
-                    ExitCode::FAILURE
-                })?
-            };
-            if let Some(ref filter) = args.function_filter {
-                print!("{}", kestrel_mir_3::display::display_module_filtered(&mir, filter));
-            } else {
-                print!("{}", kestrel_mir_3::display::display_module(&mir));
-            }
+            dump_mir3(&compiler, args.stage, args.function_filter.as_deref())?;
         },
         DumpKind::Mir1 => {
             let mir = lower_with_ownership(compiler.world(), compiler.root());
@@ -397,6 +447,111 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     } else {
         Ok(())
     }
+}
+
+/// Print the MIR-3 module at the requested `stage` (default `verify`).
+///
+/// `verify` (and the default) preserves the historical abort-on-verify-error
+/// behavior. Every other stage is best-effort: it prints whatever the stage
+/// produced and surfaces any verify errors as stderr warnings. The only hard
+/// failure off the default path is a monomorphization error (no module to show).
+fn dump_mir3(
+    compiler: &Compiler,
+    stage: Option<DumpStage>,
+    filter: Option<&str>,
+) -> Result<(), ExitCode> {
+    use kestrel_mir_3::passes::Stage;
+
+    match stage.unwrap_or(DumpStage::Verify).to_mir3() {
+        // Default / explicit `verify`: keep aborting on verify error.
+        Some(Stage::Verify) => {
+            let mir = compiler.lower_to_mir3().map_err(|e| {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            })?;
+            print_mir3(&mir, filter);
+        },
+        // Pre-mono intermediate stages (raw..layout): best-effort, no verify.
+        Some(s) if s.is_pre_mono() => {
+            let (mir, _errors) = compiler.lower_to_mir3_stage(s);
+            print_mir3(&mir, filter);
+        },
+        // Post-mono stages (mono / copy-prop / expand): best-effort; only a hard
+        // monomorphization failure aborts (there'd be no module to print).
+        Some(s) => {
+            let mir = compiler.lower_to_mir3().map_err(|e| {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            })?;
+            let (mono, mono_errors) = compiler.monomorphize_mir3_until(mir, s).map_err(|e| {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            })?;
+            for e in &mono_errors {
+                eprintln!("warning: mono-verify: {}", e.message);
+            }
+            print_mono3(&mono, filter);
+        },
+        // `--stage all`: every stage, best-effort, never aborts.
+        None => dump_all_mir3_stages(compiler, filter),
+    }
+    Ok(())
+}
+
+/// Print every pipeline stage, each under a `=== <stage> ===` header. Fully
+/// best-effort — re-runs lowering per stage and never aborts.
+fn dump_all_mir3_stages(compiler: &Compiler, filter: Option<&str>) {
+    use kestrel_mir_3::passes::Stage;
+
+    for s in Stage::ORDER.into_iter().filter(|s| s.is_pre_mono()) {
+        println!("=== {} ===", s.name());
+        let (mir, _errors) = compiler.lower_to_mir3_stage(s);
+        print_mir3(&mir, filter);
+        println!();
+    }
+    for s in Stage::ORDER.into_iter().filter(|s| s.is_post_mono()) {
+        println!("=== {} ===", s.name());
+        // Post-mono needs a fully-lowered pre-mono module; re-lower best-effort.
+        let (mir, _) = compiler.lower_to_mir3_stage(Stage::Verify);
+        match compiler.monomorphize_mir3_until(mir, s) {
+            Ok((mono, mono_errors)) => {
+                for e in &mono_errors {
+                    eprintln!("warning: mono-verify: {}", e.message);
+                }
+                print_mono3(&mono, filter);
+            },
+            Err(e) => println!("; <unavailable: {e}>"),
+        }
+        println!();
+    }
+}
+
+fn print_mir3(mir: &kestrel_mir_3::MirModule, filter: Option<&str>) {
+    match filter {
+        Some(f) => print!("{}", kestrel_mir_3::display::display_module_filtered(mir, f)),
+        None => print!("{}", kestrel_mir_3::display::display_module(mir)),
+    }
+}
+
+fn print_mono3(mono: &kestrel_mir_3::mono::MonoModule, filter: Option<&str>) {
+    match filter {
+        Some(f) => print!("{}", kestrel_mir_3::display::display_mono_module_filtered(mono, f)),
+        None => print!("{}", kestrel_mir_3::display::display_mono_module(mono)),
+    }
+}
+
+/// Print the ordered MIR-3 pipeline stages for `--list-stages`.
+fn print_stage_list() {
+    use kestrel_mir_3::passes::Stage;
+    println!("MIR-3 (OSSA) pipeline stages, in order:");
+    for s in Stage::ORDER {
+        if s == Stage::Verify {
+            println!("  {} (default)", s.name());
+        } else {
+            println!("  {}", s.name());
+        }
+    }
+    println!("  all (every stage, with `=== <stage> ===` headers)");
 }
 
 fn dump_syntax(kind: DumpKind, files: &[String], verbose: bool) -> Result<(), ExitCode> {
