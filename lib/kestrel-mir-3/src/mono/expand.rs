@@ -34,6 +34,11 @@ pub fn expand_destroy_copy(
     // methods won't expand to Call(T.clone).
     let method_to_nominal = build_method_to_nominal_map(module, generic_functions);
 
+    // Narrow map for the CopyValue→clone guard: only a type's own clone
+    // implementation may suppress cloning a copy of itself (to avoid
+    // recursion). Ordinary methods that copy `self` must still clone.
+    let clone_impl_to_nominal = build_clone_impl_to_nominal_map(generic_functions);
+
     // Pre-intern Pointer(Named) types for cloneable types so the expand
     // pass can create BeginBorrow values without mutable arena access.
     for (nominal, type_args) in clone_lookup.keys() {
@@ -44,30 +49,40 @@ pub fn expand_destroy_copy(
         }
     }
 
-    // Collect not-Copyable nominals — CopyValue on these is a move, not a copy.
-    let not_copyable: HashSet<Entity> = module
+    // Collect not-Copyable type *instances* — CopyValue on these is a move,
+    // not a copy. Keyed by (nominal, type_args), NOT by nominal alone:
+    // conditional Copyable is per-instantiation (`Optional[Int64]` is Copyable
+    // while `Optional[File]` is not), so collapsing to the nominal would poison
+    // every monomorphization of a generic that is ever instantiated move-only.
+    // That poisoning degrades a real CopyValue into a move-alias; when the
+    // operand is a borrow of a place that is later mutated (the ubiquitous
+    // `let x = self.field; self.field = ...; x` pattern in iterators/`take`),
+    // the returned value observes the mutation → silent corruption.
+    let not_copyable: HashSet<(Entity, Vec<TyId>)> = module
         .structs
         .values()
         .filter(|s| matches!(s.type_info.copy, CopyBehavior::None))
-        .map(|s| s.source)
+        .map(|s| (s.source, s.type_args.clone()))
         .chain(
             module
                 .enums
                 .values()
                 .filter(|e| matches!(e.type_info.copy, CopyBehavior::None))
-                .map(|e| e.source),
+                .map(|e| (e.source, e.type_args.clone())),
         )
         .collect();
 
     for fi in 0..module.functions.len() {
         let source = module.functions[fi].source;
         let skip_nominal = method_to_nominal.get(&source).copied();
+        let skip_clone_nominal = clone_impl_to_nominal.get(&source).copied();
         expand_function(
             &mut module.functions[fi],
             &module.ty_arena,
             &shim_lookup,
             &clone_lookup,
             skip_nominal,
+            skip_clone_nominal,
             &not_copyable,
         );
     }
@@ -114,6 +129,35 @@ fn build_method_to_nominal_map(
             if relevant.contains(&p) {
                 map.insert(f.entity, p);
             }
+        }
+    }
+    map
+}
+
+/// Build func_entity → nominal for *clone implementations only* — the
+/// synthesized `__clone$T` shim and the user-written `T.clone()` method.
+///
+/// CopyValue→clone expansion is suppressed inside a type's own clone
+/// implementation, where expanding a copy of `T` would recurse
+/// (`T.clone` → copy `T` → `T.clone` → …). It must NOT be suppressed in
+/// ordinary methods: `asSlice() -> StringSlice { self }` copies `self` to
+/// return it, and that copy has to clone so the refcount on the shared
+/// `RcBox` is bumped. Using the broad `method_to_nominal` map there left the
+/// returned slice as a bitwise alias with no refcount bump → the alias's
+/// later release over-decremented the count → double-free of the storage.
+fn build_clone_impl_to_nominal_map(
+    generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
+) -> HashMap<Entity, Entity> {
+    let mut map = HashMap::new();
+    for f in generic_functions.values() {
+        match &f.kind {
+            FunctionKind::CloneShim { nominal } => {
+                map.insert(f.entity, *nominal);
+            },
+            FunctionKind::Method { parent, .. } if f.name.ends_with(".clone") => {
+                map.insert(f.entity, *parent);
+            },
+            _ => {},
         }
     }
     map
@@ -240,7 +284,8 @@ fn expand_function(
     shim_lookup: &DropShimLookup,
     clone_lookup: &DropShimLookup,
     skip_nominal: Option<Entity>,
-    not_copyable: &HashSet<Entity>,
+    skip_clone_nominal: Option<Entity>,
+    not_copyable: &HashSet<(Entity, Vec<TyId>)>,
 ) {
     let Some(body) = &mut func.body else { return };
 
@@ -393,8 +438,11 @@ fn expand_function(
 
                     // Named type with a clone function → BeginBorrow + Call(clone) + EndBorrow
                     if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty) {
-                        // Skip inside methods of this type to prevent recursion
-                        if skip_nominal != Some(*entity) {
+                        // Skip ONLY inside this type's own clone implementation, to
+                        // prevent T.clone → copy T → T.clone recursion. Other methods
+                        // that copy a `T` (e.g. `asSlice() { self }`) must still clone
+                        // so refcounted fields stay balanced (see double-free note).
+                        if skip_clone_nominal != Some(*entity) {
                             let key = (*entity, type_args.clone());
                             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                                 let found = clone_lookup.get(&key).is_some();
@@ -447,8 +495,10 @@ fn expand_function(
 
                     // not-Copyable Named types: CopyValue is a move (alias).
                     // The source is marked as moved so DestroyValue becomes a no-op.
-                    if let MirTy::Named { entity, .. } = ty_arena.get(value_def.ty) {
-                        if not_copyable.contains(entity) {
+                    // Keyed per-instantiation: only THIS monomorphization's copy
+                    // behavior matters (see `not_copyable` construction).
+                    if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty) {
+                        if not_copyable.contains(&(*entity, type_args.clone())) {
                             let target = remap_value(operand, &value_remap);
                             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                                 eprintln!(
