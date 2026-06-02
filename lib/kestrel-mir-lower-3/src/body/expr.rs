@@ -187,6 +187,13 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::Continue { label, .. } => self.lower_continue(label.as_deref()),
 
             HirExpr::Return { value, .. } => {
+                // Classify before lowering `value` (which consumes it): in a
+                // failable init, a failure `return` (`return null`/`throw`/`try`)
+                // must drop already-initialized `self` fields, whereas an early
+                // success `return` (`.Some`/`.Ok`) must not. No-op elsewhere
+                // because `init_field_flags` is empty.
+                let is_failure_return =
+                    !self.init_field_flags.is_empty() && self.is_init_failure_return(value);
                 let ret_val = if let Some(v) = value {
                     self.lower_expr(*v)
                 } else {
@@ -199,6 +206,11 @@ impl OssaBodyCtx<'_, '_> {
                     let owned = self.emit_copy_value(ret_val);
                     self.emit_end_borrow(ret_val);
                     owned
+                } else {
+                    ret_val
+                };
+                let ret_val = if is_failure_return {
+                    self.emit_init_partial_drops(ret_val)
                 } else {
                     ret_val
                 };
@@ -335,7 +347,11 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.register_name(static_entity);
             let addr = self.emit_global_ref(static_entity);
             let ty = self.resolve_expr_type(expr_id);
-            return self.emit_load(addr, ty);
+            // Clone (not raw load): the global retains ownership. A bitwise
+            // load would yield an @owned value that, when dropped after use,
+            // decrements a COW global's refcount it never bumped → frees the
+            // global's storage out from under it (use-after-free).
+            return self.emit_copy_addr(addr, ty);
         }
 
         // Stored field → StructExtract (borrow-based when base is @owned)
@@ -438,10 +454,12 @@ impl OssaBodyCtx<'_, '_> {
                     let callee = Callee::direct_with_args(entity, vec![], None);
                     self.emit_call_returning(callee, vec![], result_ty)
                 } else {
-                    // Static stored field → load through global ref
+                    // Static stored field → global ref + clone. Clone (not raw
+                    // load) so the global keeps ownership; otherwise the @owned
+                    // result's drop frees a COW global's storage (use-after-free).
                     let addr = self.emit_global_ref(entity);
                     let ty = self.resolve_expr_type(expr_id);
-                    self.emit_load(addr, ty)
+                    self.emit_copy_addr(addr, ty)
                 }
             },
             Some(NodeKind::TypeParameter | NodeKind::TypeAlias) => {
@@ -628,6 +646,13 @@ impl OssaBodyCtx<'_, '_> {
                     let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
                         self.emit_store_init(field_addr, rhs);
+                        // Failable init: mark this field live so a later failure
+                        // `return` flag-guard-drops it. (Reassigning a field within
+                        // one init still `store_init`s over the old value — a
+                        // pre-existing leak independent of this flag; not handled.)
+                        if let Some(flag) = self.init_field_flag(field_idx) {
+                            self.store_drop_flag(flag, true);
+                        }
                     } else {
                         self.emit_store_assign(field_addr, rhs);
                     }

@@ -8,6 +8,7 @@ pub mod stmt;
 
 use std::collections::HashMap;
 
+use kestrel_ast_builder::InitEffect;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId as HirLocalId;
@@ -300,6 +301,13 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// receiver. Whole-local captures use `local_map` instead. Saved/restored
     /// across nested closure bodies like `local_map`.
     pub(crate) place_capture_map: HashMap<PlaceKey, ValueId>,
+    /// Failable-init partial-drop tracking: one entry per droppable stored field
+    /// of `self`, as `(field index, substituted field type, drop-flag pointer)`.
+    /// Populated only in a failable/throwing init body (see
+    /// `setup_init_field_flags`); the flag is set `true` when `self.f = v` runs
+    /// and consulted to flag-guard-drop the field at a failure `return`. Empty
+    /// in all other bodies.
+    pub(crate) init_field_flags: Vec<(FieldIdx, TyId, ValueId)>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -333,6 +341,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             temp_counter: 0,
             current_span: None,
             local_use_counts: HashMap::new(),
+            init_field_flags: Vec::new(),
         }
     }
 
@@ -430,6 +439,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             }
         }
         self.body.param_count = params_len;
+
+        // Failable-init partial drop: allocate drop flags for `self`'s droppable
+        // stored fields in the entry block (so they dominate every failure
+        // `return`). Must run after the param loop established `self_addr`.
+        self.setup_init_field_flags();
 
         // Consuming params stay as SSA @owned values — no var_local
         // promotion. Mutating calls use BeginMutBorrow on the SSA value
@@ -699,9 +713,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// tracked like the var address: threaded through merges and `DestroyValue`'d
     /// (a no-op on a trivial `Bool` slot) at scope exit.
     pub fn alloc_var_flag(&mut self) -> ValueId {
+        self.alloc_drop_flag(true)
+    }
+
+    /// Allocate an in-memory Bool drop flag initialized to `initial` (`true` =
+    /// slot owns a value). Like [`Self::alloc_var_flag`] but lets the caller pick
+    /// the initial state — failable-init field flags start `false` (the field is
+    /// uninitialized until `self.f = v` runs and stores `true`).
+    pub fn alloc_drop_flag(&mut self, initial: bool) -> ValueId {
         let bty = self.bool_ty();
         let flag = self.emit_uninit(bty);
-        let init = self.emit_literal(Immediate::bool(true));
+        let init = self.emit_literal(Immediate::bool(initial));
         self.emit_store_init(flag, init);
         flag
     }
@@ -720,6 +742,113 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn store_drop_flag(&mut self, flag: ValueId, full: bool) {
         let v = self.emit_literal(Immediate::bool(full));
         self.emit_store_assign(flag, v);
+    }
+
+    // ----------------------------------------------------------------
+    // Failable-init partial drop (drop already-initialized self fields
+    // on a `return null` / `throw` exit). See `init_field_flags`.
+    // ----------------------------------------------------------------
+
+    /// In a failable/throwing init body, allocate a `false`-initialized drop
+    /// flag in the entry block for each droppable stored field of `self`, and
+    /// record `(field_idx, substituted field type, flag)` in `init_field_flags`.
+    /// No-op for plain inits and every non-init body, so `init_field_flags` stays
+    /// empty and the `return`/assign hooks below do nothing.
+    fn setup_init_field_flags(&mut self) {
+        // Only failable/throwing inits can fail partway and abandon `self`.
+        if self.ctx.world.get::<InitEffect>(self.func_entity).is_none() {
+            return;
+        }
+        let Some(self_addr) = self.body_context.init_self_addr() else {
+            return;
+        };
+        let self_ty = self.body.value(self_addr).ty;
+        let (entity, type_args) = match self.ctx.module.ty_arena.get(self_ty) {
+            MirTy::Named { entity, type_args } => (*entity, type_args.clone()),
+            _ => return,
+        };
+        // Snapshot (field_idx, raw field type) + generic params, then release the
+        // module borrow before mutating the arena (substitute) / allocating flags.
+        let (raw_fields, type_params): (Vec<(FieldIdx, TyId)>, Vec<Entity>) = {
+            let Some(def) = self.ctx.module.structs.get(&entity) else {
+                return;
+            };
+            let fields = (0..def.fields.len())
+                .map(FieldIdx::new)
+                .filter_map(|idx| self.ctx.resolve_field_ty(entity, idx).map(|ft| (idx, ft)))
+                .collect();
+            let params = def.type_params.iter().map(|tp| tp.entity).collect();
+            (fields, params)
+        };
+        for (field_idx, raw_ft) in raw_fields {
+            // Substitute generic params (identity for non-generic self), exactly
+            // as `emit_field_addr` does, so the recorded type matches the
+            // `field_addr`'s pointee at the failure-return site.
+            let field_ty = if type_args.is_empty() {
+                raw_ft
+            } else {
+                let mut subst = kestrel_mir_3::SubstMap::new();
+                for (&tp, &ta) in type_params.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(tp, ta);
+                }
+                kestrel_mir_3::substitute(&mut self.ctx.module.ty_arena, raw_ft, &subst)
+            };
+            // `needs_drop` reads `type_info.drop`, which only reflects user
+            // `deinit`s pre-`drop_fix`; OR in `is_non_copyable` to also catch
+            // structs droppable purely via a non-Copyable field. A trivial
+            // `destroy_addr` (e.g. an Int64 field) would no-op in expand anyway,
+            // but skipping them avoids a useless flag + guard diamond.
+            let droppable = kestrel_mir_3::ty_query::needs_drop(
+                &self.ctx.module.ty_arena,
+                &self.ctx.module,
+                field_ty,
+            ) || self.is_non_copyable(field_ty);
+            if droppable {
+                let flag = self.alloc_drop_flag(false);
+                self.init_field_flags.push((field_idx, field_ty, flag));
+            }
+        }
+    }
+
+    /// The drop flag for a stored `self` field, if this is a failable init and
+    /// the field is droppable. Used by field-assign to mark the field live.
+    pub fn init_field_flag(&self, field: FieldIdx) -> Option<ValueId> {
+        self.init_field_flags
+            .iter()
+            .find(|(idx, _, _)| *idx == field)
+            .map(|(_, _, flag)| *flag)
+    }
+
+    /// Classify a failable-init `return` value as a FAILURE exit (must drop the
+    /// initialized fields) vs an early SUCCESS exit. An explicit/bare success
+    /// `return` in an effectful init is lowered to `.Some(())` / `.Ok(())`
+    /// (`ImplicitMember`); failure is anything else (`return null`, `throw` →
+    /// `.Err`, `try` → `fromResidual`). A void return (`None`) is not a failure.
+    pub fn is_init_failure_return(&self, value: &Option<HirExprId>) -> bool {
+        match value {
+            Some(v) => !matches!(
+                &self.hir.exprs[*v],
+                HirExpr::ImplicitMember { name, .. }
+                    if matches!(name.as_str_or_empty(), "Some" | "Ok")
+            ),
+            None => false,
+        }
+    }
+
+    /// At a failure `return` in a failable init, flag-guard-drop each
+    /// initialized `self` field (reverse declaration order). Threads `ret_val`
+    /// through the guard diamonds; returns its continuation-block value.
+    pub fn emit_init_partial_drops(&mut self, mut ret_val: ValueId) -> ValueId {
+        let Some(self_addr) = self.body_context.init_self_addr() else {
+            return ret_val;
+        };
+        let self_ty = self.body.value(self_addr).ty;
+        for (field_idx, field_ty, flag) in self.init_field_flags.clone().into_iter().rev() {
+            let field_addr = self.emit_field_addr(self_addr, self_ty, field_idx);
+            let remapped = self.emit_guarded_destroy(flag, field_addr, field_ty, &[ret_val]);
+            ret_val = remapped[0];
+        }
+        ret_val
     }
 
     pub fn emit_destroy_addr(&mut self, address: ValueId, ty: TyId) {

@@ -62,12 +62,49 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
         })
         .collect();
 
-    // Master init function
-    let _master_idx = synthesize_master_init(ctx, &thunks);
-    // Static init disabled: the init thunks call misresolved functions
-    // (e.g. Int32.maxValue instead of Int32.init). Re-enable once the
-    // monomorphizer function resolution is fixed.
-    // inject_init_call_into_main(ctx, _master_idx);
+    // Master init function, called from the start of `main`.
+    let master = synthesize_master_init(ctx, &thunks);
+    inject_init_call_into_main(ctx, master);
+}
+
+/// Prepend `call __kestrel_init_statics()` to `main`'s entry block so global
+/// constants are initialized before any user code runs. `main` is the function
+/// codegen treats as the entry point — name `main` or `*.main` (mirrors
+/// codegen's `is_main_function`). No entry (a library) → nothing to inject.
+fn inject_init_call_into_main(ctx: &mut LowerCtx, master_entity: Entity) {
+    use kestrel_mir_3::callee::Callee;
+    use kestrel_mir_3::inst::{InstKind, Instruction};
+
+    let main_entity = ctx
+        .module
+        .functions
+        .iter()
+        .find(|(entity, f)| {
+            f.body.is_some() && {
+                let name = ctx.module.resolve_name(**entity);
+                name == "main" || name.ends_with(".main")
+            }
+        })
+        .map(|(entity, _)| *entity);
+
+    let Some(main_entity) = main_entity else {
+        return;
+    };
+
+    let call = Instruction::new(InstKind::Call {
+        result: None,
+        callee: Callee::direct(master_entity),
+        args: vec![],
+    });
+
+    let body = ctx
+        .module
+        .functions
+        .get_mut(&main_entity)
+        .and_then(|f| f.body.as_mut())
+        .expect("main has a body");
+    let entry = body.entry;
+    body.block_mut(entry).insts.insert(0, call);
 }
 
 /// Create `func __init$<name>() -> T { <initializer expr> }`.

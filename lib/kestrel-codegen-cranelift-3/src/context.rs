@@ -127,9 +127,14 @@ impl<'m> CodegenCtx<'m> {
             return self.define_file_constant(s, fcd, size);
         }
 
+        // Writable even for immutable `let`s: every static lowered here is
+        // populated at startup by `__kestrel_init_statics` (its `__init$` thunk
+        // writes through `global_ref`), so the slot must be in writable memory
+        // or the init store faults. File constants are pre-baked read-only and
+        // returned above.
         let data_id = self
             .cl_module
-            .declare_data(&s.name, Linkage::Local, s.is_mutable, false)
+            .declare_data(&s.name, Linkage::Local, true, false)
             .map_err(|e| CodegenError::DataSection(format!("{e}")))?;
 
         let mut desc = DataDescription::new();

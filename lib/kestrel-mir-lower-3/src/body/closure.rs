@@ -263,9 +263,17 @@ impl OssaBodyCtx<'_, '_> {
                 let owned_field = self.emit_copy_value(field_val);
 
                 let value = if is_ref_capture {
-                    let loaded = self.emit_load(owned_field, cap_ty);
-                    self.emit_destroy_value(owned_field);
-                    loaded
+                    if self.is_protocol_self(cap_ty) {
+                        // Borrow-alias capture (non-escaping protocol `Self`):
+                        // borrow through the env pointer; never load-and-own,
+                        // which would drop the aliased receiver and desync the
+                        // conformer's refcount.
+                        self.emit_begin_borrow_addr(owned_field, cap_ty)
+                    } else {
+                        let loaded = self.emit_load(owned_field, cap_ty);
+                        self.emit_destroy_value(owned_field);
+                        loaded
+                    }
                 } else {
                     owned_field
                 };
@@ -405,9 +413,24 @@ impl OssaBodyCtx<'_, '_> {
     /// Copyable (bitwise) or Cloneable (has a clone shim). The env then owns a
     /// copy/clone and the source local stays live (capturing an `RcBox` bumps
     /// its refcount, leaving the original usable). Only move-only `not Copyable`
-    /// types are captured by reference, moving their sole owner into the env.
+    /// types — and a protocol's type-erased `Self` (see `is_protocol_self`) —
+    /// are captured by reference.
     fn captures_by_value(&self, cap_ty: TyId) -> bool {
-        !self.is_non_copyable(cap_ty)
+        !self.is_non_copyable(cap_ty) && !self.is_protocol_self(cap_ty)
+    }
+
+    /// True when `cap_ty` is a protocol's `Self` type — `MirTy::TypeParam(e)`
+    /// with `e` a protocol entity (see `ty::build_self_type`). Type-erased: a
+    /// closure's `ApplyPartial` carries no `self_type`, so `copy_value` at the
+    /// abstract type has no clone shim → captured by reference instead.
+    fn is_protocol_self(&self, cap_ty: TyId) -> bool {
+        match self.ctx.module.ty_arena.get(cap_ty) {
+            MirTy::TypeParam(e) => {
+                self.ctx.world.get::<kestrel_ast_builder::NodeKind>(*e)
+                    == Some(&kestrel_ast_builder::NodeKind::Protocol)
+            },
+            _ => false,
+        }
     }
 
     fn materialize_whole(&mut self, root: HirLocalId, cap_ty: TyId) -> ValueId {
