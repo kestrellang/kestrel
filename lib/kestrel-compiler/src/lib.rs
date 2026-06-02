@@ -454,6 +454,11 @@ impl Compiler {
             ))
         })?;
 
+        // Collapse conservative copy+destroy pairs into moves before expand turns
+        // CopyValue/DestroyValue into real clone()/drop calls. The lowering copies
+        // every @owned value (emit_value_use) by design and defers cleanup to here.
+        kestrel_mir_3::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+
         kestrel_mir_3::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
         let mono_verify = kestrel_mir_3::mono::verify::verify_mono(&mono);

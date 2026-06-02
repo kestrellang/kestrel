@@ -39,19 +39,6 @@ pub fn eliminate_redundant_copies(mono: &mut MonoModule) {
                 "[copy_prop] {}: {func_total} copy+destroy pairs eliminated",
                 func.name
             );
-            if func.name.contains("RcBox")
-                && func.name.contains("release")
-                && func.name.contains("StringStorage")
-            {
-                // Dump the optimized body
-                for (bi, block) in func.body.as_ref().unwrap().blocks.iter().enumerate() {
-                    eprintln!("[copy_prop]   bb{bi}:");
-                    for inst in &block.insts {
-                        eprintln!("[copy_prop]     {:?}", inst.kind);
-                    }
-                    eprintln!("[copy_prop]     TERM: {:?}", block.terminator.kind);
-                }
-            }
         }
         total += func_total;
     }
@@ -111,7 +98,7 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
             continue;
         };
         let x = *operand;
-        let y = *result;
+        let _y = *result;
 
         if body.value(x).ownership != Ownership::Owned {
             continue;
@@ -174,137 +161,4 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
     body.blocks[block_idx].insts = new_insts;
 
     eliminated
-}
-
-fn resolve(v: ValueId, remap: &HashMap<ValueId, ValueId>) -> ValueId {
-    let mut current = v;
-    while let Some(&target) = remap.get(&current) {
-        current = target;
-    }
-    current
-}
-
-fn remap_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
-    if remap.is_empty() {
-        return;
-    }
-    match kind {
-        InstKind::CopyValue { operand, .. }
-        | InstKind::MoveValue { operand, .. }
-        | InstKind::DestroyValue { operand }
-        | InstKind::BeginBorrow { operand, .. }
-        | InstKind::EndBorrow { operand }
-        | InstKind::BeginMutBorrow { operand, .. }
-        | InstKind::EndMutBorrow { operand }
-        | InstKind::Discriminant { operand, .. }
-        | InstKind::StructExtract { operand, .. }
-        | InstKind::TupleExtract { operand, .. }
-        | InstKind::EnumPayload { operand, .. }
-        | InstKind::DestructureStruct { operand, .. }
-        | InstKind::DestructureTuple { operand, .. }
-        | InstKind::DestructureEnum { operand, .. } => {
-            *operand = resolve(*operand, remap);
-        },
-        InstKind::Load { address, .. } => {
-            *address = resolve(*address, remap);
-        },
-        InstKind::CopyAddr { address, .. }
-        | InstKind::Take { address, .. }
-        | InstKind::BeginBorrowAddr { address, .. }
-        | InstKind::BeginMutBorrowAddr { address, .. }
-        | InstKind::DestroyAddr { address, .. } => {
-            *address = resolve(*address, remap);
-        },
-        InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
-            *address = resolve(*address, remap);
-            *value = resolve(*value, remap);
-        },
-        InstKind::Op1 { arg, .. } => {
-            *arg = resolve(*arg, remap);
-        },
-        InstKind::Op2 { lhs, rhs, .. } => {
-            *lhs = resolve(*lhs, remap);
-            *rhs = resolve(*rhs, remap);
-        },
-        InstKind::Op3 { a, b, c, .. } => {
-            *a = resolve(*a, remap);
-            *b = resolve(*b, remap);
-            *c = resolve(*c, remap);
-        },
-        InstKind::Struct { fields, .. } => {
-            for (_, v) in fields {
-                *v = resolve(*v, remap);
-            }
-        },
-        InstKind::Tuple { elements, .. } | InstKind::Array { elements, .. } => {
-            for v in elements {
-                *v = resolve(*v, remap);
-            }
-        },
-        InstKind::Enum { payload, .. } => {
-            for v in payload {
-                *v = resolve(*v, remap);
-            }
-        },
-        InstKind::Call { args, .. } => {
-            for arg in args {
-                arg.value = resolve(arg.value, remap);
-            }
-        },
-        InstKind::ApplyPartial { captures, .. } => {
-            for v in captures {
-                *v = resolve(*v, remap);
-            }
-        },
-        InstKind::FieldAddr { base, .. } => {
-            *base = resolve(*base, remap);
-        },
-        InstKind::Literal { .. } | InstKind::GlobalRef { .. } | InstKind::Uninit { .. } => {},
-    }
-}
-
-fn remap_terminator(
-    kind: &mut crate::terminator::TerminatorKind,
-    remap: &HashMap<ValueId, ValueId>,
-) {
-    if remap.is_empty() {
-        return;
-    }
-    use crate::terminator::TerminatorKind;
-    match kind {
-        TerminatorKind::Return(v) => {
-            *v = resolve(*v, remap);
-        },
-        TerminatorKind::Jump { args, .. } => {
-            for v in args {
-                *v = resolve(*v, remap);
-            }
-        },
-        TerminatorKind::Branch {
-            condition,
-            then_args,
-            else_args,
-            ..
-        } => {
-            *condition = resolve(*condition, remap);
-            for v in then_args {
-                *v = resolve(*v, remap);
-            }
-            for v in else_args {
-                *v = resolve(*v, remap);
-            }
-        },
-        TerminatorKind::Switch {
-            discriminant,
-            cases,
-        } => {
-            *discriminant = resolve(*discriminant, remap);
-            for arm in cases {
-                for v in &mut arm.args {
-                    *v = resolve(*v, remap);
-                }
-            }
-        },
-        TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {},
-    }
 }
