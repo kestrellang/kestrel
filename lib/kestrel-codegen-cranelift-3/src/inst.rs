@@ -122,8 +122,13 @@ pub fn compile_inst(
         }
 
         // address: ADDR → result: VALUE (destructive read)
+        // Resolve the address as a VALUE: a @guaranteed pointer operand (e.g. a
+        // struct_extract field projection feeding a DestroyAddr-expanded drop, as in
+        // `drop_in_place(self._raw)`) is represented as a pointer-TO-the-address and
+        // must be loaded to recover the actual address. `resolve_scalar` is identity
+        // for an @owned pointer (the common stack-slot case) and loads for @guaranteed.
         InstKind::Take { result, address, ty } => {
-            let addr = fc.get_value(builder, *address);
+            let addr = fc.resolve_scalar(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
             fc.map_value(builder, *result, val);
