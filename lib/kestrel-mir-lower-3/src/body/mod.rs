@@ -1779,6 +1779,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     convention,
                 };
             }
+            // SSA / @guaranteed receiver (e.g. a closure param or an already-borrowed
+            // value used as a borrowing method's receiver): borrow it in place.
+            // lower_expr would emit a spurious copy_value, which for a Cloneable type
+            // expands to a clone() — double-cloning the receiver and corrupting
+            // @guaranteed aggregate values (e.g. `valuePtr().with { v in v.clone() }`).
+            // Mirrors the MutBorrow path above.
+            let val = self.lower_expr_for_borrow(expr_id);
+            return self.prepare_call_arg(val, convention);
         }
         // Single-use SSA local with Consuming convention: move directly,
         // bypassing the emit_value_use copy. Only safe at function top-level
