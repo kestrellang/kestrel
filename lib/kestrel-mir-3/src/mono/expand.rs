@@ -199,26 +199,31 @@ fn build_clone_lookup(
         }
     }
 
-    // Collect entities that don't need clone shim calls:
+    // Collect instances that don't need clone shim calls:
     // Bitwise types (trivial copy) and not-Copyable types (move, never clone).
-    let skip_clone_nominals: HashSet<Entity> = module
+    // Keyed per (nominal, type_args), NOT by nominal alone: a conditionally-
+    // Copyable container has both Bitwise and Clone instances (`Optional[Int64]`
+    // vs `Optional[String]`). Collapsing to the nominal would let the Bitwise
+    // instance drop the Clone instance's shim from the lookup → the Clone
+    // instance falls back to a non-refcounting bit-copy → double-free.
+    let skip_clone_instances: HashSet<(Entity, Vec<TyId>)> = module
         .structs
         .values()
         .filter(|s| matches!(s.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
-        .map(|s| s.source)
+        .map(|s| (s.source, s.type_args.clone()))
         .chain(
             module
                 .enums
                 .values()
                 .filter(|e| matches!(e.type_info.copy, CopyBehavior::Bitwise | CopyBehavior::None))
-                .map(|e| e.source),
+                .map(|e| (e.source, e.type_args.clone())),
         )
         .collect();
 
     let mut lookup = DropShimLookup::new();
     for (mi, mf) in module.functions.iter().enumerate() {
         if let Some(&nominal) = clone_func_to_parent.get(&mf.source) {
-            if skip_clone_nominals.contains(&nominal) {
+            if skip_clone_instances.contains(&(nominal, mf.type_args.clone())) {
                 if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                     eprintln!(
                         "[clone_lookup] SKIPPED (bitwise/not-copyable): {} source={:?} nominal={:?} type_args={:?}",

@@ -18,6 +18,17 @@ use crate::{FieldIdx, MirModule, TyId, ValueId, VariantIdx};
 /// Synthesize `__clone$T` functions for all structs/enums that aren't `not Copyable`.
 /// Skips types that already have a user-written `.clone()` via a Cloneable witness.
 /// Registers each synthesized shim as a Cloneable witness.
+///
+/// Exception: a *conditionally* Copyable container (`: not Copyable` + `extend …:
+/// Copyable where T: Copyable`) has a generic base of `None`, but its concrete
+/// instances may be `Clone` (e.g. `Optional[String]`). Such a type needs a
+/// generic `__clone$T` shim so that those instances get a real clone (the per-
+/// instance `CopyValue` in its body resolves to a bitwise copy or a payload
+/// clone during expand). We synthesize the shim but leave the generic base
+/// `None` and register no unconditional witness — the conformance stays
+/// per-instance via the stdlib's `where`-gated extension. (See the
+/// `Optional[String]` if-let double-free: an unsynthesized shim left the
+/// scrutinee copy as a non-refcounting bit-copy that was then double-dropped.)
 pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     let Some(cloneable_proto) = find_cloneable_protocol(module) else {
         return;
@@ -25,7 +36,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
 
     // Pre-intern Pointer(Named(entity)) for all candidate types (needed by BeginBorrow)
     for s in module.structs.values() {
-        if s.type_info.copy == CopyBehavior::None {
+        if s.type_info.copy == CopyBehavior::None && s.conditionally_copyable.is_empty() {
             continue;
         }
         let tp_ty_ids: Vec<TyId> = s
@@ -40,7 +51,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         module.ty_arena.pointer(named_ty);
     }
     for e in module.enums.values() {
-        if e.type_info.copy == CopyBehavior::None {
+        if e.type_info.copy == CopyBehavior::None && e.conditionally_copyable.is_empty() {
             continue;
         }
         let tp_ty_ids: Vec<TyId> = e
@@ -83,11 +94,13 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         })
         .collect();
 
+    // A conditionally-Copyable container has a generic base of `None` but needs
+    // a shim for its `Clone` instances — don't let the `None` base skip it.
     let mut worklist: Vec<Entity> = Vec::new();
     for s in module.structs.values() {
         if has_user_clone.contains(&s.entity)
             || closure_env_entities.contains(&s.entity)
-            || s.type_info.copy == CopyBehavior::None
+            || (s.type_info.copy == CopyBehavior::None && s.conditionally_copyable.is_empty())
             || has_unresolvable_fields_struct(s, &module.ty_arena)
         {
             continue;
@@ -96,7 +109,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     }
     for e in module.enums.values() {
         if has_user_clone.contains(&e.entity)
-            || e.type_info.copy == CopyBehavior::None
+            || (e.type_info.copy == CopyBehavior::None && e.conditionally_copyable.is_empty())
             || has_unresolvable_fields_enum(e, &module.ty_arena)
         {
             continue;
@@ -124,8 +137,15 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         shim_map.insert(type_entity, shim_entity);
     }
 
-    // Register each shim as a Cloneable witness
+    // Register each shim as a Cloneable witness. A conditionally-Copyable
+    // container is skipped: its conformance is per-instance (the stdlib's
+    // `where T: Copyable` extension), so an unconditional witness here would
+    // wrongly claim e.g. `Optional[File]: Cloneable`. The implicit-copy path
+    // finds the shim by `FunctionKind::CloneShim`, not via this witness.
     for (&type_entity, &shim_entity) in &shim_map {
+        if is_conditional_container(module, type_entity) {
+            continue;
+        }
         let func = &module.functions[&shim_entity];
         let tp_ty_ids: Vec<TyId> = func
             .type_params
@@ -156,7 +176,14 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
 
     // Set CopyBehavior::Clone for all shim'd types that have non-trivial fields.
     // Types with only primitive fields stay Bitwise — the expand pass handles them.
+    // A conditionally-Copyable container keeps its generic `None` base: its
+    // per-instance behavior is derived later by `refine_mono_copy_behavior`
+    // (`Optional[String]` → Clone, `Optional[Int64]` → Bitwise, `Optional[File]`
+    // → None). Overwriting the base to Clone here would break that invariant.
     for (&type_entity, _) in &shim_map {
+        if is_conditional_container(module, type_entity) {
+            continue;
+        }
         // Compute predicate with shared borrow, then mutate separately
         let needs_struct = module
             .structs
@@ -179,6 +206,20 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
                 CopyBehavior::Clone(cloneable_proto);
         }
     }
+}
+
+/// True for a `: not Copyable` type that is *conditionally* Copyable (has gating
+/// positions). Such a type's generic base is `None`, but concrete instances may
+/// be `Clone`/`Bitwise` — so it gets a shim while keeping its `None` base and no
+/// unconditional Cloneable witness.
+fn is_conditional_container(module: &MirModule, entity: Entity) -> bool {
+    if let Some(s) = module.structs.get(&entity) {
+        return !s.conditionally_copyable.is_empty();
+    }
+    if let Some(e) = module.enums.get(&entity) {
+        return !e.conditionally_copyable.is_empty();
+    }
+    false
 }
 
 fn generate_clone_shim(
