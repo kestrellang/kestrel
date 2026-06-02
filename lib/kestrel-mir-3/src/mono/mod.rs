@@ -383,8 +383,10 @@ fn substitute_inst(
             substitute_immediate(arena, &mut value.kind, subst);
         },
 
-        // Calls
-        InstKind::Call { callee, .. } => {
+        // Calls and partial applications both reference a callable through a
+        // `Callee` — substitute its type args / self_type identically so the
+        // instantiation key matches what `rewrite_callee` later looks up.
+        InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
             substitute_callee_and_resolve(
                 arena,
                 witnesses,
@@ -563,7 +565,7 @@ fn rewrite_callees(
     for (bi, block) in body.blocks.iter_mut().enumerate() {
         for (ii, inst) in block.insts.iter_mut().enumerate() {
             match &mut inst.kind {
-                InstKind::Call { callee, .. } => {
+                InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
                     rewrite_callee(callee, bi, ii, &body_result.resolved_witnesses, func_id_map);
                 },
                 InstKind::Literal { value, .. } => {

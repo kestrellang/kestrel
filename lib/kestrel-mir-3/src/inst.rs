@@ -199,7 +199,13 @@ pub enum InstKind {
     },
     ApplyPartial {
         result: ValueId,
-        func: Entity,
+        /// The closure/thunk being partially applied. Pre-mono this is a
+        /// `Callee::Direct` carrying the (generic) entity + type args; mono
+        /// rewrites it to `Callee::Resolved(MonoFuncId)` exactly like a `Call`.
+        /// Storing a bare `Entity` here is what let codegen bind every
+        /// instantiation to the first thunk — see the mono `rewrite_callees`
+        /// and `compile_apply_partial` handling.
+        callee: Callee,
         captures: Vec<ValueId>,
     },
 

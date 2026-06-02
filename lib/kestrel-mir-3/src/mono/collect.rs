@@ -247,8 +247,19 @@ impl<'a> CollectionContext<'a> {
                     InstKind::Literal { value, .. } => {
                         self.scan_immediate(&value.kind, &subst, parent_self);
                     },
-                    InstKind::ApplyPartial { func, .. } => {
-                        self.scan_apply_partial(*func, &subst, parent_self);
+                    InstKind::ApplyPartial { callee, .. } => {
+                        // The partial-applied closure/thunk is referenced exactly
+                        // like a Call callee (a `Callee::Direct` after the thunk
+                        // pass), so discover its instantiation the same way — this
+                        // is what binds each `read[T]` to its own thunk instead of
+                        // collapsing to the first.
+                        self.scan_callee(
+                            callee,
+                            &subst,
+                            parent_self,
+                            caller_entity,
+                            inst.span.as_ref(),
+                        );
                     },
                     InstKind::DestroyValue { operand } => {
                         let operand_ty = body.values[operand.index()].ty;
@@ -456,24 +467,6 @@ impl<'a> CollectionContext<'a> {
         }
     }
 
-    /// Scan an ApplyPartial instruction — discovers the thunk or original
-    /// function that a partial application targets.
-    fn scan_apply_partial(&mut self, func: Entity, subst: &SubstMap, parent_self: Option<TyId>) {
-        if let Some(callable_entity) = self.apply_partial_callable_for(func) {
-            let target = &self.functions[&callable_entity];
-            let type_args: Vec<TyId> = target
-                .type_params
-                .iter()
-                .filter_map(|tp| subst.type_params.get(&tp.entity).copied())
-                .collect();
-
-            let key = InstantiationKey::new(callable_entity, type_args, parent_self);
-            if self.seen.insert(key.clone()) {
-                self.queue.push_back(key);
-            }
-        }
-    }
-
     fn func_uses_self_type(&self, func: &FunctionDef) -> bool {
         // Protocol Self is TypeParam(protocol_entity). Detect it by checking
         // if the first param is a TypeParam not in the function's type_params list.
@@ -485,25 +478,6 @@ impl<'a> CollectionContext<'a> {
             }
         }
         false
-    }
-
-    fn apply_partial_callable_for(&self, original: Entity) -> Option<Entity> {
-        // First look for a thunk wrapping this function
-        self.functions
-            .values()
-            .find_map(|func| match &func.kind {
-                FunctionKind::Thunk {
-                    original: thunk_target,
-                } if *thunk_target == original => Some(func.entity),
-                _ => None,
-            })
-            .or_else(|| {
-                if self.functions.contains_key(&original) {
-                    Some(original)
-                } else {
-                    None
-                }
-            })
     }
 
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.

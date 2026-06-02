@@ -265,8 +265,8 @@ pub fn compile_inst(
         }
 
         // captures: VALUE each → result: @owned closure pair
-        InstKind::ApplyPartial { result, func, captures } => {
-            let val = compile_apply_partial(fc, builder, *func, captures)?;
+        InstKind::ApplyPartial { result, callee, captures } => {
+            let val = compile_apply_partial(fc, builder, callee, captures)?;
             fc.map_value(builder, *result, val);
         }
 
@@ -747,27 +747,27 @@ fn compile_array(
 fn compile_apply_partial(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
-    func_entity: Entity,
+    callee: &Callee,
     captures: &[ValueId],
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
     let ptr_size = fc.ctx.ptr_size;
 
+    // Monomorphization rewrites the partial-application target to a concrete
+    // instance, exactly like a Call. Resolving by `MonoFuncId` (not by scanning
+    // for the first function whose `source` matches the generic entity) is what
+    // keeps each instantiation bound to *its own* thunk.
     let func_addr = {
-        let mut found = None;
-        for (i, f) in fc.ctx.module.functions.iter().enumerate() {
-            if f.source == func_entity {
-                let func_id = fc.ctx.func_ids[i].ok_or_else(|| {
-                    CodegenError::Unsupported("closure target not declared".into())
-                })?;
-                let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
-                found = Some(builder.ins().func_addr(ptr_ty, func_ref));
-                break;
-            }
-        }
-        found.unwrap_or_else(|| {
-            panic!("ICE: closure target entity {:?} not found in mono module", func_entity)
-        })
+        let Callee::Resolved(mono_id) = callee else {
+            return Err(CodegenError::Unsupported(format!(
+                "ApplyPartial callee not resolved to a mono instance: {callee:?}"
+            )));
+        };
+        let func_id = fc.ctx.func_ids[mono_id.index()].ok_or_else(|| {
+            CodegenError::Unsupported("closure target not declared".into())
+        })?;
+        let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
+        builder.ins().func_addr(ptr_ty, func_ref)
     };
 
     let mut env_size = 0u64;

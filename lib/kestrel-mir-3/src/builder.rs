@@ -459,14 +459,14 @@ impl OssaBuilder {
 
     pub fn emit_apply_partial(
         &mut self,
-        func: Entity,
+        callee: Callee,
         captures: Vec<ValueId>,
         result_ty: TyId,
     ) -> ValueId {
         let result = self.new_value(result_ty, Ownership::Owned);
         self.emit(InstKind::ApplyPartial {
             result,
-            func,
+            callee,
             captures,
         });
         result

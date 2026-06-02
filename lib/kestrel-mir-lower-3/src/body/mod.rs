@@ -1485,7 +1485,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_apply_partial(
         &mut self,
-        func: Entity,
+        callee: Callee,
         captures: Vec<ValueId>,
         result_ty: TyId,
     ) -> ValueId {
@@ -1495,7 +1495,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         self.push_inst(InstKind::ApplyPartial {
             result,
-            func,
+            callee,
             captures,
         });
         self.track_owned(result);

@@ -657,15 +657,16 @@ fn fmt_inst(
         },
         InstKind::ApplyPartial {
             result,
-            func,
+            callee,
             captures,
         } => {
             let vals: Vec<_> = captures.iter().map(|v| fmt_value(*v)).collect();
+            let callee_str = fmt_callee(callee, arena, module);
             write!(
                 out,
                 "{} = apply_partial {}({})",
                 fmt_value(*result),
-                module.resolve_name(*func),
+                callee_str,
                 vals.join(", "),
             )
             .unwrap();

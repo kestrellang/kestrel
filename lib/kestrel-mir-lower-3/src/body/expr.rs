@@ -397,7 +397,12 @@ impl OssaBodyCtx<'_, '_> {
                     self.ctx.module.ty_arena.get(inferred_ty),
                     MirTy::FuncThick { .. }
                 ) {
-                    return self.emit_apply_partial(entity, vec![], inferred_ty);
+                    // Carry the entity's type args so monomorphization can resolve
+                    // the partial application to the correct instance (same as the
+                    // `function_ref` path below).
+                    let type_args = self.resolve_type_args(expr_id);
+                    let callee = Callee::direct_with_args(entity, type_args, None);
+                    return self.emit_apply_partial(callee, vec![], inferred_ty);
                 }
                 let type_args = self.resolve_type_args(expr_id);
                 self.emit_literal(Immediate::function_ref(entity, type_args, None))

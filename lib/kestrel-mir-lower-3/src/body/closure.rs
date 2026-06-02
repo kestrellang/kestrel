@@ -29,6 +29,7 @@ use kestrel_mir_3::body::OssaBody;
 use kestrel_mir_3::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir_3::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir_3::value::{Ownership, ValueDef};
+use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::captures::{CaptureKind, CapturedPlace};
 
@@ -306,7 +307,23 @@ impl OssaBodyCtx<'_, '_> {
             captures.push(cap);
         }
 
-        self.emit_apply_partial(closure_entity, captures, closure_ty)
+        // The closure inherits the parent's type params (same entities), so the
+        // partial application binds them by identity. Carrying these type args
+        // lets monomorphization resolve the closure/thunk to the correct
+        // instance — without them every `read[T]` collapsed to the first thunk.
+        let parent_tp_entities: Vec<kestrel_hecs::Entity> = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .map(|f| f.type_params.iter().map(|tp| tp.entity).collect())
+            .unwrap_or_default();
+        let type_args: Vec<TyId> = parent_tp_entities
+            .iter()
+            .map(|&e| self.ctx.intern(MirTy::TypeParam(e)))
+            .collect();
+        let callee = Callee::direct_with_args(closure_entity, type_args, None);
+        self.emit_apply_partial(callee, captures, closure_ty)
     }
 
     // === Capture planning ===

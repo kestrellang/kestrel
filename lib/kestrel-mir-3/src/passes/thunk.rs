@@ -21,7 +21,10 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         let Some(body) = &func.body else { continue };
         for block in &body.blocks {
             for inst in &block.insts {
-                if let InstKind::ApplyPartial { func: target, .. } = &inst.kind
+                if let InstKind::ApplyPartial {
+                    callee: Callee::Direct { func: target, .. },
+                    ..
+                } = &inst.kind
                     && seen.insert(*target)
                 {
                     targets.push(*target);
@@ -184,7 +187,11 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
             let Some(body) = &mut func.body else { continue };
             for block in &mut body.blocks {
                 for inst in &mut block.insts {
-                    if let InstKind::ApplyPartial { func: f, .. } = &mut inst.kind {
+                    if let InstKind::ApplyPartial {
+                        callee: Callee::Direct { func: f, .. },
+                        ..
+                    } = &mut inst.kind
+                    {
                         if *f == *target {
                             *f = thunk_entity;
                         }
@@ -278,7 +285,7 @@ mod tests {
             .insts
             .push(Instruction::new(InstKind::ApplyPartial {
                 result: result_val,
-                func: target,
+                callee: Callee::direct(target),
                 captures: vec![],
             }));
 
@@ -367,7 +374,7 @@ mod tests {
                 .insts
                 .push(Instruction::new(InstKind::ApplyPartial {
                     result: r1,
-                    func: target,
+                    callee: Callee::direct(target),
                     captures: vec![],
                 }));
             let r2 = body.alloc_value(ValueDef::owned(thick_ty));
@@ -375,7 +382,7 @@ mod tests {
                 .insts
                 .push(Instruction::new(InstKind::ApplyPartial {
                     result: r2,
-                    func: target,
+                    callee: Callee::direct(target),
                     captures: vec![],
                 }));
 

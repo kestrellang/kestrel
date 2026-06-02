@@ -582,9 +582,15 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
                 _ => {},
             }
         },
-        InstKind::ApplyPartial { captures, .. } => {
+        InstKind::ApplyPartial { callee, captures, .. } => {
             for v in captures.iter_mut() {
                 *v = remap_value(*v, remap);
+            }
+            match callee {
+                Callee::Thin(v) | Callee::Thick(v) => {
+                    *v = remap_value(*v, remap);
+                },
+                _ => {},
             }
         },
 
