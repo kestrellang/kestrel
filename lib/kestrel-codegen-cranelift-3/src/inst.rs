@@ -836,14 +836,17 @@ fn compile_struct_extract(
         return Ok(addr);
     }
 
-    // @owned: single-field scalar newtype — value IS the field.
-    if let TypeRepr::Scalar(base_cl) = operand_repr {
-        if let TypeRepr::Scalar(field_cl) = field_repr {
-            if base_cl == field_cl {
-                return Ok(base);
-            }
-            return Ok(builder.ins().bitcast(field_cl, MemFlags::new(), base));
-        }
+    // @owned: single-field scalar newtype — value IS the field. A newtype's
+    // representation IS its field's (classify_named delegates to it), so the @owned
+    // value already carries the field's scalar; no load or bitcast coercion is needed.
+    // The assert pins that single-source-of-truth invariant — if it ever fires, a
+    // layout authority has diverged from classify_named again.
+    if let (TypeRepr::Scalar(base_cl), TypeRepr::Scalar(field_cl)) = (operand_repr, field_repr) {
+        debug_assert_eq!(
+            base_cl, field_cl,
+            "single-field newtype repr must equal its field repr (classify_named delegates)"
+        );
+        return Ok(base);
     }
 
     // @owned aggregate: compute field offset and load.

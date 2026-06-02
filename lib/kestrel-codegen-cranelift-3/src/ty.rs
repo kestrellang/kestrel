@@ -126,7 +126,7 @@ impl TypeCache {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
-                self.classify_named(entity, &type_args, module)
+                self.classify_named(entity, &type_args, arena, module)
             }
 
             MirTy::Error => TypeRepr::Scalar(ir::types::I8),
@@ -139,18 +139,25 @@ impl TypeCache {
     }
 
     fn classify_named(
-        &self,
+        &mut self,
         entity: Entity,
         type_args: &[TyId],
+        arena: &TyArena,
         module: &MonoModule,
     ) -> TypeRepr {
         let key = (entity, type_args.to_vec());
 
-        let (layout, is_single_field) = if let Some(s) = module.structs.get(&key) {
-            (s.type_info.layout.as_ref(), s.fields.len() <= 1)
+        // `is_single_field`: this Named type is carried as a single scalar — a one-field
+        // struct (newtype) or a pure-discriminant enum.
+        // `single_field_ty`: the field type of a one-field struct, when applicable. A
+        // newtype's value *is* its field's value, so its representation must delegate to
+        // the field's repr (the single source of truth — see the collapse branch below).
+        let (layout, is_single_field, single_field_ty) = if let Some(s) = module.structs.get(&key) {
+            let single_field_ty = (s.fields.len() == 1).then(|| s.fields[0].ty);
+            (s.type_info.layout.as_ref(), s.fields.len() <= 1, single_field_ty)
         } else if let Some(e) = module.enums.get(&key) {
             let pure_disc = e.cases.iter().all(|c| c.payload_fields.is_empty());
-            (e.type_info.layout.as_ref(), pure_disc)
+            (e.type_info.layout.as_ref(), pure_disc, None)
         } else {
             let name = module.entity_names.get(&entity).map(|s| s.as_str()).unwrap_or("?");
             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
@@ -177,6 +184,19 @@ impl TypeCache {
         }
 
         if is_single_field && size <= 8 {
+            // A single-field newtype's value is exactly its field's value (see
+            // `compile_struct` / `compile_struct_extract` in inst.rs), so its
+            // representation must be the field's representation. Collapsing by byte size
+            // alone would mis-type e.g. `Float64` (an f64 newtype) as I64 while the body
+            // carries an f64 — making the auto clone-shim's signature disagree with its
+            // body and fail Cranelift verification. Delegating keeps layout single-
+            // sourced. Pure-discriminant enums and one-field structs over a non-scalar
+            // field fall through to the integer-by-size mapping below.
+            if let Some(field_ty) = single_field_ty {
+                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
+                    return TypeRepr::Scalar(t);
+                }
+            }
             let cl_ty = match size {
                 1 => ir::types::I8,
                 2 => ir::types::I16,
