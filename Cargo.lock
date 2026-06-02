@@ -874,17 +874,10 @@ dependencies = [
  "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-codegen",
- "kestrel-codegen-cranelift",
- "kestrel-codegen-cranelift-2",
  "kestrel-codegen-cranelift-3",
  "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-hecs",
- "kestrel-mir",
- "kestrel-mir-2",
  "kestrel-mir-3",
- "kestrel-mir-lower",
- "kestrel-ownership",
  "kestrel-reporting",
 ]
 
@@ -931,48 +924,6 @@ dependencies = [
 name = "kestrel-codegen"
 version = "0.16.0"
 dependencies = [
- "indexmap",
- "kestrel-debug",
- "kestrel-hecs",
- "kestrel-mir",
- "target-lexicon 0.12.16",
-]
-
-[[package]]
-name = "kestrel-codegen-cranelift"
-version = "0.16.0"
-dependencies = [
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-module",
- "cranelift-native",
- "cranelift-object",
- "indexmap",
- "kestrel-codegen",
- "kestrel-compiler",
- "kestrel-compiler-driver",
- "kestrel-debug",
- "kestrel-hecs",
- "kestrel-mir",
- "kestrel-mir-lower",
- "kestrel-reporting",
- "stacker",
- "target-lexicon 0.12.16",
-]
-
-[[package]]
-name = "kestrel-codegen-cranelift-2"
-version = "0.16.0"
-dependencies = [
- "cranelift-codegen",
- "cranelift-frontend",
- "cranelift-module",
- "cranelift-native",
- "cranelift-object",
- "indexmap",
- "kestrel-codegen",
- "kestrel-hecs",
- "kestrel-mir-2",
  "target-lexicon 0.12.16",
 ]
 
@@ -1000,22 +951,15 @@ dependencies = [
  "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-codegen",
- "kestrel-codegen-cranelift",
- "kestrel-codegen-cranelift-2",
  "kestrel-codegen-cranelift-3",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
  "kestrel-lexer",
- "kestrel-mir",
- "kestrel-mir-2",
  "kestrel-mir-3",
- "kestrel-mir-lower",
- "kestrel-mir-lower-2",
  "kestrel-mir-lower-3",
  "kestrel-name-res",
- "kestrel-ownership",
  "kestrel-parser",
  "kestrel-reporting",
  "kestrel-span",
@@ -1121,26 +1065,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-mir"
-version = "0.16.0"
-dependencies = [
- "indexmap",
- "kestrel-hecs",
- "kestrel-span",
-]
-
-[[package]]
-name = "kestrel-mir-2"
-version = "0.16.0"
-dependencies = [
- "indexmap",
- "kestrel-debug",
- "kestrel-hecs",
- "kestrel-span",
- "smallvec",
-]
-
-[[package]]
 name = "kestrel-mir-3"
 version = "0.16.0"
 dependencies = [
@@ -1148,48 +1072,6 @@ dependencies = [
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-span",
- "smallvec",
-]
-
-[[package]]
-name = "kestrel-mir-lower"
-version = "0.16.0"
-dependencies = [
- "kestrel-ast",
- "kestrel-ast-builder",
- "kestrel-compiler",
- "kestrel-compiler-driver",
- "kestrel-hecs",
- "kestrel-hir",
- "kestrel-hir-lower",
- "kestrel-mir",
- "kestrel-name-res",
- "kestrel-pattern-matching",
- "kestrel-reporting",
- "kestrel-semantics",
- "kestrel-span",
- "kestrel-type-infer",
-]
-
-[[package]]
-name = "kestrel-mir-lower-2"
-version = "0.16.0"
-dependencies = [
- "indexmap",
- "kestrel-ast",
- "kestrel-ast-builder",
- "kestrel-compiler",
- "kestrel-compiler-driver",
- "kestrel-hecs",
- "kestrel-hir",
- "kestrel-hir-lower",
- "kestrel-mir-2",
- "kestrel-name-res",
- "kestrel-pattern-matching",
- "kestrel-reporting",
- "kestrel-semantics",
- "kestrel-span",
- "kestrel-type-infer",
  "smallvec",
 ]
 
@@ -1229,15 +1111,6 @@ dependencies = [
  "kestrel-parser",
  "kestrel-span",
  "kestrel-syntax-tree",
-]
-
-[[package]]
-name = "kestrel-ownership"
-version = "0.16.0"
-dependencies = [
- "kestrel-hecs",
- "kestrel-mir",
- "kestrel-span",
 ]
 
 [[package]]
@@ -1311,7 +1184,6 @@ dependencies = [
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",
- "kestrel-mir-2",
  "kestrel-mir-3",
  "kestrel-reporting",
  "kestrel-span",

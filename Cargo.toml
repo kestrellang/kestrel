@@ -8,16 +8,9 @@ kestrel-compiler = { path = "lib/kestrel-compiler" }
 kestrel-compiler-driver = { path = "lib/kestrel-compiler-driver" }
 kestrel-ast-builder = { path = "lib/kestrel-ast-builder" }
 kestrel-analyze = { path = "lib/kestrel-analyze" }
-kestrel-hecs = { path = "lib/kestrel-hecs" }
-kestrel-mir = { path = "lib/kestrel-mir" }
 kestrel-reporting = { path = "lib/kestrel-reporting" }
-kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
-kestrel-ownership = { path = "lib/kestrel-ownership" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
-kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
-kestrel-codegen-cranelift-2 = { path = "lib/kestrel-codegen-cranelift-2" }
 kestrel-codegen-cranelift-3 = { path = "lib/kestrel-codegen-cranelift-3" }
-kestrel-mir-2 = { path = "lib/kestrel-mir-2" }
 kestrel-mir-3 = { path = "lib/kestrel-mir-3" }
 codespan-reporting = { workspace = true }
 clap = { workspace = true }
@@ -66,18 +59,11 @@ members = [
     "lib/kestrel-analyze",
     "lib/kestrel-debug",
     "lib/kestrel-reporting",
-    "lib/kestrel-mir",
-    "lib/kestrel-mir-lower",
-    "lib/kestrel-ownership",
     "lib/kestrel-codegen",
-    "lib/kestrel-codegen-cranelift",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
-    "lib/kestrel-mir-2",
     "lib/kestrel-mir-3",
-    "lib/kestrel-mir-lower-2",
     "lib/kestrel-mir-lower-3",
-    "lib/kestrel-codegen-cranelift-2",
     "lib/kestrel-codegen-cranelift-3",
     "lib/kestrel-test-suite",
     "external/triage",

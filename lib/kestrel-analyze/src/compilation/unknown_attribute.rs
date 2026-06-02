@@ -33,7 +33,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 }];
 
 /// Attributes the compiler recognizes. Keep in sync with the consumers in
-/// `kestrel-mir-lower` (`@extern`, `@fileconstant`), `kestrel-name-res`
+/// `kestrel-mir-lower-3` (`@extern`, `@fileconstant`), `kestrel-name-res`
 /// (`@builtin`), `kestrel-analyze/decl/extern_ffi_safe.rs` (`@extern`), and
 /// `kestrel-compiler-driver` / frontmatter (`@platform`). `@dummy` is a
 /// test-only placeholder kept recognized so parser-level attribute tests

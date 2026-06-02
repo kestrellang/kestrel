@@ -3,8 +3,8 @@
 //! `kestrel build` compiles source files into an executable.
 //! `kestrel dump <kind>` prints compiler-internal representations for triage.
 //!
-//! Dump kinds today: tokens, cst, mir (=mir3), mir1, mir2, cranelift (=cranelift3),
-//! cranelift1, cranelift2, diagnostics.
+//! Dump kinds today: tokens, cst, mir (=mir3), cranelift (=cranelift3),
+//! diagnostics.
 //!
 //! For `mir`/`mir3`, `--stage <s>` (`-s`) selects which pipeline stage to print
 //! (`--list-stages` lists them; `-s all` prints every stage). Default is `verify`.
@@ -12,12 +12,9 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
 use kestrel_codegen::TargetConfig as CodegenTargetConfig;
-use kestrel_codegen_cranelift::{self as cranelift_backend, CodegenOptions};
-use kestrel_codegen_cranelift_2 as cranelift2_backend;
 use kestrel_codegen_cranelift_3 as cranelift3_backend;
 use kestrel_compiler::{Compiler, Severity};
 use kestrel_compiler_driver::CompilerDriver;
-use kestrel_mir_lower::lower_module;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -110,14 +107,6 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
-
-    /// Use the legacy MIR-1 codegen backend.
-    #[arg(long = "mir1")]
-    mir1: bool,
-
-    /// Use the MIR-2 codegen backend.
-    #[arg(long = "mir2")]
-    mir2: bool,
 }
 
 #[derive(Args)]
@@ -191,32 +180,11 @@ enum DumpKind {
     /// MIR-3 (OSSA) module. Alias for `mir3`.
     #[value(alias("mir3"))]
     Mir,
-    /// MIR-1 module (legacy HIR lowering + ownership passes).
-    Mir1,
-    /// MIR-2 module.
-    Mir2,
     /// Cranelift IR via the MIR-3 (OSSA) pipeline. Alias for `cranelift3`.
     #[value(alias("cranelift3"))]
     Cranelift,
-    /// Cranelift IR via the legacy MIR-1 pipeline.
-    Cranelift1,
-    /// Cranelift IR via the MIR-2 pipeline.
-    Cranelift2,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
     Diagnostics,
-}
-
-// ============================================================================
-// MIR pipeline
-// ============================================================================
-
-fn lower_with_ownership(
-    world: &kestrel_hecs::World,
-    root: kestrel_hecs::Entity,
-) -> kestrel_mir::MirModule {
-    let mut mir = lower_module(world, root);
-    kestrel_ownership::run(&mut mir);
-    mir.with_all_passes()
 }
 
 // ============================================================================
@@ -248,54 +216,20 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    if args.mir1 {
-        let mir = lower_with_ownership(compiler.world(), compiler.root());
-        let target = globals.codegen_target()?;
-        let options = CodegenOptions {
-            opt_level: args.opt_level,
-            libraries: args.libraries,
-            library_paths: args.library_paths,
-            frameworks: args.frameworks,
-            c_sources,
-            ..Default::default()
-        };
-        let result = cranelift_backend::compile_and_link(&mir, &target, &options, &output_path);
-        driver.emit_diagnostics().ok();
-        result.map_err(|e| {
-            eprintln!("error: {}", e);
-            ExitCode::FAILURE
-        })?;
-    } else if args.mir2 {
-        let options = cranelift2_backend::CodegenOptions {
-            opt_level: args.opt_level,
-            libraries: args.libraries,
-            library_paths: args.library_paths,
-            frameworks: args.frameworks,
-            c_sources,
-            ..Default::default()
-        };
-        let result = compiler.compile_and_link2(&output_path, &options);
-        driver.emit_diagnostics().ok();
-        result.map_err(|e| {
-            eprintln!("error: {}", e);
-            ExitCode::FAILURE
-        })?;
-    } else {
-        let options = cranelift3_backend::CodegenOptions {
-            opt_level: args.opt_level,
-            libraries: args.libraries,
-            library_paths: args.library_paths,
-            frameworks: args.frameworks,
-            c_sources,
-            ..Default::default()
-        };
-        let result = compiler.compile_and_link3(&output_path, &options);
-        driver.emit_diagnostics().ok();
-        result.map_err(|e| {
-            eprintln!("error: {}", e);
-            ExitCode::FAILURE
-        })?;
-    }
+    let options = cranelift3_backend::CodegenOptions {
+        opt_level: args.opt_level,
+        libraries: args.libraries,
+        library_paths: args.library_paths,
+        frameworks: args.frameworks,
+        c_sources,
+        ..Default::default()
+    };
+    let result = compiler.compile_and_link3(&output_path, &options);
+    driver.emit_diagnostics().ok();
+    result.map_err(|e| {
+        eprintln!("error: {}", e);
+        ExitCode::FAILURE
+    })?;
 
     if has_errors(&compiler) {
         return Err(ExitCode::FAILURE);
@@ -336,15 +270,6 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
         DumpKind::Mir => {
             dump_mir3(&compiler, args.stage, args.function_filter.as_deref())?;
         },
-        DumpKind::Mir1 => {
-            let mir = lower_with_ownership(compiler.world(), compiler.root());
-            print!("{}", mir.display());
-        },
-        DumpKind::Mir2 => {
-            let mir2 = compiler.lower_to_mir2_unchecked();
-            print!("{}", mir2.display());
-            driver.emit_diagnostics().ok();
-        },
         DumpKind::Cranelift => {
             let mir = compiler.lower_to_mir3().map_err(|e| {
                 eprintln!("error: {e}");
@@ -370,67 +295,6 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
                 Err(e) => {
                     driver.emit_diagnostics().ok();
                     eprintln!("error: {e}");
-                    return Err(ExitCode::FAILURE);
-                }
-            }
-        },
-        DumpKind::Cranelift1 => {
-            let mir = lower_with_ownership(compiler.world(), compiler.root());
-            let target = globals.codegen_target()?;
-            let options = CodegenOptions {
-                emit_clif: true,
-                ..Default::default()
-            };
-            match cranelift_backend::compile(&mir, &target, &options) {
-                Ok(result) => {
-                    for (name, clif) in &result.clif_text {
-                        println!("; function: {}", name);
-                        print!("{}", clif);
-                        println!();
-                    }
-                },
-                Err(e) => {
-                    driver.emit_diagnostics().ok();
-                    eprintln!("error: {}", e);
-                    return Err(ExitCode::FAILURE);
-                },
-            }
-        },
-        DumpKind::Cranelift2 => {
-            let mir2 = match compiler.lower_to_mir2() {
-                Ok(m) => m,
-                Err(_) => {
-                    driver.emit_diagnostics().ok();
-                    return Err(ExitCode::FAILURE);
-                }
-            };
-            let target_mir2 = kestrel_mir_2::TargetConfig::host_64();
-            match kestrel_mir_2::mono::monomorphize(mir2, &target_mir2) {
-                Ok(mono) => {
-                    let target = globals.codegen_target()?;
-                    let options = cranelift2_backend::CodegenOptions {
-                        emit_clif: true,
-                        ..Default::default()
-                    };
-                    match cranelift2_backend::compile(&mono, &target, &options) {
-                        Ok(result) => {
-                            for (name, clif) in &result.clif_text {
-                                println!("; function: {}", name);
-                                print!("{}", clif);
-                                println!();
-                            }
-                        }
-                        Err(e) => {
-                            driver.emit_diagnostics().ok();
-                            eprintln!("error: {}", e);
-                            return Err(ExitCode::FAILURE);
-                        }
-                    }
-                }
-                Err(errs) => {
-                    for e in &errs {
-                        eprintln!("mono error: {}", e);
-                    }
                     return Err(ExitCode::FAILURE);
                 }
             }
