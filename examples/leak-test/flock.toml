@@ -1,8 +1,0 @@
-[package]
-name = "leak-test"
-version = "0.1.0"
-description = "Minimal Perch app for leak measurement"
-
-[dependencies]
-perch = { path = "../../lang/perch" }
-http = { path = "../../lang/http" }

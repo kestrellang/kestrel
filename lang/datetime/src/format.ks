@@ -3,7 +3,7 @@ module datetime
 // String interpolation-based datetime formatting.
 // All text output is English (no locale support in v1).
 
-public enum FormatComponent: Equatable, Matchable, Cloneable {
+public enum FormatComponent: Equatable, Cloneable {
     // Year
     case Year               // "2024" (4-digit)
     case ShortYear          // "24" (2-digit)
@@ -179,24 +179,24 @@ public struct Format: ExpressibleByStringInterpolation, Cloneable {
 // ============================================================================
 
 // Month name lookup tables
-let MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
+let MONTH_NAMES: Array[String] = ["January", "February", "March", "April", "May", "June",
                    "July", "August", "September", "October", "November", "December"];
-let SHORT_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+let SHORT_MONTH_NAMES: Array[String] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-let NARROW_MONTH_NAMES = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+let NARROW_MONTH_NAMES: Array[String] = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
 
 // Weekday name lookup tables
-let WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-let SHORT_WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-let NARROW_WEEKDAY_NAMES = ["M", "T", "W", "T", "F", "S", "S"];
+let WEEKDAY_NAMES: Array[String] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+let SHORT_WEEKDAY_NAMES: Array[String] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+let NARROW_WEEKDAY_NAMES: Array[String] = ["M", "T", "W", "T", "F", "S", "S"];
 
 // Format a component using date/time/zone values
 func formatComponent(mutating into writer: StringBuilder,
-                     component: FormatComponent,
-                     year: Int64, month: Int64, day: Int64,
-                     hour: Int64, minute: Int64, second: Int64, nanosecond: Int64,
-                     weekday: Weekday,
-                     offsetSeconds: Int64, tzName: String) {
+                     component component: FormatComponent,
+                     year year: Int64, month month: Int64, day day: Int64,
+                     hour hour: Int64, minute minute: Int64, second second: Int64, nanosecond nanosecond: Int64,
+                     weekday weekday: Weekday,
+                     offsetSeconds offsetSeconds: Int64, tzName tzName: String) {
     match component {
         .Year => appendPadded(into: writer, year, 4),
         .ShortYear => appendPadded(into: writer, year % 100, 2),
@@ -224,7 +224,7 @@ func formatComponent(mutating into writer: StringBuilder,
         .Millisecond => appendPadded(into: writer, nanosecond / 1_000_000, 3),
         .Microsecond => appendPadded(into: writer, nanosecond / 1000, 6),
         .Nanosecond => appendPadded(into: writer, nanosecond, 9),
-        .AmPm => writer.append(if hour < 12 { "AM" } else { "PM" }),
+        .AmPm => { let ampm = if hour < 12 { "AM" } else { "PM" }; writer.append(ampm); },
         .TimeZoneName => writer.append(tzName),
         .FullTimeZoneName => writer.append(tzName),
         .Offset => {
@@ -351,12 +351,14 @@ struct ParsedFields: Cloneable {
 }
 
 // Parse a single component from input, advancing the cursor
-func parseComponent(bytes: Array[UInt8], mutating pos: Int64, component: FormatComponent,
-                    mutating fields: ParsedFields) throws ParseError {
+func parseComponent(bytes: Array[UInt8], mutating pos pos: Int64, component component: FormatComponent,
+                    mutating fields fields: ParsedFields) -> () throws ParseError {
     match component {
         .Year => { fields.year = try parseDigits(bytes, pos, 4); pos = pos + 4; },
         .ShortYear => {
-            fields.year = 2000 + try parseDigits(bytes, pos, 2);
+            // `try` hoisted out of operand position (MIR-3 OSSA ICE workaround).
+            let yy = try parseDigits(bytes, pos, 2);
+            fields.year = 2000 + yy;
             pos = pos + 2;
         },
         .Month => { fields.month = try parseDigits(bytes, pos, 2); pos = pos + 2; },
@@ -481,7 +483,7 @@ func parseComponent(bytes: Array[UInt8], mutating pos: Int64, component: FormatC
             }
         },
         .Literal(expected) => {
-            let expBytes = expected.utf8;
+            let expBytes: Array[UInt8] = Array(from: expected.bytes);
             var i: Int64 = 0;
             while i < expBytes.count {
                 guard pos + i < bytes.count else { throw ParseError.UnexpectedEnd; }
@@ -493,6 +495,7 @@ func parseComponent(bytes: Array[UInt8], mutating pos: Int64, component: FormatC
             pos = pos + expBytes.count;
         }
     };
+    ()
 }
 
 // Parse variable-width digits (1-2 digits for unpadded fields)
@@ -516,7 +519,7 @@ func matchName(bytes: Array[UInt8], offset: Int64, names: Array[String]) -> (Int
     var i: Int64 = 0;
     while i < names.count {
         let name = names(i);
-        let nameBytes = name.utf8;
+        let nameBytes: Array[UInt8] = Array(from: name.bytes);
         if offset + nameBytes.count <= bytes.count {
             var matches = true;
             var j: Int64 = 0;
@@ -540,13 +543,7 @@ func matchName(bytes: Array[UInt8], offset: Int64, names: Array[String]) -> (Int
 
 // Extract a String from a byte slice
 func stringFromBytes(bytes: Array[UInt8], start: Int64, length: Int64) -> String {
-    var b = StringBuilder();
-    var i: Int64 = 0;
-    while i < length {
-        b.appendByte(bytes(start + i));
-        i = i + 1;
-    }
-    b.build()
+    String(fromUtf8Unchecked: bytes(start..<(start + length)))
 }
 
 // ============================================================================
@@ -555,7 +552,7 @@ func stringFromBytes(bytes: Array[UInt8], start: Int64, length: Int64) -> String
 
 extend Date {
     public static func parse(from input: String, as fmt: Format) -> Date throws ParseError {
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
         var fields = ParsedFields.empty();
         for comp in fmt.components {
@@ -564,13 +561,13 @@ extend Date {
         guard isValidDate(fields.year, fields.month, fields.day) else {
             throw ParseError.InvalidValue("invalid date");
         }
-        Date.unchecked(year: fields.year, month: fields.month, day: fields.day)
+        .Ok(Date.unchecked(year: fields.year, month: fields.month, day: fields.day))
     }
 }
 
 extend Time {
     public static func parse(from input: String, as fmt: Format) -> Time throws ParseError {
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
         var fields = ParsedFields.empty();
         for comp in fmt.components {
@@ -581,13 +578,13 @@ extend Time {
             if fields.isPm and hour < 12 { hour = hour + 12; }
             if not fields.isPm and hour == 12 { hour = 0; }
         }
-        try Time(hour: hour, minute: fields.minute, second: fields.second, nanosecond: fields.nanosecond)
+        Time(hour: hour, minute: fields.minute, second: fields.second, nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid time") }
     }
 }
 
 extend DateTime {
     public static func parse(from input: String, as fmt: Format) -> DateTime throws ParseError {
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
         var fields = ParsedFields.empty();
         for comp in fmt.components {
@@ -598,15 +595,15 @@ extend DateTime {
             if fields.isPm and hour < 12 { hour = hour + 12; }
             if not fields.isPm and hour == 12 { hour = 0; }
         }
-        try DateTime(year: fields.year, month: fields.month, day: fields.day,
+        DateTime(year: fields.year, month: fields.month, day: fields.day,
                      hour: hour, minute: fields.minute, second: fields.second,
-                     nanosecond: fields.nanosecond)
+                     nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") }
     }
 }
 
 extend ZonedDateTime {
     public static func parse(from input: String, as fmt: Format) -> ZonedDateTime throws ParseError {
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
         var fields = ParsedFields.empty();
         for comp in fmt.components {
@@ -619,10 +616,10 @@ extend ZonedDateTime {
         }
         let dt = try DateTime(year: fields.year, month: fields.month, day: fields.day,
                               hour: hour, minute: fields.minute, second: fields.second,
-                              nanosecond: fields.nanosecond);
+                              nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") };
         if fields.hasTz {
             if let .Some(tz) = TimeZone.find(fields.tzName) {
-                return dt.toZoned(in: tz);
+                return .Ok(dt.toZoned(in: tz));
             }
         }
         if fields.hasOffset {
@@ -630,8 +627,8 @@ extend ZonedDateTime {
             let epochDay = daysToCivil(fields.year, fields.month, fields.day);
             let epochSec = epochDay * 86400 + hour * 3600 + fields.minute * 60 + fields.second - fields.offsetSeconds;
             let inst = Instant.raw(secs: epochSec, nanos: fields.nanosecond);
-            return inst.toZoned(in: TimeZone.utc);
+            return .Ok(inst.toZoned(in: TimeZone.utc));
         }
-        dt.toZoned(in: TimeZone.utc)
+        .Ok(dt.toZoned(in: TimeZone.utc))
     }
 }

@@ -98,6 +98,13 @@ public struct RcBox[T]: Cloneable {
     /// calling this and `deepClone` otherwise.
     /// Takes `value` by consuming — the caller's copy is dead after this.
     public func setValue(consuming value: T) {
+        // Drop the heap occupant before overwriting. Callers always pass a
+        // freshly cloned/constructed `value` (read()/getValue() clone; grow()
+        // builds a new storage), so the slot's prior value owns a DIFFERENT
+        // buffer that `write` (a non-dropping raw store) would otherwise orphan
+        // → memory leak on every COW mutation. No caller passes a `value`
+        // aliasing the occupant, so dropping first cannot use-after-free.
+        self.valuePtr().dropInPlace();
         self.valuePtr().write(value);
     }
 

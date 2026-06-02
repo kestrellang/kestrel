@@ -95,7 +95,7 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
     public static func parse(from input: String) -> Instant throws ParseError {
         // Parse RFC 3339: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DDTHH:MM:SS±HH:MM
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 20 else { throw ParseError.UnexpectedEnd; }
 
         let year = try parseDigits(bytes, 0, 4);
@@ -154,7 +154,7 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
         let epochDay = daysToCivil(year, month, day);
         let epochSec = epochDay * 86400 + hour * 3600 + minute * 60 + second - offsetSecs;
-        Instant.raw(secs: epochSec, nanos: nanos)
+        .Ok(Instant.raw(secs: epochSec, nanos: nanos))
     }
 
     // --- Protocol conformances ---

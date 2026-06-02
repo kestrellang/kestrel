@@ -33,6 +33,12 @@ public struct DigestOutput: Equatable, Hashable {
         return diff == 0;
     }
 
+    /// `Equatable` conformance. Delegates to `equals` so `==` stays
+    /// constant-time and timing-safe.
+    public func isEqual(to other: DigestOutput) -> Bool {
+        self.equals(other)
+    }
+
     public func hash[H](mutating into hasher: H) where H: Hasher {
         hasher.write(self.storage.asSlice());
     }

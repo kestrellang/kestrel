@@ -1,8 +1,0 @@
-[package]
-name = "crypto-test"
-version = "0.1.0"
-description = "Test harness for the crypto library"
-source = "src"
-
-[dependencies]
-crypto = { path = "../../lang/crypto" }

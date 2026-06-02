@@ -59,6 +59,10 @@ struct SavedState {
     func_entity: kestrel_hecs::Entity,
     temp_counter: u32,
     body_context: super::BodyContext,
+    /// Per-body value-rename map — value IDs index the parent body's arena, so
+    /// it must be swapped out for the closure's separate arena (otherwise a
+    /// stale forwarding entry resolves into the wrong arena: out-of-bounds).
+    value_forwarding: HashMap<ValueId, ValueId>,
 }
 
 impl OssaBodyCtx<'_, '_> {
@@ -223,6 +227,7 @@ impl OssaBodyCtx<'_, '_> {
             func_entity: self.func_entity,
             temp_counter: self.temp_counter,
             body_context: std::mem::replace(&mut self.body_context, super::BodyContext::Normal),
+            value_forwarding: mem::take(&mut self.value_forwarding),
         };
         self.current_block = Some(entry_block);
         self.temp_counter = 0;
@@ -309,6 +314,7 @@ impl OssaBodyCtx<'_, '_> {
         self.func_entity = saved.func_entity;
         self.temp_counter = saved.temp_counter;
         self.body_context = saved.body_context;
+        self.value_forwarding = saved.value_forwarding;
 
         // Attach body and register function
         func_def.body = Some(completed_body);

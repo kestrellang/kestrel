@@ -3,16 +3,27 @@ module datetime
 // Date + Time without timezone. "What the wall clock shows."
 // Default Formattable output: ISO 8601 ("2024-07-04T15:30:05").
 public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable {
-    fileprivate var dateVal: Date
-    fileprivate var timeVal: Time
+    internal var dateVal: Date
+    internal var timeVal: Time
 
     // --- Construction ---
 
     public init(year year: Int64, month month: Int64, day day: Int64,
                 hour hour: Int64 = 0, minute minute: Int64 = 0,
                 second second: Int64 = 0, nanosecond nanosecond: Int64 = 0) throws DateError {
-        self.dateVal = try Date(year: year, month: month, day: day);
-        self.timeVal = try Time(hour: hour, minute: minute, second: second, nanosecond: nanosecond);
+        // Validate both components via match/throw before assigning any field:
+        // definite-init rejects a `try` early-return while fields are unset,
+        // but an explicit `throw` (unwind) is allowed.
+        let d = match Date(year: year, month: month, day: day) {
+            .Ok(v) => v,
+            .Err(e) => throw e,
+        };
+        let t = match Time(hour: hour, minute: minute, second: second, nanosecond: nanosecond) {
+            .Ok(v) => v,
+            .Err(e) => throw e,
+        };
+        self.dateVal = d;
+        self.timeVal = t;
     }
 
     public init(date date: Date, time time: Time) {
@@ -58,7 +69,7 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
 
     public func advanced(by duration: Duration) -> DateTime {
         let (newTime, days) = self.timeVal.advancedWithOverflow(by: duration);
-        let newDate = self.dateVal.adding(days: days);
+        let newDate = self.dateVal.adding(years: 0, months: 0, days: days);
         DateTime(date: newDate, time: newTime)
     }
 
@@ -143,15 +154,15 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
 
     public static func parse(from input: String) -> DateTime throws ParseError {
         // Parse ISO 8601: YYYY-MM-DDTHH:MM:SS
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 19 else { throw ParseError.UnexpectedEnd; }
-        let date = try Date.parse(from: input.substringBytes(from: 0, length: 10));
+        let date = try Date.parse(from: input.bytes.substring(0..<10));
         // Expect 'T' or ' ' separator
         let sep = bytes(10);
         guard sep == 84 or sep == 32 else {
             throw ParseError.InvalidFormat("expected 'T' or space at position 10");
         }
-        let time = try Time.parse(from: input.substringBytes(from: 11, length: bytes.count - 11));
+        let time = try Time.parse(from: input.bytes.substring(11..<bytes.count));
         DateTime(date: date, time: time)
     }
 

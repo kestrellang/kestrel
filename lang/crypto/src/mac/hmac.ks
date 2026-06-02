@@ -38,6 +38,12 @@ public struct AuthenticationCode: Equatable, Hashable {
         return diff == 0;
     }
 
+    /// `Equatable` conformance. Delegates to `equals` so `==` stays
+    /// constant-time and timing-safe.
+    public func isEqual(to other: AuthenticationCode) -> Bool {
+        self.equals(other)
+    }
+
     public func hash[H](mutating into hasher: H) where H: Hasher {
         hasher.write(self.storage.asSlice());
     }

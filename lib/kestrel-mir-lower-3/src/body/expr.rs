@@ -65,7 +65,13 @@ impl OssaBodyCtx<'_, '_> {
                 if let Some(flag) = self.var_flag(hir_local) {
                     self.store_drop_flag(flag, false);
                 }
-                return v;
+                // Apply any recorded value promotion (e.g. `T` → `Result[T,E]`
+                // / `Optional[T]` Ok/Some-wrapping at a throws/Optional return).
+                // The non-var path delegates to `lower_expr`, which promotes;
+                // this fast path must do the same or a bare `var result` tail
+                // returns the unwrapped scalar where a `Result` is expected,
+                // mis-codegening into a pointer deref (segfault).
+                return self.apply_promotion(expr_id, v);
             }
         }
         self.lower_expr(expr_id)

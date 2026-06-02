@@ -28,17 +28,19 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
                                   nanosecond;
     }
 
+    // Direct field construction — the primitive every other non-throwing
+    // constructor builds on. No validation, no recursion.
+    init(rawNanos n: Int64) {
+        self.nanosSinceMidnight = n;
+    }
+
     // Raw init from total nanoseconds (already validated)
     static func fromNanos(n: Int64) -> Time {
-        var t = Time.midnight;
-        t.nanosSinceMidnight = n;
-        t
+        Time(rawNanos: n)
     }
 
     public static var midnight: Time {
-        var t = Time.fromNanos(0);
-        t.nanosSinceMidnight = 0;
-        t
+        Time.fromNanos(0)
     }
 
     public static var noon: Time {
@@ -98,7 +100,7 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
     public static func parse(from input: String) -> Time throws ParseError {
         // Parse ISO 8601: HH:MM:SS or HH:MM:SS.nnnnnnnnn
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 8 else { throw ParseError.UnexpectedEnd; }
         let hour = try parseDigits(bytes, 0, 2);
         guard bytes(2) == 58 else { throw ParseError.InvalidFormat("expected ':' at position 2"); }
@@ -120,7 +122,7 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
             }
         }
 
-        try Time(hour: hour, minute: minute, second: second, nanosecond: nanos)
+        Time(hour: hour, minute: minute, second: second, nanosecond: nanos).mapErr { ParseError.InvalidValue("invalid time") }
     }
 
     // --- Protocol conformances ---

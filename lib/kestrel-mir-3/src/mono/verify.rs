@@ -1,3 +1,4 @@
+use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
 use crate::callee::Callee;
@@ -235,7 +236,7 @@ fn verify_function(
             match &inst.kind {
                 // Check callees are resolved
                 InstKind::Call { callee, .. } => {
-                    check_callee(fi, block_id, ii, inst_span, callee, func_count, errors);
+                    check_callee(module, fi, block_id, ii, inst_span, callee, func_count, errors);
                 },
 
                 // Check FunctionRef is rewritten to MonoFunctionRef
@@ -338,6 +339,7 @@ fn verify_function(
 }
 
 fn check_callee(
+    module: &MonoModule,
     fi: usize,
     block: BlockId,
     ii: usize,
@@ -347,12 +349,32 @@ fn check_callee(
     errors: &mut Vec<MonoVerifyError>,
 ) {
     match callee {
-        Callee::Direct { .. } => {
+        Callee::Direct {
+            func,
+            type_args,
+            self_type,
+        } => {
+            let name = module
+                .entity_names
+                .get(func)
+                .map(|s| s.as_str())
+                .unwrap_or("<unknown>");
+            let targs: Vec<String> = type_args
+                .iter()
+                .map(|&t| describe_mono_ty(module, t))
+                .collect();
+            let stype = self_type
+                .map(|t| describe_mono_ty(module, t))
+                .unwrap_or_else(|| "None".into());
             errors.push(MonoVerifyError {
                 func_idx: fi,
                 block: Some(block),
                 inst: Some(ii),
-                message: "Callee::Direct not resolved to Callee::Resolved".into(),
+                message: format!(
+                    "Callee::Direct not resolved to Callee::Resolved \
+                     (callee='{name}' {func:?}, type_args=[{}], self_type={stype})",
+                    targs.join(", ")
+                ),
                 span: span.cloned(),
             });
         },
@@ -381,6 +403,45 @@ fn check_callee(
             }
         },
         Callee::Thin(_) | Callee::Thick(_) => {},
+    }
+}
+
+/// Compact, readable description of a TyId for diagnostics — surfaces the
+/// non-concrete shapes (TypeParam / AssociatedProjection / Error) that cause a
+/// mono key to miss `func_id_map`.
+fn describe_mono_ty(module: &MonoModule, ty: TyId) -> String {
+    use crate::ty::MirTy;
+    let name_of = |e: &Entity| {
+        module
+            .entity_names
+            .get(e)
+            .cloned()
+            .unwrap_or_else(|| format!("{e:?}"))
+    };
+    match module.ty_arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            if type_args.is_empty() {
+                name_of(entity)
+            } else {
+                let args: Vec<String> =
+                    type_args.iter().map(|&a| describe_mono_ty(module, a)).collect();
+                format!("{}[{}]", name_of(entity), args.join(", "))
+            }
+        },
+        MirTy::Pointer(inner) => format!("Pointer[{}]", describe_mono_ty(module, *inner)),
+        MirTy::TypeParam(e) => format!("TypeParam({})", name_of(e)),
+        MirTy::AssociatedProjection {
+            base,
+            protocol,
+            assoc_type,
+        } => format!(
+            "AssocProj({}::{}.{})",
+            describe_mono_ty(module, *base),
+            name_of(protocol),
+            name_of(assoc_type)
+        ),
+        MirTy::Error => "Error".into(),
+        other => format!("{other:?}"),
     }
 }
 

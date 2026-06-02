@@ -16,7 +16,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     public static func system() -> TimeZone {
         var buf = Array[UInt8](repeating: 0, count: 256);
         kestrel_system_timezone_name(Pointer(to: buf(0)), 256);
-        let name = String(fromCString: Pointer(to: buf(0)));
+        let name = String(from: CString(raw: Pointer(to: buf(0))));
         if let .Some(tz) = TimeZone.find(name) {
             return tz;
         }
@@ -24,8 +24,9 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     }
 
     public static func find(name: String) -> TimeZone? {
-        let cstr = CString(from: name);
+        let cstr = name.toCString();
         let tzId = kestrel_tz_find_or_register(cstr);
+        cstr.free();
         if tzId < 0 { return .None; }
         .Some(TimeZone.withId(tzId))
     }
@@ -41,7 +42,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     public var name: String {
         var buf = Array[UInt8](repeating: 0, count: 128);
         kestrel_tz_name(self.id, Pointer(to: buf(0)), 128);
-        String(fromCString: Pointer(to: buf(0)))
+        String(from: CString(raw: Pointer(to: buf(0))))
     }
 
     // Get the UTC offset in seconds at a given instant
@@ -53,7 +54,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     func abbreviationAt(epochSec: Int64) -> String {
         var buf = Array[UInt8](repeating: 0, count: 32);
         kestrel_tz_abbr(self.id, epochSec, Pointer(to: buf(0)), 32);
-        String(fromCString: Pointer(to: buf(0)))
+        String(from: CString(raw: Pointer(to: buf(0))))
     }
 
     // Whether a civil datetime is ambiguous (DST fold) in this timezone.

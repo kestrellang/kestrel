@@ -20,19 +20,19 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
         self.d = day;
     }
 
-    // No validation — traps on truly insane values but trusts the caller
-    public static func unchecked(year year: Int64, month month: Int64, day day: Int64) -> Date {
-        var date = Date.epochDate();
-        date.y = year;
-        date.m = month;
-        date.d = day;
-        date
+    // Direct field construction — no validation, no recursion. The primitive
+    // every other non-throwing constructor builds on (mirrors Instant's
+    // `init(secondsSinceEpoch:)`). Callers that produce values by construction
+    // (date arithmetic, parsing) guarantee validity.
+    init(rawYear y: Int64, rawMonth m: Int64, rawDay d: Int64) {
+        self.y = y;
+        self.m = m;
+        self.d = d;
     }
 
-    // The epoch date (1970-01-01)
-    static func epochDate() -> Date {
-        var date = Date.unchecked(year: 1970, month: 1, day: 1);
-        date
+    // No validation — traps on truly insane values but trusts the caller
+    public static func unchecked(year year: Int64, month month: Int64, day day: Int64) -> Date {
+        Date(rawYear: year, rawMonth: month, rawDay: day)
     }
 
     public static func today() -> Date {
@@ -182,7 +182,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
             months = months + 12;
         }
 
-        Period(years: years, months: months, days: days)
+        Period(years: years, months: months, weeks: 0, days: days)
     }
 
     // --- Conversion ---
@@ -195,7 +195,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
     public static func parse(from input: String) -> Date throws ParseError {
         // Parse ISO 8601: YYYY-MM-DD
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         guard bytes.count >= 10 else { throw ParseError.UnexpectedEnd; }
         let year = try parseDigits(bytes, 0, 4);
         guard bytes(4) == 45 else { throw ParseError.InvalidFormat("expected '-' at position 4"); } // '-' = 45
@@ -205,7 +205,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
         guard isValidDate(year, month, day) else {
             throw ParseError.InvalidValue("invalid date: \(year)-\(month)-\(day)");
         }
-        Date.unchecked(year: year, month: month, day: day)
+        .Ok(Date.unchecked(year: year, month: month, day: day))
     }
 
     // --- Protocol conformances ---

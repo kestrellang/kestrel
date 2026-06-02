@@ -68,12 +68,18 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
     // --- Public construction ---
 
     public init(year year: Int64, month month: Int64, day day: Int64,
+                in zone: TimeZone,
                 hour hour: Int64 = 0, minute minute: Int64 = 0,
                 second second: Int64 = 0, nanosecond nanosecond: Int64 = 0,
-                in zone: TimeZone,
                 disambiguation d: Disambiguation = .Compatible) throws DateError {
-        let dt = try DateTime(year: year, month: month, day: day,
-                              hour: hour, minute: minute, second: second, nanosecond: nanosecond);
+        // Validate via match/throw rather than `try`: a `try` early-return is
+        // rejected by definite-init before all fields are set, but an explicit
+        // `throw` (unwind) is allowed.
+        let dt = match DateTime(year: year, month: month, day: day,
+                                hour: hour, minute: minute, second: second, nanosecond: nanosecond) {
+            .Ok(v) => v,
+            .Err(e) => throw e,
+        };
         let zdt = ZonedDateTime.fromDateTime(dt, in: zone, disambiguation: d);
         self.inst = zdt.inst;
         self.tz = zdt.tz;
@@ -175,11 +181,11 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
     }
 
     public func tomorrow() -> ZonedDateTime {
-        self.adding(days: 1)
+        self.adding(years: 0, months: 0, days: 1)
     }
 
     public func yesterday() -> ZonedDateTime {
-        self.adding(days: -1)
+        self.adding(years: 0, months: 0, days: -1)
     }
 
     // --- Difference ---

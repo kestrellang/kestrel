@@ -317,7 +317,7 @@ impl<'a> CollectionContext<'a> {
                     return;
                 }
 
-                let concrete_type_args: Vec<TyId> = type_args
+                let mut concrete_type_args: Vec<TyId> = type_args
                     .iter()
                     .map(|&ta| substitute_and_resolve(self.arena, self.witnesses, ta, subst))
                     .collect();
@@ -337,6 +337,17 @@ impl<'a> CollectionContext<'a> {
                         }
                     });
 
+                // Normalize arity to the callee's own type-param count *before*
+                // the phantom check. Context inference can over-provide args
+                // drawn from a wrapper result type (`Result[T,E]`/`Optional[T]`
+                // of a throwing init or Optional-returning factory) even for a
+                // non-generic callee; drop the excess so the key matches the
+                // arity `rewrite_callee` looks up (which truncates identically).
+                // A genuine under-count can't be instantiated, so skip it.
+                if !normalize_direct_arity(&mut concrete_type_args, callee_func.type_params.len()) {
+                    return;
+                }
+
                 // Skip phantom instantiations
                 if concrete_type_args
                     .iter()
@@ -347,9 +358,6 @@ impl<'a> CollectionContext<'a> {
                 if let Some(st) = concrete_self
                     && has_type_param(self.arena, st)
                 {
-                    return;
-                }
-                if concrete_type_args.len() != callee_func.type_params.len() {
                     return;
                 }
 
@@ -850,6 +858,26 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
         },
         MirTy::AssociatedProjection { base, .. } => has_type_param(arena, *base),
         _ => false,
+    }
+}
+
+/// Normalize a `Callee::Direct`'s type-arg list to the callee's own type-param
+/// count, in place. Returns `false` (caller should skip) when the list is
+/// *shorter* than the arity — a genuinely uninstantiable call. Excess args
+/// (over-provided by context inference from a wrapper result type — e.g.
+/// `Result[T,E]`/`Optional[T]` of a throwing init or Optional-returning
+/// factory whose callee is non-generic) are truncated so the instantiation key
+/// matches between collection and `rewrite_callee`. Single source of truth for
+/// the Direct-arity invariant.
+pub(crate) fn normalize_direct_arity(type_args: &mut Vec<TyId>, type_param_count: usize) -> bool {
+    use std::cmp::Ordering;
+    match type_args.len().cmp(&type_param_count) {
+        Ordering::Greater => {
+            type_args.truncate(type_param_count);
+            true
+        },
+        Ordering::Less => false,
+        Ordering::Equal => true,
     }
 }
 

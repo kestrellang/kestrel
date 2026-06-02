@@ -308,6 +308,16 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// and consulted to flag-guard-drop the field at a failure `return`. Empty
     /// in all other bodies.
     pub(crate) init_field_flags: Vec<(FieldIdx, TyId, ValueId)>,
+    /// Maps an original ValueId to its current SSA representative after a
+    /// block-boundary rebind. A call-argument value materialized *before* a
+    /// control-flow sibling arg (`if`/`try`/`match`) is threaded through the
+    /// new blocks and renamed at the merge; the held `CallArg` still names the
+    /// pre-merge value. `emit_call_inner` resolves each arg (and indirect
+    /// callee) value through this map so the emitted `Call` references the
+    /// merged value rather than one stranded at a predecessor block's exit.
+    /// Single source of truth: every cross-block rename funnels through
+    /// `rebind_scope_values`, which records the mapping here.
+    pub(crate) value_forwarding: HashMap<ValueId, ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -342,6 +352,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             current_span: None,
             local_use_counts: HashMap::new(),
             init_field_flags: Vec::new(),
+            value_forwarding: HashMap::new(),
         }
     }
 
@@ -1114,6 +1125,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             }
         }
         self.tracker.rebind(old_vals, new_vals);
+        // Record the rename so a held value (e.g. a call argument materialized
+        // before this block boundary) can be resolved to its current SSA name.
+        // Overwrite semantics keep the map at the latest binding, which is the
+        // one valid in the block we're about to lower into.
+        for (&old, &new) in old_vals.iter().zip(new_vals.iter()) {
+            if old != new {
+                self.value_forwarding.insert(old, new);
+            }
+        }
+    }
+
+    /// Chase `value_forwarding` to the current SSA representative of `value`.
+    /// Returns `value` unchanged when it was never rebound across a block
+    /// boundary. Bounded to guard against any accidental cycle.
+    pub fn resolve_value(&self, value: ValueId) -> ValueId {
+        let mut v = value;
+        for _ in 0..10_000 {
+            match self.value_forwarding.get(&v) {
+                Some(&next) if next != v => v = next,
+                _ => break,
+            }
+        }
+        v
     }
 
     /// Finish a branch/arm: materialize an @owned result, drop arm-local owned
@@ -1638,9 +1672,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     fn emit_call_inner(
         &mut self,
         callee: Callee,
-        args: Vec<CallArg>,
+        mut args: Vec<CallArg>,
         result_ty: Option<TyId>,
     ) -> Option<ValueId> {
+        // Resolve any arg / indirect-callee value that was renamed by a
+        // block-boundary rebind since it was prepared (e.g. an @owned arg
+        // materialized before a control-flow sibling arg, threaded through the
+        // new blocks and renamed at the merge). Without this the Call would
+        // reference a value stranded at a predecessor block's exit.
+        for a in args.iter_mut() {
+            a.value = self.resolve_value(a.value);
+        }
+        let callee = match callee {
+            Callee::Thin(v) => Callee::Thin(self.resolve_value(v)),
+            Callee::Thick(v) => Callee::Thick(self.resolve_value(v)),
+            other => other,
+        };
         let result = result_ty.map(|ty| {
             let ownership = self.ownership_for(ty);
             self.alloc_value(ty, ownership)
@@ -1920,14 +1967,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Single-use SSA local with Consuming convention: move directly,
         // bypassing the emit_value_use copy. Only safe at function top-level
         // scope — loops re-execute the block, and conditional branches need
-        // the value alive for the other arm's cleanup/forwarding.
+        // the value alive for the other arm's cleanup/forwarding. The consume
+        // is deferred to `emit_call_inner` (see prepare_call_arg) so the value
+        // stays tracked across any later control-flow sibling arg.
         if convention == ParamConvention::Consuming && self.scope_stack.len() == 1 {
             let expr = self.hir.exprs[expr_id].clone();
             if let HirExpr::Local(hir_local, _) = &expr {
                 if !self.is_var_local(hir_local) && self.is_single_use(*hir_local) {
                     let val = self.map_local(*hir_local);
                     if self.body.value(val).ownership == Ownership::Owned {
-                        self.consume(val);
                         return CallArg {
                             value: val,
                             convention,
@@ -1958,12 +2006,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             },
             ParamConvention::Consuming => {
+                // Do NOT consume here. The owning `Call` is emitted only after
+                // every sibling arg is lowered; if a later arg introduces
+                // control flow (`if`/`try`/`match`), this @owned value must
+                // stay tracked so it threads through the new blocks. Consuming
+                // now would strand it (OSSA: "live at block exit but never
+                // consumed"). `emit_call_inner` resolves the (possibly rebound)
+                // value and consumes it after pushing the call.
                 if self.body.value(value).ownership == Ownership::Owned {
-                    self.consume(value);
                     CallArg { value, convention }
                 } else {
                     let copy = self.emit_copy_value(value);
-                    self.consume(copy);
                     CallArg {
                         value: copy,
                         convention,

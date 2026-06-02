@@ -106,19 +106,9 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         Duration.normalized(secs: self.secs * factor, nanos: self.nanos * factor)
     }
 
-    public func multiplied(by factor: Float64) -> Duration {
-        let totalNs = Float64(from: self.totalNanoseconds) * factor;
-        Duration.nanoseconds(Int64(from: totalNs))
-    }
-
     public func divided(by divisor: Int64) -> Duration {
         let totalNs = self.totalNanoseconds / divisor;
         Duration.nanoseconds(totalNs)
-    }
-
-    public func divided(by divisor: Float64) -> Duration {
-        let totalNs = Float64(from: self.totalNanoseconds) / divisor;
-        Duration.nanoseconds(Int64(from: totalNs))
     }
 
     // --- Rounding ---
@@ -183,7 +173,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
 
     // Parse ISO 8601 duration: PT2H30M5S, PT1.5S, -PT3H, etc.
     public static func parse(from input: String) -> Duration throws ParseError {
-        let bytes = input.utf8;
+        let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
         var negative = false;
 

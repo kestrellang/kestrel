@@ -99,7 +99,7 @@ pub fn monomorphize(
         .collect();
 
     for body_result in mono_bodies.iter_mut() {
-        rewrite_callees(body_result, &func_id_map);
+        rewrite_callees(body_result, &func_id_map, &functions);
     }
 
     // Phase 4: Type and layout resolution
@@ -579,6 +579,7 @@ fn resolve_witnesses_to_direct(body_result: &mut MonoBodyResult) {
 fn rewrite_callees(
     body_result: &mut MonoBodyResult,
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
+    functions: &IndexMap<Entity, FunctionDef>,
 ) {
     let Some(body) = &mut body_result.body else {
         return;
@@ -588,7 +589,14 @@ fn rewrite_callees(
         for (ii, inst) in block.insts.iter_mut().enumerate() {
             match &mut inst.kind {
                 InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
-                    rewrite_callee(callee, bi, ii, &body_result.resolved_witnesses, func_id_map);
+                    rewrite_callee(
+                        callee,
+                        bi,
+                        ii,
+                        &body_result.resolved_witnesses,
+                        func_id_map,
+                        functions,
+                    );
                 },
                 InstKind::Literal { value, .. } => {
                     if let ImmediateKind::FunctionRef {
@@ -615,6 +623,7 @@ fn rewrite_callee(
     inst_idx: usize,
     resolved_witnesses: &HashMap<(usize, usize), InstantiationKey>,
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
+    functions: &IndexMap<Entity, FunctionDef>,
 ) {
     match callee {
         Callee::Direct {
@@ -622,7 +631,13 @@ fn rewrite_callee(
             type_args,
             self_type,
         } => {
-            let key = InstantiationKey::new(*func, type_args.clone(), *self_type);
+            // Mirror collection's arity normalization (collect::scan_callee) so
+            // the lookup key matches the key the instance was enqueued under.
+            let mut targs = type_args.clone();
+            if let Some(f) = functions.get(&*func) {
+                collect::normalize_direct_arity(&mut targs, f.type_params.len());
+            }
+            let key = InstantiationKey::new(*func, targs, *self_type);
             if let Some(&mono_id) = func_id_map.get(&key) {
                 *callee = Callee::Resolved(mono_id);
             }

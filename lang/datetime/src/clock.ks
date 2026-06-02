@@ -3,7 +3,7 @@ module datetime
 import std.memory.(Pointer)
 
 public protocol Clock {
-    func now() -> Instant;
+    func now() -> Instant
 }
 
 public struct SystemClock: Clock {

@@ -25,7 +25,7 @@ extend Duration: Multipliable[Int64] {
     public static var one: Duration { Duration.seconds(1) }
 
     public consuming func multiply(consuming other: Int64) -> Duration {
-        self.multiplied(by: other)
+        Duration.normalized(secs: self.secs * other, nanos: self.nanos * other)
     }
 }
 
@@ -34,7 +34,7 @@ extend Duration: Divisible[Int64] {
     type Output = Duration
 
     public consuming func divide(consuming other: Int64) -> Duration {
-        self.divided(by: other)
+        Duration.nanoseconds(self.totalNanoseconds / other)
     }
 }
 
