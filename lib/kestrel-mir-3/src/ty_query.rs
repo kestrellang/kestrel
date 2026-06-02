@@ -152,6 +152,86 @@ fn instantiated_copy_behavior(
     }
 }
 
+/// True when a type's copyability is **not** fully determined in the current
+/// (generic) context — it can still resolve to `None` (move-only) at some
+/// monomorphization. Such a value must be MOVED, never bitwise-copied, inside a
+/// generic body: a `CopyValue` baked in here turns into an illegal alias once
+/// the type monomorphizes to a `not Copyable` instantiation (e.g. `Result[T,E]`
+/// with a non-Copyable `T`), and the surviving original double-frees on drop.
+///
+/// Distinct from `copy_behavior == None`: a *conditionally* Copyable container
+/// gated on an unconstrained type param reports `Bitwise` here (its gating args
+/// default to `Bitwise`), yet is unsound to copy. Moving is always correct — the
+/// frontend forbids reusing a value that isn't *guaranteed* Copyable, so a
+/// mono-dependent value is necessarily single-use.
+///
+/// - bare type param / associated projection: mono-dependent unless a
+///   `Copyable`/`Cloneable` bound guarantees duplicability;
+/// - conditionally Copyable container: mono-dependent iff a gating arg is;
+/// - tuple: mono-dependent iff any element is;
+/// - everything else (primitives, unconditional types): determined → `false`.
+pub fn copy_is_mono_dependent(
+    arena: &TyArena,
+    module: &MirModule,
+    ty: TyId,
+    where_clause: Option<&WhereClause>,
+) -> bool {
+    match arena.get(ty) {
+        MirTy::TypeParam(entity) => {
+            let entity = *entity;
+            if let Some(wc) = where_clause {
+                for constraint in &wc.constraints {
+                    if let WhereConstraint::Implements {
+                        type_param,
+                        protocol,
+                        ..
+                    } = constraint
+                    {
+                        if *type_param == entity
+                            && (is_copyable_protocol(module, *protocol)
+                                || is_cloneable_protocol(module, *protocol))
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
+        },
+        MirTy::AssociatedProjection { .. } => true,
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            elems
+                .iter()
+                .any(|&e| copy_is_mono_dependent(arena, module, e, where_clause))
+        },
+        MirTy::Named { entity, type_args } => {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            let gating = module
+                .structs
+                .get(&entity)
+                .map(|s| s.conditionally_copyable.clone())
+                .or_else(|| {
+                    module
+                        .enums
+                        .get(&entity)
+                        .map(|e| e.conditionally_copyable.clone())
+                });
+            let Some(gating) = gating else {
+                return false;
+            };
+            // Only gating positions affect the container's copyability.
+            gating.iter().any(|&pos| {
+                type_args
+                    .get(pos)
+                    .is_some_and(|&arg| copy_is_mono_dependent(arena, module, arg, where_clause))
+            })
+        },
+        _ => false,
+    }
+}
+
 pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
     match arena.get(ty) {
         MirTy::I8

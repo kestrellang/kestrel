@@ -519,9 +519,12 @@ impl<'a> CollectionContext<'a> {
                     |f| matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity),
                 )
                 .or_else(|| {
+                    // Match a user `clone()` by its self-param nominal: an
+                    // `extend`-defined clone doesn't reliably set `parent` to
+                    // the extended type, so `parent == entity` would miss it
+                    // (leaving the clone uncollected and the value bit-copied).
                     self.functions.values().find(|f| {
-                        matches!(&f.kind, FunctionKind::Method { parent, .. } if *parent == entity)
-                            && f.name.ends_with(".clone")
+                        f.clone_method_self_nominal(self.arena) == Some(entity)
                     })
                 });
             if let Some(func) = clone_func {

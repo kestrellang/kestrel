@@ -174,7 +174,10 @@ fn build_clone_lookup(
                 clone_func_to_parent.insert(f.entity, *nominal);
             },
             FunctionKind::Method { parent, .. } if f.name.ends_with(".clone") => {
-                clone_func_to_parent.insert(f.entity, *parent);
+                // Prefer the self-param nominal: an `extend`-defined `clone()`
+                // doesn't reliably set `parent` to the extended type.
+                let nominal = f.clone_method_self_nominal(&module.ty_arena).unwrap_or(*parent);
+                clone_func_to_parent.insert(f.entity, nominal);
             },
             _ => {},
         }

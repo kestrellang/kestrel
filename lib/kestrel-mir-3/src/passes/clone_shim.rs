@@ -206,6 +206,55 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
                 CopyBehavior::Clone(cloneable_proto);
         }
     }
+
+    // Explicit-clone types (user-written `clone()`) are skipped by shim
+    // synthesis above, so they never had `CopyBehavior::Clone` set — leaving a
+    // non-trivial one as `None`/`Bitwise`. The expand pass then degrades a
+    // `CopyValue` on such a type to a bitwise alias / move instead of a clone,
+    // corrupting a heap-backed value stored in a generic container (e.g. quill's
+    // `Value` as a `Dictionary[String, Value]` value: its bucket clone shim
+    // bit-copied the `Value`, aliasing the inner String). Mark them `Clone` so
+    // the CopyValue expands to their user `clone()`.
+    //
+    // Include types with a `.clone` method even if no Cloneable *witness* is
+    // recorded in `module.witnesses` — a `clone()` defined in an `extend` block
+    // (vs inline) doesn't always surface a witness here, but it must still be
+    // treated as Clone-behavior. Same trivial-field / conditional-container
+    // guards as the shim loop.
+    let user_clone_types: std::collections::HashSet<Entity> = has_user_clone
+        .iter()
+        .copied()
+        .chain(
+            module
+                .functions
+                .values()
+                .filter_map(|f| f.clone_method_self_nominal(&module.ty_arena)),
+        )
+        .collect();
+    for &type_entity in &user_clone_types {
+        if is_conditional_container(module, type_entity) {
+            continue;
+        }
+        let needs_struct = module
+            .structs
+            .get(&type_entity)
+            .map(|s| needs_clone_shim_struct(s, &module.ty_arena))
+            .unwrap_or(false);
+        if needs_struct {
+            module.structs.get_mut(&type_entity).unwrap().type_info.copy =
+                CopyBehavior::Clone(cloneable_proto);
+            continue;
+        }
+        let needs_enum = module
+            .enums
+            .get(&type_entity)
+            .map(|e| needs_clone_shim_enum(e, &module.ty_arena))
+            .unwrap_or(false);
+        if needs_enum {
+            module.enums.get_mut(&type_entity).unwrap().type_info.copy =
+                CopyBehavior::Clone(cloneable_proto);
+        }
+    }
 }
 
 /// True for a `: not Copyable` type that is *conditionally* Copyable (has gating

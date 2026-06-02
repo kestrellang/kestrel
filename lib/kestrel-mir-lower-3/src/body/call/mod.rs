@@ -168,6 +168,7 @@ impl OssaBodyCtx<'_, '_> {
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
             let (new_receiver_ty, new_args) = self.rewrite_field_subscript(
+                receiver_expr,
                 receiver_ty,
                 call_args,
                 field_entity,
@@ -208,6 +209,7 @@ impl OssaBodyCtx<'_, '_> {
 
     fn rewrite_field_subscript(
         &mut self,
+        receiver_expr: HirExprId,
         receiver_ty: TyId,
         mut call_args: Vec<CallArg>,
         field_entity: Entity,
@@ -249,7 +251,39 @@ impl OssaBodyCtx<'_, '_> {
             }
 
             if !call_args.is_empty() {
-                // Extract the field from the receiver value
+                // Borrow-like receiver (subscript get/set): borrow the field
+                // IN PLACE via its address when the base is addressable
+                // (a var / field chain). `emit_struct_extract` would yield a
+                // @guaranteed *value* that the callee — which takes self by
+                // address — must spill to memory, and for a non-trivial element
+                // type (e.g. `Array[String]`) that spill is a clone that
+                // bitwise-aliases heap elements and then over-releases them
+                // (corrupting `bag.items(i)` on a struct field). The address
+                // path mirrors how `bag.field.prop` (e.g. `.count`) is lowered.
+                if matches!(
+                    receiver_convention,
+                    ParamConvention::Borrow | ParamConvention::MutBorrow
+                ) {
+                    if let Some(base_addr) = self.try_field_addr_chain(receiver_expr) {
+                        let old_receiver = call_args[0].value;
+                        if self.body.value(old_receiver).borrow_source.is_some() {
+                            self.emit_end_borrow(old_receiver);
+                        }
+                        let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
+                        let borrow = if receiver_convention == ParamConvention::MutBorrow {
+                            self.emit_begin_mut_borrow_addr(faddr, field_ty)
+                        } else {
+                            self.emit_begin_borrow_addr(faddr, field_ty)
+                        };
+                        call_args[0] = CallArg {
+                            value: borrow,
+                            convention: receiver_convention,
+                        };
+                        return (field_ty, call_args);
+                    }
+                }
+                // Fallback (non-addressable base, e.g. `makeBag().items(i)`):
+                // extract the field value and use it as the receiver.
                 let old_receiver = call_args[0].value;
                 // If the old receiver is a borrow, end it, get the source, extract, re-borrow
                 if let Some(source) = self.body.value(old_receiver).borrow_source {

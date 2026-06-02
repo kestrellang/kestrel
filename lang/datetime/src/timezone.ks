@@ -9,14 +9,23 @@ import std.ffi.(CString)
 public struct TimeZone: Equatable, Hashable, Formattable {
     var id: Int64
 
+    // Primitive constructor — the single point that builds a TimeZone from a
+    // raw interned id. `utc`/`withId` must route through this rather than each
+    // other, else `utc -> withId -> utc` recurses forever (stack overflow).
+    init(rawId id: Int64) { self.id = id; }
+
     // --- Statics ---
 
-    public static var utc: TimeZone { TimeZone.withId(0) }
+    public static var utc: TimeZone { TimeZone(rawId: 0) }
 
     public static func system() -> TimeZone {
         var buf = Array[UInt8](repeating: 0, count: 256);
-        kestrel_system_timezone_name(Pointer(to: buf(0)), 256);
-        let name = String(from: CString(raw: Pointer(to: buf(0))));
+        // `buf.asPointer()` addresses the array's storage. `Pointer(to: buf(0))`
+        // would take the address of a *temporary copy* of element 0 (the
+        // subscript getter returns a value, not a place), so the C function's
+        // write would overflow that 1-byte temporary → stack corruption.
+        kestrel_system_timezone_name(buf.asPointer(), 256);
+        let name = String(from: CString(raw: buf.asPointer()));
         if let .Some(tz) = TimeZone.find(name) {
             return tz;
         }
@@ -32,17 +41,15 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     }
 
     static func withId(id: Int64) -> TimeZone {
-        var tz = TimeZone.utc;
-        tz.id = id;
-        tz
+        TimeZone(rawId: id)
     }
 
     // --- Properties ---
 
     public var name: String {
         var buf = Array[UInt8](repeating: 0, count: 128);
-        kestrel_tz_name(self.id, Pointer(to: buf(0)), 128);
-        String(from: CString(raw: Pointer(to: buf(0))))
+        kestrel_tz_name(self.id, buf.asPointer(), 128);
+        String(from: CString(raw: buf.asPointer()))
     }
 
     // Get the UTC offset in seconds at a given instant
@@ -53,8 +60,8 @@ public struct TimeZone: Equatable, Hashable, Formattable {
     // Get the timezone abbreviation at a given instant
     func abbreviationAt(epochSec: Int64) -> String {
         var buf = Array[UInt8](repeating: 0, count: 32);
-        kestrel_tz_abbr(self.id, epochSec, Pointer(to: buf(0)), 32);
-        String(from: CString(raw: Pointer(to: buf(0))))
+        kestrel_tz_abbr(self.id, epochSec, buf.asPointer(), 32);
+        String(from: CString(raw: buf.asPointer()))
     }
 
     // Whether a civil datetime is ambiguous (DST fold) in this timezone.

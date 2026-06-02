@@ -91,7 +91,14 @@ impl OssaBodyCtx<'_, '_> {
         self.ctx.register_name(method);
         let type_args = self.prepend_receiver_type_args(target_ty, vec![]);
         let callee = Callee::direct_with_args(method, type_args, None);
-        let arg = self.prepare_call_arg(value, ParamConvention::Borrow);
+        // `FromValue.from(value: T)` takes its argument **by value** — its body
+        // moves `value` into `.Ok(value)` / `.Some(value)`. Passing a borrow
+        // strands the payload: an @owned aggregate would be wrapped from a
+        // borrow and then dropped by the caller, yielding an empty/dangling
+        // result (a heap `Array`/`String` var tail promoted at a `throws`/
+        // optional return). Scalars masked it via a bitwise register copy.
+        // Consume the value so ownership transfers into the wrapped enum.
+        let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
         self.emit_call_returning(callee, vec![arg], target_ty)
     }
 

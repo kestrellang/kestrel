@@ -615,6 +615,27 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         matches!(self.copy_behavior_of(ty), CopyBehavior::None)
     }
 
+    /// True when a type's copy behavior is only knowable *after*
+    /// monomorphization — a bare type parameter, an associated projection, or a
+    /// conditionally-Copyable container gated on one of those. Pre-mono these
+    /// can report `Bitwise`, but they may resolve to a `not Copyable` type, at
+    /// which point a bitwise copy is an illegal alias. Such an @owned value must
+    /// be moved (consumed), never copied. See `ty_query::copy_is_mono_dependent`.
+    pub fn copy_behavior_is_mono_dependent(&self, ty: TyId) -> bool {
+        let wc = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .and_then(|f| f.where_clause.as_ref());
+        kestrel_mir_3::ty_query::copy_is_mono_dependent(
+            &self.ctx.module.ty_arena,
+            &self.ctx.module,
+            ty,
+            wc,
+        )
+    }
+
     pub fn ownership_for(&self, _ty: TyId) -> Ownership {
         Ownership::Owned
     }
@@ -1352,8 +1373,32 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
+    /// Coerce a value destined for an @owned aggregate slot (tuple element,
+    /// struct field, enum payload) to @owned. A @guaranteed element is a
+    /// *borrow*; packing it into an @owned aggregate (which then `consume`s it)
+    /// would make the aggregate alias the borrow, so once the borrow's source
+    /// drops the aggregate dangles — and double-frees when the aggregate drops.
+    /// Clone borrows to @owned. (Arises when a by-value — i.e. borrowed —
+    /// param escapes into storage, e.g. `Headers.add` doing
+    /// `self.entries.append((name, value))`.) Non-Copyable borrows are left
+    /// alone: cloning them is illegal and the frontend rejects such escapes.
+    fn own_aggregate_element(&mut self, v: ValueId) -> ValueId {
+        let vd = self.body.value(v);
+        let guaranteed = vd.ownership == Ownership::Guaranteed;
+        let ty = vd.ty;
+        if guaranteed && !self.is_non_copyable(ty) {
+            self.emit_copy_value(v)
+        } else {
+            v
+        }
+    }
+
     pub fn emit_struct(&mut self, ty: TyId, fields: Vec<(FieldIdx, ValueId)>) -> ValueId {
         let result = self.alloc_value(ty, Ownership::Owned);
+        let fields: Vec<(FieldIdx, ValueId)> = fields
+            .into_iter()
+            .map(|(idx, v)| (idx, self.own_aggregate_element(v)))
+            .collect();
         for &(_, v) in &fields {
             self.consume(v);
         }
@@ -1364,6 +1409,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_tuple(&mut self, ty: TyId, elements: Vec<ValueId>) -> ValueId {
         let result = self.alloc_value(ty, Ownership::Owned);
+        let elements: Vec<ValueId> = elements
+            .into_iter()
+            .map(|v| self.own_aggregate_element(v))
+            .collect();
         for &v in &elements {
             self.consume(v);
         }
@@ -1379,6 +1428,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         payload: Vec<ValueId>,
     ) -> ValueId {
         let result = self.alloc_value(enum_ty, Ownership::Owned);
+        let payload: Vec<ValueId> = payload
+            .into_iter()
+            .map(|v| self.own_aggregate_element(v))
+            .collect();
         for &v in &payload {
             self.consume(v);
         }

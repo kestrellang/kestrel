@@ -7,7 +7,7 @@
 //! TupleExtract, EnumPayload, Discriminant) to destructure values.
 
 use kestrel_hecs::Entity;
-use kestrel_hir::body::{HirExprId, HirMatchArm, MatchSource};
+use kestrel_hir::body::{HirExpr, HirExprId, HirMatchArm, MatchSource};
 use kestrel_hir::res::LocalId;
 use kestrel_mir_3::callee::Callee;
 use kestrel_mir_3::item::witness::WitnessMethodKey;
@@ -46,6 +46,39 @@ impl OssaBodyCtx<'_, '_> {
     /// intersection of values that stayed live on *every* reaching edge, and
     /// each edge drops the values it kept that are dead at the merge. This lets
     /// an arm consume (move out of) the scrutinee on some edges but not others.
+    /// Lower a match scrutinee. A `match` takes ownership of its @owned
+    /// scrutinee (each arm moves payloads out of it or drops it whole). For a
+    /// *mono-dependent* scrutinee local — a conditionally-Copyable container
+    /// gated on an unconstrained type param (e.g. `match self` where
+    /// `self: Result[T,E]`) — the normal `lower_expr` path emits
+    /// `emit_value_use` → a real `CopyValue` (pre-mono the type reports
+    /// `Bitwise`) and keeps the original local tracked. Monomorphized with a
+    /// non-Copyable arg, that copy becomes a bitwise alias and the surviving
+    /// original double-frees when its arm/merge drop runs. Instead we **move**
+    /// the local into the match (a fresh @owned result; the source is consumed).
+    /// Sound because a mono-dependent value is never *guaranteed* Copyable, so
+    /// it can't be used after the match — the frontend would have required a
+    /// `Copyable` bound, which makes it no longer mono-dependent.
+    ///
+    /// Unconditionally non-Copyable scrutinees already move via
+    /// `emit_copy_value`; genuinely-Copyable scrutinees keep the copy (they may
+    /// be read after the match), so both route through `lower_expr` unchanged.
+    fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
+        let expr = self.hir.exprs[scrutinee_expr].clone();
+        if let HirExpr::Local(hir_local, _) = &expr {
+            if !self.is_var_local(hir_local) {
+                let val = self.map_local(*hir_local);
+                let vdef = self.body.value(val);
+                if vdef.ownership == Ownership::Owned
+                    && self.copy_behavior_is_mono_dependent(vdef.ty)
+                {
+                    return self.emit_move_value(val);
+                }
+            }
+        }
+        self.lower_expr(scrutinee_expr)
+    }
+
     pub fn lower_match(
         &mut self,
         expr_id: HirExprId,
@@ -66,7 +99,7 @@ impl OssaBodyCtx<'_, '_> {
         let result_ty = self.resolve_expr_type(expr_id);
         let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
 
-        let scrutinee_val = self.lower_expr(scrutinee_expr);
+        let scrutinee_val = self.lower_match_scrutinee(scrutinee_expr);
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
         let saved_tracker = self.tracker.clone();
@@ -604,7 +637,7 @@ impl OssaBodyCtx<'_, '_> {
         let needs_moveout = owned
             && bindings
                 .iter()
-                .any(|b| self.path_extracts_noncopyable(scrutinee_ty, &b.path));
+                .any(|b| self.path_requires_moveout(scrutinee_ty, &b.path));
 
         if needs_moveout {
             let items: Vec<MoveItem> = bindings
@@ -667,11 +700,17 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    /// True if applying `path` to a value of `root_ty` would extract a
-    /// non-Copyable component at any step. Such an extraction from an @owned
-    /// value can't be copied — it must be moved out (see `emit_moveout`).
+    /// True if applying `path` to a value of `root_ty` extracts a component
+    /// that an @owned scrutinee must **move out** (via `emit_moveout`) rather
+    /// than borrow-extract-copy. That holds when a step's type either:
+    ///   - is `not Copyable` (no clone shim — a copy would be illegal), or
+    ///   - has mono-dependent copy behavior (a type param / associated
+    ///     projection): pre-mono it defaults to `Bitwise`, but it can
+    ///     monomorphize to a `not Copyable` type, where the copy path's
+    ///     bitwise alias + whole-scrutinee drop becomes a double-free. Moving
+    ///     out (consuming the scrutinee) is correct for every instantiation.
     /// Mirrors `apply_access_path`'s type resolution without emitting code.
-    fn path_extracts_noncopyable(&mut self, root_ty: TyId, path: &[PathElement]) -> bool {
+    fn path_requires_moveout(&mut self, root_ty: TyId, path: &[PathElement]) -> bool {
         let mut current_ty = root_ty;
         let mut pending_downcast: Option<VariantIdx> = None;
         for elem in path {
@@ -690,7 +729,9 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.resolve_struct_field(current_ty, name).1
                     };
-                    if self.is_non_copyable(field_ty) {
+                    if self.is_non_copyable(field_ty)
+                        || self.copy_behavior_is_mono_dependent(field_ty)
+                    {
                         return true;
                     }
                     current_ty = field_ty;
@@ -705,7 +746,9 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.resolve_tuple_element(current_ty, *i)
                     };
-                    if self.is_non_copyable(field_ty) {
+                    if self.is_non_copyable(field_ty)
+                        || self.copy_behavior_is_mono_dependent(field_ty)
+                    {
                         return true;
                     }
                     current_ty = field_ty;
