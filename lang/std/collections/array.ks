@@ -11,6 +11,7 @@ import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
+import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
 import std.collections.(Slice)
@@ -337,7 +338,33 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// let arr = [1, 2, 3];   // emitted by the compiler as a call to this init
     /// ```
     public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
-        self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
+        // The compiler hands us an OWNED, initialized buffer of `count`
+        // elements (it moved each element in and abandons the buffer after
+        // this call). Bit-MOVE the whole buffer into fresh storage with a
+        // single memcpy. Do NOT route through `init(arrayLiteral:)` /
+        // `LiteralSlice` element-wise `read()`: `read()` clones for
+        // non-Copyable `T`, which would duplicate every element and leak the
+        // abandoned source originals (the buffer is never dropped). A bitwise
+        // transfer moves ownership exactly once — no clone, no leak.
+        let count = Int64(intLiteral: _arrayLiteralCount);
+        if count > 0 {
+            let layout = Layout.array[T](count);
+            var allocator = SystemAllocator();
+            if let .Some(rawPtr) = allocator.allocate(layout) {
+                let newPtr = rawPtr.cast[T]();
+                let stride = Int64(intLiteral: lang.sizeof[T]());
+                let _ = memcpy(newPtr.asRaw(), Pointer[T](raw: _arrayLiteralPointer).asRaw(), count * stride);
+                self.storage = CowBox(ArrayStorage(ptr: newPtr, len: count, cap: count))
+            } else {
+                fatalError("Array allocation failed")
+            }
+        } else {
+            self.storage = CowBox(ArrayStorage(
+                ptr: Pointer[T].nullPointer(),
+                len: 0,
+                cap: 0
+            ))
+        }
     }
 
     /// @name Array Literal
