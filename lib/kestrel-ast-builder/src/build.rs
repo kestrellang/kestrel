@@ -1053,6 +1053,10 @@ mod tests {
             AstType::Unit(_) => "()".into(),
             AstType::Never(_) => "Never".into(),
             AstType::Inferred(_) => "_".into(),
+            AstType::Some { bounds, .. } => {
+                let b: Vec<_> = bounds.iter().map(type_name).collect();
+                format!("some {}", b.join(" + "))
+            },
         }
     }
 }

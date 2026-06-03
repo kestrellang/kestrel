@@ -1,3 +1,4 @@
+use kestrel_ast_builder::arg_binding::{BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Attributes, Callable, NodeKind};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
@@ -53,6 +54,103 @@ impl OssaBodyCtx<'_, '_> {
                 self.prepare_call_arg_for_expr(arg.value, conv)
             })
             .collect()
+    }
+
+    /// Lower a call's explicit arguments AND fill in defaults, producing one
+    /// `CallArg` per (non-receiver) parameter in declaration order.
+    ///
+    /// Unlike `lower_call_args` + `expand_default_args`, this uses
+    /// `arg_binding::bind_arguments`, so defaulted parameters may be skipped
+    /// anywhere (leading/middle/trailing), not just at the trailing end. Each
+    /// explicit argument is lowered with the convention of the parameter it
+    /// actually binds to. Explicit arguments are evaluated in source order
+    /// (left-to-right); defaults are lowered afterward, in their slots.
+    ///
+    /// `conventions`/`conv_offset` index the callee's full convention list,
+    /// `conv_offset` skipping any receiver slot.
+    pub(crate) fn lower_call_args_bound(
+        &mut self,
+        args: &[HirCallArg],
+        callee_entity: Entity,
+        conventions: &[ParamConvention],
+        conv_offset: usize,
+    ) -> Vec<CallArg> {
+        // Snapshot the parameter shape (owned) so the world borrow is released
+        // before we lower any argument expressions.
+        let shape: Option<Vec<(Option<String>, Option<Entity>)>> =
+            self.ctx.world.get::<Callable>(callee_entity).map(|c| {
+                c.params
+                    .iter()
+                    .map(|p| (p.label.clone(), p.default_entity))
+                    .collect()
+            });
+        let Some(shape) = shape else {
+            // No parameter metadata: lower in source order (no defaults to fill).
+            return self.lower_call_args(args, conventions, conv_offset);
+        };
+
+        let bind_params: Vec<BindParam> = shape
+            .iter()
+            .map(|(label, default)| BindParam::new(label.as_deref(), default.is_some()))
+            .collect();
+        let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+        let plan = match bind_arguments(&bind_params, &arg_labels) {
+            Ok(plan) => plan,
+            // Binding was already validated during inference; if it somehow fails
+            // here, fall back to the legacy positional path rather than panic.
+            Err(_) => {
+                let mut ca = self.lower_call_args(args, conventions, conv_offset);
+                self.expand_default_args(&mut ca, callee_entity, args.len(), conventions, conv_offset);
+                return ca;
+            },
+        };
+
+        // For each explicit (source) arg, the parameter slot it binds to — used
+        // to pick its convention. `bind_arguments` forbids reordering, so source
+        // order maps to slots monotonically.
+        let mut arg_slot = vec![0usize; args.len()];
+        for (pi, binding) in plan.iter().enumerate() {
+            if let Binding::Arg(ai) = binding {
+                arg_slot[*ai] = pi;
+            }
+        }
+
+        // Lower explicit args in source order, each with its bound param's convention.
+        let mut prepared = Vec::with_capacity(args.len());
+        for (ai, arg) in args.iter().enumerate() {
+            let conv = conventions
+                .get(conv_offset + arg_slot[ai])
+                .copied()
+                .unwrap_or(ParamConvention::Borrow);
+            prepared.push(self.prepare_call_arg_for_expr(arg.value, conv));
+        }
+
+        // Assemble in parameter order: explicit args via a source-order cursor,
+        // defaults lowered into their slots.
+        let mut prepared = prepared.into_iter();
+        let mut result = Vec::with_capacity(plan.len());
+        for (pi, binding) in plan.iter().enumerate() {
+            match binding {
+                Binding::Arg(_) => {
+                    if let Some(arg) = prepared.next() {
+                        result.push(arg);
+                    }
+                },
+                Binding::Default => {
+                    let Some(default_entity) = shape[pi].1 else {
+                        continue; // required-but-missing: impossible post-typecheck
+                    };
+                    let param_ty = resolve_type_annotation(self.ctx, default_entity);
+                    let default_val = self.lower_default_arg_inline(default_entity, param_ty);
+                    let conv = conventions
+                        .get(conv_offset + pi)
+                        .copied()
+                        .unwrap_or(ParamConvention::Borrow);
+                    result.push(self.prepare_call_arg(default_val, conv));
+                },
+            }
+        }
+        result
     }
 
     /// Lower call args with Borrow convention for all params.

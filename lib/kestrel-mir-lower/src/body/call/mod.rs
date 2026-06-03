@@ -145,7 +145,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         let mut call_args = if is_static {
-            self.lower_call_args(args, &conventions, 0)
+            self.lower_call_args_bound(args, resolved, &conventions, 0)
         } else {
             let recv_conv = conventions
                 .first()
@@ -153,7 +153,7 @@ impl OssaBodyCtx<'_, '_> {
                 .unwrap_or(ParamConvention::Borrow);
             let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
             let mut a = vec![receiver_arg];
-            a.extend(self.lower_call_args(args, &conventions, 1));
+            a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1));
             a
         };
 
@@ -195,15 +195,7 @@ impl OssaBodyCtx<'_, '_> {
             Callee::direct_with_args(resolved, type_args, None)
         };
 
-        let conv_offset = if is_static { 0 } else { 1 };
-        self.expand_default_args(
-            &mut call_args,
-            resolved,
-            args.len(),
-            &conventions,
-            conv_offset,
-        );
-
+        // Defaults are already filled by `lower_call_args_bound` above.
         self.emit_call_returning(callee, call_args, result_ty)
     }
 
@@ -342,10 +334,12 @@ impl OssaBodyCtx<'_, '_> {
             .unwrap_or(ParamConvention::Borrow);
         let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
         let mut call_args = vec![receiver_arg];
-        call_args.extend(self.lower_call_args(args, &conventions, 1));
-
+        // Bind+fill against the concrete method entity when known (so defaults can
+        // be skipped anywhere); otherwise fall back to positional source order.
         if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
-            self.expand_default_args(&mut call_args, method_entity, args.len(), &conventions, 1);
+            call_args.extend(self.lower_call_args_bound(args, method_entity, &conventions, 1));
+        } else {
+            call_args.extend(self.lower_call_args(args, &conventions, 1));
         }
 
         let callee = Callee::Witness {
@@ -461,7 +455,7 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         let conv_offset = if has_receiver { 1 } else { 0 };
-        let mut call_args = self.lower_call_args(args, &conventions, conv_offset);
+        let mut call_args = self.lower_call_args_bound(args, entity, &conventions, conv_offset);
         if has_receiver {
             let recv_conv = conventions
                 .first()
@@ -471,14 +465,7 @@ impl OssaBodyCtx<'_, '_> {
             call_args.insert(0, receiver_arg);
         }
 
-        self.expand_default_args(
-            &mut call_args,
-            entity,
-            args.len(),
-            &conventions,
-            conv_offset,
-        );
-
+        // Defaults are already filled by `lower_call_args_bound` above.
         self.emit_call_returning(callee, call_args, result_ty)
     }
 
@@ -585,8 +572,7 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args(args, &conventions, 1));
-        self.expand_default_args(&mut call_args, entity, args.len(), &conventions, 1);
+        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1));
 
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -675,8 +661,7 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args(args, &conventions, 1));
-        self.expand_default_args(&mut call_args, entity, args.len(), &conventions, 1);
+        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1));
 
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);

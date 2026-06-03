@@ -4,6 +4,7 @@
 //! depends on this trait, not on concrete `QueryContext`. `WorldResolver`
 //! is the real implementation; tests can provide mocks.
 
+use kestrel_ast_builder::arg_binding::{BindParam, binds};
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
     TypeParams, Vis, WhereClause as AstWhereClause, WhereConstraint,
@@ -1348,26 +1349,15 @@ impl WorldResolver<'_> {
             return arg_labels.is_empty();
         };
 
-        let params = &callable.params;
-        let required_count = params.iter().filter(|p| p.default_entity.is_none()).count();
-
-        // Arity check: args must be >= required and <= total params
-        if arg_labels.len() < required_count || arg_labels.len() > params.len() {
-            return false;
-        }
-
-        // Label check: each arg label must match the corresponding param label
-        for (i, arg_label) in arg_labels.iter().enumerate() {
-            if i >= params.len() {
-                return false;
-            }
-            let param_label = params[i].label.as_deref();
-            if *arg_label != param_label {
-                return false;
-            }
-        }
-
-        true
+        // Match args to params in declaration order, allowing defaulted params
+        // to be skipped anywhere (not just trailing). Single source of truth:
+        // `arg_binding::bind_arguments`.
+        let bind_params: Vec<BindParam> = callable
+            .params
+            .iter()
+            .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
+            .collect();
+        binds(&bind_params, arg_labels)
     }
 
     /// Check whether an entity could accept `arg_count` args based on arity alone

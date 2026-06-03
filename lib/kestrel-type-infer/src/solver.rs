@@ -12,6 +12,7 @@ use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
+use kestrel_ast_builder::arg_binding::{BindError, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
@@ -2116,6 +2117,24 @@ fn solve_overloaded_call(
 
 /// Emit constraints for a resolved overloaded call: instantiate the selected
 /// function/init entity, coerce args, equate return, record resolution.
+/// Compute the argument→parameter binding plan for callable `entity` and call
+/// `args`, using `arg_binding`. `None` if the entity has no `Callable` or the
+/// arguments don't bind (wrong labels / arity). Indexed by parameter slot.
+fn binding_plan_for(
+    qctx: &kestrel_hecs::QueryContext<'_>,
+    entity: Entity,
+    args: &[CallArg],
+) -> Option<Vec<Binding>> {
+    let callable = qctx.get::<Callable>(entity)?;
+    let bind_params: Vec<BindParam> = callable
+        .params
+        .iter()
+        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
+        .collect();
+    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    bind_arguments(&bind_params, &arg_labels).ok()
+}
+
 fn emit_resolved_call(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -2224,13 +2243,30 @@ fn emit_resolved_call(
         }
     }
 
-    // Coerce args against param types
+    // Coerce each explicitly-provided arg against the type of the param it bound
+    // to (per plan). Skipped params take their defaults, checked at their def site.
     if let Some(param_hir_tys) = qctx.query(LowerCallableTypes { entity, root }) {
-        for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
-            if let Some(hir_ty) = param_ty {
-                let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
-                ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
-            }
+        let plan = binding_plan_for(qctx, entity, &args);
+        match plan {
+            Some(plan) => {
+                for (slot, binding) in plan.iter().enumerate() {
+                    if let Binding::Arg(ai) = binding
+                        && let Some(Some(hir_ty)) = param_hir_tys.get(slot)
+                    {
+                        let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                        ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
+                    }
+                }
+            },
+            // No bindable plan (e.g. no Callable): fall back to positional coercion.
+            None => {
+                for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
+                    if let Some(hir_ty) = param_ty {
+                        let param_tv = lower_hir_ty_sub(ctx, hir_ty, None, TyVar(0), &subs);
+                        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
+                    }
+                }
+            },
         }
     }
 
@@ -2277,9 +2313,10 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
         return false;
     };
 
-    if param_hir_tys.len() != args.len() {
+    // Bind args to params (defaults skippable); reject if they don't bind.
+    let Some(plan) = binding_plan_for(qctx, entity, args) else {
         return false;
-    }
+    };
 
     // Build substitution map for type params
     let type_param_entities: Vec<Entity> = qctx
@@ -2300,7 +2337,14 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
         all_type_params.extend(parent_tps);
     }
 
-    for (arg, param_ty) in args.iter().zip(param_hir_tys.iter()) {
+    for (slot, binding) in plan.iter().enumerate() {
+        let Binding::Arg(ai) = binding else {
+            continue; // defaulted-and-skipped param — nothing to check
+        };
+        let arg = &args[*ai];
+        let Some(param_ty) = param_hir_tys.get(slot) else {
+            continue;
+        };
         let Some(hir_ty) = param_ty else {
             continue; // unannotated param — compatible with anything
         };
@@ -2923,31 +2967,34 @@ fn solve_member(
         ctx.conforms(receiver, protocol, span.clone());
     }
 
-    // Validate argument count: must be between required (no default) and total params
-    let required_count = resolution
+    // Bind arguments to parameters in declaration order, allowing defaulted
+    // params to be skipped anywhere. Single source of truth: `arg_binding`.
+    let bind_params: Vec<BindParam> = resolution
         .param_types
         .iter()
-        .filter(|p| !p.has_default)
-        .count();
-    let total_count = resolution.param_types.len();
-    if args.len() < required_count || args.len() > total_count {
-        return SolveResult::Error(InferError::ArgCountMismatch {
-            expected: required_count,
-            got: args.len(),
-            span,
-        });
-    }
-
-    // Validate argument labels match parameter labels
-    for (arg, param_info) in args.iter().zip(&resolution.param_types) {
-        if arg.label.as_deref() != param_info.label.as_deref() {
+        .map(|p| BindParam::new(p.label.as_deref(), p.has_default))
+        .collect();
+    let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
+    let plan = match bind_arguments(&bind_params, &arg_labels) {
+        Ok(plan) => plan,
+        Err(BindError::LabelMismatch {
+            arg_index, expected, ..
+        }) => {
             return SolveResult::Error(InferError::LabelMismatch {
-                expected: param_info.label.clone(),
-                got: arg.label.clone(),
+                expected,
+                got: args[arg_index].label.clone(),
                 span,
             });
-        }
-    }
+        },
+        Err(BindError::MissingArgument { .. } | BindError::TooManyArguments { .. }) => {
+            let required_count = bind_params.iter().filter(|p| !p.has_default).count();
+            return SolveResult::Error(InferError::ArgCountMismatch {
+                expected: required_count,
+                got: args.len(),
+                span,
+            });
+        },
+    };
 
     // Check static/instance mismatch: instance methods can't be called in static context
     if is_static_context
@@ -2968,10 +3015,15 @@ fn solve_member(
         }
     }
 
-    // Equate argument types with parameter types
-    for (arg, param_info) in args.iter().zip(&resolution.param_types) {
-        let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
-        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
+    // Equate each explicitly-provided argument's type with the type of the
+    // parameter it bound to (per `plan`). Skipped params take their defaults,
+    // which are checked at their definition site.
+    for (param_idx, binding) in plan.iter().enumerate() {
+        if let Binding::Arg(ai) = binding {
+            let param_info = &resolution.param_types[param_idx];
+            let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
+            ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
+        }
     }
 
     // Equate result with return type
