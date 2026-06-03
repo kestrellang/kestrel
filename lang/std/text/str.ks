@@ -5,7 +5,8 @@ module std.text
 import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Pointer, RawPointer)
+import std.memory.(Pointer, RawPointer, ArraySlice)
+import std.collections.(Array)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
 import std.text.(Formattable, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
@@ -106,6 +107,32 @@ extend Str {
     /// ```
     public func toOwned() -> String {
         self.asSlice().toOwned()
+    }
+
+    /// Copies this string's raw UTF-8 bytes into a new `Array[UInt8]`.
+    ///
+    /// Single bulk copy of the whole byte range (one buffer clone +
+    /// one memcpy-style loop), so it is O(n) — unlike appending byte
+    /// by byte, where each COW write re-clones the whole buffer and
+    /// the total cost is O(n²).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "Hi".toBytes().count;  // 2
+    /// "Hi".toBytes()(0);     // 72  ('H')
+    /// ```
+    public func toBytes() -> Array[UInt8] {
+        let slice = self.asSlice();
+        let n = slice.byteCount;
+        var buffer = Array[UInt8](capacity: n);
+        if n == 0 {
+            return buffer
+        }
+        // ArraySlice is a non-owning view over the live string buffer;
+        // append(contentsOf:) copies out of it in a single pass.
+        buffer.append(contentsOf: ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
+        buffer
     }
 
     // -- Iteration -----------------------------------------------------------

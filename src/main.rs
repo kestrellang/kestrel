@@ -3,16 +3,15 @@
 //! `kestrel build` compiles source files into an executable.
 //! `kestrel dump <kind>` prints compiler-internal representations for triage.
 //!
-//! Dump kinds today: tokens, cst, mir (=mir3), cranelift (=cranelift3),
-//! diagnostics.
+//! Dump kinds today: tokens, cst, mir, cranelift, diagnostics.
 //!
-//! For `mir`/`mir3`, `--stage <s>` (`-s`) selects which pipeline stage to print
+//! For `mir`, `--stage <s>` (`-s`) selects which pipeline stage to print
 //! (`--list-stages` lists them; `-s all` prints every stage). Default is `verify`.
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
 use kestrel_codegen::TargetConfig as CodegenTargetConfig;
-use kestrel_codegen_cranelift_3 as cranelift3_backend;
+use kestrel_codegen_cranelift as cranelift_backend;
 use kestrel_compiler::{Compiler, Severity};
 use kestrel_compiler_driver::CompilerDriver;
 use std::path::{Path, PathBuf};
@@ -122,18 +121,18 @@ struct DumpArgs {
     #[arg(long = "function", short = 'f')]
     function_filter: Option<String>,
 
-    /// For `mir`/`mir3`: which pipeline stage to print (see `--list-stages`).
+    /// For `mir`/`mir`: which pipeline stage to print (see `--list-stages`).
     /// Defaults to `verify`. `all` prints every stage.
     #[arg(long = "stage", short = 's', value_enum)]
     stage: Option<DumpStage>,
 
-    /// List the MIR-3 pipeline stages (for `--stage`) and exit.
+    /// List the MIR pipeline stages (for `--stage`) and exit.
     #[arg(long = "list-stages")]
     list_stages: bool,
 }
 
 /// Stage selector for `kestrel dump mir -s <stage>`. Variants map 1:1 onto
-/// [`kestrel_mir_3::passes::Stage`]; `All` is the meta-stage that prints them
+/// [`kestrel_mir::passes::Stage`]; `All` is the meta-stage that prints them
 /// all. clap derives the kebab spellings (`DropFix` → `drop-fix`), which match
 /// `Stage::name()`.
 #[derive(ValueEnum, Clone, Copy)]
@@ -153,8 +152,8 @@ enum DumpStage {
 
 impl DumpStage {
     /// The corresponding pipeline stage, or `None` for `All`.
-    fn to_mir3(self) -> Option<kestrel_mir_3::passes::Stage> {
-        use kestrel_mir_3::passes::Stage;
+    fn to_mir(self) -> Option<kestrel_mir::passes::Stage> {
+        use kestrel_mir::passes::Stage;
         Some(match self {
             DumpStage::Raw => Stage::Raw,
             DumpStage::DropFix => Stage::DropFix,
@@ -177,11 +176,9 @@ enum DumpKind {
     Tokens,
     /// Concrete syntax tree from the parser.
     Cst,
-    /// MIR-3 (OSSA) module. Alias for `mir3`.
-    #[value(alias("mir3"))]
+    /// MIR (OSSA) module.
     Mir,
-    /// Cranelift IR via the MIR-3 (OSSA) pipeline. Alias for `cranelift3`.
-    #[value(alias("cranelift3"))]
+    /// Cranelift IR via the MIR (OSSA) pipeline.
     Cranelift,
     /// All accumulated diagnostics (lex, parse, infer, analyze).
     Diagnostics,
@@ -216,7 +213,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    let options = cranelift3_backend::CodegenOptions {
+    let options = cranelift_backend::CodegenOptions {
         opt_level: args.opt_level,
         libraries: args.libraries,
         library_paths: args.library_paths,
@@ -224,7 +221,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
         c_sources,
         ..Default::default()
     };
-    let result = compiler.compile_and_link3(&output_path, &options);
+    let result = compiler.compile_and_link(&output_path, &options);
     driver.emit_diagnostics().ok();
     result.map_err(|e| {
         eprintln!("error: {}", e);
@@ -245,14 +242,14 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 // ============================================================================
 
 fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
-    // `--list-stages`: print the MIR-3 pipeline stages and exit (no files needed).
+    // `--list-stages`: print the MIR pipeline stages and exit (no files needed).
     if args.list_stages {
         print_stage_list();
         return Ok(());
     }
-    // `--stage` only makes sense for the MIR-3 dump.
+    // `--stage` only makes sense for the MIR dump.
     if args.stage.is_some() && !matches!(args.kind, DumpKind::Mir) {
-        eprintln!("error: --stage is only valid with `mir` (alias `mir3`)");
+        eprintln!("error: --stage is only valid with `mir` (alias `mir`)");
         return Err(ExitCode::FAILURE);
     }
 
@@ -268,23 +265,23 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
 
     match args.kind {
         DumpKind::Mir => {
-            dump_mir3(&compiler, args.stage, args.function_filter.as_deref())?;
+            dump_mir(&compiler, args.stage, args.function_filter.as_deref())?;
         },
         DumpKind::Cranelift => {
-            let mir = compiler.lower_to_mir3().map_err(|e| {
+            let mir = compiler.lower_to_mir().map_err(|e| {
                 eprintln!("error: {e}");
                 ExitCode::FAILURE
             })?;
-            let mono = compiler.monomorphize_mir3(mir).map_err(|e| {
+            let mono = compiler.monomorphize_mir(mir).map_err(|e| {
                 eprintln!("error: {e}");
                 ExitCode::FAILURE
             })?;
             let target = globals.codegen_target()?;
-            let options = cranelift3_backend::CodegenOptions {
+            let options = cranelift_backend::CodegenOptions {
                 emit_clif: true,
                 ..Default::default()
             };
-            match cranelift3_backend::compile(&mono, &target, &options) {
+            match cranelift_backend::compile(&mono, &target, &options) {
                 Ok(result) => {
                     for (name, clif) in &result.clif_text {
                         println!("; function: {name}");
@@ -313,76 +310,76 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     }
 }
 
-/// Print the MIR-3 module at the requested `stage` (default `verify`).
+/// Print the MIR module at the requested `stage` (default `verify`).
 ///
 /// `verify` (and the default) preserves the historical abort-on-verify-error
 /// behavior. Every other stage is best-effort: it prints whatever the stage
 /// produced and surfaces any verify errors as stderr warnings. The only hard
 /// failure off the default path is a monomorphization error (no module to show).
-fn dump_mir3(
+fn dump_mir(
     compiler: &Compiler,
     stage: Option<DumpStage>,
     filter: Option<&str>,
 ) -> Result<(), ExitCode> {
-    use kestrel_mir_3::passes::Stage;
+    use kestrel_mir::passes::Stage;
 
-    match stage.unwrap_or(DumpStage::Verify).to_mir3() {
+    match stage.unwrap_or(DumpStage::Verify).to_mir() {
         // Default / explicit `verify`: keep aborting on verify error.
         Some(Stage::Verify) => {
-            let mir = compiler.lower_to_mir3().map_err(|e| {
+            let mir = compiler.lower_to_mir().map_err(|e| {
                 eprintln!("error: {e}");
                 ExitCode::FAILURE
             })?;
-            print_mir3(&mir, filter);
+            print_mir(&mir, filter);
         },
         // Pre-mono intermediate stages (raw..layout): best-effort, no verify.
         Some(s) if s.is_pre_mono() => {
-            let (mir, _errors) = compiler.lower_to_mir3_stage(s);
-            print_mir3(&mir, filter);
+            let (mir, _errors) = compiler.lower_to_mir_stage(s);
+            print_mir(&mir, filter);
         },
         // Post-mono stages (mono / copy-prop / expand): best-effort; only a hard
         // monomorphization failure aborts (there'd be no module to print).
         Some(s) => {
-            let mir = compiler.lower_to_mir3().map_err(|e| {
+            let mir = compiler.lower_to_mir().map_err(|e| {
                 eprintln!("error: {e}");
                 ExitCode::FAILURE
             })?;
-            let (mono, mono_errors) = compiler.monomorphize_mir3_until(mir, s).map_err(|e| {
+            let (mono, mono_errors) = compiler.monomorphize_mir_until(mir, s).map_err(|e| {
                 eprintln!("error: {e}");
                 ExitCode::FAILURE
             })?;
             for e in &mono_errors {
                 eprintln!("warning: mono-verify: {}", e.message);
             }
-            print_mono3(&mono, filter);
+            print_mono(&mono, filter);
         },
         // `--stage all`: every stage, best-effort, never aborts.
-        None => dump_all_mir3_stages(compiler, filter),
+        None => dump_all_mir_stages(compiler, filter),
     }
     Ok(())
 }
 
 /// Print every pipeline stage, each under a `=== <stage> ===` header. Fully
 /// best-effort — re-runs lowering per stage and never aborts.
-fn dump_all_mir3_stages(compiler: &Compiler, filter: Option<&str>) {
-    use kestrel_mir_3::passes::Stage;
+fn dump_all_mir_stages(compiler: &Compiler, filter: Option<&str>) {
+    use kestrel_mir::passes::Stage;
 
     for s in Stage::ORDER.into_iter().filter(|s| s.is_pre_mono()) {
         println!("=== {} ===", s.name());
-        let (mir, _errors) = compiler.lower_to_mir3_stage(s);
-        print_mir3(&mir, filter);
+        let (mir, _errors) = compiler.lower_to_mir_stage(s);
+        print_mir(&mir, filter);
         println!();
     }
     for s in Stage::ORDER.into_iter().filter(|s| s.is_post_mono()) {
         println!("=== {} ===", s.name());
         // Post-mono needs a fully-lowered pre-mono module; re-lower best-effort.
-        let (mir, _) = compiler.lower_to_mir3_stage(Stage::Verify);
-        match compiler.monomorphize_mir3_until(mir, s) {
+        let (mir, _) = compiler.lower_to_mir_stage(Stage::Verify);
+        match compiler.monomorphize_mir_until(mir, s) {
             Ok((mono, mono_errors)) => {
                 for e in &mono_errors {
                     eprintln!("warning: mono-verify: {}", e.message);
                 }
-                print_mono3(&mono, filter);
+                print_mono(&mono, filter);
             },
             Err(e) => println!("; <unavailable: {e}>"),
         }
@@ -390,24 +387,24 @@ fn dump_all_mir3_stages(compiler: &Compiler, filter: Option<&str>) {
     }
 }
 
-fn print_mir3(mir: &kestrel_mir_3::MirModule, filter: Option<&str>) {
+fn print_mir(mir: &kestrel_mir::MirModule, filter: Option<&str>) {
     match filter {
-        Some(f) => print!("{}", kestrel_mir_3::display::display_module_filtered(mir, f)),
-        None => print!("{}", kestrel_mir_3::display::display_module(mir)),
+        Some(f) => print!("{}", kestrel_mir::display::display_module_filtered(mir, f)),
+        None => print!("{}", kestrel_mir::display::display_module(mir)),
     }
 }
 
-fn print_mono3(mono: &kestrel_mir_3::mono::MonoModule, filter: Option<&str>) {
+fn print_mono(mono: &kestrel_mir::mono::MonoModule, filter: Option<&str>) {
     match filter {
-        Some(f) => print!("{}", kestrel_mir_3::display::display_mono_module_filtered(mono, f)),
-        None => print!("{}", kestrel_mir_3::display::display_mono_module(mono)),
+        Some(f) => print!("{}", kestrel_mir::display::display_mono_module_filtered(mono, f)),
+        None => print!("{}", kestrel_mir::display::display_mono_module(mono)),
     }
 }
 
-/// Print the ordered MIR-3 pipeline stages for `--list-stages`.
+/// Print the ordered MIR pipeline stages for `--list-stages`.
 fn print_stage_list() {
-    use kestrel_mir_3::passes::Stage;
-    println!("MIR-3 (OSSA) pipeline stages, in order:");
+    use kestrel_mir::passes::Stage;
+    println!("MIR (OSSA) pipeline stages, in order:");
     for s in Stage::ORDER {
         if s == Stage::Verify {
             println!("  {} (default)", s.name());

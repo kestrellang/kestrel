@@ -7,7 +7,7 @@
 //! non-Copyable receiver compile: the receiver is never duplicated.
 //!
 //! Consumed by:
-//! - MIR lowering (`kestrel-mir-lower-3`): env-struct fields, parent-side
+//! - MIR lowering (`kestrel-mir-lower`): env-struct fields, parent-side
 //!   projection, and body rewriting (read the env value for `self.cap`).
 //! - `kestrel-analyze` `ClosureAnalyzer` (E603/E605): the captured-root set.
 //!
@@ -164,7 +164,7 @@ impl QueryFn for ClosureCaptures {
 
 /// True if `entity` is a *stored instance field* (not a getter, computed
 /// property, static, or protocol property). Mirrors the discrimination in
-/// `kestrel-mir-lower-3` `lower_field_access`.
+/// `kestrel-mir-lower` `lower_field_access`.
 pub fn resolved_is_stored_field(world: &QueryContext<'_>, entity: Entity) -> bool {
     if world.get::<Callable>(entity).is_some() {
         return false; // getter / computed property

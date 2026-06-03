@@ -1,4 +1,4 @@
-# MIR-3 Ownership Architecture Spec
+# MIR Ownership Architecture Spec
 
 ## Instruction Contracts
 

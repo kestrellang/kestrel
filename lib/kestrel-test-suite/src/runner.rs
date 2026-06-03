@@ -34,11 +34,11 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift_3::CodegenOptions {
+    let options = kestrel_codegen_cranelift::CodegenOptions {
         c_sources: stdlib_c_sources(),
         ..Default::default()
     };
-    let link_result = compiler.compile_and_link3(&exe_path, &options).map_err(|e| format!("{e}"));
+    let link_result = compiler.compile_and_link(&exe_path, &options).map_err(|e| format!("{e}"));
     if let Err(e) = link_result {
         let mut msg = format!("codegen/link failed: {e}");
         let diagnostics = compiler.diagnostics();

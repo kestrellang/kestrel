@@ -9,7 +9,7 @@ use std::cell::OnceCell;
 use kestrel_compiler::{Compiler, SourceText};
 use kestrel_compiler_driver::{AnalyzeSummary, CompilerDriver, InferSummary};
 use kestrel_hecs::Entity;
-use kestrel_mir_3::MirModule;
+use kestrel_mir::MirModule;
 
 use crate::diagnostic_matcher::{
     self, TestDiagnostic, TestSeverity, from_analyze_diagnostics_with_source,
@@ -119,10 +119,10 @@ impl TestCompiler {
         result
     }
 
-    /// Lower to MIR-3 (OSSA). Runs inference first if needed.
+    /// Lower to MIR (OSSA). Runs inference first if needed.
     pub fn mir(&self) -> Result<MirModule, String> {
         self.infer();
-        self.compiler.lower_to_mir3().map_err(|e| format!("MIR lowering failed: {e}"))
+        self.compiler.lower_to_mir().map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
     /// Compile, link, and run. Returns the run result.
@@ -280,7 +280,7 @@ impl TestCompiler {
             Ok(m) => m,
             Err(e) => panic!("{e}"),
         };
-        let mir_text = kestrel_mir_3::display::display_module(&mir);
+        let mir_text = kestrel_mir::display::display_module(&mir);
         if !mir_text.contains(needle) {
             panic!(
                 "Expected MIR to contain '{}'\n\nActual MIR:\n{}",

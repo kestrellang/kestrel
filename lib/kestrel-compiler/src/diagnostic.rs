@@ -290,7 +290,7 @@ impl ToDiagnostic for ResolvedInferError<'_> {
     }
 }
 
-// ===== MIR2 diagnostics =====
+// ===== MIR diagnostics =====
 
 /// Resolve a span for a diagnostic: prefer the provided span, fall back to
 /// the entity's DeclSpan from the World, then to a synthetic span.
@@ -304,10 +304,8 @@ fn resolve_span(span: Option<&Span>, entity: Entity, world: &World) -> Span {
         .unwrap_or_else(|| Span::synthetic(0))
 }
 
-// ===== MIR-3 diagnostics =====
-
-pub fn mir3_verify_error_to_diagnostic(
-    error: &kestrel_mir_3::verify::VerifyError,
+pub fn mir_verify_error_to_diagnostic(
+    error: &kestrel_mir::verify::VerifyError,
     world: &World,
 ) -> Diagnostic<usize> {
     let span = resolve_span(error.span.as_ref(), error.entity, world);
@@ -331,9 +329,9 @@ pub fn mir3_verify_error_to_diagnostic(
         ])
 }
 
-pub fn mir3_mono_verify_error_to_diagnostic(
-    error: &kestrel_mir_3::mono::verify::MonoVerifyError,
-    module: &kestrel_mir_3::mono::MonoModule,
+pub fn mir_mono_verify_error_to_diagnostic(
+    error: &kestrel_mir::mono::verify::MonoVerifyError,
+    module: &kestrel_mir::mono::MonoModule,
     world: &World,
 ) -> Diagnostic<usize> {
     let func = &module.functions[error.func_idx];

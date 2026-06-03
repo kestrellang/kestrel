@@ -874,10 +874,10 @@ dependencies = [
  "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-codegen",
- "kestrel-codegen-cranelift-3",
+ "kestrel-codegen-cranelift",
  "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-mir-3",
+ "kestrel-mir",
  "kestrel-reporting",
 ]
 
@@ -928,7 +928,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-codegen-cranelift-3"
+name = "kestrel-codegen-cranelift"
 version = "0.16.0"
 dependencies = [
  "cranelift-codegen",
@@ -939,7 +939,7 @@ dependencies = [
  "indexmap",
  "kestrel-codegen",
  "kestrel-hecs",
- "kestrel-mir-3",
+ "kestrel-mir",
  "target-lexicon 0.12.16",
 ]
 
@@ -951,14 +951,14 @@ dependencies = [
  "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-codegen",
- "kestrel-codegen-cranelift-3",
+ "kestrel-codegen-cranelift",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
  "kestrel-lexer",
- "kestrel-mir-3",
- "kestrel-mir-lower-3",
+ "kestrel-mir",
+ "kestrel-mir-lower",
  "kestrel-name-res",
  "kestrel-parser",
  "kestrel-reporting",
@@ -1065,7 +1065,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-mir-3"
+name = "kestrel-mir"
 version = "0.16.0"
 dependencies = [
  "indexmap",
@@ -1076,20 +1076,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-mir-lower-3"
+name = "kestrel-mir-lower"
 version = "0.16.0"
 dependencies = [
  "indexmap",
  "kestrel-ast",
  "kestrel-ast-builder",
  "kestrel-codegen",
- "kestrel-codegen-cranelift-3",
+ "kestrel-codegen-cranelift",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
- "kestrel-mir-3",
+ "kestrel-mir",
  "kestrel-name-res",
  "kestrel-pattern-matching",
  "kestrel-reporting",
@@ -1180,11 +1180,11 @@ dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
  "kestrel-ast-builder",
- "kestrel-codegen-cranelift-3",
+ "kestrel-codegen-cranelift",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",
- "kestrel-mir-3",
+ "kestrel-mir",
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-type-infer",

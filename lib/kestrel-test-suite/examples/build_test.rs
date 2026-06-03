@@ -81,14 +81,14 @@ fn main() {
     let shim = std_dir.join("io/libc_shims.c");
     let c_sources = if shim.exists() { vec![shim] } else { vec![] };
 
-    let options = kestrel_codegen_cranelift_3::CodegenOptions {
+    let options = kestrel_codegen_cranelift::CodegenOptions {
         libraries,
         c_sources,
         ..Default::default()
     };
     tc.compiler()
-        .compile_and_link3(Path::new(&out_path), &options)
-        .expect("compile_and_link3 failed");
+        .compile_and_link(Path::new(&out_path), &options)
+        .expect("compile_and_link failed");
 
     eprintln!("built: {}", out_path);
 }

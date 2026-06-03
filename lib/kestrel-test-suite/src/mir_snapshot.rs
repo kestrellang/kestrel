@@ -6,13 +6,13 @@
 
 use std::path::Path;
 
-use kestrel_mir_3::MirModule;
-use kestrel_mir_3::display::{display_module, display_module_filtered};
+use kestrel_mir::MirModule;
+use kestrel_mir::display::{display_module, display_module_filtered};
 
 /// Check the MIR output against a golden snapshot file.
 ///
 /// - `test_path`: path to the `.ks` test file (snapshot stored alongside)
-/// - `mir`: the lowered MIR-3 (OSSA) module
+/// - `mir`: the lowered MIR (OSSA) module
 /// - `filter`: optional function-name substring to restrict output to
 /// - `snapshot_name`: optional override for the snapshot filename
 pub fn check_mir_snapshot(
