@@ -1,14 +1,9 @@
-func Test.example() -> ()
-{
-    locals:
-        %o: Test.Outer
-        %_t0: Test.Inner
-        %_t1: Test.Outer
+; function: Test.example
+bb0:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = struct Test.Inner { .0: %v0 }  // @owned Test.Inner
+    %v2 = struct Test.Outer { .0: %v1 }  // @owned Test.Outer
+    %v3 = literal ()  // @owned ()
+    destroy_value %v2
+    return %v3
 
-    bb0:
-        %_t0 = construct Test.Inner { x: i64.literal 1 }
-        %_t1 = construct Test.Outer { inner: move %_t0 }
-        %self = move %_t1
-        call Test.Outer.deinit(ref var %self)
-        return ()
-}

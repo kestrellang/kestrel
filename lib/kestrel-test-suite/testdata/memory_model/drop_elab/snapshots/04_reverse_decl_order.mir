@@ -1,17 +1,11 @@
-func Test.example() -> ()
-{
-    locals:
-        %a: Test.Handle
-        %b: Test.Handle
-        %_t0: Test.Handle
-        %_t1: Test.Handle
+; function: Test.example
+bb0:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
+    %v2 = literal i64 2  // @owned Int64
+    %v3 = struct Test.Handle { .0: %v2 }  // @owned Test.Handle
+    %v4 = literal ()  // @owned ()
+    destroy_value %v3
+    destroy_value %v1
+    return %v4
 
-    bb0:
-        %_t0 = construct Test.Handle { fd: i64.literal 1 }
-        %self = move %_t0
-        %_t1 = construct Test.Handle { fd: i64.literal 2 }
-        %b = move %_t1
-        call Test.Handle.deinit(ref var %b)
-        call Test.Handle.deinit(ref var %self)
-        return ()
-}
