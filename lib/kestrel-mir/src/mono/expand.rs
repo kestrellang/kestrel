@@ -683,32 +683,63 @@ fn expand_function(
                     let operand = *operand;
 
                     // Tuples have no nominal clone shim — deep-clone each member
-                    // inline. The operand is @guaranteed in the real cases (a
-                    // `PtrRead` result, as in `Pointer.read`, or a `StructExtract`
-                    // field in a clone shim); leaving it as a bitwise alias would
-                    // double-free the cloned members once their destructors run.
-                    let (vty, is_guaranteed_tuple) = {
+                    // inline (the copy-side mirror of the DestroyValue/DestroyAddr
+                    // tuple arms). A bitwise alias would double-free the cloned
+                    // members once their destructors run.
+                    //
+                    // A @guaranteed tuple (ByRef: a `PtrRead`/`StructExtract`
+                    // projection) is cloned in place. An @owned tuple must be
+                    // cloned just the same — e.g. `pair = copy_value owned_pair`
+                    // where the original is still live and dropped — but
+                    // `emit_clone_recursive` projects members ByRef, so it needs a
+                    // @guaranteed operand. Borrow the owned tuple first:
+                    // `BeginBorrow` on an @owned aggregate is identity (the value
+                    // is already an address), so the view is free, and the
+                    // original stays @owned for its own later drop. Only tuples
+                    // that actually need dropping are cloned; a trivial @owned
+                    // tuple keeps the cheap alias below (its DestroyValue is a
+                    // no-op, so aliasing can't double-free). Mirrors the destroy
+                    // side's `ty_needs_drop` gate exactly.
+                    let (vty, ownership) = {
                         let vd = &body.values[operand.index()];
-                        (
-                            vd.ty,
-                            vd.ownership == Ownership::Guaranteed
-                                && matches!(ty_arena.get(vd.ty), MirTy::Tuple(_)),
-                        )
+                        (vd.ty, vd.ownership)
                     };
-                    if is_guaranteed_tuple {
+                    if matches!(ty_arena.get(vty), MirTy::Tuple(_)) {
                         let src = remap_value(operand, &value_remap);
-                        emit_clone_recursive(
-                            body,
-                            ty_arena,
-                            clone_lookup,
-                            skip_clone_nominal,
-                            src,
-                            vty,
-                            result,
-                            &inst.span,
-                            &mut new_insts,
-                        );
-                        continue;
+                        if ownership == Ownership::Guaranteed {
+                            emit_clone_recursive(
+                                body,
+                                ty_arena,
+                                clone_lookup,
+                                skip_clone_nominal,
+                                src,
+                                vty,
+                                result,
+                                &inst.span,
+                                &mut new_insts,
+                            );
+                            continue;
+                        } else if ty_needs_drop(ty_arena, shim_lookup, vty) {
+                            let borrow = body.alloc_value(ValueDef::guaranteed(vty, src));
+                            new_insts.push(Instruction::new(InstKind::BeginBorrow {
+                                result: borrow,
+                                operand: src,
+                            }));
+                            emit_clone_recursive(
+                                body,
+                                ty_arena,
+                                clone_lookup,
+                                skip_clone_nominal,
+                                borrow,
+                                vty,
+                                result,
+                                &inst.span,
+                                &mut new_insts,
+                            );
+                            new_insts
+                                .push(Instruction::new(InstKind::EndBorrow { operand: borrow }));
+                            continue;
+                        }
                     }
 
                     let value_def = &body.values[operand.index()];
