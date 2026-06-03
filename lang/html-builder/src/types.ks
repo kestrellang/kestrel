@@ -16,41 +16,66 @@ func escapeHtml(s: String) -> String {
     out
 }
 
-// A fragment of escaped HTML content.
+// A fragment of HTML content, held as an ordered list of pre-rendered string
+// pieces. Building a document (el/vel/+/append) only moves piece *handles*
+// between lists — no piece's bytes are copied until render() assembles them
+// into one buffer in a single pass. This makes a deeply nested page O(total
+// size); the previous single-String representation built bottom-up via
+// "<tag>" + inner + "</tag>", which re-copied the accumulated inner HTML at
+// every nesting level — O(depth × size).
 public struct Document: Addable, Cloneable, Defaultable {
     type Output = Document
 
-    var value: String
+    var parts: Array[String]
 
     public static var zero: Document { get { Document() } }
 
     public init() {
-        self.value = String();
+        self.parts = Array[String]();
     }
 
     public init(capacity: Int64) {
-        self.value = String(capacity: capacity);
+        // `capacity` was a byte hint for the old single-String storage. With the
+        // fragment list the byte buffer is sized once, in render(); kept only for
+        // API compatibility.
+        self.parts = Array[String]();
     }
 
-    // Wraps a pre-rendered HTML string. Internal — callers outside
+    // Wraps a single pre-rendered HTML fragment. Internal — callers outside
     // the module must go through text() or raw().
     init(raw value: String) {
-        self.value = value;
+        self.parts = Array[String]();
+        self.parts.append(value);
     }
 
     public consuming func add(consuming other: Document) -> Document {
         var result = self;
-        result.value.append(other.value);
+        result.append(other);
         result
     }
 
     public mutating func append(other: Document) {
-        self.value.append(other.value);
+        self.parts.append(contentsOf: other.parts);
     }
 
-    public func render() -> String { self.value }
+    // Assembles every fragment into one buffer, sized exactly once.
+    public func render() -> String {
+        var total: Int64 = 0;
+        for p in self.parts.iter() {
+            total = total + p.byteCount
+        };
+        var out = String(capacity: total);
+        for p in self.parts.iter() {
+            out.append(p)
+        };
+        out
+    }
 
-    public func clone() -> Document { Document(raw: self.value.clone()) }
+    public func clone() -> Document {
+        var copy = Document();
+        copy.parts = self.parts.clone();
+        copy
+    }
 }
 
 // A single HTML attribute (e.g. ` class="foo"`).
