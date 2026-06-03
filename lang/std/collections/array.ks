@@ -117,14 +117,27 @@ struct ArrayStorage[T]: Cloneable {
         }
     }
 
-    /// Frees the underlying buffer.
+    /// Drops every live element, then frees the underlying buffer.
     ///
-    /// Runs when the last `RcBox` reference to this storage drops. Skips
-    /// the deallocation entirely when `cap == 0` (no buffer was ever
-    /// allocated). Element destructors are not invoked individually here —
-    /// `T` is treated as trivially droppable at the storage level.
+    /// Runs when the last `RcBox` reference to this storage drops (COW
+    /// guarantees the buffer is uniquely owned at that point, so each
+    /// element is dropped exactly once — no double-free). Skips
+    /// everything when `cap == 0` (no buffer was ever allocated).
+    ///
+    /// The `0..<len` loop runs `T`'s destructor in place on each
+    /// initialized slot; slots `len..<cap` are uninitialized capacity and
+    /// must not be touched. For a trivially-droppable `T` (scalars), the
+    /// per-element `dropInPlace` lowers to a no-op. Skipping element
+    /// destructors here (the previous behavior) leaked the owned heap of
+    /// every non-trivial element, e.g. the `String`s inside an
+    /// `Array[(String, String)]`.
     deinit {
         if self.cap > 0 {
+            var i: Int64 = 0;
+            while i < self.len {
+                self.ptr.offset(by: i).dropInPlace();
+                i = i + 1
+            };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
@@ -569,13 +582,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + 1);
-        // Mutate the storage in place — no per-append buffer clone (O(1)
-        // amortized). `makeUnique`/`grow` run first (they may reallocate);
-        // `modify` then writes the element and bumps `len` directly on the heap.
-        self.storage.modify { (mutating s) in
-            s.ptr.offset(by: s.len).write(element);
-            s.len = s.len + 1
-        }
+        // Reserve the slot and bump `len` in place (O(1) amortized). The
+        // closure returns the slot pointer and captures NOTHING — capturing
+        // `element` here would clone a Cloneable value into the closure env and
+        // orphan the original (one leaked element per append). The element is
+        // moved into the slot *outside* the closure, so it is never cloned.
+        let slot = self.storage.modify { (mutating s) in
+            let p = s.ptr.offset(by: s.len);
+            s.len = s.len + 1;
+            p
+        };
+        slot.write(element)
     }
 
     /// Appends every element of `other` to the end of this array.

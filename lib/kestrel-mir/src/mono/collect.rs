@@ -490,49 +490,72 @@ impl<'a> CollectionContext<'a> {
 
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
     fn discover_drop_shim(&mut self, ty: TyId, parent_self: Option<TyId>) {
-        if let MirTy::Named { entity, type_args } = self.arena.get(ty) {
-            let entity = *entity;
-            let type_args = type_args.clone();
-            if let Some(shim) = self
-                .functions
-                .values()
-                .find(|f| matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity))
-            {
-                let key = InstantiationKey::new(shim.entity, type_args, parent_self);
-                if self.seen.insert(key.clone()) {
-                    self.queue.push_back(key);
+        match self.arena.get(ty) {
+            MirTy::Named { entity, type_args } => {
+                let entity = *entity;
+                let type_args = type_args.clone();
+                if let Some(shim) = self.functions.values().find(
+                    |f| matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity),
+                ) {
+                    let key = InstantiationKey::new(shim.entity, type_args, parent_self);
+                    if self.seen.insert(key.clone()) {
+                        self.queue.push_back(key);
+                    }
                 }
-            }
+            },
+            // A tuple has no nominal entity (no `__drop$tuple`), so its members'
+            // shims must be discovered through it — otherwise a resource type
+            // used *only* inside a tuple never gets its drop shim instantiated.
+            MirTy::Tuple(elems) => {
+                let elems = elems.clone();
+                for e in elems {
+                    self.discover_drop_shim(e, parent_self);
+                }
+            },
+            _ => {},
         }
     }
 
     /// If `ty` is a Named type with a clone shim, enqueue the shim instantiation.
+    /// Tuples are recursed into so their members' clone shims are discovered.
     fn discover_clone_shim(&mut self, ty: TyId, parent_self: Option<TyId>) {
-        if let MirTy::Named { entity, type_args } = self.arena.get(ty) {
-            let entity = *entity;
-            let type_args = type_args.clone();
-            // Find clone shim or user clone method
-            let clone_func = self
-                .functions
-                .values()
-                .find(
-                    |f| matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity),
-                )
-                .or_else(|| {
-                    // Match a user `clone()` by its self-param nominal: an
-                    // `extend`-defined clone doesn't reliably set `parent` to
-                    // the extended type, so `parent == entity` would miss it
-                    // (leaving the clone uncollected and the value bit-copied).
-                    self.functions
-                        .values()
-                        .find(|f| f.clone_method_self_nominal(self.arena) == Some(entity))
-                });
-            if let Some(func) = clone_func {
-                let key = InstantiationKey::new(func.entity, type_args, parent_self);
-                if self.seen.insert(key.clone()) {
-                    self.queue.push_back(key);
+        match self.arena.get(ty) {
+            MirTy::Named { entity, type_args } => {
+                let entity = *entity;
+                let type_args = type_args.clone();
+                // Find clone shim or user clone method
+                let clone_func = self
+                    .functions
+                    .values()
+                    .find(
+                        |f| matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity),
+                    )
+                    .or_else(|| {
+                        // Match a user `clone()` by its self-param nominal: an
+                        // `extend`-defined clone doesn't reliably set `parent` to
+                        // the extended type, so `parent == entity` would miss it
+                        // (leaving the clone uncollected and the value bit-copied).
+                        self.functions
+                            .values()
+                            .find(|f| f.clone_method_self_nominal(self.arena) == Some(entity))
+                    });
+                if let Some(func) = clone_func {
+                    let key = InstantiationKey::new(func.entity, type_args, parent_self);
+                    if self.seen.insert(key.clone()) {
+                        self.queue.push_back(key);
+                    }
                 }
-            }
+            },
+            // A tuple has no nominal entity, so its members' clone shims must be
+            // discovered through it — otherwise a resource type used *only*
+            // inside a tuple is bit-copied (the shim never gets instantiated).
+            MirTy::Tuple(elems) => {
+                let elems = elems.clone();
+                for e in elems {
+                    self.discover_clone_shim(e, parent_self);
+                }
+            },
+            _ => {},
         }
     }
 }

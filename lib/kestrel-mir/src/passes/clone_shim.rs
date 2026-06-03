@@ -611,19 +611,33 @@ fn has_unresolvable_fields_enum(e: &crate::item::enum_def::EnumDef, arena: &TyAr
     })
 }
 
-/// A struct needs a clone shim only if it has at least one Named or TypeParam
-/// field — those might need deep cloning. All-primitive structs are trivially
-/// bitwise-copyable and don't need a shim.
+/// True if a field of type `ty` might need deep cloning: a Named or TypeParam
+/// type, or a tuple that (recursively) contains one. A tuple has no nominal
+/// entity of its own, so a struct/enum whose only non-trivial field is a tuple
+/// of resources (e.g. `(String, String)`) must still get a clone shim — its
+/// `CopyValue` is then deep-cloned element-wise during expand.
+fn ty_needs_clone_shim(arena: &TyArena, ty: TyId) -> bool {
+    match arena.get(ty) {
+        MirTy::Named { .. } | MirTy::TypeParam(_) => true,
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            elems.iter().any(|&e| ty_needs_clone_shim(arena, e))
+        },
+        _ => false,
+    }
+}
+
+/// A struct needs a clone shim only if it has at least one field that might
+/// need deep cloning (see [`ty_needs_clone_shim`]). All-primitive structs are
+/// trivially bitwise-copyable and don't need a shim.
 fn needs_clone_shim_struct(s: &crate::item::struct_def::StructDef, arena: &TyArena) -> bool {
-    s.fields
-        .iter()
-        .any(|f| matches!(arena.get(f.ty), MirTy::Named { .. } | MirTy::TypeParam(_)))
+    s.fields.iter().any(|f| ty_needs_clone_shim(arena, f.ty))
 }
 
 fn needs_clone_shim_enum(e: &crate::item::enum_def::EnumDef, arena: &TyArena) -> bool {
     e.cases.iter().any(|c| {
         c.payload_fields
             .iter()
-            .any(|f| matches!(arena.get(f.ty), MirTy::Named { .. } | MirTy::TypeParam(_)))
+            .any(|f| ty_needs_clone_shim(arena, f.ty))
     })
 }

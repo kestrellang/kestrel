@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::Entity;
 
+use crate::body::OssaBody;
 use crate::callee::Callee;
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::CopyBehavior;
@@ -291,6 +292,185 @@ fn is_drop_self(
     matches!(skip_self, Some((e, args)) if *e == entity && args.as_slice() == type_args)
 }
 
+/// True when destroying a value of `ty` requires running a destructor: a Named
+/// type with a registered drop shim, or a tuple with at least one element that
+/// itself needs dropping. Mirrors the type kinds the destroy arms handle.
+fn ty_needs_drop(
+    ty_arena: &crate::ty::TyArena,
+    shim_lookup: &DropShimLookup,
+    ty: TyId,
+) -> bool {
+    match ty_arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            shim_lookup.contains_key(&(*entity, type_args.clone()))
+        },
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            elems
+                .iter()
+                .any(|&e| ty_needs_drop(ty_arena, shim_lookup, e))
+        },
+        _ => false,
+    }
+}
+
+/// Emit the instructions that destroy `value` (of type `ty`) into `out`,
+/// recursing through tuple members. Named-with-shim → consuming shim call;
+/// tuple → `DestructureTuple` then each member destroyed in turn; trivial →
+/// nothing. Tuples have no nominal entity, so they never get a `__drop$T`
+/// shim — their members must be expanded inline here, or every resource-owning
+/// tuple member (e.g. the `String`s in `Array[(String, String)]`) leaks. This
+/// is the post-mono analog of a struct/enum drop shim's per-field drops.
+fn emit_destroy_recursive(
+    body: &mut OssaBody,
+    ty_arena: &crate::ty::TyArena,
+    shim_lookup: &DropShimLookup,
+    skip_self: Option<&(Entity, Vec<TyId>)>,
+    value: ValueId,
+    ty: TyId,
+    span: &Option<kestrel_span::Span>,
+    out: &mut Vec<Instruction>,
+) {
+    match ty_arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            if is_drop_self(skip_self, entity, &type_args) {
+                return;
+            }
+            if let Some(&shim_id) = shim_lookup.get(&(entity, type_args)) {
+                out.push(Instruction {
+                    kind: InstKind::Call {
+                        result: None,
+                        callee: Callee::Resolved(shim_id),
+                        args: vec![CallArg {
+                            value,
+                            convention: ParamConvention::Consuming,
+                        }],
+                    },
+                    span: span.clone(),
+                });
+            }
+        },
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            if !elems
+                .iter()
+                .any(|&e| ty_needs_drop(ty_arena, shim_lookup, e))
+            {
+                return;
+            }
+            let results: Vec<ValueId> = elems
+                .iter()
+                .map(|&e| body.alloc_value(ValueDef::owned(e)))
+                .collect();
+            out.push(Instruction {
+                kind: InstKind::DestructureTuple {
+                    results: results.clone(),
+                    operand: value,
+                },
+                span: span.clone(),
+            });
+            for (i, &e) in elems.iter().enumerate() {
+                emit_destroy_recursive(body, ty_arena, shim_lookup, skip_self, results[i], e, span, out);
+            }
+        },
+        _ => {},
+    }
+}
+
+/// Emit the instructions that deep-clone `operand` (a **@guaranteed** value of
+/// type `ty`) into the @owned `result`, recursing through tuple members. This
+/// is the copy-side mirror of [`emit_destroy_recursive`] and the inline analog
+/// of a struct/enum clone shim:
+/// - Named with a clone shim → `BeginBorrow` + `Call(clone)` + `EndBorrow`
+///   (the exact form the `CopyValue` Named arm emits).
+/// - Tuple → `TupleExtract` each element (a @guaranteed projection of the
+///   @guaranteed operand), recursively clone it, then rebuild a `Tuple`.
+/// - Trivial (primitive, or Named without a clone shim) → keep a `CopyValue`,
+///   which codegen lowers to a correct bitwise load.
+///
+/// Without the tuple arm, `CopyValue` on a tuple is left as a bitwise alias
+/// (codegen loads the ByRef), so a cloned `Array[(String, String)]` (COW
+/// clone / grow via `read()`) aliases the inner `String`s without bumping their
+/// refcount — which double-frees once the element destructors run.
+fn emit_clone_recursive(
+    body: &mut OssaBody,
+    ty_arena: &crate::ty::TyArena,
+    clone_lookup: &DropShimLookup,
+    skip_clone_nominal: Option<Entity>,
+    operand: ValueId,
+    ty: TyId,
+    result: ValueId,
+    span: &Option<kestrel_span::Span>,
+    out: &mut Vec<Instruction>,
+) {
+    match ty_arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            if skip_clone_nominal != Some(entity)
+                && let Some(&clone_id) = clone_lookup.get(&(entity, type_args))
+            {
+                let ptr_ty = ty_arena
+                    .find(|t| matches!(t, MirTy::Pointer(p) if *p == ty))
+                    .expect("Pointer type should be pre-interned for cloneable types");
+                let borrow_val = body.alloc_value(ValueDef::guaranteed(ptr_ty, operand));
+                out.push(Instruction::new(InstKind::BeginBorrow {
+                    result: borrow_val,
+                    operand,
+                }));
+                out.push(Instruction {
+                    kind: InstKind::Call {
+                        result: Some(result),
+                        callee: Callee::Resolved(clone_id),
+                        args: vec![CallArg {
+                            value: borrow_val,
+                            convention: ParamConvention::Borrow,
+                        }],
+                    },
+                    span: span.clone(),
+                });
+                out.push(Instruction::new(InstKind::EndBorrow {
+                    operand: borrow_val,
+                }));
+                return;
+            }
+            // Trivial Named (no clone shim): bitwise load is a correct copy.
+            out.push(Instruction {
+                kind: InstKind::CopyValue { result, operand },
+                span: span.clone(),
+            });
+        },
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            let mut cloned: Vec<ValueId> = Vec::with_capacity(elems.len());
+            for (i, &elem_ty) in elems.iter().enumerate() {
+                let elem = body.alloc_value(ValueDef::guaranteed(elem_ty, operand));
+                out.push(Instruction::new(InstKind::TupleExtract {
+                    result: elem,
+                    operand,
+                    index: i as u32,
+                }));
+                let cl = body.alloc_value(ValueDef::owned(elem_ty));
+                emit_clone_recursive(body, ty_arena, clone_lookup, skip_clone_nominal, elem, elem_ty, cl, span, out);
+                cloned.push(cl);
+            }
+            out.push(Instruction::new(InstKind::Tuple {
+                result,
+                elements: cloned,
+            }));
+        },
+        _ => {
+            // Primitive: bitwise load is a correct copy.
+            out.push(Instruction {
+                kind: InstKind::CopyValue { result, operand },
+                span: span.clone(),
+            });
+        },
+    }
+}
+
 /// Expand DestroyValue/CopyValue in a single function body.
 /// `skip_self`: if this function is the drop machinery (`deinit`/`__drop$T`) for
 /// a specific monomorphic type, DestroyValue on *that exact type* is removed
@@ -335,9 +515,9 @@ fn expand_function(
                         continue;
                     }
 
-                    let value_def = &body.values[operand.index()];
+                    let vty = body.values[operand.index()].ty;
 
-                    match ty_arena.get(value_def.ty) {
+                    match ty_arena.get(vty) {
                         MirTy::Named { entity, type_args } => {
                             // Skip only this shim's own self type — expanding it
                             // would recurse into __drop$Self. A payload that is a
@@ -356,25 +536,72 @@ fn expand_function(
                                             convention: ParamConvention::Consuming,
                                         }],
                                     },
-                                    span: inst.span,
+                                    span: inst.span.clone(),
                                 });
                             }
+                        },
+                        // Tuples have no nominal drop shim — destructure and drop
+                        // each member inline, recursing through nested tuples.
+                        MirTy::Tuple(_) => {
+                            let value = remap_value(operand, &value_remap);
+                            emit_destroy_recursive(
+                                body,
+                                ty_arena,
+                                shim_lookup,
+                                skip_self,
+                                value,
+                                vty,
+                                &inst.span,
+                                &mut new_insts,
+                            );
                         },
                         _ => {},
                     }
                 },
 
-                // DestroyAddr: load the value from the address, then call the drop shim.
-                // Expands to: take %tmp = *%addr; call __drop$T(%tmp)
+                // DestroyAddr: load the value from the address, then drop it.
+                // Expands to: take %tmp = *%addr; <destroy %tmp>. This is the
+                // path `lang.drop_in_place` lowers to — so dropping array
+                // elements (e.g. the `(String, String)` pairs in `Headers`)
+                // flows through here.
                 InstKind::DestroyAddr { address, ty } => {
                     let address = remap_value(*address, &value_remap);
                     let ty = *ty;
                     let span = inst.span.clone();
 
-                    if let MirTy::Named { entity, type_args } = ty_arena.get(ty) {
-                        if !is_drop_self(skip_self, *entity, type_args) {
-                            let key = (*entity, type_args.clone());
-                            if let Some(&shim_id) = shim_lookup.get(&key) {
+                    match ty_arena.get(ty) {
+                        MirTy::Named { entity, type_args } => {
+                            if !is_drop_self(skip_self, *entity, type_args) {
+                                let key = (*entity, type_args.clone());
+                                if let Some(&shim_id) = shim_lookup.get(&key) {
+                                    let tmp = body.alloc_value(ValueDef::owned(ty));
+                                    new_insts.push(Instruction {
+                                        kind: InstKind::Take {
+                                            result: tmp,
+                                            address,
+                                            ty,
+                                        },
+                                        span: span.clone(),
+                                    });
+                                    new_insts.push(Instruction {
+                                        kind: InstKind::Call {
+                                            result: None,
+                                            callee: Callee::Resolved(shim_id),
+                                            args: vec![CallArg {
+                                                value: tmp,
+                                                convention: ParamConvention::Consuming,
+                                            }],
+                                        },
+                                        span,
+                                    });
+                                }
+                            }
+                        },
+                        // Take the whole tuple by value, then destructure-and-drop
+                        // its members. Skip when nothing needs dropping so a
+                        // trivial tuple address isn't loaded for no reason.
+                        MirTy::Tuple(_) => {
+                            if ty_needs_drop(ty_arena, shim_lookup, ty) {
                                 let tmp = body.alloc_value(ValueDef::owned(ty));
                                 new_insts.push(Instruction {
                                     kind: InstKind::Take {
@@ -384,19 +611,19 @@ fn expand_function(
                                     },
                                     span: span.clone(),
                                 });
-                                new_insts.push(Instruction {
-                                    kind: InstKind::Call {
-                                        result: None,
-                                        callee: Callee::Resolved(shim_id),
-                                        args: vec![CallArg {
-                                            value: tmp,
-                                            convention: ParamConvention::Consuming,
-                                        }],
-                                    },
-                                    span,
-                                });
+                                emit_destroy_recursive(
+                                    body,
+                                    ty_arena,
+                                    shim_lookup,
+                                    skip_self,
+                                    tmp,
+                                    ty,
+                                    &span,
+                                    &mut new_insts,
+                                );
                             }
-                        }
+                        },
+                        _ => {},
                     }
                 },
 
@@ -454,6 +681,36 @@ fn expand_function(
                 InstKind::CopyValue { result, operand } => {
                     let result = *result;
                     let operand = *operand;
+
+                    // Tuples have no nominal clone shim — deep-clone each member
+                    // inline. The operand is @guaranteed in the real cases (a
+                    // `PtrRead` result, as in `Pointer.read`, or a `StructExtract`
+                    // field in a clone shim); leaving it as a bitwise alias would
+                    // double-free the cloned members once their destructors run.
+                    let (vty, is_guaranteed_tuple) = {
+                        let vd = &body.values[operand.index()];
+                        (
+                            vd.ty,
+                            vd.ownership == Ownership::Guaranteed
+                                && matches!(ty_arena.get(vd.ty), MirTy::Tuple(_)),
+                        )
+                    };
+                    if is_guaranteed_tuple {
+                        let src = remap_value(operand, &value_remap);
+                        emit_clone_recursive(
+                            body,
+                            ty_arena,
+                            clone_lookup,
+                            skip_clone_nominal,
+                            src,
+                            vty,
+                            result,
+                            &inst.span,
+                            &mut new_insts,
+                        );
+                        continue;
+                    }
+
                     let value_def = &body.values[operand.index()];
 
                     // Named type with a clone function → BeginBorrow + Call(clone) + EndBorrow
