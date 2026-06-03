@@ -105,13 +105,8 @@ public struct TimeZone: Equatable, Hashable, Formattable {
 
     public var name: String { ... }
 
-    // --- Query ---
-
-    // Whether a civil datetime is ambiguous (DST fold) in this timezone.
-    public func isAmbiguous(dateTime: DateTime) -> Bool { ... }
-
-    // Whether a civil datetime is nonexistent (DST gap) in this timezone.
-    public func isNonexistent(dateTime: DateTime) -> Bool { ... }
+    // DST-hazard queries live on DateTime: see `DateTime.isAmbiguous(in:)`
+    // and `DateTime.isNonexistent(in:)`.
 
     // --- Equatable ---
 
@@ -185,7 +180,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable {
 
     // --- Construction ---
 
-    public init(year year: Int64, month month: Int64, day day: Int64) throws DateError { ... }
+    public init(year year: Int64, month month: Int64, day day: Int64) throws DateTimeError { ... }
     public static func unchecked(year year: Int64, month month: Int64, day day: Int64) -> Date { ... }
     public static func today() -> Date { ... }
     public static func today(in zone: TimeZone) -> Date { ... }
@@ -257,7 +252,7 @@ public struct Time: Equatable, Comparable, Hashable, Formattable {
     // --- Construction ---
 
     public init(hour hour: Int64, minute minute: Int64 = 0, second second: Int64 = 0,
-                nanosecond nanosecond: Int64 = 0) throws DateError { ... }
+                nanosecond nanosecond: Int64 = 0) throws DateTimeError { ... }
     public static var midnight: Time { ... }
     public static var noon: Time { ... }
 
@@ -271,7 +266,10 @@ public struct Time: Equatable, Comparable, Hashable, Formattable {
     // --- Arithmetic ---
 
     // Wraps at day boundaries (23:59:59 + 1s = 00:00:00). Days are lost.
-    public func advanced(by duration: Duration) -> Time { ... }
+    public func advancedWrapping(by duration: Duration) -> Time { ... }
+
+    // Returns nil if the result would cross midnight (leave [00:00, 24:00)).
+    public func advancedChecked(by duration: Duration) -> Time? { ... }
 
     // Wraps at day boundaries and reports how many days overflowed.
     public func advancedWithOverflow(by duration: Duration) -> (Time, Int64) { ... }
@@ -311,7 +309,7 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable {
 
     public init(year year: Int64, month month: Int64, day day: Int64,
                 hour hour: Int64 = 0, minute minute: Int64 = 0,
-                second second: Int64 = 0, nanosecond nanosecond: Int64 = 0) throws DateError { ... }
+                second second: Int64 = 0, nanosecond nanosecond: Int64 = 0) throws DateTimeError { ... }
     public init(date date: Date, time time: Time) { ... }
 
     // --- Properties ---
@@ -354,10 +352,13 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable {
     public func duration(to other: DateTime) -> Duration { ... }
     public func period(to other: DateTime) -> Period { ... }
 
-    // --- Query ---
+    // --- Query (DST hazards in the given timezone) ---
 
-    // Whether this civil datetime is ambiguous (DST fold) in the given timezone.
+    // True if this wall-clock time occurs twice (a DST fall-back fold).
     public func isAmbiguous(in zone: TimeZone) -> Bool { ... }
+
+    // True if this wall-clock time never occurs (a DST spring-forward gap).
+    public func isNonexistent(in zone: TimeZone) -> Bool { ... }
 
     // --- Conversion ---
 
@@ -393,7 +394,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable {
                 hour hour: Int64 = 0, minute minute: Int64 = 0,
                 second second: Int64 = 0, nanosecond nanosecond: Int64 = 0,
                 in zone: TimeZone,
-                disambiguation d: Disambiguation = .Compatible) throws DateError { ... }
+                disambiguation d: Disambiguation = .Compatible) throws DateTimeError { ... }
     public init(instant instant: Instant, in zone: TimeZone) { ... }
     public init(dateTime dateTime: DateTime, in zone: TimeZone,
                 disambiguation d: Disambiguation = .Compatible) { ... }
@@ -453,7 +454,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable {
 
     // --- Timezone Conversion (preserves instant, recomputes civil time) ---
 
-    public func inZone(zone: TimeZone) -> ZonedDateTime { ... }
+    public func inTimeZone(zone: TimeZone) -> ZonedDateTime { ... }
 
     // --- Rounding ---
 
@@ -527,7 +528,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable {
     public func isoString() -> String { ... }
 
     // "2h 30m 5s" (human-readable)
-    public func friendlyString() -> String { ... }
+    public func humanString() -> String { ... }
 
     // --- Parsing ---
 
@@ -604,7 +605,7 @@ public struct Period: Equatable, Hashable, Formattable {
     public func isoString() -> String { ... }
 
     // "1y 6mo 10d" (human-readable)
-    public func friendlyString() -> String { ... }
+    public func humanString() -> String { ... }
 }
 
 // ============================================================================
@@ -769,7 +770,7 @@ public struct Format: ExpressibleByStringInterpolation, Cloneable {
 // ERRORS
 // ============================================================================
 
-public enum DateError {
+public enum DateTimeError {
     case InvalidDate(year: Int64, month: Int64, day: Int64)
     case InvalidTime(hour: Int64, minute: Int64, second: Int64)
 }
@@ -794,7 +795,7 @@ public enum ParseError {
 // let tz = TimeZone.find("America/New_York")!;
 // let zoned = meeting.toZoned(in: tz);                     // Compatible (default), never fails
 // let utcInstant = zoned.instant;
-// let inTokyo = zoned.inZone(TimeZone.find("Asia/Tokyo")!);
+// let inTokyo = zoned.inTimeZone(TimeZone("Asia/Tokyo")!);
 
 // --- Formatting (string interpolation) ---
 // let fmt: Format = "\(.Year)-\(.Month)-\(.Day)";
@@ -840,13 +841,13 @@ public enum ParseError {
 // biweekly.days;                                           // 14
 // biweekly.weeks;                                          // 2 (computed)
 // Period(days: 14) == Period(weeks: 2);                    // true
-// p.friendlyString();                                      // "1y 6mo"
+// p.humanString();                                      // "1y 6mo"
 // p.isoString();                                           // "P1Y6M"
 
 // --- Duration ---
 // let timeout = Duration.minutes(90);
 // timeout.totalSeconds;                                    // 5400
-// timeout.friendlyString();                                // "1h 30m"
+// timeout.humanString();                                // "1h 30m"
 // timeout.isoString();                                     // "PT1H30M"
 // "\(timeout)";                                            // "PT1H30M" (Formattable default)
 // let half = timeout.multiplied(by: 0.5);                  // 45 minutes
@@ -861,7 +862,7 @@ public enum ParseError {
 
 // --- Time wrapping ---
 // let t = try Time(hour: 23, minute: 30);
-// let t2 = t.advanced(by: Duration.hours(2));              // 01:30 (wraps)
+// let t2 = t.advancedWrapping(by: Duration.hours(2));      // 01:30 (wraps)
 // let (t3, days) = t.advancedWithOverflow(by: Duration.hours(2));  // (01:30, 1)
 
 // --- Clock injection for testing ---

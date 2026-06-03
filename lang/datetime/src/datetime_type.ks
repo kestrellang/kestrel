@@ -10,7 +10,7 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
 
     public init(year year: Int64, month month: Int64, day day: Int64,
                 hour hour: Int64 = 0, minute minute: Int64 = 0,
-                second second: Int64 = 0, nanosecond nanosecond: Int64 = 0) throws DateError {
+                second second: Int64 = 0, nanosecond nanosecond: Int64 = 0) throws DateTimeError {
         // Validate both components via match/throw before assigning any field:
         // definite-init rejects a `try` early-return while fields are unset,
         // but an explicit `throw` (unwind) is allowed.
@@ -132,10 +132,16 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
         self.dateVal.period(to: other.dateVal)
     }
 
-    // --- Query ---
+    // --- Query (DST hazards for this wall-clock time in a given zone) ---
 
+    // True if this wall-clock time occurs twice in `zone` (a DST fall-back fold).
     public func isAmbiguous(in zone: TimeZone) -> Bool {
         zone.isAmbiguous(dateTime: self)
+    }
+
+    // True if this wall-clock time never occurs in `zone` (a DST spring-forward gap).
+    public func isNonexistent(in zone: TimeZone) -> Bool {
+        zone.isNonexistent(dateTime: self)
     }
 
     // --- Conversion ---

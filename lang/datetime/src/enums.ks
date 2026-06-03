@@ -91,7 +91,7 @@ public enum RoundMode: Equatable, Matchable {
     case Ceil
     case Floor
     case Expand
-    case Trunc
+    case Truncate
     case HalfExpand
     case HalfEven
 
@@ -100,7 +100,7 @@ public enum RoundMode: Equatable, Matchable {
             (.Ceil, .Ceil) => true,
             (.Floor, .Floor) => true,
             (.Expand, .Expand) => true,
-            (.Trunc, .Trunc) => true,
+            (.Truncate, .Truncate) => true,
             (.HalfExpand, .HalfExpand) => true,
             (.HalfEven, .HalfEven) => true,
             _ => false

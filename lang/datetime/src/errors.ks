@@ -1,6 +1,6 @@
 module datetime
 
-public enum DateError: Formattable {
+public enum DateTimeError: Formattable {
     case InvalidDate(year: Int64, month: Int64, day: Int64)
     case InvalidTime(hour: Int64, minute: Int64, second: Int64)
 

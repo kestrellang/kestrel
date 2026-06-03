@@ -11,9 +11,9 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
     // --- Construction ---
 
-    public init(year year: Int64, month month: Int64, day day: Int64) throws DateError {
+    public init(year year: Int64, month month: Int64, day day: Int64) throws DateTimeError {
         guard isValidDate(year, month, day) else {
-            throw DateError.InvalidDate(year: year, month: month, day: day);
+            throw DateTimeError.InvalidDate(year: year, month: month, day: day);
         }
         self.y = year;
         self.m = month;

@@ -18,13 +18,7 @@ public struct Period: Equatable, Hashable, Formattable, Cloneable {
         self.d = weeks * 7 + days;
     }
 
-    // Named factories (the bare names `years`/`months`/… are taken by the
-    // accessor properties below; Kestrel disallows a static func and an
-    // instance var sharing a name on the same type).
-    public static func ofYears(n: Int64) -> Period { Period(years: n) }
-    public static func ofMonths(n: Int64) -> Period { Period(years: 0, months: n) }
-    public static func ofWeeks(n: Int64) -> Period { Period(years: 0, months: 0, weeks: n) }
-    public static func ofDays(n: Int64) -> Period { Period(years: 0, months: 0, weeks: 0, days: n) }
+    // Construct via the labeled init: `Period(years: 5)`, `Period(weeks: 2)`, etc.
     public static var zero: Period { Period() }
 
     // --- Properties ---
@@ -125,7 +119,7 @@ public struct Period: Equatable, Hashable, Formattable, Cloneable {
         b.build()
     }
 
-    public func friendlyString() -> String {
+    public func humanString() -> String {
         var b = StringBuilder();
         if self.isNegative { b.append("-"); }
         let ay = self.yrs.abs();

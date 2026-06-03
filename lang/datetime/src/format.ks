@@ -78,7 +78,15 @@ public enum FormatComponent: Equatable, Cloneable {
         self.isEqual(to: other)
     }
 
-    public func clone() -> FormatComponent { self }
+    public func clone() -> FormatComponent {
+        // Only `.Literal` owns a heap payload (the String). A bare `self` here
+        // bit-copies (aliases) that String pointer and double-frees on drop, so
+        // clone it explicitly. Payload-less cases bit-copy safely.
+        match self {
+            .Literal(s) => .Literal(s.clone()),
+            _ => self
+        }
+    }
 }
 
 // Accumulator for building Format values via string interpolation.
@@ -103,6 +111,12 @@ public struct FormatAccumulator: Interpolatable, Cloneable {
 
     public mutating func appendInterpolation(value: FormatComponent) {
         self.components.append(value);
+    }
+
+    // Finalizer invoked by the string-interpolation desugar (`let f: Format = "..."`).
+    // Mirrors DefaultStringInterpolation.build(): reads the accumulated value out.
+    public func build() -> Format {
+        Format(components: self.components.clone())
     }
 }
 
@@ -331,7 +345,7 @@ struct ParsedFields: Cloneable {
     var is12Hour: Bool
 
     public func clone() -> ParsedFields {
-        var f = ParsedFields.empty();
+        var f = ParsedFields();
         f.year = self.year; f.month = self.month; f.day = self.day;
         f.hour = self.hour; f.minute = self.minute; f.second = self.second;
         f.nanosecond = self.nanosecond; f.offsetSeconds = self.offsetSeconds;
@@ -341,12 +355,12 @@ struct ParsedFields: Cloneable {
         f
     }
 
-    static func empty() -> ParsedFields {
-        var f = ParsedFields(year: 0, month: 1, day: 1, hour: 0, minute: 0,
-                             second: 0, nanosecond: 0, offsetSeconds: 0,
-                             hasOffset: false, tzName: "", hasTz: false,
-                             isPm: false, isAmPm: false, is12Hour: false);
-        f
+    init() {
+        self.year = 0; self.month = 1; self.day = 1;
+        self.hour = 0; self.minute = 0; self.second = 0;
+        self.nanosecond = 0; self.offsetSeconds = 0;
+        self.hasOffset = false; self.tzName = ""; self.hasTz = false;
+        self.isPm = false; self.isAmPm = false; self.is12Hour = false;
     }
 }
 
@@ -554,7 +568,7 @@ extend Date {
     public static func parse(from input: String, as fmt: Format) -> Date throws ParseError {
         let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
-        var fields = ParsedFields.empty();
+        var fields = ParsedFields();
         for comp in fmt.components {
             try parseComponent(bytes, pos: pos, component: comp, fields: fields);
         }
@@ -569,7 +583,7 @@ extend Time {
     public static func parse(from input: String, as fmt: Format) -> Time throws ParseError {
         let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
-        var fields = ParsedFields.empty();
+        var fields = ParsedFields();
         for comp in fmt.components {
             try parseComponent(bytes, pos: pos, component: comp, fields: fields);
         }
@@ -586,7 +600,7 @@ extend DateTime {
     public static func parse(from input: String, as fmt: Format) -> DateTime throws ParseError {
         let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
-        var fields = ParsedFields.empty();
+        var fields = ParsedFields();
         for comp in fmt.components {
             try parseComponent(bytes, pos: pos, component: comp, fields: fields);
         }
@@ -605,7 +619,7 @@ extend ZonedDateTime {
     public static func parse(from input: String, as fmt: Format) -> ZonedDateTime throws ParseError {
         let bytes: Array[UInt8] = Array(from: input.bytes);
         var pos: Int64 = 0;
-        var fields = ParsedFields.empty();
+        var fields = ParsedFields();
         for comp in fmt.components {
             try parseComponent(bytes, pos: pos, component: comp, fields: fields);
         }
@@ -618,7 +632,7 @@ extend ZonedDateTime {
                               hour: hour, minute: fields.minute, second: fields.second,
                               nanosecond: fields.nanosecond).mapErr { ParseError.InvalidValue("invalid datetime") };
         if fields.hasTz {
-            if let .Some(tz) = TimeZone.find(fields.tzName) {
+            if let .Some(tz) = TimeZone(fields.tzName) {
                 return .Ok(dt.toZoned(in: tz));
             }
         }

@@ -15,12 +15,12 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
     // --- Construction ---
 
     public init(hour hour: Int64, minute minute: Int64 = 0, second second: Int64 = 0,
-                nanosecond nanosecond: Int64 = 0) throws DateError {
+                nanosecond nanosecond: Int64 = 0) throws DateTimeError {
         guard hour >= 0 and hour < 24 and
               minute >= 0 and minute < 60 and
               second >= 0 and second < 60 and
               nanosecond >= 0 and nanosecond < 1_000_000_000 else {
-            throw DateError.InvalidTime(hour: hour, minute: minute, second: second);
+            throw DateTimeError.InvalidTime(hour: hour, minute: minute, second: second);
         }
         self.nanosSinceMidnight = hour * Time.NANOS_PER_HOUR +
                                   minute * Time.NANOS_PER_MINUTE +
@@ -56,12 +56,21 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
 
     // --- Arithmetic ---
 
-    // Wraps at day boundaries. 23:59:59 + 1s = 00:00:00.
-    public func advanced(by duration: Duration) -> Time {
+    // Wraps at day boundaries (23:59:59 + 1s = 00:00:00). The day rollover is
+    // discarded — use advancedChecked or advancedWithOverflow to observe it.
+    public func advancedWrapping(by duration: Duration) -> Time {
         let deltaNanos = duration.totalNanoseconds;
         let total = self.nanosSinceMidnight + deltaNanos;
         let wrapped = floorMod(total, Time.NANOS_PER_DAY);
         Time.fromNanos(wrapped)
+    }
+
+    // Returns nil if the result would leave the day — i.e. cross midnight in
+    // either direction (outside [00:00:00, 24:00:00)).
+    public func advancedChecked(by duration: Duration) -> Time? {
+        let total = self.nanosSinceMidnight + duration.totalNanoseconds;
+        if total < 0 or total >= Time.NANOS_PER_DAY { return .None; }
+        .Some(Time.fromNanos(total))
     }
 
     // Wraps and reports how many days overflowed.

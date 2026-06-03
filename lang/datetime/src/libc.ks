@@ -49,16 +49,17 @@ func kestrel_tz_transition_at(tzId: Int64, index: Int64,
 @extern(.C)
 func time(tloc: Pointer[Int64]) -> Int64
 
-public struct Tm: FFISafe {
-    public var sec: Int32
-    public var min: Int32
-    public var hour: Int32
-    public var mday: Int32
-    public var mon: Int32
-    public var year: Int32
-    public var wday: Int32
-    public var yday: Int32
-    public var isdst: Int32
+// Internal mirror of C `struct tm` — used only by `gmtime_r` below.
+struct Tm: FFISafe {
+    var sec: Int32
+    var min: Int32
+    var hour: Int32
+    var mday: Int32
+    var mon: Int32
+    var year: Int32
+    var wday: Int32
+    var yday: Int32
+    var isdst: Int32
 }
 
 @extern(.C)

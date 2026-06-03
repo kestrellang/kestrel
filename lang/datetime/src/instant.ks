@@ -78,7 +78,7 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
     }
 
     public func toZoned(in zone: TimeZone) -> ZonedDateTime {
-        ZonedDateTime.fromInstant(self, in: zone)
+        ZonedDateTime(instant: self, in: zone)
     }
 
     // --- Rounding ---

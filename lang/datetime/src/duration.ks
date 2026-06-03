@@ -148,7 +148,7 @@ public struct Duration: Equatable, Comparable, Hashable, Formattable, Cloneable 
         b.build()
     }
 
-    public func friendlyString() -> String {
+    public func humanString() -> String {
         let a = self.abs();
         let h = a.secs / 3600;
         let m = (a.secs % 3600) / 60;
@@ -318,7 +318,7 @@ func roundValue(value: Int64, divisor: Int64, mode: RoundMode) -> Int64 {
     match mode {
         .Floor => quot * divisor,
         .Ceil => (quot + 1) * divisor,
-        .Trunc => {
+        .Truncate => {
             if value >= 0 { quot * divisor } else { (quot + 1) * divisor }
         },
         .Expand => {

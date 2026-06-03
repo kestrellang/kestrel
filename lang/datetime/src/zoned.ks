@@ -10,13 +10,6 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
 
     // --- Internal construction ---
 
-    static func fromInstant(instant: Instant, in zone: TimeZone) -> ZonedDateTime {
-        var zdt = ZonedDateTime.stub();
-        zdt.inst = instant;
-        zdt.tz = zone;
-        zdt
-    }
-
     static func fromDateTime(dt: DateTime, in zone: TimeZone,
                               disambiguation d: Disambiguation = .Compatible) -> ZonedDateTime {
         let (naiveSecs, nanos) = dt.toEpochSecs();
@@ -27,7 +20,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
 
         if actualOffset1 == offset1 {
             // Clean match — no DST transition issue
-            return ZonedDateTime.fromInstant(Instant.raw(secs: epoch1, nanos: nanos), in: zone);
+            return ZonedDateTime(instant: Instant.raw(secs: epoch1, nanos: nanos), in: zone);
         }
 
         // We're near a transition. Try the actual offset.
@@ -36,7 +29,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
 
         if actualOffset2 == actualOffset1 {
             // Second guess is consistent
-            return ZonedDateTime.fromInstant(Instant.raw(secs: epoch2, nanos: nanos), in: zone);
+            return ZonedDateTime(instant: Instant.raw(secs: epoch2, nanos: nanos), in: zone);
         }
 
         // Ambiguous or gap — apply disambiguation
@@ -48,21 +41,15 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
                 // Gap: pick later. Fold: pick earlier.
                 if actualOffset1 > offset1 {
                     // Spring forward (gap) — pick later
-                    ZonedDateTime.fromInstant(Instant.raw(secs: laterEpoch, nanos: nanos), in: zone)
+                    ZonedDateTime(instant: Instant.raw(secs: laterEpoch, nanos: nanos), in: zone)
                 } else {
                     // Fall back (fold) — pick earlier
-                    ZonedDateTime.fromInstant(Instant.raw(secs: earlierEpoch, nanos: nanos), in: zone)
+                    ZonedDateTime(instant: Instant.raw(secs: earlierEpoch, nanos: nanos), in: zone)
                 }
             },
-            .Earlier => ZonedDateTime.fromInstant(Instant.raw(secs: earlierEpoch, nanos: nanos), in: zone),
-            .Later => ZonedDateTime.fromInstant(Instant.raw(secs: laterEpoch, nanos: nanos), in: zone)
+            .Earlier => ZonedDateTime(instant: Instant.raw(secs: earlierEpoch, nanos: nanos), in: zone),
+            .Later => ZonedDateTime(instant: Instant.raw(secs: laterEpoch, nanos: nanos), in: zone)
         }
-    }
-
-    // Placeholder for init chains
-    static func stub() -> ZonedDateTime {
-        var zdt = ZonedDateTime.fromInstant(Instant(secondsSinceEpoch: 0), in: TimeZone.utc);
-        zdt
     }
 
     // --- Public construction ---
@@ -71,7 +58,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
                 in zone: TimeZone,
                 hour hour: Int64 = 0, minute minute: Int64 = 0,
                 second second: Int64 = 0, nanosecond nanosecond: Int64 = 0,
-                disambiguation d: Disambiguation = .Compatible) throws DateError {
+                disambiguation d: Disambiguation = .Compatible) throws DateTimeError {
         // Validate via match/throw rather than `try`: a `try` early-return is
         // rejected by definite-init before all fields are set, but an explicit
         // `throw` (unwind) is allowed.
@@ -132,7 +119,7 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
     // --- Exact Arithmetic ---
 
     public func advanced(by duration: Duration) -> ZonedDateTime {
-        ZonedDateTime.fromInstant(self.inst.advanced(by: duration), in: self.tz)
+        ZonedDateTime(instant: self.inst.advanced(by: duration), in: self.tz)
     }
 
     // --- Calendar Arithmetic ---
@@ -196,14 +183,15 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
 
     // --- Timezone Conversion ---
 
-    public func inZone(zone: TimeZone) -> ZonedDateTime {
-        ZonedDateTime.fromInstant(self.inst, in: zone)
+    // Same instant, viewed in a different time zone (civil fields recomputed).
+    public func inTimeZone(zone: TimeZone) -> ZonedDateTime {
+        ZonedDateTime(instant: self.inst, in: zone)
     }
 
     // --- Rounding ---
 
     public func rounded(to unit: TimeUnit, mode mode: RoundMode = .HalfExpand) -> ZonedDateTime {
-        ZonedDateTime.fromInstant(self.inst.rounded(to: unit, mode: mode), in: self.tz)
+        ZonedDateTime(instant: self.inst.rounded(to: unit, mode: mode), in: self.tz)
     }
 
     // --- Protocol conformances ---
@@ -247,6 +235,6 @@ public struct ZonedDateTime: Equatable, Comparable, Hashable, Formattable, Clone
     }
 
     public func clone() -> ZonedDateTime {
-        ZonedDateTime.fromInstant(self.inst.clone(), in: self.tz)
+        ZonedDateTime(instant: self.inst.clone(), in: self.tz)
     }
 }
