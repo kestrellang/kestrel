@@ -15,10 +15,10 @@ kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-semantics = { path = "../kestrel-semantics" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-debug = { path = "../kestrel-debug" }
+kestrel-ast = { path = "../kestrel-ast" }
 
 [dev-dependencies]
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-parser = { path = "../kestrel-parser" }
-kestrel-ast = { path = "../kestrel-ast" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
 codespan-reporting.workspace = true

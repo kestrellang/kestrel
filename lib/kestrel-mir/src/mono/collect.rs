@@ -523,9 +523,9 @@ impl<'a> CollectionContext<'a> {
                     // `extend`-defined clone doesn't reliably set `parent` to
                     // the extended type, so `parent == entity` would miss it
                     // (leaving the clone uncollected and the value bit-copied).
-                    self.functions.values().find(|f| {
-                        f.clone_method_self_nominal(self.arena) == Some(entity)
-                    })
+                    self.functions
+                        .values()
+                        .find(|f| f.clone_method_self_nominal(self.arena) == Some(entity))
                 });
             if let Some(func) = clone_func {
                 let key = InstantiationKey::new(func.entity, type_args, parent_self);

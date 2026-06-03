@@ -242,10 +242,12 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             TyKind::Function {
                 params: pa,
                 ret: ra,
+                ..
             },
             TyKind::Function {
                 params: pb,
                 ret: rb,
+                ..
             },
         ) => {
             if pa.len() != pb.len() {
@@ -390,7 +392,7 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
             }
             Ok(())
         },
-        TySlot::Resolved(TyKind::Function { params, ret }) => {
+        TySlot::Resolved(TyKind::Function { params, ret, .. }) => {
             for &p in params {
                 occurs_check(ctx, tv, p)?;
             }

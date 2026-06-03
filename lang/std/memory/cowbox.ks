@@ -67,6 +67,17 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
         self.inner.setValue(value)
     }
 
+    /// In-place mutation barrier: ensures unique storage (deep-copying if
+    /// shared), then passes the heap value to `body` as a `mutating` argument
+    /// to mutate directly — no per-call clone or write-back. This is the O(1)
+    /// replacement for the `read()` → modify → `setValue()` dance.
+    public mutating func modify[R](body: (mutating T) -> R) -> R {
+        if self.inner.isUnique() == false {
+            self.inner = RcBox(self.inner.getValue().clone())
+        }
+        self.inner.modify(body)
+    }
+
     /// Returns a pointer to the wrapped value on the heap, bypassing
     /// the clone that `read()` / `getValue()` would create. Use this
     /// to read individual scalar fields without triggering `T.deinit`.

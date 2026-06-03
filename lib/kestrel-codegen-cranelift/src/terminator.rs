@@ -24,24 +24,28 @@ fn coerce_block_args(
     target: ir::Block,
     vals: &[Value],
 ) -> Vec<Value> {
-    let param_types: Vec<ir::Type> = builder.block_params(target)
+    let param_types: Vec<ir::Type> = builder
+        .block_params(target)
         .iter()
         .map(|&p| builder.func.dfg.value_type(p))
         .collect();
 
-    vals.iter().enumerate().map(|(i, &val)| {
-        let actual = builder.func.dfg.value_type(val);
-        let expected = param_types.get(i).copied().unwrap_or(actual);
-        if actual == expected {
-            val
-        } else if actual.bytes() < expected.bytes() && actual.is_int() && expected.is_int() {
-            builder.ins().uextend(expected, val)
-        } else if actual.bytes() > expected.bytes() && actual.is_int() && expected.is_int() {
-            builder.ins().ireduce(expected, val)
-        } else {
-            val
-        }
-    }).collect()
+    vals.iter()
+        .enumerate()
+        .map(|(i, &val)| {
+            let actual = builder.func.dfg.value_type(val);
+            let expected = param_types.get(i).copied().unwrap_or(actual);
+            if actual == expected {
+                val
+            } else if actual.bytes() < expected.bytes() && actual.is_int() && expected.is_int() {
+                builder.ins().uextend(expected, val)
+            } else if actual.bytes() > expected.bytes() && actual.is_int() && expected.is_int() {
+                builder.ins().ireduce(expected, val)
+            } else {
+                val
+            }
+        })
+        .collect()
 }
 
 pub fn compile_terminator(
@@ -56,12 +60,15 @@ pub fn compile_terminator(
         // args: VALUE each → block params
         TerminatorKind::Jump { target, args } => {
             let block = fc.block_map[target.index()];
-            let cl_args: Vec<Value> = args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
+            let cl_args: Vec<Value> = args
+                .iter()
+                .map(|v| fc.resolve_scalar(builder, *v))
+                .collect();
             let coerced = coerce_block_args(builder, block, &cl_args);
             let ba = to_block_args(&coerced);
             builder.ins().jump(block, &ba);
             Ok(())
-        }
+        },
 
         // condition: VALUE (bool), then/else_args: VALUE each → block params
         TerminatorKind::Branch {
@@ -70,20 +77,29 @@ pub fn compile_terminator(
             then_args,
             else_block,
             else_args,
-        } => compile_branch(fc, builder, *condition, *then_block, then_args, *else_block, else_args),
+        } => compile_branch(
+            fc,
+            builder,
+            *condition,
+            *then_block,
+            then_args,
+            *else_block,
+            else_args,
+        ),
 
         // discriminant: VALUE (int/enum tag), case args: VALUE each → block params
-        TerminatorKind::Switch { discriminant, cases } => {
-            compile_switch(fc, builder, *discriminant, cases)
-        }
+        TerminatorKind::Switch {
+            discriminant,
+            cases,
+        } => compile_switch(fc, builder, *discriminant, cases),
         TerminatorKind::Panic(_msg) => {
             builder.ins().trap(TrapCode::unwrap_user(1));
             Ok(())
-        }
+        },
         TerminatorKind::Unreachable => {
             builder.ins().trap(TrapCode::unwrap_user(2));
             Ok(())
-        }
+        },
     }
 }
 
@@ -92,7 +108,10 @@ fn compile_return(
     builder: &mut FunctionBuilder,
     value_id: ValueId,
 ) -> Result<(), CodegenError> {
-    let ret_repr = fc.ctx.tc.repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let ret_repr = fc
+        .ctx
+        .tc
+        .repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
     let ret_mode = abi::return_mode(ret_repr, fc.is_main);
 
     match ret_mode {
@@ -103,10 +122,12 @@ fn compile_return(
                     TypeRepr::Scalar(st) if st == ir::types::I64 => val,
                     TypeRepr::Scalar(st) if st.bytes() < 8 => {
                         builder.ins().sextend(ir::types::I64, val)
-                    }
+                    },
                     TypeRepr::Aggregate { .. } => {
-                        builder.ins().load(ir::types::I64, MemFlags::new(), val, Offset32::new(0))
-                    }
+                        builder
+                            .ins()
+                            .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0))
+                    },
                     TypeRepr::Zst => builder.ins().iconst(ir::types::I64, 0),
                     _ => val,
                 };
@@ -114,16 +135,18 @@ fn compile_return(
             } else {
                 builder.ins().return_(&[val]);
             }
-        }
+        },
         ReturnMode::Sret => {
-            let sret_ptr = fc.sret_ptr.expect("sret_ptr must be set for Sret return mode");
+            let sret_ptr = fc
+                .sret_ptr
+                .expect("sret_ptr must be set for Sret return mode");
             let val = fc.get_value(builder, value_id);
             mem::copy_aggregate(builder, ret_repr.size(), sret_ptr, val);
             builder.ins().return_(&[]);
-        }
+        },
         ReturnMode::Void => {
             builder.ins().return_(&[]);
-        }
+        },
     }
 
     Ok(())
@@ -144,14 +167,22 @@ fn compile_branch(
     let then_cl = fc.block_map[then_block.index()];
     let else_cl = fc.block_map[else_block.index()];
 
-    let then_vals: Vec<Value> = then_args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
-    let else_vals: Vec<Value> = else_args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
+    let then_vals: Vec<Value> = then_args
+        .iter()
+        .map(|v| fc.resolve_scalar(builder, *v))
+        .collect();
+    let else_vals: Vec<Value> = else_args
+        .iter()
+        .map(|v| fc.resolve_scalar(builder, *v))
+        .collect();
     let then_coerced = coerce_block_args(builder, then_cl, &then_vals);
     let else_coerced = coerce_block_args(builder, else_cl, &else_vals);
     let then_ba = to_block_args(&then_coerced);
     let else_ba = to_block_args(&else_coerced);
 
-    builder.ins().brif(cmp, then_cl, &then_ba, else_cl, &else_ba);
+    builder
+        .ins()
+        .brif(cmp, then_cl, &then_ba, else_cl, &else_ba);
 
     Ok(())
 }
@@ -176,7 +207,7 @@ fn compile_switch(
             } else {
                 ir::types::I64
             }
-        }
+        },
         MirTy::Bool => ir::types::I8,
         MirTy::I8 => ir::types::I8,
         MirTy::I16 => ir::types::I16,
@@ -201,10 +232,16 @@ fn compile_switch(
     };
 
     // Find wildcard
-    let wildcard = cases.iter().find(|arm| matches!(arm.pattern, SwitchCase::Wildcard));
+    let wildcard = cases
+        .iter()
+        .find(|arm| matches!(arm.pattern, SwitchCase::Wildcard));
     let wildcard_info = wildcard.map(|arm| {
         let cl_block = fc.block_map[arm.target.index()];
-        let cl_args: Vec<Value> = arm.args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
+        let cl_args: Vec<Value> = arm
+            .args
+            .iter()
+            .map(|v| fc.resolve_scalar(builder, *v))
+            .collect();
         let coerced = coerce_block_args(builder, cl_block, &cl_args);
         (cl_block, coerced)
     });
@@ -226,39 +263,70 @@ fn compile_switch(
 
     for (i, arm) in concrete_cases.iter().enumerate() {
         let target = fc.block_map[arm.target.index()];
-        let raw_args: Vec<Value> = arm.args.iter().map(|v| fc.resolve_scalar(builder, *v)).collect();
+        let raw_args: Vec<Value> = arm
+            .args
+            .iter()
+            .map(|v| fc.resolve_scalar(builder, *v))
+            .collect();
         let target_args = coerce_block_args(builder, target, &raw_args);
         let is_last = i == concrete_cases.len() - 1;
 
         match &arm.pattern {
             SwitchCase::Variant(idx) => {
-                let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, idx.index() as i64);
+                let cmp = builder
+                    .ins()
+                    .icmp_imm(IntCC::Equal, disc_val, idx.index() as i64);
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
-            }
+            },
             SwitchCase::Bool(b) => {
                 let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *b as i64);
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
-            }
+            },
             SwitchCase::IntLiteral(v) => {
                 let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *v);
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
-            }
+            },
             SwitchCase::CharLiteral(c) => {
                 let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *c as i64);
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
-            }
+            },
             SwitchCase::IntRange { start, end } => {
-                let ge = builder.ins().icmp_imm(IntCC::SignedGreaterThanOrEqual, disc_val, *start);
-                let le = builder.ins().icmp_imm(IntCC::SignedLessThanOrEqual, disc_val, *end);
+                let ge = builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedGreaterThanOrEqual, disc_val, *start);
+                let le = builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedLessThanOrEqual, disc_val, *end);
                 let in_range = builder.ins().band(ge, le);
-                emit_case_branch(builder, in_range, target, &target_args, is_last, &wildcard_info);
-            }
+                emit_case_branch(
+                    builder,
+                    in_range,
+                    target,
+                    &target_args,
+                    is_last,
+                    &wildcard_info,
+                );
+            },
             SwitchCase::CharRange { start, end } => {
-                let ge = builder.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, disc_val, *start as i64);
-                let le = builder.ins().icmp_imm(IntCC::UnsignedLessThanOrEqual, disc_val, *end as i64);
+                let ge = builder.ins().icmp_imm(
+                    IntCC::UnsignedGreaterThanOrEqual,
+                    disc_val,
+                    *start as i64,
+                );
+                let le =
+                    builder
+                        .ins()
+                        .icmp_imm(IntCC::UnsignedLessThanOrEqual, disc_val, *end as i64);
                 let in_range = builder.ins().band(ge, le);
-                emit_case_branch(builder, in_range, target, &target_args, is_last, &wildcard_info);
-            }
+                emit_case_branch(
+                    builder,
+                    in_range,
+                    target,
+                    &target_args,
+                    is_last,
+                    &wildcard_info,
+                );
+            },
             SwitchCase::Wildcard => unreachable!(),
         }
     }
@@ -281,7 +349,9 @@ fn emit_case_branch(
         } else {
             (target, target_ba.clone())
         };
-        builder.ins().brif(cmp, target, &target_ba, fallthrough, &fallthrough_ba);
+        builder
+            .ins()
+            .brif(cmp, target, &target_ba, fallthrough, &fallthrough_ba);
     } else {
         let next_block = builder.create_block();
         builder.ins().brif(cmp, target, &target_ba, next_block, &[]);

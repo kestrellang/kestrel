@@ -408,11 +408,28 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
-    /// Allocate a TyVar bound to a Function type.
+    /// Allocate a TyVar bound to a Function type. Convenience: every param
+    /// defaults to `Consuming` (the pre-#106 convention). Use
+    /// [`Self::function_conv`] to carry explicit `mutating` conventions.
     pub fn function(&mut self, params: Vec<TyVar>, ret: TyVar) -> TyVar {
+        let conventions = vec![kestrel_ast::ParamConvention::Consuming; params.len()];
+        self.function_conv(params, conventions, ret)
+    }
+
+    /// Allocate a TyVar bound to a Function type with explicit per-param
+    /// conventions (parallel to `params`).
+    pub fn function_conv(
+        &mut self,
+        params: Vec<TyVar>,
+        conventions: Vec<kestrel_ast::ParamConvention>,
+        ret: TyVar,
+    ) -> TyVar {
         let idx = self.types.len() as u32;
-        self.types
-            .push(TySlot::Resolved(TyKind::Function { params, ret }));
+        self.types.push(TySlot::Resolved(TyKind::Function {
+            params,
+            conventions,
+            ret,
+        }));
         TyVar(idx)
     }
 

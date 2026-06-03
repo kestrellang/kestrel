@@ -1345,8 +1345,23 @@ fn gen_closure(
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
 
+    // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
+    // otherwise `Consuming` (the default, matching ordinary closures). The
+    // no-annotation→MutBorrow inference from an expected type is handled
+    // separately during solving.
+    let conventions: Vec<kestrel_ast::ParamConvention> = params
+        .iter()
+        .map(|p| {
+            if p.is_mut {
+                kestrel_ast::ParamConvention::MutBorrow
+            } else {
+                kestrel_ast::ParamConvention::Consuming
+            }
+        })
+        .collect();
+
     // Build function type and track closure flexibility
-    let fn_tv = ctx.function(param_tvs, body_tv);
+    let fn_tv = ctx.function_conv(param_tvs, conventions, body_tv);
 
     if params.is_empty() {
         // No explicit params, no `it` — adapts to any expected arity
@@ -1726,7 +1741,11 @@ fn emit_copyable_wellformedness(
         return;
     }
     // Positional map from the type's declared params to the formed args.
-    let Some(params) = ctx.query_ctx.get::<TypeParams>(entity).map(|tp| tp.0.clone()) else {
+    let Some(params) = ctx
+        .query_ctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+    else {
         return;
     };
     let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
@@ -1891,13 +1910,18 @@ fn lower_return_ty_with_opaque(
                 .collect();
             ctx.tuple(tvs)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let param_tvs: Vec<TyVar> = params
                 .iter()
                 .map(|p| lower_return_ty_with_opaque(ctx, p, callee, subs))
                 .collect();
             let ret_tv = lower_return_ty_with_opaque(ctx, ret, callee, subs);
-            ctx.function(param_tvs, ret_tv)
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
         },
         // Non-structural types: delegate to the standard path
         _ => lower_hir_ty_with_subs(ctx, ret_hir, subs),
@@ -2014,13 +2038,18 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .collect();
             ctx.tuple(elem_tvs)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let param_tvs: Vec<TyVar> = params
                 .iter()
                 .map(|p| lower_hir_ty_with_subs(ctx, p, subs))
                 .collect();
             let ret_tv = lower_hir_ty_with_subs(ctx, ret, subs);
-            ctx.function(param_tvs, ret_tv)
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
         },
         HirTy::Param(entity, _) => {
             // Check substitution map first (for instantiated type params)

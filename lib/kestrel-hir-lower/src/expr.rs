@@ -1361,7 +1361,11 @@ impl LowerCtx<'_> {
                         (name, false, true)
                     },
                 };
-                let local = self.define_local(&name, is_mut, span.clone());
+                // A `mutating` closure param (`p.is_mut`) makes the binding
+                // mutable so `x`/`x.field` assignment is allowed (no E604/E201)
+                // and the body lowers the param as a by-reference place.
+                let param_is_mut = is_mut || p.is_mut;
+                let local = self.define_local(&name, param_is_mut, span.clone());
                 let ty = p.ty.as_ref().map(|t| self.lower_type(t));
 
                 let pattern = if needs_desugar {
@@ -1392,7 +1396,12 @@ impl LowerCtx<'_> {
                     None
                 };
 
-                HirClosureParam { local, ty, pattern }
+                HirClosureParam {
+                    local,
+                    ty,
+                    pattern,
+                    is_mut: param_is_mut,
+                }
             })
             .collect();
 

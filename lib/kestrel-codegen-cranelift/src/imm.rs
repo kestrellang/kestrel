@@ -21,13 +21,13 @@ pub fn compile_immediate(
         ImmediateKind::IntLiteral { bits, value } => {
             let cl_ty = int_bits_to_cl(*bits);
             Ok(builder.ins().iconst(cl_ty, *value as i64))
-        }
+        },
 
         ImmediateKind::FloatLiteral { bits, value } => match bits {
             FloatBits::F16 => {
                 let f32_val = builder.ins().f32const(*value as f32);
                 Ok(builder.ins().fdemote(ir::types::F16, f32_val))
-            }
+            },
             FloatBits::F32 => Ok(builder.ins().f32const(*value as f32)),
             FloatBits::F64 => Ok(builder.ins().f64const(*value)),
         },
@@ -40,26 +40,24 @@ pub fn compile_immediate(
 
         ImmediateKind::Unit => Ok(builder.ins().iconst(ptr_ty, 0)),
 
-        ImmediateKind::MonoFunctionRef(mono_id) => {
-            compile_mono_func_ref(ctx, builder, *mono_id)
-        }
+        ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(ctx, builder, *mono_id),
 
         ImmediateKind::FunctionRef { .. } => {
             debug_assert!(false, "unresolved FunctionRef in codegen");
             Ok(builder.ins().iconst(ptr_ty, 0))
-        }
+        },
 
         ImmediateKind::NullPtr(_) => Ok(builder.ins().iconst(ptr_ty, 0)),
 
         ImmediateKind::SizeOf(ty) => {
             let repr = ctx.tc.repr(*ty, &ctx.module.ty_arena, ctx.module);
             Ok(builder.ins().iconst(ptr_ty, repr.size() as i64))
-        }
+        },
 
         ImmediateKind::AlignOf(ty) => {
             let repr = ctx.tc.repr(*ty, &ctx.module.ty_arena, ctx.module);
             Ok(builder.ins().iconst(ptr_ty, repr.align() as i64))
-        }
+        },
 
         ImmediateKind::FloatInfinity(bits) => {
             let cl_ty = float_bits_to_cl(*bits);
@@ -67,11 +65,11 @@ pub fn compile_immediate(
                 FloatBits::F16 => {
                     let inf = builder.ins().f32const(f32::INFINITY);
                     Ok(builder.ins().fdemote(cl_ty, inf))
-                }
+                },
                 FloatBits::F32 => Ok(builder.ins().f32const(f32::INFINITY)),
                 FloatBits::F64 => Ok(builder.ins().f64const(f64::INFINITY)),
             }
-        }
+        },
 
         ImmediateKind::FloatNan(bits) => {
             let cl_ty = float_bits_to_cl(*bits);
@@ -79,11 +77,11 @@ pub fn compile_immediate(
                 FloatBits::F16 => {
                     let nan = builder.ins().f32const(f32::NAN);
                     Ok(builder.ins().fdemote(cl_ty, nan))
-                }
+                },
                 FloatBits::F32 => Ok(builder.ins().f32const(f32::NAN)),
                 FloatBits::F64 => Ok(builder.ins().f64const(f64::NAN)),
             }
-        }
+        },
 
         ImmediateKind::Error => Ok(builder.ins().iconst(ir::types::I8, 0)),
     }

@@ -83,6 +83,14 @@ public struct RcBox[T]: Cloneable {
         self.ptr.with { (storage) in storage.value }
     }
 
+    /// Mutates the wrapped value in place, passing it to `body` as a
+    /// `mutating` argument. No clone or write-back — `body` mutates the
+    /// heap value directly. Safe only when this is the unique owner
+    /// (`isUnique() == true`); COW types check that first (see `CowBox.modify`).
+    public func modify[R](body: (mutating T) -> R) -> R {
+        self.valuePtr().withMut(body)
+    }
+
     /// Returns a pointer to the wrapped value on the heap. The pointer
     /// is valid as long as the RcBox (and its storage) is alive. Use
     /// this to read individual fields without creating a full `T` clone

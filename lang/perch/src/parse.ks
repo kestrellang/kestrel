@@ -42,9 +42,10 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
             return .Err(invalidInput())
         }
 
-        for j in 0..<bytesRead {
-            buffer.append(chunk(unchecked: j))
-        }
+        // Bulk-append the chunk in one pass. Per-byte append() re-reads the
+        // COW-backed buffer and clones it each time → O(n²) in request size;
+        // append(contentsOf:) grows once and copies once → O(n).
+        buffer.append(contentsOf: chunk.asSlice()(0..<bytesRead));
 
         headerEnd = findHeaderEnd(buffer);
         if headerEnd >= 0 {
@@ -81,9 +82,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
             let bodyStart = headerEnd + 4;
             var bodyBytes = Array[UInt8]();
 
-            for k in bodyStart..<buffer.count {
-                bodyBytes.append(buffer(unchecked: k))
-            }
+            bodyBytes.append(contentsOf: buffer.asSlice()(bodyStart..<buffer.count));
 
             while bodyBytes.count < contentLength {
                 let remaining = contentLength - bodyBytes.count;
@@ -97,9 +96,7 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
                 if bytesRead <= 0 {
                     break
                 }
-                for copyIdx in 0..<bytesRead {
-                    bodyBytes.append(bodyChunk(unchecked: copyIdx))
-                }
+                bodyBytes.append(contentsOf: bodyChunk.asSlice()(0..<bytesRead));
             }
 
             body = String(fromUtf8: bodyBytes.asSlice()) ?? String()

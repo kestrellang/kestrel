@@ -195,6 +195,14 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
         body(lang.ptr_read(self._raw))
     }
 
+    /// Mutably borrows the pointee in place and passes it to `body` as a
+    /// `mutating` argument. The pointee is mutated directly on the heap —
+    /// never copied, cloned, or written back — so `T.deinit` does not run on
+    /// a temporary. This is the in-place primitive behind COW `modify`.
+    public func withMut[R](body: (mutating T) -> R) -> R {
+        body(lang.ptr_mut_borrow(self._raw))
+    }
+
     /// Writes `value` through the pointer. Same safety preconditions as
     /// `pointee.set`.
     public func write(consuming value: T) {

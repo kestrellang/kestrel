@@ -396,10 +396,10 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.isEmpty;  // true
     /// ```
     public mutating func clear() {
-        var s = self.storage.write();
-        s.len = 0;
-        s.head = 0;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            s.len = 0;
+            s.head = 0
+        }
     }
 
     // ========================================================================
@@ -421,12 +421,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func pushBack(element: T) {
         self.grow(minCapacity: self.len() + 1);
-        var s = self.storage.write();
-        var tail = s.head + s.len;
-        if tail >= s.cap { tail = tail - s.cap; }
-        s.ptr.offset(by: tail).write(element);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            var tail = s.head + s.len;
+            if tail >= s.cap { tail = tail - s.cap; }
+            s.ptr.offset(by: tail).write(element);
+            s.len = s.len + 1
+        }
     }
 
     /// Prepends `element` to the front of the deque. O(1) amortized.
@@ -444,12 +444,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func pushFront(element: T) {
         self.grow(minCapacity: self.len() + 1);
-        var s = self.storage.write();
-        s.head = s.head - 1;
-        if s.head < 0 { s.head = s.cap - 1; }
-        s.ptr.offset(by: s.head).write(element);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            s.head = s.head - 1;
+            if s.head < 0 { s.head = s.cap - 1; }
+            s.ptr.offset(by: s.head).write(element);
+            s.len = s.len + 1
+        }
     }
 
     // ========================================================================
@@ -472,12 +472,13 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func popFront() -> T? {
         if self.len() == 0 { return .None; }
-        var s = self.storage.write();
-        let value = s.ptr.offset(by: s.head).read();
-        s.head = s.head + 1;
-        if s.head >= s.cap { s.head = 0; }
-        s.len = s.len - 1;
-        self.storage.setValue(s);
+        let value = self.storage.modify { (mutating s) in
+            let v = s.ptr.offset(by: s.head).read();
+            s.head = s.head + 1;
+            if s.head >= s.cap { s.head = 0; }
+            s.len = s.len - 1;
+            v
+        };
         .Some(value)
     }
 
@@ -497,12 +498,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func popBack() -> T? {
         if self.len() == 0 { return .None; }
-        var s = self.storage.write();
-        s.len = s.len - 1;
-        var tail = s.head + s.len;
-        if tail >= s.cap { tail = tail - s.cap; }
-        let value = s.ptr.offset(by: tail).read();
-        self.storage.setValue(s);
+        let value = self.storage.modify { (mutating s) in
+            s.len = s.len - 1;
+            var tail = s.head + s.len;
+            if tail >= s.cap { tail = tail - s.cap; }
+            s.ptr.offset(by: tail).read()
+        };
         .Some(value)
     }
 

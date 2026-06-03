@@ -111,7 +111,7 @@ impl TypeCache {
                         align: layout.align,
                     }
                 }
-            }
+            },
 
             MirTy::Str => TypeRepr::Aggregate {
                 size: ptr_size * 2,
@@ -127,14 +127,18 @@ impl TypeCache {
                 let entity = *entity;
                 let type_args = type_args.clone();
                 self.classify_named(entity, &type_args, arena, module)
-            }
+            },
 
             MirTy::Error => TypeRepr::Scalar(ir::types::I8),
 
             MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => {
-                debug_assert!(false, "unresolved generic type in codegen: {:?}", arena.get(ty));
+                debug_assert!(
+                    false,
+                    "unresolved generic type in codegen: {:?}",
+                    arena.get(ty)
+                );
                 TypeRepr::Scalar(ptr_ty)
-            }
+            },
         }
     }
 
@@ -154,22 +158,38 @@ impl TypeCache {
         // the field's repr (the single source of truth — see the collapse branch below).
         let (layout, is_single_field, single_field_ty) = if let Some(s) = module.structs.get(&key) {
             let single_field_ty = (s.fields.len() == 1).then(|| s.fields[0].ty);
-            (s.type_info.layout.as_ref(), s.fields.len() <= 1, single_field_ty)
+            (
+                s.type_info.layout.as_ref(),
+                s.fields.len() <= 1,
+                single_field_ty,
+            )
         } else if let Some(e) = module.enums.get(&key) {
             let pure_disc = e.cases.iter().all(|c| c.payload_fields.is_empty());
             (e.type_info.layout.as_ref(), pure_disc, None)
         } else {
-            let name = module.entity_names.get(&entity).map(|s| s.as_str()).unwrap_or("?");
+            let name = module
+                .entity_names
+                .get(&entity)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                eprintln!("[classify_named] MISSING layout for {name} entity={entity:?} type_args={type_args:?} → Scalar fallback");
+                eprintln!(
+                    "[classify_named] MISSING layout for {name} entity={entity:?} type_args={type_args:?} → Scalar fallback"
+                );
             }
             return TypeRepr::Scalar(self.ptr_ty);
         };
 
         let Some(layout) = layout else {
-            let name = module.entity_names.get(&entity).map(|s| s.as_str()).unwrap_or("?");
+            let name = module
+                .entity_names
+                .get(&entity)
+                .map(|s| s.as_str())
+                .unwrap_or("?");
             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                eprintln!("[classify_named] NO LAYOUT for {name} entity={entity:?} → Scalar fallback");
+                eprintln!(
+                    "[classify_named] NO LAYOUT for {name} entity={entity:?} → Scalar fallback"
+                );
             }
             return TypeRepr::Scalar(self.ptr_ty);
         };

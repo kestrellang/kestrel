@@ -35,9 +35,12 @@ pub enum HirTy {
     },
     /// Tuple type: `(Int, String)`
     Tuple(Vec<HirTy>, Span),
-    /// Function type: `(Int, String) -> Bool`
+    /// Function type: `(Int, String) -> Bool` or `(mutating Grid) -> Unit`.
+    /// `param_conventions` is parallel to `params`; `MutBorrow` marks a
+    /// `mutating` parameter, otherwise `Consuming` (the pre-#106 default).
     Function {
         params: Vec<HirTy>,
+        param_conventions: Vec<kestrel_ast::ParamConvention>,
         ret: Box<HirTy>,
         span: Span,
     },

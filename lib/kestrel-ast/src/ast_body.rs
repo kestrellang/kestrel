@@ -363,6 +363,10 @@ pub struct MatchArm {
 pub struct ClosureParam {
     pub pattern: PatId,
     pub ty: Option<AstType>,
+    /// `true` when the param is declared `mutating` (by-reference). The
+    /// inferred convention may also be `MutBorrow` from the expected type
+    /// even when this is `false` (see type-infer closure conventions).
+    pub is_mut: bool,
 }
 
 // ===== Operators =====

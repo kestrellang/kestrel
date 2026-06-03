@@ -1111,6 +1111,27 @@ pub(crate) fn try_intrinsic(
             bctx.track_borrow(view);
             return Some(view);
         },
+        "ptr_mut_borrow" => {
+            // Mutable by-reference view of the pointee. Lowered exactly like
+            // `ptr_read`: a @guaranteed `Op1(PtrRead)` whose result "represents
+            // data living at the resolved address" — codegen `resolve_scalar`s
+            // the pointer arg (loading through a @guaranteed field access like
+            // `self._raw`) to the actual pointee address. The difference from
+            // `ptr_read` is purely at the use site: `Pointer.withMut` passes this
+            // @guaranteed view as a `mutating` (MutBorrow) closure arg, so the
+            // closure mutates the pointee in place — no clone, no write-back.
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let arg = bctx.lower_expr(args.first()?.value);
+            let view = bctx.alloc_guaranteed(result_ty, arg);
+            bctx.push_inst(InstKind::Op1 {
+                result: view,
+                op: Op::PtrRead(ty_arg),
+                arg,
+            });
+            bctx.track_borrow(view);
+            return Some(view);
+        },
         "drop_in_place" => {
             let ty_arg = *type_args.first()?;
             let arg = bctx.lower_expr(args.first()?.value);

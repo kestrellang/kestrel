@@ -354,7 +354,9 @@ fn substitute_inst(
     // (enum/struct/array construction, addr ops) are only seen here — without
     // this, a surviving `AssociatedProjection` in e.g. an `Optional` enum payload
     // fails post-mono verify ("AssociatedProjection in Enum type").
-    let resolve = |arena: &mut TyArena, ty: TyId| collect::substitute_and_resolve(arena, witnesses, ty, subst);
+    let resolve = |arena: &mut TyArena, ty: TyId| {
+        collect::substitute_and_resolve(arena, witnesses, ty, subst)
+    };
     match kind {
         // Memory access instructions with embedded type
         InstKind::CopyAddr { ty, .. }
@@ -424,7 +426,9 @@ fn substitute_immediate(
     kind: &mut ImmediateKind,
     subst: &SubstMap,
 ) {
-    let resolve = |arena: &mut TyArena, ty: TyId| collect::substitute_and_resolve(arena, witnesses, ty, subst);
+    let resolve = |arena: &mut TyArena, ty: TyId| {
+        collect::substitute_and_resolve(arena, witnesses, ty, subst)
+    };
     match kind {
         ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
             *ty = resolve(arena, *ty);
@@ -452,7 +456,9 @@ fn substitute_op_type(
     subst: &SubstMap,
 ) {
     use crate::op::Op;
-    let resolve = |arena: &mut TyArena, ty: TyId| collect::substitute_and_resolve(arena, witnesses, ty, subst);
+    let resolve = |arena: &mut TyArena, ty: TyId| {
+        collect::substitute_and_resolve(arena, witnesses, ty, subst)
+    };
     match op {
         Op::PtrFromAddress(ty)
         | Op::PtrRead(ty)
@@ -819,8 +825,14 @@ fn refine_mono_copy_behavior(
             if gating.is_empty() {
                 continue;
             }
-            let want =
-                conditional_copy(arena, ms.source, gating, &ms.type_args, mono_structs, mono_enums);
+            let want = conditional_copy(
+                arena,
+                ms.source,
+                gating,
+                &ms.type_args,
+                mono_structs,
+                mono_enums,
+            );
             if want != ms.type_info.copy {
                 updates.push((key.clone(), true, want));
             }
@@ -830,8 +842,14 @@ fn refine_mono_copy_behavior(
             if gating.is_empty() {
                 continue;
             }
-            let want =
-                conditional_copy(arena, me.source, gating, &me.type_args, mono_structs, mono_enums);
+            let want = conditional_copy(
+                arena,
+                me.source,
+                gating,
+                &me.type_args,
+                mono_structs,
+                mono_enums,
+            );
             if want != me.type_info.copy {
                 updates.push((key.clone(), false, want));
             }

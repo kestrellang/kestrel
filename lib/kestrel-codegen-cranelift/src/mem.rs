@@ -11,36 +11,48 @@ pub fn copy_aggregate(builder: &mut FunctionBuilder, size: u64, dest: Value, src
     let mut offset = 0u64;
 
     while offset + 8 <= size {
-        let val = builder
-            .ins()
-            .load(ir::types::I64, MemFlags::new(), src, Offset32::new(offset as i32));
+        let val = builder.ins().load(
+            ir::types::I64,
+            MemFlags::new(),
+            src,
+            Offset32::new(offset as i32),
+        );
         builder
             .ins()
             .store(MemFlags::new(), val, dest, Offset32::new(offset as i32));
         offset += 8;
     }
     if offset + 4 <= size {
-        let val = builder
-            .ins()
-            .load(ir::types::I32, MemFlags::new(), src, Offset32::new(offset as i32));
+        let val = builder.ins().load(
+            ir::types::I32,
+            MemFlags::new(),
+            src,
+            Offset32::new(offset as i32),
+        );
         builder
             .ins()
             .store(MemFlags::new(), val, dest, Offset32::new(offset as i32));
         offset += 4;
     }
     if offset + 2 <= size {
-        let val = builder
-            .ins()
-            .load(ir::types::I16, MemFlags::new(), src, Offset32::new(offset as i32));
+        let val = builder.ins().load(
+            ir::types::I16,
+            MemFlags::new(),
+            src,
+            Offset32::new(offset as i32),
+        );
         builder
             .ins()
             .store(MemFlags::new(), val, dest, Offset32::new(offset as i32));
         offset += 2;
     }
     if offset < size {
-        let val = builder
-            .ins()
-            .load(ir::types::I8, MemFlags::new(), src, Offset32::new(offset as i32));
+        let val = builder.ins().load(
+            ir::types::I8,
+            MemFlags::new(),
+            src,
+            Offset32::new(offset as i32),
+        );
         builder
             .ins()
             .store(MemFlags::new(), val, dest, Offset32::new(offset as i32));
@@ -96,22 +108,17 @@ pub fn alloc_stack_slot(
     builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0))
 }
 
-pub fn store_to_repr(
-    builder: &mut FunctionBuilder,
-    repr: TypeRepr,
-    dest: Value,
-    value: Value,
-) {
+pub fn store_to_repr(builder: &mut FunctionBuilder, repr: TypeRepr, dest: Value, value: Value) {
     match repr {
         TypeRepr::Scalar(_) => {
             builder
                 .ins()
                 .store(MemFlags::new(), value, dest, Offset32::new(0));
-        }
+        },
         TypeRepr::Aggregate { size, .. } => {
             copy_aggregate(builder, size, dest, value);
-        }
-        TypeRepr::Zst => {}
+        },
+        TypeRepr::Zst => {},
     }
 }
 

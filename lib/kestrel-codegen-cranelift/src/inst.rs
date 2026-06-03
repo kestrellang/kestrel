@@ -15,7 +15,7 @@ use kestrel_mir::{
 use crate::abi::{self, PassMode, ReturnMode};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
-use crate::ty::{float_bits_to_cl, int_bits_to_cl, TypeCache, TypeRepr};
+use crate::ty::{TypeCache, TypeRepr, float_bits_to_cl, int_bits_to_cl};
 use crate::{imm, mem};
 
 /// Returns true if the instruction diverges (call to a !-returning function).
@@ -33,7 +33,7 @@ pub fn compile_inst(
         InstKind::MoveValue { result, operand } => {
             let val = fc.resolve_scalar(builder, *operand);
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // operand: RAW (custom @guaranteed handling) → result: @owned value
         InstKind::CopyValue { result, operand } => {
@@ -48,18 +48,20 @@ pub fn compile_inst(
                     let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
                     mem::copy_aggregate(builder, size, slot, val);
                     fc.map_value(builder, *result, slot);
-                }
+                },
                 TypeRepr::Scalar(t) if operand_is_guaranteed => {
-                    let loaded = builder.ins().load(t, MemFlags::new(), val, Offset32::new(0));
+                    let loaded = builder
+                        .ins()
+                        .load(t, MemFlags::new(), val, Offset32::new(0));
                     fc.map_value(builder, *result, loaded);
-                }
+                },
                 _ => {
                     fc.map_value(builder, *result, val);
-                }
+                },
             }
-        }
+        },
 
-        InstKind::DestroyValue { .. } => {}
+        InstKind::DestroyValue { .. } => {},
 
         // operand: RAW (custom spill for @owned scalars) → result: ADDR
         InstKind::BeginBorrow { result, operand }
@@ -68,31 +70,40 @@ pub fn compile_inst(
             let operand_ty = fc.body.values[operand.index()].ty;
             let is_guaranteed = fc.body.values[operand.index()].ownership
                 == kestrel_mir::value::Ownership::Guaranteed;
-            let repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let repr = fc
+                .ctx
+                .tc
+                .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             match repr {
                 _ if is_guaranteed => {
                     fc.map_value(builder, *result, val);
-                }
+                },
                 TypeRepr::Aggregate { .. } | TypeRepr::Zst => {
                     fc.map_value(builder, *result, val);
-                }
+                },
                 TypeRepr::Scalar(_) => {
                     let ptr_ty = fc.ctx.ptr_ty;
                     let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
-                    builder.ins().store(MemFlags::new(), val, slot, Offset32::new(0));
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), val, slot, Offset32::new(0));
                     fc.map_value(builder, *result, slot);
-                }
+                },
             }
-        }
+        },
 
-        InstKind::EndBorrow { .. } | InstKind::EndMutBorrow { .. } => {}
+        InstKind::EndBorrow { .. } | InstKind::EndMutBorrow { .. } => {},
 
         // address: ADDR → result: ADDR
-        InstKind::BeginBorrowAddr { result, address, .. }
-        | InstKind::BeginMutBorrowAddr { result, address, .. } => {
+        InstKind::BeginBorrowAddr {
+            result, address, ..
+        }
+        | InstKind::BeginMutBorrowAddr {
+            result, address, ..
+        } => {
             let addr = fc.get_value(builder, *address);
             fc.map_value(builder, *result, addr);
-        }
+        },
 
         // address: ADDR → result: VALUE
         InstKind::Load { result, address } => {
@@ -101,10 +112,14 @@ pub fn compile_inst(
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // address: ADDR → result: VALUE (copy of pointed-to data)
-        InstKind::CopyAddr { result, address, ty } => {
+        InstKind::CopyAddr {
+            result,
+            address,
+            ty,
+        } => {
             let addr = fc.get_value(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             match repr {
@@ -113,13 +128,13 @@ pub fn compile_inst(
                     let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
                     mem::copy_aggregate(builder, size, slot, addr);
                     fc.map_value(builder, *result, slot);
-                }
+                },
                 _ => {
                     let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
                     fc.map_value(builder, *result, val);
-                }
+                },
             }
-        }
+        },
 
         // address: ADDR → result: VALUE (destructive read)
         // Resolve the address as a VALUE: a @guaranteed pointer operand (e.g. a
@@ -127,12 +142,16 @@ pub fn compile_inst(
         // `drop_in_place(self._raw)`) is represented as a pointer-TO-the-address and
         // must be loaded to recover the actual address. `resolve_scalar` is identity
         // for an @owned pointer (the common stack-slot case) and loads for @guaranteed.
-        InstKind::Take { result, address, ty } => {
+        InstKind::Take {
+            result,
+            address,
+            ty,
+        } => {
             let addr = fc.resolve_scalar(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // address: ADDR, value: VALUE → writes value to address
         InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
@@ -141,22 +160,32 @@ pub fn compile_inst(
             let ty = fc.body.values[value.index()].ty;
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             mem::store_to_repr(builder, repr, addr, val);
-        }
+        },
 
-        InstKind::DestroyAddr { .. } => {}
+        InstKind::DestroyAddr { .. } => {},
 
         // operand: RAW (custom @guaranteed handling) → result: discriminant int
         InstKind::Discriminant { result, operand } => {
             let base = fc.get_value(builder, *operand);
             let operand_ty = fc.body.values[operand.index()].ty;
-            let repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let repr = fc
+                .ctx
+                .tc
+                .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let is_guaranteed = fc.body.values[operand.index()].ownership
                 == kestrel_mir::value::Ownership::Guaranteed;
-            let disc_width = discriminant_width(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
+            let disc_width = discriminant_width(
+                operand_ty,
+                &fc.ctx.module.ty_arena,
+                fc.ctx.module,
+                &fc.ctx.tc,
+            );
             let val = match repr {
                 TypeRepr::Scalar(_) if is_guaranteed => {
-                    builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0))
-                }
+                    builder
+                        .ins()
+                        .load(disc_width, MemFlags::new(), base, Offset32::new(0))
+                },
                 TypeRepr::Scalar(_) => {
                     let actual = builder.func.dfg.value_type(base);
                     if actual == disc_width {
@@ -166,13 +195,13 @@ pub fn compile_inst(
                     } else {
                         builder.ins().uextend(disc_width, base)
                     }
-                }
-                _ => {
-                    builder.ins().load(disc_width, MemFlags::new(), base, Offset32::new(0))
-                }
+                },
+                _ => builder
+                    .ins()
+                    .load(disc_width, MemFlags::new(), base, Offset32::new(0)),
             };
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // arg: VALUE → result: @owned scalar (or @guaranteed for PtrRead)
         InstKind::Op1 { result, op, arg } => {
@@ -204,30 +233,41 @@ pub fn compile_inst(
                 let val = compile_op1(fc, builder, *op, a)?;
                 fc.map_value(builder, *result, val);
             }
-        }
+        },
 
         // lhs, rhs: VALUE → result: @owned scalar
-        InstKind::Op2 { result, op, lhs, rhs } => {
+        InstKind::Op2 {
+            result,
+            op,
+            lhs,
+            rhs,
+        } => {
             let l = fc.resolve_scalar(builder, *lhs);
             let r = fc.resolve_scalar(builder, *rhs);
             let val = compile_op2(fc, builder, *op, l, r)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // a, b, c: VALUE → result: @owned scalar
-        InstKind::Op3 { result, op, a, b, c } => {
+        InstKind::Op3 {
+            result,
+            op,
+            a,
+            b,
+            c,
+        } => {
             let va = fc.resolve_scalar(builder, *a);
             let vb = fc.resolve_scalar(builder, *b);
             let vc = fc.resolve_scalar(builder, *c);
             let val = compile_op3(builder, *op, va, vb, vc)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // result: @owned literal
         InstKind::Literal { result, value } => {
             let val = imm::compile_immediate(fc.ctx, builder, &value.kind)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // result: ADDR (global data pointer)
         InstKind::GlobalRef { result, entity } => {
@@ -235,82 +275,126 @@ pub fn compile_inst(
             let data_id = fc.ctx.static_data.get(entity).ok_or_else(|| {
                 CodegenError::Unsupported("global entity not found in statics".into())
             })?;
-            let gv = fc.ctx.cl_module.declare_data_in_func(*data_id, builder.func);
+            let gv = fc
+                .ctx
+                .cl_module
+                .declare_data_in_func(*data_id, builder.func);
             let addr = builder.ins().global_value(ptr_ty, gv);
             fc.map_value(builder, *result, addr);
-        }
+        },
 
         // fields: VALUE each → result: @owned aggregate/scalar
         InstKind::Struct { result, ty, fields } => {
             let val = compile_struct(fc, builder, *ty, fields)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // elements: VALUE each → result: @owned aggregate
         InstKind::Tuple { result, elements } => {
             let val = compile_tuple(fc, builder, elements)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // payload: VALUE each → result: @owned enum
-        InstKind::Enum { result, enum_ty, variant, payload } => {
+        InstKind::Enum {
+            result,
+            enum_ty,
+            variant,
+            payload,
+        } => {
             let val = compile_enum(fc, builder, *enum_ty, *variant, payload)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // elements: VALUE each → result: @owned aggregate
-        InstKind::Array { result, element_ty, elements } => {
+        InstKind::Array {
+            result,
+            element_ty,
+            elements,
+        } => {
             let val = compile_array(fc, builder, *element_ty, elements)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // captures: VALUE each → result: @owned closure pair
-        InstKind::ApplyPartial { result, callee, captures } => {
+        InstKind::ApplyPartial {
+            result,
+            callee,
+            captures,
+        } => {
             let val = compile_apply_partial(fc, builder, callee, captures)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // operand: RAW (@guaranteed→ADDR, @owned→VALUE) → result: field value/addr
-        InstKind::StructExtract { result, operand, field } => {
+        InstKind::StructExtract {
+            result,
+            operand,
+            field,
+        } => {
             let val = compile_struct_extract(fc, builder, *operand, *field)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // operand: RAW (@guaranteed→ADDR, @owned→VALUE) → result: element value/addr
-        InstKind::TupleExtract { result, operand, index } => {
+        InstKind::TupleExtract {
+            result,
+            operand,
+            index,
+        } => {
             let val = compile_tuple_extract(fc, builder, *operand, *index)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         // operand: RAW (@guaranteed→ADDR, @owned→VALUE) → result: payload value/addr
-        InstKind::EnumPayload { result, operand, variant, field } => {
+        InstKind::EnumPayload {
+            result,
+            operand,
+            variant,
+            field,
+        } => {
             let val = compile_enum_payload(fc, builder, *operand, *variant, *field)?;
             fc.map_value(builder, *result, val);
-        }
+        },
 
         InstKind::DestructureStruct { results, operand } => {
             compile_destructure_struct(fc, builder, results, *operand)?;
-        }
+        },
 
         InstKind::DestructureTuple { results, operand } => {
             compile_destructure_tuple(fc, builder, results, *operand)?;
-        }
+        },
 
-        InstKind::DestructureEnum { results, operand, variant } => {
+        InstKind::DestructureEnum {
+            results,
+            operand,
+            variant,
+        } => {
             compile_destructure_enum(fc, builder, results, *operand, *variant)?;
-        }
+        },
 
         // base: ADDR → result: ADDR (offset into aggregate)
-        InstKind::FieldAddr { result, base, ty, field } => {
+        InstKind::FieldAddr {
+            result,
+            base,
+            ty,
+            field,
+        } => {
             let base_val = fc.get_value(builder, *base);
-            let offset = struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
+            let offset = struct_field_offset(
+                *ty,
+                *field,
+                &fc.ctx.module.ty_arena,
+                fc.ctx.module,
+                &fc.ctx.tc,
+            );
             let addr = if offset != 0 {
                 builder.ins().iadd_imm(base_val, offset as i64)
             } else {
                 base_val
             };
             fc.map_value(builder, *result, addr);
-        }
+        },
 
         // result: ADDR (zero-initialized stack slot)
         InstKind::Uninit { result, ty } => {
@@ -321,23 +405,27 @@ pub fn compile_inst(
                     let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
                     mem::zero_memory(builder, slot, size);
                     fc.map_value(builder, *result, slot);
-                }
+                },
                 TypeRepr::Scalar(_) => {
                     let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
                     mem::zero_memory(builder, slot, repr.size());
                     fc.map_value(builder, *result, slot);
-                }
+                },
                 TypeRepr::Zst => {
                     let zero = builder.ins().iconst(ptr_ty, 0);
                     fc.map_value(builder, *result, zero);
-                }
+                },
             }
-        }
+        },
 
         // args: per-convention (see compile_resolved_call) → result: return value
-        InstKind::Call { result, callee, args } => {
+        InstKind::Call {
+            result,
+            callee,
+            args,
+        } => {
             return compile_call(fc, builder, result.as_ref().copied(), callee, args);
-        }
+        },
     }
 
     Ok(false)
@@ -380,7 +468,7 @@ fn compile_op1(
         Op::Neg(bits) => {
             let zero = builder.ins().iconst(int_bits_to_cl(bits), 0);
             builder.ins().isub(zero, arg)
-        }
+        },
         Op::FNeg(_) => builder.ins().fneg(arg),
         Op::Not(_) => builder.ins().bnot(arg),
         Op::Popcount(_) => builder.ins().popcnt(arg),
@@ -390,7 +478,7 @@ fn compile_op1(
         Op::BoolNot => {
             let one = builder.ins().iconst(ir::types::I8, 1);
             builder.ins().bxor(arg, one)
-        }
+        },
         Op::IntWiden(_, to) => builder.ins().sextend(int_bits_to_cl(to), arg),
         Op::IntUnsignedWiden(_, to) => builder.ins().uextend(int_bits_to_cl(to), arg),
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
@@ -408,27 +496,28 @@ fn compile_op1(
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::store_to_repr(builder, repr, slot, arg);
             slot
-        }
+        },
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
         Op::RefToPtr => arg,
         Op::PtrRead(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             mem::load_from_repr(builder, repr, arg, ptr_ty)
-        }
+        },
         Op::SizeOf(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             builder.ins().iconst(ptr_ty, repr.size() as i64)
-        }
+        },
         Op::AlignOf(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             builder.ins().iconst(ptr_ty, repr.align() as i64)
-        }
+        },
         Op::StackAlloc(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let count = resolve_iconst(builder, arg)
-                .expect("ICE: StackAlloc element count is not a compile-time constant") as u64;
+                .expect("ICE: StackAlloc element count is not a compile-time constant")
+                as u64;
             mem::alloc_stack_slot(builder, repr.size() * count, repr.align(), ptr_ty)
-        }
+        },
         Op::StrPtr => builder
             .ins()
             .load(ptr_ty, MemFlags::new(), arg, Offset32::new(0)),
@@ -437,11 +526,11 @@ fn compile_op1(
             builder
                 .ins()
                 .load(ptr_ty, MemFlags::new(), arg, Offset32::new(ptr_size as i32))
-        }
+        },
         Op::FloatPred(_, FloatPredicateKind::IsNan) => {
             let cmp = builder.ins().fcmp(FloatCC::Unordered, arg, arg);
             cmp_to_bool(builder, cmp)
-        }
+        },
         Op::FloatPred(fb, FloatPredicateKind::IsInfinite) => {
             let abs = builder.ins().fabs(arg);
             let inf = match fb {
@@ -450,7 +539,7 @@ fn compile_op1(
             };
             let is_inf = builder.ins().fcmp(FloatCC::Equal, abs, inf);
             cmp_to_bool(builder, is_inf)
-        }
+        },
         Op::FloatMath(_, FloatMathKind::Floor) => builder.ins().floor(arg),
         Op::FloatMath(_, FloatMathKind::Ceil) => builder.ins().ceil(arg),
         Op::FloatMath(_, FloatMathKind::Round) => builder.ins().nearest(arg),
@@ -458,7 +547,7 @@ fn compile_op1(
         Op::FloatMath(_, FloatMathKind::Sqrt) => builder.ins().sqrt(arg),
         _ => {
             return Err(CodegenError::Unsupported(format!("op1 variant: {op:?}")));
-        }
+        },
     })
 }
 
@@ -489,41 +578,104 @@ fn compile_op2(
         Op::Shl(_) => builder.ins().ishl(lhs, rhs),
         Op::Shr(_, Signedness::Signed) => builder.ins().sshr(lhs, rhs),
         Op::Shr(_, Signedness::Unsigned) => builder.ins().ushr(lhs, rhs),
-        Op::Eq(_) => { let c = builder.ins().icmp(IntCC::Equal, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Ne(_) => { let c = builder.ins().icmp(IntCC::NotEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Lt(_, Signedness::Signed) => { let c = builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Lt(_, Signedness::Unsigned) => { let c = builder.ins().icmp(IntCC::UnsignedLessThan, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Le(_, Signedness::Signed) => { let c = builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Le(_, Signedness::Unsigned) => { let c = builder.ins().icmp(IntCC::UnsignedLessThanOrEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Gt(_, Signedness::Signed) => { let c = builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Gt(_, Signedness::Unsigned) => { let c = builder.ins().icmp(IntCC::UnsignedGreaterThan, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Ge(_, Signedness::Signed) => { let c = builder.ins().icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::Ge(_, Signedness::Unsigned) => { let c = builder.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::FEq(_) => { let c = builder.ins().fcmp(FloatCC::Equal, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::FNe(_) => { let c = builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::FLt(_) => { let c = builder.ins().fcmp(FloatCC::LessThan, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::FLe(_) => { let c = builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::FGt(_) => { let c = builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs); cmp_to_bool(builder, c) }
-        Op::FGe(_) => { let c = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs); cmp_to_bool(builder, c) }
+        Op::Eq(_) => {
+            let c = builder.ins().icmp(IntCC::Equal, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Ne(_) => {
+            let c = builder.ins().icmp(IntCC::NotEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Lt(_, Signedness::Signed) => {
+            let c = builder.ins().icmp(IntCC::SignedLessThan, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Lt(_, Signedness::Unsigned) => {
+            let c = builder.ins().icmp(IntCC::UnsignedLessThan, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Le(_, Signedness::Signed) => {
+            let c = builder.ins().icmp(IntCC::SignedLessThanOrEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Le(_, Signedness::Unsigned) => {
+            let c = builder.ins().icmp(IntCC::UnsignedLessThanOrEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Gt(_, Signedness::Signed) => {
+            let c = builder.ins().icmp(IntCC::SignedGreaterThan, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Gt(_, Signedness::Unsigned) => {
+            let c = builder.ins().icmp(IntCC::UnsignedGreaterThan, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Ge(_, Signedness::Signed) => {
+            let c = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThanOrEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::Ge(_, Signedness::Unsigned) => {
+            let c = builder
+                .ins()
+                .icmp(IntCC::UnsignedGreaterThanOrEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::FEq(_) => {
+            let c = builder.ins().fcmp(FloatCC::Equal, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::FNe(_) => {
+            let c = builder.ins().fcmp(FloatCC::NotEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::FLt(_) => {
+            let c = builder.ins().fcmp(FloatCC::LessThan, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::FLe(_) => {
+            let c = builder.ins().fcmp(FloatCC::LessThanOrEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::FGt(_) => {
+            let c = builder.ins().fcmp(FloatCC::GreaterThan, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
+        Op::FGe(_) => {
+            let c = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
         Op::BoolAnd => builder.ins().band(lhs, rhs),
         Op::BoolOr => builder.ins().bor(lhs, rhs),
-        Op::BoolEq => { let c = builder.ins().icmp(IntCC::Equal, lhs, rhs); cmp_to_bool(builder, c) }
+        Op::BoolEq => {
+            let c = builder.ins().icmp(IntCC::Equal, lhs, rhs);
+            cmp_to_bool(builder, c)
+        },
         Op::PtrOffset => builder.ins().iadd(lhs, rhs),
         Op::PtrWrite(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             mem::store_to_repr(builder, repr, lhs, rhs);
             builder.ins().iconst(ptr_ty, 0)
-        }
-        Op::AtomicAdd => {
-            builder.ins().atomic_rmw(ir::types::I64, MemFlags::new(), ir::AtomicRmwOp::Add, lhs, rhs)
-        }
-        Op::AtomicSub => {
-            builder.ins().atomic_rmw(ir::types::I64, MemFlags::new(), ir::AtomicRmwOp::Sub, lhs, rhs)
-        }
+        },
+        Op::AtomicAdd => builder.ins().atomic_rmw(
+            ir::types::I64,
+            MemFlags::new(),
+            ir::AtomicRmwOp::Add,
+            lhs,
+            rhs,
+        ),
+        Op::AtomicSub => builder.ins().atomic_rmw(
+            ir::types::I64,
+            MemFlags::new(),
+            ir::AtomicRmwOp::Sub,
+            lhs,
+            rhs,
+        ),
         Op::FloatCopysign(_) => builder.ins().fcopysign(lhs, rhs),
         _ => {
             return Err(CodegenError::Unsupported(format!("op2 variant: {op:?}")));
-        }
+        },
     })
 }
 
@@ -538,7 +690,7 @@ fn compile_op3(
         Op::FloatFma(_) => builder.ins().fma(a, b, c),
         _ => {
             return Err(CodegenError::Unsupported(format!("op3 variant: {op:?}")));
-        }
+        },
     })
 }
 
@@ -565,22 +717,54 @@ fn compile_struct(
             mem::zero_memory(builder, slot, repr.size());
             for &(field_idx, value_id) in fields {
                 let val = fc.resolve_scalar(builder, value_id);
-                let offset = struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
-                let field_ty = struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
-                let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let offset = struct_field_offset(
+                    ty,
+                    field_idx,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                );
+                let field_ty = struct_field_type(
+                    ty,
+                    field_idx,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                );
+                let field_repr = fc
+                    .ctx
+                    .tc
+                    .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
                 let dest = builder.ins().iadd_imm(slot, offset as i64);
                 mem::store_to_repr(builder, field_repr, dest, val);
             }
-            Ok(builder.ins().load(t, MemFlags::new(), slot, Offset32::new(0)))
-        }
+            Ok(builder
+                .ins()
+                .load(t, MemFlags::new(), slot, Offset32::new(0)))
+        },
         TypeRepr::Aggregate { size, align } => {
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             for &(field_idx, value_id) in fields {
                 let val = fc.resolve_scalar(builder, value_id);
-                let offset = struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
-                let field_ty = struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
-                let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let offset = struct_field_offset(
+                    ty,
+                    field_idx,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                );
+                let field_ty = struct_field_type(
+                    ty,
+                    field_idx,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                );
+                let field_repr = fc
+                    .ctx
+                    .tc
+                    .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
                 let dest = if offset != 0 {
                     builder.ins().iadd_imm(slot, offset as i64)
                 } else {
@@ -589,7 +773,7 @@ fn compile_struct(
                 mem::store_to_repr(builder, field_repr, dest, val);
             }
             Ok(slot)
-        }
+        },
     }
 }
 
@@ -620,7 +804,10 @@ fn compile_tuple(
     for (i, &elem_id) in elements.iter().enumerate() {
         let val = fc.resolve_scalar(builder, elem_id);
         let offset = layout.field_offsets[i];
-        let repr = fc.ctx.tc.repr(elem_tys[i], &fc.ctx.module.ty_arena, fc.ctx.module);
+        let repr = fc
+            .ctx
+            .tc
+            .repr(elem_tys[i], &fc.ctx.module.ty_arena, fc.ctx.module);
         let dest = if offset != 0 {
             builder.ins().iadd_imm(slot, offset as i64)
         } else {
@@ -640,7 +827,10 @@ fn compile_enum(
     payload: &[ValueId],
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
-    let repr = fc.ctx.tc.repr(enum_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let repr = fc
+        .ctx
+        .tc
+        .repr(enum_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
     let arena = &fc.ctx.module.ty_arena;
 
     let (disc_width, payload_offset, disc_value) =
@@ -649,7 +839,11 @@ fn compile_enum(
             let type_args = type_args.clone();
             if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
                 let disc = e.cases[variant.index()].discriminant;
-                (int_bits_to_cl(e.discriminant_width), e.payload_offset(), disc as i64)
+                (
+                    int_bits_to_cl(e.discriminant_width),
+                    e.payload_offset(),
+                    disc as i64,
+                )
             } else {
                 (ir::types::I8, 0u64, variant.index() as i64)
             }
@@ -662,18 +856,24 @@ fn compile_enum(
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::zero_memory(builder, slot, repr.size());
             let disc = builder.ins().iconst(disc_width, disc_value);
-            builder.ins().store(MemFlags::new(), disc, slot, Offset32::new(0));
+            builder
+                .ins()
+                .store(MemFlags::new(), disc, slot, Offset32::new(0));
             store_variant_payload(fc, builder, enum_ty, variant, payload, slot, payload_offset)?;
-            Ok(builder.ins().load(t, MemFlags::new(), slot, Offset32::new(0)))
-        }
+            Ok(builder
+                .ins()
+                .load(t, MemFlags::new(), slot, Offset32::new(0)))
+        },
         TypeRepr::Aggregate { size, align } => {
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             let disc = builder.ins().iconst(disc_width, disc_value);
-            builder.ins().store(MemFlags::new(), disc, slot, Offset32::new(0));
+            builder
+                .ins()
+                .store(MemFlags::new(), disc, slot, Offset32::new(0));
             store_variant_payload(fc, builder, enum_ty, variant, payload, slot, payload_offset)?;
             Ok(slot)
-        }
+        },
         TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
     }
 }
@@ -701,7 +901,10 @@ fn store_variant_payload(
                         });
                         let total_offset = payload_offset + field_offset;
                         let field_ty = e.cases[variant.index()].payload_fields[i].ty;
-                        let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                        let field_repr =
+                            fc.ctx
+                                .tc
+                                .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
                         let dest = builder.ins().iadd_imm(slot, total_offset as i64);
                         mem::store_to_repr(builder, field_repr, dest, val);
                     }
@@ -719,7 +922,10 @@ fn compile_array(
     elements: &[ValueId],
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
-    let elem_repr = fc.ctx.tc.repr(element_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let elem_repr = fc
+        .ctx
+        .tc
+        .repr(element_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
     let elem_size = elem_repr.size();
     let total_size = elem_size * elements.len() as u64;
 
@@ -763,9 +969,8 @@ fn compile_apply_partial(
                 "ApplyPartial callee not resolved to a mono instance: {callee:?}"
             )));
         };
-        let func_id = fc.ctx.func_ids[mono_id.index()].ok_or_else(|| {
-            CodegenError::Unsupported("closure target not declared".into())
-        })?;
+        let func_id = fc.ctx.func_ids[mono_id.index()]
+            .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
         let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
         builder.ins().func_addr(ptr_ty, func_ref)
     };
@@ -805,8 +1010,15 @@ fn compile_apply_partial(
     };
 
     let thick = mem::alloc_stack_slot(builder, ptr_size * 2, ptr_size, ptr_ty);
-    builder.ins().store(MemFlags::new(), func_addr, thick, Offset32::new(0));
-    builder.ins().store(MemFlags::new(), env_ptr, thick, Offset32::new(ptr_size as i32));
+    builder
+        .ins()
+        .store(MemFlags::new(), func_addr, thick, Offset32::new(0));
+    builder.ins().store(
+        MemFlags::new(),
+        env_ptr,
+        thick,
+        Offset32::new(ptr_size as i32),
+    );
 
     Ok(thick)
 }
@@ -823,16 +1035,35 @@ fn compile_struct_extract(
 ) -> Result<Value, CodegenError> {
     let base = fc.get_value(builder, operand);
     let operand_ty = fc.body.values[operand.index()].ty;
-    let operand_repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let is_borrowed = fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
+    let operand_repr = fc
+        .ctx
+        .tc
+        .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let is_borrowed =
+        fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
 
-    let field_ty = struct_field_type(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
-    let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let field_ty = struct_field_type(
+        operand_ty,
+        field,
+        &fc.ctx.module.ty_arena,
+        fc.ctx.module,
+        &fc.ctx.tc,
+    );
+    let field_repr = fc
+        .ctx
+        .tc
+        .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
     // @guaranteed operands are always pointers (Option B invariant).
     // Return the field address — CopyValue handles the load.
     if is_borrowed {
-        let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
+        let offset = struct_field_offset(
+            operand_ty,
+            field,
+            &fc.ctx.module.ty_arena,
+            fc.ctx.module,
+            &fc.ctx.tc,
+        );
         let addr = if offset != 0 {
             builder.ins().iadd_imm(base, offset as i64)
         } else {
@@ -855,13 +1086,24 @@ fn compile_struct_extract(
     }
 
     // @owned aggregate: compute field offset and load.
-    let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module, &fc.ctx.tc);
+    let offset = struct_field_offset(
+        operand_ty,
+        field,
+        &fc.ctx.module.ty_arena,
+        fc.ctx.module,
+        &fc.ctx.tc,
+    );
     let addr = if offset != 0 {
         builder.ins().iadd_imm(base, offset as i64)
     } else {
         base
     };
-    Ok(mem::load_from_repr(builder, field_repr, addr, fc.ctx.ptr_ty))
+    Ok(mem::load_from_repr(
+        builder,
+        field_repr,
+        addr,
+        fc.ctx.ptr_ty,
+    ))
 }
 
 fn compile_tuple_extract(
@@ -872,12 +1114,14 @@ fn compile_tuple_extract(
 ) -> Result<Value, CodegenError> {
     let base = fc.get_value(builder, operand);
     let operand_ty = fc.body.values[operand.index()].ty;
-    let is_borrowed = fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
+    let is_borrowed =
+        fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
     let arena = &fc.ctx.module.ty_arena;
 
     if let MirTy::Tuple(elems) = arena.get(operand_ty) {
         let elems = elems.clone();
-        let (offset, elem_ty) = tuple_elem_offset(&mut fc.ctx.tc, arena, fc.ctx.module, &elems, index);
+        let (offset, elem_ty) =
+            tuple_elem_offset(&mut fc.ctx.tc, arena, fc.ctx.module, &elems, index);
         let addr = if offset != 0 {
             builder.ins().iadd_imm(base, offset as i64)
         } else {
@@ -889,7 +1133,9 @@ fn compile_tuple_extract(
         let elem_repr = fc.ctx.tc.repr(elem_ty, arena, fc.ctx.module);
         Ok(mem::load_from_repr(builder, elem_repr, addr, fc.ctx.ptr_ty))
     } else {
-        Err(CodegenError::Unsupported("TupleExtract on non-tuple".into()))
+        Err(CodegenError::Unsupported(
+            "TupleExtract on non-tuple".into(),
+        ))
     }
 }
 
@@ -902,7 +1148,8 @@ fn compile_enum_payload(
 ) -> Result<Value, CodegenError> {
     let base = fc.get_value(builder, operand);
     let operand_ty = fc.body.values[operand.index()].ty;
-    let is_borrowed = fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
+    let is_borrowed =
+        fc.body.values[operand.index()].ownership == kestrel_mir::value::Ownership::Guaranteed;
     let arena = &fc.ctx.module.ty_arena;
 
     if let MirTy::Named { entity, type_args } = arena.get(operand_ty) {
@@ -919,14 +1166,24 @@ fn compile_enum_payload(
                         return Ok(addr);
                     }
                     let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
-                    let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-                    return Ok(mem::load_from_repr(builder, field_repr, addr, fc.ctx.ptr_ty));
+                    let field_repr =
+                        fc.ctx
+                            .tc
+                            .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                    return Ok(mem::load_from_repr(
+                        builder,
+                        field_repr,
+                        addr,
+                        fc.ctx.ptr_ty,
+                    ));
                 }
             }
         }
     }
 
-    Err(CodegenError::Unsupported("EnumPayload: enum metadata not found".into()))
+    Err(CodegenError::Unsupported(
+        "EnumPayload: enum metadata not found".into(),
+    ))
 }
 
 fn compile_destructure_struct(
@@ -983,21 +1240,28 @@ fn compile_call(
     match callee {
         Callee::Resolved(mono_id) => compile_resolved_call(fc, builder, *mono_id, args, result),
         Callee::Thin(func_val_id) => compile_thin_call(fc, builder, *func_val_id, args, result),
-        Callee::Thick(closure_val_id) => compile_thick_call(fc, builder, *closure_val_id, args, result),
+        Callee::Thick(closure_val_id) => {
+            compile_thick_call(fc, builder, *closure_val_id, args, result)
+        },
         Callee::Direct { func, .. } => {
             let func_name = fc.ctx.module.resolve_name(*func);
             Err(CodegenError::Unsupported(format!(
                 "unresolved Direct callee post-mono: {func_name}"
             )))
-        }
-        Callee::Witness { protocol, method, self_type, .. } => {
+        },
+        Callee::Witness {
+            protocol,
+            method,
+            self_type,
+            ..
+        } => {
             let proto_name = fc.ctx.module.resolve_name(*protocol);
             let self_desc = format!("{:?}", fc.ctx.module.ty_arena.get(*self_type));
             Err(CodegenError::Unsupported(format!(
                 "unresolved Witness callee post-mono: {proto_name}.{} on {self_desc}",
                 method.name,
             )))
-        }
+        },
     }
 }
 
@@ -1016,11 +1280,17 @@ fn compile_resolved_call(
     let target_func = &fc.ctx.module.functions[mono_id.index()];
 
     let func_id = fc.ctx.func_ids[mono_id.index()].ok_or_else(|| {
-        CodegenError::Unsupported(format!("resolved function {} not declared", target_func.name))
+        CodegenError::Unsupported(format!(
+            "resolved function {} not declared",
+            target_func.name
+        ))
     })?;
     let func_ref = fc.ctx.cl_module.declare_func_in_func(func_id, builder.func);
 
-    let ret_repr = fc.ctx.tc.repr(target_func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let ret_repr = fc
+        .ctx
+        .tc
+        .repr(target_func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
     let is_main = fc.ctx.is_main_function(target_func);
     let ret_mode = abi::return_mode(ret_repr, is_main);
 
@@ -1039,7 +1309,10 @@ fn compile_resolved_call(
             break;
         }
         let param = &target_func.params[i];
-        let repr = fc.ctx.tc.repr(param.ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+        let repr = fc
+            .ctx
+            .tc
+            .repr(param.ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         let pass = abi::param_pass_mode(param.convention, repr, ptr_ty);
         let val = fc.get_value(builder, call_arg.value);
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
@@ -1050,24 +1323,34 @@ fn compile_resolved_call(
                 // @guaranteed scalars are pointers; load the value for by-val passing.
                 let val = if arg_is_guaranteed {
                     let arg_ty = fc.body.values[call_arg.value.index()].ty;
-                    let arg_repr = fc.ctx.tc.repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                    let arg_repr = fc
+                        .ctx
+                        .tc
+                        .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
                     if let TypeRepr::Scalar(t) = arg_repr {
-                        builder.ins().load(t, MemFlags::new(), val, Offset32::new(0))
+                        builder
+                            .ins()
+                            .load(t, MemFlags::new(), val, Offset32::new(0))
                     } else {
                         val
                     }
                 } else {
                     let actual_ty = builder.func.dfg.value_type(val);
                     if actual_ty != expected_ty && actual_ty == ptr_ty {
-                        builder.ins().load(expected_ty, MemFlags::new(), val, Offset32::new(0))
+                        builder
+                            .ins()
+                            .load(expected_ty, MemFlags::new(), val, Offset32::new(0))
                     } else {
                         val
                     }
                 };
                 call_args.push(val);
-            }
+            },
             PassMode::ByRef => {
-                if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
+                if matches!(
+                    call_arg.convention,
+                    ParamConvention::Borrow | ParamConvention::MutBorrow
+                ) {
                     // Borrow/MutBorrow args always go through BeginBorrow
                     // in the lowerer, so the value is already an address.
                     call_args.push(val);
@@ -1078,15 +1361,16 @@ fn compile_resolved_call(
                     // Consuming arg passed by-ref: spill scalar to stack.
                     let actual_ty = builder.func.dfg.value_type(val);
                     if repr.is_scalar() || actual_ty != ptr_ty {
-                        let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
+                        let slot =
+                            mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
                         mem::store_to_repr(builder, repr, slot, val);
                         call_args.push(slot);
                     } else {
                         call_args.push(val);
                     }
                 }
-            }
-            PassMode::Zst => {}
+            },
+            PassMode::Zst => {},
         }
     }
 
@@ -1097,15 +1381,15 @@ fn compile_resolved_call(
             ReturnMode::Direct(_) => {
                 let result_val = builder.inst_results(inst)[0];
                 fc.map_value(builder, result_id, result_val);
-            }
+            },
             ReturnMode::Sret => {
                 let slot = sret_slot.expect("sret slot must exist");
                 fc.map_value(builder, result_id, slot);
-            }
+            },
             ReturnMode::Void => {
                 let zero = builder.ins().iconst(ptr_ty, 0);
                 fc.map_value(builder, result_id, zero);
-            }
+            },
         }
     }
 
@@ -1138,7 +1422,9 @@ fn compile_thin_call(
     let (param_tys, ret_ty) = if let MirTy::FuncThin { params, ret } = arena.get(inner_ty) {
         (params.clone(), *ret)
     } else {
-        return Err(CodegenError::Unsupported("thin call on non-FuncThin".into()));
+        return Err(CodegenError::Unsupported(
+            "thin call on non-FuncThin".into(),
+        ));
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
@@ -1155,7 +1441,7 @@ fn compile_thin_call(
         match abi::param_pass_mode(*convention, repr, ptr_ty) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
-            PassMode::Zst => {}
+            PassMode::Zst => {},
         }
     }
     if let ReturnMode::Direct(t) = ret_mode {
@@ -1189,7 +1475,9 @@ fn compile_thin_call(
                     let arg_ty = fc.body.values[call_arg.value.index()].ty;
                     let arg_repr = fc.ctx.tc.repr(arg_ty, arena, fc.ctx.module);
                     if let TypeRepr::Scalar(t) = arg_repr {
-                        builder.ins().load(t, MemFlags::new(), val, Offset32::new(0))
+                        builder
+                            .ins()
+                            .load(t, MemFlags::new(), val, Offset32::new(0))
                     } else {
                         val
                     }
@@ -1197,9 +1485,9 @@ fn compile_thin_call(
                     val
                 };
                 call_args.push(val);
-            }
+            },
             PassMode::ByRef => call_args.push(val),
-            PassMode::Zst => {}
+            PassMode::Zst => {},
         }
     }
 
@@ -1210,14 +1498,14 @@ fn compile_thin_call(
             ReturnMode::Direct(_) => {
                 let result_val = builder.inst_results(inst)[0];
                 fc.map_value(builder, result_id, result_val);
-            }
+            },
             ReturnMode::Sret => {
                 fc.map_value(builder, result_id, sret_slot.unwrap());
-            }
+            },
             ReturnMode::Void => {
                 let zero = builder.ins().iconst(ptr_ty, 0);
                 fc.map_value(builder, result_id, zero);
-            }
+            },
         }
     }
 
@@ -1241,8 +1529,15 @@ fn compile_thick_call(
 
     let closure_ptr = fc.get_value(builder, closure_val_id);
 
-    let func_ptr = builder.ins().load(ptr_ty, MemFlags::new(), closure_ptr, Offset32::new(0));
-    let env_ptr = builder.ins().load(ptr_ty, MemFlags::new(), closure_ptr, Offset32::new(ptr_size as i32));
+    let func_ptr = builder
+        .ins()
+        .load(ptr_ty, MemFlags::new(), closure_ptr, Offset32::new(0));
+    let env_ptr = builder.ins().load(
+        ptr_ty,
+        MemFlags::new(),
+        closure_ptr,
+        Offset32::new(ptr_size as i32),
+    );
 
     let func_ty = fc.body.values[closure_val_id.index()].ty;
     let arena = &fc.ctx.module.ty_arena;
@@ -1254,9 +1549,10 @@ fn compile_thick_call(
     let (param_tys, ret_ty) = if let MirTy::FuncThick { params, ret } = arena.get(inner_ty) {
         (params.clone(), *ret)
     } else {
-        return Err(CodegenError::Unsupported(
-            format!("thick call on non-FuncThick: got {:?}", arena.get(func_ty)),
-        ));
+        return Err(CodegenError::Unsupported(format!(
+            "thick call on non-FuncThick: got {:?}",
+            arena.get(func_ty)
+        )));
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
@@ -1274,7 +1570,7 @@ fn compile_thick_call(
         match abi::param_pass_mode(*convention, repr, ptr_ty) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
-            PassMode::Zst => {}
+            PassMode::Zst => {},
         }
     }
     if let ReturnMode::Direct(t) = ret_mode {
@@ -1309,20 +1605,28 @@ fn compile_thick_call(
                     let arg_ty = fc.body.values[call_arg.value.index()].ty;
                     let arg_repr = fc.ctx.tc.repr(arg_ty, arena, fc.ctx.module);
                     let loaded = if let TypeRepr::Scalar(t) = arg_repr {
-                        builder.ins().load(t, MemFlags::new(), val, Offset32::new(0))
+                        builder
+                            .ins()
+                            .load(t, MemFlags::new(), val, Offset32::new(0))
                     } else {
                         val
                     };
                     call_args.push(loaded);
-                } else if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
-                    let loaded = builder.ins().load(expected_ty, MemFlags::new(), val, Offset32::new(0));
+                } else if matches!(
+                    call_arg.convention,
+                    ParamConvention::Borrow | ParamConvention::MutBorrow
+                ) {
+                    let loaded =
+                        builder
+                            .ins()
+                            .load(expected_ty, MemFlags::new(), val, Offset32::new(0));
                     call_args.push(loaded);
                 } else {
                     call_args.push(val);
                 }
-            }
+            },
             PassMode::ByRef => call_args.push(val),
-            PassMode::Zst => {}
+            PassMode::Zst => {},
         }
     }
 
@@ -1333,14 +1637,14 @@ fn compile_thick_call(
             ReturnMode::Direct(_) => {
                 let result_val = builder.inst_results(inst)[0];
                 fc.map_value(builder, result_id, result_val);
-            }
+            },
             ReturnMode::Sret => {
                 fc.map_value(builder, result_id, sret_slot.unwrap());
-            }
+            },
             ReturnMode::Void => {
                 let zero = builder.ins().iconst(ptr_ty, 0);
                 fc.map_value(builder, result_id, zero);
-            }
+            },
         }
     }
 
@@ -1356,12 +1660,7 @@ fn compile_thick_call(
 // Layout helpers
 // ======================================================================
 
-fn discriminant_width(
-    ty: TyId,
-    arena: &TyArena,
-    module: &MonoModule,
-    tc: &TypeCache,
-) -> ir::Type {
+fn discriminant_width(ty: TyId, arena: &TyArena, module: &MonoModule, tc: &TypeCache) -> ir::Type {
     if let MirTy::Named { entity, type_args } = arena.get(ty) {
         let entity = *entity;
         let type_args = type_args.clone();

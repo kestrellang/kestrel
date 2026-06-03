@@ -24,10 +24,10 @@ impl fmt::Display for CodegenError {
             Self::ModuleCreation(msg) => write!(f, "module creation failed: {msg}"),
             Self::FunctionCompilation { name, source } => {
                 write!(f, "failed to compile function '{name}': {source}")
-            }
+            },
             Self::FunctionDefinition { name, source } => {
                 write!(f, "failed to define function '{name}': {source}")
-            }
+            },
             Self::ModuleFinish(msg) => write!(f, "module finish failed: {msg}"),
             Self::LinkerError(msg) => write!(f, "linker error: {msg}"),
             Self::IoError(e) => write!(f, "I/O error: {e}"),

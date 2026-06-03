@@ -29,10 +29,10 @@ use std::mem;
 use kestrel_hir::body::{HirBlock, HirClosureParam, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId as HirLocalId;
 use kestrel_mir::body::OssaBody;
+use kestrel_mir::callee::Callee;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir::value::{Ownership, ValueDef};
-use kestrel_mir::callee::Callee;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::captures::{CaptureKind, CapturedPlace};
 
@@ -88,18 +88,22 @@ impl OssaBodyCtx<'_, '_> {
             .unwrap_or_default();
         let closure_name = format!("{}.closure.{}", parent_name, closure_idx);
 
-        // Determine param and return types from the closure's function type
-        let (param_tys, ret_ty) = match self.ctx.module.ty_arena.get(closure_ty) {
+        // Determine param types, per-param conventions, and return type from
+        // the closure's function type. A `MutBorrow` param is bound by-reference.
+        let (param_tys, param_convs, ret_ty) = match self.ctx.module.ty_arena.get(closure_ty) {
             MirTy::FuncThick { params, ret } => {
-                (params.iter().map(|(ty, _)| *ty).collect::<Vec<_>>(), *ret)
+                let tys = params.iter().map(|(ty, _)| *ty).collect::<Vec<_>>();
+                let convs = params.iter().map(|(_, c)| *c).collect::<Vec<_>>();
+                (tys, convs, *ret)
             },
             _ => {
                 let p: Vec<TyId> = params
                     .iter()
                     .map(|p| self.resolve_local_type(p.local))
                     .collect();
+                let convs = vec![ParamConvention::Consuming; p.len()];
                 let unit = self.ctx.module.ty_arena.unit();
-                (p, unit)
+                (p, convs, unit)
             },
         };
 
@@ -200,15 +204,39 @@ impl OssaBodyCtx<'_, '_> {
                 .get(i)
                 .copied()
                 .unwrap_or_else(|| self.ctx.module.ty_arena.error());
-            let val = closure_body.alloc_value(ValueDef::owned(ty));
-            func_def.params.push(ParamDef::new(
-                &self.hir.locals[cp.local].name,
-                val,
-                ty,
-                ParamConvention::Consuming,
-            ));
+            let conv = param_convs
+                .get(i)
+                .copied()
+                .unwrap_or(ParamConvention::Consuming);
+            let name = &self.hir.locals[cp.local].name;
+            match conv {
+                ParamConvention::MutBorrow => {
+                    // By-reference param: arrives as an address (ByRef ABI),
+                    // bound as a mutable place so `x`/`x.field` writes lower
+                    // in place through the borrow (mirrors `mutating self`,
+                    // body/mod.rs MutBorrow arm).
+                    let val = closure_body.alloc_value(ValueDef {
+                        ty,
+                        ownership: Ownership::Guaranteed,
+                        borrow_source: None,
+                        span: None,
+                    });
+                    func_def
+                        .params
+                        .push(ParamDef::new(name, val, ty, ParamConvention::MutBorrow));
+                    closure_local_map.insert(cp.local, LocalBinding::Var(val));
+                },
+                _ => {
+                    // Consuming (default) / Borrow: keep the @owned SSA binding
+                    // (unchanged from pre-#106 behavior).
+                    let val = closure_body.alloc_value(ValueDef::owned(ty));
+                    func_def
+                        .params
+                        .push(ParamDef::new(name, val, ty, ParamConvention::Consuming));
+                    closure_local_map.insert(cp.local, LocalBinding::Ssa(val));
+                },
+            }
             closure_body.param_count += 1;
-            closure_local_map.insert(cp.local, LocalBinding::Ssa(val));
         }
 
         // Entry block

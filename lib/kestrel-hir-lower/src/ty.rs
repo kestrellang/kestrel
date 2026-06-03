@@ -106,6 +106,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
 
         AstType::Function {
             params,
+            param_conventions,
             return_type,
             span,
         } => {
@@ -116,6 +117,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             let lowered_ret = Box::new(lower_ast_type(ctx, owner, root, return_type));
             HirTy::Function {
                 params: lowered_params,
+                param_conventions: param_conventions.clone(),
                 ret: lowered_ret,
                 span: span.clone(),
             }

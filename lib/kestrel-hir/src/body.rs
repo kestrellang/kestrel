@@ -536,6 +536,10 @@ pub struct HirClosureParam {
     /// Present for destructured params (tuple/struct). `None` for simple
     /// bindings and wildcards (the `local` already captures those).
     pub pattern: Option<HirPatId>,
+    /// `true` when the param was written `mutating` (by-reference). Inference
+    /// may additionally treat a param as `MutBorrow` based on the expected
+    /// type even when this is `false`.
+    pub is_mut: bool,
 }
 
 /// A single argument in an enum/variant pattern.

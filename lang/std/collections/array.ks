@@ -569,10 +569,13 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + 1);
-        var s = self.storage.read();
-        s.ptr.offset(by: s.len).write(element);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
+        // Mutate the storage in place — no per-append buffer clone (O(1)
+        // amortized). `makeUnique`/`grow` run first (they may reallocate);
+        // `modify` then writes the element and bumps `len` directly on the heap.
+        self.storage.modify { (mutating s) in
+            s.ptr.offset(by: s.len).write(element);
+            s.len = s.len + 1
+        }
     }
 
     /// Appends every element of `other` to the end of this array.
@@ -600,13 +603,13 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         self.makeUnique();
         self.grow(myLen + otherLen);
-        var s = self.storage.read();
         let otherPtr = sl.asPointer();
-        for i in 0..<otherLen {
-            s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
-            s.len = s.len + 1
+        self.storage.modify { (mutating s) in
+            for i in 0..<otherLen {
+                s.ptr.offset(by: s.len).write(otherPtr.offset(by: i).read());
+                s.len = s.len + 1
+            }
         }
-        self.storage.setValue(s)
     }
 
     /// Appends every element produced by an arbitrary iterable.
@@ -656,16 +659,16 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         }
         self.makeUnique();
         self.grow(myLen + 1);
-        var s = self.storage.read();
-        // Shift elements right
-        var i: Int64 = s.len;
-        while i > index {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).read());
-            i = i - 1
+        self.storage.modify { (mutating s) in
+            // Shift elements right
+            var i: Int64 = s.len;
+            while i > index {
+                s.ptr.offset(by: i).write(s.ptr.offset(by: i - 1).read());
+                i = i - 1
+            }
+            s.ptr.offset(by: index).write(element);
+            s.len = s.len + 1
         }
-        s.ptr.offset(by: index).write(element);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
     }
 
     // ========================================================================
@@ -692,10 +695,10 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         let myLen = self.len();
         if myLen > 0 {
             self.makeUnique();
-            var s = self.storage.read();
-            s.len = s.len - 1;
-            let value = s.ptr.offset(by: s.len).read();
-            self.storage.setValue(s);
+            let value = self.storage.modify { (mutating s) in
+                s.len = s.len - 1;
+                s.ptr.offset(by: s.len).read()
+            };
             .Some(value)
         } else {
             .None
@@ -749,17 +752,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             fatalError("Array.remove: index out of bounds")
         }
         self.makeUnique();
-        var s = self.storage.read();
-        let removed = s.ptr.offset(by: index).read();
-        // Shift elements left
-        var i: Int64 = index;
-        while i < s.len - 1 {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).read());
-            i = i + 1
+        self.storage.modify { (mutating s) in
+            let removed = s.ptr.offset(by: index).read();
+            // Shift elements left
+            var i: Int64 = index;
+            while i < s.len - 1 {
+                s.ptr.offset(by: i).write(s.ptr.offset(by: i + 1).read());
+                i = i + 1
+            }
+            s.len = s.len - 1;
+            removed
         }
-        s.len = s.len - 1;
-        self.storage.setValue(s);
-        removed
     }
 
     /// Removes every element in `range`, shifting later elements left.
@@ -794,15 +797,15 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             return
         }
         self.makeUnique();
-        var s = self.storage.read();
-        // Shift elements left
-        var i = start;
-        while i < myLen - removeCount {
-            s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).read());
-            i = i + 1
+        self.storage.modify { (mutating s) in
+            // Shift elements left
+            var i = start;
+            while i < myLen - removeCount {
+                s.ptr.offset(by: i).write(s.ptr.offset(by: i + removeCount).read());
+                i = i + 1
+            }
+            s.len = s.len - removeCount
         }
-        s.len = s.len - removeCount;
-        self.storage.setValue(s)
     }
 
 
@@ -820,9 +823,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.read();
-        s.len = 0;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in s.len = 0 }
     }
 
     /// Keeps only elements for which `predicate` returns true; removes
@@ -840,19 +841,19 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func retain(where predicate: (T) -> Bool) {
         self.makeUnique();
-        var s = self.storage.read();
-        var writeIdx: Int64 = 0;
-        for readIdx in 0..<s.len {
-            let element = s.ptr.offset(by: readIdx).read();
-            if predicate(element) {
-                if writeIdx != readIdx {
-                    s.ptr.offset(by: writeIdx).write(element)
+        self.storage.modify { (mutating s) in
+            var writeIdx: Int64 = 0;
+            for readIdx in 0..<s.len {
+                let element = s.ptr.offset(by: readIdx).read();
+                if predicate(element) {
+                    if writeIdx != readIdx {
+                        s.ptr.offset(by: writeIdx).write(element)
+                    }
+                    writeIdx = writeIdx + 1
                 }
-                writeIdx = writeIdx + 1
             }
+            s.len = writeIdx
         }
-        s.len = writeIdx;
-        self.storage.setValue(s)
     }
 
     /// Removes every element for which `predicate` returns true.
@@ -922,17 +923,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func reverse() {
         self.makeUnique();
-        var s = self.storage.read();
-        var left: Int64 = 0;
-        var right: Int64 = s.len - 1;
-        while left < right {
-            let temp = s.ptr.offset(by: left).read();
-            s.ptr.offset(by: left).write(s.ptr.offset(by: right).read());
-            s.ptr.offset(by: right).write(temp);
-            left = left + 1;
-            right = right - 1
+        self.storage.modify { (mutating s) in
+            var left: Int64 = 0;
+            var right: Int64 = s.len - 1;
+            while left < right {
+                let temp = s.ptr.offset(by: left).read();
+                s.ptr.offset(by: left).write(s.ptr.offset(by: right).read());
+                s.ptr.offset(by: right).write(temp);
+                left = left + 1;
+                right = right - 1
+            }
         }
-        self.storage.setValue(s)
     }
 
     // reversed(): provided by extend Slice[T] — returns a lazy ReversedView[T]
@@ -1029,31 +1030,30 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
         self.grow(newLen);
         self.makeUnique();
-        var s = self.storage.read();
-
-        if insertCount > removeCount {
-            // Shift elements right
-            var i = myLen - 1;
-            while i >= end {
-                s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).read());
-                i = i - 1
+        self.storage.modify { (mutating s) in
+            if insertCount > removeCount {
+                // Shift elements right
+                var i = myLen - 1;
+                while i >= end {
+                    s.ptr.offset(by: i + insertCount - removeCount).write(s.ptr.offset(by: i).read());
+                    i = i - 1
+                }
+            } else if insertCount < removeCount {
+                // Shift elements left
+                var i = end;
+                while i < myLen {
+                    s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).read());
+                    i = i + 1
+                }
             }
-        } else if insertCount < removeCount {
-            // Shift elements left
-            var i = end;
-            while i < myLen {
-                s.ptr.offset(by: start + insertCount + (i - end)).write(s.ptr.offset(by: i).read());
-                i = i + 1
+
+            // Copy replacement
+            for i in 0..<insertCount {
+                s.ptr.offset(by: start + i).write(replacement(unchecked: i))
             }
-        }
 
-        // Copy replacement
-        for i in 0..<insertCount {
-            s.ptr.offset(by: start + i).write(replacement(unchecked: i))
+            s.len = newLen
         }
-
-        s.len = newLen;
-        self.storage.setValue(s)
     }
 
     /// Shuffles the array in place using `rng`.
@@ -1076,24 +1076,22 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             return
         }
         self.makeUnique();
-        var s = self.storage.read();
-        var generator = rng;
-
-        // Fisher-Yates shuffle
-        var i: Int64 = n - 1;
-        while i > 0 {
-            // Inline nextInt(below:) since extension methods may not be visible on generic R
-            let bound = UInt64(from: i) + 1;
-            let rngValue = generator.nextUInt64();
-            let j = Int64(from: rngValue.modulo(bound));
-            // Swap elements at i and j
-            let temp = s.ptr.offset(by: i).read();
-            s.ptr.offset(by: i).write(s.ptr.offset(by: j).read());
-            s.ptr.offset(by: j).write(temp);
-            i = i - 1
+        self.storage.modify { (mutating s) in
+            var generator = rng;
+            // Fisher-Yates shuffle
+            var i: Int64 = n - 1;
+            while i > 0 {
+                // Inline nextInt(below:) since extension methods may not be visible on generic R
+                let bound = UInt64(from: i) + 1;
+                let rngValue = generator.nextUInt64();
+                let j = Int64(from: rngValue.modulo(bound));
+                // Swap elements at i and j
+                let temp = s.ptr.offset(by: i).read();
+                s.ptr.offset(by: i).write(s.ptr.offset(by: j).read());
+                s.ptr.offset(by: j).write(temp);
+                i = i - 1
+            }
         }
-
-        self.storage.setValue(s)
     }
 
     /// Shuffles the array in place using a fresh default RNG.
@@ -1197,13 +1195,13 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             if myLen == 0 and myCap > 0 {
                 // Deallocate entirely for empty array
                 self.makeUnique();
-                var s = self.storage.read();
-                let layout = Layout.array[T](myCap);
-                var allocator = SystemAllocator();
-                allocator.deallocate(s.ptr.asRaw(), layout);
-                s.ptr = Pointer[T].nullPointer();
-                s.cap = 0;
-                self.storage.setValue(s)
+                self.storage.modify { (mutating s) in
+                    let layout = Layout.array[T](myCap);
+                    var allocator = SystemAllocator();
+                    allocator.deallocate(s.ptr.asRaw(), layout);
+                    s.ptr = Pointer[T].nullPointer();
+                    s.cap = 0
+                }
             }
             return
         }
@@ -1264,34 +1262,33 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func partition(by predicate: (T) -> Bool) -> Int64 {
         self.makeUnique();
-        var s = self.storage.read();
-        var lo: Int64 = 0;
-        var hi: Int64 = s.len - 1;
+        self.storage.modify { (mutating s) in
+            var lo: Int64 = 0;
+            var hi: Int64 = s.len - 1;
 
-        while true {
-            // Find first element that doesn't satisfy predicate
-            while lo < s.len and predicate(s.ptr.offset(by: lo).read()) {
-                lo = lo + 1
-            }
-            // Find last element that satisfies predicate
-            while hi >= 0 and predicate(s.ptr.offset(by: hi).read()) == false {
+            while true {
+                // Find first element that doesn't satisfy predicate
+                while lo < s.len and predicate(s.ptr.offset(by: lo).read()) {
+                    lo = lo + 1
+                }
+                // Find last element that satisfies predicate
+                while hi >= 0 and predicate(s.ptr.offset(by: hi).read()) == false {
+                    hi = hi - 1
+                }
+
+                if lo >= hi {
+                    break
+                }
+
+                // Swap
+                let temp = s.ptr.offset(by: lo).read();
+                s.ptr.offset(by: lo).write(s.ptr.offset(by: hi).read());
+                s.ptr.offset(by: hi).write(temp);
+                lo = lo + 1;
                 hi = hi - 1
             }
-
-            if lo >= hi {
-                break
-            }
-
-            // Swap
-            let temp = s.ptr.offset(by: lo).read();
-            s.ptr.offset(by: lo).write(s.ptr.offset(by: hi).read());
-            s.ptr.offset(by: hi).write(temp);
-            lo = lo + 1;
-            hi = hi - 1
+            lo
         }
-
-        self.storage.setValue(s);
-        lo
     }
 
     /// Returns two new arrays: elements matching `predicate` first, then

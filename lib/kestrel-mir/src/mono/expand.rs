@@ -4,8 +4,8 @@ use kestrel_hecs::Entity;
 
 use crate::callee::Callee;
 use crate::inst::{CallArg, InstKind, Instruction};
-use crate::item::function::{FunctionDef, FunctionKind};
 use crate::item::CopyBehavior;
+use crate::item::function::{FunctionDef, FunctionKind};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::{MirTy, ParamConvention};
 use crate::value::{Ownership, ValueDef};
@@ -176,7 +176,9 @@ fn build_clone_lookup(
             FunctionKind::Method { parent, .. } if f.name.ends_with(".clone") => {
                 // Prefer the self-param nominal: an `extend`-defined `clone()`
                 // doesn't reliably set `parent` to the extended type.
-                let nominal = f.clone_method_self_nominal(&module.ty_arena).unwrap_or(*parent);
+                let nominal = f
+                    .clone_method_self_nominal(&module.ty_arena)
+                    .unwrap_or(*parent);
                 clone_func_to_parent.insert(f.entity, nominal);
             },
             _ => {},
@@ -281,7 +283,11 @@ fn build_drop_shim_lookup(
 /// type — the one case where expanding `DestroyValue → __drop$Self` would
 /// recurse. Compared per-instantiation (full type, not nominal alone) so a
 /// payload that is a *different* instantiation of the same generic still drops.
-fn is_drop_self(skip_self: Option<&(Entity, Vec<TyId>)>, entity: Entity, type_args: &[TyId]) -> bool {
+fn is_drop_self(
+    skip_self: Option<&(Entity, Vec<TyId>)>,
+    entity: Entity,
+    type_args: &[TyId],
+) -> bool {
     matches!(skip_self, Some((e, args)) if *e == entity && args.as_slice() == type_args)
 }
 
@@ -646,7 +652,9 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
                 _ => {},
             }
         },
-        InstKind::ApplyPartial { callee, captures, .. } => {
+        InstKind::ApplyPartial {
+            callee, captures, ..
+        } => {
             for v in captures.iter_mut() {
                 *v = remap_value(*v, remap);
             }

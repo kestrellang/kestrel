@@ -830,7 +830,11 @@ fn fmt_callee(callee: &Callee, arena: &TyArena, module: &dyn NameResolver) -> St
 // Immediate
 // ---------------------------------------------------------------------------
 
-fn fmt_immediate(imm: &crate::immediate::Immediate, arena: &TyArena, module: &dyn NameResolver) -> String {
+fn fmt_immediate(
+    imm: &crate::immediate::Immediate,
+    arena: &TyArena,
+    module: &dyn NameResolver,
+) -> String {
     match &imm.kind {
         ImmediateKind::IntLiteral { bits, value } => {
             // `i64 42` — bit-width prefix (lowercased Debug) before the value.
@@ -894,7 +898,12 @@ fn fmt_immediate(imm: &crate::immediate::Immediate, arena: &TyArena, module: &dy
 // Terminators
 // ---------------------------------------------------------------------------
 
-fn fmt_terminator(out: &mut String, kind: &TerminatorKind, _arena: &TyArena, _module: &dyn NameResolver) {
+fn fmt_terminator(
+    out: &mut String,
+    kind: &TerminatorKind,
+    _arena: &TyArena,
+    _module: &dyn NameResolver,
+) {
     match kind {
         TerminatorKind::Return(v) => {
             write!(out, "return {}", fmt_value(*v)).unwrap();

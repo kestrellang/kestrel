@@ -1008,10 +1008,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         // Find empty slot
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
-            var s = self.storage.read();
-            s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-            s.len = s.len + 1;
-            self.storage.setValue(s)
+            self.storage.modify { (mutating s) in
+                s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
+                s.len = s.len + 1
+            }
         } else {
             fatalError("Dictionary insert failed - no empty slot")
         }
@@ -1037,17 +1037,18 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            var s = self.storage.read();
-            let bucket = s.buckets.offset(by: index).read();
-            let removedValue: V? = match bucket {
-                .Occupied(_, v, _) => .Some(v),
-                _ => .None
-            };
+            let removedValue = self.storage.modify { (mutating s) in
+                let bucket = s.buckets.offset(by: index).read();
+                let rv: V? = match bucket {
+                    .Occupied(_, v, _) => .Some(v),
+                    _ => .None
+                };
 
-            // Mark as deleted (tombstone)
-            s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - 1;
-            self.storage.setValue(s);
+                // Mark as deleted (tombstone)
+                s.buckets.offset(by: index).write(.Deleted);
+                s.len = s.len - 1;
+                rv
+            };
 
             return removedValue
         }
@@ -1070,12 +1071,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.read();
-        for i in 0..<s.cap {
-            s.buckets.offset(by: i).write(.Empty);
+        self.storage.modify { (mutating s) in
+            for i in 0..<s.cap {
+                s.buckets.offset(by: i).write(.Empty);
+            }
+            s.len = 0
         }
-        s.len = 0;
-        self.storage.setValue(s)
     }
 
     /// Applies `transform` to the existing value for `key` and writes

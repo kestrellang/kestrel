@@ -117,7 +117,10 @@ pub fn run_pipeline_until(
     next_entity: &mut u32,
     stop: Stage,
 ) -> Vec<VerifyError> {
-    debug_assert!(stop.is_pre_mono(), "run_pipeline_until got post-mono stage {stop:?}");
+    debug_assert!(
+        stop.is_pre_mono(),
+        "run_pipeline_until got post-mono stage {stop:?}"
+    );
 
     if stop >= Stage::DropFix {
         drop_fix::fix_drop_behaviors(module);

@@ -110,6 +110,35 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         }
 
         for param in &target_params {
+            if param.convention == ParamConvention::MutBorrow {
+                // By-reference (`mutating`) param: the thunk receives it as a
+                // @guaranteed mutable borrow (ByRef address) and forwards it
+                // unchanged, so writes in the target reach the caller's place.
+                let val = body.alloc_value(ValueDef {
+                    ty: param.ty,
+                    ownership: Ownership::Guaranteed,
+                    borrow_source: None,
+                    span: None,
+                });
+                body.block_mut(entry).params.push(BlockParam {
+                    value: val,
+                    ty: param.ty,
+                    ownership: Ownership::Guaranteed,
+                });
+                thunk_def.params.push(ParamDef::new(
+                    &param.name,
+                    val,
+                    param.ty,
+                    ParamConvention::MutBorrow,
+                ));
+                body.param_count += 1;
+                forward_args.push(CallArg {
+                    value: val,
+                    convention: ParamConvention::MutBorrow,
+                });
+                continue;
+            }
+
             let val = body.alloc_value(ValueDef {
                 ty: param.ty,
                 ownership: Ownership::Owned,

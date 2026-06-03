@@ -910,13 +910,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let (then_block, then_params) = self.new_block_with_params(&descs);
         let (else_block, else_params) = self.new_block_with_params(&descs);
         let (merge_block, merge_params) = self.new_block_with_params(&descs);
-        self.emit_branch(
-            cond,
-            then_block,
-            live.clone(),
-            else_block,
-            live.clone(),
-        );
+        self.emit_branch(cond, then_block, live.clone(), else_block, live.clone());
 
         // then arm: run the deinit on the slot, then forward the live set.
         self.switch_to(then_block);
@@ -2052,6 +2046,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             },
             ParamConvention::MutBorrow => {
+                // An already-@guaranteed value is itself the by-reference
+                // address (e.g. from `ptr_mut_borrow` or `lower_expr_for_borrow`
+                // of a mut place). Re-borrowing a scalar address spills it to a
+                // stack slot and passes `&slot`, adding a spurious indirection
+                // that corrupts the pointee — pass it through directly.
+                if self.body.value(value).ownership == Ownership::Guaranteed {
+                    return CallArg { value, convention };
+                }
                 let borrow = self.emit_begin_mut_borrow(value);
                 CallArg {
                     value: borrow,

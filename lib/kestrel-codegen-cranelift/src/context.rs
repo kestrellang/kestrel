@@ -9,13 +9,13 @@ use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use kestrel_codegen::TargetConfig;
 use kestrel_hecs::Entity;
-use kestrel_mir::mono::{MonoFunction, MonoModule};
 use kestrel_mir::ImmediateKind;
+use kestrel_mir::mono::{MonoFunction, MonoModule};
 
+use crate::CodegenOptions;
 use crate::error::CodegenError;
 use crate::func;
 use crate::ty::TypeCache;
-use crate::CodegenOptions;
 
 pub struct CodegenCtx<'m> {
     pub module: &'m MonoModule,
@@ -119,7 +119,10 @@ impl<'m> CodegenCtx<'m> {
         Ok(())
     }
 
-    fn define_static(&mut self, s: &kestrel_mir::item::static_def::StaticDef) -> Result<(), CodegenError> {
+    fn define_static(
+        &mut self,
+        s: &kestrel_mir::item::static_def::StaticDef,
+    ) -> Result<(), CodegenError> {
         let repr = self.tc.repr(s.ty, &self.module.ty_arena, self.module);
         let size = repr.size().max(1) as usize;
 
@@ -149,22 +152,22 @@ impl<'m> CodegenCtx<'m> {
                         kestrel_mir::IntBits::I64 => (*value as i64).to_le_bytes().to_vec(),
                     };
                     desc.define(bytes.into_boxed_slice());
-                }
+                },
                 ImmediateKind::FloatLiteral { bits, value } => {
                     let bytes = match bits {
                         kestrel_mir::FloatBits::F32 | kestrel_mir::FloatBits::F16 => {
                             (*value as f32).to_le_bytes().to_vec()
-                        }
+                        },
                         kestrel_mir::FloatBits::F64 => value.to_le_bytes().to_vec(),
                     };
                     desc.define(bytes.into_boxed_slice());
-                }
+                },
                 ImmediateKind::BoolLiteral(b) => {
                     desc.define(vec![*b as u8].into_boxed_slice());
-                }
+                },
                 _ => {
                     desc.define_zeroinit(size);
-                }
+                },
             }
         } else {
             desc.define_zeroinit(size);
@@ -191,7 +194,10 @@ impl<'m> CodegenCtx<'m> {
         };
 
         let file_bytes = std::fs::read(&path).map_err(|e| {
-            CodegenError::DataSection(format!("failed to read file constant '{}': {e}", path.display()))
+            CodegenError::DataSection(format!(
+                "failed to read file constant '{}': {e}",
+                path.display()
+            ))
         })?;
 
         let data_name = format!("{}.data", s.name);
@@ -261,7 +267,11 @@ impl<'m> CodegenCtx<'m> {
         Ok(())
     }
 
-    fn declare_function(&mut self, func: &MonoFunction, idx: usize) -> Result<FuncId, CodegenError> {
+    fn declare_function(
+        &mut self,
+        func: &MonoFunction,
+        idx: usize,
+    ) -> Result<FuncId, CodegenError> {
         let is_main = self.is_main_function(func);
         let call_conv = self.isa.default_call_conv();
 
@@ -322,11 +332,11 @@ impl<'m> CodegenCtx<'m> {
                     func::compile_function(self, i, func_id)
                 }));
                 match result {
-                    Ok(Ok(())) => {}
+                    Ok(Ok(())) => {},
                     Ok(Err(e)) => {
                         errors.push((func_name, format!("{e}")));
                         self.define_trap_stub(func_id);
-                    }
+                    },
                     Err(panic) => {
                         let msg = if let Some(s) = panic.downcast_ref::<String>() {
                             s.clone()
@@ -337,22 +347,40 @@ impl<'m> CodegenCtx<'m> {
                         };
                         errors.push((func_name, format!("panic: {msg}")));
                         self.define_trap_stub(func_id);
-                    }
+                    },
                 }
             }
         }
         if !errors.is_empty() {
-            let body_count = self.module.functions.iter().filter(|f| f.body.is_some()).count();
-            eprintln!("warning: {} of {} functions failed to compile (skipped):", errors.len(), body_count);
-            let mut by_cat: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let body_count = self
+                .module
+                .functions
+                .iter()
+                .filter(|f| f.body.is_some())
+                .count();
+            eprintln!(
+                "warning: {} of {} functions failed to compile (skipped):",
+                errors.len(),
+                body_count
+            );
+            let mut by_cat: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for (_, err) in &errors {
-                let cat = if err.contains("non-dominating") { "dominance" }
-                    else if err.contains("invalid pointer width") { "ptr-width" }
-                    else if err.contains("type set") { "type-set" }
-                    else if err.contains("ICE:") { "ICE" }
-                    else if err.contains("has type") { "type-mismatch" }
-                    else if err.contains("result 0 has type") { "return-type" }
-                    else { "other" };
+                let cat = if err.contains("non-dominating") {
+                    "dominance"
+                } else if err.contains("invalid pointer width") {
+                    "ptr-width"
+                } else if err.contains("type set") {
+                    "type-set"
+                } else if err.contains("ICE:") {
+                    "ICE"
+                } else if err.contains("has type") {
+                    "type-mismatch"
+                } else if err.contains("result 0 has type") {
+                    "return-type"
+                } else {
+                    "other"
+                };
                 *by_cat.entry(cat.to_string()).or_default() += 1;
             }
             for (cat, count) in by_cat.iter() {
@@ -372,22 +400,29 @@ impl<'m> CodegenCtx<'m> {
     /// Define a minimal trap function for a failed compilation so the
     /// object module doesn't panic on an undeclared-but-local symbol.
     fn define_trap_stub(&mut self, func_id: FuncId) {
-        let sig = self.cl_module.declarations().get_function_decl(func_id).signature.clone();
-        let mut cl_func = ir::Function::with_name_signature(
-            ir::UserFuncName::user(0, 0),
-            sig,
-        );
+        let sig = self
+            .cl_module
+            .declarations()
+            .get_function_decl(func_id)
+            .signature
+            .clone();
+        let mut cl_func = ir::Function::with_name_signature(ir::UserFuncName::user(0, 0), sig);
         let mut fbc = std::mem::take(&mut self.func_builder_ctx);
         let mut builder = cranelift_frontend::FunctionBuilder::new(&mut cl_func, &mut fbc);
         let entry = builder.create_block();
         builder.append_block_params_for_function_params(entry);
         builder.switch_to_block(entry);
         builder.seal_block(entry);
-        builder.ins().trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
+        builder
+            .ins()
+            .trap(cranelift_codegen::ir::TrapCode::unwrap_user(1));
         builder.finalize();
         self.func_builder_ctx = fbc;
         let mut comp_ctx = cranelift_codegen::Context::for_function(cl_func);
-        if comp_ctx.compile(self.isa.as_ref(), &mut Default::default()).is_ok() {
+        if comp_ctx
+            .compile(self.isa.as_ref(), &mut Default::default())
+            .is_ok()
+        {
             let _ = self.cl_module.define_function(func_id, &mut comp_ctx);
         }
     }

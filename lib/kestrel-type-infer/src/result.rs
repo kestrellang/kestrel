@@ -111,6 +111,8 @@ pub enum ResolvedTy {
     Tuple(Vec<ResolvedTy>),
     Function {
         params: Vec<ResolvedTy>,
+        /// Parallel to `params`; carries the `mutating` convention to MIR.
+        conventions: Vec<kestrel_ast::ParamConvention>,
         ret: Box<ResolvedTy>,
     },
     /// Opaque return type from a call to a function with `some P` return.
@@ -180,11 +182,16 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .map(|&tv| resolve_to_concrete(ctx, tv))
                 .collect(),
         ),
-        TyKind::Function { params, ret } => ResolvedTy::Function {
+        TyKind::Function {
+            params,
+            conventions,
+            ret,
+        } => ResolvedTy::Function {
             params: params
                 .iter()
                 .map(|&tv| resolve_to_concrete(ctx, tv))
                 .collect(),
+            conventions: conventions.clone(),
             ret: Box::new(resolve_to_concrete(ctx, *ret)),
         },
         TyKind::Opaque {
@@ -352,7 +359,7 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 format!("({})", strs.join(", "))
             }
         },
-        TyKind::Function { params, ret } => {
+        TyKind::Function { params, ret, .. } => {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
             format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
         },

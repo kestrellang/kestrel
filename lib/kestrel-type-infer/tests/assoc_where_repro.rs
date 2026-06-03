@@ -26,7 +26,12 @@ fn build_from_source(source: &str) -> (World, Entity) {
     (world, root)
 }
 
-fn child(ctx: &kestrel_hecs::QueryContext<'_>, parent: Entity, kind: NodeKind, name: &str) -> Entity {
+fn child(
+    ctx: &kestrel_hecs::QueryContext<'_>,
+    parent: Entity,
+    kind: NodeKind,
+    name: &str,
+) -> Entity {
     ctx.children_of(parent)
         .iter()
         .find(|&&e| {
@@ -59,7 +64,8 @@ fn method_under_kind(
 }
 
 fn infer(ctx: &kestrel_hecs::QueryContext<'_>, root: Entity, m: Entity) -> TypedBody {
-    ctx.query(InferBody { entity: m, root }).expect("InferBody None")
+    ctx.query(InferBody { entity: m, root })
+        .expect("InferBody None")
 }
 
 // NOTE: bug 1 — struct-level associated-type-equality where clauses

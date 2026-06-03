@@ -21,17 +21,27 @@ pub fn link_executable(
     let mut c_objects: Vec<std::path::PathBuf> = Vec::new();
     for (i, c_src) in options.c_sources.iter().enumerate() {
         let link_id = LINK_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let c_obj = tmp_dir.join(format!("kestrel_c{}_{}_{}.o", std::process::id(), link_id, i));
+        let c_obj = tmp_dir.join(format!(
+            "kestrel_c{}_{}_{}.o",
+            std::process::id(),
+            link_id,
+            i
+        ));
         let c_output = Command::new(&cc)
             .arg("-c")
             .arg(c_src)
             .arg("-o")
             .arg(&c_obj)
             .output()
-            .map_err(|e| CodegenError::LinkerError(format!("failed to compile {}: {e}", c_src.display())))?;
+            .map_err(|e| {
+                CodegenError::LinkerError(format!("failed to compile {}: {e}", c_src.display()))
+            })?;
         if !c_output.status.success() {
             let stderr = String::from_utf8_lossy(&c_output.stderr);
-            return Err(CodegenError::LinkerError(format!("failed to compile {}: {stderr}", c_src.display())));
+            return Err(CodegenError::LinkerError(format!(
+                "failed to compile {}: {stderr}",
+                c_src.display()
+            )));
         }
         c_objects.push(c_obj);
     }

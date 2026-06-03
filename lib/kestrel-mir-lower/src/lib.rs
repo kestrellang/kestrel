@@ -173,8 +173,7 @@ mod tests {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
                 }
-                let errors =
-                    kestrel_mir::verify::verify_ossa(body, &mir, &func.name, func.entity);
+                let errors = kestrel_mir::verify::verify_ossa(body, &mir, &func.name, func.entity);
                 if !errors.is_empty() {
                     total_errors += errors.len();
                     if error_funcs.len() < 15 {
@@ -268,8 +267,7 @@ mod tests {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
                 }
-                let errors =
-                    kestrel_mir::verify::verify_ossa(body, &mir, &func.name, func.entity);
+                let errors = kestrel_mir::verify::verify_ossa(body, &mir, &func.name, func.entity);
                 if errors.is_empty() {
                     continue;
                 }
@@ -300,10 +298,8 @@ mod tests {
                                 | kestrel_mir::terminator::TerminatorKind::Switch { .. }
                         ) {
                             unconsumed_in_branching += 1;
-                        } else if matches!(
-                            term,
-                            kestrel_mir::terminator::TerminatorKind::Return(_)
-                        ) {
+                        } else if matches!(term, kestrel_mir::terminator::TerminatorKind::Return(_))
+                        {
                             unconsumed_in_return_block += 1;
                         } else if matches!(
                             term,
@@ -367,8 +363,7 @@ mod tests {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
                 }
-                let errors =
-                    kestrel_mir::verify::verify_ossa(body, &mir, &func.name, func.entity);
+                let errors = kestrel_mir::verify::verify_ossa(body, &mir, &func.name, func.entity);
                 if errors.is_empty() {
                     continue;
                 }

@@ -236,7 +236,9 @@ fn verify_function(
             match &inst.kind {
                 // Check callees are resolved
                 InstKind::Call { callee, .. } => {
-                    check_callee(module, fi, block_id, ii, inst_span, callee, func_count, errors);
+                    check_callee(
+                        module, fi, block_id, ii, inst_span, callee, func_count, errors,
+                    );
                 },
 
                 // Check FunctionRef is rewritten to MonoFunctionRef
@@ -423,8 +425,10 @@ fn describe_mono_ty(module: &MonoModule, ty: TyId) -> String {
             if type_args.is_empty() {
                 name_of(entity)
             } else {
-                let args: Vec<String> =
-                    type_args.iter().map(|&a| describe_mono_ty(module, a)).collect();
+                let args: Vec<String> = type_args
+                    .iter()
+                    .map(|&a| describe_mono_ty(module, a))
+                    .collect();
                 format!("{}[{}]", name_of(entity), args.join(", "))
             }
         },

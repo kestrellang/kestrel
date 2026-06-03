@@ -16,6 +16,18 @@ use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::LowerCtx;
 
+/// Convert a language-level (`kestrel_ast`) parameter convention to the
+/// MIR convention. The two enums are structurally identical; this is the
+/// crate boundary where the conversion happens (mir keeps its own enum so
+/// codegen can depend on mir without an ast edge).
+fn to_mir_convention(c: kestrel_ast::ParamConvention) -> ParamConvention {
+    match c {
+        kestrel_ast::ParamConvention::Borrow => ParamConvention::Borrow,
+        kestrel_ast::ParamConvention::MutBorrow => ParamConvention::MutBorrow,
+        kestrel_ast::ParamConvention::Consuming => ParamConvention::Consuming,
+    }
+}
+
 // === Public query wrappers ===
 
 /// Resolve an entity's TypeAnnotation to TyId via the query system.
@@ -109,10 +121,23 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
             let elems: Vec<TyId> = elems.iter().map(|e| lower_type(ctx, e)).collect();
             ctx.module.ty_arena.tuple(elems)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
-                .map(|t| (lower_type(ctx, t), ParamConvention::Consuming))
+                .enumerate()
+                .map(|(i, t)| {
+                    let conv = param_conventions
+                        .get(i)
+                        .copied()
+                        .map(to_mir_convention)
+                        .unwrap_or(ParamConvention::Consuming);
+                    (lower_type(ctx, t), conv)
+                })
                 .collect();
             let lowered_ret = lower_type(ctx, ret);
             ctx.intern(MirTy::FuncThick {
@@ -167,10 +192,22 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
             let lowered: Vec<TyId> = elems.iter().map(|t| lower_resolved_ty(ctx, t)).collect();
             ctx.module.ty_arena.tuple(lowered)
         },
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function {
+            params,
+            conventions,
+            ret,
+        } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
-                .map(|t| (lower_resolved_ty(ctx, t), ParamConvention::Consuming))
+                .enumerate()
+                .map(|(i, t)| {
+                    let conv = conventions
+                        .get(i)
+                        .copied()
+                        .map(to_mir_convention)
+                        .unwrap_or(ParamConvention::Consuming);
+                    (lower_resolved_ty(ctx, t), conv)
+                })
                 .collect();
             let lowered_ret = lower_resolved_ty(ctx, ret);
             ctx.intern(MirTy::FuncThick {
@@ -420,12 +457,14 @@ fn substitute_resolved_ty(
         ),
         ResolvedTy::Function {
             params: fn_params,
+            conventions,
             ret,
         } => ResolvedTy::Function {
             params: fn_params
                 .iter()
                 .map(|p| substitute_resolved_ty(p, type_params, args))
                 .collect(),
+            conventions: conventions.clone(),
             ret: Box::new(substitute_resolved_ty(ret, type_params, args)),
         },
         ResolvedTy::AssocProjection { base, assoc } => ResolvedTy::AssocProjection {

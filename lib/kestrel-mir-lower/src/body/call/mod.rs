@@ -786,7 +786,32 @@ impl OssaBodyCtx<'_, '_> {
         let callee_ty = self.resolve_expr_type(callee_expr);
         let callee_val = self.lower_callee_value(callee_expr);
         let result_ty = self.resolve_expr_type(expr_id);
-        let call_args = self.lower_call_args_default(args);
+
+        // Read the callee's per-param conventions from its function type. Only a
+        // `MutBorrow` param changes behavior (it must receive a by-reference
+        // arg via the mut-borrow machinery); every other param keeps the
+        // pre-#106 indirect-call default of `Borrow`.
+        let convs: Vec<ParamConvention> = match self.ctx.module.ty_arena.get(callee_ty) {
+            MirTy::FuncThick { params, .. } | MirTy::FuncThin { params, .. } => {
+                params.iter().map(|(_, c)| *c).collect()
+            },
+            _ => Vec::new(),
+        };
+        let call_args = if convs.iter().any(|c| *c == ParamConvention::MutBorrow) {
+            let mapped: Vec<ParamConvention> = convs
+                .iter()
+                .map(|c| {
+                    if *c == ParamConvention::MutBorrow {
+                        ParamConvention::MutBorrow
+                    } else {
+                        ParamConvention::Borrow
+                    }
+                })
+                .collect();
+            self.lower_call_args(args, &mapped, 0)
+        } else {
+            self.lower_call_args_default(args)
+        };
 
         let callee = match self.ctx.module.ty_arena.get(callee_ty) {
             MirTy::FuncThin { .. } => Callee::Thin(callee_val),

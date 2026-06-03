@@ -135,6 +135,25 @@ extend Str {
         buffer
     }
 
+    /// Returns a non-owning `ArraySlice[UInt8]` view over this string's
+    /// raw UTF-8 bytes — no copy, no allocation. The slice borrows the
+    /// live string buffer, so it must not outlive the string (or any
+    /// mutation of it). O(1).
+    ///
+    /// Use this to hand the bytes to a sink (a socket, a hasher, an
+    /// FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = "Hi".asByteSlice();
+    /// bytes.count;  // 2
+    /// ```
+    public func asByteSlice() -> ArraySlice[UInt8] {
+        let slice = self.asSlice();
+        ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: slice.byteCount)
+    }
+
     // -- Iteration -----------------------------------------------------------
 
     /// Returns a `CharsIterator` over the code points.

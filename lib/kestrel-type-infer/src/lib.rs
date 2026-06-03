@@ -209,11 +209,14 @@ fn create_param_types(
                 // methods see the extension's. Without this the equality is
                 // invisible in `next()` and `self.second.next(): B.Item` fails
                 // to unify with the `A.Item` return type (adapters.ks).
-                if parent_kind == Some(&NodeKind::Struct)
-                    || parent_kind == Some(&NodeKind::Enum)
-                {
+                if parent_kind == Some(&NodeKind::Struct) || parent_kind == Some(&NodeKind::Enum) {
                     emit_container_where_clauses(
-                        ctx, query_ctx, parent, parent, &fresh_args, self_tv,
+                        ctx,
+                        query_ctx,
+                        parent,
+                        parent,
+                        &fresh_args,
+                        self_tv,
                     );
                 }
                 self_tv
@@ -466,13 +469,18 @@ fn create_return_type_with_opaque(
                 .collect();
             ctx.tuple(tvs)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let param_tvs: Vec<ty::TyVar> = params
                 .iter()
                 .map(|p| create_return_type_with_opaque(ctx, p))
                 .collect();
             let ret_tv = create_return_type_with_opaque(ctx, ret);
-            ctx.function(param_tvs, ret_tv)
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
         },
         _ => generate::lower_hir_ty(ctx, hir_ty),
     }

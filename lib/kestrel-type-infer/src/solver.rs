@@ -269,7 +269,7 @@ fn poison_unresolved_type_args(ctx: &mut InferCtx<'_>, tv: TyVar) {
             | TySlot::Resolved(TyKind::Protocol { args, .. })
             | TySlot::Resolved(TyKind::TypeAlias { args, .. }) => args,
             TySlot::Resolved(TyKind::Tuple(elements)) => elements,
-            TySlot::Resolved(TyKind::Function { params, ret }) => {
+            TySlot::Resolved(TyKind::Function { params, ret, .. }) => {
                 let mut v = params;
                 v.push(ret);
                 v
@@ -309,7 +309,7 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
             TySlot::Resolved(TyKind::Tuple(elements)) => {
                 elements.iter().any(|&elem| walk(ctx, elem, seen))
             },
-            TySlot::Resolved(TyKind::Function { params, ret }) => {
+            TySlot::Resolved(TyKind::Function { params, ret, .. }) => {
                 params.iter().any(|&param| walk(ctx, param, seen)) || walk(ctx, *ret, seen)
             },
             TySlot::Resolved(TyKind::AssocProjection { base, .. }) => walk(ctx, *base, seen),
@@ -1437,10 +1437,12 @@ fn solve_coerce(
         TyKind::Function {
             ret: ret_a,
             params: pa,
+            ..
         },
         TyKind::Function {
             ret: ret_b,
             params: pb,
+            ..
         },
     ) = (&from_kind, &to_kind)
     {
@@ -1821,10 +1823,8 @@ fn solve_associated(
                         }
                     } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
                         tv
-                    } else if matches!(
-                        kind,
-                        TyKind::Param { .. } | TyKind::AssocProjection { .. }
-                    ) {
+                    } else if matches!(kind, TyKind::Param { .. } | TyKind::AssocProjection { .. })
+                    {
                         // Abstract container — a type param (`T.Item`) or an
                         // already-projected base (`T.TargetIterator.Item`) — with
                         // an abstract associated-type binding. `lower_hir_ty_sub`
@@ -1929,7 +1929,7 @@ fn solve_call(
     }
 
     match kind {
-        TyKind::Function { params, ret } => {
+        TyKind::Function { params, ret, .. } => {
             // Reject excess arguments (too few is OK — defaults may fill in)
             if args.len() > params.len() {
                 return SolveResult::Error(InferError::ArgCountMismatch {
@@ -3658,13 +3658,18 @@ pub fn kind_to_tyvar_sub(
                 .collect();
             ctx.tuple(elem_tvs)
         },
-        TyKind::Function { params, ret } => {
+        TyKind::Function {
+            params,
+            conventions,
+            ret,
+        } => {
             let param_tvs: Vec<TyVar> = params
                 .iter()
                 .map(|p| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *p), self_entity, recv_tv))
                 .collect();
             let ret_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *ret), self_entity, recv_tv);
-            ctx.function(param_tvs, ret_tv)
+            // Preserve per-param conventions through generic instantiation.
+            ctx.function_conv(param_tvs, conventions.clone(), ret_tv)
         },
         TyKind::Opaque {
             origin,
@@ -4059,13 +4064,18 @@ fn lower_hir_ty_sub(
                 .collect();
             ctx.tuple(elem_tvs)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let param_tvs: Vec<TyVar> = params
                 .iter()
                 .map(|p| lower_hir_ty_sub(ctx, p, self_entity, recv_tv, subs))
                 .collect();
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
-            ctx.function(param_tvs, ret_tv)
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
         },
         // Opaque types at call sites: create a fresh TyVar for now.
         // Full `TyKind::Opaque` creation requires the callee entity (origin),

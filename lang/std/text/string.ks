@@ -518,11 +518,11 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
         }
         let myLen = self.len();
         self.grow(myLen + otherLen);
-        var s = self.storage.write();
         let srcPtr = slice._rawPtr().offset(by: slice.start);
-        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
-        s.len = s.len + otherLen;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            _memcpyBytes(dst: s.ptr.offset(by: s.len), src: srcPtr, n: otherLen);
+            s.len = s.len + otherLen
+        }
     }
 
     /// Appends a single code point, encoding it as UTF-8.
@@ -541,12 +541,12 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     public mutating func append(char c: Char) {
         let utf8Len = c.utf8Length();
         self.grow(self.len() + utf8Len);
-        var s = self.storage.write();
-        // Encode to buffer
-        let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
-        let written = encodeUtf8(c, rawPtr, at: s.len);
-        s.len = s.len + written;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            // Encode to buffer
+            let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](s.ptr.asRaw().raw);
+            let written = encodeUtf8(c, rawPtr, at: s.len);
+            s.len = s.len + written
+        }
     }
 
     /// Appends a raw byte. Internal — caller ensures UTF-8 validity.
@@ -556,10 +556,10 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// inside the stdlib (e.g. an encoder that already produced bytes).
     internal mutating func appendByte(byte: UInt8) {
         self.grow(self.len() + 1);
-        var s = self.storage.write();
-        s.ptr.offset(by: s.len).write(byte);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            s.ptr.offset(by: s.len).write(byte);
+            s.len = s.len + 1
+        }
     }
 
     /// Appends `n` bytes from `ptr` via `memcpy`. Internal — caller
@@ -574,10 +574,10 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
             return
         }
         self.grow(self.len() + n);
-        var s = self.storage.write();
-        _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
-        s.len = s.len + n;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            _memcpyBytes(dst: s.ptr.offset(by: s.len), src: ptr, n: n);
+            s.len = s.len + n
+        }
     }
 
     /// Internal substring by byte range. Returns empty for invalid ranges.
@@ -599,9 +599,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// Capacity is unchanged, so this is the right primitive for
     /// reusing a buffer in a hot loop.
     public mutating func clear() {
-        var s = self.storage.write();
-        s.len = 0;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in s.len = 0 }
     }
 
     // ========================================================================
@@ -678,33 +676,33 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// ```
     public mutating func lowercaseAscii() {
         let myLen = self.len();
-        var s = self.storage.write();
-        for i in 0..<myLen {
-            let byte = s.ptr.offset(by: i).read();
-            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-            // A-Z: 65-90 -> a-z: 97-122
-            let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
-            if Bool(boolLiteral: isUppercase) {
-                s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
+        self.storage.modify { (mutating s) in
+            for i in 0..<myLen {
+                let byte = s.ptr.offset(by: i).read();
+                let v: lang.i32 = lang.cast_i8_i32(byte.raw);
+                // A-Z: 65-90 -> a-z: 97-122
+                let isUppercase = lang.i1_and(lang.i32_signed_ge(v, 65), lang.i32_signed_le(v, 90));
+                if Bool(boolLiteral: isUppercase) {
+                    s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_add(v, 32))))
+                }
             }
         }
-        self.storage.setValue(s)
     }
 
     /// Uppercases ASCII letters in place; non-ASCII bytes are left untouched.
     public mutating func uppercaseAscii() {
         let myLen = self.len();
-        var s = self.storage.write();
-        for i in 0..<myLen {
-            let byte = s.ptr.offset(by: i).read();
-            let v: lang.i32 = lang.cast_i8_i32(byte.raw);
-            // a-z: 97-122 -> A-Z: 65-90
-            let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
-            if Bool(boolLiteral: isLowercase) {
-                s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
+        self.storage.modify { (mutating s) in
+            for i in 0..<myLen {
+                let byte = s.ptr.offset(by: i).read();
+                let v: lang.i32 = lang.cast_i8_i32(byte.raw);
+                // a-z: 97-122 -> A-Z: 65-90
+                let isLowercase = lang.i1_and(lang.i32_signed_ge(v, 97), lang.i32_signed_le(v, 122));
+                if Bool(boolLiteral: isLowercase) {
+                    s.ptr.offset(by: i).write(UInt8(raw: lang.cast_i32_i8(lang.i32_sub(v, 32))))
+                }
             }
         }
-        self.storage.setValue(s)
     }
 
     // ========================================================================

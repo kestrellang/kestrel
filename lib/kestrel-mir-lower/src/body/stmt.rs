@@ -52,10 +52,7 @@ impl OssaBodyCtx<'_, '_> {
                 if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
-                    self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
-                        address: addr,
-                        ty,
-                    });
+                    self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr { address: addr, ty });
                 } else {
                     let val = self.map_local(*hir_local);
                     self.emit_destroy_value(val);

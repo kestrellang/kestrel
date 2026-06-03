@@ -1035,8 +1035,7 @@ impl OssaBodyCtx<'_, '_> {
                 for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
                     subst.type_params.insert(tp.entity, arg);
                 }
-                field_ty =
-                    kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+                field_ty = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
             }
         }
 

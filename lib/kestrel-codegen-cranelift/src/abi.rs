@@ -19,11 +19,7 @@ pub enum ReturnMode {
     Void,
 }
 
-pub fn param_pass_mode(
-    convention: ParamConvention,
-    repr: TypeRepr,
-    _ptr_ty: ir::Type,
-) -> PassMode {
+pub fn param_pass_mode(convention: ParamConvention, repr: TypeRepr, _ptr_ty: ir::Type) -> PassMode {
     match convention {
         ParamConvention::Borrow | ParamConvention::MutBorrow => PassMode::ByRef,
         ParamConvention::Consuming => match repr {
@@ -68,13 +64,13 @@ pub fn build_signature(
         match param_pass_mode(param.convention, repr, ptr_ty) {
             PassMode::ByVal(t) => sig.params.push(AbiParam::new(t)),
             PassMode::ByRef => sig.params.push(AbiParam::new(ptr_ty)),
-            PassMode::Zst => {}
+            PassMode::Zst => {},
         }
     }
 
     match ret_mode {
         ReturnMode::Direct(t) => sig.returns.push(AbiParam::new(t)),
-        ReturnMode::Sret | ReturnMode::Void => {}
+        ReturnMode::Sret | ReturnMode::Void => {},
     }
 
     sig
@@ -101,7 +97,7 @@ pub fn build_extern_signature(
         match repr {
             TypeRepr::Scalar(t) => sig.params.push(AbiParam::new(t)),
             TypeRepr::Aggregate { .. } => sig.params.push(AbiParam::new(ptr_ty)),
-            TypeRepr::Zst => {}
+            TypeRepr::Zst => {},
         }
     }
 

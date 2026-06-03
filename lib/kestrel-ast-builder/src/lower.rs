@@ -1306,7 +1306,17 @@ impl LowerCtx {
                             .find(|c| is_type_kind(c.kind()))
                             .and_then(|c| ast_type_from_cst(&c, self.file_id));
 
-                        ClosureParam { pattern, ty }
+                        // A leading `mutating` token marks a by-reference param.
+                        let is_mut = param_node.children_with_tokens().any(|e| {
+                            e.as_token()
+                                .is_some_and(|t| t.kind() == SyntaxKind::Mutating)
+                        });
+
+                        ClosureParam {
+                            pattern,
+                            ty,
+                            is_mut,
+                        }
                     })
                     .collect()
             })
@@ -1324,6 +1334,7 @@ impl LowerCtx {
             params.push(ClosureParam {
                 pattern: pat,
                 ty: None,
+                is_mut: false,
             });
         }
 
@@ -1349,6 +1360,23 @@ impl LowerCtx {
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::Statement => {
+                    // Demote any pending tail expression (e.g. a statement-like
+                    // `while`/`for`/`if` that preceded this statement) to a
+                    // statement FIRST, so source order is preserved. Without
+                    // this, a statement after such an expression was appended to
+                    // `stmts` while the expression stayed as `tail_expr`, lowering
+                    // the later statement *before* the loop.
+                    if let Some(prev) = tail_expr.take() {
+                        let prev_span = match &self.exprs[prev] {
+                            AstExpr::Error { span } => span.clone(),
+                            _ => Span::synthetic(self.file_id),
+                        };
+                        let stmt = self.alloc_stmt(AstStmt::Expr {
+                            expr: prev,
+                            span: prev_span,
+                        });
+                        stmts.push(stmt);
+                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
