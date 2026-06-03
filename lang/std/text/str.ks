@@ -832,6 +832,41 @@ extend Str {
         self.caseFolded().isEqual(to: other.caseFolded())
     }
 
+    /// ASCII case-insensitive equality — folds only `A`–`Z` ↔ `a`–`z`;
+    /// bytes `>= 0x80` must match exactly.
+    ///
+    /// Allocates nothing: it compares the raw UTF-8 bytes in place behind a
+    /// length fast-path, so it is far cheaper than `equalsCaseInsensitive`,
+    /// which builds two Unicode-folded `String`s. Use it for ASCII tokens
+    /// such as HTTP header names, where Unicode folding is unnecessary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "Content-Type".equalsIgnoreAsciiCase("content-type");  // true
+    /// "Content-Type".equalsIgnoreAsciiCase("Host");          // false
+    /// ```
+    public func equalsIgnoreAsciiCase(other: some Str) -> Bool {
+        let a = self.asByteSlice();
+        let b = other.asByteSlice();
+        if a.count != b.count {
+            return false
+        }
+        var i: Int64 = 0;
+        while i < a.count {
+            var x = a.pointer.offset(by: i).read();
+            var y = b.pointer.offset(by: i).read();
+            // Fold A–Z (0x41–0x5A) to lower case; leave everything else.
+            if x >= 65 and x <= 90 { x = x + 32 };
+            if y >= 65 and y <= 90 { y = y + 32 };
+            if x != y {
+                return false
+            };
+            i = i + 1
+        };
+        true
+    }
+
     /// Returns a new string with Unicode case folding applied to
     /// each code point.
     ///

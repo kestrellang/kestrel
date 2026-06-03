@@ -31,21 +31,21 @@ import std.io.error.(IoError)
 /// ```
 public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] {
     var buffer = Array[UInt8]();
-    var chunk = Array[UInt8](repeating: 0, count: 4096);
+    // Uninitialized 4 KiB scratch buffer — recv overwrites it, so zero-filling
+    // (`repeating: 0`) would just be a wasted 4096-element write per request.
+    var chunk = Array[UInt8](capacity: 4096);
 
     var headerEnd: Int64 = -1;
 
     loop {
-        let slice = ArraySlice(pointer: chunk.asPointer(), count: 4096);
-        let bytesRead = recv(fileDescriptor, slice.pointer, slice.count, 0);
+        let bytesRead = recv(fileDescriptor, chunk.asPointer(), 4096, 0);
         if bytesRead <= 0 {
             return .Err(invalidInput())
         }
 
-        // Bulk-append the chunk in one pass. Per-byte append() re-reads the
-        // COW-backed buffer and clones it each time → O(n²) in request size;
+        // Bulk-append exactly the bytes recv produced, in one pass:
         // append(contentsOf:) grows once and copies once → O(n).
-        buffer.append(contentsOf: chunk.asSlice()(0..<bytesRead));
+        buffer.append(contentsOf: ArraySlice(pointer: chunk.asPointer(), count: bytesRead));
 
         headerEnd = findHeaderEnd(buffer);
         if headerEnd >= 0 {
@@ -90,13 +90,12 @@ public func parseHttpRequest(fileDescriptor: Int32) -> Result[Request, IoError] 
                 if remaining < readSize {
                     readSize = remaining
                 }
-                var bodyChunk = Array[UInt8](repeating: 0, count: readSize);
-                let bodySlice = ArraySlice(pointer: bodyChunk.asPointer(), count: readSize);
-                let bytesRead = recv(fileDescriptor, bodySlice.pointer, bodySlice.count, 0);
+                var bodyChunk = Array[UInt8](capacity: readSize);
+                let bytesRead = recv(fileDescriptor, bodyChunk.asPointer(), readSize, 0);
                 if bytesRead <= 0 {
                     break
                 }
-                bodyBytes.append(contentsOf: bodyChunk.asSlice()(0..<bytesRead));
+                bodyBytes.append(contentsOf: ArraySlice(pointer: bodyChunk.asPointer(), count: bytesRead));
             }
 
             body = String(fromUtf8: bodyBytes.asSlice()) ?? String()
