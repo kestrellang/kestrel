@@ -12,7 +12,7 @@
 
 module talon.sqlite.database
 
-import talon.sqlite.connection.(Connection, execRawOnDb)
+import talon.sqlite.connection.(Connection, execRawOnDb, lastInsertRowIdOnDb)
 import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(FromRow)
@@ -40,6 +40,10 @@ public struct Database: SqliteExecutor {
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
         self.conn.query[R](sql)
+    }
+
+    public func lastInsertRowId() -> Int64 {
+        lastInsertRowIdOnDb(self.conn.db)
     }
 
     /// Runs `body` inside a BEGIN/COMMIT transaction.

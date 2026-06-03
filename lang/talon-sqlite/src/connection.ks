@@ -133,6 +133,12 @@ func execRawOnDb(db: RawPointer, sql: String) -> () throws SqliteError {
     .Ok(())
 }
 
+// rowid of the last successful INSERT on this connection. No SQL — a single C
+// call, versus the prepare/step/finalize cost of `SELECT last_insert_rowid()`.
+func lastInsertRowIdOnDb(db: RawPointer) -> Int64 {
+    ffi.sqlite3_last_insert_rowid(db)
+}
+
 // Helper: read all columns from the current row into an owned Row
 func readRow(stmt: RawPointer) -> Row {
     let colCount = Int64(from: ffi.sqlite3_column_count(stmt));

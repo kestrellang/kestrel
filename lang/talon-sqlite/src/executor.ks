@@ -18,4 +18,6 @@ import talon.sqlite.error.(SqliteError)
 public protocol SqliteExecutor {
     func execute(sql: SQL) -> () throws SqliteError
     func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow
+    /// rowid of the last successful INSERT on this connection.
+    func lastInsertRowId() -> Int64
 }
