@@ -1877,6 +1877,53 @@ fn solve_associated(
     }
 }
 
+/// Reconcile a function-typed call argument's param conventions against the
+/// expected parameter type (#106). For a closure *literal*, a non-`MutBorrow`
+/// param is upgraded to `MutBorrow` when the expected type demands it (the
+/// no-annotation `arr.modify { it.len += 1 }` inference). Passing a `MutBorrow`
+/// closure where a non-mutating param is expected is a hard error. Returns
+/// `Some(err)` only on that mismatch; the upgrade is an in-place side effect.
+fn reconcile_fn_convention(
+    ctx: &mut InferCtx<'_>,
+    arg: &CallArg,
+    param: TyVar,
+    span: &Span,
+) -> Option<InferError> {
+    use kestrel_ast::ParamConvention::MutBorrow;
+
+    // Expected per-param conventions come from the parameter's function type.
+    let expected = match ctx.slot(param) {
+        TySlot::Resolved(TyKind::Function { conventions, .. }) => conventions.clone(),
+        _ => return None,
+    };
+    // Actual conventions from the argument's (closure/function) type.
+    let actual = match ctx.slot(arg.ty) {
+        TySlot::Resolved(TyKind::Function { conventions, .. }) => conventions.clone(),
+        _ => return None,
+    };
+
+    let is_literal = ctx.closure_literal_exprs.contains(&arg.value);
+    let mut upgraded = actual.clone();
+    let mut changed = false;
+    for j in 0..expected.len().min(actual.len()) {
+        let exp_mut = expected[j] == MutBorrow;
+        let act_mut = actual[j] == MutBorrow;
+        if exp_mut && !act_mut && is_literal {
+            // No-annotation literal lent a mutable place: infer `MutBorrow`.
+            upgraded[j] = MutBorrow;
+            changed = true;
+        } else if !exp_mut && act_mut {
+            // A mutating closure can't be passed where the callee promises no
+            // mutable place.
+            return Some(InferError::ConventionMismatch { span: span.clone() });
+        }
+    }
+    if changed {
+        ctx.set_function_conventions(arg.ty, upgraded);
+    }
+    None
+}
+
 fn solve_call(
     ctx: &mut InferCtx<'_>,
     callee: TyVar,
@@ -1939,11 +1986,23 @@ fn solve_call(
                     span,
                 });
             }
-            // Normal function call — unify params and return
+            // Normal function call — unify params and return. Reconcile each
+            // function-typed arg's conventions first (its `MutBorrow` upgrade is
+            // an in-place side effect), capturing the first mismatch. We still
+            // run every `coerce` so the param/return types unify regardless —
+            // reporting the convention error without a spurious cascade.
+            let mut conv_err: Option<InferError> = None;
             for (arg, param) in args.iter().zip(params.iter()) {
+                let e = reconcile_fn_convention(ctx, arg, *param, &span);
+                if conv_err.is_none() {
+                    conv_err = e;
+                }
                 ctx.coerce(arg.ty, *param, arg.value, span.clone());
             }
             ctx.equal(result, ret, span);
+            if let Some(err) = conv_err {
+                ctx.report_error(err);
+            }
             SolveResult::Solved
         },
         TyKind::Param { .. } | TyKind::SelfType { .. } => {
@@ -2978,7 +3037,9 @@ fn solve_member(
     let plan = match bind_arguments(&bind_params, &arg_labels) {
         Ok(plan) => plan,
         Err(BindError::LabelMismatch {
-            arg_index, expected, ..
+            arg_index,
+            expected,
+            ..
         }) => {
             return SolveResult::Error(InferError::LabelMismatch {
                 expected,

@@ -555,7 +555,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // === Closures ===
-        HirExpr::Closure { params, body, .. } => gen_closure(ctx, hir, params, body),
+        HirExpr::Closure { params, body, .. } => {
+            // Mark this expr as a closure *literal* so `solve_call` may upgrade
+            // its inferred param convention (the no-annotation `MutBorrow`
+            // inference applies to literals only, not named function values).
+            ctx.closure_literal_exprs.insert(id);
+            gen_closure(ctx, hir, params, body)
+        },
 
         // === Aggregates ===
         HirExpr::Array { elements, span } => {

@@ -286,6 +286,14 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_notes(vec![
                     "mutually recursive functions with 'some' return types must have at least one non-opaque base case".into(),
                 ]),
+            InferError::ConventionMismatch { .. } => Diagnostic::error()
+                .with_message(
+                    "convention mismatch: cannot pass a mutating closure where a non-mutating parameter is expected",
+                )
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message("mutating closure not allowed here"),
+                ]),
         }
     }
 }
@@ -321,8 +329,7 @@ pub fn mir_verify_error_to_diagnostic(
             error.func_name, location, error.message
         ))
         .with_labels(vec![
-            Label::primary(span.file_id, span.range())
-                .with_message(&error.message),
+            Label::primary(span.file_id, span.range()).with_message(&error.message),
         ])
         .with_notes(vec![
             "this is an internal compiler error; please file a bug report".into(),
@@ -349,8 +356,7 @@ pub fn mir_mono_verify_error_to_diagnostic(
             func.name, location, error.message
         ))
         .with_labels(vec![
-            Label::primary(span.file_id, span.range())
-                .with_message(&error.message),
+            Label::primary(span.file_id, span.range()).with_message(&error.message),
         ])
         .with_notes(vec![
             "this is an internal compiler error; please file a bug report".into(),

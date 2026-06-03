@@ -233,6 +233,10 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             "circular opaque return type".into(),
             "concrete type cannot be determined".into(),
         ),
+        InferError::ConventionMismatch { .. } => (
+            format!("convention mismatch: {}", detail),
+            "mutating closure not allowed here".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

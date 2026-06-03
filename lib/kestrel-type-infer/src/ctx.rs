@@ -111,6 +111,12 @@ pub struct InferCtx<'a> {
     /// Implicit-it closure TyVars: 1 param named "it", requires exactly 1-param context.
     pub(crate) closure_it: HashSet<TyVar>,
 
+    /// HirExprIds of closure-*literal* expressions, recorded during constraint
+    /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
+    /// convention upgrade to literals only — a named function value's
+    /// conventions reflect its real ABI and must not be rewritten.
+    pub(crate) closure_literal_exprs: HashSet<HirExprId>,
+
     /// TyVars that were unified with `Never` while still unresolved.
     /// `unify(Never, Unresolved)` is intentionally a no-op — Never is
     /// the bottom type and shouldn't pin a TyVar that a sibling arm
@@ -232,6 +238,7 @@ impl<'a> InferCtx<'a> {
             type_param_defs: HashMap::new(),
             closure_flex: HashSet::new(),
             closure_it: HashSet::new(),
+            closure_literal_exprs: HashSet::new(),
             never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
             expected_dict_entry: None,
@@ -431,6 +438,23 @@ impl<'a> InferCtx<'a> {
             ret,
         }));
         TyVar(idx)
+    }
+
+    /// Overwrite the resolved `TyKind::Function` conventions of `tv` in place.
+    /// Used by `solve_call` to upgrade a closure literal's inferred param
+    /// convention (e.g. `Consuming` → `MutBorrow`) once the expected parameter
+    /// type is known. No-op if `tv` does not resolve to a function type.
+    pub fn set_function_conventions(
+        &mut self,
+        tv: TyVar,
+        conventions: Vec<kestrel_ast::ParamConvention>,
+    ) {
+        let root = self.resolve(tv);
+        if let TySlot::Resolved(TyKind::Function { conventions: c, .. }) =
+            &mut self.types[root.0 as usize]
+        {
+            *c = conventions;
+        }
     }
 
     /// Allocate a TyVar bound to Never.
