@@ -251,7 +251,10 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         // Local variable reference — check if binding is mutable
         HirExpr::Local(local_id, _) => {
             let local = &cx.hir.locals[*local_id];
-            if local.is_mut {
+            // A closure param with an inferred `MutBorrow` convention (#106) is
+            // a mutable place even without a `mutating` annotation, so calling a
+            // mutating method / passing it to a mutating param is allowed.
+            if local.is_mut || util::is_mut_borrow_param(cx, *local_id) {
                 MutClass::Mutable
             } else {
                 MutClass::ImmutableLocal(local.name.clone())

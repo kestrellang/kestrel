@@ -49,8 +49,6 @@ use crate::traits::{BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{NodeKind, Settable, Static};
 use kestrel_hir::body::*;
-use kestrel_hir::res::LocalId;
-use kestrel_type_infer::result::ResolvedTy;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -116,7 +114,7 @@ fn check_target(
         // Local variable: check is_mut
         HirExpr::Local(local_id, _) => {
             let local = &cx.hir.locals[*local_id];
-            if !local.is_mut && !is_mut_borrow_param(cx, *local_id) {
+            if !local.is_mut && !util::is_mut_borrow_param(cx, *local_id) {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
@@ -357,27 +355,6 @@ fn push_assign_to_expression(
     });
 }
 
-/// True if `local` is a closure parameter whose convention was inferred to
-/// `MutBorrow` (#106) — a mutable binding even without a `mutating` annotation
-/// (the convention came from the expected type). Explicitly-`mutating` params
-/// already carry `Local.is_mut == true`, so this only adds the inferred case.
-fn is_mut_borrow_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
-    for (id, expr) in cx.hir.exprs.iter() {
-        let HirExpr::Closure { params, .. } = expr else {
-            continue;
-        };
-        let Some(j) = params.iter().position(|p| p.local == local) else {
-            continue;
-        };
-        return matches!(
-            cx.typed.expr_types.get(&id),
-            Some(ResolvedTy::Function { conventions, .. })
-                if conventions.get(j) == Some(&kestrel_ast::ParamConvention::MutBorrow)
-        );
-    }
-    false
-}
-
 /// Check if an expression is a reference to `self` (first parameter, index 0).
 fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     if let HirExpr::Local(local_id, _) = &cx.hir.exprs[expr_id] {
@@ -393,7 +370,7 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
 fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     match &cx.hir.exprs[expr_id] {
         HirExpr::Local(local_id, _) => {
-            cx.hir.locals[*local_id].is_mut || is_mut_borrow_param(cx, *local_id)
+            cx.hir.locals[*local_id].is_mut || util::is_mut_borrow_param(cx, *local_id)
         },
         HirExpr::Field { base, .. } => {
             if let Some(&field_entity) = cx.typed.resolutions.get(&expr_id)
