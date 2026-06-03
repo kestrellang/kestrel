@@ -1018,34 +1018,47 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn destroy_scope_except(&mut self, keep: &[ValueId]) {
         if let Some(scope) = self.scope_stack.last_mut() {
-            let borrows: Vec<ValueId> = scope
-                .entries
-                .iter()
-                .rev()
-                .filter_map(|e| match e {
-                    ScopeEntry::Borrow(v) => Some(*v),
-                    _ => None,
-                })
-                .collect();
-            let to_destroy: Vec<ValueId> = scope
-                .entries
-                .iter()
-                .rev()
-                .filter_map(|e| match e {
-                    ScopeEntry::Owned(v) if !keep.contains(v) => Some(*v),
-                    _ => None,
-                })
-                .collect();
+            // Snapshot in reverse declaration order before mutating the scope, so
+            // owned temporaries and scope-local vars are dropped innermost-first.
+            let entries: Vec<ScopeEntry> = scope.entries.iter().rev().cloned().collect();
             scope.entries.retain(|e| match e {
                 ScopeEntry::Owned(v) => keep.contains(v),
                 ScopeEntry::Var { .. } => true,
                 ScopeEntry::Borrow(_) => false,
             });
-            for v in borrows {
-                self.push_inst(InstKind::EndBorrow { operand: v });
+            // End borrows first — they may reference values we're about to destroy.
+            for entry in &entries {
+                if let ScopeEntry::Borrow(v) = entry {
+                    self.push_inst(InstKind::EndBorrow { operand: *v });
+                }
             }
-            for value in to_destroy {
-                self.push_inst(InstKind::DestroyValue { operand: value });
+            for entry in &entries {
+                match entry {
+                    ScopeEntry::Owned(v) if !keep.contains(v) => {
+                        self.push_inst(InstKind::DestroyValue { operand: *v });
+                    },
+                    // A `var` declared in this scope (an if/match arm, loop body, or
+                    // closure body) that wasn't moved out must be destroyed here:
+                    // this is the only cleanup the normal arm-exit / loop-back-edge
+                    // fallthrough runs (terminating exits go through
+                    // `destroy_scopes_to_depth`). DefInit → drop. DefUninit → moved
+                    // out, nothing to drop. MaybeUninit (conditional move) → skip:
+                    // an unconditional DestroyAddr would double-free on the moved
+                    // path; the flag-guarded destroy is deferred, so this stays a
+                    // possible leak — never a double-free.
+                    ScopeEntry::Var {
+                        init: VarInit::DefInit,
+                        addr,
+                        ty,
+                        ..
+                    } => {
+                        self.push_inst(InstKind::DestroyAddr {
+                            address: *addr,
+                            ty: *ty,
+                        });
+                    },
+                    _ => {},
+                }
             }
         }
     }

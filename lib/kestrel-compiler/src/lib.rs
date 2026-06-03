@@ -216,7 +216,9 @@ impl Compiler {
         kestrel_mir_lower::lower_module(self.world(), self.root())
     }
 
-    pub fn lower_to_mir(&self) -> Result<kestrel_mir::MirModule, kestrel_codegen_cranelift::CodegenError> {
+    pub fn lower_to_mir(
+        &self,
+    ) -> Result<kestrel_mir::MirModule, kestrel_codegen_cranelift::CodegenError> {
         let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
         let target = kestrel_mir::TargetConfig::host_64();
         let mut next_entity = self.world().entity_count() as u32;
@@ -244,7 +246,10 @@ impl Compiler {
     pub fn lower_to_mir_stage(
         &self,
         stop: kestrel_mir::passes::Stage,
-    ) -> (kestrel_mir::MirModule, Vec<kestrel_mir::verify::VerifyError>) {
+    ) -> (
+        kestrel_mir::MirModule,
+        Vec<kestrel_mir::verify::VerifyError>,
+    ) {
         debug_assert!(stop.is_pre_mono());
         let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
         let target = kestrel_mir::TargetConfig::host_64();
@@ -282,7 +287,8 @@ impl Compiler {
                 .collect::<Vec<_>>()
                 .join("; ");
             kestrel_codegen_cranelift::CodegenError::Unsupported(format!(
-                "monomorphization failed with {} error(s): {detail}", errs.len(),
+                "monomorphization failed with {} error(s): {detail}",
+                errs.len(),
             ))
         })?;
 
@@ -304,7 +310,10 @@ impl Compiler {
                 ));
             }
             return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
-                format!("post-mono verification failed with {} error(s)", mono_verify.errors.len()),
+                format!(
+                    "post-mono verification failed with {} error(s)",
+                    mono_verify.errors.len()
+                ),
             ));
         }
 
@@ -323,7 +332,10 @@ impl Compiler {
         mir: kestrel_mir::MirModule,
         stop: kestrel_mir::passes::Stage,
     ) -> Result<
-        (kestrel_mir::mono::MonoModule, Vec<kestrel_mir::mono::MonoVerifyError>),
+        (
+            kestrel_mir::mono::MonoModule,
+            Vec<kestrel_mir::mono::MonoVerifyError>,
+        ),
         kestrel_codegen_cranelift::CodegenError,
     > {
         debug_assert!(stop.is_post_mono());

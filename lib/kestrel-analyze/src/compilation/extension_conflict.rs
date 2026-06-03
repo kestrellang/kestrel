@@ -336,10 +336,10 @@ fn ast_type_key(ty: &AstType) -> String {
                         .collect::<Vec<_>>()
                         .join(",");
                     format!("{path}[{inner}]")
-                }
+                },
                 _ => path,
             }
-        }
+        },
         other => format!("{other:?}"),
     }
 }
