@@ -72,9 +72,24 @@ struct DequeStorage[T]: Cloneable {
         }
     }
 
-    /// Frees the underlying ring buffer if one was allocated.
+    /// Drops every live element, then frees the underlying ring buffer.
+    ///
+    /// Runs when the last `RcBox` reference to this storage drops (COW
+    /// guarantees the buffer is uniquely owned, so each element is dropped
+    /// exactly once). The `len` live elements occupy ring positions
+    /// `(head + i) % cap`; uninitialized slots are skipped. Skipping these
+    /// destructors (the previous behavior) leaked the owned heap of every
+    /// non-trivial element, e.g. the `String`s in a `Deque[String]`. For a
+    /// trivially-droppable `T` the per-element `dropInPlace` is a no-op.
     deinit {
         if self.cap > 0 {
+            var i: Int64 = 0;
+            while i < self.len {
+                var phys = self.head + i;
+                if phys >= self.cap { phys = phys - self.cap; };
+                self.ptr.offset(by: phys).dropInPlace();
+                i = i + 1
+            };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)

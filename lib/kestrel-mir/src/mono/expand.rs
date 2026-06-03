@@ -494,6 +494,49 @@ fn expand_function(
     // DestroyValue on these is a no-op (ownership already transferred).
     let mut moved_values: HashSet<ValueId> = HashSet::new();
 
+    // Map each `@thick` closure value (an ApplyPartial result) to the capture
+    // values packed into its environment. Destroying the closure must drop these
+    // owned captures; the generic DestroyValue arm below would silently discard
+    // a FuncThick destroy (it is neither Named nor Tuple), leaking every owned
+    // capture. See the DestroyValue handling below.
+    let mut closure_captures: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
+    for block in &body.blocks {
+        for inst in &block.insts {
+            if let InstKind::ApplyPartial { result, captures, .. } = &inst.kind {
+                closure_captures.insert(*result, captures.clone());
+            }
+        }
+    }
+    // Propagate closure identity through block parameters. A closure value passed
+    // as a jump/branch/switch argument reappears under the target block's param
+    // ValueId, and its `DestroyValue` can be in a later block (e.g. after a
+    // `match`/`if` splits control flow — as in handlePostNote's `match createNote
+    // { .Err => return }`). Without this we'd only recognize closures destroyed in
+    // their defining block and leak the rest. Fixpoint over the (small) CFG.
+    loop {
+        let mut changed = false;
+        for bi in 0..body.blocks.len() {
+            for (target, args) in body.blocks[bi].terminator.kind.successor_args() {
+                let arg_caps: Vec<(usize, Vec<ValueId>)> = args
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, a)| closure_captures.get(a).map(|c| (i, c.clone())))
+                    .collect();
+                for (i, caps) in arg_caps {
+                    if let Some(param) = body.blocks[target.index()].params.get(i) {
+                        if !closure_captures.contains_key(&param.value) {
+                            closure_captures.insert(param.value, caps);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
     for block_idx in 0..body.blocks.len() {
         let old_insts = std::mem::take(&mut body.blocks[block_idx].insts);
         let mut new_insts: Vec<Instruction> = Vec::with_capacity(old_insts.len());
@@ -510,6 +553,38 @@ fn expand_function(
                             eprintln!(
                                 "[expand] SKIP destroy on moved value {remapped:?} (orig {operand:?}) in {}",
                                 func.name
+                            );
+                        }
+                        continue;
+                    }
+
+                    // A `@thick` closure created by ApplyPartial owns the `@owned`
+                    // captures stored in its environment. The generic match below hits
+                    // `_ => {}` for FuncThick (neither Named nor Tuple) and silently
+                    // discards the destroy, leaking every owned capture of a
+                    // non-escaping closure — e.g. the `String` a `with` closure captures
+                    // from an `@owned` local. Drop those captures here.
+                    //
+                    // CRUCIAL: only `@owned` captures. A `@guaranteed` (borrow) capture
+                    // — e.g. a closure capturing a *borrow parameter* like
+                    // `Dictionary.insert`'s `key`/`value` — is a bitwise alias the env
+                    // does NOT own; the value's real owner (the caller) releases it, so
+                    // dropping it here double-frees. By-reference captures are also
+                    // `Pointer[T]` and expand to nothing regardless. Mirrors how a value
+                    // is captured: `emit_value_use` clones `@owned` captures into the
+                    // env but passes `@guaranteed` ones through as aliases.
+                    if let Some(captures) =
+                        closure_captures.get(&operand).or_else(|| closure_captures.get(&remapped))
+                    {
+                        for cap in captures.clone() {
+                            let cap = remap_value(cap, &value_remap);
+                            if body.values[cap.index()].ownership != Ownership::Owned {
+                                continue;
+                            }
+                            let cap_ty = body.values[cap.index()].ty;
+                            emit_destroy_recursive(
+                                body, ty_arena, shim_lookup, skip_self, cap, cap_ty,
+                                &inst.span, &mut new_insts,
                             );
                         }
                         continue;
