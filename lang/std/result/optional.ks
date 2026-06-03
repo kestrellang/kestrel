@@ -678,6 +678,20 @@ extend Optional[T]: Tryable {
     }
 }
 
+/// `ForceUnwrap` — drives the postfix `!` operator. `value!` returns the
+/// wrapped value for `.Some`, or aborts via `fatalError` for `.None`.
+extend Optional[T]: ForceUnwrap {
+    type Output = T
+
+    /// Returns the wrapped value, trapping on `.None`. Backs `value!`.
+    public consuming func forceUnwrap() -> T {
+        match self {
+            .Some(value) => value,
+            .None => fatalError("unwrapped a nil Optional")
+        }
+    }
+}
+
 /// `FromResidual[()]` — turns a `try`-propagated `()` residual back into
 /// `.None` so chains of `try` returning optionals compose.
 extend Optional[T]: FromResidual[()] {

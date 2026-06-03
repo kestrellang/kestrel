@@ -863,63 +863,9 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Desugar `operand!` (unwrap) to:
-    /// ```text
-    /// match operand {
-    ///     .Some($v) => $v,
-    ///     .None => <unreachable/trap>
-    /// }
-    /// ```
-    pub(crate) fn desugar_unwrap(
-        &mut self,
-        body: &AstBody,
-        operand: ExprId,
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_operand = self.lower_expr(body, operand);
-
-        // .Some($v) => $v
-        let some_local = self.define_local("$unwrap", false, span.clone());
-        let some_binding = self.alloc_pat(HirPat::Binding {
-            local: some_local,
-            span: span.clone(),
-        });
-        let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("Some"),
-            args: vec![HirPatArg {
-                label: None,
-                pattern: some_binding,
-            }],
-            span: span.clone(),
-        });
-        let some_body = self.alloc_expr(HirExpr::Local(some_local, span.clone()));
-
-        // .None => trap (represented as Error for now — codegen will handle)
-        let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("None"),
-            args: Vec::new(),
-            span: span.clone(),
-        });
-        let trap = self.alloc_expr(HirExpr::Error { span: span.clone() });
-
-        self.alloc_expr(HirExpr::Match {
-            scrutinee: lowered_operand,
-            arms: vec![
-                HirMatchArm {
-                    pattern: some_pat,
-                    guard: None,
-                    body: some_body,
-                },
-                HirMatchArm {
-                    pattern: none_pat,
-                    guard: None,
-                    body: trap,
-                },
-            ],
-            source: MatchSource::UnwrapOp,
-            span: span.clone(),
-        })
-    }
+    // `operand!` (force-unwrap) desugars to a ProtocolCall via
+    // `desugar_postfix_op` + the `POSTFIX_OP_PROTOCOLS` table
+    // (`ForceUnwrap.forceUnwrap`), exactly like postfix `..`.
 
     // ===== Interpolated strings =====
 

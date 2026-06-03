@@ -167,6 +167,10 @@ pub enum Builtin {
     CoalesceOperatorProtocol,
     CoalesceOperatorMethod,
 
+    // ===== Force unwrap =====
+    ForceUnwrapOperatorProtocol,
+    ForceUnwrapOperatorMethod,
+
     // ===== Boolean conditional =====
     BooleanConditional,
 
@@ -352,6 +356,10 @@ impl Builtin {
             // Null coalescing
             Self::CoalesceOperatorProtocol => "Coalesce",
             Self::CoalesceOperatorMethod => "CoalesceOperatorMethod",
+
+            // Force unwrap
+            Self::ForceUnwrapOperatorProtocol => "ForceUnwrap",
+            Self::ForceUnwrapOperatorMethod => "ForceUnwrapOperatorMethod",
 
             // Boolean conditional
             Self::BooleanConditional => "BooleanConditional",
@@ -539,6 +547,10 @@ impl Builtin {
             "CoalesceOperatorProtocol" => Some(Self::CoalesceOperatorProtocol),
             "CoalesceOperatorMethod" => Some(Self::CoalesceOperatorMethod),
 
+            // Force unwrap
+            "ForceUnwrapOperatorProtocol" => Some(Self::ForceUnwrapOperatorProtocol),
+            "ForceUnwrapOperatorMethod" => Some(Self::ForceUnwrapOperatorMethod),
+
             // Boolean conditional
             "BooleanConditional" => Some(Self::BooleanConditional),
 
@@ -704,6 +716,7 @@ impl Builtin {
             | Self::LogicalOrOperatorProtocol
             | Self::LogicalNotOperatorProtocol
             | Self::CoalesceOperatorProtocol
+            | Self::ForceUnwrapOperatorProtocol
             | Self::ExclusiveRangeOperatorProtocol
             | Self::InclusiveRangeOperatorProtocol
             | Self::RangeFromOperatorProtocol
@@ -743,6 +756,7 @@ impl Builtin {
             | Self::LogicalOrOperatorMethod
             | Self::LogicalNotOperatorMethod
             | Self::CoalesceOperatorMethod
+            | Self::ForceUnwrapOperatorMethod
             | Self::ExclusiveRangeOperatorMethod
             | Self::InclusiveRangeOperatorMethod
             | Self::RangeFromOperatorMethod

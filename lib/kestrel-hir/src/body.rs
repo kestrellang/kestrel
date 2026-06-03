@@ -72,8 +72,6 @@ pub enum MatchSource {
     ParamDestructure,
     /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
     TryOp,
-    /// Desugared from `expr!` unwrap.
-    UnwrapOp,
 }
 
 impl MatchSource {
@@ -722,11 +720,18 @@ pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
 ];
 
 /// (operator, protocol_builtin, method_name)
-pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[(
-    PostfixOp::RangeFrom,
-    Builtin::RangeFromOperatorProtocol,
-    "rangeFrom",
-)];
+pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[
+    (
+        PostfixOp::RangeFrom,
+        Builtin::RangeFromOperatorProtocol,
+        "rangeFrom",
+    ),
+    (
+        PostfixOp::Unwrap,
+        Builtin::ForceUnwrapOperatorProtocol,
+        "forceUnwrap",
+    ),
+];
 
 /// (operator, protocol_builtin, method_name, arg_label)
 ///

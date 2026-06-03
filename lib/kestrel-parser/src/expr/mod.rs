@@ -588,7 +588,8 @@ pub fn expr_parser<'tokens>()
 
         // Postfix pieces live in `postfix.rs`. `arg_list` is still named
         // locally because the condition-postfix logic below reuses it to
-        // pick out `PostfixOp::Call` forms (conditions forbid postfix-bang).
+        // pick out `PostfixOp::Call` forms (the condition grammar wires each
+        // postfix op in by hand: call, member, tuple-index, `..`, and `!`).
         let arg_list = postfix::arg_list_parser(expr.clone());
         let postfix_op = postfix::postfix_op_parser(expr.clone());
 
@@ -708,6 +709,20 @@ pub fn expr_parser<'tokens>()
                     })
             })
             .or(postfix::postfix_range_parser().map(|op| match op {
+                PostfixOp::PostfixOperator {
+                    operator,
+                    operator_span,
+                } => ConditionPostfixOp::PostfixOperator {
+                    operator,
+                    operator_span,
+                },
+                _ => unreachable!(),
+            }))
+            // Postfix `!` force-unwrap. Prefix `!` (negation) is handled by
+            // `condition_unary` and only ever appears with no preceding
+            // operand, so the two `Bang` uses don't conflict — see the full
+            // `expr` grammar, which supports both simultaneously.
+            .or(postfix::postfix_bang_parser().map(|op| match op {
                 PostfixOp::PostfixOperator {
                     operator,
                     operator_span,

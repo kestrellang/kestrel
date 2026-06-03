@@ -88,9 +88,10 @@ impl LowerCtx<'_> {
             AstExpr::Unary { op, operand, span } => {
                 self.desugar_unary_op(body, &op, operand, &span)
             },
-            AstExpr::Postfix { operand, op, span } => match op {
-                PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
-                PostfixOp::RangeFrom => self.desugar_postfix_op(body, &op, operand, &span),
+            AstExpr::Postfix { operand, op, span } => {
+                // Both `!` (Unwrap) and `..` (RangeFrom) desugar to a
+                // ProtocolCall via the operator → protocol table.
+                self.desugar_postfix_op(body, &op, operand, &span)
             },
             AstExpr::Binary { .. } => self.lower_binary_with_precedence(body, id),
             AstExpr::Assignment { lhs, rhs, span } => {
