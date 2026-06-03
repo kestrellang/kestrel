@@ -73,6 +73,9 @@ public protocol FromResidual[Residual] {
 @builtin(.FromValueProtocol)
 protocol FromValue[Output] {
     /// Lifts `value` into an instance of the conforming type.
+    /// Takes `value` `consuming`: the promotion site transfers ownership, so
+    /// `from` moves it into the wrapper rather than cloning a borrow and leaking
+    /// the original (the kestrel-wall per-GET query-result leak).
     @builtin(.FromValueMethod)
-    static func from(value: Output) -> Self
+    static func from(consuming value: Output) -> Self
 }

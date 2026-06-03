@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod collect;
 pub mod expand;
 pub mod mangle;

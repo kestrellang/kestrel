@@ -317,8 +317,9 @@ extend Result[T, E]: FromResidual[E] {
 /// write `let r: Int throws Error = 42` without explicit `.Ok`.
 extend Result[T, E]: FromValue[T] {
     /// Wraps `value` in `.Ok`. Called by the compiler at the promotion
-    /// site, not usually by user code.
-    public static func from(value: T) -> Result[T, E] {
+    /// site, not usually by user code. `consuming` so `value` is moved into
+    /// `.Ok` (no clone-and-leak of a borrowed original).
+    public static func from(consuming value: T) -> Result[T, E] {
         .Ok(value)
     }
 }

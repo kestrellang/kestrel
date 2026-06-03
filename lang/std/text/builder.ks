@@ -125,16 +125,18 @@ public struct StringBuilder: Cloneable {
         if self.len == 0 {
             return String()
         }
-        // Capture fields before resetting — the StringStorage local's
-        // deinit must NOT free the buffer (CowBox/RcBox owns it now).
-        var storage = StringStorage(ptr: self.ptr, len: self.len, cap: self.cap);
-        let result = String(storage: CowBox(storage));
-        // Disarm storage's deinit so the drop doesn't double-free.
-        storage.cap = 0;
+        // Move the buffer into a fresh String. Disarm `self` FIRST so its deinit
+        // can't free the buffer the String now owns, then MOVE `storage` into the
+        // CowBox as its LAST use. `storage` must NOT be read afterward: a later
+        // use forces a `copy_value`, and because `StringStorage` is `Cloneable`
+        // that expands to a `clone()` — allocating a *fresh* buffer for the String
+        // and orphaning this builder's original buffer (one StringBuilder buffer
+        // leaked per `formatted()` / string-interpolation call).
+        let storage = StringStorage(ptr: self.ptr, len: self.len, cap: self.cap);
         self.ptr = Pointer[UInt8].nullPointer();
         self.len = 0;
         self.cap = 0;
-        result
+        String(storage: CowBox(storage))
     }
 
     /// Resets length to zero, keeping the allocated buffer for reuse.

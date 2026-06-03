@@ -705,8 +705,9 @@ extend Optional[T]: FromResidual[()] {
 /// `let x: Int? = 5` works without explicit `.Some`.
 extend Optional[T]: FromValue[T] {
     /// Wraps `value` in `.Some`. Called by the compiler at the promotion
-    /// site, not usually by user code.
-    public static func from(value: T) -> Optional[T] {
+    /// site, not usually by user code. `consuming` so `value` is moved into
+    /// `.Some` (no clone-and-leak of a borrowed original).
+    public static func from(consuming value: T) -> Optional[T] {
         .Some(value)
     }
 }

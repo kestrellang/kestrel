@@ -42,6 +42,24 @@ Values created before the branch (like a StackAlloc pointer) get new
 ValueIds in each arm via block params. Use `live_vals.iter().position()`
 to find the rebound version.
 
+### Resolve held values through `value_forwarding` before consuming them
+
+Any value materialized *before* a control-flow construct and held in a Rust-side
+list (call args, aggregate fields/elements/payloads, indirect callees) names the
+**pre-split** SSA id. When a later sibling expression splits the block, that id
+is threaded across the merge and renamed — `rebind_scope_values` records the
+rename in `value_forwarding`. A held id is therefore **stale**: consuming it
+emits a use of a value stranded at a predecessor block's exit, while the live
+threaded twin stays tracked in scope and is dropped at scope exit — an
+over-release that double-frees any shared (e.g. COW) operand.
+
+**Invariant:** before consuming a held value, resolve it with `resolve_value`
+(which chases `value_forwarding`). Single funnels enforce this:
+`emit_call_inner` resolves every arg + indirect callee; `own_aggregate_element`
+resolves every struct field / tuple element / enum payload. Any *new* site that
+holds a value across a possible block split and then consumes it must do the
+same. Regression coverage: `memory_model/deinit/aggregate_{control_flow,try}_field_no_double_drop.ks`.
+
 ## Irrefutable destructures (let/param patterns)
 
 `let (a, b) = expr` desugars in the HIR to a `Match` with

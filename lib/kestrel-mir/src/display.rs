@@ -26,6 +26,11 @@ use crate::{BlockId, MirModule, TyId, ValueId};
 pub trait NameResolver {
     fn ty_arena(&self) -> &TyArena;
     fn resolve_name(&self, entity: Entity) -> &str;
+    /// Resolve a monomorphized function id (index into a `MonoModule`'s
+    /// `functions`) to its mangled name. `None` pre-mono.
+    fn resolve_mono_name(&self, _id: usize) -> Option<&str> {
+        None
+    }
 }
 
 impl NameResolver for MirModule {
@@ -43,6 +48,9 @@ impl NameResolver for crate::mono::MonoModule {
     }
     fn resolve_name(&self, entity: Entity) -> &str {
         crate::mono::MonoModule::resolve_name(self, entity)
+    }
+    fn resolve_mono_name(&self, id: usize) -> Option<&str> {
+        self.functions.get(id).map(|f| f.name.as_str())
     }
 }
 
@@ -785,8 +793,9 @@ fn fmt_callee(callee: &Callee, arena: &TyArena, module: &dyn NameResolver) -> St
             }
             s
         },
-        Callee::Resolved(mono_id) => {
-            format!("@mono({})", mono_id.index())
+        Callee::Resolved(mono_id) => match module.resolve_mono_name(mono_id.index()) {
+            Some(name) => format!("@mono({}: {})", mono_id.index(), name),
+            None => format!("@mono({})", mono_id.index()),
         },
         Callee::Thin(v) => {
             format!("@thin {}", fmt_value(*v))

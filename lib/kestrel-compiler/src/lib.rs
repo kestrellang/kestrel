@@ -299,6 +299,9 @@ impl Compiler {
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
+        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        kestrel_mir::mono::audit::run_audit(&mono);
+
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
         if !mono_verify.is_ok() {
             let ctx = self.world().query_context();
@@ -363,6 +366,8 @@ impl Compiler {
         }
 
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
+        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        kestrel_mir::mono::audit::run_audit(&mono);
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
         Ok((mono, mono_verify.errors))
     }

@@ -81,3 +81,26 @@ this — it degraded a real `CopyValue` on `Optional[Int64]` into a move-alias, 
 returned the overwritten value. See [[expand_not_copyable_nominal_collapse]].
 This is the MIR face of the same per-instantiation invariant the solver / MIR
 ty_query / semantics enforce ([[per_instantiation_copy_semantics]]).
+
+## Copy and destroy elaboration must stay symmetric (`mono/expand.rs`)
+
+The `CopyValue` (copy) and `DestroyValue`/`DestroyAddr` (destroy) arms must agree
+on **exactly which values carry resources**: anything the destroy side runs a
+destructor on, the copy side must deep-clone (not bitwise-alias). Gate both on
+the same predicate — `ty_needs_drop` — so they can't drift. If destroy drops a
+member but copy aliases it, two owners free the same heap → **double-free**; if
+copy clones but destroy skips, you **leak**. This applies per *operand-ownership*
+case too: handle `@owned` and `@guaranteed` operands for **every** type kind the
+destroy side handles, not just the convenient one.
+
+This bites hardest on anonymous **tuples**, which have no nominal `Entity` and so
+no `__drop$T`/`__clone$T` shim — their members are elaborated inline in both arms
+(`emit_destroy_recursive` / `emit_clone_recursive`). `emit_clone_recursive`
+projects members ByRef (`TupleExtract` on a `@guaranteed` operand), so to clone
+an `@owned` tuple you must `BeginBorrow` it to a `@guaranteed` view first
+(identity for an aggregate). Commit `22084a42` added tuple drop + clone but gated
+the clone to `@guaranteed` operands only; an `@owned` tuple copy still aliased →
+double-freed any heap member (crashed bootstrapped `flock` on
+`Optional[(String, Int64)]`). Tests stayed green because they used string
+*literals* — only **heap** strings corrupt malloc, so a correctness suite that
+doesn't allocate won't catch this class. See [[tuple_drop_copy_elaboration_gap]].

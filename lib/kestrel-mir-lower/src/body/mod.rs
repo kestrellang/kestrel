@@ -1390,6 +1390,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// `self.entries.append((name, value))`.) Non-Copyable borrows are left
     /// alone: cloning them is illegal and the frontend rejects such escapes.
     fn own_aggregate_element(&mut self, v: ValueId) -> ValueId {
+        // Resolve any element value renamed by a block-boundary rebind since it
+        // was prepared. When a *later* aggregate element expression splits the
+        // current block (a `try`/`if`/`match` field), the values of the earlier
+        // elements are threaded through the new blocks and renamed at the merge
+        // (recorded in `value_forwarding`); the held element value still names
+        // the stranded pre-split id. Without this, the aggregate would consume
+        // the stale id while the live threaded twin stays tracked in scope and
+        // is dropped at scope exit — an over-release that double-frees any
+        // COW-shared element. Mirrors the same resolution in `emit_call_inner`.
+        let v = self.resolve_value(v);
         let vd = self.body.value(v);
         let guaranteed = vd.ownership == Ownership::Guaranteed;
         let ty = vd.ty;
