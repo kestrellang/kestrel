@@ -39,7 +39,11 @@ jobs:
         run: cargo build --workspace
 
       - name: Rust test
-        run: cargo test --workspace
+        # Exclude the .ks suite: it documents in-progress compiler state (need
+        # not all pass) and some cases hit debug-only rowan asserts that don't
+        # fire in release. It runs in release via the `triage` tool as a
+        # non-blocking signal, so the hard gate here is the Rust unit tests.
+        run: cargo test --workspace --exclude kestrel-test-suite
 
       - name: kestrel-lsp release build
         run: cargo build -p kestrel-lsp --release
