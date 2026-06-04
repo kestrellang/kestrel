@@ -1,7 +1,9 @@
-//! Calling convention. Faithful port of the Cranelift backend's `abi.rs`: a
-//! "manual ABI" — aggregates pass/return by pointer (a leading `sret` integer
-//! pointer param + manual `memcpy`), scalars pass by value. No LLVM `sret`/
-//! `byval` attributes are used, so this matches the Cranelift lowering exactly.
+//! Calling convention. A "manual ABI" — aggregates pass/return by pointer (a
+//! leading `ptr` sret param + manual `memcpy`), scalars pass by value. No LLVM
+//! `sret`/`byval`/`noalias` attributes are used (those are a deliberate
+//! follow-up; this keeps exact ABI compatibility with extern "C" and across
+//! calls). Sret/ByRef/aggregate params are the `ptr` scalar (`ScalarTy::Ptr`),
+//! so no body change was needed for the typed-`ptr` migration.
 
 use inkwell::context::Context;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, FunctionType};

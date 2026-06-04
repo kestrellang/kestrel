@@ -1,17 +1,20 @@
 //! MIR type -> LLVM scalar/aggregate classification.
 //!
-//! Faithful port of the Cranelift backend's `ty.rs`. The model is "scalar or
-//! memory": a value is either a machine scalar (held in an LLVM SSA value) or an
-//! aggregate (held by pointer to memory). Layouts are NOT recomputed here — they
-//! come from the MIR layout pass (`s.type_info.layout`), the single source of
-//! truth. Like the Cranelift backend, a single-field newtype delegates to its
-//! field's representation (so `Float64` is an `f64`, not an `i64`).
+//! The model is "scalar or memory": a value is either a machine scalar (held in
+//! an LLVM SSA value) or an aggregate (held by pointer to memory). Layouts are
+//! NOT recomputed here — they come from the MIR layout pass
+//! (`s.type_info.layout`), the single source of truth. A single-field newtype
+//! delegates to its field's representation (so `Float64` is an `f64`, not an
+//! `i64`, and `Pointer[T]`/`RawPointer` is a real `ptr`).
 //!
-//! Pointer-width scalars are represented as the integer `ScalarTy::I64`/`I32`
-//! (NOT an LLVM `ptr`), exactly mirroring Cranelift's `ptr_ty = I64`. The `ptr`
-//! type only materialises at memory-access/call boundaries (see `mem`), keeping
-//! all arithmetic, ABI, and offset logic identical to the Cranelift backend.
+//! Typed-`ptr` representation (formerly "Option A" used `i64` here): pointer-
+//! width scalars — addresses, aggregate references, `Pointer`/`FuncThin`
+//! scalars, function pointers — are the LLVM `ptr` scalar `ScalarTy::Ptr`, and
+//! offset math is `getelementptr` (see `mem`). This restores pointer provenance
+//! so LLVM's alias analysis can devirtualize/LICM/vectorize. The only genuine
+//! `int<->ptr` conversions left are `Op::PtrToAddress`/`Op::PtrFromAddress`.
 
+use inkwell::AddressSpace;
 use inkwell::context::Context;
 use inkwell::types::BasicTypeEnum;
 use kestrel_hecs::Entity;
@@ -19,7 +22,9 @@ use kestrel_mir::mono::MonoModule;
 use kestrel_mir::{FloatBits, IntBits, Layout, MirTy, StructLayout, TyArena, TyId};
 
 /// A machine scalar type, independent of any LLVM context lifetime (Copy, like
-/// Cranelift's `ir::Type`). Pointer-width scalars use `I64`/`I32`.
+/// Cranelift's `ir::Type`). `Ptr` is the pointer-width opaque LLVM `ptr` and is
+/// neither int nor float (it carries addresses, `Pointer`/`FuncThin` scalars,
+/// and function pointers). It currently assumes 8-byte pointers (64-bit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarTy {
     I8,
@@ -29,6 +34,7 @@ pub enum ScalarTy {
     F16,
     F32,
     F64,
+    Ptr,
 }
 
 impl ScalarTy {
@@ -37,7 +43,8 @@ impl ScalarTy {
             Self::I8 => 1,
             Self::I16 | Self::F16 => 2,
             Self::I32 | Self::F32 => 4,
-            Self::I64 | Self::F64 => 8,
+            // Ptr is pointer-width; the backend assumes 64-bit (see TypeCache::new).
+            Self::I64 | Self::F64 | Self::Ptr => 8,
         }
     }
 
@@ -45,8 +52,13 @@ impl ScalarTy {
         matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
     }
 
+    /// Positive match — `Ptr` is neither int nor float, so this is NOT `!is_int`.
     pub fn is_float(self) -> bool {
-        !self.is_int()
+        matches!(self, Self::F16 | Self::F32 | Self::F64)
+    }
+
+    pub fn is_ptr(self) -> bool {
+        matches!(self, Self::Ptr)
     }
 
     /// Materialise the inkwell type for this scalar.
@@ -59,6 +71,7 @@ impl ScalarTy {
             Self::F16 => cx.f16_type().into(),
             Self::F32 => cx.f32_type().into(),
             Self::F64 => cx.f64_type().into(),
+            Self::Ptr => cx.ptr_type(AddressSpace::default()).into(),
         }
     }
 }
@@ -108,11 +121,10 @@ pub struct TypeCache {
 
 impl TypeCache {
     pub fn new(module: &MonoModule, ptr_size: u64) -> Self {
-        let ptr_scalar = if ptr_size == 8 {
-            ScalarTy::I64
-        } else {
-            ScalarTy::I32
-        };
+        // Pointer-width scalars are the LLVM `ptr`. `ScalarTy::Ptr::bytes()` is
+        // hardcoded to 8, so a non-64-bit target would mis-size pointer fields.
+        debug_assert_eq!(ptr_size, 8, "ScalarTy::Ptr currently assumes 8-byte pointers");
+        let ptr_scalar = ScalarTy::Ptr;
         Self {
             reprs: vec![None; module.ty_arena.len()],
             ptr_scalar,
@@ -256,13 +268,20 @@ impl TypeCache {
             // byte size alone would mis-type e.g. `Float64` (an f64 newtype) as
             // I64 while the body carries an f64 — making the auto clone-shim's
             // signature disagree with its body. Delegating keeps layout single-
-            // sourced. Pure-discriminant enums and one-field structs over a
-            // non-scalar field fall through to the integer-by-size mapping below.
+            // sourced.
             if let Some(field_ty) = single_field_ty {
+                // Delegate to a SCALAR field (Float64 -> f64, Pointer[T] -> ptr).
+                // A newtype over an AGGREGATE field is itself carried by address:
+                // collapsing it to an integer would mismatch its by-memory clone/
+                // construction (the body builds a slot and returns its `ptr`,
+                // which is not an integer scalar). See IoError (a newtype over a
+                // payload-carrying enum).
                 if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
                     return TypeRepr::Scalar(t);
                 }
+                return TypeRepr::Aggregate { size, align };
             }
+            // Pure-discriminant enum: a small integer discriminant.
             let scalar = match size {
                 1 => ScalarTy::I8,
                 2 => ScalarTy::I16,

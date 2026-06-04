@@ -143,6 +143,11 @@ impl<'ctx> CodegenCtx<'ctx> {
             }
         }
 
+        // Debug: dump the final (post-optimization) module IR for inspection.
+        if let Ok(path) = std::env::var("KESTREL_DUMP_LLVM_IR") {
+            let _ = std::fs::write(&path, self.llmod.print_to_string().to_string());
+        }
+
         let buffer = self
             .machine
             .write_to_memory_buffer(&self.llmod, FileType::Object)
@@ -303,6 +308,13 @@ impl<'ctx> CodegenCtx<'ctx> {
                 Ok(Ok(())) => {
                     let print_verify = std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok();
                     if !fn_value.verify(print_verify) {
+                        if print_verify {
+                            // The LLVM verifier message above is terse; also dump
+                            // the whole broken function so the offending instruction
+                            // has context (the function is about to be trap-stubbed).
+                            use inkwell::values::AnyValue;
+                            eprintln!("=== broken fn {func_name} ===\n{}", fn_value.print_to_string().to_string());
+                        }
                         errors.push((func_name, "LLVM function verification failed".into()));
                         self.reset_to_trap_stub(fn_value);
                     }

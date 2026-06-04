@@ -1,7 +1,6 @@
-//! Terminator lowering. Faithful port of the Cranelift backend's
-//! `terminator.rs`. MIR block args become phi incomings (added from the current
-//! insert block); `Switch` is a comparison chain (not a jump table), matching
-//! Cranelift; `Panic`/`Unreachable` lower to `llvm.trap` + `unreachable`.
+//! Terminator lowering. MIR block args become phi incomings (added from the
+//! current insert block); `Switch` is a comparison chain (not a jump table);
+//! `Panic`/`Unreachable` lower to `llvm.trap` + `unreachable`.
 
 use inkwell::IntPredicate;
 use inkwell::builder::Builder;
@@ -29,8 +28,11 @@ pub fn emit_trap<'ctx>(fc: &FuncCompiler<'_, 'ctx>, builder: &Builder<'ctx>) {
     let _ = builder.build_unreachable();
 }
 
-/// Coerce an integer value to the phi's expected int type (zero-extend or
-/// truncate), matching the Cranelift backend's `coerce_block_args`.
+/// Coerce a block-arg value to the phi's expected type. Integers are zero-
+/// extended/truncated to the expected width; the `int<->ptr` branches are
+/// defensive repairs (should be unreachable if `value_scalar` is consistent —
+/// they keep one classification slip from sinking the whole function to a trap
+/// stub via a phi-type verify failure).
 fn coerce<'ctx>(
     builder: &Builder<'ctx>,
     expected: BasicTypeEnum<'ctx>,
@@ -50,6 +52,18 @@ fn coerce<'ctx>(
         if vw > ew {
             return builder.build_int_truncate(v, e, "tr").unwrap().into();
         }
+    }
+    if expected.is_pointer_type() && val.is_int_value() {
+        return builder
+            .build_int_to_ptr(val.into_int_value(), expected.into_pointer_type(), "i2p")
+            .unwrap()
+            .into();
+    }
+    if expected.is_int_type() && val.is_pointer_value() {
+        return builder
+            .build_ptr_to_int(val.into_pointer_value(), expected.into_int_type(), "p2i")
+            .unwrap()
+            .into();
     }
     val
 }
@@ -124,31 +138,35 @@ fn compile_return<'ctx>(
     let ret_mode = abi::return_mode(ret_repr, fc.is_main);
 
     match ret_mode {
-        ReturnMode::Direct(_) => {
+        ReturnMode::Direct(scalar) => {
             let val = fc.resolve_scalar(builder, value_id);
             if fc.is_main {
                 let i64_ty = cx.i64_type();
                 let final_val: BasicValueEnum = match ret_repr {
-                    TypeRepr::Scalar(ScalarTy::I64) => val,
-                    TypeRepr::Scalar(s) if s.is_int() && s.bytes() < 8 => builder
+                    TypeRepr::Aggregate { .. } => {
+                        builder.build_load(i64_ty, val.into_pointer_value(), "mainret").unwrap()
+                    },
+                    TypeRepr::Scalar(s) if s.is_int() && s.bytes() < 8 && val.is_int_value() => builder
                         .build_int_s_extend(val.into_int_value(), i64_ty, "ext")
                         .unwrap()
                         .into(),
-                    TypeRepr::Aggregate { .. } => {
-                        let p = mem::int_to_ptr(cx, builder, val.into_int_value());
-                        builder.build_load(i64_ty, p, "mainret").unwrap()
-                    },
-                    TypeRepr::Zst => i64_ty.const_zero().into(),
-                    _ => val,
+                    // I64 / Ptr / Zst, or a dead-block Never/ZST placeholder whose
+                    // value doesn't match `ret_repr`: coerce to i64 (ptrtoint a
+                    // placeholder `ptr`, zext/trunc an int).
+                    _ => coerce(builder, i64_ty.into(), val),
                 };
                 builder.build_return(Some(&final_val)).unwrap();
             } else {
-                builder.build_return(Some(&val)).unwrap();
+                // Coerce to the declared scalar: handles a dead/unreachable block
+                // whose Never/ZST return placeholder (`ptr null`) doesn't match the
+                // function's scalar return type.
+                let final_val = coerce(builder, scalar.llvm(cx), val);
+                builder.build_return(Some(&final_val)).unwrap();
             }
         },
         ReturnMode::Sret => {
             let sret_ptr = fc.sret_ptr.expect("sret_ptr must be set for Sret return mode");
-            let val = fc.get_value(value_id).into_int_value();
+            let val = fc.get_value(value_id).into_pointer_value();
             mem::copy_aggregate(cx, builder, ptr_size, ret_repr.size(), sret_ptr, val);
             builder.build_return(None).unwrap();
         },

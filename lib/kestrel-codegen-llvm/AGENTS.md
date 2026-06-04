@@ -1,10 +1,11 @@
 # kestrel-codegen-llvm — agent guide
 
-LLVM code generation backend (inkwell 0.9 / LLVM 18). It is a **faithful port of
-`kestrel-codegen-cranelift`** — same module layout, same `MonoModule` input, same
+LLVM code generation backend (inkwell 0.9 / LLVM 18). It started as a port of
+`kestrel-codegen-cranelift` — same module layout, same `MonoModule` input, same
 public surface (`compile`, `compile_and_link`, `CodegenOptions`,
-`CompilationResult`, `CodegenError`). When in doubt, read the cranelift module
-with the same name; the lowering decisions are meant to match it exactly.
+`CompilationResult`, `CodegenError`). The cranelift module with the same name is
+still a useful reference for control flow, BUT the representation now **diverges**:
+addresses are real LLVM `ptr` (typed-`ptr`), not cranelift's `i64` (see below).
 
 ## Build / setup
 
@@ -13,23 +14,38 @@ with the same name; the lowering decisions are meant to match it exactly.
 - Do **not** add a dependency on `kestrel-codegen-cranelift`. Shared types are
   intentionally duplicated (cf. [[feedback_mir3_independent]] philosophy).
 
-## The representation model — "Option A" (do not break this)
+## The representation model — typed `ptr` (do not break this)
 
-Pointer-width scalars are LLVM **`i64`/`i32`**, NOT LLVM `ptr` (mirrors
-cranelift's `ptr_ty = I64`). LLVM `ptr` materialises ONLY at memory-access and
-indirect-call sites, via `inttoptr`, centralized in `mem.rs`. Consequences:
+Pointer-width scalars are real LLVM **`ptr`** values (`ScalarTy::Ptr`), NOT
+`i64`. This is a deliberate divergence from the cranelift backend (`ptr_ty =
+I64`): it preserves pointer provenance so LLVM can devirtualize indirect calls,
+hoist loads (LICM), and vectorize. Consequences:
 
-- Byte-offset address math is `build_int_add` (see `inst::offset_addr`), never GEP.
-- Addresses, aggregate values, and pointer-typed scalars are all `IntValue` of
-  pointer width in `value_map`. Only int/float scalars differ.
-- New memory access? Route it through `mem.rs` so the `inttoptr` stays in one place.
+- Byte-offset address math is `getelementptr`, via `mem::field_gep` (`inbounds`,
+  for compiler-generated within-object offsets) or `mem::raw_gep` (plain, for
+  `Op::PtrOffset` user pointer arithmetic that may reach one-past-the-end).
+  NEVER `build_int_add` on an address.
+- Addresses, aggregate values, and pointer-typed scalars are all `PointerValue`
+  in `value_map`. Only int/float scalars differ.
+- The ONLY genuine `int<->ptr` conversions are `Op::PtrToAddress` (`ptrtoint`)
+  and `Op::PtrFromAddress` (`inttoptr`); `mem::int_to_ptr`/`ptr_to_int` exist
+  solely for those (plus the `main` aggregate-return marshalling).
+- `ScalarTy::Ptr` is neither int nor float; `is_float` is a positive match (NOT
+  `!is_int`), and `bytes()` returns 8 (the backend assumes 64-bit — see
+  `TypeCache::new`'s `debug_assert`).
+- `Str`/`FuncThick` are `{ ptr@0, <int/ptr>@ptr_size }`: `StrLen` loads the
+  length as `I64` (NOT `ptr_scalar`, which is now a `ptr`); the closure fn/env
+  slots are both `ptr`.
 
-## Value model (identical to cranelift `func.rs`)
+## Value model
 
-- @owned scalar → the LLVM value IS the scalar.
-- @guaranteed scalar → an i64 ADDRESS; `FuncCompiler::resolve_scalar` loads it.
-- aggregate (any ownership) → an i64 ADDRESS.
-- ZST → placeholder i64 `0`.
+- @owned scalar → the LLVM value IS the scalar (int/float/`ptr`).
+- @guaranteed scalar → a `ptr` ADDRESS; `FuncCompiler::resolve_scalar` loads it.
+- aggregate (any ownership) → a `ptr` ADDRESS.
+- ZST → a null-`ptr` placeholder.
+- single-field newtype collapses to its field's repr — so `compile_struct_extract`
+  must NOT eagerly `into_pointer_value()` the operand (a newtype's value IS the
+  field, possibly a non-pointer scalar).
 
 Layouts (size/align/field offsets, enum discriminant width, variant layouts)
 come from the MIR layout pass (`type_info.layout`) — the single source of truth.
@@ -37,12 +53,17 @@ come from the MIR layout pass (`type_info.layout`) — the single source of trut
 `ty::classify_named` must delegate to the field's repr (a `Float64` is `f64`,
 not `i64`) — see [[per_instantiation_copy_semantics]].
 
-## ABI (manual, like cranelift)
+## ABI (manual)
 
-No LLVM `sret`/`byval` attributes. Aggregates pass by pointer: a leading i64
-sret param + manual `mem::copy_aggregate`. Param/return classification lives in
-`abi.rs` (`param_pass_mode`/`return_mode`) — keep it byte-identical to the
-cranelift `abi.rs`, or call ABIs will disagree with extern C and across calls.
+No LLVM `sret`/`byval`/`noalias` attributes (a deliberate follow-up — adding
+them is the next provenance tier, but it changes the platform ABI so it's not
+part of the typed-`ptr` base). Aggregates pass by pointer: a leading `ptr` sret
+param + manual `mem::copy_aggregate`. Param/return classification lives in
+`abi.rs` (`param_pass_mode`/`return_mode`); the sret/ByRef/aggregate param type
+is `ptr_scalar.llvm` (now `ptr`), so the bodies are unchanged from the i64 era.
+Callers and callees both derive signatures from `ptr_scalar`, so they stay in
+lockstep; extern "C" pointer params are `ptr` (what C wants), integer params
+(`size_t`-like) stay `I64`.
 
 ## CFG lowering invariants
 

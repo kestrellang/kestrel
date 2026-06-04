@@ -1,16 +1,17 @@
-//! Instruction lowering — the core of the backend. Faithful port of the
-//! Cranelift backend's `inst.rs`. Addresses are i64 (Option A): byte-offset
-//! arithmetic is `build_int_add`, and `inttoptr` happens only inside `mem`.
+//! Instruction lowering — the core of the backend. Addresses are real LLVM
+//! `ptr` values (typed-`ptr` model): byte-offset arithmetic is `getelementptr`
+//! (`mem::field_gep`/`raw_gep`); the only `int<->ptr` conversions are
+//! `Op::PtrToAddress`/`Op::PtrFromAddress`.
 //!
-//! Operand contract legend (same as the Cranelift backend):
+//! Operand contract legend:
 //!   VALUE  — the scalar/aggregate data itself (resolve_scalar)
-//!   ADDR   — a memory address to load from / store to (get_value)
+//!   ADDR   — a memory address (a `ptr`) to load from / store to (get_value)
 //!   RAW    — forwarded as-is, custom ownership handling inline
 
 use inkwell::module::Module;
 use inkwell::builder::Builder;
 use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
-use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue};
+use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, IntValue, PointerValue};
 use inkwell::{AtomicOrdering, AtomicRMWBinOp, FloatPredicate, IntPredicate};
 use inkwell::intrinsics::Intrinsic;
 
@@ -57,12 +58,11 @@ pub fn compile_inst<'ctx>(
             match repr {
                 TypeRepr::Aggregate { size, align } => {
                     let slot = fc.alloca(size, align);
-                    mem::copy_aggregate(cx, builder, ptr_size, size, slot, val.into_int_value());
+                    mem::copy_aggregate(cx, builder, ptr_size, size, slot, val.into_pointer_value());
                     fc.map_value(*result, slot.into());
                 },
                 TypeRepr::Scalar(t) if operand_is_guaranteed => {
-                    let p = mem::int_to_ptr(cx, builder, val.into_int_value());
-                    let loaded = builder.build_load(t.llvm(cx), p, "cv").unwrap();
+                    let loaded = builder.build_load(t.llvm(cx), val.into_pointer_value(), "cv").unwrap();
                     fc.map_value(*result, loaded);
                 },
                 _ => {
@@ -85,8 +85,7 @@ pub fn compile_inst<'ctx>(
                 TypeRepr::Aggregate { .. } | TypeRepr::Zst => fc.map_value(*result, val),
                 TypeRepr::Scalar(_) => {
                     let slot = fc.alloca(repr.size(), repr.align());
-                    let p = mem::int_to_ptr(cx, builder, slot);
-                    builder.build_store(p, val).unwrap();
+                    builder.build_store(slot, val).unwrap();
                     fc.map_value(*result, slot.into());
                 },
             }
@@ -103,7 +102,7 @@ pub fn compile_inst<'ctx>(
 
         // address: ADDR → result: VALUE
         InstKind::Load { result, address } => {
-            let addr = fc.get_value(*address).into_int_value();
+            let addr = fc.get_value(*address).into_pointer_value();
             let ty = fc.body.values[result.index()].ty;
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let val = mem::load_from_repr(cx, builder, ptr_size, repr, addr);
@@ -112,7 +111,7 @@ pub fn compile_inst<'ctx>(
 
         // address: ADDR → result: VALUE (copy of pointed-to data)
         InstKind::CopyAddr { result, address, ty } => {
-            let addr = fc.get_value(*address).into_int_value();
+            let addr = fc.get_value(*address).into_pointer_value();
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             match repr {
                 TypeRepr::Aggregate { size, align } => {
@@ -129,7 +128,7 @@ pub fn compile_inst<'ctx>(
 
         // address: ADDR → result: VALUE (destructive read)
         InstKind::Take { result, address, ty } => {
-            let addr = fc.resolve_scalar(builder, *address).into_int_value();
+            let addr = fc.resolve_scalar(builder, *address).into_pointer_value();
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let val = mem::load_from_repr(cx, builder, ptr_size, repr, addr);
             fc.map_value(*result, val);
@@ -137,7 +136,7 @@ pub fn compile_inst<'ctx>(
 
         // address: ADDR, value: VALUE → writes value to address
         InstKind::StoreInit { address, value } | InstKind::StoreAssign { address, value } => {
-            let addr = fc.get_value(*address).into_int_value();
+            let addr = fc.get_value(*address).into_pointer_value();
             let val = fc.resolve_scalar(builder, *value);
             let ty = fc.body.values[value.index()].ty;
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -158,10 +157,11 @@ pub fn compile_inst<'ctx>(
             let disc_ty = disc_scalar.llvm(cx).into_int_type();
             let val: BasicValueEnum = match repr {
                 TypeRepr::Scalar(_) if is_guaranteed => {
-                    let p = mem::int_to_ptr(cx, builder, base.into_int_value());
-                    builder.build_load(disc_ty, p, "disc").unwrap()
+                    builder.build_load(disc_ty, base.into_pointer_value(), "disc").unwrap()
                 },
                 TypeRepr::Scalar(_) => {
+                    // Enum carried as a scalar: a real integer discriminant (enums
+                    // never collapse to `Ptr`).
                     let v = base.into_int_value();
                     let actual = v.get_type().get_bit_width();
                     let want = disc_ty.get_bit_width();
@@ -174,8 +174,7 @@ pub fn compile_inst<'ctx>(
                     }
                 },
                 _ => {
-                    let p = mem::int_to_ptr(cx, builder, base.into_int_value());
-                    builder.build_load(disc_ty, p, "disc").unwrap()
+                    builder.build_load(disc_ty, base.into_pointer_value(), "disc").unwrap()
                 },
             };
             fc.map_value(*result, val);
@@ -233,8 +232,7 @@ pub fn compile_inst<'ctx>(
             let global = *fc.ctx.static_data.get(entity).ok_or_else(|| {
                 CodegenError::Unsupported("global entity not found in statics".into())
             })?;
-            let addr = mem::ptr_to_int(cx, builder, global.as_pointer_value(), ptr_size);
-            fc.map_value(*result, addr.into());
+            fc.map_value(*result, global.as_pointer_value().into());
         },
 
         // fields: VALUE each → result: @owned aggregate/scalar
@@ -305,10 +303,10 @@ pub fn compile_inst<'ctx>(
 
         // base: ADDR → result: ADDR (offset into aggregate)
         InstKind::FieldAddr { result, base, ty, field } => {
-            let base_val = fc.get_value(*base).into_int_value();
+            let base_val = fc.get_value(*base).into_pointer_value();
             let offset =
                 struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module);
-            let addr = offset_addr(cx, builder, ptr_size, base_val, offset);
+            let addr = mem::field_gep(cx, builder, base_val, offset);
             fc.map_value(*result, addr.into());
         },
 
@@ -327,7 +325,7 @@ pub fn compile_inst<'ctx>(
                     fc.map_value(*result, slot.into());
                 },
                 TypeRepr::Zst => {
-                    fc.map_value(*result, mem::ptr_const(cx, ptr_size, 0).into());
+                    fc.map_value(*result, mem::null_ptr(cx).into());
                 },
             }
         },
@@ -352,23 +350,6 @@ fn cmp_to_bool<'ctx>(
     cmp: IntValue<'ctx>,
 ) -> BasicValueEnum<'ctx> {
     builder.build_int_z_extend(cmp, cx.i8_type(), "b").unwrap().into()
-}
-
-/// Compute `base + offset` (both pointer-width integers). Identity at offset 0.
-fn offset_addr<'ctx>(
-    cx: &'ctx inkwell::context::Context,
-    builder: &Builder<'ctx>,
-    ptr_size: u64,
-    base: IntValue<'ctx>,
-    offset: u64,
-) -> IntValue<'ctx> {
-    if offset == 0 {
-        base
-    } else {
-        builder
-            .build_int_add(base, mem::ptr_const(cx, ptr_size, offset as i64), "fa")
-            .unwrap()
-    }
 }
 
 /// Call an LLVM intrinsic by name with the given overload types and arguments.
@@ -460,36 +441,36 @@ fn compile_op1<'ctx>(
             .build_float_trunc(arg.into_float_value(), float_bits_to_scalar(to).llvm(cx).into_float_type(), "ftr")
             .unwrap()
             .into(),
+        // A reference is an address (`ptr`); pointers are opaque, so these casts
+        // are identities.
         Op::RefToImmut => arg,
-        Op::PtrFromAddress(_) => arg,
-        Op::PtrToAddress => arg,
+        Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
+        Op::RefToPtr => arg,
+        // The two genuine int<->ptr boundaries.
+        Op::PtrFromAddress(_) => mem::int_to_ptr(cx, builder, arg.into_int_value()).into(),
+        Op::PtrToAddress => mem::ptr_to_int(cx, builder, arg.into_pointer_value(), ptr_size).into(),
         Op::PtrIsNull => {
-            let zero = arg.into_int_value().get_type().const_zero();
-            let cmp = builder
-                .build_int_compare(IntPredicate::EQ, arg.into_int_value(), zero, "isnull")
-                .unwrap();
+            let cmp = builder.build_is_null(arg.into_pointer_value(), "isnull").unwrap();
             cmp_to_bool(cx, builder, cmp)
         },
-        Op::PtrNull(_) => mem::ptr_const(cx, ptr_size, 0).into(),
+        Op::PtrNull(_) => mem::null_ptr(cx).into(),
         Op::PtrTo(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let slot = fc.alloca(repr.size(), repr.align());
             mem::store_to_repr(cx, builder, ptr_size, repr, slot, arg);
             slot.into()
         },
-        Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
-        Op::RefToPtr => arg,
         Op::PtrRead(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            mem::load_from_repr(cx, builder, ptr_size, repr, arg.into_int_value())
+            mem::load_from_repr(cx, builder, ptr_size, repr, arg.into_pointer_value())
         },
         Op::SizeOf(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            mem::ptr_const(cx, ptr_size, repr.size() as i64).into()
+            mem::usize_const(cx, ptr_size, repr.size() as i64).into()
         },
         Op::AlignOf(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            mem::ptr_const(cx, ptr_size, repr.align() as i64).into()
+            mem::usize_const(cx, ptr_size, repr.align() as i64).into()
         },
         Op::StackAlloc(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -501,12 +482,13 @@ fn compile_op1<'ctx>(
         },
         Op::StrPtr => {
             let repr = TypeRepr::Scalar(fc.ctx.tc.ptr_scalar);
-            mem::load_from_repr(cx, builder, ptr_size, repr, arg.into_int_value())
+            mem::load_from_repr(cx, builder, ptr_size, repr, arg.into_pointer_value())
         },
         Op::StrLen => {
-            let ptr_scalar = fc.ctx.tc.ptr_scalar;
-            let addr = offset_addr(cx, builder, ptr_size, arg.into_int_value(), ptr_size);
-            mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), addr)
+            // The `Str` header is `{ ptr@0, i64 len@ptr_size }`; load the length
+            // as an integer (NOT `ptr_scalar`, which is now a `ptr`).
+            let addr = mem::field_gep(cx, builder, arg.into_pointer_value(), ptr_size);
+            mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ScalarTy::I64), addr)
         },
         Op::FloatPred(_, FloatPredicateKind::IsNan) => {
             let v = arg.into_float_value();
@@ -600,26 +582,32 @@ fn compile_op2<'ctx>(
         Op::BoolAnd => builder.build_and(li(), ri(), "booland").unwrap().into(),
         Op::BoolOr => builder.build_or(li(), ri(), "boolor").unwrap().into(),
         Op::BoolEq => icmp(IntPredicate::EQ, builder),
-        Op::PtrOffset => builder.build_int_add(li(), ri(), "ptroff").unwrap().into(),
+        // Raw user pointer arithmetic: byte GEP (plain, NOT inbounds — may be
+        // one-past-the-end). lhs is the base `ptr`, rhs the runtime byte offset.
+        Op::PtrOffset => mem::raw_gep(cx, builder, lhs.into_pointer_value(), ri()).into(),
         Op::PtrWrite(ty) => {
             let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            mem::store_to_repr(cx, builder, ptr_size, repr, li(), rhs);
-            mem::ptr_const(cx, ptr_size, 0).into()
+            mem::store_to_repr(cx, builder, ptr_size, repr, lhs.into_pointer_value(), rhs);
+            mem::null_ptr(cx).into()
         },
-        Op::AtomicAdd => {
-            let p = mem::int_to_ptr(cx, builder, li());
-            builder
-                .build_atomicrmw(AtomicRMWBinOp::Add, p, ri(), AtomicOrdering::SequentiallyConsistent)
-                .unwrap()
-                .into()
-        },
-        Op::AtomicSub => {
-            let p = mem::int_to_ptr(cx, builder, li());
-            builder
-                .build_atomicrmw(AtomicRMWBinOp::Sub, p, ri(), AtomicOrdering::SequentiallyConsistent)
-                .unwrap()
-                .into()
-        },
+        Op::AtomicAdd => builder
+            .build_atomicrmw(
+                AtomicRMWBinOp::Add,
+                lhs.into_pointer_value(),
+                ri(),
+                AtomicOrdering::SequentiallyConsistent,
+            )
+            .unwrap()
+            .into(),
+        Op::AtomicSub => builder
+            .build_atomicrmw(
+                AtomicRMWBinOp::Sub,
+                lhs.into_pointer_value(),
+                ri(),
+                AtomicOrdering::SequentiallyConsistent,
+            )
+            .unwrap()
+            .into(),
         Op::FloatCopysign(_) => {
             let l = lf();
             let fty: BasicTypeEnum = l.get_type().into();
@@ -672,7 +660,7 @@ fn compile_struct<'ctx>(
     let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
     match repr {
-        TypeRepr::Zst => Ok(mem::ptr_const(cx, ptr_size, 0).into()),
+        TypeRepr::Zst => Ok(mem::null_ptr(cx).into()),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
                 return Ok(fc.resolve_scalar(builder, fields[0].1));
@@ -680,8 +668,7 @@ fn compile_struct<'ctx>(
             let slot = fc.alloca(repr.size(), repr.align());
             mem::zero_memory(cx, builder, ptr_size, slot, repr.size());
             store_struct_fields(fc, builder, ty, fields, slot)?;
-            let p = mem::int_to_ptr(cx, builder, slot);
-            Ok(builder.build_load(t.llvm(cx), p, "struct").unwrap())
+            Ok(builder.build_load(t.llvm(cx), slot, "struct").unwrap())
         },
         TypeRepr::Aggregate { size, align } => {
             let slot = fc.alloca(size, align);
@@ -697,7 +684,7 @@ fn store_struct_fields<'ctx>(
     builder: &Builder<'ctx>,
     ty: TyId,
     fields: &[(FieldIdx, ValueId)],
-    slot: IntValue<'ctx>,
+    slot: PointerValue<'ctx>,
 ) -> Result<(), CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
@@ -706,7 +693,7 @@ fn store_struct_fields<'ctx>(
         let offset = struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
         let field_ty = struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
         let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-        let dest = offset_addr(cx, builder, ptr_size, slot, offset);
+        let dest = mem::field_gep(cx, builder, slot, offset);
         mem::store_to_repr(cx, builder, ptr_size, field_repr, dest, val);
     }
     Ok(())
@@ -721,7 +708,7 @@ fn compile_tuple<'ctx>(
     let ptr_size = fc.ctx.ptr_size;
 
     if elements.is_empty() {
-        return Ok(mem::ptr_const(cx, ptr_size, 0).into());
+        return Ok(mem::null_ptr(cx).into());
     }
 
     let mut layout = StructLayout::new();
@@ -741,7 +728,7 @@ fn compile_tuple<'ctx>(
         let val = fc.resolve_scalar(builder, elem_id);
         let offset = layout.field_offsets[i];
         let repr = fc.ctx.tc.repr(elem_tys[i], &fc.ctx.module.ty_arena, fc.ctx.module);
-        let dest = offset_addr(cx, builder, ptr_size, slot, offset);
+        let dest = mem::field_gep(cx, builder, slot, offset);
         mem::store_to_repr(cx, builder, ptr_size, repr, dest, val);
     }
 
@@ -777,23 +764,20 @@ fn compile_enum<'ctx>(
         };
 
     match repr {
-        TypeRepr::Zst => Ok(mem::ptr_const(cx, ptr_size, 0).into()),
+        TypeRepr::Zst => Ok(mem::null_ptr(cx).into()),
         TypeRepr::Scalar(t) => {
             let slot = fc.alloca(repr.size(), repr.align());
             mem::zero_memory(cx, builder, ptr_size, slot, repr.size());
             let disc = disc_scalar.llvm(cx).into_int_type().const_int(disc_value as u64, false);
-            let p = mem::int_to_ptr(cx, builder, slot);
-            builder.build_store(p, disc).unwrap();
+            builder.build_store(slot, disc).unwrap();
             store_variant_payload(fc, builder, enum_ty, variant, payload, slot, payload_offset)?;
-            let p2 = mem::int_to_ptr(cx, builder, slot);
-            Ok(builder.build_load(t.llvm(cx), p2, "enum").unwrap())
+            Ok(builder.build_load(t.llvm(cx), slot, "enum").unwrap())
         },
         TypeRepr::Aggregate { size, align } => {
             let slot = fc.alloca(size, align);
             mem::zero_memory(cx, builder, ptr_size, slot, size);
             let disc = disc_scalar.llvm(cx).into_int_type().const_int(disc_value as u64, false);
-            let p = mem::int_to_ptr(cx, builder, slot);
-            builder.build_store(p, disc).unwrap();
+            builder.build_store(slot, disc).unwrap();
             store_variant_payload(fc, builder, enum_ty, variant, payload, slot, payload_offset)?;
             Ok(slot.into())
         },
@@ -806,7 +790,7 @@ fn store_variant_payload<'ctx>(
     enum_ty: TyId,
     variant: VariantIdx,
     payload: &[ValueId],
-    slot: IntValue<'ctx>,
+    slot: PointerValue<'ctx>,
     payload_offset: u64,
 ) -> Result<(), CodegenError> {
     let cx = fc.ctx.cx;
@@ -842,7 +826,7 @@ fn store_variant_payload<'ctx>(
         let val = fc.resolve_scalar(builder, value_id);
         let (total_offset, field_ty) = plan[i];
         let field_repr = fc.ctx.tc.repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-        let dest = offset_addr(cx, builder, ptr_size, slot, total_offset);
+        let dest = mem::field_gep(cx, builder, slot, total_offset);
         mem::store_to_repr(cx, builder, ptr_size, field_repr, dest, val);
     }
     Ok(())
@@ -861,7 +845,7 @@ fn compile_array<'ctx>(
     let total_size = elem_size * elements.len() as u64;
 
     if total_size == 0 {
-        return Ok(mem::ptr_const(cx, ptr_size, 0).into());
+        return Ok(mem::null_ptr(cx).into());
     }
 
     let slot = fc.alloca(total_size, elem_repr.align());
@@ -870,7 +854,7 @@ fn compile_array<'ctx>(
     for (i, &value_id) in elements.iter().enumerate() {
         let val = fc.resolve_scalar(builder, value_id);
         let offset = i as u64 * elem_size;
-        let dest = offset_addr(cx, builder, ptr_size, slot, offset);
+        let dest = mem::field_gep(cx, builder, slot, offset);
         mem::store_to_repr(cx, builder, ptr_size, elem_repr, dest, val);
     }
 
@@ -895,7 +879,9 @@ fn compile_apply_partial<'ctx>(
         };
         let func = fc.ctx.func_ids[mono_id.index()]
             .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
-        mem::ptr_to_int(cx, builder, func.as_global_value().as_pointer_value(), ptr_size)
+        // Keep the function as a real `ptr` (no ptrtoint) so the constant flows
+        // store->load->call and LLVM can devirtualize the closure call.
+        func.as_global_value().as_pointer_value()
     };
 
     let mut env_size = 0u64;
@@ -920,17 +906,17 @@ fn compile_apply_partial<'ctx>(
         for (i, &cap_id) in captures.iter().enumerate() {
             let val = fc.resolve_scalar(builder, cap_id);
             let (repr, offset) = capture_reprs[i];
-            let dest = offset_addr(cx, builder, ptr_size, env_slot, offset);
+            let dest = mem::field_gep(cx, builder, env_slot, offset);
             mem::store_to_repr(cx, builder, ptr_size, repr, dest, val);
         }
         env_slot
     } else {
-        mem::ptr_const(cx, ptr_size, 0)
+        mem::null_ptr(cx)
     };
 
     let thick = fc.alloca(ptr_size * 2, ptr_size);
     mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), thick, func_addr.into());
-    let env_dest = offset_addr(cx, builder, ptr_size, thick, ptr_size);
+    let env_dest = mem::field_gep(cx, builder, thick, ptr_size);
     mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), env_dest, env_ptr.into());
 
     Ok(thick.into())
@@ -948,7 +934,9 @@ fn compile_struct_extract<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
-    let base = fc.get_value(operand).into_int_value();
+    // Don't convert eagerly: for an @owned single-field newtype, `base` is the
+    // field VALUE (any scalar — int/float/ptr), not an address.
+    let base = fc.get_value(operand);
     let operand_ty = fc.body.values[operand.index()].ty;
     let operand_repr = fc.ctx.tc.repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
     let is_borrowed = fc.body.values[operand.index()].ownership == Ownership::Guaranteed;
@@ -959,17 +947,17 @@ fn compile_struct_extract<'ctx>(
     // @guaranteed operands are always pointers. Return the field address.
     if is_borrowed {
         let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
-        return Ok(offset_addr(cx, builder, ptr_size, base, offset).into());
+        return Ok(mem::field_gep(cx, builder, base.into_pointer_value(), offset).into());
     }
 
     // @owned single-field newtype: value IS the field (classify_named delegates).
     if let (TypeRepr::Scalar(_), TypeRepr::Scalar(_)) = (operand_repr, field_repr) {
-        return Ok(base.into());
+        return Ok(base);
     }
 
     // @owned aggregate: compute field offset and load.
     let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let addr = offset_addr(cx, builder, ptr_size, base, offset);
+    let addr = mem::field_gep(cx, builder, base.into_pointer_value(), offset);
     Ok(mem::load_from_repr(cx, builder, ptr_size, field_repr, addr))
 }
 
@@ -981,7 +969,8 @@ fn compile_tuple_extract<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
-    let base = fc.get_value(operand).into_int_value();
+    // Tuples are always carried by address (never collapse to a scalar newtype).
+    let base = fc.get_value(operand).into_pointer_value();
     let operand_ty = fc.body.values[operand.index()].ty;
     let is_borrowed = fc.body.values[operand.index()].ownership == Ownership::Guaranteed;
 
@@ -990,7 +979,7 @@ fn compile_tuple_extract<'ctx>(
     };
     let elems = elems.clone();
     let (offset, elem_ty) = tuple_elem_offset(&mut fc.ctx.tc, &fc.ctx.module.ty_arena, fc.ctx.module, &elems, index);
-    let addr = offset_addr(cx, builder, ptr_size, base, offset);
+    let addr = mem::field_gep(cx, builder, base, offset);
     if is_borrowed {
         return Ok(addr.into());
     }
@@ -1007,7 +996,9 @@ fn compile_enum_payload<'ctx>(
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
-    let base = fc.get_value(operand).into_int_value();
+    // Enums with payloads are always carried by address (only pure-discriminant
+    // enums collapse to a scalar, and those have no payload to extract).
+    let base = fc.get_value(operand).into_pointer_value();
     let operand_ty = fc.body.values[operand.index()].ty;
     let is_borrowed = fc.body.values[operand.index()].ownership == Ownership::Guaranteed;
 
@@ -1032,7 +1023,7 @@ fn compile_enum_payload<'ctx>(
         (payload_offset + field_offset, field_ty)
     };
 
-    let addr = offset_addr(cx, builder, ptr_size, base, total_offset);
+    let addr = mem::field_gep(cx, builder, base, total_offset);
     if is_borrowed {
         return Ok(addr.into());
     }
@@ -1093,8 +1084,7 @@ fn coerce_byval_arg<'ctx>(
         let arg_ty = fc.body.values[arg_value.index()].ty;
         let arg_repr = fc.ctx.tc.repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         if let TypeRepr::Scalar(t) = arg_repr {
-            let p = mem::int_to_ptr(cx, builder, val.into_int_value());
-            return builder.build_load(t.llvm(cx), p, "argld").unwrap();
+            return builder.build_load(t.llvm(cx), val.into_pointer_value(), "argld").unwrap();
         }
         return val;
     }
@@ -1102,10 +1092,9 @@ fn coerce_byval_arg<'ctx>(
     if val.get_type() == expected_ty {
         return val;
     }
-    let ptr_bits = (ptr_size * 8) as u32;
-    if val.is_int_value() && val.into_int_value().get_type().get_bit_width() == ptr_bits {
-        // val is an address; load the expected scalar.
-        return mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(expected), val.into_int_value());
+    // val is an address (a `ptr`) but the param wants a different scalar; load it.
+    if val.is_pointer_value() {
+        return mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(expected), val.into_pointer_value());
     }
     val
 }
@@ -1163,9 +1152,7 @@ fn compile_resolved_call<'ctx>(
                 } else if arg_is_guaranteed {
                     call_args.push(val.into());
                 } else {
-                    let ptr_bits = (ptr_size * 8) as u32;
-                    let is_addr =
-                        val.is_int_value() && val.into_int_value().get_type().get_bit_width() == ptr_bits;
+                    let is_addr = val.is_pointer_value();
                     if repr.is_scalar() || !is_addr {
                         let slot = fc.alloca(repr.size(), repr.align());
                         mem::store_to_repr(cx, builder, ptr_size, repr, slot, val);
@@ -1191,7 +1178,7 @@ fn compile_resolved_call<'ctx>(
                 fc.map_value(result_id, sret_slot.unwrap().into());
             },
             ReturnMode::Void => {
-                fc.map_value(result_id, mem::ptr_const(cx, ptr_size, 0).into());
+                fc.map_value(result_id, mem::null_ptr(cx).into());
             },
         }
     }
@@ -1212,11 +1199,10 @@ fn compile_thin_call<'ctx>(
     result: Option<ValueId>,
 ) -> Result<bool, CodegenError> {
     let cx = fc.ctx.cx;
-    let ptr_size = fc.ctx.ptr_size;
     let ptr_scalar = fc.ctx.tc.ptr_scalar;
     let module: &'ctx MonoModule = fc.ctx.module;
 
-    let func_ptr_int = fc.get_value(func_val_id).into_int_value();
+    let func_ptr = fc.get_value(func_val_id).into_pointer_value();
 
     let func_ty = fc.body.values[func_val_id.index()].ty;
     let inner_ty = match module.ty_arena.get(func_ty) {
@@ -1277,7 +1263,7 @@ fn compile_thin_call<'ctx>(
         }
     }
 
-    let func_ptr = mem::int_to_ptr(cx, builder, func_ptr_int);
+    // `func_ptr` is already a real `ptr` — no inttoptr, so LLVM can devirtualize.
     let cs = builder.build_indirect_call(fn_type, func_ptr, &call_args, "icall").unwrap();
 
     if let Some(result_id) = result {
@@ -1287,7 +1273,7 @@ fn compile_thin_call<'ctx>(
                 fc.map_value(result_id, rv);
             },
             ReturnMode::Sret => fc.map_value(result_id, sret_slot.unwrap().into()),
-            ReturnMode::Void => fc.map_value(result_id, mem::ptr_const(cx, ptr_size, 0).into()),
+            ReturnMode::Void => fc.map_value(result_id, mem::null_ptr(cx).into()),
         }
     }
 
@@ -1311,13 +1297,13 @@ fn compile_thick_call<'ctx>(
     let ptr_scalar = fc.ctx.tc.ptr_scalar;
     let module: &'ctx MonoModule = fc.ctx.module;
 
-    let closure_ptr = fc.get_value(closure_val_id).into_int_value();
-    // Load func_ptr and env_ptr from the {fn, env} closure pair.
-    let func_ptr_int = mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), closure_ptr)
-        .into_int_value();
-    let env_addr = offset_addr(cx, builder, ptr_size, closure_ptr, ptr_size);
-    let env_ptr_int = mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), env_addr)
-        .into_int_value();
+    let closure_ptr = fc.get_value(closure_val_id).into_pointer_value();
+    // Load func_ptr and env_ptr (both real `ptr`) from the {fn, env} closure pair.
+    let func_ptr = mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), closure_ptr)
+        .into_pointer_value();
+    let env_addr = mem::field_gep(cx, builder, closure_ptr, ptr_size);
+    let env_ptr = mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), env_addr)
+        .into_pointer_value();
 
     let func_ty = fc.body.values[closure_val_id.index()].ty;
     let inner_ty = match module.ty_arena.get(func_ty) {
@@ -1362,7 +1348,7 @@ fn compile_thick_call<'ctx>(
     } else {
         None
     };
-    call_args.push(env_ptr_int.into());
+    call_args.push(env_ptr.into());
 
     for (i, call_arg) in args.iter().enumerate() {
         if i >= param_tys.len() {
@@ -1382,7 +1368,7 @@ fn compile_thick_call<'ctx>(
                 } else if matches!(call_arg.convention, ParamConvention::Borrow | ParamConvention::MutBorrow) {
                     // Borrow arg is an address; load the expected scalar.
                     let loaded = mem::load_from_repr(
-                        cx, builder, ptr_size, TypeRepr::Scalar(expected), val.into_int_value(),
+                        cx, builder, ptr_size, TypeRepr::Scalar(expected), val.into_pointer_value(),
                     );
                     call_args.push(loaded.into());
                 } else {
@@ -1394,7 +1380,7 @@ fn compile_thick_call<'ctx>(
         }
     }
 
-    let func_ptr = mem::int_to_ptr(cx, builder, func_ptr_int);
+    // `func_ptr` is already a real `ptr` — no inttoptr, so LLVM can devirtualize.
     let cs = builder.build_indirect_call(fn_type, func_ptr, &call_args, "tcall").unwrap();
 
     if let Some(result_id) = result {
@@ -1404,7 +1390,7 @@ fn compile_thick_call<'ctx>(
                 fc.map_value(result_id, rv);
             },
             ReturnMode::Sret => fc.map_value(result_id, sret_slot.unwrap().into()),
-            ReturnMode::Void => fc.map_value(result_id, mem::ptr_const(cx, ptr_size, 0).into()),
+            ReturnMode::Void => fc.map_value(result_id, mem::null_ptr(cx).into()),
         }
     }
 

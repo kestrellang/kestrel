@@ -1,6 +1,6 @@
-//! Immediate / constant lowering. Faithful port of the Cranelift backend's
-//! `imm.rs`. String literals build a `{ptr, len}` aggregate in a stack slot and
-//! return its address (so `Str` is carried by pointer, like every aggregate).
+//! Immediate / constant lowering. String literals build a `{ ptr, i64 len }`
+//! aggregate in a stack slot and return its address (so `Str` is carried by
+//! pointer, like every aggregate). Addresses are real LLVM `ptr` values.
 
 use inkwell::builder::Builder;
 use inkwell::values::BasicValueEnum;
@@ -10,7 +10,7 @@ use kestrel_mir::{ImmediateKind, MonoFuncId};
 use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::mem;
-use crate::ty::{TypeRepr, float_bits_to_scalar, int_bits_to_scalar};
+use crate::ty::{ScalarTy, TypeRepr, float_bits_to_scalar, int_bits_to_scalar};
 
 pub fn compile_immediate<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
@@ -37,28 +37,28 @@ pub fn compile_immediate<'ctx>(
 
         ImmediateKind::StringPointer(s) => {
             let global = fc.ctx.get_or_create_string_data(s)?;
-            Ok(mem::ptr_to_int(cx, builder, global.as_pointer_value(), ptr_size).into())
+            Ok(global.as_pointer_value().into())
         },
 
-        ImmediateKind::Unit => Ok(mem::ptr_const(cx, ptr_size, 0).into()),
+        ImmediateKind::Unit => Ok(mem::null_ptr(cx).into()),
 
         ImmediateKind::MonoFunctionRef(mono_id) => compile_mono_func_ref(fc, builder, *mono_id),
 
         ImmediateKind::FunctionRef { .. } => {
             debug_assert!(false, "unresolved FunctionRef in codegen");
-            Ok(mem::ptr_const(cx, ptr_size, 0).into())
+            Ok(mem::null_ptr(cx).into())
         },
 
-        ImmediateKind::NullPtr(_) => Ok(mem::ptr_const(cx, ptr_size, 0).into()),
+        ImmediateKind::NullPtr(_) => Ok(mem::null_ptr(cx).into()),
 
         ImmediateKind::SizeOf(ty) => {
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            Ok(mem::ptr_const(cx, ptr_size, repr.size() as i64).into())
+            Ok(mem::usize_const(cx, ptr_size, repr.size() as i64).into())
         },
 
         ImmediateKind::AlignOf(ty) => {
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            Ok(mem::ptr_const(cx, ptr_size, repr.align() as i64).into())
+            Ok(mem::usize_const(cx, ptr_size, repr.align() as i64).into())
         },
 
         ImmediateKind::FloatInfinity(bits) => {
@@ -85,29 +85,25 @@ fn compile_string_literal<'ctx>(
     let ptr_scalar = fc.ctx.tc.ptr_scalar;
 
     let global = fc.ctx.get_or_create_string_data(s)?;
-    let data_ptr = mem::ptr_to_int(cx, builder, global.as_pointer_value(), ptr_size);
-    let len = mem::ptr_const(cx, ptr_size, s.len() as i64);
+    let data_ptr = global.as_pointer_value();
+    let len = mem::usize_const(cx, ptr_size, s.len() as i64);
 
+    // `{ ptr@0, i64 len@ptr_size }`: data is a real `ptr`, the length an integer.
     let slot = fc.alloca(ptr_size * 2, ptr_size);
     mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), slot, data_ptr.into());
-    let len_dest = builder
-        .build_int_add(slot, mem::ptr_const(cx, ptr_size, ptr_size as i64), "str_len_ptr")
-        .unwrap();
-    mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), len_dest, len.into());
+    let len_dest = mem::field_gep(cx, builder, slot, ptr_size);
+    mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ScalarTy::I64), len_dest, len.into());
 
     Ok(slot.into())
 }
 
 fn compile_mono_func_ref<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
-    builder: &Builder<'ctx>,
+    _builder: &Builder<'ctx>,
     mono_id: MonoFuncId,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
-    let cx = fc.ctx.cx;
-    let ptr_size = fc.ctx.ptr_size;
     let func = fc.ctx.func_ids[mono_id.index()].ok_or_else(|| {
         CodegenError::Unsupported(format!("mono function ref {} not declared", mono_id.index()))
     })?;
-    let ptr = func.as_global_value().as_pointer_value();
-    Ok(mem::ptr_to_int(cx, builder, ptr, ptr_size).into())
+    Ok(func.as_global_value().as_pointer_value().into())
 }

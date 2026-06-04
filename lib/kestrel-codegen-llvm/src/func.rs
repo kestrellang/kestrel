@@ -1,11 +1,11 @@
-//! Per-function lowering. Faithful port of the Cranelift backend's `func.rs`.
+//! Per-function lowering.
 //!
-//! Value model (the central invariant, identical to the Cranelift backend):
-//!   - @owned scalar      -> the LLVM SSA value IS the scalar (i/f value)
-//!   - @guaranteed scalar -> the value is an i64 ADDRESS of the scalar
+//! Value model (the central invariant, typed-`ptr`):
+//!   - @owned scalar      -> the LLVM SSA value IS the scalar (i/f/`ptr` value)
+//!   - @guaranteed scalar -> the value is a `ptr` ADDRESS of the scalar
 //!                           (`resolve_scalar` loads through it)
-//!   - aggregate (any)    -> the value is an i64 ADDRESS of the memory
-//!   - ZST                -> a placeholder i64 `0`
+//!   - aggregate (any)    -> the value is a `ptr` ADDRESS of the memory
+//!   - ZST                -> a null-`ptr` placeholder
 //!
 //! MIR block params become LLVM phi nodes (`block_phis`); the `Builder` is
 //! threaded as a separate `&Builder` argument (never stored in the context) so
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
-use inkwell::values::{AnyValue, BasicValueEnum, FunctionValue, IntValue, PhiValue};
+use inkwell::values::{AnyValue, BasicValueEnum, FunctionValue, PhiValue, PointerValue};
 
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
@@ -39,8 +39,8 @@ pub struct FuncCompiler<'a, 'ctx> {
     pub block_phis: Vec<Vec<PhiValue<'ctx>>>,
     pub value_map: HashMap<ValueId, BasicValueEnum<'ctx>>,
     pub is_main: bool,
-    /// sret destination address (i64), set when the return mode is `Sret`.
-    pub sret_ptr: Option<IntValue<'ctx>>,
+    /// sret destination address, set when the return mode is `Sret`.
+    pub sret_ptr: Option<PointerValue<'ctx>>,
 }
 
 impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
@@ -60,7 +60,7 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
     }
 
     /// Resolve a MIR value to its scalar form. A @guaranteed scalar is held as
-    /// an i64 address, so it must be loaded; everything else is returned as-is.
+    /// a `ptr` address, so it must be loaded; everything else is returned as-is.
     pub fn resolve_scalar(&mut self, builder: &Builder<'ctx>, id: ValueId) -> BasicValueEnum<'ctx> {
         let val = self.get_value(id);
         let ownership = self.body.values[id.index()].ownership;
@@ -69,8 +69,7 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
             let repr = self.ctx.tc.repr(ty, &self.ctx.module.ty_arena, self.ctx.module);
             if let TypeRepr::Scalar(t) = repr {
                 let cx = self.ctx.cx;
-                let p = mem::int_to_ptr(cx, builder, val.into_int_value());
-                return builder.build_load(t.llvm(cx), p, "g").unwrap();
+                return builder.build_load(t.llvm(cx), val.into_pointer_value(), "g").unwrap();
             }
         }
         val
@@ -81,11 +80,10 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
     }
 
     /// Allocate a stack slot of `size` bytes aligned to `align`, returning its
-    /// address as an i64. The alloca is hoisted to the entry block (matching
-    /// Cranelift's fixed stack-slot semantics — not re-allocated per loop iter).
-    pub fn alloca(&self, size: u64, align: u64) -> IntValue<'ctx> {
+    /// `ptr` address. The alloca is hoisted to the entry block (fixed stack-slot
+    /// semantics — not re-allocated per loop iteration).
+    pub fn alloca(&self, size: u64, align: u64) -> PointerValue<'ctx> {
         let cx = self.ctx.cx;
-        let ptr_size = self.ctx.ptr_size;
         let tmp = cx.create_builder();
         match self.entry_block.get_first_instruction() {
             Some(instr) => tmp.position_before(&instr),
@@ -96,7 +94,7 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
         if let Some(instr) = slot.as_instruction() {
             let _ = instr.set_alignment(align.max(1) as u32);
         }
-        mem::ptr_to_int(cx, &tmp, slot, ptr_size)
+        slot
     }
 }
 
@@ -115,7 +113,6 @@ pub fn compile_function<'ctx>(
     let is_main = ctx.is_main_function(func);
     let cx = ctx.cx;
     let ptr_scalar = ctx.tc.ptr_scalar;
-    let ptr_size = ctx.ptr_size;
 
     let builder = cx.create_builder();
 
@@ -157,7 +154,7 @@ pub fn compile_function<'ctx>(
 
     let mut param_idx = 0u32;
     let sret_ptr = if matches!(ret_mode, ReturnMode::Sret) {
-        let p = fn_value.get_nth_param(param_idx).unwrap().into_int_value();
+        let p = fn_value.get_nth_param(param_idx).unwrap().into_pointer_value();
         param_idx += 1;
         Some(p)
     } else {
@@ -169,14 +166,14 @@ pub fn compile_function<'ctx>(
         let param_ty = body.values[i].ty;
         let repr = ctx.tc.repr(param_ty, &module.ty_arena, module);
         match abi::param_pass_mode(func.params[i].convention, repr) {
-            // ByVal: the scalar itself. ByRef: the i64 address. Both are the
+            // ByVal: the scalar itself. ByRef: the `ptr` address. Both are the
             // nth LLVM param value as declared by `build_signature`.
             PassMode::ByVal(_) | PassMode::ByRef => {
                 value_map.insert(value_id, fn_value.get_nth_param(param_idx).unwrap());
                 param_idx += 1;
             },
             PassMode::Zst => {
-                value_map.insert(value_id, mem::ptr_const(cx, ptr_size, 0).into());
+                value_map.insert(value_id, mem::null_ptr(cx).into());
             },
         }
     }

@@ -4,11 +4,13 @@
 //! `MonoModule` and produces a linkable object file (and optional textual LLVM
 //! IR for inspection) via the LLVM C API, wrapped by `inkwell` (LLVM 18).
 //!
-//! The lowering strategy is a faithful transliteration of the Cranelift backend
-//! (see `ty`, `abi`, `mem`, `inst`, `terminator`, `func`). The key adaptation:
-//! pointer-width scalars are represented as the integer `i64`/`i32`, and LLVM
-//! `ptr` values only materialise at memory-access and call boundaries, so the
-//! value model, ABI, and offset arithmetic match the Cranelift backend exactly.
+//! Representation (typed-`ptr`; see `ty`, `abi`, `mem`, `inst`, `terminator`,
+//! `func`): pointer-width scalars — addresses, aggregate references,
+//! `Pointer`/`FuncThin` scalars, function pointers — are real LLVM `ptr` values,
+//! and offset arithmetic is `getelementptr`. This preserves pointer provenance
+//! so LLVM's alias analysis can devirtualize indirect calls, hoist loads (LICM),
+//! and vectorize. The only `int<->ptr` conversions are the
+//! `Op::PtrToAddress`/`Op::PtrFromAddress` boundaries.
 
 pub mod abi;
 pub mod context;
