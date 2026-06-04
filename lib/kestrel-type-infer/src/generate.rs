@@ -656,11 +656,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // Link the interpolation's result type to its accumulator so that
             // an expected type (from a let annotation or function parameter)
             // can drive which accumulator is used.
-            if matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation) {
-                if let Some(acc_tv) = ctx.interpolation_acc_tv.take() {
+            if matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation)
+                && let Some(acc_tv) = ctx.interpolation_acc_tv.take() {
                     ctx.interpolation_link(result_tv, acc_tv, span.clone());
                 }
-            }
 
             result_tv
         },

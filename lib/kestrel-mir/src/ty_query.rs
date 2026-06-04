@@ -186,14 +186,12 @@ pub fn copy_is_mono_dependent(
                         protocol,
                         ..
                     } = constraint
-                    {
-                        if *type_param == entity
+                        && *type_param == entity
                             && (is_copyable_protocol(module, *protocol)
                                 || is_cloneable_protocol(module, *protocol))
                         {
                             return false;
                         }
-                    }
                 }
             }
             true

@@ -253,12 +253,11 @@ impl<'m> CodegenCtx<'m> {
         // collide, each mono function is a distinct compilation unit.
         let mut extern_declared: HashMap<String, FuncId> = HashMap::new();
         for (i, func) in self.module.functions.iter().enumerate() {
-            if let Some(ext) = &func.extern_info {
-                if let Some(&existing_id) = extern_declared.get(&ext.symbol_name) {
+            if let Some(ext) = &func.extern_info
+                && let Some(&existing_id) = extern_declared.get(&ext.symbol_name) {
                     self.func_ids[i] = Some(existing_id);
                     continue;
                 }
-            }
             let func_id = self.declare_function(func, i)?;
             if let Some(ext) = &func.extern_info {
                 extern_declared.insert(ext.symbol_name.clone(), func_id);

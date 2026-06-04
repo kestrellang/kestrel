@@ -346,15 +346,14 @@ fn parse_multiline_cooked(lex: &mut logos::Lexer<Token>) -> bool {
             }
         } else {
             consecutive_quotes = 0;
-            if c == '\\' {
-                if let Some(&next) = chars.peek() {
+            if c == '\\'
+                && let Some(&next) = chars.peek() {
                     chars.next();
                     offset += next.len_utf8();
                     if next == '(' {
                         offset += scan_interpolation(&mut chars, remainder);
                     }
                 }
-            }
         }
     }
 

@@ -220,11 +220,9 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                         callee: Callee::Direct { func: f, .. },
                         ..
                     } = &mut inst.kind
-                    {
-                        if *f == *target {
+                        && *f == *target {
                             *f = thunk_entity;
                         }
-                    }
                 }
             }
         }

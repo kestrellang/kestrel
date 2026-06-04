@@ -176,7 +176,7 @@ impl TestCompiler {
     fn source_map(&self) -> Vec<(usize, String)> {
         let world = self.compiler.world();
         let mut sources = Vec::new();
-        for (_, &entity) in self.compiler.files() {
+        for &entity in self.compiler.files().values() {
             if let Some(source) = world.get::<SourceText>(entity) {
                 sources.push((entity.index(), source.0.clone()));
             }

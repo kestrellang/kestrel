@@ -186,7 +186,7 @@ pub fn process_multiline_body(
                 span_end: abs + line.len(),
             });
             // Best-effort: trim what whitespace it does have.
-            let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+            let trimmed = line.trim_start_matches([' ', '\t']);
             out.push_str(trimmed);
         }
     }

@@ -705,11 +705,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     init,
                     ..
                 } = entry
-                {
-                    if *l == local {
+                    && *l == local {
                         return Some(*init);
                     }
-                }
             }
         }
         None
@@ -724,12 +722,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     init,
                     ..
                 } = entry
-                {
-                    if *l == local {
+                    && *l == local {
                         *init = new_init;
                         return;
                     }
-                }
             }
         }
     }
@@ -946,11 +942,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     flag,
                     ..
                 } = entry
-                {
-                    if *l == local {
+                    && *l == local {
                         return *flag;
                     }
-                }
             }
         }
         None
@@ -1137,11 +1131,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn rebind_scope_values(&mut self, old_vals: &[ValueId], new_vals: &[ValueId]) {
         for scope in self.scope_stack.iter_mut() {
             for entry in scope.entries.iter_mut() {
-                if let ScopeEntry::Owned(v) = entry {
-                    if let Some(pos) = old_vals.iter().position(|&old| old == *v) {
+                if let ScopeEntry::Owned(v) = entry
+                    && let Some(pos) = old_vals.iter().position(|&old| old == *v) {
                         *v = new_vals[pos];
                     }
-                }
             }
         }
         for (_, binding) in self.local_map.iter_mut() {
@@ -1217,11 +1210,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     init,
                     ..
                 } = entry
-                {
-                    if !out.iter().any(|(k, _)| k == l) {
+                    && !out.iter().any(|(k, _)| k == l) {
                         out.push((*l, *init));
                     }
-                }
             }
         }
         out
@@ -1803,11 +1794,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
             .map(|a| a.value)
             .collect();
-        if let Some(cv) = callee.value() {
-            if self.body.value(cv).ownership == Ownership::Guaranteed {
+        if let Some(cv) = callee.value()
+            && self.body.value(cv).ownership == Ownership::Guaranteed {
                 borrows.push(cv);
             }
-        }
         let consuming: Vec<ValueId> = args
             .iter()
             .filter(|a| a.convention == ParamConvention::Consuming)
@@ -2078,8 +2068,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // stays tracked across any later control-flow sibling arg.
         if convention == ParamConvention::Consuming && self.scope_stack.len() == 1 {
             let expr = self.hir.exprs[expr_id].clone();
-            if let HirExpr::Local(hir_local, _) = &expr {
-                if !self.is_var_local(hir_local) && self.is_single_use(*hir_local) {
+            if let HirExpr::Local(hir_local, _) = &expr
+                && !self.is_var_local(hir_local) && self.is_single_use(*hir_local) {
                     let val = self.map_local(*hir_local);
                     if self.body.value(val).ownership == Ownership::Owned {
                         return CallArg {
@@ -2088,7 +2078,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         };
                     }
                 }
-            }
         }
         let val = self.lower_expr(expr_id);
         self.prepare_call_arg(val, convention)

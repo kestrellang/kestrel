@@ -824,11 +824,10 @@ fn solve_interpolation_link(
     // If the result type is String (the default path), let literal defaults
     // handle the accumulator — String's conformance to
     // ExpressibleByStringInterpolation is compiler-synthesized.
-    if let TySlot::Resolved(TyKind::Struct { entity, .. }) = ctx.slot(result_resolved) {
-        if ctx.resolver.builtin(Builtin::DefaultStringLiteralType) == Some(*entity) {
+    if let TySlot::Resolved(TyKind::Struct { entity, .. }) = ctx.slot(result_resolved)
+        && ctx.resolver.builtin(Builtin::DefaultStringLiteralType) == Some(*entity) {
             return SolveResult::Solved;
         }
-    }
 
     // Delegate: resolve ResultType.Interpolation → accumulator type.
     solve_associated(ctx, result_tv, "Interpolation", acc_tv, span)
@@ -996,8 +995,8 @@ fn member_not_found_error(
         }
     }
     // When accessed without `()`, check if there's a method with this name.
-    if !is_call {
-        if let TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } = recv_kind {
+    if !is_call
+        && let TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. } = recv_kind {
             let has_callable = |parent: Entity| -> bool {
                 ctx.query_ctx.children_of(parent).iter().any(|&child| {
                     ctx.query_ctx
@@ -1022,7 +1021,6 @@ fn member_not_found_error(
                 };
             }
         }
-    }
     InferError::NoMember {
         receiver,
         name: name.to_string(),

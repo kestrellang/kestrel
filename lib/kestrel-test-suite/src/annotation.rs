@@ -197,8 +197,8 @@ fn try_parse_annotation(line: &str, line_num: usize) -> Option<Annotation> {
     let comment = comment.trim();
 
     // Try `ERROR(Exxxx)` pattern first
-    if let Some(rest) = comment.strip_prefix("ERROR(") {
-        if let Some(code) = rest.strip_suffix(')') {
+    if let Some(rest) = comment.strip_prefix("ERROR(")
+        && let Some(code) = rest.strip_suffix(')') {
             return Some(Annotation {
                 line: line_num,
                 kind: AnnotationKind::ErrorCode {
@@ -206,7 +206,6 @@ fn try_parse_annotation(line: &str, line_num: usize) -> Option<Annotation> {
                 },
             });
         }
-    }
 
     // Try `ERROR: message` or bare `ERROR`
     if let Some(rest) = comment.strip_prefix("ERROR") {

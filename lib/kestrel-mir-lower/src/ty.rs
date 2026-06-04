@@ -431,11 +431,10 @@ fn substitute_resolved_ty(
     match ty {
         ResolvedTy::Param { entity } => {
             for (i, tp) in type_params.iter().enumerate() {
-                if tp == entity {
-                    if let Some(arg) = args.get(i) {
+                if tp == entity
+                    && let Some(arg) = args.get(i) {
                         return arg.clone();
                     }
-                }
             }
             ty.clone()
         },

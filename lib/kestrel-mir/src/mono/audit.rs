@@ -285,11 +285,10 @@ fn classify(
                 return Some(DupKind::OwnedFromBorrow);
             }
             // A move whose source is still referenced elsewhere = live duplicate.
-            if let InstKind::MoveValue { operand, .. } = kind {
-                if heap(*operand) && uses.get(operand).copied().unwrap_or(0) > 1 {
+            if let InstKind::MoveValue { operand, .. } = kind
+                && heap(*operand) && uses.get(operand).copied().unwrap_or(0) > 1 {
                     return Some(DupKind::UseAfterMove);
                 }
-            }
             None
         },
 

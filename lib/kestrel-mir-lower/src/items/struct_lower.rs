@@ -70,12 +70,7 @@ fn lower_drop_behavior(ctx: &LowerCtx, entity: Entity) -> DropBehavior {
 }
 
 pub(crate) fn find_user_deinit(ctx: &LowerCtx, entity: Entity) -> Option<Entity> {
-    for &child in ctx.world.children_of(entity) {
-        if ctx.world.get::<NodeKind>(child) == Some(&NodeKind::Deinit) {
-            return Some(child);
-        }
-    }
-    None
+    ctx.world.children_of(entity).iter().find(|&&child| ctx.world.get::<NodeKind>(child) == Some(&NodeKind::Deinit)).copied()
 }
 
 pub(crate) fn collect_type_params(ctx: &mut LowerCtx, entity: Entity) -> Vec<TypeParamDef> {

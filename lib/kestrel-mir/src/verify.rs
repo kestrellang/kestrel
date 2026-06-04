@@ -397,14 +397,13 @@ impl<'a> BlockVerifier<'a> {
     fn addr_require_init(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, check the specific field.
         if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get(&base) {
-                if let Some(InitState::Uninit) = fields.get(&field) {
+            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get(&base)
+                && let Some(InitState::Uninit) = fields.get(&field) {
                     self.err(
                         inst,
                         format!("field {:?} of address {:?} is uninit", field, base),
                     );
                 }
-            }
             return;
         }
 
@@ -437,8 +436,8 @@ impl<'a> BlockVerifier<'a> {
         // If this is a field addr, set that specific field.
         if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
             let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base) {
-                if let Some(st) = fields.get_mut(&field) {
+            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base)
+                && let Some(st) = fields.get_mut(&field) {
                     if *st == InitState::Uninit {
                         err_msg = Some(format!(
                             "field {:?} of address {:?} already uninit",
@@ -447,7 +446,6 @@ impl<'a> BlockVerifier<'a> {
                     }
                     *st = InitState::Uninit;
                 }
-            }
             if let Some(msg) = err_msg {
                 self.err(inst, msg);
             }
@@ -478,8 +476,8 @@ impl<'a> BlockVerifier<'a> {
         // If this is a field addr, set that specific field.
         if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
             let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base) {
-                if let Some(st) = fields.get_mut(&field) {
+            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base)
+                && let Some(st) = fields.get_mut(&field) {
                     if *st == InitState::Init {
                         err_msg = Some(format!(
                             "store_init on field {:?} of address {:?} but field already init",
@@ -488,7 +486,6 @@ impl<'a> BlockVerifier<'a> {
                     }
                     *st = InitState::Init;
                 }
-            }
             if let Some(msg) = err_msg {
                 self.err(inst, msg);
             }
@@ -519,17 +516,13 @@ impl<'a> BlockVerifier<'a> {
 
     fn addr_store_assign(&mut self, addr: ValueId, inst: Option<u32>) {
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get(&addr) {
-            match ak {
-                AddrKind::Whole(InitState::Uninit) => {
-                    err_msg = Some(format!(
-                        "store_assign on address {:?} but it is uninit",
-                        addr,
-                    ));
-                },
-                _ => {},
+        if let Some(ak) = self.addrs.get(&addr)
+            && let AddrKind::Whole(InitState::Uninit) = ak {
+                err_msg = Some(format!(
+                    "store_assign on address {:?} but it is uninit",
+                    addr,
+                ));
             }
-        }
         if let Some(msg) = err_msg {
             self.err(inst, msg);
         }
@@ -627,22 +620,20 @@ impl<'a> BlockVerifier<'a> {
             } => {
                 self.addr_require_init(*address, idx);
                 // Result is @owned, register it.
-                if let Some(r) = kind.result() {
-                    if self.body.value(r).ownership == Ownership::Owned {
+                if let Some(r) = kind.result()
+                    && self.body.value(r).ownership == Ownership::Owned {
                         self.define_owned(r);
                     }
-                }
             },
             InstKind::Take {
                 result: _, address, ..
             } => {
                 self.addr_require_init(*address, idx);
                 self.addr_set_uninit(*address, idx);
-                if let Some(r) = kind.result() {
-                    if self.body.value(r).ownership == Ownership::Owned {
+                if let Some(r) = kind.result()
+                    && self.body.value(r).ownership == Ownership::Owned {
                         self.define_owned(r);
                     }
-                }
             },
             InstKind::BeginBorrowAddr {
                 result, address, ..
@@ -901,11 +892,10 @@ impl<'a> BlockVerifier<'a> {
     /// Returns the number of fields for a named struct type, or None if not a struct.
     fn struct_field_count(&self, ty: TyId) -> Option<usize> {
         let mir_ty = self._module.ty_arena.get(ty);
-        if let crate::ty::MirTy::Named { entity, .. } = mir_ty {
-            if let Some(s) = self._module.structs.get(entity) {
+        if let crate::ty::MirTy::Named { entity, .. } = mir_ty
+            && let Some(s) = self._module.structs.get(entity) {
                 return Some(s.fields.len());
             }
-        }
         None
     }
 

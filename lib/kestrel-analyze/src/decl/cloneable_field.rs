@@ -25,9 +25,7 @@
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
-use crate::util;
 use kestrel_ast_builder::NodeKind;
-use kestrel_semantics::{CopySemanticsReason, NominalCopySemantics};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E502",

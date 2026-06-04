@@ -352,12 +352,7 @@ fn find_impl_among(
             return Some(c);
         }
     }
-    for &c in candidates {
-        if matches_candidate(ctx, c, method_name, required_labels, None) {
-            return Some(c);
-        }
-    }
-    None
+    candidates.iter().find(|&&c| matches_candidate(ctx, c, method_name, required_labels, None)).copied()
 }
 
 fn find_setter_among(ctx: &LowerCtx, candidates: &[Entity]) -> Option<Entity> {
@@ -493,12 +488,11 @@ fn bind_associated_types(
             continue;
         }
         // Blanket conformances
-        if source != type_entity {
-            if let Some(ty) = find_associated_type(ctx, source, member.entity) {
+        if source != type_entity
+            && let Some(ty) = find_associated_type(ctx, source, member.entity) {
                 let ty = replace_self_type(ctx, ty, impl_ty, protocol);
                 witness.add_type_binding(member.entity, ty);
             }
-        }
     }
 }
 

@@ -15,7 +15,7 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
 
     for s in module.structs.values() {
         for field in &s.fields {
-            if is_error(&module, field.ty) {
+            if is_error(module, field.ty) {
                 emit(
                     ctx,
                     &mut n,
@@ -29,7 +29,7 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
     for e in module.enums.values() {
         for case in &e.cases {
             for field in &case.payload_fields {
-                if is_error(&module, field.ty) {
+                if is_error(module, field.ty) {
                     emit(
                         ctx,
                         &mut n,
@@ -42,13 +42,13 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
     }
 
     for st in module.statics.values() {
-        if is_error(&module, st.ty) {
+        if is_error(module, st.ty) {
             emit(ctx, &mut n, st.entity, format!("static '{}'", st.name));
         }
     }
 
     for f in module.functions.values() {
-        if is_error(&module, f.ret) {
+        if is_error(module, f.ret) {
             emit(
                 ctx,
                 &mut n,
@@ -57,7 +57,7 @@ pub fn validate_no_error_types(ctx: &LowerCtx, module: &MirModule) -> usize {
             );
         }
         for p in &f.params {
-            if is_error(&module, p.ty) {
+            if is_error(module, p.ty) {
                 emit(
                     ctx,
                     &mut n,

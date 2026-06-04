@@ -1164,8 +1164,8 @@ impl LowerCtx<'_> {
         // The bool-returning match + if-branch strategy breaks OSSA dominance
         // because bindings created inside the match don't dominate the if's
         // then-block.
-        if conditions.len() == 1 && matches!(&conditions[0], IfCondition::Let { .. }) {
-            if let IfCondition::Let { pattern, value } = &conditions[0] {
+        if conditions.len() == 1 && matches!(&conditions[0], IfCondition::Let { .. })
+            && let IfCondition::Let { pattern, value } = &conditions[0] {
                 self.push_scope();
                 let lowered_value = self.lower_expr(body, *value);
                 let lowered_pat = self.lower_pat(body, *pattern);
@@ -1239,7 +1239,6 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 });
             }
-        }
 
         // Regular if expression (no pattern binding)
         self.push_scope();

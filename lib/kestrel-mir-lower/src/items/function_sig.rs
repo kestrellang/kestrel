@@ -107,8 +107,8 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     }
 
     // @extern
-    if is_extern {
-        if let Some(attrs) = ctx.world.get::<Attributes>(entity) {
+    if is_extern
+        && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
             for attr in &attrs.0 {
                 if attr.name == "extern" {
                     let symbol_name = attr
@@ -127,7 +127,6 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
                 }
             }
         }
-    }
 
     // Intrinsic functions have no body
     if ctx.world.get::<Intrinsic>(entity).is_some() {
@@ -234,8 +233,8 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
         Some(parent)
     };
 
-    if let Some(source) = type_params_source {
-        if let Some(type_params) = ctx.world.get::<TypeParams>(source) {
+    if let Some(source) = type_params_source
+        && let Some(type_params) = ctx.world.get::<TypeParams>(source) {
             for &tp_entity in &type_params.0 {
                 ctx.register_name(tp_entity);
                 let tp_name = ctx
@@ -246,7 +245,6 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
                 def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
             }
         }
-    }
 
     // Extension's own free type params (e.g. `extend Int64: ArrayIndex[T]`)
     if matches!(parent_kind, Some(NodeKind::Extension))

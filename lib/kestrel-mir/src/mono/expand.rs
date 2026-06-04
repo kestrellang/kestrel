@@ -541,12 +541,11 @@ fn expand_function(
                     .filter_map(|(i, a)| closure_captures.get(a).map(|c| (i, c.clone())))
                     .collect();
                 for (i, caps) in arg_caps {
-                    if let Some(param) = body.blocks[target.index()].params.get(i) {
-                        if !closure_captures.contains_key(&param.value) {
-                            closure_captures.insert(param.value, caps);
+                    if let Some(param) = body.blocks[target.index()].params.get(i)
+                        && let std::collections::hash_map::Entry::Vacant(e) = closure_captures.entry(param.value) {
+                            e.insert(caps);
                             changed = true;
                         }
-                    }
                 }
             }
         }
@@ -739,8 +738,8 @@ fn expand_function(
                     let mut expanded = false;
                     if let MirTy::Pointer(pointee) = ty_arena.get(addr_ty) {
                         let pointee = *pointee;
-                        if let MirTy::Named { entity, type_args } = ty_arena.get(pointee) {
-                            if !is_drop_self(skip_self, *entity, type_args) {
+                        if let MirTy::Named { entity, type_args } = ty_arena.get(pointee)
+                            && !is_drop_self(skip_self, *entity, type_args) {
                                 let key = (*entity, type_args.clone());
                                 if let Some(&shim_id) = shim_lookup.get(&key) {
                                     let tmp = body.alloc_value(ValueDef::owned(pointee));
@@ -766,7 +765,6 @@ fn expand_function(
                                     expanded = true;
                                 }
                             }
-                        }
                     }
                     new_insts.push(Instruction {
                         kind: if expanded {
@@ -905,8 +903,8 @@ fn expand_function(
                     // The source is marked as moved so DestroyValue becomes a no-op.
                     // Keyed per-instantiation: only THIS monomorphization's copy
                     // behavior matters (see `not_copyable` construction).
-                    if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty) {
-                        if not_copyable.contains(&(*entity, type_args.clone())) {
+                    if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty)
+                        && not_copyable.contains(&(*entity, type_args.clone())) {
                             let target = remap_value(operand, &value_remap);
                             if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                                 eprintln!(
@@ -918,7 +916,6 @@ fn expand_function(
                             moved_values.insert(target);
                             continue;
                         }
-                    }
 
                     // @guaranteed operands are ByRef pointers — CopyValue must be
                     // preserved so codegen loads from the pointer (Option B invariant).

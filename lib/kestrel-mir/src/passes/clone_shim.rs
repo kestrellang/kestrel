@@ -180,7 +180,7 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
     // per-instance behavior is derived later by `refine_mono_copy_behavior`
     // (`Optional[String]` → Clone, `Optional[Int64]` → Bitwise, `Optional[File]`
     // → None). Overwriting the base to Clone here would break that invariant.
-    for (&type_entity, _) in &shim_map {
+    for &type_entity in shim_map.keys() {
         if is_conditional_container(module, type_entity) {
             continue;
         }

@@ -212,11 +212,10 @@ impl TypeCache {
             // body and fail Cranelift verification. Delegating keeps layout single-
             // sourced. Pure-discriminant enums and one-field structs over a non-scalar
             // field fall through to the integer-by-size mapping below.
-            if let Some(field_ty) = single_field_ty {
-                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
+            if let Some(field_ty) = single_field_ty
+                && let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
                     return TypeRepr::Scalar(t);
                 }
-            }
             let cl_ty = match size {
                 1 => ir::types::I8,
                 2 => ir::types::I16,

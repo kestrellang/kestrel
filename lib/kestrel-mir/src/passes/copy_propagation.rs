@@ -78,11 +78,10 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
                 borrow_source_map.insert(*result, src);
             },
             InstKind::EndBorrow { operand } | InstKind::EndMutBorrow { operand } => {
-                if let Some(&src) = borrow_source_map.get(operand) {
-                    if let Some(count) = frozen.get_mut(&src) {
+                if let Some(&src) = borrow_source_map.get(operand)
+                    && let Some(count) = frozen.get_mut(&src) {
                         *count = count.saturating_sub(1);
                     }
-                }
             },
             _ => {},
         }
@@ -109,7 +108,7 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
         if claimed.contains(&x) {
             continue;
         }
-        if frozen_at.get(i).map_or(false, |f| f.contains(&x)) {
+        if frozen_at.get(i).is_some_and(|f| f.contains(&x)) {
             continue;
         }
 
@@ -144,8 +143,8 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
         if delete_indices.contains(&idx) {
             continue;
         }
-        if replace_with_move.contains(&idx) {
-            if let InstKind::CopyValue { result, operand } = &inst.kind {
+        if replace_with_move.contains(&idx)
+            && let InstKind::CopyValue { result, operand } = &inst.kind {
                 new_insts.push(crate::inst::Instruction {
                     kind: InstKind::MoveValue {
                         result: *result,
@@ -155,7 +154,6 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
                 });
                 continue;
             }
-        }
         new_insts.push(inst);
     }
     body.blocks[block_idx].insts = new_insts;

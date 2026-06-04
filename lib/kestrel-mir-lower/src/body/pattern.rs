@@ -65,8 +65,8 @@ impl OssaBodyCtx<'_, '_> {
     /// be read after the match), so both route through `lower_expr` unchanged.
     fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
         let expr = self.hir.exprs[scrutinee_expr].clone();
-        if let HirExpr::Local(hir_local, _) = &expr {
-            if !self.is_var_local(hir_local) {
+        if let HirExpr::Local(hir_local, _) = &expr
+            && !self.is_var_local(hir_local) {
                 let val = self.map_local(*hir_local);
                 let vdef = self.body.value(val);
                 if vdef.ownership == Ownership::Owned
@@ -75,7 +75,6 @@ impl OssaBodyCtx<'_, '_> {
                     return self.emit_move_value(val);
                 }
             }
-        }
         self.lower_expr(scrutinee_expr)
     }
 
@@ -1154,9 +1153,9 @@ impl OssaBodyCtx<'_, '_> {
             _ => (None, vec![]),
         };
 
-        if let Some(entity) = entity {
-            if let Some(sdef) = self.ctx.module.structs.get(&entity) {
-                if let Some(idx) = sdef.fields.iter().position(|f| f.name == field_name) {
+        if let Some(entity) = entity
+            && let Some(sdef) = self.ctx.module.structs.get(&entity)
+                && let Some(idx) = sdef.fields.iter().position(|f| f.name == field_name) {
                     let mut field_ty = sdef.fields[idx].ty;
 
                     // Substitute generic type params if needed
@@ -1174,8 +1173,6 @@ impl OssaBodyCtx<'_, '_> {
 
                     return (FieldIdx::new(idx), field_ty);
                 }
-            }
-        }
 
         // Fallback: unresolved field — use index 0 and the error type.
         // This can happen with generic types before monomorphization.
@@ -1208,10 +1205,10 @@ impl OssaBodyCtx<'_, '_> {
             _ => (None, vec![]),
         };
 
-        if let Some(entity) = entity {
-            if let Some(edef) = self.ctx.module.enums.get(&entity) {
-                if let Some(case) = edef.cases.get(variant_idx.index()) {
-                    if let Some(idx) = case
+        if let Some(entity) = entity
+            && let Some(edef) = self.ctx.module.enums.get(&entity)
+                && let Some(case) = edef.cases.get(variant_idx.index())
+                    && let Some(idx) = case
                         .payload_fields
                         .iter()
                         .position(|f| f.name == field_name)
@@ -1233,9 +1230,6 @@ impl OssaBodyCtx<'_, '_> {
 
                         return (FieldIdx::new(idx), field_ty);
                     }
-                }
-            }
-        }
 
         // Fallback: unresolved payload field
         (FieldIdx::new(0), self.ctx.module.ty_arena.error())
@@ -1255,10 +1249,10 @@ impl OssaBodyCtx<'_, '_> {
             _ => (None, vec![]),
         };
 
-        if let Some(entity) = entity {
-            if let Some(edef) = self.ctx.module.enums.get(&entity) {
-                if let Some(case) = edef.cases.get(variant_idx.index()) {
-                    if let Some(field) = case.payload_fields.get(field_idx.index()) {
+        if let Some(entity) = entity
+            && let Some(edef) = self.ctx.module.enums.get(&entity)
+                && let Some(case) = edef.cases.get(variant_idx.index())
+                    && let Some(field) = case.payload_fields.get(field_idx.index()) {
                         let mut field_ty = field.ty;
                         if !type_args.is_empty() {
                             let mut subst = kestrel_mir::SubstMap::new();
@@ -1273,9 +1267,6 @@ impl OssaBodyCtx<'_, '_> {
                         }
                         return field_ty;
                     }
-                }
-            }
-        }
 
         self.ctx.module.ty_arena.error()
     }
