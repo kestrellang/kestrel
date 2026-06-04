@@ -48,10 +48,15 @@ jobs:
         run: bash lang/flock/bootstrap.sh
 
       - name: Build jessup
+        working-directory: lang/jessup
         run: |
-          bash lang/jessup/bootstrap.sh
-          test -f lang/jessup/jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
-          file lang/jessup/jessup
+          # Build via flock (reads flock.toml) — robust vs the hand-maintained
+          # file list in bootstrap.sh, which drifts (renamed/added .ks files).
+          # flock is bootstrapped in the prior step.
+          rm -f jessup
+          KESTREL=../../target/release/kestrel KESTREL_STD=../std ../../lang/flock/flock build
+          test -f jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
+          file jessup
 
       - name: Package toolchain tarball
         run: |
@@ -114,10 +119,15 @@ jobs:
         run: bash lang/flock/bootstrap.sh
 
       - name: Build jessup
+        working-directory: lang/jessup
         run: |
-          bash lang/jessup/bootstrap.sh
-          test -f lang/jessup/jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
-          file lang/jessup/jessup
+          # Build via flock (reads flock.toml) — robust vs the hand-maintained
+          # file list in bootstrap.sh, which drifts (renamed/added .ks files).
+          # flock is bootstrapped in the prior step.
+          rm -f jessup
+          KESTREL=../../target/release/kestrel KESTREL_STD=../std ../../lang/flock/flock build
+          test -f jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
+          file jessup
 
       - name: Package toolchain tarball
         run: |
