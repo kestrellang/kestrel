@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test iter on Some - yields 1 element
             let someOpt: std.result.Optional[std.numeric.Int64] = .Some(42);

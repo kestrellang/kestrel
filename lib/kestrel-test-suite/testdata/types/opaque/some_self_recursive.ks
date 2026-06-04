@@ -24,6 +24,7 @@ func compute(n: std.numeric.Int64) -> some Numeric {
     compute(n - 1)
 }
 
+@main
 func main() -> lang.i64 {
     let r = compute(5);
     if r.value() != 42 { return 1 }

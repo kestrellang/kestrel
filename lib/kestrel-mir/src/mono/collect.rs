@@ -1001,6 +1001,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1038,6 +1039,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1072,6 +1074,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], gen_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         // main() calls generic_fn[Int64]
@@ -1100,6 +1103,7 @@ mod tests {
                 vec![ValueDef::owned(unit)],
             )),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1145,6 +1149,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let thunk = FunctionDef {
@@ -1159,6 +1164,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1196,6 +1202,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1245,6 +1252,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], impl_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         // main() has a witness call
@@ -1274,6 +1282,7 @@ mod tests {
                 vec![ValueDef::owned(unit)],
             )),
             extern_info: None,
+            is_main: false,
         };
 
         let mut names = IndexMap::new();

@@ -42,6 +42,7 @@ func openAndRead(value v: Int64) -> Int64 throws OpenErr {
     .Ok(n)
 }
 
+@main
 func main() -> lang.i64 {
     match openAndRead(value: 42) {
         .Ok(n) => { if n != 42 { return 1; }; 0 },

@@ -19,6 +19,7 @@ struct User: FromRow {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let db = try Database(":memory:");
 

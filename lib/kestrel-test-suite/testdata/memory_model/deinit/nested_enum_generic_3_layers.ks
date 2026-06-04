@@ -31,6 +31,7 @@ func test() {
     // Scope exit recursively deinits through all 3 enum layers
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if deinit_count != 1 { return 1; }

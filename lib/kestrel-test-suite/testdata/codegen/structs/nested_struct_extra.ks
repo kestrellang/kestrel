@@ -12,6 +12,7 @@ struct Outer {
     let extra: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     let o = Outer(inner: Inner(value: 40), extra: 42);
     if o.extra != 42 { return 1 }

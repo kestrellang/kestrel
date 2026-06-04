@@ -31,6 +31,7 @@ import std.numeric.Int64
 import std.numeric.Float64
 import std.collections.Array
 
+@main
 func main() -> lang.i64 {
     var ints = Array[Int64]();
     ints.append(7);

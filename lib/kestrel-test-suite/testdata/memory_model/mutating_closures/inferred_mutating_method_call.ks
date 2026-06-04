@@ -14,6 +14,7 @@ func mutate(mutating arr: Array[Int64], with body: (mutating Array[Int64]) -> In
     body(arr)
 }
 
+@main
 func main() -> lang.i64 {
     var arr = Array[Int64]();
     var i = 0;

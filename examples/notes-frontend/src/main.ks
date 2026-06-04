@@ -28,6 +28,7 @@ struct Ctx: Cloneable {
 
 func render(doc doc: Document) -> Html { Html(doc.render()) }
 
+@main
 func main() {
     var app = App[Ctx](Ctx(x: 0));
     app.use(Logger[Ctx]());

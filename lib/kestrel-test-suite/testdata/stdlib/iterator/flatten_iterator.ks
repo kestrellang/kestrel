@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Flatten nested iterators
             var nested = std.collections.Array[std.collections.Array[std.numeric.Int64]]();

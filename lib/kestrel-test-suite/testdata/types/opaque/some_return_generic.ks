@@ -23,6 +23,7 @@ func wrap(v: std.numeric.Int64) -> some Printable {
     Wrapper[std.numeric.Int64](inner: v)
 }
 
+@main
 func main() -> lang.i64 {
     let a = wrap(42);
     if a.value() != 42 { return 1 }

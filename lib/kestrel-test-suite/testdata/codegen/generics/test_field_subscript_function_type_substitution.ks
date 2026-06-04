@@ -43,7 +43,8 @@ struct Router[T]: Cloneable {
     }
 }
 
-func main() -> Int64 {
+@main
+func main() -> lang.i64 {
     let router = Router[Int64](routes: Array[Route[Int64]]());
-    router.touch()
+    router.touch().raw
 }

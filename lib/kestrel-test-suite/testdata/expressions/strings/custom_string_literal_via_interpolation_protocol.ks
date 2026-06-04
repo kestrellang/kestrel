@@ -63,6 +63,7 @@ struct Tagged: ExpressibleByStringInterpolation, Cloneable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     // Plain string literal (no interpolation) assigned to an ESI type.
     // Must route through init(stringLiteral:) found via transitive

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- lines.iter() with \n ----
             let s: std.text.String = "hello\nworld\nfoo";

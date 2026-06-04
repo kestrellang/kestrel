@@ -25,6 +25,7 @@ extend A: Factory {
     public static func zero() -> Self { A() }
 }
 
+@main
 func main() -> lang.i64 {
     lang.i64_sub(A.magic(), 99)
 }

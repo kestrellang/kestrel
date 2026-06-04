@@ -175,7 +175,13 @@ pub fn check(
     diagnostics: &[TestDiagnostic],
     test_file_id: usize,
 ) -> Result<(), String> {
-    // Filter diagnostics to only those from the test file
+    // Match annotations against diagnostics from the test file only. A test
+    // annotates its own source; diagnostics that land in stdlib or an included
+    // file (and location-free synthetic-span cascades, which carry no test-file
+    // id) are not the test's concern and would otherwise show up as
+    // un-annotatable noise. Whole-program checks that must be tested anchor
+    // their label on a declaration in the test file (e.g. E618), so they keep
+    // the test file's id and are covered here.
     let test_diags: Vec<&TestDiagnostic> = diagnostics
         .iter()
         .filter(|d| d.file_id == test_file_id)

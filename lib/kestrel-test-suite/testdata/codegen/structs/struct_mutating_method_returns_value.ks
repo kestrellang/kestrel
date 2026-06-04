@@ -12,6 +12,7 @@ struct Counter {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var c = Counter(value: 30);
     let result = c.incrementAndGet(12);

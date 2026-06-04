@@ -12,6 +12,7 @@ struct Point {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let pt = Point(x: 20, y: 22);
     if pt.sum() != 42 { return 1 }

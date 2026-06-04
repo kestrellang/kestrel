@@ -15,6 +15,7 @@ func get_value(s: State) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var state = State.Off;
     if get_value(state) != 0 { return 1 }

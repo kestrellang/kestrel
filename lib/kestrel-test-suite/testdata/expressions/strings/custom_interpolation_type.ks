@@ -60,6 +60,7 @@ struct BracketString: ExpressibleByStringInterpolation, Cloneable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let name = "World";
 

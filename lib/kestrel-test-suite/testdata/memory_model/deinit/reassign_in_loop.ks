@@ -25,6 +25,7 @@ func test() {
     // 5 reassigns deinited 5 old values; final (id=5) deinited at scope exit
 }
 
+@main
 func main() -> lang.i64 {
     test();
     // 5 old values + 1 final scope exit = 6 total

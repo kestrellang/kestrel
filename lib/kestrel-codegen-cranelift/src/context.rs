@@ -106,8 +106,9 @@ impl<'m> CodegenCtx<'m> {
     }
 
     pub fn is_main_function(&self, func: &MonoFunction) -> bool {
-        let name = self.module.resolve_name(func.source);
-        name == "main" || name.ends_with(".main")
+        // The entry point is the `@main`-marked function (propagated from
+        // FunctionDef.is_main through monomorphization). Independent of name.
+        func.is_main
     }
 
     // -- Statics --

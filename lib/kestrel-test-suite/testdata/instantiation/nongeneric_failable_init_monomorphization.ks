@@ -49,6 +49,7 @@ struct Inner {
     }
 }
 
+@main
 func main() -> lang.i64 {
     match Outer.find(n: 5) {
         some o => { if o.inner.n != 5 { return 1; } },

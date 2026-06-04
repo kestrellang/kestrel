@@ -26,6 +26,7 @@ extend IntMaker: Factory {
     }
 }
 
+@main
 func main() -> lang.i64 {
     if false {
         let m = IntMaker();

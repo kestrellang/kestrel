@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // ---- CharsView.firstIndex(where:) ----
     let s: std.text.String = "hello world";

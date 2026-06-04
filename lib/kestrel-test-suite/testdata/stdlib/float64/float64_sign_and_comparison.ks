@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let pos: std.numeric.Float64 = 3.14;
             let neg: std.numeric.Float64 = -2.5;

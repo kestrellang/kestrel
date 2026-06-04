@@ -34,6 +34,7 @@ extend B: Factory {
     public func tag() -> lang.i64 { 2 }
 }
 
+@main
 func main() -> lang.i64 {
     let a = A();
     let b = B();

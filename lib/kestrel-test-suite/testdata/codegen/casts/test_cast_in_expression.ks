@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x: lang.i8 = 20;
     let y: lang.i8 = 22;

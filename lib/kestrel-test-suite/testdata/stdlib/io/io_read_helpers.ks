@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test readByte using a Cursor
             let byte65: std.numeric.UInt8 = 65; // 'A'

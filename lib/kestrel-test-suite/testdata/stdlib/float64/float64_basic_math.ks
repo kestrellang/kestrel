@@ -8,6 +8,7 @@ module Test
             diff < 0.0000001
         }
 
+        @main
         func main() -> lang.i64 {
             // floor
             let a: std.numeric.Float64 = 3.7;

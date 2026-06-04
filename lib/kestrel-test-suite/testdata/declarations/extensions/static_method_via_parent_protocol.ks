@@ -21,6 +21,7 @@ struct A {}
 
 extend A: Child {}
 
+@main
 func main() -> lang.i64 {
     lang.i64_sub(A.greet(), 100)
 }

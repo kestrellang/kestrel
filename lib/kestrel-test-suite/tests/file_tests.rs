@@ -160,6 +160,9 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
     } else {
         TestCompiler::new()
     };
+    // Execution tests build a binary, so they require a `@main` (E618). A
+    // diagnostics test can opt in with `// executable: true` to exercise it.
+    tc.set_executable(config.test_mode == TestMode::Execution || config.executable);
 
     for include_path in &config.include {
         let include_file = path.parent().unwrap().join(include_path);

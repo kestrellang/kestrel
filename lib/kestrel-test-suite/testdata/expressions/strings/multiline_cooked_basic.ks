@@ -4,6 +4,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // Multi-line cooked: indent strip + escape decoding.
     let s = """

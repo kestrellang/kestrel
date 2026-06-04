@@ -65,6 +65,7 @@ func getN(request: Request) -> Int64 {
     }
 }
 
+@main
 func main() {
     var app = App[Ctx](Ctx(x: 0));
 

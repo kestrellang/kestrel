@@ -7,7 +7,8 @@ import std.io.stdio.println
 
 public var globalVar: std.numeric.Int64 = 0;
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(globalVar);
     globalVar = 5;
     let _ = println(globalVar);

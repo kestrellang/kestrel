@@ -27,6 +27,7 @@ func measure[T](s: T) -> std.numeric.Int64 where T: Shape {
     s.area()
 }
 
+@main
 func main() -> lang.i64 {
     let s = makeShape();
     if measure(s) != 16 { return 1 }

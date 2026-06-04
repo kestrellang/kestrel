@@ -79,6 +79,7 @@ struct SqlQuery: ExpressibleByStringInterpolation, Cloneable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let name = "Alice";
     let age: Int64 = 30;

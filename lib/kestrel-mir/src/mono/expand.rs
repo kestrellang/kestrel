@@ -1137,6 +1137,7 @@ mod tests {
             ret,
             body,
             extern_info: None,
+            is_main: false,
         }
     }
 
@@ -1204,6 +1205,7 @@ mod tests {
                 where_clause: None,
                 body: None,
                 extern_info: None,
+                is_main: false,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);
@@ -1378,6 +1380,7 @@ mod tests {
                 where_clause: None,
                 body: None,
                 extern_info: None,
+                is_main: false,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);

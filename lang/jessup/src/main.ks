@@ -23,6 +23,7 @@ import jessup.toolchain.(installToolchain, setDefault, listToolchains, removeToo
 // ENTRY POINT
 // ============================================================================
 
+@main
 func main() {
     let argv = getArgv();
 

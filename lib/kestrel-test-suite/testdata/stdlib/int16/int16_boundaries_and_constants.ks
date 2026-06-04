@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // minValue should be -32768
             let minVal = std.numeric.Int16.minValue;

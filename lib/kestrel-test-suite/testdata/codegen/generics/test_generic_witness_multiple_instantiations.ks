@@ -19,6 +19,7 @@ func extract[C](c: C) -> std.numeric.Int64 where C: Container {
     c.read()
 }
 
+@main
 func main() -> lang.i64 {
     let b1 = Box[std.numeric.Int64](value: 20);
     let b2 = Box[std.core.Bool](value: 22);

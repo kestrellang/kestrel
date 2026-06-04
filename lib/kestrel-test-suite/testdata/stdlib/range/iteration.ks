@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create range 0..<5
             let r = std.core.Range[std.numeric.Int64](0, 5);

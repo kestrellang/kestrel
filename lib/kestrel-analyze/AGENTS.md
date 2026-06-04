@@ -163,6 +163,10 @@ Current allocations:
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)
 - E503: `move_out_of_borrow` (body/move_tracking.rs) — moving a non-Copyable value bound from a borrowed scrutinee; backstopped in MIR lowering by `emit_copy_value` (kestrel-mir-lower `body/mod.rs`)
+- E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
+- E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
+- E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build
+- E618: `missing_main` (compilation/entry_point.rs) — executable build with no `@main`; gated on `CompilationContext::is_executable` (set by the driver's `analyze_all(is_executable)`), so it fires only for `kestrel build` / execution tests, never for libraries / `kestrel check` / LSP / diagnostics tests
 - E700: `invalid_escape_sequence` (body/string_escape.rs)
 - E701: `ascii_escape_out_of_range` (body/string_escape.rs)
 - E702: `invalid_unicode_escape` (body/string_escape.rs)
@@ -172,6 +176,7 @@ Current allocations:
 
 - Analyzers are **stateless ZSTs** — no fields, no mutable state
 - Use `cx.query` to read ECS components (`NodeKind`, `Name`, `Callable`, `TypeAnnotation`, etc.)
+- A `CompilationCheck` may gate on `cx.is_executable` (true only when building a binary) for whole-program requirements that must not fire on libraries / `kestrel check` / the LSP — e.g. the entry-point requirement E618. Module entities carry **no `DeclSpan`** (and no `FileId`), so anchor whole-program diagnostics on a declaration's span, not a module's.
 - Use `cx.hir` to iterate the HIR body, `cx.typed` for resolved types
 - Return `Vec<AnalyzeDiagnostic>` — the framework handles accumulation and memoization
 - Use `DESCRIPTORS[N].id` and `DESCRIPTORS[N].default_severity` when constructing diagnostics

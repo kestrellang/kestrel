@@ -11,6 +11,7 @@ func combine(
     g(f(x))
 }
 
+@main
 func main() -> lang.i64 {
     let result = combine(
         { (x) in x + 10 },

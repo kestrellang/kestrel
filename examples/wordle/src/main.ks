@@ -146,6 +146,7 @@ func decodeError(code: String) -> String {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     let ctx = Ctx(words: wordList());
     var app = App[Ctx](ctx);

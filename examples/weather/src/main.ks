@@ -95,6 +95,7 @@ func handleWeather(req: Request, ctx: Ctx) -> Response {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     let landing = pageHtml();
     let ctx = Ctx(geoBase: "https://geocoding-api.open-meteo.com", weatherBase: "https://api.open-meteo.com", landingHtml: landing);

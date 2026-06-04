@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test filterMap with optionals
             var arr = std.collections.Array[std.result.Optional[std.numeric.Int64]]();

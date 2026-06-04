@@ -29,6 +29,7 @@ extend A: Factory {
     public func value() -> lang.i64 { 0 }
 }
 
+@main
 func main() -> lang.i64 {
     let a = A();
     let b = a.makeOther();

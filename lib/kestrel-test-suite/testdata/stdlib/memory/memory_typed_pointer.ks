@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test nullPointer
             let nullPtr = std.memory.Pointer[std.numeric.Int64].nullPointer();

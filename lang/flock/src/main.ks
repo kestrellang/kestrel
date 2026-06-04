@@ -28,7 +28,8 @@ import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
 // ENTRY POINT
 // ============================================================================
 
-func main() -> Int32 {
+@main
+func main() -> lang.i32 {
     let argv = getArgv();
 
     var cmd = Command("flock");
@@ -92,7 +93,7 @@ func main() -> Int32 {
 // COMMAND HANDLERS
 // ============================================================================
 
-func handleBuild(release release: Bool) -> Int32 {
+func handleBuild(release release: Bool) -> lang.i32 {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
@@ -112,7 +113,7 @@ func handleBuild(release release: Bool) -> Int32 {
     }
 }
 
-func handleRun(release release: Bool) -> Int32 {
+func handleRun(release release: Bool) -> lang.i32 {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
@@ -124,7 +125,7 @@ func handleRun(release release: Bool) -> Int32 {
     }
 }
 
-func handleCheck() -> Int32 {
+func handleCheck() -> lang.i32 {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
@@ -138,7 +139,7 @@ func handleCheck() -> Int32 {
     }
 }
 
-func handleInit() -> Int32 {
+func handleInit() -> lang.i32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
@@ -171,7 +172,7 @@ func handleInit() -> Int32 {
     0
 }
 
-func handlePublish() -> Int32 {
+func handlePublish() -> lang.i32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
@@ -299,7 +300,7 @@ func handlePublish() -> Int32 {
     0
 }
 
-func handleUpdate() -> Int32 {
+func handleUpdate() -> lang.i32 {
     let cwd = getcwd();
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
 

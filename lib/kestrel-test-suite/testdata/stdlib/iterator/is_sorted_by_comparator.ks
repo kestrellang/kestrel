@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // isSorted(by:) with a custom comparator
             // Check descending order: a >= b means "a comes before b"

@@ -25,6 +25,7 @@ func make[T](from source: Int64) -> T? where T: Parseable {
     return T(from: source)
 }
 
+@main
 func main() -> lang.i64 {
     let someOpt: Wrapper? = make[Wrapper](from: 42);
     match someOpt {

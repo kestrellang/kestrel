@@ -54,6 +54,7 @@ func build(flag: Bool) -> Trip {
     )
 }
 
+@main
 func main() -> lang.i64 {
     let t = build(true);
     // Read each field before `t` itself drops. A spurious twin-drop would have

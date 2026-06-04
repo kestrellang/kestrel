@@ -13,6 +13,7 @@ func reset(mutating p: Point) {
     p.y = 0;
 }
 
+@main
 func main() -> lang.i64 {
     var pt = Point(x: 0, y: 0);
     reset(pt);

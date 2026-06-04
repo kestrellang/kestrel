@@ -12,6 +12,7 @@ func make_some(v: std.numeric.Int64) -> Option {
     Option.Some(value: v)
 }
 
+@main
 func main() -> lang.i64 {
     let opt = make_some(42);
     match opt {

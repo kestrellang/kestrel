@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test flatten on Some(Some(value))
             let nested: std.result.Optional[std.result.Optional[std.numeric.Int64]] = .Some(.Some(42));

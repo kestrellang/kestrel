@@ -610,6 +610,7 @@ mod tests {
             ret: unit,
             body: Some(body),
             extern_info: None,
+            is_main: false,
         });
         module.structs.insert(
             (entity(2), vec![]),
@@ -707,6 +708,7 @@ mod tests {
             ret: unit,
             body: Some(body),
             extern_info: None,
+            is_main: false,
         });
 
         let result = verify_mono(&module);
@@ -750,6 +752,7 @@ mod tests {
             ret: unit,
             body: Some(body),
             extern_info: None,
+            is_main: false,
         });
 
         let result = verify_mono(&module);
@@ -788,6 +791,7 @@ mod tests {
             ret: unit,
             body: Some(body),
             extern_info: None,
+            is_main: false,
         });
 
         let result = verify_mono(&module);
@@ -827,6 +831,7 @@ mod tests {
             ret: unit,
             body: Some(body),
             extern_info: None,
+            is_main: false,
         });
 
         let result = verify_mono(&module);
@@ -878,6 +883,7 @@ mod tests {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
             }),
+            is_main: false,
         });
 
         let result = verify_mono(&module);
@@ -897,6 +903,7 @@ mod tests {
             ret: unit,
             body: None,
             extern_info: None,
+            is_main: false,
         });
 
         let result = verify_mono(&module);
@@ -933,6 +940,7 @@ mod tests {
             ret: unit,
             body: Some(body),
             extern_info: None,
+            is_main: false,
         });
 
         let result = verify_mono(&module);

@@ -10,6 +10,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let opt: std.result.Optional[std.numeric.Int64] = .None;
     let v = opt!;            // traps here

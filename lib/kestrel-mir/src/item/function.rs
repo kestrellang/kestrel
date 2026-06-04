@@ -178,6 +178,12 @@ pub struct FunctionDef {
     pub where_clause: Option<WhereClause>,
     pub body: Option<OssaBody>,
     pub extern_info: Option<ExternInfo>,
+    /// True when this function carries the `@main` attribute — it is the
+    /// program entry point. Set during MIR lowering (see kestrel-mir-lower
+    /// `function_sig.rs`), read by `static_lower` (init-statics injection) and
+    /// the codegen backend (entry selection + C `main` export). Replaces the
+    /// old discover-by-name (`name == "main"`) scheme.
+    pub is_main: bool,
 }
 
 impl FunctionDef {
@@ -214,6 +220,7 @@ impl FunctionDef {
             where_clause: None,
             body: None,
             extern_info: None,
+            is_main: false,
         }
     }
 }

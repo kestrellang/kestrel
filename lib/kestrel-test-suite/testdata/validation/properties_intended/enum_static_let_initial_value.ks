@@ -10,7 +10,8 @@ enum Foo {
     static let staticLet: std.numeric.Int64 = 4;
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(Foo.staticLet);
     0
 }

@@ -192,7 +192,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     let (compiler, std_dir) = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
-    let analyze_summary = driver.analyze_all();
+    // `build` produces an executable, so analysis enforces the `@main`
+    // entry-point requirement (E618).
+    let analyze_summary = driver.analyze_all(true);
 
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
@@ -261,7 +263,8 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     let (compiler, _std_dir) = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
-    driver.analyze_all();
+    // `dump` is not producing a binary — don't require a `@main`.
+    driver.analyze_all(false);
 
     match args.kind {
         DumpKind::Mir => {

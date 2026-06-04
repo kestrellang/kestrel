@@ -48,6 +48,7 @@ func run() -> Result[Int64, Int64] {
     .Ok(0)
 }
 
+@main
 func main() -> lang.i64 {
     match run() {
         .Ok(_) => if deinit_count == 1 { 0 } else { 2 },

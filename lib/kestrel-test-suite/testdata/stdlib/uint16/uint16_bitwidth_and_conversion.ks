@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // byteSwapped — 2-byte swap
             // 0x0102 (258) byte-swapped = 0x0201 (513)

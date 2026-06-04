@@ -11,6 +11,7 @@ func factorial(n: std.numeric.Int64) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     // 5! = 120
     if factorial(5) != 120 { return 1 }

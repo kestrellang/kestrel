@@ -16,7 +16,8 @@ public struct Foo {
     init() { self._v = 5 }
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     var foo = Foo();
     let _ = println(foo.structComputedVar);
     foo.structComputedVar = 9;

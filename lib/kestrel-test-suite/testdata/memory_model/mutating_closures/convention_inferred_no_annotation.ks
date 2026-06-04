@@ -13,6 +13,7 @@ func apply(mutating c: Counter, with f: (mutating Counter) -> Int64) -> Int64 {
     f(c)
 }
 
+@main
 func main() -> lang.i64 {
     var c = Counter(n: 10);
     let r = apply(c, with: { (x) in x.n = x.n + 3; x.n });

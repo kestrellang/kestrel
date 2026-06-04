@@ -16,6 +16,7 @@ func double_increment(mutating c: Counter, amount: std.numeric.Int64) {
     c.increment(amount);
 }
 
+@main
 func main() -> lang.i64 {
     var c = Counter(value: 0);
     double_increment(c, 21);

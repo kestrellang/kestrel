@@ -39,6 +39,7 @@ func run() -> Result[Int64, Int64] {
     .Ok(sum)
 }
 
+@main
 func main() -> lang.i64 {
     match run() {
         .Ok(sum) => {

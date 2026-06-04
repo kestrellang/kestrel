@@ -21,6 +21,10 @@ use crate::runner::{self, RunResult};
 pub struct TestCompiler {
     compiler: Compiler,
     has_stdlib: bool,
+    /// Whether analysis treats this as an executable build (gates the
+    /// entry-point requirement E618). Execution tests set this true; diagnostics
+    /// tests default false and opt in via `// executable: true`.
+    is_executable: bool,
     /// Entities for test files (not stdlib files).
     test_files: Vec<(String, Entity)>,
     /// Cached results for lazy evaluation.
@@ -34,6 +38,7 @@ impl TestCompiler {
         Self {
             compiler: crate::test_compiler(false),
             has_stdlib: false,
+            is_executable: false,
             test_files: Vec::new(),
             infer_result: OnceCell::new(),
             analyze_result: OnceCell::new(),
@@ -45,10 +50,17 @@ impl TestCompiler {
         Self {
             compiler: crate::test_compiler(true),
             has_stdlib: true,
+            is_executable: false,
             test_files: Vec::new(),
             infer_result: OnceCell::new(),
             analyze_result: OnceCell::new(),
         }
+    }
+
+    /// Mark this compilation as producing an executable, so analysis enforces
+    /// the entry-point requirement (E618). Must be called before `analyze()`.
+    pub fn set_executable(&mut self, is_executable: bool) {
+        self.is_executable = is_executable;
     }
 
     /// Add a source file, parse, and build declarations.
@@ -70,7 +82,7 @@ impl TestCompiler {
     /// Run all registered analyzers.
     pub fn analyze(&self) -> &AnalyzeSummary {
         self.analyze_result
-            .get_or_init(|| CompilerDriver::new(&self.compiler).analyze_all())
+            .get_or_init(|| CompilerDriver::new(&self.compiler).analyze_all(self.is_executable))
     }
 
     /// Collect all diagnostics from all stages as unified TestDiagnostics:

@@ -15,6 +15,7 @@ func category(s: String) -> Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     if category("a") != 1 { return 1 }
     if category("b") != 1 { return 2 }

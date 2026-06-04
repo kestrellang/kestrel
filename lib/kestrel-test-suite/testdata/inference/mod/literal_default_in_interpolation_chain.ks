@@ -16,6 +16,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let n: Int64 = 42;
     let s = "\(n)";

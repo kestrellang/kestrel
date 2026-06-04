@@ -83,6 +83,9 @@ pub struct MonoFunction {
     pub ret: TyId,
     pub body: Option<OssaBody>,
     pub extern_info: Option<ExternInfo>,
+    /// True for the `@main` entry point (propagated from `FunctionDef.is_main`).
+    /// Consumed by the codegen backend to select the entry and export C `main`.
+    pub is_main: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -265,6 +268,7 @@ mod tests {
             ret,
             body: None,
             extern_info: None,
+            is_main: false,
         };
         let id = module.add_function(func);
         assert_eq!(id.index(), 0);

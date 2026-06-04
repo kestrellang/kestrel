@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // byteSwapped — 8-byte swap
             // 1 as u64 (0x0000000000000001) -> 0x0100000000000000 (72057594037927936)

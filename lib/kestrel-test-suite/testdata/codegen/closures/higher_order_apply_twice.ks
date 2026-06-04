@@ -7,6 +7,7 @@ func apply_twice(f: (std.numeric.Int64) -> std.numeric.Int64, x: std.numeric.Int
     f(f(x))
 }
 
+@main
 func main() -> lang.i64 {
     // apply_twice(add10, 22) = (22 + 10) + 10 = 42
     if apply_twice({ (x) in x + 10 }, 22) != 42 { return 1 }

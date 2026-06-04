@@ -16,6 +16,7 @@ func classify(s: String) -> Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     if classify("fire") != 1 { return 1 }
     if classify("water") != 2 { return 2 }

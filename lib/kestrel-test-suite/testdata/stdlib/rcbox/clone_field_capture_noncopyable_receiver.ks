@@ -14,6 +14,7 @@ struct Container: not Copyable {
     var box: std.memory.RcBox[std.numeric.Int64]
 }
 
+@main
 func main() -> lang.i64 {
     let c = Container(box: std.memory.RcBox[std.numeric.Int64](42));
 

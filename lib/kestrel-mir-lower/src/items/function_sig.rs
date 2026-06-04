@@ -42,6 +42,13 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
         .get::<Attributes>(entity)
         .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
 
+    // `@main` marks the program entry point. Set early so both the intrinsic
+    // early-return path and the normal path carry it. Replaces discover-by-name.
+    def.is_main = ctx
+        .world
+        .get::<Attributes>(entity)
+        .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "main"));
+
     // Function's own type params
     if let Some(type_params) = ctx.world.get::<TypeParams>(entity) {
         for &tp_entity in &type_params.0 {

@@ -67,6 +67,7 @@ func handleIndex(req: Request, ctx: Ctx) -> Response {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     // DEMO_KEY is rate-limited (30/hr, 50/day). For heavier use, register at
     // https://api.nasa.gov and pass your own key here.

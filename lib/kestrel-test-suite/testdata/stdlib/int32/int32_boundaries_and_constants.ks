@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // minValue should be -2147483648
             let minVal = std.numeric.Int32.minValue;

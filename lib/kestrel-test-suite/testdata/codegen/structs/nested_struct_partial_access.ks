@@ -16,6 +16,7 @@ func sum_inner(i: Inner) -> std.numeric.Int64 {
     i.a + i.b
 }
 
+@main
 func main() -> lang.i64 {
     let o = Outer(inner: Inner(a: 20, b: 22));
     // Access the intermediate inner struct and pass it

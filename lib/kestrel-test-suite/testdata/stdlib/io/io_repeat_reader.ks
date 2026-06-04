@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create a Repeat reader that yields byte 42
             let byte42: std.numeric.UInt8 = 42;

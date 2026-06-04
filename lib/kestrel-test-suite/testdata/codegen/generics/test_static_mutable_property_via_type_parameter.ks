@@ -19,7 +19,8 @@ func increment[T]() where T: Counter {
     T.count = T.count + 1
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     increment[MyCounter]();
     if MyCounter.count != 1 { return 1 }
     0

@@ -7,6 +7,7 @@ struct Config {
     let multiplier: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     let config = Config(multiplier: 2);
     let f = { (x: std.numeric.Int64) in x * config.multiplier };

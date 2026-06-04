@@ -23,6 +23,7 @@ func double_value[T](x: T) -> std.numeric.Int64 where T: Valuable {
     get_value[T](x) * 2
 }
 
+@main
 func main() -> lang.i64 {
     let t = Token(v: 21);
     if double_value[Token](t) != 42 { return 1 }

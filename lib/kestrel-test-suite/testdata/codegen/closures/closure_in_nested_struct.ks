@@ -12,6 +12,7 @@ struct Outer {
     let value: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     let outer = Outer(
         inner: Inner(transform: { (x) in x + 12 }),

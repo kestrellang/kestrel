@@ -10,6 +10,7 @@ func describe(opt: std.result.Optional[std.numeric.Int64]) -> lang.i64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     match describe(.Some(7)) {
         1 => match describe(.None) {

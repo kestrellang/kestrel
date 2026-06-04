@@ -22,6 +22,7 @@ func toggle(mutating s: State) {
     };
 }
 
+@main
 func main() -> lang.i64 {
     var state = State.Off;
     if get_value(state) != 0 { return 1 }

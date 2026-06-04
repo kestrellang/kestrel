@@ -7,6 +7,7 @@ func square(x: std.numeric.Int64) -> std.numeric.Int64 {
     x * x
 }
 
+@main
 func main() -> lang.i64 {
     let a: std.numeric.Int64 = 6;
     let b = square(a);

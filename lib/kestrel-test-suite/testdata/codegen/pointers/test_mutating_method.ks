@@ -15,6 +15,7 @@ struct Counter {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var c = Counter(count: 40);
     c.increment();

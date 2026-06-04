@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // minValue is 0
             let minVal = std.numeric.UInt32.minValue;

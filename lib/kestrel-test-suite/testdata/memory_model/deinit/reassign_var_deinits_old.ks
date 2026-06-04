@@ -17,6 +17,7 @@ struct Resource: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var x = Resource(id: 1);
     x = Resource(id: 2);

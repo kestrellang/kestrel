@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- compare() ----
             let a: std.text.String = "apple";

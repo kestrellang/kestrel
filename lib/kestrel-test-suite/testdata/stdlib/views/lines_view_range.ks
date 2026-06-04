@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- half-open Range over LF-only buffer ----
             let s: std.text.String = "alpha\nbeta\ngamma";

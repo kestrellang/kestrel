@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test init() and isEmpty
             var s = std.collections.Set[std.numeric.Int64]();

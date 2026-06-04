@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test IoError constructor from raw errno
             let code2: std.numeric.Int32 = 2;

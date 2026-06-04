@@ -12,6 +12,7 @@ struct Outer {
     var extra: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     var o = Outer(inner: Inner(value: 0), extra: 0);
     o.inner.value = 30;

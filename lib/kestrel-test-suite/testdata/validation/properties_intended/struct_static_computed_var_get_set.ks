@@ -14,7 +14,8 @@ public struct Foo {
     }
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(Foo.structStaticComputedVar);
     Foo.structStaticComputedVar = 7;
     let _ = println(Foo.structStaticComputedVar);

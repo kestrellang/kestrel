@@ -29,6 +29,10 @@ pub struct TestConfig {
     pub stdout_contains: Option<String>,
     pub mir_snapshot: Option<String>,
     pub mir_filter: Option<String>,
+    /// Treat analysis as an executable build, enabling the entry-point
+    /// requirement (E618). Execution-mode tests imply this; a diagnostics test
+    /// opts in via `// executable: true` to exercise the missing-`@main` check.
+    pub executable: bool,
 }
 
 impl Default for TestConfig {
@@ -43,6 +47,7 @@ impl Default for TestConfig {
             stdout_contains: None,
             mir_snapshot: None,
             mir_filter: None,
+            executable: false,
         }
     }
 }
@@ -127,6 +132,9 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             },
             "stdlib" => {
                 config.stdlib = value.to_lowercase() != "false";
+            },
+            "executable" => {
+                config.executable = value.to_lowercase() == "true";
             },
             "include" => {
                 config.include.push(value.trim().to_string());

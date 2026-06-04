@@ -80,6 +80,7 @@ func handlePokemon(req: Request, ctx: Ctx) -> Response {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     let landing = landingPageHtml();
     let ctx = Ctx(pokeApiBase: "https://pokeapi.co", landingHtml: landing);

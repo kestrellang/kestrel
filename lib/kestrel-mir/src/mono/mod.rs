@@ -173,6 +173,7 @@ pub fn monomorphize(
             ret: body_result.ret,
             body: body_result.body.clone(),
             extern_info: body_result.extern_info.clone(),
+            is_main: body_result.is_main,
         });
     }
 
@@ -195,6 +196,7 @@ struct MonoBodyResult {
     params: Vec<MonoParam>,
     ret: TyId,
     extern_info: Option<crate::item::function::ExternInfo>,
+    is_main: bool,
     /// Resolved witness callees: (block_idx, inst_idx) -> target key
     resolved_witnesses: HashMap<(usize, usize), InstantiationKey>,
 }
@@ -236,6 +238,7 @@ fn monomorphize_body(
     let ret = substitute(arena, func.ret, &subst);
 
     let extern_info = func.extern_info.clone();
+    let is_main = func.is_main;
 
     let Some(body) = &func.body else {
         return MonoBodyResult {
@@ -243,6 +246,7 @@ fn monomorphize_body(
             params,
             ret,
             extern_info,
+            is_main,
             resolved_witnesses: HashMap::new(),
         };
     };
@@ -326,6 +330,7 @@ fn monomorphize_body(
         params,
         ret,
         extern_info,
+        is_main,
         resolved_witnesses,
     }
 }
@@ -1116,6 +1121,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
         module.add_function(func);
         module.register_name(entity(1), "main");
@@ -1162,6 +1168,7 @@ mod tests {
                 body
             }),
             extern_info: None,
+            is_main: false,
         };
 
         // main() calls identity[Int64]
@@ -1199,6 +1206,7 @@ mod tests {
                 ],
             )),
             extern_info: None,
+            is_main: false,
         };
 
         module.add_function(main_fn);
@@ -1263,6 +1271,7 @@ mod tests {
                 calling_convention: crate::item::function::CallingConvention::C,
                 symbol_name: "malloc".into(),
             }),
+            is_main: false,
         };
         module.add_function(func);
         module.register_name(entity(1), "malloc");

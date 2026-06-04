@@ -18,7 +18,8 @@ func make[T]() -> T where T: Factory {
     T.create()
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let w: Widget = make[Widget]();
     if w.value != 42 { return 1 }
     0

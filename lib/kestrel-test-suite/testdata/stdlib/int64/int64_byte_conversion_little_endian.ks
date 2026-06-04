@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // toBytesLittleEndian / fromBytesLittleEndian round-trip
             let val: std.numeric.Int64 = 258;  // 0x0000000000000102

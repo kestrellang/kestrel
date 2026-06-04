@@ -29,6 +29,7 @@ struct Bag: HasCount {
     func count() -> lang.i64 { return self.n; }
 }
 
+@main
 func main() -> lang.i64 {
     let b = Bag(4);
     // sixCount == 4 * 3 * 2 == 24

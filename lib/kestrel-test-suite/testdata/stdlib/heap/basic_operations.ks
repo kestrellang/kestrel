@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test isEmpty on empty heap
             var h = std.collections.Heap[std.numeric.Int64]();
