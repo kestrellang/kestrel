@@ -697,9 +697,10 @@ mod tests {
         let deinit = find_child_by_kind(&world, s, &NodeKind::Deinit).unwrap();
 
         assert!(world.has::<Valued>(deinit));
-        // Deinits now have Callable with consuming self receiver
+        // Deinits receive &var (mutating) self — the caller owns the memory
+        // and deallocates after the deinit body runs cleanup.
         let callable = world.get::<Callable>(deinit).unwrap();
-        assert_eq!(callable.receiver, Some(ReceiverKind::Consuming));
+        assert_eq!(callable.receiver, Some(ReceiverKind::Mutating));
         assert!(callable.params.is_empty());
     }
 
@@ -810,7 +811,7 @@ mod tests {
         let path = world.get::<ModulePath>(import).unwrap();
         assert_eq!(path.0, vec!["std", "text"]);
         let items = world.get::<ImportItems>(import).unwrap();
-        assert_eq!(items.0.len(), 3); // String, FormatOptions, Formattable
+        assert_eq!(items.0.len(), 4); // String, StringBuilder, FormatOptions, Formattable
 
         // Verify enum Ordering
         let ordering = find_child_by_name(&world, core, &NodeKind::Enum, "Ordering").unwrap();
@@ -824,7 +825,7 @@ mod tests {
 
         // Documentation: descendants walk picks up trivia inside Visibility.
         let doc = world.get::<Documentation>(ordering).expect("doc attached");
-        assert!(doc.0.contains("comparing"), "doc: {}", doc.0);
+        assert!(doc.0.contains("comparison"), "doc: {}", doc.0);
 
         // Enum cases: Less, Equal, Greater
         let less = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Less").unwrap();
@@ -875,9 +876,11 @@ mod tests {
         let format_fn =
             find_child_by_name(&world, ordering, &NodeKind::Function, "format").unwrap();
         let callable = world.get::<Callable>(format_fn).unwrap();
-        assert_eq!(callable.params.len(), 1);
+        assert_eq!(callable.params.len(), 2);
+        // params[0] is `into writer: StringBuilder` (no default); params[1] is
+        // `options: FormatOptions = ...`, which carries the default.
         assert!(
-            callable.params[0].default_entity.is_some(),
+            callable.params[1].default_entity.is_some(),
             "format options has default value"
         );
 
@@ -893,8 +896,9 @@ mod tests {
             .count();
         assert_eq!(case_count, 3, "3 enum cases");
         assert_eq!(
-            fn_count, 6,
-            "6 methods (equals, notEquals, reverse, then, thenWith, format)"
+            fn_count, 5,
+            "5 in-file methods (isEqual, reverse, then, thenWith, format); \
+             notEqual is provided by an extension in std.core.protocols"
         );
     }
 
