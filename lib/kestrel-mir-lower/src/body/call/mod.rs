@@ -68,7 +68,8 @@ impl OssaBodyCtx<'_, '_> {
         let is_static = resolved_entity.is_some_and(|e| self.ctx.world.get::<Static>(e).is_some());
 
         let Some(resolved) = resolved_entity else {
-            return self.emit_literal(Immediate::error());
+            return self
+                .emit_lowering_gap(expr_id, format!("could not resolve method `{method_name}`"));
         };
 
         // Field-stored thick/thin function: lower as field access + indirect call.
@@ -377,7 +378,10 @@ impl OssaBodyCtx<'_, '_> {
         } else if let HirExpr::OverloadSet { candidates, .. } = &self.hir.exprs[callee_expr] {
             match candidates.first() {
                 Some(&e) => e,
-                None => return self.emit_literal(Immediate::error()),
+                None => {
+                    return self
+                        .emit_lowering_gap(expr_id, "could not resolve the callee of this call");
+                },
             }
         } else {
             return self.lower_indirect_call(expr_id, callee_expr, args);

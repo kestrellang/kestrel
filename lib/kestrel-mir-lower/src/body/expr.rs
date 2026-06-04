@@ -190,7 +190,10 @@ impl OssaBodyCtx<'_, '_> {
                     self.ctx.register_name(first);
                     self.emit_literal(Immediate::function_ref(first, vec![], None))
                 } else {
-                    self.emit_literal(Immediate::error())
+                    self.emit_lowering_gap(
+                        expr_id,
+                        "could not resolve this overloaded reference to a single function",
+                    )
                 }
             },
 
@@ -520,7 +523,7 @@ impl OssaBodyCtx<'_, '_> {
             Some(NodeKind::TypeParameter | NodeKind::TypeAlias) => {
                 self.emit_literal(Immediate::unit())
             },
-            _ => self.emit_literal(Immediate::error()),
+            _ => self.emit_lowering_gap(expr_id, "cannot lower this reference to a value"),
         }
     }
 
