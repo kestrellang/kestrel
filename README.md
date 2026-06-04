@@ -1,5 +1,5 @@
 <p align="center">
-<img src="external/kestrel-website/public/kestrel-hovering.png" alt="Kestrel" width="180">
+<img src="docs/images/kestrel-hovering.png" alt="Kestrel" width="180">
 </p>
 
 <h1 align="center">Kestrel</h1>
