@@ -452,7 +452,6 @@ mod tests {
             .functions
             .values()
             .filter(|f| {
-                
                 f.body.as_ref().is_some_and(|b| {
                     !b.values.is_empty()
                         && !b.blocks.is_empty()

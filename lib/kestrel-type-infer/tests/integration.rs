@@ -151,13 +151,14 @@ fn infer_tuple() {
     let func = find_function(&ctx, root, "TestMod", "foo");
     let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
     if let Some(tail) = hir.tail_expr
-        && let Some(ty) = typed.expr_types.get(&tail) {
-            assert!(
-                matches!(ty, ResolvedTy::Tuple(_)),
-                "tail should be Tuple, got {:?}",
-                ty
-            );
-        }
+        && let Some(ty) = typed.expr_types.get(&tail)
+    {
+        assert!(
+            matches!(ty, ResolvedTy::Tuple(_)),
+            "tail should be Tuple, got {:?}",
+            ty
+        );
+    }
 }
 
 #[test]
@@ -191,13 +192,14 @@ fn infer_return() {
     let func = find_function(&ctx, root, "TestMod", "foo");
     let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
     if let Some(tail) = hir.tail_expr
-        && let Some(ty) = typed.expr_types.get(&tail) {
-            assert!(
-                matches!(ty, ResolvedTy::Never),
-                "return should be Never, got {:?}",
-                ty
-            );
-        }
+        && let Some(ty) = typed.expr_types.get(&tail)
+    {
+        assert!(
+            matches!(ty, ResolvedTy::Never),
+            "return should be Never, got {:?}",
+            ty
+        );
+    }
 }
 
 #[test]

@@ -438,11 +438,12 @@ fn render_signature(
 fn type_text(source: Option<&str>, ty: &AstType) -> String {
     let span = ast_type_span(ty);
     if let Some(src) = source
-        && let Some(slice) = src.get(span.start..span.end) {
-            // Collapse any embedded newlines / runs of whitespace so the
-            // signature stays a single line.
-            return collapse_ws(slice);
-        }
+        && let Some(slice) = src.get(span.start..span.end)
+    {
+        // Collapse any embedded newlines / runs of whitespace so the
+        // signature stays a single line.
+        return collapse_ws(slice);
+    }
     "_".to_string()
 }
 

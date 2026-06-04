@@ -150,9 +150,10 @@ pub async fn subtypes(
                     }
                     let protos = ctx.query(ConformingProtocols { entity, root });
                     if protos.contains(&target)
-                        && let Some(item) = entity_to_item(world, &sources, entity) {
-                            items.push(item);
-                        }
+                        && let Some(item) = entity_to_item(world, &sources, entity)
+                    {
+                        items.push(item);
+                    }
                 }
                 // For protocol subtypes: protocols that inherit from target.
                 for (entity, kind) in world.iter_component::<NodeKind>() {
@@ -161,9 +162,10 @@ pub async fn subtypes(
                     }
                     let protos = ctx.query(ConformingProtocols { entity, root });
                     if protos.contains(&target)
-                        && let Some(item) = entity_to_item(world, &sources, entity) {
-                            items.push(item);
-                        }
+                        && let Some(item) = entity_to_item(world, &sources, entity)
+                    {
+                        items.push(item);
+                    }
                 }
 
                 if items.is_empty() { None } else { Some(items) }
@@ -186,9 +188,10 @@ fn resolve_type_at(
     let file_cst = compiler.parse(file_entity).tree;
     if let Some((entity, _)) =
         crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
-        && is_type_entity(world, entity) {
-            return Some(entity);
-        }
+        && is_type_entity(world, entity)
+    {
+        return Some(entity);
+    }
 
     // Expression-position: resolve Def to a type entity.
     if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
@@ -196,26 +199,27 @@ fn resolve_type_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        })
-            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                match &hir.exprs[expr_id] {
-                    HirExpr::Def(entity, _, _) if is_type_entity(world, *entity) => {
-                        return Some(*entity);
-                    },
-                    HirExpr::MethodCall { .. } | HirExpr::Field { .. } | HirExpr::Call { .. } => {
-                        let typed = ctx.query(InferBody {
-                            entity: body_entity,
-                            root,
-                        });
-                        if let Some(typed) = typed
-                            && let Some(&resolved) = typed.resolutions.get(&expr_id)
-                                && is_type_entity(world, resolved) {
-                                    return Some(resolved);
-                                }
-                    },
-                    _ => {},
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        {
+            match &hir.exprs[expr_id] {
+                HirExpr::Def(entity, _, _) if is_type_entity(world, *entity) => {
+                    return Some(*entity);
+                },
+                HirExpr::MethodCall { .. } | HirExpr::Field { .. } | HirExpr::Call { .. } => {
+                    let typed = ctx.query(InferBody {
+                        entity: body_entity,
+                        root,
+                    });
+                    if let Some(typed) = typed
+                        && let Some(&resolved) = typed.resolutions.get(&expr_id)
+                        && is_type_entity(world, resolved)
+                    {
+                        return Some(resolved);
+                    }
+                },
+                _ => {},
             }
+        }
     }
 
     // Fallback: cursor on a declaration name.

@@ -99,11 +99,11 @@ fn target_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        })
-            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-                && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
-                    return Some(t);
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
+        {
+            return Some(t);
+        }
     }
 
     let decl = semantic::enclosing_decl_at(world, file_entity, offset)?;
@@ -166,28 +166,29 @@ fn collect_sites(
     // Add the declaration site.
     if let Target::Entity(e) = target
         && let Some(span) = world.get::<DeclSpan>(*e).map(|s| s.0.clone())
-            && let Some(file) = crate::references::entity_file(world, *e)
-                && file == file_entity {
-                    sites.push(ReferenceSite {
-                        file,
-                        span,
-                        kind: RefKind::Direct,
-                    });
-                }
+        && let Some(file) = crate::references::entity_file(world, *e)
+        && file == file_entity
+    {
+        sites.push(ReferenceSite {
+            file,
+            span,
+            kind: RefKind::Direct,
+        });
+    }
     if let Target::Local { body, id } = target {
         let ctx = world.query_context();
         if let Some(hir) = ctx.query(LowerBody {
             entity: *body,
             root,
-        })
-            && let Some(file) = crate::references::entity_file(world, *body)
-                && file == file_entity {
-                    sites.push(ReferenceSite {
-                        file,
-                        span: hir.locals[*id].span.clone(),
-                        kind: RefKind::Direct,
-                    });
-                }
+        }) && let Some(file) = crate::references::entity_file(world, *body)
+            && file == file_entity
+        {
+            sites.push(ReferenceSite {
+                file,
+                span: hir.locals[*id].span.clone(),
+                kind: RefKind::Direct,
+            });
+        }
     }
 
     sites

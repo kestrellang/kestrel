@@ -171,13 +171,14 @@ pub fn local_references(
     let mut sites: Vec<ReferenceSite> = Vec::new();
     for (_, expr) in hir.exprs.iter() {
         if let HirExpr::Local(id, span) = expr
-            && *id == local {
-                sites.push(ReferenceSite {
-                    file,
-                    span: span.clone(),
-                    kind: RefKind::Direct,
-                });
-            }
+            && *id == local
+        {
+            sites.push(ReferenceSite {
+                file,
+                span: span.clone(),
+                kind: RefKind::Direct,
+            });
+        }
     }
     sites.sort_by_key(sort_key);
     sites.dedup();
@@ -238,9 +239,10 @@ mod tests {
                 continue;
             }
             if let Some(fid) = world.get::<F>(e)
-                && fid.0 == file {
-                    return e;
-                }
+                && fid.0 == file
+            {
+                return e;
+            }
         }
         panic!("decl `{name}` not found in file");
     }

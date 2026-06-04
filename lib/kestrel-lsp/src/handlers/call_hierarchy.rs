@@ -244,30 +244,31 @@ fn resolve_callable_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        })
-            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                match &hir.exprs[expr_id] {
-                    HirExpr::Def(entity, _, _) => {
-                        if is_callable(world, *entity) {
-                            return Some(*entity);
-                        }
-                    },
-                    HirExpr::MethodCall { .. }
-                    | HirExpr::Call { .. }
-                    | HirExpr::ProtocolCall { .. } => {
-                        let typed = ctx.query(InferBody {
-                            entity: body_entity,
-                            root,
-                        });
-                        if let Some(typed) = typed
-                            && let Some(&resolved) = typed.resolutions.get(&expr_id)
-                                && is_callable(world, resolved) {
-                                    return Some(resolved);
-                                }
-                    },
-                    _ => {},
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        {
+            match &hir.exprs[expr_id] {
+                HirExpr::Def(entity, _, _) => {
+                    if is_callable(world, *entity) {
+                        return Some(*entity);
+                    }
+                },
+                HirExpr::MethodCall { .. }
+                | HirExpr::Call { .. }
+                | HirExpr::ProtocolCall { .. } => {
+                    let typed = ctx.query(InferBody {
+                        entity: body_entity,
+                        root,
+                    });
+                    if let Some(typed) = typed
+                        && let Some(&resolved) = typed.resolutions.get(&expr_id)
+                        && is_callable(world, resolved)
+                    {
+                        return Some(resolved);
+                    }
+                },
+                _ => {},
             }
+        }
     }
     // Fallback: cursor on a declaration name.
     let decl = semantic::enclosing_decl_at(world, file_entity, offset)?;

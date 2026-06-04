@@ -172,11 +172,11 @@ fn target_at(world: &World, file_entity: Entity, offset: usize, root: Entity) ->
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        })
-            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-                && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
-                    return Some(t);
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
+        {
+            return Some(t);
+        }
     }
     let decl = semantic::enclosing_decl_at(world, file_entity, offset)?;
     Some(Target::Entity(decl))
@@ -420,9 +420,10 @@ mod tests {
                 continue;
             }
             if let Some(fid) = world.get::<FileId>(e)
-                && fid.0 == file {
-                    return e;
-                }
+                && fid.0 == file
+            {
+                return e;
+            }
         }
         panic!("no decl `{name}` in file");
     }

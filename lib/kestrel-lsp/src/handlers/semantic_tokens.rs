@@ -173,43 +173,47 @@ fn build_entity_overrides(
                 },
                 HirExpr::Field { span, .. } => {
                     if let Some(typed) = &typed
-                        && let Some(&resolved) = typed.resolutions.get(&id) {
-                            let ttype = resolved_entity_token_type(world, resolved);
-                            let text = source.get(span.start..span.end).unwrap_or("");
-                            if let Some(dot_pos) = text.rfind('.') {
-                                overrides.insert(span.start + dot_pos + 1, ttype);
-                            }
+                        && let Some(&resolved) = typed.resolutions.get(&id)
+                    {
+                        let ttype = resolved_entity_token_type(world, resolved);
+                        let text = source.get(span.start..span.end).unwrap_or("");
+                        if let Some(dot_pos) = text.rfind('.') {
+                            overrides.insert(span.start + dot_pos + 1, ttype);
                         }
+                    }
                 },
                 HirExpr::MethodCall { span, .. } => {
                     if let Some(typed) = &typed
-                        && let Some(&_resolved) = typed.resolutions.get(&id) {
-                            let text = source.get(span.start..span.end).unwrap_or("");
-                            let before_paren = text.find('(').unwrap_or(text.len());
-                            if let Some(dot_pos) = text[..before_paren].rfind('.') {
-                                overrides.insert(span.start + dot_pos + 1, FUNCTION);
-                            }
+                        && let Some(&_resolved) = typed.resolutions.get(&id)
+                    {
+                        let text = source.get(span.start..span.end).unwrap_or("");
+                        let before_paren = text.find('(').unwrap_or(text.len());
+                        if let Some(dot_pos) = text[..before_paren].rfind('.') {
+                            overrides.insert(span.start + dot_pos + 1, FUNCTION);
                         }
+                    }
                 },
                 HirExpr::ProtocolCall { span, .. } => {
                     if let Some(typed) = &typed
-                        && let Some(&_resolved) = typed.resolutions.get(&id) {
-                            let text = source.get(span.start..span.end).unwrap_or("");
-                            let before_paren = text.find('(').unwrap_or(text.len());
-                            if let Some(dot_pos) = text[..before_paren].rfind('.') {
-                                overrides.insert(span.start + dot_pos + 1, FUNCTION);
-                            }
+                        && let Some(&_resolved) = typed.resolutions.get(&id)
+                    {
+                        let text = source.get(span.start..span.end).unwrap_or("");
+                        let before_paren = text.find('(').unwrap_or(text.len());
+                        if let Some(dot_pos) = text[..before_paren].rfind('.') {
+                            overrides.insert(span.start + dot_pos + 1, FUNCTION);
                         }
+                    }
                 },
                 HirExpr::ImplicitMember { span, .. } => {
                     if let Some(typed) = &typed
-                        && let Some(&resolved) = typed.resolutions.get(&id) {
-                            let ttype = resolved_entity_token_type(world, resolved);
-                            let text = source.get(span.start..span.end).unwrap_or("");
-                            if let Some(dot_pos) = text.find('.') {
-                                overrides.insert(span.start + dot_pos + 1, ttype);
-                            }
+                        && let Some(&resolved) = typed.resolutions.get(&id)
+                    {
+                        let ttype = resolved_entity_token_type(world, resolved);
+                        let text = source.get(span.start..span.end).unwrap_or("");
+                        if let Some(dot_pos) = text.find('.') {
+                            overrides.insert(span.start + dot_pos + 1, ttype);
                         }
+                    }
                 },
                 _ => {},
             }

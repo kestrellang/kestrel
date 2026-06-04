@@ -552,9 +552,10 @@ fn default_std_path() -> Option<std::path::PathBuf> {
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("lib/std"))
-            && p.exists() {
-                return Some(p);
-            }
+        && p.exists()
+    {
+        return Some(p);
+    }
 
     // Follow the jessup kestrel symlink to find the active toolchain's stdlib.
     // Covers the case where a bundled VSIX LSP binary can't use exe-relative.
@@ -566,9 +567,10 @@ fn default_std_path() -> Option<std::path::PathBuf> {
                 .and_then(|p| p.parent())
                 .map(|p| p.join("lib/std"));
             if let Some(p) = std_path
-                && p.exists() {
-                    return Some(p);
-                }
+                && p.exists()
+            {
+                return Some(p);
+            }
         }
     }
 

@@ -99,11 +99,11 @@ fn target_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        })
-            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-                && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
-                    return Some(t);
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
+        {
+            return Some(t);
+        }
     }
 
     // Fallback: cursor is on a declaration's identifier (function name, struct
@@ -165,13 +165,14 @@ fn collect_sites(
     if include_declaration {
         if let Target::Entity(e) = target
             && let Some(span) = world.get::<DeclSpan>(*e).map(|s| s.0.clone())
-                && let Some(file) = crate::references::entity_file(world, *e) {
-                    sites.push(ReferenceSite {
-                        file,
-                        span,
-                        kind: RefKind::Direct,
-                    });
-                }
+            && let Some(file) = crate::references::entity_file(world, *e)
+        {
+            sites.push(ReferenceSite {
+                file,
+                span,
+                kind: RefKind::Direct,
+            });
+        }
         // For locals, the definition site is `hir.locals[id].span` — included
         // here too.
         if let Target::Local { body, id } = target {
@@ -179,14 +180,14 @@ fn collect_sites(
             if let Some(hir) = ctx.query(LowerBody {
                 entity: *body,
                 root,
-            })
-                && let Some(file) = crate::references::entity_file(world, *body) {
-                    sites.push(ReferenceSite {
-                        file,
-                        span: hir.locals[*id].span.clone(),
-                        kind: RefKind::Direct,
-                    });
-                }
+            }) && let Some(file) = crate::references::entity_file(world, *body)
+            {
+                sites.push(ReferenceSite {
+                    file,
+                    span: hir.locals[*id].span.clone(),
+                    kind: RefKind::Direct,
+                });
+            }
         }
     }
 
@@ -233,10 +234,11 @@ mod tests {
                     continue;
                 }
                 if let Some(fid) = c.world().get::<F>(e)
-                    && fid.0 == f {
-                        found = Some(e);
-                        break;
-                    }
+                    && fid.0 == f
+                {
+                    found = Some(e);
+                    break;
+                }
             }
             found.unwrap_or_else(|| panic!("no `{target_name}` found"))
         };
@@ -326,10 +328,11 @@ mod tests {
             for (e, n) in c.world().iter_component::<Name>() {
                 if n.0 == "foo"
                     && let Some(fid) = c.world().get::<F>(e)
-                        && fid.0 == f {
-                            found = Some(e);
-                            break;
-                        }
+                    && fid.0 == f
+                {
+                    found = Some(e);
+                    break;
+                }
             }
             found.unwrap()
         };

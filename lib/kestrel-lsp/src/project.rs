@@ -143,44 +143,45 @@ fn collect_recursive(
     let lock_path = pkg_root.join("flock.lock");
     if lock_path.is_file()
         && let Ok(raw) = std::fs::read_to_string(&lock_path)
-            && let Ok(lock) = toml::from_str::<LockFile>(&raw) {
-                for entry in &lock.package {
-                    if entry.source == "path" {
-                        if let Some(p) = &entry.path {
-                            let dep_manifest = PathBuf::from(p).join("flock.toml");
-                            if dep_manifest.is_file() {
-                                collect_recursive(&dep_manifest, cache_root, visited, report);
-                            }
-                        }
-                        continue;
-                    }
-                    if entry.source != "registry" {
-                        continue;
-                    }
-                    let Some(cache) = cache_root else {
-                        report.missing_cache.push(format!(
-                            "{}@{} (no cache root: HOME unset and kestrel.flockCachePath not configured)",
-                            entry.name, entry.version
-                        ));
-                        continue;
-                    };
-                    // Names like "kestrel/swoop" already split into org/pkg
-                    // segments; bare names (e.g. "swoop") cache directly
-                    // under <cache>/<name>/<version>/.
-                    let pkg_dir = cache.join(&entry.name).join(&entry.version);
-                    let dep_manifest = pkg_dir.join("flock.toml");
+        && let Ok(lock) = toml::from_str::<LockFile>(&raw)
+    {
+        for entry in &lock.package {
+            if entry.source == "path" {
+                if let Some(p) = &entry.path {
+                    let dep_manifest = PathBuf::from(p).join("flock.toml");
                     if dep_manifest.is_file() {
                         collect_recursive(&dep_manifest, cache_root, visited, report);
-                    } else {
-                        report.missing_cache.push(format!(
-                            "{}@{} (expected at {})",
-                            entry.name,
-                            entry.version,
-                            pkg_dir.display()
-                        ));
                     }
                 }
+                continue;
             }
+            if entry.source != "registry" {
+                continue;
+            }
+            let Some(cache) = cache_root else {
+                report.missing_cache.push(format!(
+                    "{}@{} (no cache root: HOME unset and kestrel.flockCachePath not configured)",
+                    entry.name, entry.version
+                ));
+                continue;
+            };
+            // Names like "kestrel/swoop" already split into org/pkg
+            // segments; bare names (e.g. "swoop") cache directly
+            // under <cache>/<name>/<version>/.
+            let pkg_dir = cache.join(&entry.name).join(&entry.version);
+            let dep_manifest = pkg_dir.join("flock.toml");
+            if dep_manifest.is_file() {
+                collect_recursive(&dep_manifest, cache_root, visited, report);
+            } else {
+                report.missing_cache.push(format!(
+                    "{}@{} (expected at {})",
+                    entry.name,
+                    entry.version,
+                    pkg_dir.display()
+                ));
+            }
+        }
+    }
 }
 
 /// Recursively collect every `.ks` file under `dir`. Used by both
