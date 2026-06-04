@@ -107,7 +107,7 @@ fn node_kind_to_token_type(kind: &NodeKind) -> u32 {
 fn resolved_entity_token_type(world: &World, entity: Entity) -> u32 {
     world
         .get::<NodeKind>(entity)
-        .map(|k| node_kind_to_token_type(k))
+        .map(node_kind_to_token_type)
         .unwrap_or(VARIABLE)
 }
 
@@ -172,48 +172,44 @@ fn build_entity_overrides(
                     overrides.insert(span.start, FUNCTION);
                 },
                 HirExpr::Field { span, .. } => {
-                    if let Some(typed) = &typed {
-                        if let Some(&resolved) = typed.resolutions.get(&id) {
+                    if let Some(typed) = &typed
+                        && let Some(&resolved) = typed.resolutions.get(&id) {
                             let ttype = resolved_entity_token_type(world, resolved);
                             let text = source.get(span.start..span.end).unwrap_or("");
                             if let Some(dot_pos) = text.rfind('.') {
                                 overrides.insert(span.start + dot_pos + 1, ttype);
                             }
                         }
-                    }
                 },
                 HirExpr::MethodCall { span, .. } => {
-                    if let Some(typed) = &typed {
-                        if let Some(&_resolved) = typed.resolutions.get(&id) {
+                    if let Some(typed) = &typed
+                        && let Some(&_resolved) = typed.resolutions.get(&id) {
                             let text = source.get(span.start..span.end).unwrap_or("");
                             let before_paren = text.find('(').unwrap_or(text.len());
                             if let Some(dot_pos) = text[..before_paren].rfind('.') {
                                 overrides.insert(span.start + dot_pos + 1, FUNCTION);
                             }
                         }
-                    }
                 },
                 HirExpr::ProtocolCall { span, .. } => {
-                    if let Some(typed) = &typed {
-                        if let Some(&_resolved) = typed.resolutions.get(&id) {
+                    if let Some(typed) = &typed
+                        && let Some(&_resolved) = typed.resolutions.get(&id) {
                             let text = source.get(span.start..span.end).unwrap_or("");
                             let before_paren = text.find('(').unwrap_or(text.len());
                             if let Some(dot_pos) = text[..before_paren].rfind('.') {
                                 overrides.insert(span.start + dot_pos + 1, FUNCTION);
                             }
                         }
-                    }
                 },
                 HirExpr::ImplicitMember { span, .. } => {
-                    if let Some(typed) = &typed {
-                        if let Some(&resolved) = typed.resolutions.get(&id) {
+                    if let Some(typed) = &typed
+                        && let Some(&resolved) = typed.resolutions.get(&id) {
                             let ttype = resolved_entity_token_type(world, resolved);
                             let text = source.get(span.start..span.end).unwrap_or("");
                             if let Some(dot_pos) = text.find('.') {
                                 overrides.insert(span.start + dot_pos + 1, ttype);
                             }
                         }
-                    }
                 },
                 _ => {},
             }

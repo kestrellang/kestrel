@@ -568,7 +568,6 @@ mod tests {
     use crate::ty::{ParamConvention, TyArena};
     use crate::value::{Ownership, ValueDef};
     use crate::{MonoFuncId, ValueId};
-    use indexmap::IndexMap;
     use kestrel_hecs::Entity;
 
     fn entity(id: u32) -> Entity {

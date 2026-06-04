@@ -649,11 +649,10 @@ mod tests {
                             }
                         }
                     }
-                    if *kind == NodeKind::Module {
-                        if let Some(found) = walk(world, child, target) {
+                    if *kind == NodeKind::Module
+                        && let Some(found) = walk(world, child, target) {
                             return Some(found);
                         }
-                    }
                 }
             }
             None

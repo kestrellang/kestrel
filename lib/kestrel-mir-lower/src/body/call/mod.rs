@@ -535,14 +535,8 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
     ) -> ValueId {
         let init_effect = self.ctx.world.get::<InitEffect>(entity).cloned();
-        if init_effect.is_some() {
-            return self.emit_failable_init_call(
-                entity,
-                type_args,
-                args,
-                result_ty,
-                init_effect.unwrap(),
-            );
+        if let Some(init_effect) = init_effect {
+            return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect);
         }
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);

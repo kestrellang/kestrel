@@ -141,9 +141,9 @@ fn collect_recursive(
 
     // Registry deps via flock.lock, resolved against the local flock cache.
     let lock_path = pkg_root.join("flock.lock");
-    if lock_path.is_file() {
-        if let Ok(raw) = std::fs::read_to_string(&lock_path) {
-            if let Ok(lock) = toml::from_str::<LockFile>(&raw) {
+    if lock_path.is_file()
+        && let Ok(raw) = std::fs::read_to_string(&lock_path)
+            && let Ok(lock) = toml::from_str::<LockFile>(&raw) {
                 for entry in &lock.package {
                     if entry.source == "path" {
                         if let Some(p) = &entry.path {
@@ -181,6 +181,22 @@ fn collect_recursive(
                     }
                 }
             }
+}
+
+/// Recursively collect every `.ks` file under `dir`. Used by both
+/// `collect_sources` (for package source dirs) and the LSP's stdlib loader
+/// when `kestrel.stdlibPath` is configured.
+pub fn walk_kestrel_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+    if !dir.is_dir() {
+        return;
+    }
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("ks") {
+            out.push(path.to_path_buf());
         }
     }
 }
@@ -266,23 +282,5 @@ source = "registry"
         let report = collect_sources(&pkg.join("flock.toml"), Some(&cache));
         assert_eq!(report.missing_cache.len(), 1);
         assert!(report.missing_cache[0].contains("missing@0.1.0"));
-    }
-}
-
-/// Recursively collect every `.ks` file under `dir`. Used by both
-/// `collect_sources` (for package source dirs) and the LSP's stdlib loader
-/// when `kestrel.stdlibPath` is configured.
-pub fn walk_kestrel_sources(dir: &Path, out: &mut Vec<PathBuf>) {
-    if !dir.is_dir() {
-        return;
-    }
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("ks") {
-            out.push(path.to_path_buf());
-        }
     }
 }

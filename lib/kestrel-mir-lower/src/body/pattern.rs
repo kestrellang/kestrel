@@ -125,8 +125,8 @@ impl OssaBodyCtx<'_, '_> {
         // A slot is live at the merge only if it survived on every reaching edge.
         let mut merge_mask = vec![true; n];
         for exit in &exits {
-            for i in 0..n {
-                merge_mask[i] &= exit.slots[i].1;
+            for (i, mask) in merge_mask.iter_mut().enumerate() {
+                *mask &= exit.slots[i].1;
             }
         }
         let merge_idx: Vec<usize> = (0..n).filter(|&i| merge_mask[i]).collect();
@@ -142,8 +142,8 @@ impl OssaBodyCtx<'_, '_> {
         for exit in &exits {
             self.switch_to(exit.block);
             // Drop values this edge kept live but that are dead at the merge.
-            for i in 0..n {
-                if exit.slots[i].1 && !merge_mask[i] {
+            for (i, &keep) in merge_mask.iter().enumerate() {
+                if exit.slots[i].1 && !keep {
                     self.emit_destroy_value(exit.slots[i].0);
                 }
             }
@@ -202,7 +202,7 @@ impl OssaBodyCtx<'_, '_> {
             &self.ctx.query,
             self.ctx.root,
             &scrutinee_resolved_ty,
-            &[arm.clone()],
+            std::slice::from_ref(arm),
         );
 
         // Extract bindings from the decision tree's Success leaf.
@@ -707,6 +707,7 @@ impl OssaBodyCtx<'_, '_> {
     ///     monomorphize to a `not Copyable` type, where the copy path's
     ///     bitwise alias + whole-scrutinee drop becomes a double-free. Moving
     ///     out (consuming the scrutinee) is correct for every instantiation.
+    ///
     /// Mirrors `apply_access_path`'s type resolution without emitting code.
     fn path_requires_moveout(&mut self, root_ty: TyId, path: &[PathElement]) -> bool {
         let mut current_ty = root_ty;

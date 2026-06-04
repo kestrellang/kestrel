@@ -172,13 +172,11 @@ fn target_at(world: &World, file_entity: Entity, offset: usize, root: Entity) ->
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                if let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
+        })
+            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+                && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
                     return Some(t);
                 }
-            }
-        }
     }
     let decl = semantic::enclosing_decl_at(world, file_entity, offset)?;
     Some(Target::Entity(decl))
@@ -356,7 +354,7 @@ fn would_collide(res: &NameResolution, target: Entity) -> bool {
             // Collision only if the resolution doesn't already include our
             // target. Function overloads share names so seeing the target
             // in the list is fine.
-            !entities.iter().any(|&e| e == target)
+            !entities.contains(&target)
         },
         NameResolution::Ambiguous(_) => true,
         NameResolution::NotFound => false,
@@ -421,11 +419,10 @@ mod tests {
             if n.0 != name {
                 continue;
             }
-            if let Some(fid) = world.get::<FileId>(e) {
-                if fid.0 == file {
+            if let Some(fid) = world.get::<FileId>(e)
+                && fid.0 == file {
                     return e;
                 }
-            }
         }
         panic!("no decl `{name}` in file");
     }

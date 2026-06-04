@@ -40,11 +40,7 @@ impl LspClient {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
-            loop {
-                let msg = match read_lsp_message(&mut reader) {
-                    Some(m) => m,
-                    None => break,
-                };
+            while let Some(msg) = read_lsp_message(&mut reader) {
                 if tx.send(msg).is_err() {
                     break;
                 }
@@ -223,6 +219,7 @@ fn cargo_bin(name: &str) -> PathBuf {
     debug
 }
 
+#[allow(dead_code)]
 fn diagnostics_for(notifications: &[Value], uri: &str) -> Vec<Value> {
     notifications
         .iter()

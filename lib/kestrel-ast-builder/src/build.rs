@@ -802,7 +802,7 @@ mod tests {
 
         // Print the entity tree for visual inspection
         println!("\n=== ordering.ks entity tree ===\n");
-        print_entity_tree(&world, root, 0, file);
+        print_entity_tree(&world, root, 0);
         println!();
 
         // Verify import
@@ -828,8 +828,9 @@ mod tests {
 
         // Enum cases: Less, Equal, Greater
         let less = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Less").unwrap();
-        let equal = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Equal").unwrap();
-        let greater = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Greater").unwrap();
+        let _equal = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Equal").unwrap();
+        let _greater =
+            find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Greater").unwrap();
         assert!(!world.has::<Callable>(less), "plain case has no Callable");
 
         // Methods
@@ -898,7 +899,7 @@ mod tests {
     }
 
     /// Pretty-print the entity tree for debugging.
-    fn print_entity_tree(world: &World, entity: Entity, depth: usize, file: Entity) {
+    fn print_entity_tree(world: &World, entity: Entity, depth: usize) {
         let indent = "  ".repeat(depth);
         let kind = world.get::<NodeKind>(entity);
         let name = world.get::<Name>(entity);
@@ -1013,7 +1014,7 @@ mod tests {
         println!();
 
         for &child in world.children_of(entity) {
-            print_entity_tree(world, child, depth + 1, file);
+            print_entity_tree(world, child, depth + 1);
         }
     }
 

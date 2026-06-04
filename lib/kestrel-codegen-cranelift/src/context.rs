@@ -316,7 +316,7 @@ impl<'m> CodegenCtx<'m> {
             .declare_function(&name, linkage, &sig)
             .map_err(|e| CodegenError::FunctionDefinition {
                 name: name.clone(),
-                source: e,
+                source: Box::new(e),
             })?;
 
         Ok(func_id)

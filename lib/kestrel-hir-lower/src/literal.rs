@@ -281,6 +281,7 @@ fn decode_unicode_escape(
 ///   - `"""\n...\n"""` — multi-line cooked; indent-strip + decode escapes
 ///   - `#"..."#`       — single-line raw; strip pounds + 1 quote, no decode
 ///   - `#"""\n...\n"""#` — multi-line raw; indent-strip, no decode
+///
 /// Pound count > 1 is supported for both raw forms (`##"..."##`, etc.).
 pub fn decode_string_literal_token(
     raw: &str,

@@ -1125,7 +1125,6 @@ mod tests {
     use crate::ty::{ParamConvention, TyArena};
     use crate::value::ValueDef;
     use crate::{BlockId, Immediate, ValueId};
-    use indexmap::IndexMap;
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)

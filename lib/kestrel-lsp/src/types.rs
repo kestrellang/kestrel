@@ -128,8 +128,8 @@ pub fn type_references_in_file(
                 segments: segments.clone(),
                 context,
                 root,
-            }) {
-                if e == target {
+            })
+                && e == target {
                     let ident = elem
                         .children_with_tokens()
                         .filter_map(|c| c.into_token())
@@ -143,7 +143,6 @@ pub fn type_references_in_file(
                         });
                     }
                 }
-            }
         }
     }
     sites

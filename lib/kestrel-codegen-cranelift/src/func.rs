@@ -280,7 +280,7 @@ pub fn compile_function(
         .define_function(func_id, &mut comp_ctx)
         .map_err(|e| CodegenError::FunctionDefinition {
             name: func.name.clone(),
-            source: e,
+            source: Box::new(e),
         })?;
 
     Ok(())

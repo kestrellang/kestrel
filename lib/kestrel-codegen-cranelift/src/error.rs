@@ -9,7 +9,9 @@ pub enum CodegenError {
     },
     FunctionDefinition {
         name: String,
-        source: cranelift_module::ModuleError,
+        // Boxed: `ModuleError` is large (~160 bytes), so inlining it bloats
+        // every `Result<_, CodegenError>` (clippy::result_large_err).
+        source: Box<cranelift_module::ModuleError>,
     },
     ModuleFinish(String),
     LinkerError(String),
@@ -41,7 +43,7 @@ impl std::error::Error for CodegenError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::FunctionCompilation { source, .. } => Some(source.as_ref()),
-            Self::FunctionDefinition { source, .. } => Some(source),
+            Self::FunctionDefinition { source, .. } => Some(source.as_ref()),
             Self::IoError(e) => Some(e),
             _ => None,
         }

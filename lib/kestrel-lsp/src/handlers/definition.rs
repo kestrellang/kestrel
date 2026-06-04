@@ -62,11 +62,9 @@ pub async fn handle(
                 let file_cst = compiler.parse(file_entity).tree;
                 if let Some((entity, _span)) =
                     crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
-                {
-                    if let Some(loc) = target_to_location(world, &sources, Target::Entity(entity)) {
+                    && let Some(loc) = target_to_location(world, &sources, Target::Entity(entity)) {
                         return Some(loc);
                     }
-                }
 
                 let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
                 let ctx = world.query_context();

@@ -99,13 +99,11 @@ fn target_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                if let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
+        })
+            && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+                && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
                     return Some(t);
                 }
-            }
-        }
     }
 
     // Fallback: cursor is on a declaration's identifier (function name, struct
@@ -165,17 +163,15 @@ fn collect_sites(
     }
 
     if include_declaration {
-        if let Target::Entity(e) = target {
-            if let Some(span) = world.get::<DeclSpan>(*e).map(|s| s.0.clone()) {
-                if let Some(file) = crate::references::entity_file(world, *e) {
+        if let Target::Entity(e) = target
+            && let Some(span) = world.get::<DeclSpan>(*e).map(|s| s.0.clone())
+                && let Some(file) = crate::references::entity_file(world, *e) {
                     sites.push(ReferenceSite {
                         file,
                         span,
                         kind: RefKind::Direct,
                     });
                 }
-            }
-        }
         // For locals, the definition site is `hir.locals[id].span` — included
         // here too.
         if let Target::Local { body, id } = target {
@@ -183,15 +179,14 @@ fn collect_sites(
             if let Some(hir) = ctx.query(LowerBody {
                 entity: *body,
                 root,
-            }) {
-                if let Some(file) = crate::references::entity_file(world, *body) {
+            })
+                && let Some(file) = crate::references::entity_file(world, *body) {
                     sites.push(ReferenceSite {
                         file,
                         span: hir.locals[*id].span.clone(),
                         kind: RefKind::Direct,
                     });
                 }
-            }
         }
     }
 
@@ -237,12 +232,11 @@ mod tests {
                 if n.0 != target_name {
                     continue;
                 }
-                if let Some(fid) = c.world().get::<F>(e) {
-                    if fid.0 == f {
+                if let Some(fid) = c.world().get::<F>(e)
+                    && fid.0 == f {
                         found = Some(e);
                         break;
                     }
-                }
             }
             found.unwrap_or_else(|| panic!("no `{target_name}` found"))
         };
@@ -330,14 +324,12 @@ mod tests {
         let foo = {
             let mut found = None;
             for (e, n) in c.world().iter_component::<Name>() {
-                if n.0 == "foo" {
-                    if let Some(fid) = c.world().get::<F>(e) {
-                        if fid.0 == f {
+                if n.0 == "foo"
+                    && let Some(fid) = c.world().get::<F>(e)
+                        && fid.0 == f {
                             found = Some(e);
                             break;
                         }
-                    }
-                }
             }
             found.unwrap()
         };

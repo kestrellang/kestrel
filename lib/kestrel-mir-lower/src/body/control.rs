@@ -75,8 +75,8 @@ impl OssaBodyCtx<'_, '_> {
         let reaching: Vec<&ArmExit> = [&then_exit, &else_exit].into_iter().flatten().collect();
         let mut merge_mask = vec![true; n];
         for exit in &reaching {
-            for i in 0..n {
-                merge_mask[i] &= exit.slots[i].1;
+            for (i, mask) in merge_mask.iter_mut().enumerate() {
+                *mask &= exit.slots[i].1;
             }
         }
         let merge_idx: Vec<usize> = (0..n).filter(|&i| merge_mask[i]).collect();
@@ -90,8 +90,8 @@ impl OssaBodyCtx<'_, '_> {
         for exit in &reaching {
             self.switch_to(exit.block);
             // Drop values this edge kept live but that are dead at the merge.
-            for i in 0..n {
-                if exit.slots[i].1 && !merge_mask[i] {
+            for (i, &keep) in merge_mask.iter().enumerate() {
+                if exit.slots[i].1 && !keep {
                     self.emit_destroy_value(exit.slots[i].0);
                 }
             }

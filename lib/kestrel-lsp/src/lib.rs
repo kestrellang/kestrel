@@ -547,17 +547,14 @@ fn default_std_path() -> Option<std::path::PathBuf> {
         }
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(p) = exe
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(p) = exe
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("lib/std"))
-        {
-            if p.exists() {
+            && p.exists() {
                 return Some(p);
             }
-        }
-    }
 
     // Follow the jessup kestrel symlink to find the active toolchain's stdlib.
     // Covers the case where a bundled VSIX LSP binary can't use exe-relative.
@@ -568,11 +565,10 @@ fn default_std_path() -> Option<std::path::PathBuf> {
                 .parent()
                 .and_then(|p| p.parent())
                 .map(|p| p.join("lib/std"));
-            if let Some(p) = std_path {
-                if p.exists() {
+            if let Some(p) = std_path
+                && p.exists() {
                     return Some(p);
                 }
-            }
         }
     }
 

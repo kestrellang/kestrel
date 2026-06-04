@@ -146,7 +146,7 @@ fn sort_key(s: &ReferenceSite) -> (usize, usize, usize, u8) {
         RefKind::MemberAccess => 1,
         RefKind::Pattern => 2,
     };
-    (s.file.index() as usize, s.span.start, s.span.end, kind)
+    (s.file.index(), s.span.start, s.span.end, kind)
 }
 
 /// Find references to a local within its owning body. Locals don't escape, so
@@ -170,15 +170,14 @@ pub fn local_references(
 
     let mut sites: Vec<ReferenceSite> = Vec::new();
     for (_, expr) in hir.exprs.iter() {
-        if let HirExpr::Local(id, span) = expr {
-            if *id == local {
+        if let HirExpr::Local(id, span) = expr
+            && *id == local {
                 sites.push(ReferenceSite {
                     file,
                     span: span.clone(),
                     kind: RefKind::Direct,
                 });
             }
-        }
     }
     sites.sort_by_key(sort_key);
     sites.dedup();
@@ -238,11 +237,10 @@ mod tests {
             if n.0 != name {
                 continue;
             }
-            if let Some(fid) = world.get::<F>(e) {
-                if fid.0 == file {
+            if let Some(fid) = world.get::<F>(e)
+                && fid.0 == file {
                     return e;
                 }
-            }
         }
         panic!("decl `{name}` not found in file");
     }
@@ -264,7 +262,7 @@ mod tests {
             .map(|r| &src[r.span.start..r.span.end])
             .collect();
         assert!(
-            texts.iter().any(|t| *t == "target"),
+            texts.contains(&"target"),
             "expected `target` reference; got {texts:?}"
         );
     }
