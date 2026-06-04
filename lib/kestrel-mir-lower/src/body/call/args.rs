@@ -1,11 +1,13 @@
 use kestrel_ast_builder::arg_binding::{BindParam, Binding, bind_arguments};
-use kestrel_ast_builder::{Attributes, Callable, NodeKind};
+use kestrel_ast_builder::{Attributes, Callable, DeclSpan, NodeKind};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_hir_lower::LowerBody;
 use kestrel_mir::inst::CallArg;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{Immediate, MirTy, ParamConvention, TyId, ValueId};
+use kestrel_reporting::{Diagnostic, Label};
+use kestrel_span::Span;
 use kestrel_type_infer::InferBody;
 
 use crate::body::{HirRef, OssaBodyCtx, TypedRef};
@@ -206,6 +208,24 @@ impl OssaBodyCtx<'_, '_> {
             entity: default_entity,
             root: self.ctx.root,
         }) else {
+            // The parameter has a default value but no lowerable body — a
+            // structural inconsistency (a type error would still yield a body
+            // with error nodes), so surface it instead of silently substituting
+            // a garbage value.
+            let span = self
+                .ctx
+                .world
+                .get::<DeclSpan>(default_entity)
+                .map(|s| s.0.clone())
+                .unwrap_or_else(|| Span::synthetic(0));
+            self.ctx.query.accumulate(
+                Diagnostic::error()
+                    .with_message("could not lower the default argument value")
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("default value could not be lowered to MIR"),
+                    ]),
+            );
             return self.emit_literal(Immediate::error());
         };
         let default_typed = self.ctx.query.query(InferBody {

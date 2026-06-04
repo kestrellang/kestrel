@@ -1553,13 +1553,21 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> HirExprId {
         let scrutinee = self.lower_expr(body, value);
+
+        // The pattern bindings are visible only in the continuation (the rest
+        // of the enclosing block), not in the else block. Scope the pattern +
+        // continuation so the bindings don't leak into the else body — mirrors
+        // the if-let lowering in `lower_if`.
+        self.push_scope();
         let pat = self.lower_pat(body, pattern);
 
         // Continuation: remaining stmts + tail (recurses for chained guards)
         let continuation = self.lower_block_stmts(body, remaining_stmts, tail_expr);
         let cont_body = self.hir_block_to_expr(continuation, span);
+        self.pop_scope();
 
-        // Else body (must diverge)
+        // Else body (must diverge) — lowered outside the pattern's scope so the
+        // bindings are undefined here.
         let else_block = self.lower_block(body, else_body);
         let else_arm_body = self.hir_block_to_expr(else_block, span);
 

@@ -246,14 +246,28 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
         }
     }
 
-    /// Frees the bucket array.
+    /// Drops every bucket payload, then frees the bucket array.
     ///
-    /// Runs when the last `RcBox` reference to this storage drops.
-    /// Skips deallocation entirely when `cap == 0` (no buffer was
-    /// allocated). Bucket payloads are not destructed individually —
-    /// `K` and `V` are treated as trivially droppable here.
+    /// Runs when the last `RcBox` reference to this storage drops (COW
+    /// guarantees the buffer is uniquely owned at that point, so each
+    /// payload is dropped exactly once — no double-free). Skips
+    /// everything when `cap == 0` (no buffer was ever allocated).
+    ///
+    /// The `0..<cap` loop runs `Bucket`'s destructor in place on every
+    /// slot — open addressing scatters live entries across the whole
+    /// buffer, and every slot is initialized (to `.Empty` at minimum),
+    /// so all `cap` slots must be visited, not just `len`. `dropInPlace`
+    /// is a no-op for `.Empty`/`.Deleted` and drops the `K`/`V` payload
+    /// of each `.Occupied` slot. Skipping these destructors (the previous
+    /// behavior) leaked the owned heap of every non-trivial key and value,
+    /// e.g. the `String`s inside a `Dictionary[String, String]`.
     deinit {
         if self.cap > 0 {
+            var i: Int64 = 0;
+            while i < self.cap {
+                self.buckets.offset(by: i).dropInPlace();
+                i = i + 1
+            };
             let layout = Layout.array[Bucket[K, V]](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.buckets.asRaw(), layout)

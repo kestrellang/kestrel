@@ -15,6 +15,7 @@ use kestrel_mir::item::function::FunctionKind;
 use kestrel_mir::{
     Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
 };
+use kestrel_reporting::{Diagnostic, Label};
 
 use super::OssaBodyCtx;
 use crate::ty::resolve_callable_types;
@@ -149,7 +150,71 @@ impl OssaBodyCtx<'_, '_> {
             return val;
         }
 
-        // Fallback: no init found — emit error literal
+        // No usable initializer was resolved. Rather than silently emitting an
+        // error literal (which miscompiles to a zero value), surface it.
+        self.emit_unlowerable_literal(
+            expr_id,
+            result_ty,
+            "array literal",
+            "`init(_arrayLiteralPointer: lang.ptr[Element], _arrayLiteralCount: lang.i64)`",
+            "_ExpressibleByArrayLiteral",
+        )
+    }
+
+    /// Emit a diagnostic for a collection literal whose target type has no
+    /// usable `_ExpressibleBy*Literal` initializer, then return an error
+    /// literal so lowering can continue (the accumulated error aborts the
+    /// build). Suppressed when `result_ty` is already an error — that means an
+    /// earlier phase reported the real cause and a second diagnostic would just
+    /// be cascade noise.
+    fn emit_unlowerable_literal(
+        &mut self,
+        expr_id: HirExprId,
+        result_ty: TyId,
+        what: &str,
+        init_sig: &str,
+        protocol: &str,
+    ) -> ValueId {
+        if !matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Error) {
+            let span = super::expr_span(&self.hir, expr_id);
+            let ty_str = kestrel_mir::display::ty_to_string(result_ty, &self.ctx.module);
+            self.ctx.query.accumulate(
+                Diagnostic::error()
+                    .with_message(format!("cannot lower {what} to type `{ty_str}`"))
+                    .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                        format!("no usable `{protocol}` initializer was resolved"),
+                    )])
+                    .with_notes(vec![format!(
+                        "`{ty_str}` must conform to `{protocol}` and provide {init_sig}"
+                    )]),
+            );
+        }
+        self.emit_literal(Immediate::error())
+    }
+
+    /// Hard-error for an expression that type-checked but hit a hole in MIR
+    /// lowering (an unresolved callee, an unhandled `Def` kind, ...). Returns an
+    /// error literal so lowering continues; the accumulated error aborts the
+    /// build. Suppressed when the expression's own type is already an error —
+    /// that means an earlier phase reported the real cause and a second
+    /// diagnostic would just be cascade noise.
+    pub(crate) fn emit_lowering_gap(
+        &mut self,
+        expr_id: HirExprId,
+        message: impl Into<String>,
+    ) -> ValueId {
+        let result_ty = self.resolve_expr_type(expr_id);
+        if !matches!(self.ctx.module.ty_arena.get(result_ty), MirTy::Error) {
+            let span = super::expr_span(&self.hir, expr_id);
+            self.ctx.query.accumulate(
+                Diagnostic::error()
+                    .with_message(message.into())
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range())
+                            .with_message("could not be lowered to MIR"),
+                    ]),
+            );
+        }
         self.emit_literal(Immediate::error())
     }
 
@@ -237,7 +302,13 @@ impl OssaBodyCtx<'_, '_> {
             return val;
         }
 
-        self.emit_literal(Immediate::error())
+        self.emit_unlowerable_literal(
+            expr_id,
+            result_ty,
+            "dictionary literal",
+            "`init(_dictionaryLiteralPointer: lang.ptr[(Key, Value)], _dictionaryLiteralCount: lang.i64)`",
+            "_ExpressibleByDictionaryLiteral",
+        )
     }
 
     fn try_dict_literal_via_init(
