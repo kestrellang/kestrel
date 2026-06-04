@@ -65,33 +65,22 @@ func githubClient() -> Swoop {
 public func fetchRelease(channel channel: String, platform platform: Platform) -> Result[Release, JessupError] {
     let client = githubClient();
 
-    if channel == "nightly" {
-        // Fetch nightly release by tag
-        let url = repoApi() + "/tags/nightly";
+    // A named channel (stable/preview/beta/nightly) resolves to the most recent
+    // release whose tag matches that channel's convention — see
+    // `tagMatchesChannel`. Anything else is treated as an explicit version tag
+    // (`v<channel>`) and fetched directly, which is reliable regardless of how
+    // many newer releases exist.
+    if isNamedChannel(channel: channel) {
+        let url = repoApi() + "?per_page=100";
         match client.fetch(url) {
-            .Err(_) => return .Err(JessupError.NetworkError("failed to fetch nightly release")),
+            .Err(_) => return .Err(JessupError.NetworkError("failed to fetch releases")),
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    return .Err(JessupError.NotFound("nightly release not found"))
+                    return .Err(JessupError.NetworkError("GitHub API returned status \(resp.status.code)"))
                 }
                 match resp.json() {
-                    .Err(_) => return .Err(JessupError.ParseError("invalid JSON in release response")),
-                    .Ok(json) => return findAssetInRelease(json: json, platform: platform)
-                }
-            }
-        }
-    } else if channel == "stable" {
-        // Fetch latest stable release
-        let url = repoApi() + "/latest";
-        match client.fetch(url) {
-            .Err(_) => return .Err(JessupError.NetworkError("failed to fetch latest release")),
-            .Ok(resp) => {
-                if not resp.status.isSuccess() {
-                    return .Err(JessupError.NotFound("no stable release found"))
-                }
-                match resp.json() {
-                    .Err(_) => return .Err(JessupError.ParseError("invalid JSON in release response")),
-                    .Ok(json) => return findAssetInRelease(json: json, platform: platform)
+                    .Err(_) => return .Err(JessupError.ParseError("invalid JSON in releases response")),
+                    .Ok(json) => return findChannelRelease(json: json, channel: channel, platform: platform)
                 }
             }
         }
@@ -214,6 +203,41 @@ func findAssetInRelease(json json: Value, platform platform: Platform) -> Result
     }
 
     .Err(JessupError.NotFound("no asset found for platform " + target + " in release " + tagName))
+}
+
+/// Scans a `/releases` array (newest first) and returns the most recent
+/// release whose tag matches `channel` *and* carries an asset for this
+/// platform. Releases that match the channel but lack a platform asset are
+/// skipped, so we land on the newest actually-installable one.
+func findChannelRelease(json json: Value, channel channel: String, platform platform: Platform) -> Result[Release, JessupError] {
+    match json.asArray() {
+        .None => return .Err(JessupError.ParseError("releases response is not an array")),
+        .Some(arr) => {
+            var i: Int64 = 0;
+            while i < arr.count {
+                let release = arr(unchecked: i);
+                match release.value(forKey: "tag_name") {
+                    .Some(tagVal) => {
+                        match tagVal.asString() {
+                            .Some(tag) => {
+                                if tagMatchesChannel(tag: tag, channel: channel) {
+                                    match findAssetInRelease(json: release, platform: platform) {
+                                        .Ok(found) => return .Ok(found),
+                                        .Err(_) => {}
+                                    }
+                                }
+                            },
+                            .None => {}
+                        }
+                    },
+                    .None => {}
+                }
+                i = i + 1
+            }
+        }
+    }
+
+    .Err(JessupError.NotFound("no " + channel + " release found for platform " + platform.assetTarget()))
 }
 
 /// Finds the jessup binary asset in a release (for self-update).
@@ -358,6 +382,36 @@ func parseReleaseTags(json json: Value) -> Result[Array[String], JessupError] {
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/// True for the four rolling/branch channels resolved by scanning the release
+/// list. Any other string is an explicit version tag.
+func isNamedChannel(channel channel: String) -> Bool {
+    channel == "stable" or channel == "preview" or channel == "beta" or channel == "nightly"
+}
+
+/// Decides whether a release `tag` belongs to a named `channel`, by the tag
+/// naming convention each branch publishes under:
+///   - stable:  `v1.X.Y`+ from main   — major >= 1, no prerelease suffix
+///   - preview: `v0.X.Y` from main    — major 0, no prerelease suffix
+///   - beta:    the rolling `beta` tag (republished from the beta branch)
+///   - nightly: the rolling `nightly` tag (republished from the nightly branch)
+func tagMatchesChannel(tag tag: String, channel channel: String) -> Bool {
+    if channel == "nightly" {
+        return tag == "nightly"
+    }
+    if channel == "beta" {
+        return tag == "beta"
+    }
+    if channel == "preview" {
+        return tag.starts(with: "v0.") and not stringContains(haystack: tag, needle: "-")
+    }
+    if channel == "stable" {
+        return tag.starts(with: "v")
+            and not tag.starts(with: "v0.")
+            and not stringContains(haystack: tag, needle: "-")
+    }
+    false
+}
 
 /// Checks if haystack contains needle (simple byte search).
 func stringContains(haystack haystack: String, needle needle: String) -> Bool {

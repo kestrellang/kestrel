@@ -501,9 +501,12 @@ public func updateToolchains() -> Result[(), JessupError] {
     var i: Int64 = 0;
     while i < entries.count {
         let name = entries(unchecked: i);
-        // Update channels (stable-*, nightly-*)
-        if name.starts(with: "stable") or name.starts(with: "nightly") {
-            let channel = if name.starts(with: "stable") { "stable" } else { "nightly" };
+        // Update channels (stable-*, preview-*, beta-*, nightly-*)
+        if name.starts(with: "stable") or name.starts(with: "preview") or name.starts(with: "beta") or name.starts(with: "nightly") {
+            let channel = if name.starts(with: "stable") { "stable" }
+                else if name.starts(with: "preview") { "preview" }
+                else if name.starts(with: "beta") { "beta" }
+                else { "nightly" };
             var updMsg = String();
             updMsg.append("Updating ");
             updMsg.append(channel);
@@ -743,33 +746,41 @@ func installAgentPlugins() {
 // ============================================================================
 
 /// Generates a toolchain directory name from channel and release tag.
-/// e.g., "stable" + "v1.0.0" -> "stable-1.0.0"
+/// e.g., "stable" + "v1.0.0"  -> "stable-1.0.0"
+/// e.g., "preview" + "v0.16.0" -> "preview-0.16.0"
+/// e.g., "beta" + "beta" -> "beta-2026-03-02"
 /// e.g., "nightly" + "nightly" -> "nightly-2026-03-02"
 func toolchainDirName(channel channel: String, tag tag: String) -> String {
-    if channel == "nightly" {
-        // Use current date for nightly
+    if channel == "nightly" or channel == "beta" {
+        // Rolling channels — the tag is fixed (`nightly`/`beta`), so
+        // disambiguate installs by date instead.
         let date = captureOutput("date +%Y-%m-%d");
         let trimmed = trimTrailingNewline(date);
         var s = String();
-        s.append("nightly-");
+        s.append(channel);
+        s.append("-");
         s.append(trimmed);
         s
-    } else if channel == "stable" {
-        // Strip leading 'v' from tag if present
-        if tag.byteCount > 0 and tag.bytes(unchecked: 0) == 118 {
-            var s = String();
-            s.append("stable-");
-            s.append(tag.asSlice().subslice(from: 1, to: tag.byteCount).toOwned());
-            s
-        } else {
-            var s = String();
-            s.append("stable-");
-            s.append(tag);
-            s
-        }
+    } else if channel == "stable" or channel == "preview" {
+        // Named version channels resolve to a concrete tag; name the dir
+        // "<channel>-<version>" with any leading 'v' stripped.
+        var s = String();
+        s.append(channel);
+        s.append("-");
+        s.append(stripLeadingV(tag: tag));
+        s
     } else {
         // Specific version — use as-is
         channel
+    }
+}
+
+/// Strips a single leading 'v' (byte 118) from a tag, if present.
+func stripLeadingV(tag tag: String) -> String {
+    if tag.byteCount > 0 and tag.bytes(unchecked: 0) == 118 {
+        tag.asSlice().subslice(from: 1, to: tag.byteCount).toOwned()
+    } else {
+        tag
     }
 }
 
