@@ -1,0 +1,63 @@
+name: Build Kestrel toolchain
+description: >
+  Installs the pinned Rust toolchain + OpenSSL, builds the compiler, LSP and
+  doc tool, bootstraps flock, and builds jessup. Single source of truth for
+  "how the toolchain is built" — shared by the CI smoke job and every release
+  workflow, so a flock/jessup fix lands in exactly one place.
+
+inputs:
+  profile:
+    description: cargo profile — "release" to ship, "debug" for a faster CI smoke
+    default: release
+
+runs:
+  using: composite
+  steps:
+    # Read the pinned channel from rust-toolchain.toml so the version lives in
+    # exactly one place. Portable sed — macOS runners ship BSD sed (no `grep -P`).
+    - name: Read pinned toolchain
+      id: rust
+      shell: bash
+      run: echo "channel=$(sed -n 's/.*channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.rust.outputs.channel }}
+
+    - name: Cache cargo
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ inputs.profile }}
+
+    - name: Install OpenSSL (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install openssl@3
+
+    - name: Install OpenSSL (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+    - name: Build compiler, LSP, doc
+      shell: bash
+      run: |
+        FLAG=$([ "${{ inputs.profile }}" = "release" ] && echo "--release" || echo "")
+        cargo build $FLAG
+        cargo build $FLAG -p kestrel-lsp
+        cargo build $FLAG -p kestrel-doc
+
+    - name: Bootstrap flock
+      shell: bash
+      run: bash lang/flock/bootstrap.sh
+
+    - name: Build jessup
+      working-directory: lang/jessup
+      shell: bash
+      run: |
+        rm -f jessup   # never package a stale binary
+        KESTREL=../../target/${{ inputs.profile }}/kestrel \
+          KESTREL_STD=../std ../../lang/flock/flock build
+        test -f jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
+        file jessup

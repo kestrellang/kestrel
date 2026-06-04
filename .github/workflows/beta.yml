@@ -8,122 +8,28 @@ on:
 permissions:
   contents: write
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   build:
-    strategy:
-      matrix:
-        include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux
+    uses: ./.github/workflows/_release-build.yml
 
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install OpenSSL (macOS)
-        if: runner.os == 'macOS'
-        run: brew install openssl@3
-
-      - name: Install OpenSSL (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
-
-      - name: Build kestrel compiler
-        run: cargo build --release
-
-      - name: Build kestrel language server
-        run: cargo build --release -p kestrel-lsp
-
-      - name: Build kestrel-doc
-        run: cargo build --release -p kestrel-doc
-
-      - name: Bootstrap flock
-        run: bash lang/flock/bootstrap.sh
-
-      - name: Build jessup
-        working-directory: lang/jessup
-        run: |
-          # Remove any stale binary to ensure a fresh build
-          rm -f jessup
-          KESTREL=../../target/release/kestrel KESTREL_STD=../std ../../lang/flock/flock build
-          # Verify the binary was actually produced
-          test -f jessup || { echo "ERROR: jessup binary not produced"; exit 1; }
-          file jessup
-
-      - name: Package toolchain tarball
-        run: |
-          STAGING="kestrel-${{ matrix.target }}"
-          mkdir -p "$STAGING/bin"
-          mkdir -p "$STAGING/lib"
-
-          cp target/release/kestrel "$STAGING/bin/"
-          cp target/release/kestrel-lsp "$STAGING/bin/"
-          cp target/release/kestrel-doc "$STAGING/bin/"
-          cp lang/flock/flock "$STAGING/bin/"
-          cp -r lang/std "$STAGING/lib/std"
-
-          tar czf "$STAGING.tar.gz" "$STAGING"
-
-      - name: Package jessup binary
-        run: |
-          STAGING="jessup-${{ matrix.target }}"
-          mkdir -p "$STAGING"
-          cp lang/jessup/jessup "$STAGING/"
-          tar czf "$STAGING.tar.gz" "$STAGING"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ matrix.target }}
-          path: |
-            kestrel-${{ matrix.target }}.tar.gz
-            jessup-${{ matrix.target }}.tar.gz
-
-  release:
+  publish:
     needs: build
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -la artifacts/
-
-      - name: Delete existing beta release
-        run: gh release delete beta --yes --cleanup-tag || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create beta release
+      - name: Publish rolling beta release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
           DATE="$(date -u +%Y-%m-%d)"
+          gh release delete beta --yes --cleanup-tag || true
           gh release create beta \
             --title "Beta $DATE" \
             --notes "Automated beta build from the \`beta\` branch — the current release-train stabilization candidate.

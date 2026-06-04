@@ -19,7 +19,7 @@ duplicate state.
 3. PAT exported as `GH_TOKEN` for the local terminal, **and** added as
    the repo secret `PROJECTS_TOKEN` (used by Actions workflows that
    touch the Project).
-4. `python3` ≥ 3.10 in `PATH` (used by `promote_status.py`).
+4. `python3` ≥ 3.10 in `PATH` (used by `set_status.py`).
 
 ## Order
 
@@ -53,7 +53,7 @@ bash scripts/setup/configure-branch-protection.sh
 | `create-milestones.sh` | Creates 8 numeric milestones (`0.16` → `0.23`) with 3-week due dates starting `2026-05-31`, plus 5 open-ended milestones (`Preview 3`, `Preview 4`, `RC`, `2.0`, `3.0`). Skips any that already exist. |
 | `migrate-roadmap.sh` | Creates one issue per unchecked ROADMAP item (~80 total) with the right type label, `triage` label, and milestone. Idempotent by issue title — re-running won't create duplicates. |
 | `configure-branch-protection.sh` | Applies protection rules: `main` (no direct pushes, fast-forward only, PR required), `nightly` (PR required, `ci` status check, linear history), `beta` (PR required, `ci` status check, merge commits allowed for the cycle merge). |
-| `promote_status.py` | Library script invoked by `promote-to-beta.yml` and `release.yml`. Not run directly. |
+| `set_status.py` | Library script invoked by `project-status.yml` to move Project cards — either the issues a PR closes (`--by-closing-issues`) or a whole status column on promotion (`--by-status`). Not run directly. |
 
 ## Re-running
 
