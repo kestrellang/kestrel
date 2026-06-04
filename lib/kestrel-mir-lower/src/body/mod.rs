@@ -22,6 +22,7 @@ use kestrel_mir::{
     BlockId, CopyBehavior, FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId,
     VariantIdx,
 };
+use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 use kestrel_type_infer::captures::{ClosureCaptureMap, PlaceKey};
 use kestrel_type_infer::result::TypedBody;
@@ -1252,16 +1253,46 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
-        let ty = self.body.value(operand).ty;
+        let v = self.body.value(operand);
+        let ty = v.ty;
+        let ownership = v.ownership;
         // A copy of a non-Copyable @owned value is illegal (no clone shim). Such
         // a transfer is a move: consume the operand instead of duplicating it.
-        if self.body.value(operand).ownership == Ownership::Owned && self.is_non_copyable(ty) {
+        if ownership == Ownership::Owned && self.is_non_copyable(ty) {
+            return self.emit_move_value(operand);
+        }
+        // A copy of a non-Copyable @guaranteed value is a move-out-of-borrow:
+        // there's no clone shim to duplicate it and we don't own it to move it.
+        // The front-end move checker should reject this (E503); this is the
+        // lowering backstop so it can never reach OSSA verify as an ICE-shaped
+        // "copy of non-Copyable" failure. Diagnose with a span, then move the
+        // borrow (the accumulated error aborts the build before codegen).
+        if self.is_non_copyable(ty) {
+            self.emit_move_out_of_borrow_backstop(ty);
             return self.emit_move_value(operand);
         }
         let result = self.alloc_value(ty, Ownership::Owned);
         self.push_inst(InstKind::CopyValue { result, operand });
         self.track_owned(result);
         result
+    }
+
+    /// Backstop diagnostic for the lowering of a move-out-of-borrow (duplicating
+    /// a non-Copyable value held only by borrow). Normally the HIR move checker
+    /// rejects this first (E503); this fires only for shapes it can't see, so
+    /// the build fails with a real error instead of an OSSA-verify ICE.
+    fn emit_move_out_of_borrow_backstop(&mut self, ty: TyId) {
+        let span = self.current_span.clone().unwrap_or_else(|| Span::synthetic(0));
+        let ty_str = kestrel_mir::display::ty_to_string(ty, &self.ctx.module);
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "cannot move non-copyable value of type `{ty_str}` out of a borrow"
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                    "a non-copyable value cannot be moved out of a borrowed place",
+                )]),
+        );
     }
 
     /// Move an @owned value: produces a fresh @owned result and consumes the

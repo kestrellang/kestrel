@@ -9,7 +9,8 @@ Clean syntax. Powerful types. Deterministic memory.
 </p>
 
 <p align="center">
-<a href="https://kestrel-lang.com"><img src="https://img.shields.io/badge/docs-kestrel--lang.com-blue" alt="Docs"></a>
+<a href="https://kestrel-lang.com"><img src="https://img.shields.io/badge/website-kestrel--lang.com-orange" alt="Website"></a>
+<a href="https://kestrel-lang.com/docs"><img src="https://img.shields.io/badge/docs-kestrel--lang.com-blue" alt="Docs"></a>
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"></a>
 </p>
 
@@ -33,17 +34,19 @@ Kestrel is a compiled programming language with deterministic memory management 
 
 Currently in its first preview release, Kestrel can be used to write 2D games, CLI tools, and web apps.
 
+> **See it live:** [wall.kestrel-lang.com](https://wall.kestrel-lang.com) is a public community sticky-note wall built entirely in Kestrel — Perch backend, SQLite, and an htmx frontend.
+
 ## Quick Start
 
 ```bash
 # Install Kestrel
-curl --proto '=https' --tlsv1.2 -sSf https://kestrel-lang.com/install.sh | sh
+curl -fsSL https://kestrel-lang.com/install | sh
 
-# Run a program
-kestrel run hello.ks
+# Compile and run a program
+kestrel build hello.ks && ./hello
 
 # Or use Flock (package manager)
-flock new myproject && cd myproject && flock run
+mkdir myproject && cd myproject && flock init && flock run
 ```
 
 Or [build from source](#building-from-source) if you prefer.
@@ -126,8 +129,8 @@ func main() {
 Kestrel ships with **Flock**, a package manager written in Kestrel:
 
 ```bash
-flock init myproject && cd myproject
-flock run
+mkdir myproject && cd myproject
+flock init && flock run
 ```
 
 Available packages:
@@ -143,11 +146,11 @@ Available packages:
 | [kestrel/http](https://kestrel-lang.com/flock/kestrel/http) | Shared HTTP types |
 | [kestrel/plume](https://kestrel-lang.com/flock/kestrel/plume) | Template engine |
 | [kestrel/talon-sqlite](https://kestrel-lang.com/flock/kestrel/talon-sqlite) | SQLite Wrapper |
-| [kestrel/uuid](https://kestrel-lang.com/flock/kestrel/kestrel/uuid) | UUID Type |
-| [kestrel/html-builder](https://kestrel-lang.com/flock/kestrel/kestrel/html-builder) | HTML DSL |
-| [kestrel/sdl](https://kestrel-lang.com/flock/kestrel/kestrel/sdl) | SDL Bindings |
-| [kestrel/crypto](https://kestrel-lang.com/flock/kestrel/kestrel/crypto) | Crypto primitives |
-| [kestrel/datetime](https://kestrel-lang.com/flock/kestrel/kestrel/datetime) | Datetime library |
+| [kestrel/uuid](https://kestrel-lang.com/flock/kestrel/uuid) | UUID Type |
+| [kestrel/html-builder](https://kestrel-lang.com/flock/kestrel/html-builder) | HTML DSL |
+| [kestrel/sdl](https://kestrel-lang.com/flock/kestrel/sdl) | SDL Bindings |
+| [kestrel/crypto](https://kestrel-lang.com/flock/kestrel/crypto) | Crypto primitives |
+| [kestrel/datetime](https://kestrel-lang.com/flock/kestrel/datetime) | Datetime library |
 
 Also included: **Jessup** (toolchain version manager, like rustup).
 

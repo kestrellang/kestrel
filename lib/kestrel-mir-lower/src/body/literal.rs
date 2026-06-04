@@ -6,8 +6,9 @@
 //! - Init calls use StackAlloc (not Uninit) → `emit_call_void` → `emit_take`/`emit_load`
 //! - Stack buffer ops use `emit_op1` / `emit_op2`
 
-use kestrel_ast_builder::{Callable, NodeKind};
+use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hecs::Entity;
+use kestrel_name_res::{ProtocolAssociatedTypes, ResolveBuiltin, extensions::ExtensionsFor};
 use kestrel_hir::body::{HirDictEntry, HirExprId, HirLiteral};
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
@@ -449,34 +450,50 @@ impl OssaBodyCtx<'_, '_> {
 
     /// Find the `init(&mut self, Pointer[T], Int64)` initializer for array
     /// literal lowering. Returns (init entity, element type, type args).
-    fn resolve_array_literal_init(&self, result_ty: TyId) -> Option<(Entity, TyId, Vec<TyId>)> {
+    fn resolve_array_literal_init(&mut self, result_ty: TyId) -> Option<(Entity, TyId, Vec<TyId>)> {
         let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(result_ty) else {
             return None;
         };
         let entity = *entity;
-        let init_func = self.ctx.module.functions.values().find(|f| {
-            let FunctionKind::Initializer { parent } = f.kind else {
-                return false;
-            };
-            self.init_parent_matches(parent, entity)
-                && f.params.len() == 3
-                && matches!(f.params[0].convention, ParamConvention::MutBorrow)
-                && matches!(
-                    self.ctx.module.ty_arena.get(f.params[1].ty),
-                    MirTy::Pointer(_)
-                )
-                && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
-        })?;
+        let init_entity = self
+            .ctx
+            .module
+            .functions
+            .values()
+            .find(|f| {
+                let FunctionKind::Initializer { parent } = f.kind else {
+                    return false;
+                };
+                self.init_parent_matches(parent, entity)
+                    && f.params.len() == 3
+                    && matches!(f.params[0].convention, ParamConvention::MutBorrow)
+                    && matches!(
+                        self.ctx.module.ty_arena.get(f.params[1].ty),
+                        MirTy::Pointer(_)
+                    )
+                    && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
+            })?
+            .entity;
 
         let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-        // Extract element type from result_ty's type args (Array[T] → T),
-        // not the init function's generic param which is unsubstituted.
+        // The element type is the first generic arg for a generic conformer
+        // (Array[T] → T), or the `Element` associated type for a non-generic
+        // one (`struct MyList: _ExpressibleByArrayLiteral` with
+        // `type Element = Int64`). Not the init's own param, which is the
+        // unsubstituted generic param for `Array`.
         let element_ty = match self.ctx.module.ty_arena.get(result_ty) {
             MirTy::Named { type_args, .. } => type_args.first().copied(),
             _ => None,
         };
-        let element_ty = element_ty?;
-        Some((init_func.entity, element_ty, type_args))
+        let element_ty = match element_ty {
+            Some(ty) => ty,
+            None => self.resolve_literal_assoc_type(
+                entity,
+                kestrel_hir::Builtin::InternalExpressibleByArrayLiteral,
+                "Element",
+            )?,
+        };
+        Some((init_entity, element_ty, type_args))
     }
 
     /// Find the `init(&mut self, Pointer[(K,V)], Int64)` initializer for dict
@@ -486,37 +503,102 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         };
         let entity = *entity;
-        let init_func = self.ctx.module.functions.values().find(|f| {
-            let FunctionKind::Initializer { parent } = f.kind else {
-                return false;
-            };
-            if !self.init_parent_matches(parent, entity) || f.params.len() != 3 {
-                return false;
-            }
-            if !matches!(f.params[0].convention, ParamConvention::MutBorrow) {
-                return false;
-            }
-            let MirTy::Pointer(inner) = self.ctx.module.ty_arena.get(f.params[1].ty) else {
-                return false;
-            };
-            let MirTy::Tuple(elems) = self.ctx.module.ty_arena.get(*inner) else {
-                return false;
-            };
-            elems.len() == 2 && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
-        })?;
+        let init_entity = self
+            .ctx
+            .module
+            .functions
+            .values()
+            .find(|f| {
+                let FunctionKind::Initializer { parent } = f.kind else {
+                    return false;
+                };
+                if !self.init_parent_matches(parent, entity) || f.params.len() != 3 {
+                    return false;
+                }
+                if !matches!(f.params[0].convention, ParamConvention::MutBorrow) {
+                    return false;
+                }
+                let MirTy::Pointer(inner) = self.ctx.module.ty_arena.get(f.params[1].ty) else {
+                    return false;
+                };
+                let MirTy::Tuple(elems) = self.ctx.module.ty_arena.get(*inner) else {
+                    return false;
+                };
+                elems.len() == 2 && self.ctx.module.ty_arena.get(f.params[2].ty) == &MirTy::I64
+            })?
+            .entity;
 
         let type_args = self.prepend_receiver_type_args(result_ty, vec![]);
-        // Build the concrete pair type from result_ty's type args (Dict[K, V] → (K, V)),
-        // not the init function's generic param which is unsubstituted.
-        let pair_ty = match self.ctx.module.ty_arena.get(result_ty) {
+        // The (Key, Value) pair comes from result_ty's generic args
+        // (Dict[K, V] → (K, V)) for a generic conformer, or the `Key`/`Value`
+        // associated types for a non-generic one — not the init's own param,
+        // which is the unsubstituted generic pair for `Dictionary`.
+        let kv = match self.ctx.module.ty_arena.get(result_ty) {
             MirTy::Named { type_args, .. } if type_args.len() >= 2 => {
-                let k = type_args[0];
-                let v = type_args[1];
-                self.ctx.module.ty_arena.tuple(vec![k, v])
+                Some((type_args[0], type_args[1]))
             },
-            _ => return None,
+            _ => None,
         };
-        Some((init_func.entity, pair_ty, type_args))
+        let (k, v) = match kv {
+            Some(kv) => kv,
+            None => {
+                let proto = kestrel_hir::Builtin::InternalExpressibleByDictionaryLiteral;
+                let k = self.resolve_literal_assoc_type(entity, proto, "Key")?;
+                let v = self.resolve_literal_assoc_type(entity, proto, "Value")?;
+                (k, v)
+            },
+        };
+        let pair_ty = self.ctx.module.ty_arena.tuple(vec![k, v]);
+        Some((init_entity, pair_ty, type_args))
+    }
+
+    /// Resolve a literal protocol's associated type (e.g. `Element` for
+    /// `_ExpressibleByArrayLiteral`, or `Key`/`Value` for the dictionary
+    /// variant) on a non-generic conforming type, by reading its `type X = ...`
+    /// binding from the type body or one of its extensions. Returns `None` if
+    /// the protocol, the associated member, or the binding can't be found.
+    fn resolve_literal_assoc_type(
+        &mut self,
+        type_entity: Entity,
+        protocol: kestrel_hir::Builtin,
+        assoc_name: &str,
+    ) -> Option<TyId> {
+        let proto_entity = self.ctx.query.query(ResolveBuiltin {
+            builtin: protocol,
+            root: self.ctx.root,
+        })?;
+        let assoc_entity = self
+            .ctx
+            .query
+            .query(ProtocolAssociatedTypes {
+                protocol: proto_entity,
+                root: self.ctx.root,
+            })
+            .into_iter()
+            .find(|m| {
+                self.ctx.world.get::<Name>(m.entity).map(|n| n.0.as_str()) == Some(assoc_name)
+            })?
+            .entity;
+
+        // The binding lives either in the type body (`struct S { type X = ... }`)
+        // or in a conforming extension (`extend S: P { type X = ... }`).
+        if let Some(ty) =
+            crate::items::witness_lower::find_associated_type(self.ctx, type_entity, assoc_entity)
+        {
+            return Some(ty);
+        }
+        let extensions = self.ctx.query.query(ExtensionsFor {
+            target: type_entity,
+            root: self.ctx.root,
+        });
+        for ext in extensions {
+            if let Some(ty) =
+                crate::items::witness_lower::find_associated_type(self.ctx, ext, assoc_entity)
+            {
+                return Some(ty);
+            }
+        }
+        None
     }
 
     /// Check whether an init's parent matches the target type entity, handling
