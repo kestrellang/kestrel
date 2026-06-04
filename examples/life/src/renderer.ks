@@ -71,3 +71,30 @@ struct HeadlessRenderer: GameRenderer {
         println("\(self.width)x\(self.height)  gens=\(state.generation)  elapsed_ms=\(elapsedMs)  gens_per_sec=\(gensPerSec)");
     }
 }
+
+// Combines the headless input source and renderer into one object so the
+// generic `gameLoop` can drive both through a single `mutating app` value,
+// mirroring how SdlGameRenderer serves both roles in the interactive path.
+// Marked `not Copyable` to satisfy gameLoop's `A: not Copyable` bound (see the
+// note there); these helpers are never meant to be copied anyway.
+struct HeadlessApp: GameRenderer, InputManager, not Copyable {
+    var input: HeadlessInputManager
+    var renderer: HeadlessRenderer
+
+    init(config cfg: Config) {
+        self.input = HeadlessInputManager(cfg.headlessIters);
+        self.renderer = HeadlessRenderer(config: cfg);
+    }
+
+    mutating func getEvent() -> Optional[Event] {
+        self.input.getEvent()
+    }
+
+    mutating func render(state: GameState) {
+        self.renderer.render(state);
+    }
+
+    func finish(state: GameState, elapsed elapsedMs: Int64) {
+        self.renderer.finish(state, elapsed: elapsedMs);
+    }
+}
