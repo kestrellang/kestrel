@@ -522,7 +522,7 @@ fn collect_type_links(
                 collect_type_links(world, sources, elem, out);
             }
         },
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function { params, ret, .. } => {
             for p in params {
                 collect_type_links(world, sources, p, out);
             }

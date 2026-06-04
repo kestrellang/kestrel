@@ -256,6 +256,7 @@ impl LiveTracker {
     }
 
     /// Whether `value` is still alive in the forwarded set.
+    #[allow(dead_code)]
     pub fn contains(&self, value: ValueId) -> bool {
         self.slots.iter().any(|s| s.alive && s.value == value)
     }
@@ -606,6 +607,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         kestrel_mir::ty_query::copy_behavior(&self.ctx.module.ty_arena, &self.ctx.module, ty, wc)
     }
 
+    #[allow(dead_code)]
     pub fn is_copy_type(&self, ty: TyId) -> bool {
         matches!(self.copy_behavior_of(ty), CopyBehavior::Bitwise)
     }

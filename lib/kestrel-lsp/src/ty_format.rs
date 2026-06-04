@@ -46,7 +46,7 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             out.push(')');
         },
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function { params, ret, .. } => {
             out.push('(');
             for (i, p) in params.iter().enumerate() {
                 if i > 0 {
