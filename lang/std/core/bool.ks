@@ -137,9 +137,10 @@ public struct Bool:
         if options.debug {
             writer.append("Bool(");
             writer.append(value);
-            writer.appendChar(')')
+            writer.append(char: ')')
         } else {
             writer.append(value)
         }
     }
 }
+// triage-refresh

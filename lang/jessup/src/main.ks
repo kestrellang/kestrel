@@ -1,7 +1,7 @@
 // Jessup - Kestrel version manager
 //
 // Usage:
-//   jessup install <version>     Install a toolchain (stable, nightly, or version)
+//   jessup install <channel>     Install a toolchain (stable, preview, beta, nightly, or a version)
 //   jessup default <version>     Set the default toolchain
 //   jessup list                  Show installed toolchains
 //   jessup update                Update installed channels to latest
@@ -23,12 +23,13 @@ import jessup.toolchain.(installToolchain, setDefault, listToolchains, removeToo
 // ENTRY POINT
 // ============================================================================
 
+@main
 func main() {
     let argv = getArgv();
 
     var installCmd = Command("install");
-    installCmd = installCmd.about("Install a toolchain (stable, nightly, or specific version)");
-    installCmd = installCmd.argument(Argument("channel").toPositional().help("Channel or version to install (e.g., stable, nightly, 1.0.0)").required());
+    installCmd = installCmd.about("Install a toolchain (stable, preview, beta, nightly, or specific version)");
+    installCmd = installCmd.argument(Argument("channel").toPositional().help("Channel or version to install (stable, preview, beta, nightly, or a version like 1.0.0). Defaults to preview.").optional(defaultsTo: "preview"));
 
     var defaultCmd = Command("default");
     defaultCmd = defaultCmd.about("Set the default toolchain");
@@ -92,8 +93,8 @@ func main() {
 // ============================================================================
 
 func handleInstall(matches matches: ArgumentMatches) {
-    // Get channel from submatches
-    var channel = "stable";
+    // Get channel from submatches (the arg defaults to "preview" when omitted).
+    var channel = "preview";
     if matches.submatches.count > 0 {
         let sub = matches.submatches(unchecked: 0);
         match sub.value(of: "channel") {

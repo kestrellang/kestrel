@@ -11,6 +11,7 @@ func withCallback(body: () -> ()) {
     body();
 }
 
+@main
 func main() -> lang.i64 {
     withCallback {
         var y: std.numeric.Int64 = 0;

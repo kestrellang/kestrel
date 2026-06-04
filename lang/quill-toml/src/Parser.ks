@@ -20,6 +20,7 @@ module quill.toml.parser
 
 import quill.value.(Value)
 import quill.toml.error.(TomlParseError)
+import std.text.(decodeUtf8)
 
 // ============================================================================
 // TOML CURSOR
@@ -28,7 +29,7 @@ import quill.toml.error.(TomlParseError)
 /// Mutable cursor tracking the current byte position and line number in a
 /// TOML source string.
 ///
-/// Unlike the JSON parser (which is character-oriented), this parser works
+/// Structural scanning decodes characters via `decodeUtf8`. The parser works
 /// line-by-line: `nextLine()` extracts one logical line at a time, handling
 /// `\n`, `\r\n`, and `\r` line endings.
 ///
@@ -36,7 +37,7 @@ import quill.toml.error.(TomlParseError)
 ///
 /// Four fields: `source` (the full input), `pos` (current byte offset),
 /// `len` (cached `source.byteCount`), and `line` (1-based line counter).
-struct TomlCursor {
+struct TomlCursor: Cloneable {
     var source: String
     var pos: Int64
     var len: Int64
@@ -92,6 +93,15 @@ struct TomlCursor {
 
         .Some((slice.subslice(from: start, to: self.len).toOwned(), lineNum))
     }
+
+    /// Returns a copy of this cursor with the same position and state.
+    func clone() -> TomlCursor {
+        var c = TomlCursor(self.source.clone());
+        c.pos = self.pos;
+        c.len = self.len;
+        c.line = self.line;
+        c
+    }
 }
 
 // ============================================================================
@@ -135,7 +145,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
                 return .Err(TomlParseError("array of tables [[...]] not supported", lineNum))
             }
 
-            match findUnquotedByte(line, 93) {
+            match findUnquotedChar(line, ']') {
                 .Some(endPos) => {
                     currentTable = line.asSlice().subslice(from: 1, to: endPos).trimmed().toOwned();
                     ensureTable(root, currentTable);
@@ -165,7 +175,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
 
 /// Splits a line on the first unquoted `=` and parses key + value.
 func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), TomlParseError] {
-    let eqPos = match findUnquotedByte(line, 61) {
+    let eqPos = match findUnquotedChar(line, '=') {
         .Some(p) => p,
         .None => return .Err(TomlParseError("expected '=' in key-value pair", lineNum))
     };
@@ -191,9 +201,9 @@ func parseKey(s: String) -> String {
 
 /// Finds the byte offset of `target` outside double-quoted regions.
 ///
-/// Tracks quote/escape state so that the byte 34 (`"`) inside a quoted
-/// string is not confused with the target.
-func findUnquotedByte(s: String, target: UInt8) -> Optional[Int64] {
+/// Decodes UTF-8 characters for comparison but returns byte offsets
+/// suitable for `subslice(from:to:)` calls.
+func findUnquotedChar(s: String, target: Char) -> Optional[Int64] {
     let bytes = s.bytes;
     let len = s.byteCount;
     var inQuote = false;
@@ -201,17 +211,24 @@ func findUnquotedByte(s: String, target: UInt8) -> Optional[Int64] {
     var i: Int64 = 0;
 
     while i < len {
-        let b = bytes(unchecked: i);
-        if escaped {
-            escaped = false
-        } else if inQuote and b == 92 {
-            escaped = true
-        } else if b == 34 {
-            inQuote = not inQuote
-        } else if not inQuote and b == target {
-            return .Some(i)
+        match decodeUtf8(bytes.asRaw(), len, at: i) {
+            .Some(decoded) => {
+                let c = decoded.char;
+                if escaped {
+                    escaped = false
+                } else if inQuote and c == '\\' {
+                    escaped = true
+                } else if c == '"' {
+                    inQuote = not inQuote
+                } else if not inQuote and c == target {
+                    return .Some(i)
+                }
+                i = i + decoded.bytesConsumed
+            },
+            .None => {
+                i = i + 1
+            }
         }
-        i = i + 1
     }
 
     .None
@@ -219,7 +236,7 @@ func findUnquotedByte(s: String, target: UInt8) -> Optional[Int64] {
 
 /// Strips an inline comment (`# ...`) from a value string, respecting quotes.
 func stripInlineComment(s: String) -> String {
-    match findUnquotedByte(s, 35) {
+    match findUnquotedChar(s, '#') {
         .Some(pos) => s.asSlice().subslice(from: 0, to: pos).trimmed().toOwned(),
         .None => s
     }
@@ -265,47 +282,49 @@ func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError
     }
 
     var result = String();
-    let slice = s.asSlice();
     let bytes = s.bytes;
+    let len = s.byteCount;
     var i: Int64 = 1;
-    let end = s.byteCount - 1;
-    var segStart: Int64 = 1;
+    let end = len - 1;
 
     while i < end {
-        let b = bytes(unchecked: i);
-        if b == 92 {
-            // flush plain segment before escape
-            if segStart < i {
-                result.append(slice.subslice(from: segStart, to: i).toOwned())
+        match decodeUtf8(bytes.asRaw(), len, at: i) {
+            .Some(decoded) => {
+                let c = decoded.char;
+                if c == '\\' {
+                    i = i + decoded.bytesConsumed;
+                    if i >= end {
+                        return .Err(TomlParseError("unterminated escape in string", lineNum))
+                    }
+                    match decodeUtf8(bytes.asRaw(), len, at: i) {
+                        .Some(escDecoded) => {
+                            let esc = escDecoded.char;
+                            if esc == '"' {
+                                result.append(char: '"')
+                            } else if esc == '\\' {
+                                result.append(char: '\\')
+                            } else if esc == 'n' {
+                                result.append(char: '\n')
+                            } else if esc == 't' {
+                                result.append(char: '\t')
+                            } else if esc == 'r' {
+                                result.append(char: '\r')
+                            } else {
+                                return .Err(TomlParseError("invalid escape sequence", lineNum))
+                            }
+                            i = i + escDecoded.bytesConsumed
+                        },
+                        .None => return .Err(TomlParseError("invalid escape sequence", lineNum))
+                    }
+                } else {
+                    result.append(char: c);
+                    i = i + decoded.bytesConsumed
+                }
+            },
+            .None => {
+                i = i + 1
             }
-            i = i + 1;
-            if i >= end {
-                return .Err(TomlParseError("unterminated escape in string", lineNum))
-            }
-
-            let esc = bytes(unchecked: i);
-            if esc == 34 {
-                result.appendChar('"')
-            } else if esc == 92 {
-                result.appendChar('\\')
-            } else if esc == 110 {
-                result.appendChar('\n')
-            } else if esc == 116 {
-                result.appendChar('\t')
-            } else if esc == 114 {
-                result.appendChar('\r')
-            } else {
-                return .Err(TomlParseError("invalid escape sequence", lineNum))
-            }
-            i = i + 1;
-            segStart = i
-        } else {
-            i = i + 1
         }
-    }
-
-    if segStart < end {
-        result.append(slice.subslice(from: segStart, to: end).toOwned())
     }
 
     .Ok(result)
@@ -330,16 +349,7 @@ func parseTomlNumber(s: String, lineNum: Int64) -> Result[Value, TomlParseError]
 
 /// Returns `true` if the string contains `.`, `e`, or `E` (float indicators).
 func containsFloatMarker(s: String) -> Bool {
-    let bytes = s.bytes;
-    var i: Int64 = 0;
-    while i < s.byteCount {
-        let b = bytes(unchecked: i);
-        if b == 46 or b == 101 or b == 69 {
-            return true
-        }
-        i = i + 1
-    }
-    false
+    s.contains(where: { (c) in c == '.' or c == 'e' or c == 'E' })
 }
 
 /// Parses a TOML inline array (`[value, ...]`).
@@ -407,24 +417,31 @@ func splitTomlItems(s: String) -> Array[String] {
     let slice = s.asSlice();
 
     while i < len {
-        let b = bytes(unchecked: i);
-        if escaped {
-            escaped = false
-        } else if inQuote and b == 92 {
-            escaped = true
-        } else if b == 34 {
-            inQuote = not inQuote
-        } else if not inQuote {
-            if b == 91 or b == 123 {
-                depth = depth + 1
-            } else if b == 93 or b == 125 {
-                depth = depth - 1
-            } else if b == 44 and depth == 0 {
-                parts.append(slice.subslice(from: start, to: i).toOwned());
-                start = i + 1
+        match decodeUtf8(bytes.asRaw(), len, at: i) {
+            .Some(decoded) => {
+                let c = decoded.char;
+                if escaped {
+                    escaped = false
+                } else if inQuote and c == '\\' {
+                    escaped = true
+                } else if c == '"' {
+                    inQuote = not inQuote
+                } else if not inQuote {
+                    if c == '[' or c == '{' {
+                        depth = depth + 1
+                    } else if c == ']' or c == '}' {
+                        depth = depth - 1
+                    } else if c == ',' and depth == 0 {
+                        parts.append(slice.subslice(from: start, to: i).toOwned());
+                        start = i + decoded.bytesConsumed
+                    }
+                }
+                i = i + decoded.bytesConsumed
+            },
+            .None => {
+                i = i + 1
             }
         }
-        i = i + 1
     }
 
     if start < len {
@@ -533,7 +550,7 @@ func tomlParseFloat(s: String) -> Optional[Float64] {
     var iter = s.chars.iter();
     while let .Some(c) = iter.next() {
         if c != '_' {
-            cleaned.appendChar(c)
+            cleaned.append(char: c)
         }
     }
 

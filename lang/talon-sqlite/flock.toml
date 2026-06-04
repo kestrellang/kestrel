@@ -1,0 +1,12 @@
+[package]
+name = "talon-sqlite"
+version = "0.1.0"
+description = "SQLite database library for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]
+
+[build]
+link = ["sqlite3"]

@@ -7,6 +7,7 @@ struct Counter {
     var value: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     var c = Counter(value: 0);
     c.value = 42;

@@ -15,6 +15,7 @@ func apply_or_default[T](opt: OptionalTransform[T], x: T, default: T) -> T {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let transform = OptionalTransform[std.numeric.Int64].Some(f: { (x) in x * 2 });
     let none = OptionalTransform[std.numeric.Int64].None;

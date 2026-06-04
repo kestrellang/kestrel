@@ -65,6 +65,24 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -85,6 +103,16 @@ Alignment.Left.isEqual(to: .Center);  // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -159,6 +187,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -169,7 +215,25 @@ Returns true if the two indices wrap the same byte offset.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -180,6 +244,76 @@ public func compare(ByteIndex) -> Ordering
 Compares two byte indices by their wrapped offsets.
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `BytesIndex`
 
@@ -280,6 +414,507 @@ The element type yielded by `next()` — always `UInt8`.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -291,6 +926,324 @@ Returns the next byte, or `None` once `index` reaches `length`.
 Each call reads one byte and advances the cursor by 1.
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## protocol `BytesSubstringIndex`
 
@@ -416,6 +1369,18 @@ sub-view aliases out-of-bounds memory.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.BytesWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.bytes(wrapped: -1)` reads the last byte.
+Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### function `asRaw`
 
 ```kestrel
@@ -505,7 +1470,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: BytesSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: BytesSubstringIndex
 ```
 
 Convenience: dispatches to a `BytesSubstringIndex` to produce
@@ -625,24 +1590,55 @@ let c: Char = 'a';  // lowers to Char(charLiteral: ...)
 
 _Defined in `lang/std/text/char.ks`._
 
+#### initializer `From Digit`
+
+```kestrel
+public init(fromDigit: UInt32)
+```
+
+Returns the ASCII digit `Char` for a numeric value `0`–`9`, `null` otherwise.
+
+Inverse of `digitValue`. Values outside `0..=9` return `null`.
+
+##### Examples
+
+```
+Char(fromDigit: 7);   // Some('7')
+Char(fromDigit: 12);  // None
+```
+
+_Defined in `lang/std/text/char.ks`._
+
 #### initializer `From Value`
 
 ```kestrel
 public init(UInt32)
 ```
 
-Wraps a raw `UInt32` scalar value as a `Char`.
-
-No range or surrogate validation is performed; pass values you
-already know are valid Unicode scalars. Prefer the literal syntax
-(`'a'`, `'\u{...}'`) when the value is known at compile time.
+Returns a `Char` if the value is a valid Unicode scalar, `null` otherwise.
+Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
 
 ##### Examples
 
 ```
-let c = Char(value: UInt32(intLiteral: 0x41));
-c == 'A';  // true
+let c = Char(65);      // Some('A')
+let bad = Char(0xD800); // None (surrogate)
 ```
+
+_Defined in `lang/std/text/char.ks`._
+
+#### initializer `Unchecked`
+
+```kestrel
+public init(unchecked: UInt32)
+```
+
+Wraps a raw `UInt32` scalar value as a `Char` without validation.
+
+##### Safety
+
+The caller must ensure `value` is a valid Unicode scalar
+(0..=0x10FFFF, excluding surrogates U+D800..U+DFFF).
 
 _Defined in `lang/std/text/char.ks`._
 
@@ -662,25 +1658,6 @@ Inverse of `fromDigit`. Non-ASCII digit characters return `None`
 ```
 '7'.digitValue();  // Some(7)
 'a'.digitValue();  // None
-```
-
-_Defined in `lang/std/text/char.ks`._
-
-#### function `fromDigit`
-
-```kestrel
-public static func fromDigit(UInt32) -> Char?
-```
-
-Returns the ASCII digit `Char` for a numeric value `0`–`9`, otherwise `None`.
-
-Inverse of `digitValue`. Values outside `0..=9` return `None`.
-
-##### Examples
-
-```
-Char.fromDigit(7);   // Some('7')
-Char.fromDigit(12);  // None
 ```
 
 _Defined in `lang/std/text/char.ks`._
@@ -1036,17 +2013,6 @@ size buffers before calling `encodeUtf8`.
 
 _Defined in `lang/std/text/char.ks`._
 
-#### function `validated`
-
-```kestrel
-public static func validated(UInt32) -> Char?
-```
-
-Returns a `Char` if the value is a valid Unicode scalar, `.None` otherwise.
-Rejects values > U+10FFFF and the surrogate range U+D800..U+DFFF.
-
-_Defined in `lang/std/text/char.ks`._
-
 #### function `value`
 
 ```kestrel
@@ -1069,6 +2035,24 @@ _Defined in `lang/std/text/char.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -1088,7 +2072,25 @@ Pure scalar-value equality — no case folding, no normalization.
 
 _Defined in `lang/std/text/char.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -1111,6 +2113,76 @@ collation.
 ```
 
 _Defined in `lang/std/text/char.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -1193,6 +2265,20 @@ public func format(into: mutating StringBuilder, FormatOptions)
 
 _Defined in `lang/std/text/char.ks`._
 
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
+
 ## struct `CharIndex`
 
 ```kestrel
@@ -1247,6 +2333,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -1257,7 +2361,25 @@ Returns true if the two indices point at the same byte offset.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -1266,6 +2388,76 @@ public func compare(CharIndex) -> Ordering
 ```
 
 _Defined in `lang/std/text/slice.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `CharsIndex`
 
@@ -1359,6 +2551,507 @@ The element type yielded by `next()` — always `Char`.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -1372,6 +3065,324 @@ On invalid UTF-8 the iterator yields the replacement character
 progress without aborting.
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## protocol `CharsSubstringIndex`
 
@@ -1477,6 +3488,18 @@ variable-width. Panics on out-of-bounds.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.CharsWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.chars(wrapped: -1)` reads the last char.
+Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -1518,7 +3541,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(matching: (Char) -> Bool) -> CharIndex?
+public func firstIndex(where: (Char) -> Bool) -> CharIndex?
 ```
 
 Returns the index of the first code point matching `predicate`, or `.None`.
@@ -1580,7 +3603,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `lastIndex`
 
 ```kestrel
-public func lastIndex(matching: (Char) -> Bool) -> CharIndex?
+public func lastIndex(where: (Char) -> Bool) -> CharIndex?
 ```
 
 Returns the index of the last code point matching `predicate`, or `.None`.
@@ -1620,7 +3643,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: CharsSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: CharsSubstringIndex
 ```
 
 Convenience: dispatches to a `CharsSubstringIndex` to produce
@@ -1735,6 +3758,16 @@ acc.build();  // ""
 
 _Defined in `lang/std/text/format.ks`._
 
+#### function `appendInterpolation`
+
+```kestrel
+public mutating func appendInterpolation[__opaque_0](__opaque_0, FormatOptions) where __opaque_0: Formattable
+```
+
+Formats one interpolation hole directly into the buffer.
+
+_Defined in `lang/std/text/format.ks`._
+
 #### function `build`
 
 ```kestrel
@@ -1759,7 +3792,7 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `With Capacity`
 
 ```kestrel
-init(Int64, Int64)
+init(literalCapacity: Int64, interpolationCount: Int64)
 ```
 
 Constructs an empty accumulator with capacity hints derived from the literal at compile time.
@@ -1767,16 +3800,6 @@ Constructs an empty accumulator with capacity hints derived from the literal at 
 `literalCapacity` is the total byte count of the static segments;
 `interpolationCount` is the number of `\{...}` holes. Implementors
 can use these to preallocate.
-
-_Defined in `lang/std/text/format.ks`._
-
-#### function `appendInterpolation`
-
-```kestrel
-public mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
-```
-
-Formats one interpolation hole directly into the buffer.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -1844,7 +3867,7 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `String Literal`
 
 ```kestrel
-init(stringLiteral: lang.str)
+init(stringLiteral: lang.ptr[lang.i8], lang.i64)
 ```
 
 Builds an instance from a string literal.
@@ -1934,6 +3957,24 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -1952,6 +3993,16 @@ FloatStyle.Fixed.isEqual(to: .Scientific);  // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -2163,6 +4214,24 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -2187,6 +4256,16 @@ a.isEqual(to: c);  // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ## protocol `Formattable`
 
@@ -2385,6 +4464,24 @@ _Defined in `lang/std/text/char.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -2408,6 +4505,16 @@ a.isEqual(to: b);  // true
 
 _Defined in `lang/std/text/char.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Cloneable`
 
 #### function `clone`
@@ -2422,6 +4529,14 @@ _Defined in `lang/std/text/char.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -2429,6 +4544,76 @@ public func compare(Grapheme) -> Ordering
 ```
 
 _Defined in `lang/std/text/char.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Hashable`
 
@@ -2449,6 +4634,20 @@ public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 _Defined in `lang/std/text/char.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ## struct `GraphemeIndex`
 
@@ -2512,6 +4711,24 @@ _Defined in `lang/std/text/views.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -2522,7 +4739,25 @@ Returns true if the two indices point at the same byte offset.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -2531,6 +4766,76 @@ public func compare(GraphemeIndex) -> Ordering
 ```
 
 _Defined in `lang/std/text/slice.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ## struct `GraphemesIterator`
 
@@ -2591,6 +4896,507 @@ The element type yielded by `next()` — always `Grapheme`.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -2604,6 +5410,324 @@ boundary, then returns them as a `Grapheme`. The look-ahead
 char that triggered the break is held back for the next call.
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## protocol `GraphemesSubstringIndex`
 
@@ -2702,6 +5826,18 @@ start. Panics on out-of-bounds.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.GraphemesWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.graphemes(wrapped: -1)` reads the last
+grapheme cluster. Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -2739,7 +5875,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `firstIndex`
 
 ```kestrel
-public func firstIndex(matching: (Grapheme) -> Bool) -> GraphemeIndex?
+public func firstIndex(where: (Grapheme) -> Bool) -> GraphemeIndex?
 ```
 
 Returns the index of the first grapheme matching `predicate`, or `.None`.
@@ -2814,7 +5950,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: GraphemesSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: GraphemesSubstringIndex
 ```
 
 Convenience: dispatches to a `GraphemesSubstringIndex` to
@@ -2908,6 +6044,507 @@ type Item = (CharIndex, Char)
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -2915,6 +6552,324 @@ public mutating func next() -> (CharIndex, Char)?
 ```
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## struct `IndexedGraphemesIterator`
 
@@ -2947,6 +6902,507 @@ type Item = (GraphemeIndex, Grapheme)
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -2954,6 +7410,324 @@ public mutating func next() -> (GraphemeIndex, Grapheme)?
 ```
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## struct `IndexedLinesIterator`
 
@@ -2986,6 +7760,507 @@ type Item = (LineIndex, String)
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -2993,6 +8268,324 @@ public mutating func next() -> (LineIndex, String)?
 ```
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## protocol `Interpolatable`
 
@@ -3017,7 +8610,7 @@ _Defined in `lang/std/text/format.ks`._
 #### initializer `With Capacity`
 
 ```kestrel
-init(Int64, Int64)
+init(literalCapacity: Int64, interpolationCount: Int64)
 ```
 
 Constructs an empty accumulator with capacity hints derived from the literal at compile time.
@@ -3025,20 +8618,6 @@ Constructs an empty accumulator with capacity hints derived from the literal at 
 `literalCapacity` is the total byte count of the static segments;
 `interpolationCount` is the number of `\{...}` holes. Implementors
 can use these to preallocate.
-
-_Defined in `lang/std/text/format.ks`._
-
-#### function `appendInterpolation`
-
-```kestrel
-mutating func appendInterpolation[T](T, FormatOptions) where T: Formattable
-```
-
-Appends one formatted interpolation hole.
-
-Receives the runtime `value`, the parsed `options` from the
-trailing spec (or defaults if no spec was given), and a generic
-constraint that the value is `Formattable`.
 
 _Defined in `lang/std/text/format.ks`._
 
@@ -3107,6 +8686,24 @@ _Defined in `lang/std/text/slice.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -3115,7 +8712,25 @@ public func isEqual(to: LineIndex) -> Bool
 
 _Defined in `lang/std/text/slice.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -3124,6 +8739,76 @@ public func compare(LineIndex) -> Ordering
 ```
 
 _Defined in `lang/std/text/slice.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ## struct `LinesIterator`
 
@@ -3188,6 +8873,507 @@ The element type yielded by `next()` — always `String`.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -3201,6 +9387,324 @@ single terminator. The yielded string contains the bytes up
 to but not including the terminator.
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## protocol `LinesSubstringIndex`
 
@@ -3306,6 +9810,18 @@ start. Panics on out-of-bounds.
 
 _Defined in `lang/std/text/views.ks`._
 
+#### subscript `Wrapping`
+
+```kestrel
+public subscript[I](wrapped: I) -> I.LinesWrappedYield { get }
+```
+
+Reads at `index` with modulo wrap-around. Negative indices wrap
+from the end: `view.lines(wrapped: -1)` reads the last line.
+Returns `None` on an empty view.
+
+_Defined in `lang/std/text/views.ks`._
+
 #### field `count`
 
 ```kestrel
@@ -3396,7 +9912,7 @@ _Defined in `lang/std/text/views.ks`._
 #### function `substring`
 
 ```kestrel
-public func substring[I](I) -> String where I: LinesSubstringIndex
+public func substring[__opaque_0](__opaque_0) -> String where __opaque_0: LinesSubstringIndex
 ```
 
 Convenience: dispatches to a `LinesSubstringIndex` to produce
@@ -3492,6 +10008,507 @@ type Item = Char
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -3499,6 +10516,324 @@ public mutating func next() -> Char?
 ```
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ## struct `ReversedCharsView`
 
@@ -3654,6 +10989,24 @@ _Defined in `lang/std/text/format.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -3673,6 +11026,16 @@ Sign.Negative.isEqual(to: .Always);   // false
 ```
 
 _Defined in `lang/std/text/format.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -3843,6 +11206,507 @@ type Item = StringSlice
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -3850,6 +11714,324 @@ public mutating func next() -> StringSlice?
 ```
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ### Implements `Cloneable`
 
@@ -3915,7 +12097,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: StringSlice, matching: (Char) -> Bool)
+public init(slice: StringSlice, where: (Char) -> Bool)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -3993,7 +12175,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: StringSlice, matching: (Char) -> Bool)
+public init(slice: StringSlice, where: (Char) -> Bool)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4008,6 +12190,507 @@ type Item = StringSlice
 
 _Defined in `lang/std/text/views.ks`._
 
+#### typealias `TargetIterator`
+
+```kestrel
+type TargetIterator = Self
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `all`
+
+```kestrel
+public mutating func all(where: (Item) -> Bool) -> Bool
+```
+
+True if every element satisfies `predicate`. Stops at the first
+failure. True for an empty iterator (vacuous truth).
+
+##### Examples
+
+```
+[2, 4, 6].iter().all { it % 2 == 0 };   // true
+[2, 3, 4].iter().all { it % 2 == 0 };   // false (stops at 3)
+[].iter().all { false };                // true (empty)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `any`
+
+```kestrel
+public mutating func any(where: (Item) -> Bool) -> Bool
+```
+
+True if any element satisfies `predicate`. Stops at the first
+match. False for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().any { it > 3 };    // true (stops at 4)
+[1, 2, 3].iter().any { it > 10 };      // false
+[].iter().any { true };                // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `chain`
+
+```kestrel
+public func chain[Other](Other) -> ChainIterator[Self, Other] where Other: Iterator, Other.Item == Item
+```
+
+Yields all of `self`, then all of `other`. Both must produce the
+same `Item` type.
+
+##### Examples
+
+```
+[1, 2].iter().chain([3, 4].iter()).collect();   // [1, 2, 3, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `collect`
+
+```kestrel
+public consuming func collect() -> Array[Item]
+```
+
+Drains the iterator into an `Array[Item]`. Eager and `O(n)`. Use
+at the end of an adapter chain to materialise the result.
+
+##### Examples
+
+```
+[1, 2, 3].iter().filter { it > 1 }.collect();   // [2, 3]
+(1..5).iter().map { it * it }.collect();        // [1, 4, 9, 16]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `compactMap`
+
+```kestrel
+public func compactMap[T]() -> FilterMapIterator[Self, T] where Item == Optional[T]
+```
+
+Drops `None`s and unwraps `Some`s — the identity-transform special
+case of `filterMap`. Available when the iterator already yields
+optionals.
+
+##### Examples
+
+```
+let xs: [Int64?] = [.Some(1), .None, .Some(2), .None, .Some(3)];
+xs.iter().compactMap().collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `contains`
+
+```kestrel
+public mutating func contains(Item) -> Bool
+```
+
+True if any element equals `element`. Short-circuits.
+
+##### Examples
+
+```
+[1, 2, 3].iter().contains(2);   // true
+[1, 2, 3].iter().contains(5);   // false
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `count`
+
+```kestrel
+public consuming func count() -> Int64
+```
+
+Counts the elements by walking the whole iterator. `O(n)` — for
+types that already know their length, prefer
+`ExactSizeIterator.remaining`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.count();   // 2
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `cycle`
+
+```kestrel
+public func cycle() -> CycleIterator[Self]
+```
+
+Restarts iteration from the beginning whenever the inner iterator
+is exhausted, producing an infinite sequence. Always combine with
+`take` (or another short-circuiting consumer) — otherwise the
+result is unbounded.
+
+##### Examples
+
+```
+[1, 2, 3].iter().cycle().take(7).collect();
+// [1, 2, 3, 1, 2, 3, 1]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `enumerate`
+
+```kestrel
+public func enumerate() -> EnumerateIterator[Self]
+```
+
+Pairs each element with its zero-based position.
+
+##### Examples
+
+```
+for (i, item) in arr.iter().enumerate() {
+    print("Index \{i}: \{item}")
+};
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filter`
+
+```kestrel
+public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+```
+
+Yields only elements where `predicate` returns `true`. Lazy —
+elements are tested as they're pulled.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `filterMap`
+
+```kestrel
+public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+```
+
+Combined map + filter — `transform` returns `Optional[U]`; `None`
+values are skipped. Use over `map(...).filter(...)` when the
+transform itself decides whether the element belongs.
+
+##### Examples
+
+```
+["1", "two", "3"].iter()
+    .filterMap { Int64.parse(it) }
+    .collect();   // [1, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `first`
+
+```kestrel
+public mutating func first(where: (Item) -> Bool) -> Item?
+```
+
+First element matching `predicate`, or `None`. Stops at the first
+match.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().first { it > 3 };   // Some(4)
+[1, 2, 3].iter().first { it > 10 };        // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public mutating func firstIndex(where: (Item) -> Bool) -> Int64?
+```
+
+Index of the first element matching `predicate`, or `None`.
+
+##### Examples
+
+```
+["a", "b", "c"].iter().firstIndex(where: { it == "b" });   // Some(1)
+[1, 2, 3].iter().firstIndex(where: { it > 10 });           // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatMap`
+
+```kestrel
+public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+```
+
+Maps each element to an iterator and concatenates the results.
+The monadic bind for iterators.
+
+##### Examples
+
+```
+[[1, 2], [3, 4], [5]].iter()
+    .flatMap { it.iter() }
+    .collect();   // [1, 2, 3, 4, 5]
+```
+
+```
+// Conditional expand — drop odd, double even
+[1, 2, 3].iter()
+    .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
+    .collect();   // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `flatten`
+
+```kestrel
+public func flatten() -> FlattenIterator[Self]
+```
+
+Concatenates the inner iterators into one flat stream. Each inner
+iterator is fully drained before moving to the next. The
+already-have-iterators counterpart of `flatMap`.
+
+##### Examples
+
+```
+let nested = [[1, 2], [3, 4], [5]].iter().map { it.iter() };
+nested.flatten().collect();   // [1, 2, 3, 4, 5]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fold`
+
+```kestrel
+public consuming func fold[Acc](from: Acc, by: (Acc, Item) -> Acc) -> Acc
+```
+
+Left fold — start at `initial` and walk left to right, applying
+`combine(acc, element)`. Returns `initial` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().fold(from: 0) { (acc, x) in acc + x };   // 10
+[1, 2, 3].iter().fold(from: 1) { (acc, x) in acc * x };      // 6
+[].iter().fold(from: 42) { (acc, x) in acc + x };            // 42
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `forEach`
+
+```kestrel
+public consuming func forEach((Item) -> ())
+```
+
+Calls `action` on every element, discarding return values. Use
+`tryForEach` if you need to short-circuit on failure.
+
+##### Examples
+
+```
+[1, 2, 3].iter().forEach { print(it) };
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `fuse`
+
+```kestrel
+public func fuse() -> FusedIterator[Self]
+```
+
+Locks `None` once seen — protects against iterators that aren't
+fused (i.e. that may produce more elements after returning `None`
+once). After the first `None`, this adapter returns `None`
+forever.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `inspect`
+
+```kestrel
+public func inspect((Item) -> ()) -> InspectIterator[Self]
+```
+
+Calls `inspector` on each element as it flows through, leaving
+the value otherwise untouched. Useful for logging or
+instrumenting an adapter chain mid-pipeline.
+
+##### Examples
+
+```
+[1, 2, 3].iter()
+    .inspect { print("before filter: \{it}") }
+    .filter { it > 1 }
+    .inspect { print("after filter: \{it}") }
+    .collect();
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperse`
+
+```kestrel
+public func intersperse(with: Item) -> IntersperseIterator[Self]
+```
+
+Inserts `separator` between consecutive elements. Empty inputs
+stay empty; single-element inputs get no separator.
+
+##### Examples
+
+```
+[1, 2, 3].iter().intersperse(with: 0).collect();
+// [1, 0, 2, 0, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `intersperseWith`
+
+```kestrel
+public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+```
+
+Like `intersperse`, but builds each separator on demand by calling
+`separator()`. Use when the separator is expensive or needs to
+vary by call.
+
+##### Examples
+
+```
+var counter = 0;
+[1, 2, 3].iter()
+    .intersperseWith { counter += 1; counter * 10 }
+    .collect();   // [1, 10, 2, 20, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSorted`
+
+```kestrel
+public consuming func isSorted() -> Bool
+```
+
+True if elements come out in ascending order. True for empty or
+single-element iterators (vacuous). Short-circuits on the first
+out-of-order pair.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().isSorted();   // true
+[1, 3, 2, 4, 5].iter().isSorted();   // false
+[1, 1, 2, 2, 3].iter().isSorted();   // true (equal allowed)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `isSortedDescending`
+
+```kestrel
+public consuming func isSortedDescending() -> Bool
+```
+
+True if elements come out in descending order. Mirror of
+`isSorted`.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `iter`
+
+```kestrel
+func iter() -> Self
+```
+
+Returns `self`. The blanket conformance pivot — iterators *are*
+iterables.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `last`
+
+```kestrel
+public consuming func last() -> Item?
+```
+
+Last element, or `None` if empty. Consumes the entire iterator —
+`O(n)` even for sequences whose last element is cheap to address
+directly.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `map`
+
+```kestrel
+public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+```
+
+Applies `transform` to each element. Lazy — the function only
+fires when the downstream pulls a value.
+
+##### Examples
+
+```
+[1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
+["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `max`
+
+```kestrel
+public consuming func max() -> Item?
+```
+
+Largest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `min`
+
+```kestrel
+public consuming func min() -> Item?
+```
+
+Smallest element, or `None` for an empty iterator. Ties go to the
+first occurrence.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().min();   // Some(1)
+[].iter().min();                // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
 #### function `next`
 
 ```kestrel
@@ -4015,6 +12698,324 @@ public mutating func next() -> StringSlice?
 ```
 
 _Defined in `lang/std/text/views.ks`._
+
+#### function `nth`
+
+```kestrel
+public mutating func nth(Int64) -> Item?
+```
+
+Returns the element at index `n` (zero-based), consuming
+everything up to and including it. `None` if `n` is past the end.
+
+##### Examples
+
+```
+[10, 20, 30, 40].iter().nth(2);   // Some(30)
+[10, 20].iter().nth(5);           // None
+[10, 20, 30].iter().nth(0);       // Some(10)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `peekable`
+
+```kestrel
+public func peekable() -> PeekableIterator[Self]
+```
+
+Wraps `self` so you can look at the next element without
+consuming it.
+
+##### Examples
+
+```
+var it = [1, 2, 3].iter().peekable();
+it.peek();   // Some(1) — no consumption
+it.peek();   // Some(1) — still
+it.next();   // Some(1) — now consumed
+it.peek();   // Some(2)
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `product`
+
+```kestrel
+public consuming func product() -> Item
+```
+
+Product of every element. Returns `Item.one` for an empty
+iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().product();   // 120
+(1..=5).iter().product();           // 120  (5!)
+[].iter().product();                // 1
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `reduce`
+
+```kestrel
+public consuming func reduce(by: (Item, Item) -> Item) -> Item?
+```
+
+Like `fold`, but seeds the accumulator with the first element
+instead of taking an explicit `initial`. Returns `None` for an
+empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4].iter().reduce { (a, b) in a + b };   // Some(10)
+[5].iter().reduce { (a, b) in a + b };            // Some(5)
+[].iter().reduce { (a, b) in a + b };             // None
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `scan`
+
+```kestrel
+public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+```
+
+Like `fold`, but yields each intermediate accumulator value
+instead of just the final one. Useful for prefix sums, running
+products, and any "carry state along" pattern.
+
+##### Examples
+
+```
+// Running sum
+[1, 2, 3, 4].iter()
+    .scan(from: 0) { (acc, x) in acc + x }
+    .collect();   // [1, 3, 6, 10]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skip`
+
+```kestrel
+public func skip(Int64) -> SkipIterator[Self]
+```
+
+Drops the first `count` elements, then yields the rest.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().skip(2).collect();   // [3, 4, 5]
+[1, 2].iter().skip(10).collect();           // []
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `skipWhile`
+
+```kestrel
+public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+```
+
+Drops elements while `predicate` is `true`, then yields *every*
+remaining element (including ones that would also satisfy the
+predicate). Mirror of `takeWhile`.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .skipWhile { it < 3 }
+    .collect();   // [3, 4, 1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sorted`
+
+```kestrel
+public consuming func sorted() -> Array[Item]
+```
+
+Collects into an `Array[Item]`, sorted ascending. Eager and
+`O(n log n)` — calls `Array.sort(by:)` after `collect()`.
+
+##### Examples
+
+```
+[3, 1, 4, 1, 5].iter().sorted();                       // [1, 1, 3, 4, 5]
+[3, 1, 2].iter().filter { it > 1 }.sorted();          // [2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `stepBy`
+
+```kestrel
+public func stepBy(Int64) -> StepByIterator[Self]
+```
+
+Yields every `n`-th element, starting at the first. `n == 0` is
+undefined (the adapter will spin forever).
+
+##### Examples
+
+```
+[0, 1, 2, 3, 4, 5, 6].iter().stepBy(2).collect();   // [0, 2, 4, 6]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `sum`
+
+```kestrel
+public consuming func sum() -> Item
+```
+
+Sum of every element. Returns `Item.zero` for an empty iterator.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().sum();    // 15
+[1.5, 2.5, 3.0].iter().sum();    // 7.0
+[].iter().sum();                 // 0
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `take`
+
+```kestrel
+public func take(Int64) -> TakeIterator[Self]
+```
+
+Yields at most the first `count` elements; stops early even if
+more are available.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 5].iter().take(3).collect();   // [1, 2, 3]
+[1, 2].iter().take(10).collect();           // [1, 2]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `takeWhile`
+
+```kestrel
+public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+```
+
+Yields elements until `predicate` first returns `false`, then
+stops. The "first failing" element is *not* yielded.
+
+##### Examples
+
+```
+[1, 2, 3, 4, 1, 2].iter()
+    .takeWhile { it < 4 }
+    .collect();   // [1, 2, 3]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryFold`
+
+```kestrel
+public mutating func tryFold[Acc, E](from: Acc, by: (Acc, Item) -> Result[Acc, E]) -> Result[Acc, E]
+```
+
+Fold with early exit on `Err`. The combine returns `Result`; the
+first `Err` halts iteration and is returned. If everything
+succeeds, returns `Ok(final accumulator)`.
+
+##### Examples
+
+```
+// Stop the moment a parse fails
+["1", "2", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Ok(6)
+
+["1", "bad", "3"].iter()
+    .tryFold(from: 0) { (acc, s) in
+        match Int64.parse(s) {
+            .Some(n) => .Ok(acc + n),
+            .None    => .Err("parse error")
+        }
+    };   // Err("parse error")
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `tryForEach`
+
+```kestrel
+public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+```
+
+`forEach` with early exit on `Err`. Mirror of `tryFold` for the
+"do something with each element" shape.
+
+##### Examples
+
+```
+files.iter().tryForEach { (path) in
+    File.delete(path)   // Result[(), IoError]
+};   // stops on first failure
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `unzip`
+
+```kestrel
+public consuming func unzip[A, B]() -> (Array[A], Array[B]) where Item == (A, B)
+```
+
+Splits an iterator of pairs into two parallel arrays. Inverse of
+`zip`.
+
+##### Examples
+
+```
+let pairs = [(1, "a"), (2, "b"), (3, "c")];
+let (nums, strs) = pairs.iter().unzip();
+// nums = [1, 2, 3], strs = ["a", "b", "c"]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
+
+#### function `zip`
+
+```kestrel
+public func zip[Other](Other) -> ZipIterator[Self, Other] where Other: Iterator
+```
+
+Pairs elements from `self` and `other`. Stops as soon as either
+side runs out.
+
+##### Examples
+
+```
+let names = ["Alice", "Bob", "Charlie"];
+let ages  = [30, 25, 35];
+names.iter().zip(ages.iter()).collect();
+// [("Alice", 30), ("Bob", 25), ("Charlie", 35)]
+```
+
+_Defined in `lang/std/iter/iterator.ks`._
 
 ### Implements `Cloneable`
 
@@ -4141,7 +13142,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `contains`
 
 ```kestrel
-public func contains(matching: (Char) -> Bool) -> Bool
+public func contains(where: (Char) -> Bool) -> Bool
 ```
 
 Returns true if any code point matches `predicate`.
@@ -4149,7 +13150,7 @@ Returns true if any code point matches `predicate`.
 ##### Examples
 
 ```
-"abc123".contains(matching: { (c) in c.isAsciiDigit });  // true
+"abc123".contains(where: { (c) in c.isAsciiDigit });  // true
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4432,7 +13433,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `split`
 
 ```kestrel
-public func split(matching: (Char) -> Bool) -> SplitWhereView
+public func split(where: (Char) -> Bool) -> SplitWhereView
 ```
 
 Returns a lazy view that splits at every code point matching
@@ -4443,7 +13444,7 @@ The matching characters are not included in any segment.
 ##### Examples
 
 ```
-"hello world".split(matching: { (c) in c.isWhitespace }).count;  // 2
+"hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4535,7 +13536,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `trimmed`
 
 ```kestrel
-public func trimmed(matching: (Char) -> Bool) -> StringSlice
+public func trimmed(where: (Char) -> Bool) -> StringSlice
 ```
 
 Returns a zero-copy slice with leading and trailing code points
@@ -4548,7 +13549,7 @@ is the last character that does *not* match.
 ##### Examples
 
 ```
-"00042".trimmed(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
+"00042".trimmed(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "42"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4575,7 +13576,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `trimmedEnd`
 
 ```kestrel
-public func trimmedEnd(matching: (Char) -> Bool) -> StringSlice
+public func trimmedEnd(where: (Char) -> Bool) -> StringSlice
 ```
 
 Returns a zero-copy slice with trailing code points matching
@@ -4584,7 +13585,7 @@ Returns a zero-copy slice with trailing code points matching
 ##### Examples
 
 ```
-"abc000".trimmedEnd(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+"abc000".trimmedEnd(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4611,7 +13612,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `trimmedStart`
 
 ```kestrel
-public func trimmedStart(matching: (Char) -> Bool) -> StringSlice
+public func trimmedStart(where: (Char) -> Bool) -> StringSlice
 ```
 
 Returns a zero-copy slice with leading code points matching
@@ -4620,7 +13621,7 @@ Returns a zero-copy slice with leading code points matching
 ##### Examples
 
 ```
-"000abc".trimmedStart(matching: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
+"000abc".trimmedStart(where: { (c) in c.isEqual(to: '0') }).toOwned();  // "abc"
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -4710,6 +13711,24 @@ _Defined in `lang/std/text/str.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -4730,7 +13749,25 @@ case-insensitive comparison, see `equalsCaseInsensitive`.
 
 _Defined in `lang/std/text/str.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -4752,6 +13789,76 @@ shorter is less.
 ```
 
 _Defined in `lang/std/text/str.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Hashable`
 
@@ -4782,6 +13889,20 @@ Formats the string using the given options.
 ```
 
 _Defined in `lang/std/text/str.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ## struct `String`
 
@@ -4923,6 +14044,54 @@ and other std.text code that constructs strings from raw storage.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### initializer `From UTF-8`
+
+```kestrel
+public init[S](fromUtf8: S) where S: Slice[UInt8]
+```
+
+Constructs a string from validated UTF-8 bytes, returning `null`
+if the input is not valid UTF-8.
+
+##### Examples
+
+```
+let s = String(fromUtf8: "héllo".bytes);  // Some("héllo")
+```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### initializer `From UTF-8 Lossy`
+
+```kestrel
+public init[S](fromUtf8Lossy: S) where S: Slice[UInt8]
+```
+
+Constructs a string from bytes, replacing invalid UTF-8 sequences
+with the Unicode replacement character (U+FFFD).
+
+##### Examples
+
+```
+let s = String(fromUtf8Lossy: mixedBytes);  // invalid bytes become '�'
+```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### initializer `From UTF-8 Unchecked`
+
+```kestrel
+public init[S](fromUtf8Unchecked: S) where S: Slice[UInt8]
+```
+
+Constructs a string by copying bytes without UTF-8 validation.
+
+##### Safety
+
+The caller must ensure the bytes are valid UTF-8.
+
+_Defined in `lang/std/text/string.ks`._
+
 #### initializer `String Literal`
 
 ```kestrel
@@ -4989,7 +14158,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append(String)
+public mutating func append[__opaque_0](__opaque_0) where __opaque_0: Str
 ```
 
 Appends `other`'s bytes to this string. COW.
@@ -5007,24 +14176,10 @@ s;  // "hello, world"
 
 _Defined in `lang/std/text/string.ks`._
 
-#### function `appendByte`
+#### function `append`
 
 ```kestrel
-internal mutating func appendByte(UInt8)
-```
-
-Appends a raw byte. Internal — caller ensures UTF-8 validity.
-
-Do not use to append ASCII characters: prefer `appendChar(c)` or
-`append(other)`. This exists only for low-level UTF-8 plumbing
-inside the stdlib (e.g. an encoder that already produced bytes).
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `appendChar`
-
-```kestrel
-public mutating func appendChar(Char)
+public mutating func append(char: Char)
 ```
 
 Appends a single code point, encoding it as UTF-8.
@@ -5036,10 +14191,24 @@ writing.
 
 ```
 var s = "h";
-s.appendChar('i');
-s.appendChar('\u{1F600}');
+s.append(char: 'i');
+s.append(char: '\u{1F600}');
 s;  // "hi😀"
 ```
+
+_Defined in `lang/std/text/string.ks`._
+
+#### function `appendByte`
+
+```kestrel
+internal mutating func appendByte(UInt8)
+```
+
+Appends a raw byte. Internal — caller ensures UTF-8 validity.
+
+Do not use to append ASCII characters: prefer `appendChar(c)` or
+`append(other)`. This exists only for low-level UTF-8 plumbing
+inside the stdlib (e.g. an encoder that already produced bytes).
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5109,16 +14278,7 @@ _Defined in `lang/std/text/string.ks`._
 static func fromBytesUnchecked(Pointer[UInt8], Int64) -> String
 ```
 
-Constructs a string by copying `count` bytes starting at `ptr`, without UTF-8 validation.
-
-Internal helper used by split iterators and substring helpers
-that already know the byte range falls on UTF-8 boundaries.
-
-##### Safety
-
-`ptr` must reference at least `count` valid UTF-8 bytes; the
-range starting at `ptr` and ending at `ptr + count` must not
-split a multi-byte sequence.
+Internal helper: copies `count` bytes from `ptr` without validation.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5128,45 +14288,7 @@ _Defined in `lang/std/text/string.ks`._
 static func fromRawBytes(lang.ptr[lang.i8], Int64) -> String
 ```
 
-Constructs a string by copying `count` bytes from a raw `lang.ptr[lang.i8]`.
-
-Internal helper for view-side code that holds raw pointers but
-needs to materialize an owned `String`. No UTF-8 validation.
-
-##### Safety
-
-`rawPtr` must reference at least `count` valid UTF-8 bytes; the
-range must not split a multi-byte sequence.
-
-_Defined in `lang/std/text/string.ks`._
-
-#### function `fromUtf8`
-
-```kestrel
-public static func fromUtf8(ArraySlice[UInt8]) -> String?
-```
-
-Constructs a string by copying validated UTF-8 bytes from `bytes`,
-returning `.None` if the slice is not valid UTF-8.
-
-Walks the slice end-to-end with `decodeUtf8`; any malformed,
-truncated, or overlong sequence produces `.None`. The empty slice
-is valid and yields the empty string. On success the bytes are
-copied into a fresh heap allocation, so the returned `String`
-owns its storage independently of `bytes`.
-
-##### Errors
-
-Panics with `"String allocation failed"` if the system allocator
-returns null. Returns `.None` only for invalid UTF-8 — the
-allocation case is unrecoverable.
-
-##### Examples
-
-```
-String.fromUtf8("héllo".bytes.asSlice());  // Some("héllo")
-String.fromUtf8(badSlice);                 // None
-```
+Internal helper: copies `count` bytes from a raw `lang.ptr[lang.i8]`.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5296,7 +14418,7 @@ Removes leading and trailing ASCII whitespace in place.
 
 Recognises the same whitespace set as `Char.isWhitespace`:
 space, tab, LF, CR, form feed. For Unicode-aware trimming, use
-the `(matching:)` overloads with a custom predicate. Non-mutating
+the `(where:)` overloads with a custom predicate. Non-mutating
 mirrors live under `trimmed*`.
 
 ##### Examples
@@ -5312,7 +14434,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trim`
 
 ```kestrel
-public mutating func trim(matching: (Char) -> Bool)
+public mutating func trim(where: (Char) -> Bool)
 ```
 
 Removes leading and trailing code points matching `predicate`, in place.
@@ -5340,7 +14462,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimEnd`
 
 ```kestrel
-public mutating func trimEnd(matching: (Char) -> Bool)
+public mutating func trimEnd(where: (Char) -> Bool)
 ```
 
 Removes trailing code points matching `predicate`, in place.
@@ -5360,7 +14482,7 @@ _Defined in `lang/std/text/string.ks`._
 #### function `trimStart`
 
 ```kestrel
-public mutating func trimStart(matching: (Char) -> Bool)
+public mutating func trimStart(where: (Char) -> Bool)
 ```
 
 Removes leading code points matching `predicate`, in place.
@@ -5403,6 +14525,598 @@ Shares storage via refcount — zero-copy.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### field `byteCount`
+
+```kestrel
+public var byteCount: Int64 { get }
+```
+
+Number of UTF-8 bytes. O(1).
+
+##### Examples
+
+```
+"hello".byteCount;       // 5
+"\u{00E9}".byteCount;    // 2 (é is two UTF-8 bytes)
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `bytes`
+
+```kestrel
+public var bytes: BytesView { get }
+```
+
+View over the raw UTF-8 bytes.
+
+##### Examples
+
+```
+"hi".bytes.count;  // 2
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `caseFolded`
+
+```kestrel
+public func caseFolded() -> String
+```
+
+Returns a new string with Unicode case folding applied to
+each code point.
+
+Case folding maps characters to a canonical form suitable
+for case-insensitive comparison. Currently single-char folds
+only (e.g. `A` → `a`); multi-char expansions like `ß` → `ss`
+are not yet supported.
+
+##### Examples
+
+```
+"Hello".caseFolded();  // "hello"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `chars`
+
+```kestrel
+public var chars: CharsView { get }
+```
+
+View over Unicode code points.
+
+##### Examples
+
+```
+"caf\u{00E9}".chars.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `compare`
+
+```kestrel
+public func compare(Self) -> Ordering
+```
+
+Lexicographic byte-wise comparison.
+
+Returns `Less` / `Equal` / `Greater` according to the first
+differing byte; if one string is a prefix of the other, the
+shorter is less.
+
+##### Examples
+
+```
+"abc".compare("abd");  // Less
+"abc".compare("ab");   // Greater
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(String) -> Bool
+```
+
+Returns true if `substring` appears anywhere in this string.
+
+##### Examples
+
+```
+"hello world".contains(substring: "world");  // true
+"hello world".contains(substring: "xyz");    // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `ends`
+
+```kestrel
+public func ends(with: String) -> Bool
+```
+
+Returns true if this string ends with `suffix`.
+
+Empty suffix always returns true. Comparison is byte-wise.
+
+##### Examples
+
+```
+"hello".ends(with: "llo");  // true
+"hello".ends(with: "xyz");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `equalsCaseInsensitive`
+
+```kestrel
+public func equalsCaseInsensitive(String) -> Bool
+```
+
+Compares two strings for equality after Unicode case folding.
+
+Folds each string to its case-folded form and compares the
+results byte-wise. Not normalization-aware — `é` (`U+00E9`)
+and `e\u{0301}` are still considered different.
+
+##### Examples
+
+```
+"Hello".equalsCaseInsensitive("HELLO");  // true
+"Hello".equalsCaseInsensitive("World");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: String) -> ByteIndex?
+```
+
+Returns the byte index of the first occurrence of `substring`,
+or `None` if not found.
+
+The empty substring matches at the start. Uses `memmem` for
+efficient byte-level search.
+
+##### Examples
+
+```
+"hello world".firstIndex(of: "world");  // Some(ByteIndex(6))
+"hello world".firstIndex(of: "xyz");    // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
+
+Formats the string using the given options.
+
+##### Examples
+
+```
+"hi".format(FormatOptions(width: 5));  // "hi   "
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `graphemes`
+
+```kestrel
+public var graphemes: GraphemesView { get }
+```
+
+View over grapheme clusters (user-perceived characters).
+
+##### Examples
+
+```
+"caf\u{00E9}".graphemes.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `hash`
+
+```kestrel
+public func hash[H](into: mutating H) where H: Hasher
+```
+
+Hashes the byte content into `hasher`.
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the string contains no bytes.
+
+##### Examples
+
+```
+"".isEmpty;       // true
+"hello".isEmpty;  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Self) -> Bool
+```
+
+Returns true if both strings have the same byte sequence.
+
+Pure byte-wise equality — not normalization-aware. For
+case-insensitive comparison, see `equalsCaseInsensitive`.
+
+##### Examples
+
+```
+"abc".isEqual(to: "abc");  // true
+"abc".isEqual(to: "ABC");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> CharsIterator
+```
+
+Returns a `CharsIterator` over the code points.
+
+Required by `Iterable`. Each call returns a fresh iterator;
+the source is reusable.
+
+##### Examples
+
+```
+for c in "abc" { ... }  // iterates 'a', 'b', 'c'
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: String) -> ByteIndex?
+```
+
+Returns the byte index of the last occurrence of `substring`,
+or `None` if not found.
+
+Scans from the left using repeated `memmem` calls, keeping
+the last match position.
+
+##### Examples
+
+```
+"abcabc".lastIndex(of: "abc");  // Some(ByteIndex(3))
+"abcabc".lastIndex(of: "xyz");  // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `lines`
+
+```kestrel
+public var lines: LinesView { get }
+```
+
+View over lines, recognising `\n`, `\r\n`, and `\r`.
+
+##### Examples
+
+```
+"a\nb\nc".lines.count;  // 3
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lowercased`
+
+```kestrel
+public func lowercased() -> String
+```
+
+Returns the lowercase form using full Unicode case mapping.
+
+Locale-independent. Handles multi-character expansions
+(e.g. Turkish dotted I). All-ASCII strings with no uppercase
+letters short-circuit to `toOwned()` (no per-char decode).
+
+##### Examples
+
+```
+"Hello".lowercased();      // "hello"
+"\u{0130}".lowercased();   // "i\u{0307}"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lowercasedAscii`
+
+```kestrel
+public func lowercasedAscii() -> String
+```
+
+Returns a copy with only ASCII letters lowercased; non-ASCII
+bytes pass through unchanged.
+
+Cheap byte-level scan with no Unicode tables. For full
+Unicode case mapping, use `lowercased()`.
+
+##### Examples
+
+```
+"H\u{00E9}LLO".lowercasedAscii();  // "h\u{00E9}llo"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `pad`
+
+```kestrel
+public func pad(leading: Int64, with: Char) -> String
+```
+
+Returns the string padded at the start with `char` so the
+total *code-point* count is at least `length`.
+
+If the string is already at least `length` code points long,
+returns a copy unchanged.
+
+##### Examples
+
+```
+"42".pad(leading: 5, with: '0');  // "00042"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `repeated`
+
+```kestrel
+public func repeated(Int64) -> String
+```
+
+Returns this string concatenated with itself `count` times.
+
+Non-positive `count` returns the empty string. Pre-allocates
+the result buffer for the exact final length.
+
+##### Examples
+
+```
+"ab".repeated(3);  // "ababab"
+"ab".repeated(0);  // ""
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `replaced`
+
+```kestrel
+public func replaced(String, with: String) -> String
+```
+
+Returns a copy with every occurrence of `pattern` replaced
+by `replacement`.
+
+Empty `pattern` is a no-op (returns a copy). Searches
+greedily from the left and skips past each replacement so
+substituted text is not re-matched.
+
+##### Examples
+
+```
+"hello world".replaced("o", with: "0");    // "hell0 w0rld"
+"abcabc".replaced("ab", with: "ABCD");     // "ABCDcABCDc"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(String) -> SplitView
+```
+
+Returns a lazy view that splits on `separator`, yielding
+zero-copy `StringSlice` segments.
+
+The empty separator is special-cased to split per code
+point. Adjacent separators produce empty segments.
+
+##### Examples
+
+```
+"a,b,c".split(",").collect();   // ["a", "b", "c"]
+"a,,b".split(",").count;        // 3 (empty segment preserved)
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `starts`
+
+```kestrel
+public func starts(with: String) -> Bool
+```
+
+Returns true if this string starts with `prefix`.
+
+Empty prefix always returns true. Comparison is byte-wise.
+
+##### Examples
+
+```
+"hello".starts(with: "hel");  // true
+"hello".starts(with: "xyz");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `titlecased`
+
+```kestrel
+public func titlecased() -> String
+```
+
+Returns the titlecase form using full Unicode case mapping.
+
+Word boundaries are detected by `Char.isWhitespace`; the
+first non-space character of each run is titlecased and the
+rest lowercased.
+
+##### Examples
+
+```
+"hello world".titlecased();  // "Hello World"
+"FOO BAR".titlecased();      // "Foo Bar"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `toOwned`
+
+```kestrel
+public func toOwned() -> String
+```
+
+Copies this string's bytes into a new independent `String`.
+
+For `String`, this is equivalent to `clone()`. For
+`StringSlice`, it copies only the slice's bytes, releasing
+the reference to the source buffer.
+
+##### Examples
+
+```
+let slice = "hello world".asSlice();
+let owned = slice.toOwned();  // independent copy
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmed`
+
+```kestrel
+public func trimmed() -> StringSlice
+```
+
+Returns a zero-copy slice with leading and trailing ASCII
+whitespace removed.
+
+Whitespace characters: space (`' '`), tab (`'\t'`), newline
+(`'\n'`), carriage return (`'\r'`), and form feed (`'\x0C'`).
+The returned `StringSlice` shares the source buffer — no
+allocation occurs.
+
+##### Examples
+
+```
+"  hello  ".trimmed().toOwned();   // "hello"
+"\t\n".trimmed().isEmpty;          // true
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedEnd`
+
+```kestrel
+public func trimmedEnd() -> StringSlice
+```
+
+Returns a zero-copy slice with trailing whitespace removed.
+
+See `trimmed()` for the whitespace set. Leading whitespace
+is preserved.
+
+##### Examples
+
+```
+"  hello  ".trimmedEnd().toOwned();  // "  hello"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedStart`
+
+```kestrel
+public func trimmedStart() -> StringSlice
+```
+
+Returns a zero-copy slice with leading whitespace removed.
+
+See `trimmed()` for the whitespace set. Trailing whitespace
+is preserved.
+
+##### Examples
+
+```
+"  hello  ".trimmedStart().toOwned();  // "hello  "
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `uppercased`
+
+```kestrel
+public func uppercased() -> String
+```
+
+Returns the uppercase form using full Unicode case mapping.
+
+Locale-independent. Handles multi-character expansions
+(e.g. `ß` → `SS`). All-ASCII strings with no lowercase
+letters short-circuit to `toOwned()`.
+
+##### Examples
+
+```
+"hello".uppercased();             // "HELLO"
+"stra\u{00DF}e".uppercased();     // "STRASSE"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `uppercasedAscii`
+
+```kestrel
+public func uppercasedAscii() -> String
+```
+
+Returns a copy with only ASCII letters uppercased; non-ASCII
+bytes pass through unchanged.
+
+Cheap byte-level scan with no Unicode tables. For full
+Unicode case mapping, use `uppercased()`.
+
+##### Examples
+
+```
+"h\u{00E9}llo".uppercasedAscii();  // "H\u{00E9}LLO"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
 ### Implements `Iterable`
 
 #### typealias `Item`
@@ -5440,6 +15154,24 @@ _Defined in `lang/std/text/string.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -5460,6 +15192,16 @@ case-insensitive comparison, see `equalsCaseInsensitive`.
 
 _Defined in `lang/std/text/string.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Matchable`
 
 #### function `matches`
@@ -5476,6 +15218,14 @@ E316 will suggest an `if/else if` chain instead.
 _Defined in `lang/std/text/string.ks`._
 
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -5500,6 +15250,76 @@ locale-aware collation.
 ```
 
 _Defined in `lang/std/text/string.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Cloneable`
 
@@ -5546,6 +15366,20 @@ opts.alignment = .Center;
 
 _Defined in `lang/std/text/string.ks`._
 
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
+
 ### Implements `Addable`
 
 #### typealias `Output`
@@ -5561,12 +15395,12 @@ _Defined in `lang/std/text/string.ks`._
 #### function `add`
 
 ```kestrel
-public func add(String) -> String
+public consuming func add(consuming String) -> String
 ```
 
 Returns the concatenation `self + other`. Required by `Addable`.
-
-Equivalent to cloning `self` and appending `other`.
+When `self` is uniquely owned (refcount 1), appends in place —
+no allocation. Otherwise builds a fresh string with both halves.
 
 _Defined in `lang/std/text/string.ks`._
 
@@ -5585,7 +15419,7 @@ _Defined in `lang/std/text/string.ks`._
 #### initializer `String Literal`
 
 ```kestrel
-init(stringLiteral: lang.str)
+init(stringLiteral: lang.ptr[lang.i8], lang.i64)
 ```
 
 Builds an instance from a string literal.
@@ -5648,7 +15482,7 @@ without copying. The builder resets to empty and can be reused.
 ```
 var b = StringBuilder();
 b.append("hello");
-b.appendChar(' ');
+b.append(char: ' ');
 b.append("world");
 let s = b.build();   // "hello world", zero-copy
 ```
@@ -5690,7 +15524,7 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `append`
 
 ```kestrel
-public mutating func append[S](S) where S: Str
+public mutating func append[__opaque_0](__opaque_0) where __opaque_0: Str
 ```
 
 Appends the UTF-8 bytes of `other` to this builder. Accepts any
@@ -5698,10 +15532,20 @@ type conforming to `Str` — `String`, `StringSlice`, etc.
 
 _Defined in `lang/std/text/builder.ks`._
 
+#### function `append`
+
+```kestrel
+public mutating func append(char: Char)
+```
+
+Appends a single code point, encoding it as UTF-8.
+
+_Defined in `lang/std/text/builder.ks`._
+
 #### function `appendByte`
 
 ```kestrel
-public mutating func appendByte(UInt8)
+internal mutating func appendByte(UInt8)
 ```
 
 Appends a raw byte. Caller must ensure UTF-8 validity.
@@ -5711,20 +15555,10 @@ _Defined in `lang/std/text/builder.ks`._
 #### function `appendBytes`
 
 ```kestrel
-public mutating func appendBytes(ptr: Pointer[UInt8], count: Int64)
+internal mutating func appendBytes(ptr: Pointer[UInt8], count: Int64)
 ```
 
 Appends `count` bytes from `ptr`. Caller must ensure UTF-8 validity.
-
-_Defined in `lang/std/text/builder.ks`._
-
-#### function `appendChar`
-
-```kestrel
-public mutating func appendChar(Char)
-```
-
-Appends a single code point, encoding it as UTF-8.
 
 _Defined in `lang/std/text/builder.ks`._
 
@@ -5813,6 +15647,24 @@ _Defined in `lang/std/text/slice.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -5825,7 +15677,25 @@ values to hash equal, so don't drift from those laws.
 
 _Defined in `lang/std/core/protocols.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -5836,6 +15706,76 @@ func compare(Self) -> Ordering
 Returns the ordering of `self` relative to `other`. Must be a
 total order — for any `a`, `b`, `c` exactly one of `Less`,
 `Equal`, `Greater` holds, and the order is transitive.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
 
 _Defined in `lang/std/core/protocols.ks`._
 
@@ -5979,7 +15919,617 @@ Returns self — StringSlice is already a slice.
 
 _Defined in `lang/std/text/slice.ks`._
 
+#### field `byteCount`
+
+```kestrel
+public var byteCount: Int64 { get }
+```
+
+Number of UTF-8 bytes. O(1).
+
+##### Examples
+
+```
+"hello".byteCount;       // 5
+"\u{00E9}".byteCount;    // 2 (é is two UTF-8 bytes)
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `bytes`
+
+```kestrel
+public var bytes: BytesView { get }
+```
+
+View over the raw UTF-8 bytes.
+
+##### Examples
+
+```
+"hi".bytes.count;  // 2
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `caseFolded`
+
+```kestrel
+public func caseFolded() -> String
+```
+
+Returns a new string with Unicode case folding applied to
+each code point.
+
+Case folding maps characters to a canonical form suitable
+for case-insensitive comparison. Currently single-char folds
+only (e.g. `A` → `a`); multi-char expansions like `ß` → `ss`
+are not yet supported.
+
+##### Examples
+
+```
+"Hello".caseFolded();  // "hello"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `chars`
+
+```kestrel
+public var chars: CharsView { get }
+```
+
+View over Unicode code points.
+
+##### Examples
+
+```
+"caf\u{00E9}".chars.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `compare`
+
+```kestrel
+public func compare(Self) -> Ordering
+```
+
+Lexicographic byte-wise comparison.
+
+Returns `Less` / `Equal` / `Greater` according to the first
+differing byte; if one string is a prefix of the other, the
+shorter is less.
+
+##### Examples
+
+```
+"abc".compare("abd");  // Less
+"abc".compare("ab");   // Greater
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `contains`
+
+```kestrel
+public func contains(String) -> Bool
+```
+
+Returns true if `substring` appears anywhere in this string.
+
+##### Examples
+
+```
+"hello world".contains(substring: "world");  // true
+"hello world".contains(substring: "xyz");    // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `ends`
+
+```kestrel
+public func ends(with: String) -> Bool
+```
+
+Returns true if this string ends with `suffix`.
+
+Empty suffix always returns true. Comparison is byte-wise.
+
+##### Examples
+
+```
+"hello".ends(with: "llo");  // true
+"hello".ends(with: "xyz");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `equalsCaseInsensitive`
+
+```kestrel
+public func equalsCaseInsensitive(String) -> Bool
+```
+
+Compares two strings for equality after Unicode case folding.
+
+Folds each string to its case-folded form and compares the
+results byte-wise. Not normalization-aware — `é` (`U+00E9`)
+and `e\u{0301}` are still considered different.
+
+##### Examples
+
+```
+"Hello".equalsCaseInsensitive("HELLO");  // true
+"Hello".equalsCaseInsensitive("World");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `firstIndex`
+
+```kestrel
+public func firstIndex(of: String) -> ByteIndex?
+```
+
+Returns the byte index of the first occurrence of `substring`,
+or `None` if not found.
+
+The empty substring matches at the start. Uses `memmem` for
+efficient byte-level search.
+
+##### Examples
+
+```
+"hello world".firstIndex(of: "world");  // Some(ByteIndex(6))
+"hello world".firstIndex(of: "xyz");    // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `format`
+
+```kestrel
+public func format(into: mutating StringBuilder, FormatOptions)
+```
+
+Formats the string using the given options.
+
+##### Examples
+
+```
+"hi".format(FormatOptions(width: 5));  // "hi   "
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `graphemes`
+
+```kestrel
+public var graphemes: GraphemesView { get }
+```
+
+View over grapheme clusters (user-perceived characters).
+
+##### Examples
+
+```
+"caf\u{00E9}".graphemes.count;  // 4
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `hash`
+
+```kestrel
+public func hash[H](into: mutating H) where H: Hasher
+```
+
+Hashes the byte content into `hasher`.
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `isEmpty`
+
+```kestrel
+public var isEmpty: Bool { get }
+```
+
+True when the string contains no bytes.
+
+##### Examples
+
+```
+"".isEmpty;       // true
+"hello".isEmpty;  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `isEqual`
+
+```kestrel
+public func isEqual(to: Self) -> Bool
+```
+
+Returns true if both strings have the same byte sequence.
+
+Pure byte-wise equality — not normalization-aware. For
+case-insensitive comparison, see `equalsCaseInsensitive`.
+
+##### Examples
+
+```
+"abc".isEqual(to: "abc");  // true
+"abc".isEqual(to: "ABC");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `iter`
+
+```kestrel
+public func iter() -> CharsIterator
+```
+
+Returns a `CharsIterator` over the code points.
+
+Required by `Iterable`. Each call returns a fresh iterator;
+the source is reusable.
+
+##### Examples
+
+```
+for c in "abc" { ... }  // iterates 'a', 'b', 'c'
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lastIndex`
+
+```kestrel
+public func lastIndex(of: String) -> ByteIndex?
+```
+
+Returns the byte index of the last occurrence of `substring`,
+or `None` if not found.
+
+Scans from the left using repeated `memmem` calls, keeping
+the last match position.
+
+##### Examples
+
+```
+"abcabc".lastIndex(of: "abc");  // Some(ByteIndex(3))
+"abcabc".lastIndex(of: "xyz");  // None
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### field `lines`
+
+```kestrel
+public var lines: LinesView { get }
+```
+
+View over lines, recognising `\n`, `\r\n`, and `\r`.
+
+##### Examples
+
+```
+"a\nb\nc".lines.count;  // 3
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lowercased`
+
+```kestrel
+public func lowercased() -> String
+```
+
+Returns the lowercase form using full Unicode case mapping.
+
+Locale-independent. Handles multi-character expansions
+(e.g. Turkish dotted I). All-ASCII strings with no uppercase
+letters short-circuit to `toOwned()` (no per-char decode).
+
+##### Examples
+
+```
+"Hello".lowercased();      // "hello"
+"\u{0130}".lowercased();   // "i\u{0307}"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `lowercasedAscii`
+
+```kestrel
+public func lowercasedAscii() -> String
+```
+
+Returns a copy with only ASCII letters lowercased; non-ASCII
+bytes pass through unchanged.
+
+Cheap byte-level scan with no Unicode tables. For full
+Unicode case mapping, use `lowercased()`.
+
+##### Examples
+
+```
+"H\u{00E9}LLO".lowercasedAscii();  // "h\u{00E9}llo"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `pad`
+
+```kestrel
+public func pad(leading: Int64, with: Char) -> String
+```
+
+Returns the string padded at the start with `char` so the
+total *code-point* count is at least `length`.
+
+If the string is already at least `length` code points long,
+returns a copy unchanged.
+
+##### Examples
+
+```
+"42".pad(leading: 5, with: '0');  // "00042"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `repeated`
+
+```kestrel
+public func repeated(Int64) -> String
+```
+
+Returns this string concatenated with itself `count` times.
+
+Non-positive `count` returns the empty string. Pre-allocates
+the result buffer for the exact final length.
+
+##### Examples
+
+```
+"ab".repeated(3);  // "ababab"
+"ab".repeated(0);  // ""
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `replaced`
+
+```kestrel
+public func replaced(String, with: String) -> String
+```
+
+Returns a copy with every occurrence of `pattern` replaced
+by `replacement`.
+
+Empty `pattern` is a no-op (returns a copy). Searches
+greedily from the left and skips past each replacement so
+substituted text is not re-matched.
+
+##### Examples
+
+```
+"hello world".replaced("o", with: "0");    // "hell0 w0rld"
+"abcabc".replaced("ab", with: "ABCD");     // "ABCDcABCDc"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `split`
+
+```kestrel
+public func split(String) -> SplitView
+```
+
+Returns a lazy view that splits on `separator`, yielding
+zero-copy `StringSlice` segments.
+
+The empty separator is special-cased to split per code
+point. Adjacent separators produce empty segments.
+
+##### Examples
+
+```
+"a,b,c".split(",").collect();   // ["a", "b", "c"]
+"a,,b".split(",").count;        // 3 (empty segment preserved)
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `starts`
+
+```kestrel
+public func starts(with: String) -> Bool
+```
+
+Returns true if this string starts with `prefix`.
+
+Empty prefix always returns true. Comparison is byte-wise.
+
+##### Examples
+
+```
+"hello".starts(with: "hel");  // true
+"hello".starts(with: "xyz");  // false
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `titlecased`
+
+```kestrel
+public func titlecased() -> String
+```
+
+Returns the titlecase form using full Unicode case mapping.
+
+Word boundaries are detected by `Char.isWhitespace`; the
+first non-space character of each run is titlecased and the
+rest lowercased.
+
+##### Examples
+
+```
+"hello world".titlecased();  // "Hello World"
+"FOO BAR".titlecased();      // "Foo Bar"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `toOwned`
+
+```kestrel
+public func toOwned() -> String
+```
+
+Copies this string's bytes into a new independent `String`.
+
+For `String`, this is equivalent to `clone()`. For
+`StringSlice`, it copies only the slice's bytes, releasing
+the reference to the source buffer.
+
+##### Examples
+
+```
+let slice = "hello world".asSlice();
+let owned = slice.toOwned();  // independent copy
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmed`
+
+```kestrel
+public func trimmed() -> StringSlice
+```
+
+Returns a zero-copy slice with leading and trailing ASCII
+whitespace removed.
+
+Whitespace characters: space (`' '`), tab (`'\t'`), newline
+(`'\n'`), carriage return (`'\r'`), and form feed (`'\x0C'`).
+The returned `StringSlice` shares the source buffer — no
+allocation occurs.
+
+##### Examples
+
+```
+"  hello  ".trimmed().toOwned();   // "hello"
+"\t\n".trimmed().isEmpty;          // true
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedEnd`
+
+```kestrel
+public func trimmedEnd() -> StringSlice
+```
+
+Returns a zero-copy slice with trailing whitespace removed.
+
+See `trimmed()` for the whitespace set. Leading whitespace
+is preserved.
+
+##### Examples
+
+```
+"  hello  ".trimmedEnd().toOwned();  // "  hello"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `trimmedStart`
+
+```kestrel
+public func trimmedStart() -> StringSlice
+```
+
+Returns a zero-copy slice with leading whitespace removed.
+
+See `trimmed()` for the whitespace set. Trailing whitespace
+is preserved.
+
+##### Examples
+
+```
+"  hello  ".trimmedStart().toOwned();  // "hello  "
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `uppercased`
+
+```kestrel
+public func uppercased() -> String
+```
+
+Returns the uppercase form using full Unicode case mapping.
+
+Locale-independent. Handles multi-character expansions
+(e.g. `ß` → `SS`). All-ASCII strings with no lowercase
+letters short-circuit to `toOwned()`.
+
+##### Examples
+
+```
+"hello".uppercased();             // "HELLO"
+"stra\u{00DF}e".uppercased();     // "STRASSE"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
+#### function `uppercasedAscii`
+
+```kestrel
+public func uppercasedAscii() -> String
+```
+
+Returns a copy with only ASCII letters uppercased; non-ASCII
+bytes pass through unchanged.
+
+Cheap byte-level scan with no Unicode tables. For full
+Unicode case mapping, use `uppercased()`.
+
+##### Examples
+
+```
+"h\u{00E9}llo".uppercasedAscii();  // "H\u{00E9}LLO"
+```
+
+_Defined in `lang/std/text/str.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -5989,7 +16539,25 @@ public func isEqual(to: StringSlice) -> Bool
 
 _Defined in `lang/std/text/slice.ks`._
 
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Comparable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `compare`
 
@@ -5998,6 +16566,76 @@ public func compare(StringSlice) -> Ordering
 ```
 
 _Defined in `lang/std/text/slice.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Hashable`
 
@@ -6028,6 +16666,20 @@ public func format(into: mutating StringBuilder, FormatOptions)
 ```
 
 _Defined in `lang/std/text/slice.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Iterable`
 

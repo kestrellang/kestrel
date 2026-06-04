@@ -23,6 +23,7 @@ func unwrap_or(opt: Option, default: std.numeric.Int64) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let doubled = maybe_double(21, true);
     let none = maybe_double(21, false);

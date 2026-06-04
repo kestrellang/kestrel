@@ -1,6 +1,6 @@
 module Life
 
-import Sdl.(Event)
+import sdl.(Event)
 
 protocol InputManager {
     mutating func getEvent() -> Optional[Event]

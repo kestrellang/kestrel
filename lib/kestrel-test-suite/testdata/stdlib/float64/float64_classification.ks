@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let normal: std.numeric.Float64 = 1.0;
             let zero = std.numeric.Float64.zero;

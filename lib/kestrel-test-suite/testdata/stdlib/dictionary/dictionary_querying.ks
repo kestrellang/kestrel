@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
@@ -25,47 +26,47 @@ module Test
             }
             if valSum != 60 { return 2 }
 
-            // Test contains(matching:) - true case
-            let hasLargeValue = dict.contains(matching: { (k, v) in v > 25 });
+            // Test contains(where:) - true case
+            let hasLargeValue = dict.contains(where: { (k, v) in v > 25 });
             if hasLargeValue == false { return 3 }
 
-            // Test contains(matching:) - false case
-            let hasHugeValue = dict.contains(matching: { (k, v) in v > 100 });
+            // Test contains(where:) - false case
+            let hasHugeValue = dict.contains(where: { (k, v) in v > 100 });
             if hasHugeValue { return 4 }
 
-            // Test all(matching:) - true case
-            let allPositive = dict.all(matching: { (k, v) in v > 0 });
+            // Test all(where:) - true case
+            let allPositive = dict.all(where: { (k, v) in v > 0 });
             if allPositive == false { return 5 }
 
-            // Test all(matching:) - false case
-            let allBig = dict.all(matching: { (k, v) in v > 15 });
+            // Test all(where:) - false case
+            let allBig = dict.all(where: { (k, v) in v > 15 });
             if allBig { return 6 }
 
-            // Test any(matching:)
-            let anyTwenty = dict.any(matching: { (k, v) in v == 20 });
+            // Test any(where:)
+            let anyTwenty = dict.any(where: { (k, v) in v == 20 });
             if anyTwenty == false { return 7 }
 
-            let anyHundred = dict.any(matching: { (k, v) in v == 100 });
+            let anyHundred = dict.any(where: { (k, v) in v == 100 });
             if anyHundred { return 8 }
 
             // Test countWhere()
-            let countAbove15 = dict.countItems(matching: { (k, v) in v > 15 });
+            let countAbove15 = dict.countItems(where: { (k, v) in v > 15 });
             if countAbove15 != 2 { return 9 }
 
-            // Test first(matching:)
-            let found = dict.first(matching: { (k, v) in v == 20 });
+            // Test first(where:)
+            let found = dict.first(where: { (k, v) in v == 20 });
             if found.isNone() { return 10 }
             let (fk, fv) = found.unwrap();
             if fk != 2 { return 11 }
             if fv != 20 { return 12 }
 
-            // Test first(matching:) - not found
-            let notFound = dict.first(matching: { (k, v) in v == 999 });
+            // Test first(where:) - not found
+            let notFound = dict.first(where: { (k, v) in v == 999 });
             if notFound.isSome() { return 13 }
 
-            // Test all(matching:) on empty dictionary - vacuous truth
+            // Test all(where:) on empty dictionary - vacuous truth
             var emptyDict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let vacuousAll = emptyDict.all(matching: { (k, v) in false });
+            let vacuousAll = emptyDict.all(where: { (k, v) in false });
             if vacuousAll == false { return 14 }
 
             0

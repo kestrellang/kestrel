@@ -8,6 +8,7 @@ module Test
             diff < 0.0000001
         }
 
+        @main
         func main() -> lang.i64 {
             // clamp: within range
             let val: std.numeric.Float64 = 0.5;
@@ -56,41 +57,41 @@ module Test
             if convDiff > 0.001 { return 15 }
 
             // parse: valid decimal
-            let parsed = std.numeric.Float64.parse( "3.14");
+            let parsed = std.numeric.Float64(parsing: "3.14");
             if parsed.isNone() { return 16 }
             if approxEqual(parsed.unwrap(), 3.14) == false { return 17 }
 
             // parse: negative
-            let parsedNeg = std.numeric.Float64.parse( "-2.5");
+            let parsedNeg = std.numeric.Float64(parsing: "-2.5");
             if parsedNeg.isNone() { return 18 }
             if approxEqual(parsedNeg.unwrap(), -2.5) == false { return 19 }
 
             // parse: integer string
-            let parsedInt = std.numeric.Float64.parse( "42");
+            let parsedInt = std.numeric.Float64(parsing: "42");
             if parsedInt.isNone() { return 20 }
             if approxEqual(parsedInt.unwrap(), 42.0) == false { return 21 }
 
             // parse: scientific notation
-            let parsedSci = std.numeric.Float64.parse( "1.5e2");
+            let parsedSci = std.numeric.Float64(parsing: "1.5e2");
             if parsedSci.isNone() { return 22 }
             if approxEqual(parsedSci.unwrap(), 150.0) == false { return 23 }
 
             // parse: "nan"
-            let parsedNaN = std.numeric.Float64.parse( "nan");
+            let parsedNaN = std.numeric.Float64(parsing: "nan");
             if parsedNaN.isNone() { return 24 }
             if parsedNaN.unwrap().isNaN == false { return 25 }
 
             // parse: "inf"
-            let parsedInf = std.numeric.Float64.parse( "inf");
+            let parsedInf = std.numeric.Float64(parsing: "inf");
             if parsedInf.isNone() { return 26 }
             if parsedInf.unwrap().isInfinite == false { return 27 }
 
             // parse: invalid
-            let parsedBad = std.numeric.Float64.parse( "abc");
+            let parsedBad = std.numeric.Float64(parsing: "abc");
             if parsedBad.isSome() { return 28 }
 
             // parse: empty string
-            let parsedEmpty = std.numeric.Float64.parse( "");
+            let parsedEmpty = std.numeric.Float64(parsing: "");
             if parsedEmpty.isSome() { return 29 }
 
             // format: default

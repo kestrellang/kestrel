@@ -19,7 +19,7 @@ public protocol BitwiseAnd[Other = Self] {
 
     /// Returns `self & other`.
     @builtin(.BitwiseAndOperatorMethod)
-    func bitwiseAnd(other: Other) -> Output
+    consuming func bitwiseAnd(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the `|` operator.
@@ -29,7 +29,7 @@ public protocol BitwiseOr[Other = Self] {
 
     /// Returns `self | other`.
     @builtin(.BitwiseOrOperatorMethod)
-    func bitwiseOr(other: Other) -> Output
+    consuming func bitwiseOr(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the `^` operator.
@@ -39,7 +39,7 @@ public protocol BitwiseXor[Other = Self] {
 
     /// Returns `self ^ other`.
     @builtin(.BitwiseXorOperatorMethod)
-    func bitwiseXor(other: Other) -> Output
+    consuming func bitwiseXor(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the unary `~` operator.
@@ -49,7 +49,7 @@ public protocol BitwiseNot {
 
     /// Returns `~self` — every bit flipped.
     @builtin(.BitwiseNotOperatorMethod)
-    func bitwiseNot() -> Output
+    consuming func bitwiseNot() -> Output
 }
 
 /// Raw protocol backing the `<<` operator.
@@ -67,7 +67,7 @@ public protocol LeftShift[Other = Int64] {
 
     /// Returns `self << count`.
     @builtin(.ShiftLeftOperatorMethod)
-    func shiftLeft(by count: Other) -> Output
+    consuming func shiftLeft(consuming by count: Other) -> Output
 }
 
 /// Raw protocol backing the `>>` operator.
@@ -80,5 +80,5 @@ public protocol RightShift[Other = Int64] {
 
     /// Returns `self >> count`.
     @builtin(.ShiftRightOperatorMethod)
-    func shiftRight(by count: Other) -> Output
+    consuming func shiftRight(consuming by count: Other) -> Output
 }

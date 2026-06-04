@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // intersperseWith: lazy separator via closure
             let result: std.collections.Array[std.numeric.Int64] = [1, 2, 3].iter().intersperseWith(with: { () in 0 }).collect();

@@ -12,6 +12,7 @@ func increment_copy(c: Counter) -> std.numeric.Int64 {
     c.value + 1
 }
 
+@main
 func main() -> lang.i64 {
     let c = Counter(value: 41);
     let result = increment_copy(c);

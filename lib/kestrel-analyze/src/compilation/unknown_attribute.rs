@@ -33,12 +33,20 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 }];
 
 /// Attributes the compiler recognizes. Keep in sync with the consumers in
-/// `kestrel-mir-lower` (`@extern`, `@fileconstant`), `kestrel-name-res`
-/// (`@builtin`), `kestrel-analyze/decl/extern_ffi_safe.rs` (`@extern`), and
+/// `kestrel-mir-lower` (`@extern`, `@fileconstant`, `@main`), `kestrel-name-res`
+/// (`@builtin`), `kestrel-analyze/decl/extern_ffi_safe.rs` (`@extern`),
+/// `kestrel-analyze/compilation/entry_point.rs` (`@main`), and
 /// `kestrel-compiler-driver` / frontmatter (`@platform`). `@dummy` is a
 /// test-only placeholder kept recognized so parser-level attribute tests
 /// stay free of semantic noise.
-const KNOWN_ATTRIBUTES: &[&str] = &["builtin", "dummy", "extern", "fileconstant", "platform"];
+const KNOWN_ATTRIBUTES: &[&str] = &[
+    "builtin",
+    "dummy",
+    "extern",
+    "fileconstant",
+    "main",
+    "platform",
+];
 
 pub struct UnknownAttributeAnalyzer;
 

@@ -15,7 +15,8 @@ func getDefault[T]() -> std.numeric.Int64 where T: HasDefault {
     T.defaultValue
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     if getDefault[Config]() != 100 { return 1 }
     0
 }

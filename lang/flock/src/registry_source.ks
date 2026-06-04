@@ -6,7 +6,6 @@
 module flock.registry_source
 
 import swoop.swoop.(Swoop)
-import swoop.body.(Body)
 import quill.value.(Value)
 import flock.error.(FlockError)
 import flock.version.(Version, VersionConstraint, parseVersion, satisfies)

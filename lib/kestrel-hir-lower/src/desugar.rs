@@ -45,7 +45,6 @@ impl LowerCtx<'_> {
         if let Some((proto, method, label)) = lookup_short_circuit_op(&op) {
             let rhs_closure = self.alloc_expr(HirExpr::Closure {
                 params: Vec::new(),
-                captures: Vec::new(),
                 body: HirBlock {
                     stmts: Vec::new(),
                     tail_expr: Some(rhs),
@@ -71,19 +70,20 @@ impl LowerCtx<'_> {
 
         // Regular binary op
         if let Some((proto, method, label)) = lookup_binary_op(&op)
-            && let Some(protocol) = self.resolve_builtin(proto) {
-                return self.alloc_expr(HirExpr::ProtocolCall {
-                    receiver: lhs,
-                    protocol,
-                    method: HirName::name(method),
-                    type_args: None,
-                    args: vec![HirCallArg {
-                        label: label.map(|l| l.to_string()),
-                        value: rhs,
-                    }],
-                    span: span.clone(),
-                });
-            }
+            && let Some(protocol) = self.resolve_builtin(proto)
+        {
+            return self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lhs,
+                protocol,
+                method: HirName::name(method),
+                type_args: None,
+                args: vec![HirCallArg {
+                    label: label.map(|l| l.to_string()),
+                    value: rhs,
+                }],
+                span: span.clone(),
+            });
+        }
 
         self.emit_missing_operator_diagnostic(&op, span);
         self.alloc_expr(HirExpr::Error { span: span.clone() })
@@ -99,7 +99,6 @@ impl LowerCtx<'_> {
         // Wrap RHS in closure for short-circuit
         let rhs_closure = self.alloc_expr(HirExpr::Closure {
             params: Vec::new(),
-            captures: Vec::new(),
             body: HirBlock {
                 stmts: Vec::new(),
                 tail_expr: Some(rhs),
@@ -167,6 +166,43 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
+    // ===== Postfix operators =====
+
+    /// Desugar a postfix operator to a ProtocolCall (e.g. `x..` → `x.rangeFrom()`).
+    pub(crate) fn desugar_postfix_op(
+        &mut self,
+        body: &AstBody,
+        op: &PostfixOp,
+        operand: ExprId,
+        span: &Span,
+    ) -> HirExprId {
+        let lowered_operand = self.lower_expr(body, operand);
+
+        if let Some((proto, method)) = lookup_postfix_op(op)
+            && let Some(protocol) = self.resolve_builtin(proto)
+        {
+            return self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_operand,
+                protocol,
+                method: HirName::name(method),
+                type_args: None,
+                args: Vec::new(),
+                span: span.clone(),
+            });
+        }
+
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_message(format!(
+                    "unsupported postfix operator '{}'",
+                    postfix_op_symbol(op)
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range())])
+                .with_notes(vec!["is the standard library imported?".to_string()]),
+        );
+        self.alloc_expr(HirExpr::Error { span: span.clone() })
+    }
+
     // ===== Compound assignment =====
 
     /// Desugar compound assignment (+=, -=, etc.) to a ProtocolCall, wrapped
@@ -208,24 +244,25 @@ impl LowerCtx<'_> {
         let lowered_rhs = self.lower_expr(body, rhs);
 
         if let Some((proto, method, label)) = lookup_compound_assign_op(op)
-            && let Some(protocol) = self.resolve_builtin(proto) {
-                let pcall = self.alloc_expr(HirExpr::ProtocolCall {
-                    receiver: lowered_lhs,
-                    protocol,
-                    method: HirName::name(method),
-                    type_args: None,
-                    args: vec![HirCallArg {
-                        label: label.map(|l| l.to_string()),
-                        value: lowered_rhs,
-                    }],
-                    span: span.clone(),
-                });
-                return self.alloc_expr(HirExpr::Sugar {
-                    kind: SugarKind::CompoundAssign,
-                    inner: pcall,
-                    span: span.clone(),
-                });
-            }
+            && let Some(protocol) = self.resolve_builtin(proto)
+        {
+            let pcall = self.alloc_expr(HirExpr::ProtocolCall {
+                receiver: lowered_lhs,
+                protocol,
+                method: HirName::name(method),
+                type_args: None,
+                args: vec![HirCallArg {
+                    label: label.map(|l| l.to_string()),
+                    value: lowered_rhs,
+                }],
+                span: span.clone(),
+            });
+            return self.alloc_expr(HirExpr::Sugar {
+                kind: SugarKind::CompoundAssign,
+                inner: pcall,
+                span: span.clone(),
+            });
+        }
 
         self.ctx.accumulate(
             Diagnostic::error()
@@ -305,7 +342,29 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Desugar `while let conditions { body }` → `loop { match ... }`
+    /// Desugar `while let conditions { body }` → `loop { match ... }`.
+    ///
+    /// For the common single-`let` case, lower to:
+    /// ```text
+    /// loop {
+    ///     match value {
+    ///         pattern => { body }
+    ///         _       => break
+    ///     }
+    /// }
+    /// ```
+    /// This puts the body **inside** the matching arm, so the move-check
+    /// dataflow doesn't lose the binding-then-use correlation through a
+    /// merge with the unmatched arm. The previous shape
+    /// (`loop { if !cond { break }; body }` where `cond` was a
+    /// `match v { pat => true, _ => false }`) joined the two arms before
+    /// the body, leaving the bound variable `MaybeInit` at the body's
+    /// reads — a flood of false-positive E501s in stdlib iterator code
+    /// (`Iterator.fold`, `Set.min`, `Array.appendFrom`, etc.).
+    ///
+    /// For multi-condition while-let (`while let .Some(x) = a, x > 0 { … }`)
+    /// the dataflow-friendly shape is harder to express, so we fall back
+    /// to the if-break-merge desugaring for those.
     pub(crate) fn desugar_while_let(
         &mut self,
         body: &AstBody,
@@ -314,10 +373,103 @@ impl LowerCtx<'_> {
         while_body: &AstBlock,
         span: &Span,
     ) -> HirExprId {
-        // Scope enclosing the condition + loop body so `while let` pattern
-        // bindings are visible inside the body but not after the loop.
+        // Single-`let` shape: lower to `loop { match v { pat => body, _ => break } }`
+        // — same structure as `desugar_for_loop`. No CFG merge before the body,
+        // so the move-check dataflow keeps the binding-then-use correlation.
+        if conditions.len() == 1
+            && let IfCondition::Let { pattern, value } = &conditions[0]
+        {
+            return self.desugar_while_let_single(body, label, *pattern, *value, while_body, span);
+        }
+
+        self.desugar_while_let_chain(body, label, conditions, while_body, span)
+    }
+
+    /// Single-let shape: `while let pat = value { body }` →
+    /// `loop { match value { pat => body, _ => break } }`. The body lives
+    /// inside the matching arm, so the move-check dataflow sees `pat`'s
+    /// bindings as `DefinitelyInit` at the body without a merge.
+    fn desugar_while_let_single(
+        &mut self,
+        body: &AstBody,
+        label: Option<&str>,
+        pattern: PatId,
+        value: ExprId,
+        while_body: &AstBlock,
+        span: &Span,
+    ) -> HirExprId {
+        let lowered_value = self.lower_expr(body, value);
+
+        // Pattern bindings are visible inside the loop body but not after.
         self.push_scope();
-        // Lower conditions to a boolean expression
+        let lowered_pat = self.lower_pat(body, pattern);
+
+        // Lower body inside the same scope as the pattern bindings, with
+        // the loop label in scope so `break` / `continue` can validate.
+        self.push_loop(label);
+        let lowered_body = self.lower_block(body, while_body);
+        self.pop_loop();
+        self.pop_scope();
+
+        let body_expr = self.alloc_expr(HirExpr::Block {
+            body: lowered_body,
+            span: span.clone(),
+        });
+
+        let wildcard_pat = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+        let break_expr = self.alloc_expr(HirExpr::Break {
+            label: label.map(|l| l.to_string()),
+            span: span.clone(),
+        });
+
+        let match_expr = self.alloc_expr(HirExpr::Match {
+            scrutinee: lowered_value,
+            arms: vec![
+                HirMatchArm {
+                    pattern: lowered_pat,
+                    guard: None,
+                    body: body_expr,
+                },
+                HirMatchArm {
+                    pattern: wildcard_pat,
+                    guard: None,
+                    body: break_expr,
+                },
+            ],
+            source: MatchSource::WhileLet,
+            span: span.clone(),
+        });
+
+        let match_stmt = self.alloc_stmt(HirStmt::Expr {
+            expr: match_expr,
+            span: span.clone(),
+        });
+
+        self.alloc_expr(HirExpr::Loop {
+            label: label.map(|l| l.to_string()),
+            body: HirBlock {
+                stmts: vec![match_stmt],
+                tail_expr: None,
+            },
+            span: span.clone(),
+        })
+    }
+
+    /// Multi-condition while-let — `while let .Some(x) = a, let .Some(y) = b
+    /// { … }` and friends. Falls back to the `loop { if !cond { break }; body }`
+    /// shape because the binding scope spans multiple match expressions, which
+    /// can't be expressed as a single arm body. The dataflow may emit
+    /// false-positive E501s for non-Copyable bindings in this shape; in
+    /// practice the chained shape isn't used in stdlib code.
+    fn desugar_while_let_chain(
+        &mut self,
+        body: &AstBody,
+        label: Option<&str>,
+        conditions: &[IfCondition],
+        while_body: &AstBlock,
+        span: &Span,
+    ) -> HirExprId {
+        self.push_scope();
         let cond = self.lower_if_conditions(body, conditions, MatchSource::WhileLet, span);
 
         let break_expr = self.alloc_expr(HirExpr::Break {
@@ -325,7 +477,6 @@ impl LowerCtx<'_> {
             span: span.clone(),
         });
 
-        // Negate: if !cond { break }
         let negated =
             if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
                 self.alloc_expr(HirExpr::ProtocolCall {
@@ -712,63 +863,9 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Desugar `operand!` (unwrap) to:
-    /// ```text
-    /// match operand {
-    ///     .Some($v) => $v,
-    ///     .None => <unreachable/trap>
-    /// }
-    /// ```
-    pub(crate) fn desugar_unwrap(
-        &mut self,
-        body: &AstBody,
-        operand: ExprId,
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_operand = self.lower_expr(body, operand);
-
-        // .Some($v) => $v
-        let some_local = self.define_local("$unwrap", false, span.clone());
-        let some_binding = self.alloc_pat(HirPat::Binding {
-            local: some_local,
-            span: span.clone(),
-        });
-        let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("Some"),
-            args: vec![HirPatArg {
-                label: None,
-                pattern: some_binding,
-            }],
-            span: span.clone(),
-        });
-        let some_body = self.alloc_expr(HirExpr::Local(some_local, span.clone()));
-
-        // .None => trap (represented as Error for now — codegen will handle)
-        let none_pat = self.alloc_pat(HirPat::ImplicitVariant {
-            name: HirName::name("None"),
-            args: Vec::new(),
-            span: span.clone(),
-        });
-        let trap = self.alloc_expr(HirExpr::Error { span: span.clone() });
-
-        self.alloc_expr(HirExpr::Match {
-            scrutinee: lowered_operand,
-            arms: vec![
-                HirMatchArm {
-                    pattern: some_pat,
-                    guard: None,
-                    body: some_body,
-                },
-                HirMatchArm {
-                    pattern: none_pat,
-                    guard: None,
-                    body: trap,
-                },
-            ],
-            source: MatchSource::UnwrapOp,
-            span: span.clone(),
-        })
-    }
+    // `operand!` (force-unwrap) desugars to a ProtocolCall via
+    // `desugar_postfix_op` + the `POSTFIX_OP_PROTOCOLS` table
+    // (`ForceUnwrap.forceUnwrap`), exactly like postfix `..`.
 
     // ===== Interpolated strings =====
 
@@ -897,15 +994,13 @@ impl LowerCtx<'_> {
                     }];
 
                     // If format spec is present, parse it and build FormatOptions
-                    if let Some(spec_str) = format {
-                        if let Some(opts_expr) =
-                            self.build_format_options_from_spec(spec_str, span)
-                        {
-                            args.push(HirCallArg {
-                                label: None,
-                                value: opts_expr,
-                            });
-                        }
+                    if let Some(spec_str) = format
+                        && let Some(opts_expr) = self.build_format_options_from_spec(spec_str, span)
+                    {
+                        args.push(HirCallArg {
+                            label: None,
+                            value: opts_expr,
+                        });
                     }
 
                     let append = self.alloc_expr(HirExpr::MethodCall {
@@ -952,11 +1047,7 @@ impl LowerCtx<'_> {
     /// Returns None if the spec can't be parsed or the builtin isn't available.
     ///
     /// Emits a block: `{ var $opts = FormatOptions(); $opts.radix = 16; ... ; $opts }`
-    fn build_format_options_from_spec(
-        &mut self,
-        spec: &str,
-        span: &Span,
-    ) -> Option<HirExprId> {
+    fn build_format_options_from_spec(&mut self, spec: &str, span: &Span) -> Option<HirExprId> {
         use crate::format_spec::{self, Alignment, FormatType, SignMode};
 
         let parsed = match format_spec::parse_format_spec(spec) {
@@ -991,26 +1082,24 @@ impl LowerCtx<'_> {
         }));
 
         // Helper: emit `$opts.field = value`
-        let assign_field = |this: &mut Self,
-                                stmts: &mut Vec<HirStmtId>,
-                                name: &str,
-                                value: HirExprId| {
-            let target_base = this.alloc_expr(HirExpr::Local(opts_local, span.clone()));
-            let target = this.alloc_expr(HirExpr::Field {
-                base: target_base,
-                name: HirName::name(name),
-                span: span.clone(),
-            });
-            let assign = this.alloc_expr(HirExpr::Assign {
-                target,
-                value,
-                span: span.clone(),
-            });
-            stmts.push(this.alloc_stmt(HirStmt::Expr {
-                expr: assign,
-                span: span.clone(),
-            }));
-        };
+        let assign_field =
+            |this: &mut Self, stmts: &mut Vec<HirStmtId>, name: &str, value: HirExprId| {
+                let target_base = this.alloc_expr(HirExpr::Local(opts_local, span.clone()));
+                let target = this.alloc_expr(HirExpr::Field {
+                    base: target_base,
+                    name: HirName::name(name),
+                    span: span.clone(),
+                });
+                let assign = this.alloc_expr(HirExpr::Assign {
+                    target,
+                    value,
+                    span: span.clone(),
+                });
+                stmts.push(this.alloc_stmt(HirStmt::Expr {
+                    expr: assign,
+                    span: span.clone(),
+                }));
+            };
 
         // width: Int64? — only if specified
         if let Some(w) = parsed.width {
@@ -1249,6 +1338,15 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::BitNot => "!",
         UnaryOp::LogicalNot => "not",
         UnaryOp::Pos => "+",
+        UnaryOp::RangeUpTo => "..<",
+        UnaryOp::RangeThrough => "..=",
+    }
+}
+
+fn postfix_op_symbol(op: &PostfixOp) -> &'static str {
+    match op {
+        PostfixOp::Unwrap => "!",
+        PostfixOp::RangeFrom => "..",
     }
 }
 

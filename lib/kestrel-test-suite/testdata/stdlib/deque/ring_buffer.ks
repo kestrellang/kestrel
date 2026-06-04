@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Exercise ring-buffer wrap-around by alternating push/pop patterns
             // that force the head pointer to advance past the end of the buffer.

@@ -1,6 +1,6 @@
 module Life
 
-struct Grid {
+struct Grid: Cloneable {
     var width: Int64
     var height: Int64
     var cells: Array[Bool]
@@ -72,5 +72,12 @@ struct Grid {
         for i in 0..<self.cells.count {
             self.cells(i) = rng.nextInt(below: 10) < 3;
         }
+    }
+
+    func clone() -> Grid {
+        var copy = Grid(width: self.width, height: self.height);
+        copy.cells = self.cells.clone();
+        copy.next = self.next.clone();
+        copy
     }
 }

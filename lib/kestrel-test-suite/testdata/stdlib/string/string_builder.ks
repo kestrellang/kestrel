@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // ---- Append String ----
     var b = std.text.StringBuilder();
@@ -57,8 +58,8 @@ func main() -> lang.i64 {
 
     // ---- appendChar ----
     var b7 = std.text.StringBuilder();
-    b7.appendChar('A');
-    b7.appendChar('B');
+    b7.append(char: 'A');
+    b7.append(char: 'B');
     let s7 = b7.build();
     if s7.isEqual(to: "AB") == false { return 8 }
 

@@ -64,6 +64,7 @@ pub trait QueryFn: Hash + Eq + Clone + 'static {
 }
 
 /// A memoized query result with dependency and revision tracking.
+#[derive(Clone)]
 struct MemoEntry<V> {
     value: V,
     /// Fingerprint of the value for early cutoff.
@@ -87,10 +88,39 @@ struct MemoEntry<V> {
 /// without knowing the sub-query's concrete type.
 type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision>;
 
+/// Type-erased store that can be cloned. Pairs a `Box<dyn Any>` with a
+/// clone function so we can duplicate query caches across snapshots.
+struct ErasedStore {
+    data: Box<dyn Any>,
+    clone_fn: fn(&dyn Any) -> Box<dyn Any>,
+}
+
+impl ErasedStore {
+    fn new<T: Clone + 'static>(value: T) -> Self {
+        Self {
+            data: Box::new(value),
+            clone_fn: |any| {
+                Box::new(
+                    any.downcast_ref::<T>()
+                        .expect("type mismatch in ErasedStore clone")
+                        .clone(),
+                )
+            },
+        }
+    }
+
+    fn clone_store(&self) -> Self {
+        Self {
+            data: (self.clone_fn)(&*self.data),
+            clone_fn: self.clone_fn,
+        }
+    }
+}
+
 /// Type-erased memoization storage. Each query type Q gets its own
 /// `HashMap<Q, MemoEntry<Q::Output>>`.
 pub(crate) struct QueryStorage {
-    stores: HashMap<TypeId, Box<dyn Any>>,
+    stores: HashMap<TypeId, ErasedStore>,
     /// Type-erased verifiers keyed by QueryKey. Registered when a query
     /// is first computed. Called during dep verification to recursively
     /// check if sub-queries have changed.
@@ -108,14 +138,15 @@ impl QueryStorage {
     fn get_memo<Q: QueryFn>(&self, key: &Q) -> Option<&MemoEntry<Q::Output>> {
         self.stores
             .get(&TypeId::of::<Q>())
-            .and_then(|s| s.downcast_ref::<HashMap<Q, MemoEntry<Q::Output>>>())
+            .and_then(|s| s.data.downcast_ref::<HashMap<Q, MemoEntry<Q::Output>>>())
             .and_then(|map| map.get(key))
     }
 
     fn insert_memo<Q: QueryFn>(&mut self, key: Q, entry: MemoEntry<Q::Output>) {
         self.stores
             .entry(TypeId::of::<Q>())
-            .or_insert_with(|| Box::new(HashMap::<Q, MemoEntry<Q::Output>>::new()))
+            .or_insert_with(|| ErasedStore::new(HashMap::<Q, MemoEntry<Q::Output>>::new()))
+            .data
             .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
             .expect("type mismatch in query storage")
             .insert(key, entry);
@@ -123,7 +154,9 @@ impl QueryStorage {
 
     fn update_verified<Q: QueryFn>(&mut self, key: &Q, revision: Revision) {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
-            && let Some(map) = store.downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
+            && let Some(map) = store
+                .data
+                .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;
@@ -132,6 +165,20 @@ impl QueryStorage {
 
     fn register_verifier(&mut self, key: QueryKey, verifier: VerifierFn) {
         self.verifiers.insert(key, verifier);
+    }
+}
+
+impl Clone for QueryStorage {
+    fn clone(&self) -> Self {
+        let stores = self
+            .stores
+            .iter()
+            .map(|(&k, v)| (k, v.clone_store()))
+            .collect();
+        Self {
+            stores,
+            verifiers: self.verifiers.clone(),
+        }
     }
 }
 

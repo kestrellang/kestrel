@@ -1,0 +1,25 @@
+; function: Test.example
+bb0:
+    %v1 = move_value %v0  // @owned Test.Opt
+    %v2 = discriminant %v1  // @owned Int32
+    switch %v2 {
+        variant 0 => bb1(%v1, %v2)
+        variant 1 => bb2(%v1, %v2)
+    }
+
+bb1(%v3: @owned Test.Opt, %v4: @owned Int32):
+    destroy_value %v4
+    (%v7) = destructure_enum %v3, variant 0
+    %v8 = move_value %v7  // @owned Test.Handle
+    %v9 = call Test.consume(%v8)  // @owned ()
+    jump bb3(%v9)
+
+bb2(%v5: @owned Test.Opt, %v6: @owned Int32):
+    destroy_value %v6
+    %v10 = literal ()  // @owned ()
+    destroy_value %v5
+    jump bb3(%v10)
+
+bb3(%v11: @owned ()):
+    return %v11
+

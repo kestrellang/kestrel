@@ -8,6 +8,7 @@ struct Point {
     let y: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     let p = Point(x: 42, y: 0);
     if p.x != 42 { return 1 }

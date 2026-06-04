@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let opt: std.numeric.Int64? = .Some(7);
     let val = match opt {

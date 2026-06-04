@@ -7,6 +7,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let n = 7;
 

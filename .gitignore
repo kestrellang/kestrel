@@ -8,6 +8,8 @@
 flock.lock
 !examples/*/flock.lock
 
+.claude/scheduled_tasks.lock
+
 # Cloudflare Worker for the package registry — lives in a separate repo
 /registry/
 

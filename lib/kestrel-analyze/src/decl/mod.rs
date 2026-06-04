@@ -18,6 +18,7 @@ pub mod extern_ffi_safe;
 pub mod field;
 pub mod function_body;
 pub mod generics;
+pub mod indirect_enum;
 pub mod parent_protocol_conformance;
 pub mod protocol_field_conformance;
 pub mod protocol_method;

@@ -85,6 +85,38 @@ public struct Command: Cloneable {
         self.subcommands = Array[Command]();
     }
 
+    /// @name With Description
+    /// Creates a command with a name and description.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("flock", about: "Package manager");
+    /// ```
+    public init(name: String, about about: String) {
+        self.name = name;
+        self._about = .Some(about);
+        self._version = .None;
+        self.arguments = Array[Argument]();
+        self.subcommands = Array[Command]();
+    }
+
+    /// @name With Description and Version
+    /// Creates a command with a name, description, and version.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("flock", about: "Package manager", version: "0.3.0");
+    /// ```
+    public init(name: String, about about: String, version version: String) {
+        self.name = name;
+        self._about = .Some(about);
+        self._version = .Some(version);
+        self.arguments = Array[Argument]();
+        self.subcommands = Array[Command]();
+    }
+
     /// Creates a deep copy of the command and all its contents.
     public func clone() -> Command {
         var c = Command(self.name.clone());
@@ -167,6 +199,122 @@ public struct Command: Cloneable {
         var copy = self.clone();
         copy.subcommands.append(subcommand);
         copy
+    }
+
+    // --- with() ---
+
+    /// Returns a copy with the given argument appended.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .with(argument: Argument(flag: "verbose", short: "v", about: "Be noisy"));
+    /// ```
+    public func with(argument argument: Argument) -> Command {
+        var copy = self.clone();
+        copy.arguments.append(argument);
+        copy
+    }
+
+    /// Returns a copy with the given subcommand appended.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("flock")
+    ///     .with(subcommand: Command("build", about: "Build the project"));
+    /// ```
+    public func with(subcommand subcommand: Command) -> Command {
+        var copy = self.clone();
+        copy.subcommands.append(subcommand);
+        copy
+    }
+
+    // --- inline argument convenience methods ---
+
+    /// Appends a flag argument inline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument(flag: "release", about: "Build in release mode");
+    /// ```
+    public func argument(flag name: String, about about: String) -> Command {
+        self.with(argument: Argument(flag: name, about: about))
+    }
+
+    /// Appends a flag argument with a short alias inline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument(flag: "verbose", short: "v", about: "Enable verbose output");
+    /// ```
+    public func argument(flag name: String, short short: String, about about: String) -> Command {
+        self.with(argument: Argument(flag: name, short: short, about: about))
+    }
+
+    /// Appends an option argument inline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument("target", about: "Target triple");
+    /// ```
+    public func argument(name: String, about about: String) -> Command {
+        self.with(argument: Argument(name, about: about))
+    }
+
+    /// Appends an option argument with a short alias inline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument("output", short: "o", about: "Output path");
+    /// ```
+    public func argument(name: String, short short: String, about about: String) -> Command {
+        self.with(argument: Argument(name, short: short, about: about))
+    }
+
+    /// Appends an option argument with a placeholder inline.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument("target", about: "Target triple", placeholder: "TRIPLE");
+    /// ```
+    public func argument(name: String, about about: String, placeholder placeholder: String) -> Command {
+        self.with(argument: Argument(name, about: about, placeholder: placeholder))
+    }
+
+    /// Appends an option argument with short alias and placeholder.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument("output", short: "o", about: "Output path", placeholder: "FILE");
+    /// ```
+    public func argument(name: String, short short: String, about about: String, placeholder placeholder: String) -> Command {
+        self.with(argument: Argument(name, short: short, about: about, placeholder: placeholder))
+    }
+
+    /// Appends a positional argument inline. Required by default.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cmd = Command("mycli")
+    ///     .argument(positional: "file", about: "Input file");
+    /// ```
+    public func argument(positional name: String, about about: String) -> Command {
+        self.with(argument: Argument(positional: name, about: about))
     }
 
     // --- parsing ---

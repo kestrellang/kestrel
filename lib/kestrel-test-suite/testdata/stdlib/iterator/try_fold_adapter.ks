@@ -3,13 +3,14 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // tryFold: fold where combine returns Result
             // Successful fold - all Ok. The error type `E` is unused here,
             // so it needs an explicit annotation (see try_fold_unconstrained_error_type.ks
             // for the diagnostic we emit when the annotation is missing).
             let result: std.result.Result[std.numeric.Int64, std.numeric.Int64] =
-                [1, 2, 3, 4].iter().tryFold(from: 0, combining: { (acc, x) in
+                [1, 2, 3, 4].iter().tryFold(from: 0, by: { (acc, x) in
                     .Ok(acc + x)
                 });
             match result {
@@ -18,7 +19,7 @@ module Test
             }
 
             // tryFold with early exit on error
-            let earlyExit = [1, 2, 3, 4, 5].iter().tryFold(from: 0, combining: { (acc, x) in
+            let earlyExit = [1, 2, 3, 4, 5].iter().tryFold(from: 0, by: { (acc, x) in
                 if acc > 3 {
                     let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(acc);
                     err
@@ -33,7 +34,7 @@ module Test
 
             // tryFold on empty iterator returns Ok(initial)
             let empty = std.collections.Array[std.numeric.Int64]();
-            let emptyResult: std.result.Result[std.numeric.Int64, std.numeric.Int64] = empty.iter().tryFold(from: 42, combining: { (acc, x) in
+            let emptyResult: std.result.Result[std.numeric.Int64, std.numeric.Int64] = empty.iter().tryFold(from: 42, by: { (acc, x) in
                 .Ok(acc + x)
             });
             match emptyResult {
@@ -42,7 +43,7 @@ module Test
             }
 
             // tryFold that errors on first element
-            let firstErr = [1, 2, 3].iter().tryFold(from: 0, combining: { (acc, x) in
+            let firstErr = [1, 2, 3].iter().tryFold(from: 0, by: { (acc, x) in
                 let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(-1);
                 err
             });

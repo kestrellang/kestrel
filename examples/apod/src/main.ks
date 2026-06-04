@@ -9,7 +9,8 @@ module apod.main
 import perch.app.(App)
 import perch.request.(Request)
 import perch.response.(Response)
-import perch.middleware.(logger)
+import perch.middleware.(Logger)
+import http.content.(Html)
 import swoop.swoop.(Swoop)
 import quill.json.parser.(parseJson)
 import apod.ui.(pageHtml, errorPageHtml)
@@ -52,12 +53,12 @@ func handleIndex(req: Request, ctx: Ctx) -> Response {
     match Swoop().fetch(url) {
         .Ok(res) => {
             match parseJson(res.body) {
-                .Ok(json) => Response.ok(html: pageHtml(json, date)),
-                .Err(e) => Response.ok(html: errorPageHtml("Could not parse the response from NASA.", date))
+                .Ok(json) => Response.ok(Html(pageHtml(json, date))),
+                .Err(e) => Response.ok(Html(errorPageHtml("Could not parse the response from NASA.", date)))
             }
         },
         .Err(e) => {
-            Response.ok(html: errorPageHtml("Could not reach NASA. Check your connection or try again later.", date))
+            Response.ok(Html(errorPageHtml("Could not reach NASA. Check your connection or try again later.", date)))
         }
     }
 }
@@ -66,23 +67,24 @@ func handleIndex(req: Request, ctx: Ctx) -> Response {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     // DEMO_KEY is rate-limited (30/hr, 50/day). For heavier use, register at
     // https://api.nasa.gov and pass your own key here.
     let ctx = Ctx(apiBase: "https://api.nasa.gov", apiKey: "DEMO_KEY");
     var app = App[Ctx](ctx);
-    app.use(logger[Ctx]());
+    app.use(Logger[Ctx]());
 
-    app.onGet("/", { (req: Request, ctx: Ctx) in
+    app.route(get: "/", { (req: Request, ctx: Ctx) in
         handleIndex(req, ctx)
     });
 
     let port: UInt16 = 8095;
-    let _ = println("Starting APOD viewer on http://localhost:8095");
+    println("Starting APOD viewer on http://localhost:8095");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = println("Error: " + e.description());
+            println("Error: " + e.description());
         }
     }
 }

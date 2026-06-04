@@ -1,0 +1,52 @@
+name: Beta Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [beta]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/_release-build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish rolling beta release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          DATE="$(date -u +%Y-%m-%d)"
+          gh release delete beta --yes --cleanup-tag || true
+          gh release create beta \
+            --title "Beta $DATE" \
+            --notes "Automated beta build from the \`beta\` branch — the current release-train stabilization candidate.
+
+          **Commit:** $COMMIT_SHA
+          **Date:** $DATE
+
+          ## Install
+
+          Install jessup (https://kestrel-lang.com), then switch to this channel:
+
+          \`\`\`sh
+          jessup install beta
+          \`\`\`
+
+          Or download the toolchain tarball for your platform below." \
+            --prerelease \
+            --target beta \
+            artifacts/kestrel-*.tar.gz \
+            artifacts/jessup-*.tar.gz

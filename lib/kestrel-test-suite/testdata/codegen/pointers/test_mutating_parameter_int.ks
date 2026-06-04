@@ -7,6 +7,7 @@ func increment(mutating n: std.numeric.Int64) {
     n = n + 1;
 }
 
+@main
 func main() -> lang.i64 {
     var x: std.numeric.Int64 = 41;
     increment(x);

@@ -9,6 +9,7 @@
 //! HIR Lowering (HirBody) → Type Inference (this crate) → TypedBody
 //! ```
 
+pub mod captures;
 pub mod compare;
 pub mod constraint;
 pub mod ctx;
@@ -34,6 +35,8 @@ use kestrel_span::Span;
 use ctx::InferCtx;
 use resolve::WorldResolver;
 use result::TypedBody;
+
+pub use captures::ClosureCaptures;
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;
@@ -93,6 +96,21 @@ impl QueryFn for InferBody {
 
         // Solve
         solver::solve(&mut infer_ctx, &hir);
+
+        // Detect circular opaque returns: if the concrete type behind `some P`
+        // is itself another opaque, the body never grounded to a real type.
+        if let Some(ref info) = infer_ctx.opaque_return {
+            let resolved = infer_ctx.resolve(info.concrete_tv);
+            if let ty::TySlot::Resolved(ty::TyKind::Opaque { .. }) =
+                &infer_ctx.types[resolved.0 as usize]
+            {
+                infer_ctx
+                    .errors
+                    .push(error::InferError::CircularOpaqueReturn {
+                        span: info.span.clone(),
+                    });
+            }
+        }
 
         // Build output
         Some(result::build_result(&infer_ctx))
@@ -174,7 +192,7 @@ fn create_param_types(
 
                         // Emit extension where clause constraints so the solver
                         // knows about bounds like Item: Addable, Item.Output = Item
-                        emit_extension_where_clauses(
+                        emit_container_where_clauses(
                             ctx, query_ctx, parent, target, &args, self_tv,
                         );
 
@@ -184,7 +202,24 @@ fn create_param_types(
                 }
             } else {
                 let fresh_args = fresh_type_args(ctx, query_ctx, parent);
-                ctx.named(parent, fresh_args)
+                let self_tv = ctx.named(parent, fresh_args.clone());
+                // Methods defined directly inside a struct/enum body must see
+                // the container's where clauses — e.g. `struct ChainIterator
+                // [A,B] ... where B.Item = A.Item` — exactly as extension
+                // methods see the extension's. Without this the equality is
+                // invisible in `next()` and `self.second.next(): B.Item` fails
+                // to unify with the `A.Item` return type (adapters.ks).
+                if parent_kind == Some(&NodeKind::Struct) || parent_kind == Some(&NodeKind::Enum) {
+                    emit_container_where_clauses(
+                        ctx,
+                        query_ctx,
+                        parent,
+                        parent,
+                        &fresh_args,
+                        self_tv,
+                    );
+                }
+                self_tv
             }
         } else {
             ctx.fresh()
@@ -208,8 +243,9 @@ fn create_param_types(
     }
 
     // Emit the method's own where clause constraints (e.g., `where I: Iterable, V = Array[E]`).
-    // Extension where clauses are handled by emit_extension_where_clauses above;
-    // this handles where clauses declared on the method/init itself.
+    // Container (extension / struct / enum) where clauses are handled by
+    // emit_container_where_clauses above; this handles where clauses declared
+    // on the method/init itself.
     emit_method_where_clauses(ctx, query_ctx, entity);
 
     param_tvs
@@ -227,14 +263,14 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
     // `where I: SeqIndex[T]` on the subscript). The accessor owner is
     // the direct parent (Subscript/Field); EnclosingContainer skips
     // one further to the type container — we need the intermediate one.
-    if query_ctx.get::<EnclosingContainer>(entity).is_some() {
-        if let Some(accessor_owner) = query_ctx.parent_of(entity) {
-            let owner_clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
-                entity: accessor_owner,
-                root: ctx.root,
-            });
-            clauses.extend(owner_clauses);
-        }
+    if query_ctx.get::<EnclosingContainer>(entity).is_some()
+        && let Some(accessor_owner) = query_ctx.parent_of(entity)
+    {
+        let owner_clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: accessor_owner,
+            root: ctx.root,
+        });
+        clauses.extend(owner_clauses);
     }
     if clauses.is_empty() {
         return;
@@ -264,6 +300,16 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
                 protocol,
                 protocol_type_args,
             } => {
+                // Skip the implicit (and explicit) `Copyable` / `Cloneable`
+                // bound — a call-site obligation, not a body-inference fact.
+                // `Pointer[T].read()` is declared `where T: Copyable` over the
+                // type's `T: not Copyable` param; emitting `Conforms(T,
+                // Copyable)` here makes the abstract param fail conformance and
+                // poisons the body. See the matching skip in
+                // `emit_container_where_clauses`.
+                if solver::copyable_builtin_kind(ctx, protocol).is_some() {
+                    continue;
+                }
                 // Find or create a TyVar for this param
                 let tv = ctx.param(param);
                 ctx.conforms(tv, protocol, span.clone());
@@ -325,18 +371,117 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
 }
 
 /// Create return type TyVar from the TypeAnnotation component.
+///
+/// When the return annotation is `HirTy::Opaque` (i.e. `some P`), this
+/// implements the **internal view**: a fresh TyVar constrained by `Conforms`
+/// to each bound protocol. The body's return expressions unify with this
+/// TyVar normally. Callers (external view) see `TyKind::Opaque` instead,
+/// constructed in `lower_hir_ty_sub`.
 fn create_return_type(
     ctx: &mut InferCtx<'_>,
     query_ctx: &QueryContext<'_>,
     entity: Entity,
 ) -> ty::TyVar {
-    query_ctx
-        .query(LowerTypeAnnotation {
-            entity,
-            root: ctx.root,
-        })
-        .map(|hir_ty| generate::lower_hir_ty(ctx, &hir_ty))
-        .unwrap_or_else(|| ctx.fresh())
+    let hir_ty = query_ctx.query(LowerTypeAnnotation {
+        entity,
+        root: ctx.root,
+    });
+
+    match hir_ty {
+        Some(ref hir) if contains_hir_opaque(hir) => create_return_type_with_opaque(ctx, hir),
+        Some(hir_ty) => generate::lower_hir_ty(ctx, &hir_ty),
+        None => ctx.fresh(),
+    }
+}
+
+/// Check if a HirTy contains `Opaque` at any depth.
+fn contains_hir_opaque(ty: &kestrel_hir::ty::HirTy) -> bool {
+    use kestrel_hir::ty::HirTy;
+    match ty {
+        HirTy::Opaque { .. } => true,
+        HirTy::Struct { args, .. }
+        | HirTy::Enum { args, .. }
+        | HirTy::Protocol { args, .. }
+        | HirTy::AliasUse { args, .. } => args.iter().any(contains_hir_opaque),
+        HirTy::Tuple(elems, _) => elems.iter().any(contains_hir_opaque),
+        HirTy::Function { params, ret, .. } => {
+            params.iter().any(contains_hir_opaque) || contains_hir_opaque(ret)
+        },
+        HirTy::AssocProjection { base, .. } => contains_hir_opaque(base),
+        _ => false,
+    }
+}
+
+/// Lower a return type containing opaque positions. Replaces each `HirTy::Opaque`
+/// with a fresh TyVar + Conforms constraints (internal view), and records
+/// the opaque info for the outermost opaque found.
+fn create_return_type_with_opaque(
+    ctx: &mut InferCtx<'_>,
+    hir_ty: &kestrel_hir::ty::HirTy,
+) -> ty::TyVar {
+    use kestrel_hir::ty::HirTy;
+    match hir_ty {
+        HirTy::Opaque { bounds, span } => {
+            let concrete_ret = ctx.fresh();
+
+            let mut opaque_bounds = Vec::new();
+            for bound in bounds {
+                let bound_tv = generate::lower_hir_ty(ctx, bound);
+                let resolved = ctx.resolve(bound_tv);
+                if let ty::TySlot::Resolved(ty::TyKind::Protocol {
+                    entity: proto,
+                    args,
+                }) = &ctx.types[resolved.0 as usize]
+                {
+                    opaque_bounds.push((*proto, args.clone()));
+                    ctx.conforms(concrete_ret, *proto, span.clone());
+                }
+            }
+
+            ctx.opaque_return = Some(ctx::OpaqueReturnInfo {
+                concrete_tv: concrete_ret,
+                bounds: opaque_bounds,
+                span: span.clone(),
+            });
+
+            concrete_ret
+        },
+        HirTy::Struct { entity, args, .. } => {
+            let arg_tvs: Vec<ty::TyVar> = args
+                .iter()
+                .map(|a| create_return_type_with_opaque(ctx, a))
+                .collect();
+            ctx.struct_ty(*entity, arg_tvs)
+        },
+        HirTy::Enum { entity, args, .. } => {
+            let arg_tvs: Vec<ty::TyVar> = args
+                .iter()
+                .map(|a| create_return_type_with_opaque(ctx, a))
+                .collect();
+            ctx.enum_ty(*entity, arg_tvs)
+        },
+        HirTy::Tuple(elems, _) => {
+            let tvs: Vec<ty::TyVar> = elems
+                .iter()
+                .map(|e| create_return_type_with_opaque(ctx, e))
+                .collect();
+            ctx.tuple(tvs)
+        },
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
+            let param_tvs: Vec<ty::TyVar> = params
+                .iter()
+                .map(|p| create_return_type_with_opaque(ctx, p))
+                .collect();
+            let ret_tv = create_return_type_with_opaque(ctx, ret);
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+        },
+        _ => generate::lower_hir_ty(ctx, hir_ty),
+    }
 }
 
 /// Create Param TyVars for the struct's type parameters in method body setup.
@@ -353,15 +498,21 @@ fn fresh_type_args(
         .unwrap_or_default()
 }
 
-/// Emit extension where clause constraints for the method body being inferred.
+/// Emit a type container's where-clause constraints for a method body being
+/// inferred. The container is either an `extend` block or the struct/enum that
+/// directly owns the method — both need their bounds and associated-type
+/// equalities visible inside their methods.
 ///
-/// Extension where clauses (e.g., `extend Iterator where Item: Addable, Item.Output = Item`)
-/// need to be emitted as constraints so the solver knows about bounds on associated types
-/// and type parameters when inferring method bodies inside the extension.
-fn emit_extension_where_clauses(
+/// Examples: `extend Iterator where Item: Addable, Item.Output = Item`, or
+/// `struct ChainIterator[A,B] ... where B.Item = A.Item`. Without these
+/// constraints the solver treats `A.Item` and `B.Item` as unrelated TyVars and
+/// rejects the method body. `where_entity` is queried for the clauses;
+/// `target` supplies the type params bound by `fresh_args` (for a struct method
+/// the two coincide).
+fn emit_container_where_clauses(
     ctx: &mut InferCtx<'_>,
     query_ctx: &QueryContext<'_>,
-    extension: Entity,
+    where_entity: Entity,
     target: Entity,
     fresh_args: &[ty::TyVar],
     self_tv: ty::TyVar,
@@ -377,7 +528,7 @@ fn emit_extension_where_clauses(
     let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::new();
 
     let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
-        entity: extension,
+        entity: where_entity,
         root: ctx.root,
     });
     for clause in clauses {
@@ -387,6 +538,17 @@ fn emit_extension_where_clauses(
                 protocol,
                 protocol_type_args,
             } => {
+                // Skip the implicit `T: Copyable` / `Cloneable` bound that
+                // `WhereClausesOf` injects for every generic param. Those are
+                // call-site obligations, not body-inference facts — emitting
+                // `Conforms(T, Copyable)` here is never needed to resolve types
+                // and wrongly rejects abstract non-Copyable params (e.g.
+                // `Pointer[T].read`/`pointee`/`deepClone`). Extensions never
+                // reach this (injection skips them), so this only narrows the
+                // struct/enum container path.
+                if solver::copyable_builtin_kind(ctx, protocol).is_some() {
+                    continue;
+                }
                 let span = Span::synthetic(0);
                 let subject_tv = get_or_create_subject_tv(
                     ctx,
@@ -511,6 +673,50 @@ fn emit_protocol_assoc_type_where_clauses(
     _self_tv: ty::TyVar,
     span: &Span,
 ) {
+    // A where clause on one associated type can reference a *sibling* in its
+    // RHS — `Iterable` declares `type TargetIterator: Iterator where
+    // TargetIterator.Item = Item`, where the bare `Item` is `Self.Item`.
+    // Without a substitution, that `Item` lowers to a raw `Param` for the
+    // associated-type entity, leaving the body's `T.Item` unrelated to the
+    // equality (the `expected T.Item got T.TargetIterator.Item` mismatch in
+    // array.ks `flatten`). So when — and only when — the protocol has any
+    // associated type carrying a where clause, pre-register `subject.<assoc>`
+    // for *all* of its associated types: the RHS references resolve, and
+    // registering each in `where_clause_assoc_subs` lets the body's own
+    // `T.<assoc>` projections reuse the same TyVar. Protocols whose associated
+    // types are unconstrained (e.g. `Iterator`'s bare `Item`) skip this
+    // entirely — pre-registering there would over-unify `Item` across
+    // independent uses and break `sum`/`product`/etc.
+    let has_assoc_where_clause = query_ctx.children_of(protocol).iter().any(|&child| {
+        query_ctx.get::<kestrel_ast_builder::NodeKind>(child)
+            == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+            && !query_ctx
+                .query(crate::where_clauses::WhereClausesOf {
+                    entity: child,
+                    root: ctx.root,
+                })
+                .is_empty()
+    });
+    if has_assoc_where_clause {
+        for &child in query_ctx.children_of(protocol) {
+            if query_ctx.get::<kestrel_ast_builder::NodeKind>(child)
+                != Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+            {
+                continue;
+            }
+            let assoc_name = query_ctx
+                .get::<kestrel_ast_builder::Name>(child)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            assoc_type_tvs.entry(child).or_insert_with(|| {
+                let tv = ctx.fresh();
+                ctx.associated(subject_tv, &assoc_name, tv, span.clone());
+                ctx.where_clause_assoc_subs.push((child, tv));
+                tv
+            });
+        }
+    }
+
     // Walk the protocol's children looking for TypeAlias entities with where clauses
     for &child in query_ctx.children_of(protocol) {
         if query_ctx.get::<kestrel_ast_builder::NodeKind>(child)
@@ -613,9 +819,10 @@ fn get_or_create_subject_tv(
 ) -> ty::TyVar {
     // Check if param is a type parameter of the target type
     if let Some(idx) = target_type_params.iter().position(|&p| p == param)
-        && idx < fresh_args.len() {
-            return fresh_args[idx];
-        }
+        && idx < fresh_args.len()
+    {
+        return fresh_args[idx];
+    }
 
     // Check if param is an associated type (TypeAlias) — create via associated constraint
     if query_ctx.get::<NodeKind>(param) == Some(&NodeKind::TypeAlias) {

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1);
@@ -22,12 +23,12 @@ module Test
             if last3(unchecked: 0) != 3 { return 4 }
 
             // Test takeWhile
-            let lessThan4 = arr.iter().takeWhile(matching: { (x) in x < 4 }).collect();
+            let lessThan4 = arr.iter().takeWhile(where: { (x) in x < 4 }).collect();
             if lessThan4.count != 3 { return 5 }
             if lessThan4(unchecked: 2) != 3 { return 6 }
 
             // Test skipWhile
-            let from4 = arr.iter().skipWhile(matching: { (x) in x < 4 }).collect();
+            let from4 = arr.iter().skipWhile(where: { (x) in x < 4 }).collect();
             if from4.count != 2 { return 7 }
             if from4(unchecked: 0) != 4 { return 8 }
 

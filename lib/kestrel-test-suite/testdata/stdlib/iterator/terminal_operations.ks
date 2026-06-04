@@ -13,22 +13,22 @@ module Test
 
             // Test count
             if arr.iter().count() != 5 { return 1 }
-            if arr.iter().filter(matching: { (x) in x % 2 == 0 }).count() != 2 { return 2 }
+            if arr.iter().filter(where: { (x) in x % 2 == 0 }).count() != 2 { return 2 }
 
             // Test fold (sum)
-            let sum = arr.iter().fold(from: 0, combining: { (acc, x) in acc + x });
+            let sum = arr.iter().fold(from: 0, by: { (acc, x) in acc + x });
             if sum != 15 { return 3 }
 
             // Test any
-            if arr.iter().any(matching: { (x) in x > 10 }) { return 4 }
-            if arr.iter().any(matching: { (x) in x == 3 }) == false { return 5 }
+            if arr.iter().any(where: { (x) in x > 10 }) { return 4 }
+            if arr.iter().any(where: { (x) in x == 3 }) == false { return 5 }
 
             // Test all
-            if arr.iter().all(matching: { (x) in x < 10 }) == false { return 6 }
-            if arr.iter().all(matching: { (x) in x % 2 == 0 }) { return 7 }
+            if arr.iter().all(where: { (x) in x < 10 }) == false { return 6 }
+            if arr.iter().all(where: { (x) in x % 2 == 0 }) { return 7 }
 
             // Test position
-            let found = arr.iter().firstIndex(matching: { (x) in x > 3 });
+            let found = arr.iter().firstIndex(where: { (x) in x > 3 });
             if found.isNone() { return 8 }
             if found.unwrap() != 3 { return 9 }
 

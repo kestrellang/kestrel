@@ -41,6 +41,7 @@ func sum(h: Holder) -> Int64 {
     s
 }
 
+@main
 func main() -> lang.i64 {
     var h = Holder();
     if sum(h) != 0 { return 1 }

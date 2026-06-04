@@ -16,8 +16,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    DeinitDeclarationData, FunctionBodyData, InitializerDeclarationData, ParameterAccessMode,
-    ParameterData,
+    DeinitDeclarationData, FunctionBodyData, InitEffect, InitializerDeclarationData,
+    ParameterAccessMode, ParameterData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -84,6 +84,17 @@ pub fn identifier<'tokens>()
     trivia(select! {
         Token::Identifier = e => to_kestrel_span(e.span()),
     })
+}
+
+/// Parse an identifier or keyword token, skipping leading trivia.
+/// Used in label position where keywords are allowed (e.g., `func insert(in list: Array[Int])`).
+pub fn identifier_or_keyword<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+    trivia(
+        any()
+            .filter(|t: &Token| matches!(t, Token::Identifier) || t.is_label_keyword())
+            .map_with(|_, e| to_kestrel_span(e.span())),
+    )
 }
 
 /// Internal Chumsky parser for module path segments
@@ -319,10 +330,8 @@ fn default_value_parser<'tokens>() -> impl Parser<
 /// - `x: Int = 0` → access_mode=None, label=None, pattern=Binding(x), default=Some(0)
 pub(crate) fn parameter_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, ParameterData, ParserExtra<'tokens>> + Clone {
-    // Parse identifier (with trivia skipping)
-    let ident = trivia(select! {
-        Token::Identifier = e => to_kestrel_span(e.span()),
-    });
+    // Parse label: identifier or keyword (keywords allowed as parameter labels)
+    let ident = identifier_or_keyword();
 
     let param_pattern = parameter_pattern_parser();
 
@@ -445,9 +454,25 @@ pub fn block_body_parser<'tokens>()
 // Declaration Parsers - Single Source of Truth
 // =============================================================================
 
+/// Parser for an init effect modifier: `?` or `throws Type`
+fn init_effect_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, Option<InitEffect>, ParserExtra<'tokens>> + Clone {
+    skip_trivia()
+        .ignore_then(
+            just(Token::Question)
+                .map_with(|_, e| InitEffect::Failable(to_kestrel_span(e.span())))
+                .or(just(Token::Throws)
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .then(ty_parser())
+                    .map(|(throws_span, err_ty)| InitEffect::Throwing(throws_span, err_ty))),
+        )
+        .or_not()
+        .boxed()
+}
+
 /// Parser for an initializer declaration
 ///
-/// Syntax: `(@attr)* (visibility)? init(params) { body }?`
+/// Syntax: `(@attr)* (visibility)? init(params)(? | throws E)? { body }?`
 /// Body is optional for protocol initializer declarations.
 ///
 /// This is the single source of truth for initializer declaration parsing.
@@ -461,6 +486,7 @@ pub fn initializer_declaration_parser_internal<'tokens>()
         .then(token(Token::LParen))
         .then(parameter_list_parser())
         .then(token(Token::RParen))
+        .then(init_effect_parser())
         .then(where_clause_parser().or_not())
         .then(block_body_parser())
         .map(
@@ -468,10 +494,13 @@ pub fn initializer_declaration_parser_internal<'tokens>()
                 (
                     (
                         (
-                            ((((attributes, visibility), init_span), type_params), lparen),
-                            parameters,
+                            (
+                                ((((attributes, visibility), init_span), type_params), lparen),
+                                parameters,
+                            ),
+                            rparen,
                         ),
-                        rparen,
+                        effect,
                     ),
                     where_clause,
                 ),
@@ -485,6 +514,7 @@ pub fn initializer_declaration_parser_internal<'tokens>()
                     lparen,
                     parameters,
                     rparen,
+                    effect,
                     where_clause,
                     body,
                 }

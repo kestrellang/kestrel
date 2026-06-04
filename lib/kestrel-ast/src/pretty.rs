@@ -75,7 +75,7 @@ impl PrettyCtx<'_> {
                 self.print_expr(*expr, depth);
                 self.buf.push('\n');
             },
-            AstStmt::GuardLet {
+            AstStmt::Guard {
                 conditions,
                 else_body,
                 ..
@@ -676,6 +676,10 @@ fn format_type(ty: &AstType) -> String {
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
+        AstType::Some { bounds, .. } => {
+            let b: Vec<_> = bounds.iter().map(format_type).collect();
+            format!("some {}", b.join(" and "))
+        },
     }
 }
 
@@ -685,12 +689,15 @@ fn format_unary_op(op: &UnaryOp) -> &'static str {
         UnaryOp::BitNot => "!",
         UnaryOp::LogicalNot => "not ",
         UnaryOp::Pos => "+",
+        UnaryOp::RangeUpTo => "..<",
+        UnaryOp::RangeThrough => "..=",
     }
 }
 
 fn format_postfix_op(op: &PostfixOp) -> &'static str {
     match op {
         PostfixOp::Unwrap => "!",
+        PostfixOp::RangeFrom => "..",
     }
 }
 

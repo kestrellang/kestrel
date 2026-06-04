@@ -8,6 +8,7 @@ module Test
             diff < 0.0000001
         }
 
+        @main
         func main() -> lang.i64 {
             let a: std.numeric.Float64 = 10.5;
             let b: std.numeric.Float64 = 3.2;

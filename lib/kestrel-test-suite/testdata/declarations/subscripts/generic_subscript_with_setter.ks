@@ -54,6 +54,7 @@ extend Slot1: Indexer {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var b = Box(v0: 10, v1: 20);
     if lang.i64_signed_lt(b(at: Slot0()), 10) { return 1 }

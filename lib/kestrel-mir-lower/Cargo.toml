@@ -18,7 +18,12 @@ kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-pattern-matching = { path = "../kestrel-pattern-matching" }
 kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-semantics = { path = "../kestrel-semantics" }
+indexmap = { workspace = true }
+smallvec = { workspace = true }
 
 [dev-dependencies]
 kestrel-compiler = { path = "../kestrel-compiler" }
 kestrel-compiler-driver = { path = "../kestrel-compiler-driver" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }

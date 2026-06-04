@@ -1,0 +1,10 @@
+[package]
+name = "datetime"
+version = "0.1.0"
+description = "Date, time, and timezone library for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[build]
+c-sources = ["datetime_shims.c"]

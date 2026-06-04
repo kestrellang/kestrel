@@ -12,6 +12,7 @@ func add_points(a: Point, b: Point) -> Point {
     Point(x: a.x + b.x, y: a.y + b.y)
 }
 
+@main
 func main() -> lang.i64 {
     let p1 = Point(x: 10, y: 5);
     let p2 = Point(x: 12, y: 15);

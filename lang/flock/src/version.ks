@@ -30,7 +30,7 @@ public struct Version: Cloneable {
     }
 
     /// Returns true if this version equals another.
-    public func equals(other other: Version) -> Bool {
+    public func isEqual(to other: Version) -> Bool {
         self.major == other.major and self.minor == other.minor and self.patch == other.patch
     }
 
@@ -75,7 +75,7 @@ public enum VersionConstraint: Cloneable {
 public func satisfies(version: Version, constraint: VersionConstraint) -> Bool {
     match constraint {
         .Any => true,
-        .Exact(required) => version.equals(other: required),
+        .Exact(required) => version.isEqual(to: required),
         .Compatible(minimum) => {
             if version.lessThan(other: minimum) {
                 return false
@@ -89,7 +89,7 @@ public func satisfies(version: Version, constraint: VersionConstraint) -> Bool {
                 return version.major == 0 and version.minor == minimum.minor
             }
             // For 0.0.z, must be exact
-            version.equals(other: minimum)
+            version.isEqual(to: minimum)
         },
         .TildeCompat(minimum) => {
             if version.lessThan(other: minimum) {
@@ -193,7 +193,7 @@ func splitOnDot(s: String) -> Array[String] {
 
 /// Parses a non-negative integer from a string. Returns None on failure.
 func parseInt(s: String) -> Optional[Int64] {
-    match Int64.parse(s) {
+    match Int64(parsing: s) {
         .Some(n) => {
             if n >= 0 { .Some(n) } else { .None }
         },

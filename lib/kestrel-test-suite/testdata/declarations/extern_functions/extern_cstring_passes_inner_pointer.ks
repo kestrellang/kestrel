@@ -17,6 +17,7 @@ module Test
 @extern(.C, mangleName: "strlen")
 func strlen(s: CString) -> lang.i64
 
+@main
 func main() -> lang.i64 {
     let cstr = "kestrel".toCString();
     let n = strlen(cstr);

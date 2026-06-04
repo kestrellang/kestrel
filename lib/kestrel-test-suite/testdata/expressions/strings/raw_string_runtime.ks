@@ -15,6 +15,7 @@ func consume(s: String) -> Int64 {
     s.byteCount
 }
 
+@main
 func main() -> lang.i64 {
     // Direct binding round-trips through codegen.
     let raw = #"hello"#;

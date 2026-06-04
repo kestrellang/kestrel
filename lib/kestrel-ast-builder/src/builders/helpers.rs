@@ -304,16 +304,16 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
                             && let AstType::Named {
                                 ref mut segments, ..
                             } = ty
-                            {
-                                let type_args: Vec<AstType> = args_node
-                                    .children()
-                                    .filter(|c| crate::ast_type::is_type_node(c.kind()))
-                                    .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
-                                    .collect();
-                                if let Some(last) = segments.last_mut() {
-                                    last.type_args = type_args;
-                                }
+                        {
+                            let type_args: Vec<AstType> = args_node
+                                .children()
+                                .filter(|c| crate::ast_type::is_type_node(c.kind()))
+                                .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
+                                .collect();
+                            if let Some(last) = segments.last_mut() {
+                                last.type_args = type_args;
                             }
+                        }
                         return Some(WhereConstraint::NegativeBound {
                             subject,
                             protocol: ty,
@@ -405,9 +405,10 @@ pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, fi
 fn bound_subject_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
     // Try AssociatedTypeTarget first (T.Item — contains a Path)
     if let Some(assoc) = find_child(parent, SyntaxKind::AssociatedTypeTarget)
-        && let Some(path) = find_child(&assoc, SyntaxKind::Path) {
-            return path_to_ast_type(&path, file_id);
-        }
+        && let Some(path) = find_child(&assoc, SyntaxKind::Path)
+    {
+        return path_to_ast_type(&path, file_id);
+    }
     // Fall back to simple Name (T)
     name_to_ast_type(parent, file_id)
 }
@@ -469,10 +470,12 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
         .collect::<Vec<_>>();
     // If multi-segment, put type args on last segment
     let mut segments = segments;
-    if segments.len() > 1 && !type_args.is_empty()
-        && let Some(last) = segments.last_mut() {
-            last.type_args = type_args;
-        }
+    if segments.len() > 1
+        && !type_args.is_empty()
+        && let Some(last) = segments.last_mut()
+    {
+        last.type_args = type_args;
+    }
     Some(AstType::Named { segments, span })
 }
 
@@ -517,6 +520,7 @@ pub fn is_type_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::TyUnit
             | SyntaxKind::TyNever
             | SyntaxKind::TyInferred
+            | SyntaxKind::TySome
     )
 }
 

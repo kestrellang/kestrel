@@ -70,12 +70,11 @@ fn walk_entity(
         !is_protocol
     };
 
-    if should_check
-        && let Some(ann) = cx.query.get::<TypeAnnotation>(entity) {
-            // Resolve context: use the entity itself so its own type params are in scope.
-            // ResolveName walks up the hierarchy, so parent/ancestor names are also found.
-            check_ast_type(cx, &ann.0, entity, diags);
-        }
+    if should_check && let Some(ann) = cx.query.get::<TypeAnnotation>(entity) {
+        // Resolve context: use the entity itself so its own type params are in scope.
+        // ResolveName walks up the hierarchy, so parent/ancestor names are also found.
+        check_ast_type(cx, &ann.0, entity, diags);
+    }
 
     for &child in cx.query.children_of(entity) {
         walk_entity(cx, child, in_protocol || is_protocol, diags);
@@ -151,6 +150,12 @@ fn check_ast_type(
         AstType::Result { ok, err, .. } => {
             check_ast_type(cx, ok, context, diags);
             check_ast_type(cx, err, context, diags);
+        },
+        // Opaque types — recurse into protocol bounds
+        AstType::Some { bounds, .. } => {
+            for b in bounds {
+                check_ast_type(cx, b, context, diags);
+            }
         },
         // Unit, Never, Inferred — no type references to check
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},

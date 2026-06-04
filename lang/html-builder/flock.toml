@@ -1,0 +1,9 @@
+[package]
+name = "html-builder"
+version = "0.1.0"
+description = "Type-safe HTML builder"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]

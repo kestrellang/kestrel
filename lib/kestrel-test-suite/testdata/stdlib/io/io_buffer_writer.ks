@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create a Buffer writer
             var buf = std.io.write.Buffer();

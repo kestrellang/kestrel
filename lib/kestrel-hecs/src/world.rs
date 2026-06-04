@@ -332,7 +332,7 @@ impl World {
             components: self.components.clone(),
             hierarchy: self.hierarchy.clone(),
             changes: self.changes.clone(),
-            queries: RefCell::new(QueryStorage::new()),
+            queries: RefCell::new(self.queries.borrow().clone()),
             accumulators: RefCell::new(AccumulatorStore::new()),
             query_exec_count: Cell::new(0),
         }
@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_has_fresh_query_cache() {
+    fn snapshot_preserves_query_cache() {
         use crate::query::QueryFn;
         use std::cell::RefCell;
 
@@ -565,17 +565,72 @@ mod tests {
             c.replace(0);
         });
 
-        // Snapshot starts with empty cache, so query must re-execute
+        // begin_revision clears the changed set; cached queries whose deps
+        // are unchanged will be verified without re-execution.
+        world.begin_revision();
+
         let snap = world.snapshot();
         let ctx = snap.query_context();
+
+        // Cached query survives snapshot — entity is NOT in the changed set,
+        // so deps_unchanged returns true and we get a cache hit.
         let result = ctx.query(GetHealth { entity: e });
         assert_eq!(result, Some(42));
-        assert_eq!(SNAP_EXEC.with(|c| *c.borrow()), 1);
+        assert_eq!(SNAP_EXEC.with(|c| *c.borrow()), 0);
 
-        // Second call on snapshot is memoized
+        // Second call is still memoized
         let result2 = ctx.query(GetHealth { entity: e });
         assert_eq!(result2, Some(42));
-        assert_eq!(SNAP_EXEC.with(|c| *c.borrow()), 1);
+        assert_eq!(SNAP_EXEC.with(|c| *c.borrow()), 0);
+    }
+
+    #[test]
+    fn snapshot_invalidates_changed_deps() {
+        use crate::query::QueryFn;
+        use std::cell::RefCell;
+
+        thread_local! {
+            static INV_EXEC: RefCell<u32> = const { RefCell::new(0) };
+        }
+
+        #[derive(Clone, PartialEq, Eq, Hash)]
+        struct GetHealth {
+            entity: Entity,
+        }
+
+        impl QueryFn for GetHealth {
+            type Output = Option<i32>;
+            fn execute(&self, ctx: &crate::query::QueryContext<'_>) -> Self::Output {
+                INV_EXEC.with(|c| *c.borrow_mut() += 1);
+                ctx.get::<Health>(self.entity).map(|h| h.0)
+            }
+        }
+
+        let mut world = World::new();
+        world.begin_revision();
+        let e = world.spawn();
+        world.set(e, Health(42));
+
+        // Populate cache
+        {
+            let ctx = world.query_context();
+            ctx.query(GetHealth { entity: e });
+        }
+        INV_EXEC.with(|c| {
+            c.replace(0);
+        });
+
+        // Mutate the entity in a new revision — it's now in the changed set
+        world.begin_revision();
+        world.set(e, Health(99));
+
+        let snap = world.snapshot();
+        let ctx = snap.query_context();
+
+        // Cached query is invalidated because entity is changed; re-executes
+        let result = ctx.query(GetHealth { entity: e });
+        assert_eq!(result, Some(99));
+        assert_eq!(INV_EXEC.with(|c| *c.borrow()), 1);
     }
 
     // -- Despawn tests --

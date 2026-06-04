@@ -599,9 +599,9 @@ fn emit_binary_expr(
 }
 
 /// Emit a single condition (either a let-binding or a boolean expression)
-/// Used by if-let, while-let, and guard-let chains.
+/// Used by if-let, while-let, and guard chains.
 /// The `condition_node_kind` parameter specifies the syntax kind for let conditions
-/// (e.g., IfLetCondition, WhileLetCondition, GuardLetCondition).
+/// (e.g., IfLetCondition, WhileLetCondition, GuardCondition).
 pub fn emit_if_condition(
     sink: &mut EventSink,
     condition: &IfCondition,
@@ -878,6 +878,11 @@ fn emit_closure_expr(
                 sink.add_token(SyntaxKind::Comma, params_data.commas[i - 1].clone());
             }
             sink.start_node(SyntaxKind::ClosureParam);
+            // `mutating` token sits at the head of the ClosureParam node; the
+            // AST builder scans for it (Phase 3).
+            if let Some(ref m) = param.mutating {
+                sink.add_token(SyntaxKind::Mutating, m.clone());
+            }
             crate::pattern::emit_pattern_variant(sink, &param.pattern);
             if let Some(ref colon) = param.colon {
                 sink.add_token(SyntaxKind::Colon, colon.clone());
@@ -913,16 +918,16 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
         BlockItem::TrailingExpression(expr) => {
             emit_expr_variant(sink, expr);
         },
-        BlockItem::GuardLet(guard_data) => {
-            // Guard-let in a closure/expression context
+        BlockItem::Guard(guard_data) => {
+            // Guard in a closure/expression context
             use crate::stmt::emit_stmt_variant;
 
             sink.start_node(SyntaxKind::Statement);
-            sink.start_node(SyntaxKind::GuardLetStatement);
+            sink.start_node(SyntaxKind::GuardStatement);
             sink.add_token(SyntaxKind::Guard, guard_data.guard_span.clone());
             // Emit each condition in the chain
             for condition in &guard_data.conditions {
-                emit_if_condition(sink, condition, SyntaxKind::GuardLetCondition);
+                emit_if_condition(sink, condition, SyntaxKind::GuardCondition);
             }
             sink.add_token(SyntaxKind::Else, guard_data.else_span.clone());
 
@@ -948,7 +953,7 @@ fn emit_block_item(sink: &mut EventSink, item: &BlockItem) {
             sink.add_token(SyntaxKind::RBrace, guard_data.else_rbrace.clone());
             sink.finish_node(); // CodeBlock
 
-            sink.finish_node(); // GuardLetStatement
+            sink.finish_node(); // GuardStatement
             sink.finish_node(); // Statement
         },
         BlockItem::Recovered(span) => {

@@ -1,0 +1,14 @@
+; function: Test.example
+bb0:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
+    jump bb1(%v1)
+
+bb1(%v2: @owned Test.Handle):
+    jump bb2(%v2)
+
+bb2(%v3: @owned Test.Handle):
+    %v6 = literal ()  // @owned ()
+    destroy_value %v3
+    return %v6
+

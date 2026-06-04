@@ -9,14 +9,16 @@ use std::collections::HashSet;
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause, WhereConstraint,
+    Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause,
+    WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
-use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_hir_lower::{LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation};
 use kestrel_name_res::{
-    ConformingProtocols, EntityBuiltin, ResolveBuiltin, ResolveTypePath, TypeResolution,
+    ConformingProtocolInstantiations, ConformingProtocols, EntityBuiltin, ResolveBuiltin,
+    ResolveTypePath, TypeResolution,
 };
 use kestrel_span::Span;
 
@@ -318,9 +320,9 @@ impl QueryFn for TypeParamCopyRequirement {
                         if let Some(copyable) = copyable
                             && resolve_type_entity(ctx, protocol, context, self.root)
                                 == Some(copyable)
-                            {
-                                return CopyRequirement::MayBeNonCopyable;
-                            }
+                        {
+                            return CopyRequirement::MayBeNonCopyable;
+                        }
                     },
                     WhereConstraint::Bound {
                         subject, protocols, ..
@@ -360,6 +362,108 @@ impl QueryFn for TypeParamCopyRequirement {
 
     fn describe(&self) -> String {
         format!("TypeParamCopyRequirement({:?})", self.param)
+    }
+}
+
+/// The type-param positions that gate a `not Copyable` type's *conditional*
+/// Copyable conformance. `struct X[A, B]: not Copyable` + `extend X[A, B]:
+/// Copyable where A: Copyable` returns `[0]`. Empty when the type isn't
+/// conditionally copyable — i.e. it's unconditionally Copyable/Cloneable, or
+/// `not Copyable` with no `extend …: Copyable`. Used to compute
+/// per-instantiation copyability: `X[args]` is Copyable iff every gating
+/// `args[i]` is itself Copyable. Single source of truth shared by the inference
+/// solver and MIR `copy_behavior`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ConditionalCopyableParams {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for ConditionalCopyableParams {
+    type Output = Vec<usize>;
+
+    fn describe(&self) -> String {
+        format!("ConditionalCopyableParams({:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<usize> {
+        // Only a `not Copyable`-base type can be *conditionally* Copyable.
+        if ctx
+            .query(NominalCopySemantics {
+                entity: self.entity,
+                root: self.root,
+            })
+            .semantics
+            != CopySemantics::NotCopyable
+        {
+            return Vec::new();
+        }
+        let Some(copyable) = ctx.query(ResolveBuiltin {
+            builtin: Builtin::Copyable,
+            root: self.root,
+        }) else {
+            return Vec::new();
+        };
+
+        // Find an extension adding a Copyable(-refining) conformance.
+        let insts = ctx.query(ConformingProtocolInstantiations {
+            entity: self.entity,
+            root: self.root,
+        });
+        let refines_copyable = |proto: Entity| {
+            proto == copyable
+                || ctx.query(ProtocolRefines {
+                    protocol: proto,
+                    base: copyable,
+                    root: self.root,
+                })
+        };
+        let Some(ext) = insts
+            .iter()
+            .find(|(proto, source, _)| *source != self.entity && refines_copyable(*proto))
+            .map(|(_, source, _)| *source)
+        else {
+            return Vec::new();
+        };
+
+        // Map the extension's Copyable where-clause bounds to target-arg
+        // positions: `extend X[A, B]` lowers its target to `X[Param(A), Param(B)]`,
+        // so a bound `A: Copyable` gates position 0.
+        let target_args = ctx
+            .query(LowerExtensionTargetTypeArgs {
+                extension: ext,
+                root: self.root,
+            })
+            .unwrap_or_default();
+        let Some(wc) = ctx.get::<AstWhereClause>(ext) else {
+            return Vec::new();
+        };
+        let mut positions = Vec::new();
+        for constraint in &wc.0 {
+            let WhereConstraint::Bound {
+                subject, protocols, ..
+            } = constraint
+            else {
+                continue;
+            };
+            let gates_copyable = protocols.iter().any(|p| {
+                resolve_type_entity(ctx, p, ext, self.root).is_some_and(&refines_copyable)
+            });
+            if !gates_copyable {
+                continue;
+            }
+            let Some(param) = resolve_type_entity(ctx, subject, ext, self.root) else {
+                continue;
+            };
+            if let Some(idx) = target_args
+                .iter()
+                .position(|t| matches!(t, HirTy::Param(p, _) if *p == param))
+                && !positions.contains(&idx)
+            {
+                positions.push(idx);
+            }
+        }
+        positions
     }
 }
 
@@ -477,6 +581,49 @@ impl QueryFn for IsBuiltinProtocol {
     }
 }
 
+/// Copy semantics of a concrete nominal instance `entity[args]`. For an
+/// unconditional type this is just the entity's `NominalCopySemantics`. For a
+/// *conditional* container (`: not Copyable` + `extend …: Copyable where T:
+/// Copyable`) the generic entity is `NotCopyable`, but the instance's semantics
+/// come from folding the gating args — any `NotCopyable` → `NotCopyable`, else
+/// any `Cloneable` → `Cloneable`, else `Copyable`. This keeps the semantics
+/// layer per-instantiation, in lockstep with MIR `instantiated_copy_behavior`
+/// and the inference solver's `nominal_conforms_copyable` (single source of
+/// truth: the gating positions come from `ConditionalCopyableParams`).
+fn nominal_instance_copy_semantics(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    args: &[HirTy],
+    context: Entity,
+    root: Entity,
+) -> CopySemantics {
+    let base = query_nominal_semantics(ctx, entity, root);
+    if base != CopySemantics::NotCopyable {
+        return base;
+    }
+    // A `not Copyable` base may still be conditionally Copyable per-instantiation.
+    let positions = ctx.query(ConditionalCopyableParams { entity, root });
+    if positions.is_empty() {
+        return CopySemantics::NotCopyable;
+    }
+    let mut saw_cloneable = false;
+    for &pos in &positions {
+        let Some(arg) = args.get(pos) else {
+            return CopySemantics::NotCopyable;
+        };
+        match hir_type_copy_semantics(ctx, arg, context, root) {
+            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
+            CopySemantics::Cloneable => saw_cloneable = true,
+            CopySemantics::Copyable => {},
+        }
+    }
+    if saw_cloneable {
+        CopySemantics::Cloneable
+    } else {
+        CopySemantics::Copyable
+    }
+}
+
 pub fn hir_type_copy_semantics(
     ctx: &QueryContext<'_>,
     ty: &HirTy,
@@ -484,10 +631,10 @@ pub fn hir_type_copy_semantics(
     root: Entity,
 ) -> CopySemantics {
     match ty {
-        HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. } => {
-            query_nominal_semantics(ctx, *entity, root)
+        HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
+            nominal_instance_copy_semantics(ctx, *entity, args, context, root)
         },
-        HirTy::Protocol { .. } => CopySemantics::Copyable,
+        HirTy::Protocol { .. } | HirTy::Opaque { .. } => CopySemantics::Copyable,
         HirTy::Tuple(elems, _) => {
             let mut saw_cloneable = false;
             for elem in elems {
@@ -519,7 +666,16 @@ pub fn hir_type_copy_semantics(
             }
         },
         HirTy::SelfType(entity, _) => query_nominal_semantics(ctx, *entity, root),
-        HirTy::AssocProjection { .. } => CopySemantics::NotCopyable,
+        // An associated projection (`I.Item`) is Copyable-by-default, exactly
+        // like a type param: the model gives every associated type an implicit
+        // `Copyable` bound unless it's declared `: not Copyable`, and only
+        // Copyable concretes are substituted at mono. Treating it as
+        // `NotCopyable` here wrongly poisoned every container of an assoc type
+        // (e.g. an iterator's `pendingItem: I.Item?`). MIR `ty_query` already
+        // classifies `AssociatedProjection` as `Bitwise`; the solver agrees via
+        // `type_conforms_copyable`. (A `type Item: not Copyable` associated type
+        // would need per-assoc requirement tracking — not modeled yet.)
+        HirTy::AssocProjection { .. } => CopySemantics::Copyable,
     }
 }
 
@@ -556,6 +712,10 @@ pub fn hir_type_conforms_to_protocol(
             protocol,
             root,
         }),
+        // Opaque types conform if any of their bounds conform
+        HirTy::Opaque { bounds, .. } => bounds
+            .iter()
+            .any(|b| hir_type_conforms_to_protocol(ctx, b, protocol, context, root)),
         HirTy::Param(entity, _) => {
             let Some(parent) = ctx.parent_of(*entity) else {
                 return false;
@@ -591,12 +751,32 @@ fn nominal_copy_semantics_impl(
             entity,
             protocol: copyable,
             root,
-        }) {
-            return CopySemanticsInfo {
-                semantics: CopySemantics::NotCopyable,
-                reason: CopySemanticsReason::ExplicitNotCopyable,
-            };
-        }
+        })
+    {
+        return CopySemanticsInfo {
+            semantics: CopySemantics::NotCopyable,
+            reason: CopySemanticsReason::ExplicitNotCopyable,
+        };
+    }
+
+    // Fallback: `: not Copyable` is meaningful syntactically even when the
+    // protocol path did not resolve to the builtin (for example, fixtures or
+    // modules that did not import std.core.Copyable). Match the last segment by
+    // name so the semantic copy classifier still agrees with the parser-level
+    // negative conformance.
+    if let Some(conf) = ctx.get::<Conformances>(entity)
+        && conf.0.iter().any(|item| {
+            matches!(
+                item,
+                ConformanceItem::Negative(ast_ty, _) if ast_type_last_segment_is(ast_ty, "Copyable")
+            )
+        })
+    {
+        return CopySemanticsInfo {
+            semantics: CopySemantics::NotCopyable,
+            reason: CopySemanticsReason::ExplicitNotCopyable,
+        };
+    }
 
     let child_types = collect_child_types(ctx, entity, root);
     for (child, ty) in &child_types {
@@ -613,23 +793,27 @@ fn nominal_copy_semantics_impl(
             entity,
             protocol: cloneable,
             root,
-        }) {
-            return CopySemanticsInfo {
-                semantics: CopySemantics::Cloneable,
-                reason: CopySemanticsReason::ExplicitCloneable,
-            };
-        }
-
-    for (child, ty) in &child_types {
-        if hir_type_copy_semantics(ctx, ty, entity, root) == CopySemantics::Cloneable {
-            return CopySemanticsInfo {
-                semantics: CopySemantics::NotCopyable,
-                reason: CopySemanticsReason::CloneableChildRequiresConformance(*child),
-            };
-        }
+        })
+    {
+        return CopySemanticsInfo {
+            semantics: CopySemantics::Cloneable,
+            reason: CopySemanticsReason::ExplicitCloneable,
+        };
     }
 
     CopySemanticsInfo::copyable()
+}
+
+/// `Copyable`-name fallback for stdlib-less fixtures. Returns true when
+/// `ast_ty` is a single-segment named type whose last segment matches
+/// `name`. Matches the previous HIR-tracker behavior so tests like
+/// `struct Handle: not Copyable {}` (without `import std.core`) still
+/// pick up their non-copyable semantics.
+fn ast_type_last_segment_is(ast_ty: &AstType, name: &str) -> bool {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return false;
+    };
+    segments.last().is_some_and(|s| s.name == name)
 }
 
 fn collect_child_types(
@@ -641,6 +825,13 @@ fn collect_child_types(
     for &child in ctx.children_of(entity) {
         match ctx.get::<NodeKind>(child) {
             Some(NodeKind::Field) => {
+                // Computed properties (`var x: T { get … }`) store nothing —
+                // they read/write through accessors — so they never affect
+                // whether the containing type is bit-copyable. Only stored
+                // fields contribute to copy semantics.
+                if ctx.get::<Computed>(child).is_some() {
+                    continue;
+                }
                 if let Some(ty) = ctx.query(LowerTypeAnnotation {
                     entity: child,
                     root,
@@ -749,7 +940,8 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Result { span, .. }
         | AstType::Unit(span)
         | AstType::Never(span)
-        | AstType::Inferred(span) => span.clone(),
+        | AstType::Inferred(span)
+        | AstType::Some { span, .. } => span.clone(),
     }
 }
 
@@ -769,5 +961,6 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
+        AstType::Some { .. } => "some".into(),
     }
 }

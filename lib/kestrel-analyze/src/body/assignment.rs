@@ -114,7 +114,7 @@ fn check_target(
         // Local variable: check is_mut
         HirExpr::Local(local_id, _) => {
             let local = &cx.hir.locals[*local_id];
-            if !local.is_mut {
+            if !local.is_mut && !util::is_mut_borrow_param(cx, *local_id) {
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[0].id,
                     severity: DESCRIPTORS[0].default_severity,
@@ -369,12 +369,15 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
 /// intermediate field along the chain is settable.
 fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
     match &cx.hir.exprs[expr_id] {
-        HirExpr::Local(local_id, _) => cx.hir.locals[*local_id].is_mut,
+        HirExpr::Local(local_id, _) => {
+            cx.hir.locals[*local_id].is_mut || util::is_mut_borrow_param(cx, *local_id)
+        },
         HirExpr::Field { base, .. } => {
             if let Some(&field_entity) = cx.typed.resolutions.get(&expr_id)
-                && cx.query.get::<Settable>(field_entity).is_none() {
-                    return false;
-                }
+                && cx.query.get::<Settable>(field_entity).is_none()
+            {
+                return false;
+            }
             is_mutable_base(cx, *base)
         },
         HirExpr::TupleIndex { base, .. } => is_mutable_base(cx, *base),

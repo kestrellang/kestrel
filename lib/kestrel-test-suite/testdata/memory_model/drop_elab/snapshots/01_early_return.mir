@@ -1,0 +1,8 @@
+; function: Test.example
+bb0:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
+    %v2 = literal ()  // @owned ()
+    destroy_value %v1
+    return %v2
+

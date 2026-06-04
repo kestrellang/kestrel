@@ -15,6 +15,7 @@ func handle(r: Result) -> lang.i64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let err = Result.Err(code: 10);
     // code (10) + 100 = 110

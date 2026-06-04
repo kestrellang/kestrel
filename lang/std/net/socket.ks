@@ -4,7 +4,7 @@ module std.net.socket
 
 import std.numeric.(Int64, Int32, UInt8, UInt16)
 import std.result.(Result)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(ArraySlice, Pointer, RcBox)
 import std.collections.(Array)
 import std.text.(String)
 import std.core.(Bool)
@@ -99,15 +99,24 @@ func buildSockaddrIn(port: UInt16) -> Array[UInt8] {
 ///
 /// # Representation
 ///
-/// A single `Int32` field holding the file descriptor; `-1` means
+/// A single `RcBox[Int32]` holding the file descriptor; `-1` means
 /// "detached, do not close on drop".
 ///
 /// # Memory Model
 ///
-/// Owns its fd. Cloning is not provided — duplicate explicitly via
-/// `dup(2)` if you need it.
-public struct TcpStream: Readable, Writable {
-    var fd: Int32
+/// Reference-counted shared ownership of the fd. Cloning is a refcount
+/// bump (the same socket), and `close(2)` runs exactly once — when the
+/// last handle drops. This is a shared handle, not a `dup(2)`; use
+/// `dup(2)` explicitly if you need an independent fd.
+public struct TcpStream: Readable, Writable, Cloneable {
+    // The fd lives in a reference-counted box so the socket is `close(2)`d
+    // exactly once — by whichever handle drops last. A plain `var fd: Int32`
+    // with a `deinit` is a footgun: the type would be `Copyable`, and any
+    // bit-copy (passing by value, extracting from a `Result`/`match`) would
+    // run `deinit` per copy, closing a live fd out from under other holders.
+    // Holding the fd in `RcBox` makes `TcpStream` `Cloneable` (copies bump a
+    // refcount) instead, so callers that pass streams around stay correct.
+    private var conn: RcBox[Int32]
 
     /// @name From Fd
     /// Wraps an existing socket fd as a `TcpStream`.
@@ -116,7 +125,19 @@ public struct TcpStream: Readable, Writable {
     /// Callers obtaining the fd from `accept` / `socket` should
     /// hand it over and stop using it directly.
     public init(fd: Int32) {
-        self.fd = fd
+        self.conn = RcBox(fd);
+    }
+
+    // Adopts an already-bumped storage handle; used by `clone()`.
+    private init(conn conn: RcBox[Int32]) {
+        self.conn = conn;
+    }
+
+    // Shares the socket: bump the refcount, hand back a second handle.
+    // Explicitly clones `conn` (clone-insertion is suppressed inside a clone
+    // impl), so this is a refcount bump — not an fd-aliasing bit-copy.
+    public func clone() -> TcpStream {
+        TcpStream(conn: self.conn.clone())
     }
 
     /// Reads up to `buf.count` bytes into `buf`. Returns the byte count actually read.
@@ -129,7 +150,7 @@ public struct TcpStream: Readable, Writable {
     /// Returns `Err(IoError)` from the captured `errno` if `recv`
     /// returns `-1`.
     public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.recv(self.fd, buf.pointer, buf.count, 0);
+        let n = libc.recv(self.conn.getValue(), buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -147,7 +168,7 @@ public struct TcpStream: Readable, Writable {
     /// Returns `Err(IoError)` from the captured `errno` if `send`
     /// returns `-1`.
     public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
-        let n = libc.send(self.fd, buf.pointer, buf.count, 0);
+        let n = libc.send(self.conn.getValue(), buf.pointer, buf.count, 0);
         if n < 0 {
             return .Err(IoError.last())
         }
@@ -168,25 +189,31 @@ public struct TcpStream: Readable, Writable {
     /// not expose (`fcntl`, `setsockopt`, …). Do not close it
     /// yourself — the deinit still will.
     public func rawFd() -> Int32 {
-        self.fd
+        self.conn.getValue()
     }
 
     /// Releases ownership of the fd and returns it.
     ///
-    /// Sets the internal fd to `-1` so the deinit becomes a no-op.
-    /// The caller takes responsibility for closing the returned fd.
-    /// Use this when handing the fd to another owner (e.g. an event
-    /// loop or a child process).
+    /// Stores the `-1` sentinel so the deinit becomes a no-op for every
+    /// handle sharing this socket. The caller takes responsibility for
+    /// closing the returned fd. Use this when handing the fd to another
+    /// owner (e.g. an event loop, a child process, or a TLS stream).
     public mutating func detachFd() -> Int32 {
-        let fd = self.fd;
-        self.fd = -1;
-        fd
+        self.conn.modify { (mutating fd) in
+            let old = fd;
+            fd = -1;
+            old
+        }
     }
 
-    /// Closes the owned fd if any. The `-1` sentinel set by `detachFd` makes this a no-op.
+    /// Closes the owned fd once, when the last shared handle drops.
+    /// The `-1` sentinel set by `detachFd` makes the close a no-op.
     deinit {
-        if self.fd >= 0 {
-            let _ = libc.close(self.fd);
+        if self.conn.isUnique() {
+            let fd = self.conn.getValue();
+            if fd >= 0 {
+                let _ = libc.close(fd);
+            }
         }
     }
 }
@@ -400,6 +427,14 @@ public struct TcpListener {
         if clientFd < 0 {
             return .Err(IoError.last())
         }
+        // Disable Nagle's algorithm on the connection. These are request/
+        // response sockets — the response should leave immediately, not wait
+        // to coalesce with a write that isn't coming. TCP_NODELAY is not
+        // reliably inherited from the listener, so set it per accepted fd.
+        // Best-effort: a failure here doesn't make the connection unusable.
+        var nodelay: Int32 = 1;
+        let optPtr = Pointer(to: nodelay).cast[UInt8]();
+        let _ = libc.setsockopt(clientFd, libc.IPPROTO_TCP(), libc.TCP_NODELAY(), optPtr, 4);
         .Ok(TcpStream(clientFd))
     }
 

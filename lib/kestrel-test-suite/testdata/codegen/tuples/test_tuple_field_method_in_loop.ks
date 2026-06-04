@@ -15,6 +15,7 @@ func findValue(pairs: Array[(String, String)], name: String) -> String? {
     .None
 }
 
+@main
 func main() -> lang.i64 {
     var headers = Array[(String, String)]();
     headers.append(("Content-Type", "text/html"));

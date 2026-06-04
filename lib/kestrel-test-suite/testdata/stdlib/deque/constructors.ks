@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test empty init
             var d1 = std.collections.Deque[std.numeric.Int64]();

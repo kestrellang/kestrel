@@ -264,7 +264,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeAll`
 
 ```kestrel
-public func writeAll[W](mutating W, from: ArraySlice[UInt8]) -> Result[(), IoError] where W: Writable
+public func writeAll[__opaque_0](mutating __opaque_0, from: ArraySlice[UInt8]) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes every byte in `buf`, looping until the full slice has been
@@ -284,7 +284,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeByte`
 
 ```kestrel
-public func writeByte[W](mutating W, UInt8) -> Result[(), IoError] where W: Writable
+public func writeByte[__opaque_0](mutating __opaque_0, UInt8) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes a single byte, looping internally until it lands.
@@ -294,7 +294,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeLine`
 
 ```kestrel
-public func writeLine[W](mutating W, String) -> Result[(), IoError] where W: Writable
+public func writeLine[__opaque_0](mutating __opaque_0, String) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes `s` followed by a single `\n`. Does not append `\r` on any
@@ -305,7 +305,7 @@ _Defined in `lang/std/io/write.ks`._
 ## function `writeString`
 
 ```kestrel
-public func writeString[W](mutating W, String) -> Result[(), IoError] where W: Writable
+public func writeString[__opaque_0](mutating __opaque_0, String) -> Result[(), IoError] where __opaque_0: Writable
 ```
 
 Writes the UTF-8 encoding of `s`. Empty strings short-circuit. Currently

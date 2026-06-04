@@ -212,8 +212,8 @@ mod tests {
     use super::*;
     use kestrel_ast::{AstType, PathSegment};
     use kestrel_ast_builder::{
-        AstParam, ConformanceItem, Conformances, ExtensionTarget, NodeKind, TypeAnnotation,
-        Typed, Vis,
+        AstParam, ConformanceItem, Conformances, ExtensionTarget, NodeKind, TypeAnnotation, Typed,
+        Vis,
     };
     use kestrel_hecs::World;
     use kestrel_span::Span;
@@ -314,7 +314,11 @@ mod tests {
         let entities: Vec<Entity> = members.iter().map(|tm| tm.entity).collect();
         assert!(entities.contains(&m));
         assert!(entities.contains(&f));
-        assert!(members.iter().all(|tm| tm.source == TypeMemberSource::Direct));
+        assert!(
+            members
+                .iter()
+                .all(|tm| tm.source == TypeMemberSource::Direct)
+        );
     }
 
     #[test]

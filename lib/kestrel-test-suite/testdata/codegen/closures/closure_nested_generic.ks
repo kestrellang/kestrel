@@ -11,6 +11,7 @@ struct Container[T] {
     let make: () -> Box[T]
 }
 
+@main
 func main() -> lang.i64 {
     let c = Container[std.numeric.Int64](make: { Box[std.numeric.Int64](value: 42) });
     let box = (c.make)();

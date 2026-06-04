@@ -9,17 +9,16 @@
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{DeclSpan, FileId, FilePath};
+use kestrel_ast_builder::{DeclSpan, FilePath};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
-use kestrel_span::Span;
 use kestrel_type_infer::InferBody;
 use tower_lsp::lsp_types::{Location, Range, ReferenceParams, Url};
 
 use crate::position::LineIndex;
-use crate::references::{self, RefKind, ReferenceSite};
+use crate::references::{self, RefKind, ReferenceSite, clip_to_identifier};
 use crate::semantic;
 use crate::server::{SharedState, path_to_url, url_to_path};
 
@@ -100,12 +99,10 @@ fn target_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                if let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
-                    return Some(t);
-                }
-            }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
+        {
+            return Some(t);
         }
     }
 
@@ -166,16 +163,15 @@ fn collect_sites(
     }
 
     if include_declaration {
-        if let Target::Entity(e) = target {
-            if let Some(span) = world.get::<DeclSpan>(*e).map(|s| s.0.clone()) {
-                if let Some(file) = entity_file(world, *e) {
-                    sites.push(ReferenceSite {
-                        file,
-                        span,
-                        kind: RefKind::Direct,
-                    });
-                }
-            }
+        if let Target::Entity(e) = target
+            && let Some(span) = world.get::<DeclSpan>(*e).map(|s| s.0.clone())
+            && let Some(file) = crate::references::entity_file(world, *e)
+        {
+            sites.push(ReferenceSite {
+                file,
+                span,
+                kind: RefKind::Direct,
+            });
         }
         // For locals, the definition site is `hir.locals[id].span` — included
         // here too.
@@ -184,14 +180,13 @@ fn collect_sites(
             if let Some(hir) = ctx.query(LowerBody {
                 entity: *body,
                 root,
-            }) {
-                if let Some(file) = entity_file(world, *body) {
-                    sites.push(ReferenceSite {
-                        file,
-                        span: hir.locals[*id].span.clone(),
-                        kind: RefKind::Direct,
-                    });
-                }
+            }) && let Some(file) = crate::references::entity_file(world, *body)
+            {
+                sites.push(ReferenceSite {
+                    file,
+                    span: hir.locals[*id].span.clone(),
+                    kind: RefKind::Direct,
+                });
             }
         }
     }
@@ -219,53 +214,12 @@ fn site_to_location(
     Some((url, li.range_for(clipped.start, clipped.end)))
 }
 
-/// For `MemberAccess` and `Pattern` spans, find the trailing identifier
-/// substring and return its sub-span. For `Direct`, the span is already the
-/// identifier.
-fn clip_to_identifier(source: &str, span: &Span, kind: RefKind) -> Span {
-    if matches!(kind, RefKind::Direct) {
-        return span.clone();
-    }
-    let text = match source.get(span.start..span.end) {
-        Some(t) => t,
-        None => return span.clone(),
-    };
-    // Find the last sequence of identifier-continue characters.
-    let trailing_start_in_text = text
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| is_ident_char(*c))
-        .last()
-        .map(|(i, _)| i);
-    match trailing_start_in_text {
-        Some(start) => Span::new(span.file_id, span.start + start..span.end),
-        None => span.clone(),
-    }
-}
-
-fn is_ident_char(c: char) -> bool {
-    c == '_' || c.is_alphanumeric()
-}
-
-fn entity_file(world: &World, entity: Entity) -> Option<Entity> {
-    if let Some(fid) = world.get::<FileId>(entity) {
-        return Some(fid.0);
-    }
-    let mut cur = world.parent_of(entity);
-    while let Some(e) = cur {
-        if let Some(fid) = world.get::<FileId>(e) {
-            return Some(fid.0);
-        }
-        cur = world.parent_of(e);
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::position::LineIndex;
     use kestrel_compiler::Compiler;
+    use kestrel_span::Span;
 
     fn site_kinds_for(target_name: &str, src: &str) -> Vec<(usize, usize, RefKind)> {
         let mut c = Compiler::new();
@@ -279,11 +233,11 @@ mod tests {
                 if n.0 != target_name {
                     continue;
                 }
-                if let Some(fid) = c.world().get::<F>(e) {
-                    if fid.0 == f {
-                        found = Some(e);
-                        break;
-                    }
+                if let Some(fid) = c.world().get::<F>(e)
+                    && fid.0 == f
+                {
+                    found = Some(e);
+                    break;
                 }
             }
             found.unwrap_or_else(|| panic!("no `{target_name}` found"))
@@ -372,13 +326,12 @@ mod tests {
         let foo = {
             let mut found = None;
             for (e, n) in c.world().iter_component::<Name>() {
-                if n.0 == "foo" {
-                    if let Some(fid) = c.world().get::<F>(e) {
-                        if fid.0 == f {
-                            found = Some(e);
-                            break;
-                        }
-                    }
+                if n.0 == "foo"
+                    && let Some(fid) = c.world().get::<F>(e)
+                    && fid.0 == f
+                {
+                    found = Some(e);
+                    break;
                 }
             }
             found.unwrap()

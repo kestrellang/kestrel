@@ -14,6 +14,7 @@ struct Task {
     let status: Status
 }
 
+@main
 func main() -> lang.i64 {
     let task = Task(id: 42, status: Status.Active);
     match task.status {

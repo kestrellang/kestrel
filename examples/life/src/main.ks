@@ -22,16 +22,26 @@
 
 module Life
 
-import Sdl.(Event)
+import sdl.(Event)
 
-func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Config) where I: InputManager, R: GameRenderer {
+// `gameLoop` drives a single object that both produces input events and renders.
+// SdlGameRenderer owns the window and naturally does both, so it is passed once;
+// the headless path wraps its two separate helpers in a HeadlessApp adapter.
+//
+// A single `mutating app` (rather than two params bound to the same `sdl`) keeps
+// us from aliasing one resource-owning value into two mutable params, which would
+// risk a double drop of the SDL handles at exit. The `A: not Copyable` bound is
+// required: a generic protocol-bound param defaults to a `Copyable` requirement,
+// so a non-Copyable concrete type (SdlGameRenderer wraps SDL pointers) only fits
+// when the param explicitly opts out of copyability.
+func gameLoop[A](mutating app: A, config cfg: Config) where A: InputManager, A: GameRenderer, A: not Copyable {
     var state = GameState(fromConfig: cfg);
 
     var timer = Timer.start();
     var simAccum: Int64 = 0;
 
     while state.running {
-        while let .Some(event) = i.getEvent() {
+        while let .Some(event) = app.getEvent() {
             match event {
                 .Quit => { state.running = false },
                 .KeyDown(.Space) => { state.paused = not state.paused },
@@ -48,6 +58,11 @@ func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Con
             }
         }
 
+        // Quit/Escape (or headless exhausting its iters) stops us before the
+        // generation step, so `--iters N` runs exactly N generations and an
+        // interactive quit doesn't burn one more step/render frame.
+        if not state.running { break; }
+
         simAccum = simAccum + timer.tick();
         if not state.paused and (state.stepDelayMs == 0 or simAccum >= state.stepDelayMs) {
             state.grid.step();
@@ -56,21 +71,20 @@ func gameLoop[I, R](mutating input i: I, mutating renderer r: R, config cfg: Con
         }
 
         state.updateFps(timer.elapsed());
-        r.render(state);
+        app.render(state);
     }
 
-    r.finish(state, elapsed: timer.elapsed());
+    app.finish(state, elapsed: timer.elapsed());
 }
 
-func main() -> Int32 {
+@main
+func main() {
     let cfg = Config.fromArgs();
     if cfg.headlessIters > 0 {
-        var input = HeadlessInputManager(cfg.headlessIters);
-        var renderer = HeadlessRenderer(config: cfg);
-        gameLoop(input: input, renderer: renderer, config: cfg);
+        var app = HeadlessApp(config: cfg);
+        gameLoop(app, config: cfg);
     } else {
         var sdl = SdlGameRenderer(config: cfg);
-        gameLoop(input: sdl, renderer: sdl, config: cfg);
+        gameLoop(sdl, config: cfg);
     }
-    0
 }

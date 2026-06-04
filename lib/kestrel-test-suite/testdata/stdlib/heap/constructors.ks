@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test empty init
             var h1 = std.collections.Heap[std.numeric.Int64]();

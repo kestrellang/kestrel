@@ -4,6 +4,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let n = 42;
     let s = """

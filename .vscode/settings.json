@@ -12,5 +12,6 @@
     "clippy::correctness",
     "-D",
     "clippy::suspicious"
-  ]
+  ],
+  "kestrel.lsp.path": "/Users/dino/Documents/Projects/kestrel/target/release/kestrel-lsp"
 }

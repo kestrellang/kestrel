@@ -136,7 +136,7 @@ fn build_page(
     let mut submodules: Vec<String> = Vec::new();
     let mut items: Vec<Item> = Vec::new();
 
-    let mut children: Vec<Entity> = world.children_of(module).iter().copied().collect();
+    let mut children: Vec<Entity> = world.children_of(module).to_vec();
     children.sort_by_key(|&e| {
         world
             .get::<Name>(e)
@@ -362,25 +362,34 @@ fn build_member_groups(
                 members.push(item);
             }
         }
-        for &child in world.children_of(protocol) {
-            let Some(kind) = world.get::<NodeKind>(child) else {
-                continue;
-            };
-            if !is_member_kind(kind) {
-                continue;
-            }
-            if signature::is_private(world, child) {
-                continue;
-            }
-            let raw_name = world
-                .get::<Name>(child)
-                .map(|n| n.0.clone())
-                .unwrap_or_default();
-            if covered_names.contains(&raw_name) {
-                continue;
-            }
-            if let Some(item) = build_item(world, child, protocol_index, extensions_by_target) {
-                members.push(item);
+        // Collect members from the protocol itself and any extensions of
+        // the protocol (default implementations like `extend Str`).
+        let empty_ext: Vec<Entity> = Vec::new();
+        let protocol_extensions = extensions_by_target.get(&protocol).unwrap_or(&empty_ext);
+        let mut protocol_sources: Vec<Entity> = vec![protocol];
+        protocol_sources.extend(protocol_extensions.iter().copied());
+        for &proto_source in &protocol_sources {
+            for &child in world.children_of(proto_source) {
+                let Some(kind) = world.get::<NodeKind>(child) else {
+                    continue;
+                };
+                if !is_member_kind(kind) {
+                    continue;
+                }
+                if signature::is_private(world, child) {
+                    continue;
+                }
+                let raw_name = world
+                    .get::<Name>(child)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
+                if covered_names.contains(&raw_name) {
+                    continue;
+                }
+                covered_names.insert(raw_name);
+                if let Some(item) = build_item(world, child, protocol_index, extensions_by_target) {
+                    members.push(item);
+                }
             }
         }
 
@@ -492,14 +501,14 @@ fn protocol_short_name(world: &World, protocol: Entity) -> String {
 }
 
 fn module_path_for(world: &World, entity: Entity) -> String {
-    if let Some(parent) = world.parent_of(entity) {
-        if matches!(world.get::<NodeKind>(parent), Some(NodeKind::Module)) {
-            let mp = module_path(world, parent);
-            if let Some(name) = world.get::<Name>(entity) {
-                return format!("{}.{}", mp, name.0);
-            }
-            return mp;
+    if let Some(parent) = world.parent_of(entity)
+        && matches!(world.get::<NodeKind>(parent), Some(NodeKind::Module))
+    {
+        let mp = module_path(world, parent);
+        if let Some(name) = world.get::<Name>(entity) {
+            return format!("{}.{}", mp, name.0);
         }
+        return mp;
     }
     String::new()
 }

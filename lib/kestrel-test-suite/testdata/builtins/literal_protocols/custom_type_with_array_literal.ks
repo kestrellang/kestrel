@@ -10,11 +10,12 @@ struct MyList: _ExpressibleByArrayLiteral {
     type Element = Int64
     var count: Int64
 
-    init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Int64], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+    init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[Int64], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.count = Int64(intLiteral: _arrayLiteralCount)
     }
 }
 
+@main
 func main() -> lang.i64 {
     let list: MyList = [1, 2, 3];
     list.count.raw

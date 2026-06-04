@@ -9,7 +9,7 @@ import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
 
 // Storage block backing an RcBox: the refcount lives next to the value,
 // in a single allocation, so clones bump a counter rather than copying T.
-struct RcBoxStorage[T] {
+struct RcBoxStorage[T]: not Copyable {
     var refCount: Int64  // TODO: Should be atomic
     var value: T
 }
@@ -48,7 +48,7 @@ struct RcBoxStorage[T] {
 ///   how COW types decide whether to copy.
 /// - The refcount is currently **not** atomic, so `RcBox` is not safe to
 ///   share across threads.
-public struct RcBox[T] {
+public struct RcBox[T]: Cloneable {
     private var ptr: Pointer[RcBoxStorage[T]]
 
     /// @name From Value
@@ -58,7 +58,7 @@ public struct RcBox[T] {
     /// # Errors
     ///
     /// Panics with `"RcBox allocation failed"` on allocation failure.
-    public init(value: T) {
+    public init(consuming value: T) {
         let layout: Layout = Layout.of[RcBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
         let result: RawPointer? = allocator.allocate(layout);
@@ -77,42 +77,64 @@ public struct RcBox[T] {
     }
 
     /// Reads the wrapped value out of storage. Returns a copy — the
-    /// underlying `T` is read through a pointer, so callers see a
-    /// snapshot, not a live reference.
+    /// underlying `T` is borrowed through `Pointer.with`, so no
+    /// temporary `RcBoxStorage` is created or dropped.
     public func getValue() -> T {
-        self.ptr.read().value
+        self.ptr.with { (storage) in storage.value }
+    }
+
+    /// Mutates the wrapped value in place, passing it to `body` as a
+    /// `mutating` argument. No clone or write-back — `body` mutates the
+    /// heap value directly. Safe only when this is the unique owner
+    /// (`isUnique() == true`); COW types check that first (see `CowBox.modify`).
+    public func modify[R](body: (mutating T) -> R) -> R {
+        self.valuePtr().withMut(body)
+    }
+
+    /// Returns a pointer to the wrapped value on the heap. The pointer
+    /// is valid as long as the RcBox (and its storage) is alive. Use
+    /// this to read individual fields without creating a full `T` clone
+    /// whose deinit would free owned resources prematurely.
+    public func valuePtr() -> Pointer[T] {
+        let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
+        self.ptr.asRaw().offset(by: valueOffset).cast[T]()
     }
 
     /// Overwrites the wrapped value in place. Safe only when this is the
     /// unique owner (`isUnique() == true`); otherwise other clones see the
     /// new value, defeating COW. The COW types check `isUnique` before
     /// calling this and `deepClone` otherwise.
-    public func setValue(value: T) {
-        var storage = self.ptr.read();
-        storage.value = value;
-        self.ptr.write(storage);
+    /// Takes `value` by consuming — the caller's copy is dead after this.
+    public func setValue(consuming value: T) {
+        // Drop the heap occupant before overwriting. Callers always pass a
+        // freshly cloned/constructed `value` (read()/getValue() clone; grow()
+        // builds a new storage), so the slot's prior value owns a DIFFERENT
+        // buffer that `write` (a non-dropping raw store) would otherwise orphan
+        // → memory leak on every COW mutation. No caller passes a `value`
+        // aliasing the occupant, so dropping first cannot use-after-free.
+        self.valuePtr().dropInPlace();
+        self.valuePtr().write(value);
     }
 
     /// Returns `true` when no other clone is sharing storage. The litmus
     /// test for "safe to mutate in place" in COW collections.
     public func isUnique() -> Bool {
-        self.ptr.read().refCount == 1
+        self.ptr.with { (storage) in storage.refCount == 1 }
     }
 
     /// Current strong reference count. Mostly useful for tests and
     /// diagnostics; production COW logic should branch on `isUnique`.
     public func refCount() -> Int64 {
-        self.ptr.read().refCount
+        self.ptr.with { (storage) in storage.refCount }
     }
 
     /// Bumps the refcount and returns a second `RcBox` pointing at the
     /// same storage. The receiver and the returned box now both reference
     /// the value; the next mutation should test `isUnique`.
     public func clone() -> RcBox[T] {
-        // TODO: Should use atomic increment
-        var storage = self.ptr.read();
-        storage.refCount = storage.refCount + 1;
-        self.ptr.write(storage);
+        let rcPtr = self.ptr.asRaw().cast[Int64]();
+        let count = rcPtr.read();
+        rcPtr.write(count + 1);
         RcBox(inner: self.ptr)
     }
 
@@ -120,23 +142,26 @@ public struct RcBox[T] {
     /// types when `isUnique()` returns `false` — splits off a private
     /// copy so the caller can mutate without affecting other clones.
     public func deepClone() -> RcBox[T] {
-        RcBox(self.ptr.read().value)
+        RcBox(self.ptr.with { (storage) in storage.value })
     }
 
     // Drop one reference; deallocate storage when the count hits zero.
     // Called from deinit; not exposed publicly.
     private func release() {
-        // TODO: Should use atomic decrement
-        var storage = self.ptr.read();
-        storage.refCount = storage.refCount - 1;
+        let rcPtr = self.ptr.asRaw().cast[Int64]();
+        let count = rcPtr.read();
+        let newCount = count - 1;
 
-        if storage.refCount == 0 {
-            // Last reference, deallocate
+        if newCount == 0 {
+            // Drop the value field in-place at the heap address, then free the block.
+            // RcBoxStorage layout: [refCount: Int64, value: T]
+            let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
+            self.ptr.asRaw().offset(by: valueOffset).cast[T]().dropInPlace();
             let layout = Layout.of[RcBoxStorage[T]]();
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
         } else {
-            self.ptr.write(storage)
+            rcPtr.write(newCount)
         }
     }
 

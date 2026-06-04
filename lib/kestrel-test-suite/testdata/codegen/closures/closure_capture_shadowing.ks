@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x: std.numeric.Int64 = 100;  // This will be captured
     // But the closure parameter shadows it

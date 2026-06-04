@@ -7,6 +7,13 @@ import std.core.Range
 import Tui.(Style, StyleOption, Box, moveTo, home, clearScreen, hideCursor, showCursor, clearLine, repeatStr)
 import Input.(Key, InputManager)
 
+// Workaround for cross-module ExpressibleByArrayLiteral compiler bug:
+// Array literal syntax for Style doesn't resolve element types across modules.
+func makeStyle(options: Array[StyleOption]) -> Style {
+    let ptr = lang.cast_ptr[_, StyleOption](options.asPointer().asRaw().raw);
+    Style(_arrayLiteralPointer: ptr, _arrayLiteralCount: options.count.raw)
+}
+
 // ============================================
 // Configuration
 // ============================================
@@ -22,15 +29,17 @@ struct Config {
 // Styles
 // ============================================
 
-struct Styles {
-    static var border: Style { [.White, .Dim] }
-    static var paddle1: Style { [.Green, .Bold] }
-    static var paddle2: Style { [.Cyan, .Bold] }
-    static var ball: Style { [.Yellow, .Bold] }
-    static var trail: Style { [.Gray] }
-    static var label: Style { [.Gray] }
-    static var value: Style { [.White, .Bold] }
-    static var centerLine: Style { [.White, .Dim] }
+struct Styles : Cloneable {
+    static var border: Style { makeStyle([.White, .Dim]) }
+    static var paddle1: Style { makeStyle([.Green, .Bold]) }
+    static var paddle2: Style { makeStyle([.Cyan, .Bold]) }
+    static var ball: Style { makeStyle([.Yellow, .Bold]) }
+    static var trail: Style { makeStyle([.Gray]) }
+    static var label: Style { makeStyle([.Gray]) }
+    static var value: Style { makeStyle([.White, .Bold]) }
+    static var centerLine: Style { makeStyle([.White, .Dim]) }
+
+    func clone() -> Styles { Styles() }
 }
 
 // ============================================
@@ -398,6 +407,7 @@ func usleep(usec: UInt32) -> Int32
 // Main
 // ============================================
 
+@main
 func main() {
     var game = Game();
 

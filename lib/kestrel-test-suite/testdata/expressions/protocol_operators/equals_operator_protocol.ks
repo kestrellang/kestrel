@@ -5,7 +5,7 @@
 module Test
 struct Number: Prelude.EqualsOperatorProtocol {
     var value: lang.i64
-    func isEqual(to rhs: Number) -> lang.i1 {
+    func equal(to rhs: Number) -> lang.i1 {
         lang.i64_eq(self.value, rhs.value)
     }
 }

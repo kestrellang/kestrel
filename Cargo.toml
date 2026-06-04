@@ -7,13 +7,16 @@ edition.workspace = true
 kestrel-compiler = { path = "lib/kestrel-compiler" }
 kestrel-compiler-driver = { path = "lib/kestrel-compiler-driver" }
 kestrel-ast-builder = { path = "lib/kestrel-ast-builder" }
-kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
+kestrel-analyze = { path = "lib/kestrel-analyze" }
+kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
+kestrel-mir = { path = "lib/kestrel-mir" }
+codespan-reporting = { workspace = true }
 clap = { workspace = true }
 
 [workspace.package]
-version = "0.15.0"
+version = "0.16.0"
 edition = "2024"
 license = "Apache-2.0"
 
@@ -32,6 +35,7 @@ tokio = { version = "1.52.1", features = ["full"] }
 toml = "0.8"
 tower-lsp = "0.20"
 unicode-xid = "0.2"
+smallvec = "1"
 walkdir = "2"
 
 
@@ -55,16 +59,20 @@ members = [
     "lib/kestrel-analyze",
     "lib/kestrel-debug",
     "lib/kestrel-reporting",
-    "lib/kestrel-mir",
-    "lib/kestrel-mir-lower",
     "lib/kestrel-codegen",
-    "lib/kestrel-codegen-cranelift",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
+    "lib/kestrel-mir",
+    "lib/kestrel-mir-lower",
+    "lib/kestrel-codegen-cranelift",
     "lib/kestrel-test-suite",
-    "external/triage",
 ]
-exclude = ["registry", "external/flock-registry"]
+# external/triage is local-only dev tooling (the whole external/ tree is
+# gitignored — see .gitignore). It builds standalone (own [workspace] +
+# literal package fields) and is installed via `cargo install --path
+# external/triage`, so it must NOT be a workspace member or CI checkouts
+# (which lack the dir) fail to load the manifest.
+exclude = ["registry", "external/flock-registry", "external/triage"]
 
 # Workspace-wide lint configuration
 # Individual crates inherit these with [lints] workspace = true

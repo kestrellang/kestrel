@@ -138,34 +138,35 @@ pub fn build_field(
         // static/global setters have no receiver.
         if has_setter
             && let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause)
-                && let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock) {
-                    let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
-                    let setter_receiver = if is_static_field || !parent_is_type {
-                        None
-                    } else {
-                        Some(ReceiverKind::Mutating)
-                    };
-                    let params = vec![AstParam {
-                        label: None,
-                        name: "newValue".into(),
-                        ty: new_value_ty,
-                        default_entity: None,
-                        pattern: None,
-                        is_mut: false,
-                        is_consuming: false,
-                    }];
-                    spawn_setter(
-                        world,
-                        entity,
-                        &setter_clause,
-                        &setter_body,
-                        params,
-                        setter_receiver,
-                        file_entity,
-                        file_id,
-                        is_static_field,
-                    );
-                }
+            && let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock)
+        {
+            let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
+            let setter_receiver = if is_static_field || !parent_is_type {
+                None
+            } else {
+                Some(ReceiverKind::Mutating)
+            };
+            let params = vec![AstParam {
+                label: None,
+                name: "newValue".into(),
+                ty: new_value_ty,
+                default_entity: None,
+                pattern: None,
+                is_mut: false,
+                is_consuming: false,
+            }];
+            spawn_setter(
+                world,
+                entity,
+                &setter_clause,
+                &setter_body,
+                params,
+                setter_receiver,
+                file_entity,
+                file_id,
+                is_static_field,
+            );
+        }
     } else {
         // Stored property: always Gettable
         world.set(entity, Gettable);
@@ -183,16 +184,15 @@ pub fn build_field(
                 .is_some_and(|t| t.kind() == SyntaxKind::Equals)
             {
                 found_equals = true;
-            } else if found_equals
-                && let Some(expr_node) = child.into_node() {
-                    // The parser wraps initializer exprs in Expression nodes
-                    world.set(
-                        entity,
-                        Body(lower::lower_default_value_expr(&expr_node, file_id)),
-                    );
-                    world.set(entity, Valued(expr_node));
-                    break;
-                }
+            } else if found_equals && let Some(expr_node) = child.into_node() {
+                // The parser wraps initializer exprs in Expression nodes
+                world.set(
+                    entity,
+                    Body(lower::lower_default_value_expr(&expr_node, file_id)),
+                );
+                world.set(entity, Valued(expr_node));
+                break;
+            }
         }
     }
 

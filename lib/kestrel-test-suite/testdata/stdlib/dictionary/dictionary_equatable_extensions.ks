@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // equals(other:) - same dictionaries
             var a = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();

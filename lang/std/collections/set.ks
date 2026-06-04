@@ -482,7 +482,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// var set: Set = [1, 2, 3, 4, 5];
     /// set.retain { (x) in x % 2 == 0 };  // {2, 4}
     /// ```
-    public mutating func retain(matching predicate: (T) -> Bool) {
+    public mutating func retain(where predicate: (T) -> Bool) {
         var toRemove: Array[T] = [];
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -505,7 +505,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// var set: Set = [1, 2, 3, 4, 5];
     /// set.removeAll { (x) in x % 2 == 0 };  // {1, 3, 5}
     /// ```
-    public mutating func removeAll(matching predicate: (T) -> Bool) {
+    public mutating func removeAll(where predicate: (T) -> Bool) {
         var toRemove: Array[T] = [];
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -856,7 +856,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// Set([1, 2, 3]).contains { (x) in x > 2 };  // true
     /// Set([1, 2, 3]).contains { (x) in x > 5 };  // false
     /// ```
-    public func contains(matching predicate: (T) -> Bool) -> Bool {
+    public func contains(where predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if predicate(elem) {
@@ -879,7 +879,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// set.first { (x) in x > 3 };   // Some(4) or Some(5)
     /// set.first { (x) in x > 99 };  // None
     /// ```
-    public func first(matching predicate: (T) -> Bool) -> T? {
+    public func first(where predicate: (T) -> Bool) -> T? {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if predicate(elem) {
@@ -902,7 +902,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// Set([1, 2, 4]).all { (x) in x % 2 == 0 };  // false
     /// Set[Int64]().all { (x) in false };           // true (vacuous)
     /// ```
-    public func all(matching predicate: (T) -> Bool) -> Bool {
+    public func all(where predicate: (T) -> Bool) -> Bool {
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if not predicate(elem) {
@@ -924,8 +924,8 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// Set([1, 2, 3]).any { (x) in x > 2 };  // true
     /// Set[Int64]().any { (x) in true };     // false (empty)
     /// ```
-    public func any(matching predicate: (T) -> Bool) -> Bool {
-        self.contains(matching: predicate)
+    public func any(where predicate: (T) -> Bool) -> Bool {
+        self.contains(where: predicate)
     }
 
     /// Returns the number of elements for which `predicate` is true.
@@ -940,7 +940,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// Set([1, 2, 3, 4, 5]).countItems { (x) in x % 2 == 0 };  // 2
     /// Set[Int64]().countItems { (x) in true };                // 0
     /// ```
-    public func countItems(matching predicate: (T) -> Bool) -> Int64 {
+    public func countItems(where predicate: (T) -> Bool) -> Int64 {
         var count: Int64 = 0;
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -968,7 +968,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     /// let set: Set = [1, 2, 3, 4, 5];
     /// let evens = set.filter { (x) in x % 2 == 0 };  // {2, 4}
     /// ```
-    public func filter(matching predicate: (T) -> Bool) -> Set[T, H] {
+    public func filter(where predicate: (T) -> Bool) -> Set[T, H] {
         var result = Set[T, H]();
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -1223,7 +1223,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
     /// "\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
     /// ```
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
-        writer.appendChar('{');
+        writer.append(char: '{');
         var first = true;
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
@@ -1233,7 +1233,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
             first = false;
             elem.format(into: writer, options)
         }
-        writer.appendChar('}')
+        writer.append(char: '}')
     }
 }
 
@@ -1422,7 +1422,7 @@ extend Set[T, H]: ExpressibleByArrayLiteral where T: Hashable, H: Hasher, H: Def
     ///
     /// The compiler guarantees `_arrayLiteralPointer` covers exactly
     /// `_arrayLiteralCount` initialized elements of `T`.
-    public init(_arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], _arrayLiteralCount _arrayLiteralCount: lang.i64) {
+    public init(consuming _arrayLiteralPointer _arrayLiteralPointer: lang.ptr[T], consuming _arrayLiteralCount _arrayLiteralCount: lang.i64) {
         self.init(arrayLiteral: LiteralSlice(pointer: _arrayLiteralPointer, count: _arrayLiteralCount))
     }
 }

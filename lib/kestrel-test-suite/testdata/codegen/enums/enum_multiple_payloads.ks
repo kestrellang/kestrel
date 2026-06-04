@@ -15,6 +15,7 @@ func handle(r: Result) -> lang.i64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let ok = Result.Ok(value: 42);
     if lang.i64_eq(handle(ok), 42) { 0 } else { 1 }

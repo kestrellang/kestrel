@@ -25,6 +25,7 @@ func sum_and_get[T](a: T, b: T) -> std.numeric.Int64 where T: Math {
     result.value()
 }
 
+@main
 func main() -> lang.i64 {
     let a = Num(n: 20);
     let b = Num(n: 22);

@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let t: ((std.numeric.Int64, std.numeric.Int64), std.numeric.Int64) = ((40, 2), 0);
     let inner = t.0;

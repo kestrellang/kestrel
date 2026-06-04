@@ -209,7 +209,7 @@ pub enum AstStmt {
         expr: ExprId,
         span: Span,
     },
-    GuardLet {
+    Guard {
         conditions: Vec<IfCondition>,
         else_body: AstBlock,
         span: Span,
@@ -363,6 +363,10 @@ pub struct MatchArm {
 pub struct ClosureParam {
     pub pattern: PatId,
     pub ty: Option<AstType>,
+    /// `true` when the param is declared `mutating` (by-reference). The
+    /// inferred convention may also be `MutBorrow` from the expected type
+    /// even when this is `false` (see type-infer closure conventions).
+    pub is_mut: bool,
 }
 
 // ===== Operators =====
@@ -373,11 +377,14 @@ pub enum UnaryOp {
     BitNot,
     LogicalNot,
     Pos,
+    RangeUpTo,
+    RangeThrough,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PostfixOp {
     Unwrap,
+    RangeFrom,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

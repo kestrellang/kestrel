@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Hash test: Some(42) and Some(42) should hash the same
             // None and None should hash the same

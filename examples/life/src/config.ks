@@ -44,11 +44,15 @@ struct Config {
 
         let finalCell = if cellSize > 0 { cellSize } else { autoCellSize(width: width, height: height) };
 
+        // Interactive runs throttle to ~12.5 gens/sec for a watchable animation;
+        // headless benchmarks step every iteration so `--iters` == generations.
+        let stepDelayMs = if headlessIters > 0 { 0 } else { 80 };
+
         Config(
             width: width,
             height: height,
             cellSize: finalCell,
-            stepDelayMs: 80,
+            stepDelayMs: stepDelayMs,
             headlessIters: headlessIters
         )
     }
@@ -66,14 +70,12 @@ func autoCellSize(width w: Int64, height h: Int64) -> Int64 {
 }
 
 func buildCommand() -> Command {
-    var cmd = Command("life");
-    cmd = cmd.about("Conway's Game of Life — an SDL example");
-    cmd = cmd.argument(Argument("width").short("W").help("Board width (5..2000)").defaultsTo("80"));
-    cmd = cmd.argument(Argument("height").short("H").help("Board height (5..2000)").defaultsTo("60"));
-    cmd = cmd.argument(Argument("cell-size").short("c").help("Cell size in pixels (1..40, auto if omitted)"));
-    cmd = cmd.argument(Argument("headless").toFlag().help("Run headless benchmark (no window)"));
-    cmd = cmd.argument(Argument("iters").short("n").help("Number of generations for headless mode").defaultsTo("1000"));
-    cmd
+    Command("life", about: "Conway's Game of Life — an SDL example")
+        .with(argument: Argument("width", short: "W", about: "Board width (5..2000)").optional(defaultsTo: "80"))
+        .with(argument: Argument("height", short: "H", about: "Board height (5..2000)").optional(defaultsTo: "60"))
+        .argument("cell-size", short: "c", about: "Cell size in pixels (1..40, auto if omitted)")
+        .argument(flag: "headless", about: "Run headless benchmark (no window)")
+        .with(argument: Argument("iters", short: "n", about: "Number of generations for headless mode").optional(defaultsTo: "1000"))
 }
 
 func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default fallback: Int64) -> Int64 {
@@ -81,7 +83,7 @@ func clampParse(value: Optional[String], min lo: Int64, max hi: Int64, default f
         return fallback;
     }
 
-    guard let .Some(n) = Int64.parse(s) else {
+    guard let .Some(n) = Int64(parsing: s) else {
         return fallback;
     }
 

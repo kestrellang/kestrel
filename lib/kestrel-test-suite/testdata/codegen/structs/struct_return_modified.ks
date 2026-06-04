@@ -15,6 +15,7 @@ func make_and_modify(base: std.numeric.Int64) -> Point {
     p
 }
 
+@main
 func main() -> lang.i64 {
     let p = make_and_modify(10);
     // x = 10 + 10 = 20, y = 10 + 12 = 22, sum = 42

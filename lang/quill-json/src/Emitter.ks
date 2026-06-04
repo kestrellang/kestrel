@@ -208,7 +208,7 @@ func emitString(s: String, mutating buf: String) {
         } else if b < 32 {
             buf.append("\\u00\(b:02x)")
         } else {
-            buf.appendChar(Char(UInt32(from: b)))
+            buf.append(char: Char(UInt32(from: b)).unwrap())
         }
         i = i + 1
     }
@@ -240,7 +240,10 @@ func emitFloat(f: Float64, mutating buf: String) {
     let len = s.byteCount;
     while i < len {
         let b = s.bytes(unchecked: i);
-        if b == 46 or b == 101 or b == 69 {
+        let dot: UInt8 = 46;
+        let eL: UInt8 = 101;
+        let eU: UInt8 = 69;
+        if b == dot or b == eL or b == eU {
             hasDot = true
         }
         i = i + 1

@@ -206,9 +206,10 @@ impl EventSink {
     fn last_real_token_end(&self) -> Option<usize> {
         for ev in self.events.iter().rev() {
             if let Event::AddToken(k, span) = ev
-                && !is_trivia_kind(*k) {
-                    return Some(span.end);
-                }
+                && !is_trivia_kind(*k)
+            {
+                return Some(span.end);
+            }
         }
         None
     }

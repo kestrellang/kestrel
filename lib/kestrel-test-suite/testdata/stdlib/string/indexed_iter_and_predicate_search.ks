@@ -3,35 +3,36 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
-    // ---- CharsView.firstIndex(matching:) ----
+    // ---- CharsView.firstIndex(where:) ----
     let s: std.text.String = "hello world";
-    let spaceIdx = s.chars.firstIndex(matching: { (c) in c.isWhitespace });
+    let spaceIdx = s.chars.firstIndex(where: { (c) in c.isWhitespace });
     if let .Some(idx) = spaceIdx {
         if idx.byteOffset != 5 { return 1 }
     } else { return 2 }
 
     // No match
-    let noMatch = s.chars.firstIndex(matching: { (c) in c.isAsciiDigit });
+    let noMatch = s.chars.firstIndex(where: { (c) in c.isAsciiDigit });
     if let .Some(_) = noMatch { return 3 }
 
-    // ---- CharsView.lastIndex(matching:) ----
+    // ---- CharsView.lastIndex(where:) ----
     let s2: std.text.String = "a b c d";
-    let lastSpace = s2.chars.lastIndex(matching: { (c) in c.isWhitespace });
+    let lastSpace = s2.chars.lastIndex(where: { (c) in c.isWhitespace });
     if let .Some(idx) = lastSpace {
         if idx.byteOffset != 5 { return 4 }
     } else { return 5 }
 
     // ---- Multi-byte: predicate search ----
     let uni: std.text.String = "hi\u{00E9}lo";
-    let accent = uni.chars.firstIndex(matching: { (c) in c.value() > 127 });
+    let accent = uni.chars.firstIndex(where: { (c) in c.value() > 127 });
     if let .Some(idx) = accent {
         if idx.byteOffset != 2 { return 6 }
     } else { return 7 }
 
-    // ---- GraphemesView.firstIndex(matching:) ----
+    // ---- GraphemesView.firstIndex(where:) ----
     let g: std.text.String = "abc def";
-    let gIdx = g.graphemes.firstIndex(matching: { (gr) in
+    let gIdx = g.graphemes.firstIndex(where: { (gr) in
         gr.firstChar.isWhitespace
     });
     if let .Some(idx) = gIdx {

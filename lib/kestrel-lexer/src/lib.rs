@@ -45,11 +45,21 @@ fn parse_pound_string(lex: &mut logos::Lexer<Token>) -> bool {
     if total_open_quotes >= 3 {
         // Multi-line raw. Opener is exactly `"""` (3 quotes); any further
         // quotes are content. Consume 2 more opener quotes (1 was matched).
-        scan_raw_close(lex, pound_count, /* opener_quote_count = */ 3, /* extra_consumed = */ 2)
+        scan_raw_close(
+            lex,
+            pound_count,
+            /* opener_quote_count = */ 3,
+            /* extra_consumed = */ 2,
+        )
     } else {
         // Single-line raw. Opener is exactly `"` (1 quote). No extra quotes
         // to consume from the regex match.
-        scan_raw_close(lex, pound_count, /* opener_quote_count = */ 1, /* extra_consumed = */ 0)
+        scan_raw_close(
+            lex,
+            pound_count,
+            /* opener_quote_count = */ 1,
+            /* extra_consumed = */ 0,
+        )
     }
 }
 
@@ -336,13 +346,13 @@ fn parse_multiline_cooked(lex: &mut logos::Lexer<Token>) -> bool {
             }
         } else {
             consecutive_quotes = 0;
-            if c == '\\' {
-                if let Some(&next) = chars.peek() {
-                    chars.next();
-                    offset += next.len_utf8();
-                    if next == '(' {
-                        offset += scan_interpolation(&mut chars, remainder);
-                    }
+            if c == '\\'
+                && let Some(&next) = chars.peek()
+            {
+                chars.next();
+                offset += next.len_utf8();
+                if next == '(' {
+                    offset += scan_interpolation(&mut chars, remainder);
                 }
             }
         }
@@ -446,6 +456,9 @@ pub enum Token {
 
     #[token("null")]
     Null,
+
+    #[token("some")]
+    Some,
 
     // ===== Declaration Keywords =====
     #[token("extend")]
@@ -729,6 +742,57 @@ pub enum Token {
 
     #[token("@")]
     At,
+}
+
+impl Token {
+    /// Whether this token is a keyword that can appear as a parameter label.
+    /// Excludes `Mutating` and `Consuming` — they're parsed as access modes.
+    pub fn is_label_keyword(&self) -> bool {
+        matches!(
+            self,
+            Token::As
+                | Token::And
+                | Token::Break
+                | Token::Case
+                | Token::Continue
+                | Token::Deinit
+                | Token::Else
+                | Token::Enum
+                | Token::Extend
+                | Token::Fileprivate
+                | Token::For
+                | Token::Func
+                | Token::Get
+                | Token::Guard
+                | Token::If
+                | Token::Import
+                | Token::In
+                | Token::Indirect
+                | Token::Init
+                | Token::Internal
+                | Token::Let
+                | Token::Loop
+                | Token::Match
+                | Token::Module
+                | Token::Not
+                | Token::Or
+                | Token::Private
+                | Token::Protocol
+                | Token::Public
+                | Token::Return
+                | Token::Set
+                | Token::Static
+                | Token::Struct
+                | Token::Subscript
+                | Token::Throw
+                | Token::Throws
+                | Token::Try
+                | Token::Type
+                | Token::Var
+                | Token::Where
+                | Token::While
+        )
+    }
 }
 
 pub type SpannedToken = Spanned<Token>;

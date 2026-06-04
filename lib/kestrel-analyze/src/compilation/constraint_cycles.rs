@@ -190,9 +190,10 @@ fn collect_param_refs(
                     context,
                     root: cx.root,
                 })
-                    && param_set.contains(&e) {
-                        out.push(e);
-                    }
+                && param_set.contains(&e)
+            {
+                out.push(e);
+            }
             for seg in segments {
                 for t in &seg.type_args {
                     collect_param_refs(cx, t, context, param_set, out);
@@ -224,6 +225,11 @@ fn collect_param_refs(
         AstType::Result { ok, err, .. } => {
             collect_param_refs(cx, ok, context, param_set, out);
             collect_param_refs(cx, err, context, param_set, out);
+        },
+        AstType::Some { bounds, .. } => {
+            for b in bounds {
+                collect_param_refs(cx, b, context, param_set, out);
+            }
         },
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }

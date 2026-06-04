@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // ---- CharsView.isEmpty ----
     let s: std.text.String = "hello";

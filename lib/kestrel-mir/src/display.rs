@@ -1,988 +1,990 @@
-//! Display implementations for MIR types.
-//!
-//! Types that need entity name resolution use the pattern:
-//!   `value.display(module) -> impl Display`
-//!
-//! Types that are self-contained (Op, IntBits, etc.) implement Display directly
-//! in their own files.
+// Pretty-printer for OSSA IR bodies.
+//
+// Produces textual output like:
+//   bb0(%v0: @owned String, %v1: @owned Int64):
+//       %v2 = copy_value %v0
+//       ...
+//       return %v2
 
-use crate::MirModule;
-use crate::body::BasicBlock;
-use crate::immediate::{Immediate, ImmediateKind};
-use crate::item::*;
-use crate::place::Place;
-use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
-use crate::terminator::{Terminator, TerminatorKind};
-use crate::ty::MirTy;
-use crate::value::Value;
-use std::fmt;
+use std::fmt::Write;
 
-// === Display helpers ===
+use kestrel_hecs::Entity;
 
-/// Write a comma-separated list of displayable items.
-fn write_comma_sep(
-    f: &mut fmt::Formatter<'_>,
-    items: &[impl DisplayWithModule],
-    module: &MirModule,
-) -> fmt::Result {
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            write!(f, ", ")?;
-        }
-        item.fmt_with(f, module)?;
+use crate::body::OssaBody;
+use crate::callee::Callee;
+use crate::immediate::ImmediateKind;
+use crate::inst::InstKind;
+use crate::terminator::{SwitchCase, TerminatorKind};
+use crate::ty::{MirTy, TyArena};
+use crate::value::Ownership;
+use crate::{BlockId, MirModule, TyId, ValueId};
+
+/// The two facts the pretty-printer needs from a module: its type arena and a
+/// way to turn an [`Entity`] into a display name. Both [`MirModule`] (pre-mono)
+/// and [`crate::mono::MonoModule`] (post-mono) satisfy this identically, so the
+/// whole printer is shared across both via `&dyn NameResolver`.
+pub trait NameResolver {
+    fn ty_arena(&self) -> &TyArena;
+    fn resolve_name(&self, entity: Entity) -> &str;
+    /// Resolve a monomorphized function id (index into a `MonoModule`'s
+    /// `functions`) to its mangled name. `None` pre-mono.
+    fn resolve_mono_name(&self, _id: usize) -> Option<&str> {
+        None
     }
-    Ok(())
 }
 
-/// Write type parameters: `[T, U]` or nothing if empty.
-fn write_type_params(f: &mut fmt::Formatter<'_>, params: &[TypeParamDef]) -> fmt::Result {
-    if !params.is_empty() {
-        write!(f, "[")?;
-        for (i, tp) in params.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
+impl NameResolver for MirModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+    fn resolve_name(&self, entity: Entity) -> &str {
+        MirModule::resolve_name(self, entity)
+    }
+}
+
+impl NameResolver for crate::mono::MonoModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+    fn resolve_name(&self, entity: Entity) -> &str {
+        crate::mono::MonoModule::resolve_name(self, entity)
+    }
+    fn resolve_mono_name(&self, id: usize) -> Option<&str> {
+        self.functions.get(id).map(|f| f.name.as_str())
+    }
+}
+
+/// Pretty-print the entire MIR module — all functions with bodies.
+pub fn display_module(module: &MirModule) -> String {
+    display_module_filtered(module, "")
+}
+
+/// Pretty-print functions whose name contains `filter` (empty = all).
+pub fn display_module_filtered(module: &MirModule, filter: &str) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for func in module.functions.values() {
+        if let Some(body) = &func.body {
+            if !filter.is_empty() && !func.name.contains(filter) {
+                continue;
             }
-            write!(f, "{}", tp.name)?;
-        }
-        write!(f, "]")?;
-    }
-    Ok(())
-}
-
-/// Trait for types that can be displayed with a module reference.
-trait DisplayWithModule {
-    fn fmt_with(&self, f: &mut fmt::Formatter<'_>, module: &MirModule) -> fmt::Result;
-}
-
-// === MirTy ===
-
-impl MirTy {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        MirTyDisplay { ty: self, module }
-    }
-}
-
-impl DisplayWithModule for MirTy {
-    fn fmt_with(&self, f: &mut fmt::Formatter<'_>, module: &MirModule) -> fmt::Result {
-        write!(f, "{}", self.display(module))
-    }
-}
-
-struct MirTyDisplay<'a> {
-    ty: &'a MirTy,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for MirTyDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.ty {
-            MirTy::I8 => write!(f, "i8"),
-            MirTy::I16 => write!(f, "i16"),
-            MirTy::I32 => write!(f, "i32"),
-            MirTy::I64 => write!(f, "i64"),
-            MirTy::F16 => write!(f, "f16"),
-            MirTy::F32 => write!(f, "f32"),
-            MirTy::F64 => write!(f, "f64"),
-            MirTy::Bool => write!(f, "bool"),
-            MirTy::Never => write!(f, "!"),
-            MirTy::Str => write!(f, "str"),
-            MirTy::Pointer(inner) => write!(f, "p[{}]", inner.display(self.module)),
-            MirTy::Ref(inner) => write!(f, "&{}", inner.display(self.module)),
-            MirTy::RefMut(inner) => write!(f, "&var {}", inner.display(self.module)),
-            MirTy::Tuple(elems) => {
-                write!(f, "(")?;
-                write_comma_sep(f, elems, self.module)?;
-                write!(f, ")")
-            },
-            MirTy::Named { entity, type_args } => {
-                write!(f, "{}", self.module.resolve_name(*entity))?;
-                if !type_args.is_empty() {
-                    write!(f, "[")?;
-                    write_comma_sep(f, type_args, self.module)?;
-                    write!(f, "]")?;
-                }
-                Ok(())
-            },
-            MirTy::TypeParam(entity) => {
-                write!(f, "{}", self.module.resolve_name(*entity))
-            },
-            MirTy::SelfType => write!(f, "Self"),
-            MirTy::AssociatedProjection {
-                base,
-                protocol,
-                name,
-            } => {
-                write!(
-                    f,
-                    "({}.{} for {})",
-                    self.module.resolve_name(*protocol),
-                    name,
-                    base.display(self.module),
-                )
-            },
-            MirTy::FuncThin { params, ret } => {
-                write!(f, "func(")?;
-                write_comma_sep(f, params, self.module)?;
-                write!(f, ") -> {}", ret.display(self.module))
-            },
-            MirTy::FuncThick { params, ret } => {
-                write!(f, "func escaping(")?;
-                write_comma_sep(f, params, self.module)?;
-                write!(f, ") -> {}", ret.display(self.module))
-            },
-            MirTy::Error => write!(f, "<error>"),
-        }
-    }
-}
-
-// === Place ===
-
-impl Place {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        PlaceDisplay {
-            place: self,
-            module,
-        }
-    }
-}
-
-struct PlaceDisplay<'a> {
-    place: &'a Place,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for PlaceDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.place {
-            Place::Local(id) => {
-                write!(f, "%{}", self.module.resolve_local_name(*id))
-            },
-            Place::Global(entity) => {
-                write!(f, "@{}", self.module.resolve_name(*entity))
-            },
-            Place::Field { parent, name } => {
-                write!(f, "{}.{}", parent.display(self.module), name)
-            },
-            Place::Index { parent, index } => {
-                write!(f, "{}.{}", parent.display(self.module), index)
-            },
-            Place::Downcast { parent, variant } => {
-                write!(f, "{}.{}", parent.display(self.module), variant)
-            },
-            Place::Deref(inner) => {
-                write!(f, "(deref {})", inner.display(self.module))
-            },
-        }
-    }
-}
-
-// === Value ===
-
-impl Value {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        ValueDisplay {
-            value: self,
-            module,
-        }
-    }
-}
-
-struct ValueDisplay<'a> {
-    value: &'a Value,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for ValueDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.value {
-            Value::Place(p) => write!(f, "{}", p.display(self.module)),
-            Value::Immediate(i) => write!(f, "{}", i.display(self.module)),
-        }
-    }
-}
-
-// === Immediate ===
-
-impl Immediate {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        ImmediateDisplay { imm: self, module }
-    }
-}
-
-struct ImmediateDisplay<'a> {
-    imm: &'a Immediate,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for ImmediateDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.imm.kind {
-            ImmediateKind::IntLiteral { bits, value } => {
-                write!(f, "{}.literal {}", bits, value)
-            },
-            ImmediateKind::FloatLiteral { bits, value } => {
-                write!(f, "{}.literal {}", bits, value)
-            },
-            ImmediateKind::BoolLiteral(b) => write!(f, "{}", b),
-            ImmediateKind::StringLiteral(s) => write!(f, "str.literal {:?}", s),
-            ImmediateKind::StringPointer(s) => write!(f, "str.ptr {:?}", s),
-            ImmediateKind::Unit => write!(f, "()"),
-            ImmediateKind::FunctionRef { func, type_args } => {
-                write!(f, "{}", self.module.resolve_name(*func))?;
-                if !type_args.is_empty() {
-                    write!(f, "[")?;
-                    write_comma_sep(f, type_args, self.module)?;
-                    write!(f, "]")?;
-                }
-                Ok(())
-            },
-            ImmediateKind::WitnessMethod {
-                protocol,
-                method,
-                for_type,
-            } => {
-                write!(
-                    f,
-                    "witness_method {}.{} for {}",
-                    self.module.resolve_name(*protocol),
-                    method,
-                    for_type.display(self.module),
-                )
-            },
-            ImmediateKind::NullPtr(ty) => {
-                write!(f, "ptr.null[{}]", ty.display(self.module))
-            },
-            ImmediateKind::Error => write!(f, "<error>"),
-        }
-    }
-}
-
-// === Statement ===
-
-impl Statement {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        StatementDisplay { stmt: self, module }
-    }
-}
-
-struct StatementDisplay<'a> {
-    stmt: &'a Statement,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for StatementDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.stmt.kind {
-            StatementKind::Assign { dest, rvalue } => {
-                write!(
-                    f,
-                    "{} = {}",
-                    dest.display(self.module),
-                    rvalue.display(self.module),
-                )
-            },
-            StatementKind::Call { dest, callee, args } => {
-                if let Some(d) = dest {
-                    write!(f, "{} = ", d.display(self.module))?;
-                }
-                write!(f, "call {}", callee.display(self.module))?;
-                write!(f, "(")?;
-                write_call_args(f, args, self.module)?;
-                write!(f, ")")
-            },
-            StatementKind::Deinit { place } => {
-                write!(f, "deinit {}", place.display(self.module))
-            },
-            StatementKind::DeinitIf { place, flag } => {
-                write!(
-                    f,
-                    "deinit {} if %{}",
-                    place.display(self.module),
-                    self.module.resolve_local_name(*flag),
-                )
-            },
-            StatementKind::SetDeinitFlag { flag, value } => {
-                write!(f, "%{} = {}", self.module.resolve_local_name(*flag), value,)
-            },
-        }
-    }
-}
-
-// === Rvalue ===
-
-impl Rvalue {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        RvalueDisplay {
-            rvalue: self,
-            module,
-        }
-    }
-}
-
-struct RvalueDisplay<'a> {
-    rvalue: &'a Rvalue,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for RvalueDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.rvalue {
-            Rvalue::Move(p) => write!(f, "move {}", p.display(self.module)),
-            Rvalue::Copy(p) => write!(f, "copy {}", p.display(self.module)),
-            Rvalue::Ref(p) => write!(f, "ref {}", p.display(self.module)),
-            Rvalue::RefMut(p) => write!(f, "ref var {}", p.display(self.module)),
-            Rvalue::Const(imm) => write!(f, "{}", imm.display(self.module)),
-            Rvalue::Op1 { op, arg } => {
-                write!(f, "{} {}", op, arg.display(self.module))
-            },
-            Rvalue::Op2 { op, lhs, rhs } => {
-                write!(
-                    f,
-                    "{} {}, {}",
-                    op,
-                    lhs.display(self.module),
-                    rhs.display(self.module),
-                )
-            },
-            Rvalue::Op3 { op, a, b, c } => {
-                write!(
-                    f,
-                    "{} {}, {}, {}",
-                    op,
-                    a.display(self.module),
-                    b.display(self.module),
-                    c.display(self.module),
-                )
-            },
-            Rvalue::Construct { ty, fields } => {
-                write!(f, "construct {} {{ ", ty.display(self.module))?;
-                for (i, (name, value)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}: {}", name, value.display(self.module))?;
-                }
-                write!(f, " }}")
-            },
-            Rvalue::Tuple(elements) => {
-                write!(f, "tuple (")?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", elem.display(self.module))?;
-                }
-                write!(f, ")")
-            },
-            Rvalue::ApplyPartial { func, captures } => {
-                write!(f, "apply partial {}", self.module.resolve_name(*func))?;
-                write!(f, "(")?;
-                for (i, cap) in captures.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", cap.display(self.module))?;
-                }
-                write!(f, ")")
-            },
-            Rvalue::EnumVariant {
-                enum_ty,
-                variant,
-                payload,
-            } => {
-                write!(f, "enum {}.{}", enum_ty.display(self.module), variant)?;
-                if !payload.is_empty() {
-                    write!(f, "(")?;
-                    for (i, val) in payload.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{}", val.display(self.module))?;
-                    }
-                    write!(f, ")")?;
-                }
-                Ok(())
-            },
-            Rvalue::ArrayLiteral { element_ty, values } => {
-                write!(f, "array[{}] [", element_ty.display(self.module))?;
-                for (i, val) in values.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", val.display(self.module))?;
-                }
-                write!(f, "]")
-            },
-            // DictLiteral was removed — dict literals are lowered to
-            // ArrayLiteral { element_ty: Tuple(K, V), values } in MIR lowering.
-        }
-    }
-}
-
-// === Callee ===
-
-impl Callee {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        CalleeDisplay {
-            callee: self,
-            module,
-        }
-    }
-}
-
-struct CalleeDisplay<'a> {
-    callee: &'a Callee,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for CalleeDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.callee {
-            Callee::Direct {
-                func, type_args, ..
-            } => {
-                write!(f, "{}", self.module.resolve_name(*func))?;
-                if !type_args.is_empty() {
-                    write!(f, "[")?;
-                    write_comma_sep(f, type_args, self.module)?;
-                    write!(f, "]")?;
-                }
-                Ok(())
-            },
-            Callee::Thin(p) => write!(f, "{}", p.display(self.module)),
-            Callee::Thick(p) => write!(f, "escaping {}", p.display(self.module)),
-            Callee::Witness {
-                protocol,
-                method,
-                self_type,
-                method_type_args,
-            } => {
-                write!(
-                    f,
-                    "witness_method {}.{}",
-                    self.module.resolve_name(*protocol),
-                    method,
-                )?;
-                if !method_type_args.is_empty() {
-                    write!(f, "[")?;
-                    write_comma_sep(f, method_type_args, self.module)?;
-                    write!(f, "]")?;
-                }
-                write!(f, " for {}", self_type.display(self.module))
-            },
-        }
-    }
-}
-
-/// Write call arguments with passing modes.
-fn write_call_args(
-    f: &mut fmt::Formatter<'_>,
-    args: &[CallArg],
-    module: &MirModule,
-) -> fmt::Result {
-    for (i, arg) in args.iter().enumerate() {
-        if i > 0 {
-            write!(f, ", ")?;
-        }
-        write!(f, "{} {}", arg.mode, arg.value.display(module))?;
-    }
-    Ok(())
-}
-
-// === Terminator ===
-
-impl Terminator {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        TerminatorDisplay { term: self, module }
-    }
-}
-
-struct TerminatorDisplay<'a> {
-    term: &'a Terminator,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for TerminatorDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.term.kind {
-            TerminatorKind::Return(v) => {
-                write!(f, "return {}", v.display(self.module))
-            },
-            TerminatorKind::Jump(target) => {
-                write!(f, "jump bb{}", target.index())
-            },
-            TerminatorKind::Branch {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                write!(
-                    f,
-                    "branch if {}, bb{} else bb{}",
-                    condition.display(self.module),
-                    then_block.index(),
-                    else_block.index(),
-                )
-            },
-            TerminatorKind::Switch {
-                discriminant,
-                cases,
-            } => {
-                writeln!(f, "switch {} {{", discriminant.display(self.module))?;
-                for (case, target) in cases {
-                    writeln!(f, "    {} => bb{}", case, target.index())?;
-                }
-                write!(f, "}}")
-            },
-            TerminatorKind::Panic(msg) => write!(f, "panic {:?}", msg),
-            TerminatorKind::Unreachable => write!(f, "unreachable"),
-        }
-    }
-}
-
-// === BasicBlock ===
-
-impl BasicBlock {
-    pub fn display<'a>(&'a self, module: &'a MirModule, indent: &'a str) -> impl fmt::Display + 'a {
-        BasicBlockDisplay {
-            block: self,
-            module,
-            indent,
-        }
-    }
-}
-
-struct BasicBlockDisplay<'a> {
-    block: &'a BasicBlock,
-    module: &'a MirModule,
-    indent: &'a str,
-}
-
-impl fmt::Display for BasicBlockDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for stmt in &self.block.stmts {
-            writeln!(f, "{}{}", self.indent, stmt.display(self.module))?;
-        }
-        writeln!(
-            f,
-            "{}{}",
-            self.indent,
-            self.block.terminator.display(self.module)
-        )
-    }
-}
-
-// === FunctionDef ===
-
-impl FunctionDef {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        FunctionDefDisplay { def: self, module }
-    }
-}
-
-struct FunctionDefDisplay<'a> {
-    def: &'a FunctionDef,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for FunctionDefDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "func {}", self.def.name)?;
-        write_type_params(f, &self.def.type_params)?;
-
-        // Parameters
-        write!(f, "(")?;
-        for (i, param) in self.def.params.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
+            if !first {
+                out.push('\n');
             }
-            write!(f, "{}: {}", param.name, param.ty.display(self.module))?;
+            first = false;
+            writeln!(out, "; function: {}", func.name).unwrap();
+            out.push_str(&display_body(body, module));
+            out.push('\n');
         }
-        write!(f, ") -> {}", self.def.ret.display(self.module))?;
+    }
+    out
+}
 
-        // Where clause
-        if let Some(wc) = &self.def.where_clause {
-            write!(f, "\nwhere ")?;
-            for (i, constraint) in wc.constraints.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                match constraint {
-                    WhereConstraint::Implements {
-                        type_param,
-                        protocol,
-                    } => {
-                        write!(
-                            f,
-                            "{}: {}",
-                            self.module.resolve_name(*type_param),
-                            self.module.resolve_name(*protocol),
-                        )?;
-                    },
-                    WhereConstraint::TypeEquals {
-                        base,
-                        associated,
-                        equals,
-                    } => {
-                        write!(
-                            f,
-                            "{}.{} = {}",
-                            self.module.resolve_name(*base),
-                            associated,
-                            equals.display(self.module),
-                        )?;
-                    },
-                }
+/// Pretty-print an entire monomorphized module — all functions with bodies.
+pub fn display_mono_module(module: &crate::mono::MonoModule) -> String {
+    display_mono_module_filtered(module, "")
+}
+
+/// Pretty-print mono functions whose name contains `filter` (empty = all).
+pub fn display_mono_module_filtered(module: &crate::mono::MonoModule, filter: &str) -> String {
+    let mut out = String::new();
+    let mut first = true;
+    for func in &module.functions {
+        if let Some(body) = &func.body {
+            if !filter.is_empty() && !func.name.contains(filter) {
+                continue;
             }
+            if !first {
+                out.push('\n');
+            }
+            first = false;
+            writeln!(out, "; function: {}", func.name).unwrap();
+            out.push_str(&display_body(body, module));
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Pretty-print an entire OSSA body to a string.
+pub fn display_body(body: &OssaBody, module: &dyn NameResolver) -> String {
+    let mut out = String::new();
+    let arena = module.ty_arena();
+
+    for (i, block) in body.blocks.iter().enumerate() {
+        let bid = BlockId::new(i);
+
+        // Block header: bb0(%v0: @owned Type, ...):
+        write!(out, "bb{}", bid.index()).unwrap();
+        if !block.params.is_empty() {
+            out.push('(');
+            for (j, param) in block.params.iter().enumerate() {
+                if j > 0 {
+                    out.push_str(", ");
+                }
+                write!(
+                    out,
+                    "{}: {} {}",
+                    fmt_value(param.value),
+                    fmt_ownership(param.ownership),
+                    fmt_ty(param.ty, arena, module),
+                )
+                .unwrap();
+            }
+            out.push(')');
+        }
+        out.push_str(":\n");
+
+        // Instructions
+        for inst in &block.insts {
+            out.push_str("    ");
+            fmt_inst(&mut out, &inst.kind, body, arena, module);
+            out.push('\n');
         }
 
-        // Body
-        if let Some(body) = &self.def.body {
-            writeln!(f, "\n{{")?;
+        // Terminator
+        out.push_str("    ");
+        fmt_terminator(&mut out, &block.terminator.kind, arena, module);
+        out.push('\n');
 
-            // Non-parameter locals
-            let non_param_locals: Vec<_> = body
-                .locals
+        // Blank line between blocks (except after the last)
+        if i + 1 < body.blocks.len() {
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn fmt_value(v: ValueId) -> String {
+    format!("%v{}", v.index())
+}
+
+fn fmt_block(b: BlockId) -> String {
+    format!("bb{}", b.index())
+}
+
+fn fmt_ownership(o: Ownership) -> &'static str {
+    match o {
+        Ownership::Owned => "@owned",
+        Ownership::Guaranteed => "@guaranteed",
+    }
+}
+
+/// Render a type to its display string (e.g. for diagnostic messages).
+pub fn ty_to_string(ty: TyId, module: &MirModule) -> String {
+    fmt_ty(ty, &module.ty_arena, module)
+}
+
+fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
+    match arena.get(ty) {
+        MirTy::I8 => "Int8".into(),
+        MirTy::I16 => "Int16".into(),
+        MirTy::I32 => "Int32".into(),
+        MirTy::I64 => "Int64".into(),
+        MirTy::F16 => "Float16".into(),
+        MirTy::F32 => "Float32".into(),
+        MirTy::F64 => "Float64".into(),
+        MirTy::Bool => "Bool".into(),
+        MirTy::Never => "Never".into(),
+        MirTy::Str => "Str".into(),
+
+        MirTy::Pointer(inner) => {
+            format!("Pointer[{}]", fmt_ty(*inner, arena, module))
+        },
+
+        MirTy::Tuple(elems) => {
+            if elems.is_empty() {
+                "()".into()
+            } else {
+                let inner: Vec<_> = elems.iter().map(|t| fmt_ty(*t, arena, module)).collect();
+                format!("({})", inner.join(", "))
+            }
+        },
+
+        MirTy::Named { entity, type_args } => {
+            let name = module.resolve_name(*entity);
+            if type_args.is_empty() {
+                name.to_string()
+            } else {
+                let args: Vec<_> = type_args
+                    .iter()
+                    .map(|t| fmt_ty(*t, arena, module))
+                    .collect();
+                format!("{}[{}]", name, args.join(", "))
+            }
+        },
+
+        MirTy::TypeParam(entity) => module.resolve_name(*entity).to_string(),
+
+        MirTy::AssociatedProjection {
+            base,
+            protocol,
+            assoc_type,
+        } => {
+            format!(
+                "{}.{}::{}",
+                fmt_ty(*base, arena, module),
+                module.resolve_name(*protocol),
+                module.resolve_name(*assoc_type),
+            )
+        },
+
+        MirTy::FuncThin { params, ret } => {
+            let ps: Vec<_> = params
                 .iter()
-                .enumerate()
-                .skip(body.param_count)
+                .map(|(t, _)| fmt_ty(*t, arena, module))
                 .collect();
+            format!(
+                "@thin ({}) -> {}",
+                ps.join(", "),
+                fmt_ty(*ret, arena, module)
+            )
+        },
 
-            if !non_param_locals.is_empty() {
-                writeln!(f, "    locals:")?;
-                for (_, local) in &non_param_locals {
-                    writeln!(
-                        f,
-                        "        %{}: {}",
-                        local.name,
-                        local.ty.display(self.module),
-                    )?;
-                }
-                writeln!(f)?;
-            }
+        MirTy::FuncThick { params, ret } => {
+            let ps: Vec<_> = params
+                .iter()
+                .map(|(t, _)| fmt_ty(*t, arena, module))
+                .collect();
+            format!(
+                "@thick ({}) -> {}",
+                ps.join(", "),
+                fmt_ty(*ret, arena, module)
+            )
+        },
 
-            // Blocks
-            for (i, block) in body.blocks.iter().enumerate() {
-                writeln!(f, "    bb{}:", i)?;
-                write!(f, "{}", block.display(self.module, "        "))?;
-                if i < body.blocks.len() - 1 {
-                    writeln!(f)?;
-                }
-            }
-
-            write!(f, "}}")?;
-        }
-
-        Ok(())
+        MirTy::Error => "<error>".into(),
     }
 }
 
-// === StructDef ===
+/// Format a type annotation comment for value-producing instructions.
+fn fmt_type_comment(
+    value: ValueId,
+    body: &OssaBody,
+    arena: &TyArena,
+    module: &dyn NameResolver,
+) -> String {
+    let def = body.value(value);
+    format!(
+        "  // {} {}",
+        fmt_ownership(def.ownership),
+        fmt_ty(def.ty, arena, module)
+    )
+}
 
-impl StructDef {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        StructDefDisplay { def: self, module }
+// ---------------------------------------------------------------------------
+// Block argument list (for jumps/branches)
+// ---------------------------------------------------------------------------
+
+fn fmt_block_with_args(target: BlockId, args: &[ValueId]) -> String {
+    if args.is_empty() {
+        fmt_block(target)
+    } else {
+        let vals: Vec<_> = args.iter().map(|v| fmt_value(*v)).collect();
+        format!("{}({})", fmt_block(target), vals.join(", "))
     }
 }
 
-struct StructDefDisplay<'a> {
-    def: &'a StructDef,
-    module: &'a MirModule,
-}
+// ---------------------------------------------------------------------------
+// Instructions
+// ---------------------------------------------------------------------------
 
-impl fmt::Display for StructDefDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "struct {}", self.def.name)?;
-        write_type_params(f, &self.def.type_params)?;
-        writeln!(f, " {{")?;
-        for field in &self.def.fields {
-            writeln!(f, "    {}: {}", field.name, field.ty.display(self.module))?;
-        }
-        write!(f, "}}")
-    }
-}
-
-// === EnumDef ===
-
-impl EnumDef {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        EnumDefDisplay { def: self, module }
-    }
-}
-
-struct EnumDefDisplay<'a> {
-    def: &'a EnumDef,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for EnumDefDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "enum {}", self.def.name)?;
-        write_type_params(f, &self.def.type_params)?;
-        writeln!(f, " {{")?;
-        for case in &self.def.cases {
-            let payload_struct = &self.module.structs[case.payload_struct.index()];
-            writeln!(f, "    {}: {}", case.name, payload_struct.name)?;
-        }
-        write!(f, "}}")
-    }
-}
-
-// === ProtocolDef ===
-
-impl ProtocolDef {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        ProtocolDefDisplay { def: self, module }
-    }
-}
-
-struct ProtocolDefDisplay<'a> {
-    def: &'a ProtocolDef,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for ProtocolDefDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "protocol {}", self.def.name)?;
-        write_type_params(f, &self.def.type_params)?;
-        if !self.def.parent_protocols.is_empty() {
-            write!(f, ": ")?;
-            for (i, parent) in self.def.parent_protocols.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", self.module.resolve_name(*parent))?;
-            }
-        }
-        writeln!(f, " {{")?;
-        for assoc in &self.def.associated_types {
-            writeln!(f, "    type {}", assoc.name)?;
-        }
-        for method in &self.def.methods {
-            write!(f, "    func {}(", method.name)?;
-            for (i, (pname, pty)) in method.params.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}: {}", pname, pty.display(self.module))?;
-            }
-            writeln!(f, ") -> {}", method.ret.display(self.module))?;
-        }
-        write!(f, "}}")
-    }
-}
-
-// === WitnessDef ===
-
-impl WitnessDef {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        WitnessDefDisplay { def: self, module }
-    }
-}
-
-struct WitnessDefDisplay<'a> {
-    def: &'a WitnessDef,
-    module: &'a MirModule,
-}
-
-impl fmt::Display for WitnessDefDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "witness {}: {}",
-            self.def.implementing_type.display(self.module),
-            self.module.resolve_name(self.def.protocol),
-        )?;
-        if !self.def.protocol_type_args.is_empty() {
-            write!(f, "[")?;
-            for (i, (name, ty)) in self.def.protocol_type_args.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{} = {}", name, ty.display(self.module))?;
-            }
-            write!(f, "]")?;
-        }
-        writeln!(f, " {{")?;
-        for (name, ty) in &self.def.type_bindings {
-            writeln!(f, "    type {} = {}", name, ty.display(self.module))?;
-        }
-        for (name, binding) in &self.def.method_bindings {
+fn fmt_inst(
+    out: &mut String,
+    kind: &InstKind,
+    body: &OssaBody,
+    arena: &TyArena,
+    module: &dyn NameResolver,
+) {
+    match kind {
+        // -- Value lifecycle --
+        InstKind::CopyValue { result, operand } => {
             write!(
-                f,
-                "    func {} = {}",
-                name,
-                self.module.resolve_name(binding.implementation),
-            )?;
-            if !binding.type_args.is_empty() {
-                write!(f, "[")?;
-                write_comma_sep(f, &binding.type_args, self.module)?;
-                write!(f, "]")?;
+                out,
+                "{} = copy_value {}",
+                fmt_value(*result),
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::MoveValue { result, operand } => {
+            write!(
+                out,
+                "{} = move_value {}",
+                fmt_value(*result),
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::DestroyValue { operand } => {
+            write!(out, "destroy_value {}", fmt_value(*operand)).unwrap();
+        },
+
+        // -- Borrowing --
+        InstKind::BeginBorrow { result, operand } => {
+            write!(
+                out,
+                "{} = begin_borrow {}",
+                fmt_value(*result),
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::EndBorrow { operand } => {
+            write!(out, "end_borrow {}", fmt_value(*operand)).unwrap();
+        },
+        InstKind::BeginMutBorrow { result, operand } => {
+            write!(
+                out,
+                "{} = begin_mut_borrow {}",
+                fmt_value(*result),
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::EndMutBorrow { operand } => {
+            write!(out, "end_mut_borrow {}", fmt_value(*operand)).unwrap();
+        },
+
+        // -- Memory access --
+        InstKind::Load { result, address } => {
+            write!(out, "{} = load {}", fmt_value(*result), fmt_value(*address)).unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::CopyAddr {
+            result,
+            address,
+            ty,
+        } => {
+            write!(
+                out,
+                "{} = copy_addr {}, {}",
+                fmt_value(*result),
+                fmt_value(*address),
+                fmt_ty(*ty, arena, module),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::Take {
+            result,
+            address,
+            ty,
+        } => {
+            write!(
+                out,
+                "{} = take {}, {}",
+                fmt_value(*result),
+                fmt_value(*address),
+                fmt_ty(*ty, arena, module),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::BeginBorrowAddr {
+            result,
+            address,
+            ty,
+        } => {
+            write!(
+                out,
+                "{} = begin_borrow_addr {}, {}",
+                fmt_value(*result),
+                fmt_value(*address),
+                fmt_ty(*ty, arena, module),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::BeginMutBorrowAddr {
+            result,
+            address,
+            ty,
+        } => {
+            write!(
+                out,
+                "{} = begin_mut_borrow_addr {}, {}",
+                fmt_value(*result),
+                fmt_value(*address),
+                fmt_ty(*ty, arena, module),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::StoreInit { address, value } => {
+            write!(
+                out,
+                "store_init {}, {}",
+                fmt_value(*address),
+                fmt_value(*value)
+            )
+            .unwrap();
+        },
+        InstKind::StoreAssign { address, value } => {
+            write!(
+                out,
+                "store_assign {}, {}",
+                fmt_value(*address),
+                fmt_value(*value)
+            )
+            .unwrap();
+        },
+        InstKind::DestroyAddr { address, ty } => {
+            write!(
+                out,
+                "destroy_addr {}, {}",
+                fmt_value(*address),
+                fmt_ty(*ty, arena, module)
+            )
+            .unwrap();
+        },
+
+        // -- Discriminant --
+        InstKind::Discriminant { result, operand } => {
+            write!(
+                out,
+                "{} = discriminant {}",
+                fmt_value(*result),
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+
+        // -- Computation --
+        InstKind::Op1 { result, op, arg } => {
+            write!(
+                out,
+                "{} = op1 {:?} {}",
+                fmt_value(*result),
+                op,
+                fmt_value(*arg)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::Op2 {
+            result,
+            op,
+            lhs,
+            rhs,
+        } => {
+            write!(
+                out,
+                "{} = op2 {:?} {}, {}",
+                fmt_value(*result),
+                op,
+                fmt_value(*lhs),
+                fmt_value(*rhs),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::Op3 {
+            result,
+            op,
+            a,
+            b,
+            c,
+        } => {
+            write!(
+                out,
+                "{} = op3 {:?} {}, {}, {}",
+                fmt_value(*result),
+                op,
+                fmt_value(*a),
+                fmt_value(*b),
+                fmt_value(*c),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+
+        // -- Constants --
+        InstKind::Literal { result, value } => {
+            write!(
+                out,
+                "{} = literal {}",
+                fmt_value(*result),
+                fmt_immediate(value, arena, module)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::GlobalRef { result, entity } => {
+            write!(
+                out,
+                "{} = global_ref {}",
+                fmt_value(*result),
+                module.resolve_name(*entity)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+
+        // -- Aggregates: construction --
+        InstKind::Struct { result, ty, fields } => {
+            let fs: Vec<_> = fields
+                .iter()
+                .map(|(idx, v)| format!(".{}: {}", idx.index(), fmt_value(*v)))
+                .collect();
+            write!(
+                out,
+                "{} = struct {} {{ {} }}",
+                fmt_value(*result),
+                fmt_ty(*ty, arena, module),
+                fs.join(", "),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::Tuple { result, elements } => {
+            let elems: Vec<_> = elements.iter().map(|v| fmt_value(*v)).collect();
+            write!(out, "{} = tuple ({})", fmt_value(*result), elems.join(", ")).unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::Enum {
+            result,
+            enum_ty,
+            variant,
+            payload,
+        } => {
+            let ty_str = fmt_ty(*enum_ty, arena, module);
+            if payload.is_empty() {
+                write!(
+                    out,
+                    "{} = enum {}.{}",
+                    fmt_value(*result),
+                    ty_str,
+                    variant.index()
+                )
+                .unwrap();
+            } else {
+                let vals: Vec<_> = payload.iter().map(|v| fmt_value(*v)).collect();
+                write!(
+                    out,
+                    "{} = enum {}.{}({})",
+                    fmt_value(*result),
+                    ty_str,
+                    variant.index(),
+                    vals.join(", "),
+                )
+                .unwrap();
             }
-            writeln!(f)?;
-        }
-        write!(f, "}}")
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::Array {
+            result,
+            element_ty,
+            elements,
+        } => {
+            let elems: Vec<_> = elements.iter().map(|v| fmt_value(*v)).collect();
+            write!(
+                out,
+                "{} = array {}[{}]",
+                fmt_value(*result),
+                fmt_ty(*element_ty, arena, module),
+                elems.join(", "),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+
+        // -- Aggregates: destructuring --
+        InstKind::StructExtract {
+            result,
+            operand,
+            field,
+        } => {
+            write!(
+                out,
+                "{} = struct_extract {}, .{}",
+                fmt_value(*result),
+                fmt_value(*operand),
+                field.index(),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::TupleExtract {
+            result,
+            operand,
+            index,
+        } => {
+            write!(
+                out,
+                "{} = tuple_extract {}, .{}",
+                fmt_value(*result),
+                fmt_value(*operand),
+                index,
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::EnumPayload {
+            result,
+            operand,
+            variant,
+            field,
+        } => {
+            write!(
+                out,
+                "{} = enum_payload {}, variant {}, .{}",
+                fmt_value(*result),
+                fmt_value(*operand),
+                variant.index(),
+                field.index(),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+        InstKind::DestructureStruct { results, operand } => {
+            let rs: Vec<_> = results.iter().map(|r| fmt_value(*r)).collect();
+            write!(
+                out,
+                "({}) = destructure_struct {}",
+                rs.join(", "),
+                fmt_value(*operand)
+            )
+            .unwrap();
+        },
+        InstKind::DestructureTuple { results, operand } => {
+            let rs: Vec<_> = results.iter().map(|r| fmt_value(*r)).collect();
+            write!(
+                out,
+                "({}) = destructure_tuple {}",
+                rs.join(", "),
+                fmt_value(*operand)
+            )
+            .unwrap();
+        },
+        InstKind::DestructureEnum {
+            results,
+            operand,
+            variant,
+        } => {
+            let rs: Vec<_> = results.iter().map(|r| fmt_value(*r)).collect();
+            write!(
+                out,
+                "({}) = destructure_enum {}, variant {}",
+                rs.join(", "),
+                fmt_value(*operand),
+                variant.index(),
+            )
+            .unwrap();
+        },
+
+        // -- Calls --
+        InstKind::Call {
+            result,
+            callee,
+            args,
+        } => {
+            let callee_str = fmt_callee(callee, arena, module);
+            let arg_strs: Vec<_> = args
+                .iter()
+                .map(|a| {
+                    let conv = match a.convention {
+                        crate::ty::ParamConvention::Borrow => "@borrow ",
+                        crate::ty::ParamConvention::MutBorrow => "@mut_borrow ",
+                        crate::ty::ParamConvention::Consuming => "",
+                    };
+                    format!("{}{}", conv, fmt_value(a.value))
+                })
+                .collect();
+            match result {
+                Some(r) => {
+                    write!(
+                        out,
+                        "{} = call {}({})",
+                        fmt_value(*r),
+                        callee_str,
+                        arg_strs.join(", "),
+                    )
+                    .unwrap();
+                    out.push_str(&fmt_type_comment(*r, body, arena, module));
+                },
+                None => {
+                    write!(out, "call {}({})", callee_str, arg_strs.join(", ")).unwrap();
+                },
+            }
+        },
+        InstKind::ApplyPartial {
+            result,
+            callee,
+            captures,
+        } => {
+            let vals: Vec<_> = captures.iter().map(|v| fmt_value(*v)).collect();
+            let callee_str = fmt_callee(callee, arena, module);
+            write!(
+                out,
+                "{} = apply_partial {}({})",
+                fmt_value(*result),
+                callee_str,
+                vals.join(", "),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+
+        // -- Address projection --
+        InstKind::FieldAddr {
+            result,
+            base,
+            ty,
+            field,
+        } => {
+            write!(
+                out,
+                "{} = field_addr {}, {}, .{}",
+                fmt_value(*result),
+                fmt_value(*base),
+                fmt_ty(*ty, arena, module),
+                field.index(),
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
+
+        // -- Special --
+        InstKind::Uninit { result, ty } => {
+            write!(
+                out,
+                "{} = uninit {}",
+                fmt_value(*result),
+                fmt_ty(*ty, arena, module)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
     }
 }
 
-// === StaticDef ===
+// ---------------------------------------------------------------------------
+// Callee
+// ---------------------------------------------------------------------------
 
-impl StaticDef {
-    pub fn display<'a>(&'a self, module: &'a MirModule) -> impl fmt::Display + 'a {
-        StaticDefDisplay { def: self, module }
+fn fmt_callee(callee: &Callee, arena: &TyArena, module: &dyn NameResolver) -> String {
+    match callee {
+        Callee::Direct {
+            func,
+            type_args,
+            self_type,
+        } => {
+            let mut s = module.resolve_name(*func).to_string();
+            if !type_args.is_empty() {
+                let args: Vec<_> = type_args
+                    .iter()
+                    .map(|t| fmt_ty(*t, arena, module))
+                    .collect();
+                write!(s, "[{}]", args.join(", ")).unwrap();
+            }
+            if let Some(st) = self_type {
+                write!(s, " for {}", fmt_ty(*st, arena, module)).unwrap();
+            }
+            s
+        },
+        Callee::Resolved(mono_id) => match module.resolve_mono_name(mono_id.index()) {
+            Some(name) => format!("@mono({}: {})", mono_id.index(), name),
+            None => format!("@mono({})", mono_id.index()),
+        },
+        Callee::Thin(v) => {
+            format!("@thin {}", fmt_value(*v))
+        },
+        Callee::Thick(v) => {
+            format!("@thick {}", fmt_value(*v))
+        },
+        Callee::Witness {
+            protocol,
+            method,
+            self_type,
+            method_type_args,
+        } => {
+            let mut s = format!(
+                "@witness {}.{}",
+                module.resolve_name(*protocol),
+                method.name,
+            );
+            if !method.labels.is_empty() {
+                let labels: Vec<_> = method
+                    .labels
+                    .iter()
+                    .map(|l| l.as_deref().unwrap_or("_"))
+                    .collect();
+                write!(s, "({}:)", labels.join(":")).unwrap();
+            }
+            write!(s, " for {}", fmt_ty(*self_type, arena, module)).unwrap();
+            if !method_type_args.is_empty() {
+                let args: Vec<_> = method_type_args
+                    .iter()
+                    .map(|t| fmt_ty(*t, arena, module))
+                    .collect();
+                write!(s, "[{}]", args.join(", ")).unwrap();
+            }
+            s
+        },
     }
 }
 
-struct StaticDefDisplay<'a> {
-    def: &'a StaticDef,
-    module: &'a MirModule,
-}
+// ---------------------------------------------------------------------------
+// Immediate
+// ---------------------------------------------------------------------------
 
-impl fmt::Display for StaticDefDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "static ")?;
-        if self.def.is_mutable {
-            write!(f, "var ")?;
-        }
-        write!(f, "{}: {}", self.def.name, self.def.ty.display(self.module),)?;
-        if let Some(init) = &self.def.initializer {
-            write!(f, " = {}", init.display(self.module))?;
-        }
-        Ok(())
+fn fmt_immediate(
+    imm: &crate::immediate::Immediate,
+    arena: &TyArena,
+    module: &dyn NameResolver,
+) -> String {
+    match &imm.kind {
+        ImmediateKind::IntLiteral { bits, value } => {
+            // `i64 42` — bit-width prefix (lowercased Debug) before the value.
+            format!("{} {}", format!("{:?}", bits).to_lowercase(), value)
+        },
+        ImmediateKind::FloatLiteral { bits, value } => {
+            // `f64 3.14` — bit-width prefix (lowercased Debug) before the value.
+            format!("{} {}", format!("{:?}", bits).to_lowercase(), value)
+        },
+        ImmediateKind::BoolLiteral(b) => {
+            format!("{}", b)
+        },
+        ImmediateKind::StringLiteral(s) => {
+            format!("\"{}\"", s.escape_default())
+        },
+        ImmediateKind::StringPointer(s) => {
+            format!("string_ptr \"{}\"", s.escape_default())
+        },
+        ImmediateKind::Unit => "()".into(),
+        ImmediateKind::FunctionRef {
+            func,
+            type_args,
+            self_type,
+        } => {
+            let mut s = format!("func_ref {}", module.resolve_name(*func));
+            if !type_args.is_empty() {
+                let args: Vec<_> = type_args
+                    .iter()
+                    .map(|t| fmt_ty(*t, arena, module))
+                    .collect();
+                write!(s, "[{}]", args.join(", ")).unwrap();
+            }
+            if let Some(st) = self_type {
+                write!(s, " for {}", fmt_ty(*st, arena, module)).unwrap();
+            }
+            s
+        },
+        ImmediateKind::MonoFunctionRef(id) => {
+            format!("mono_func_ref @mono({})", id.index())
+        },
+        ImmediateKind::NullPtr(ty) => {
+            format!("null_ptr {}", fmt_ty(*ty, arena, module))
+        },
+        ImmediateKind::SizeOf(ty) => {
+            format!("size_of {}", fmt_ty(*ty, arena, module))
+        },
+        ImmediateKind::AlignOf(ty) => {
+            format!("align_of {}", fmt_ty(*ty, arena, module))
+        },
+        ImmediateKind::FloatInfinity(bits) => {
+            format!("infinity {:?}", bits)
+        },
+        ImmediateKind::FloatNan(bits) => {
+            format!("nan {:?}", bits)
+        },
+        ImmediateKind::Error => "<error>".into(),
     }
 }
 
-// === MirModule ===
+// ---------------------------------------------------------------------------
+// Terminators
+// ---------------------------------------------------------------------------
 
-impl MirModule {
-    pub fn display(&self) -> impl fmt::Display + '_ {
-        MirModuleDisplay { module: self }
+fn fmt_terminator(
+    out: &mut String,
+    kind: &TerminatorKind,
+    _arena: &TyArena,
+    _module: &dyn NameResolver,
+) {
+    match kind {
+        TerminatorKind::Return(v) => {
+            write!(out, "return {}", fmt_value(*v)).unwrap();
+        },
+        TerminatorKind::Jump { target, args } => {
+            write!(out, "jump {}", fmt_block_with_args(*target, args)).unwrap();
+        },
+        TerminatorKind::Branch {
+            condition,
+            then_block,
+            then_args,
+            else_block,
+            else_args,
+        } => {
+            write!(
+                out,
+                "branch {}, {}, {}",
+                fmt_value(*condition),
+                fmt_block_with_args(*then_block, then_args),
+                fmt_block_with_args(*else_block, else_args),
+            )
+            .unwrap();
+        },
+        TerminatorKind::Switch {
+            discriminant,
+            cases,
+        } => {
+            write!(out, "switch {} {{", fmt_value(*discriminant)).unwrap();
+            for arm in cases {
+                write!(
+                    out,
+                    "\n        {} => {}",
+                    fmt_switch_case(&arm.pattern),
+                    fmt_block_with_args(arm.target, &arm.args)
+                )
+                .unwrap();
+            }
+            out.push_str("\n    }");
+        },
+        TerminatorKind::Panic(msg) => {
+            write!(out, "panic \"{}\"", msg.escape_default()).unwrap();
+        },
+        TerminatorKind::Unreachable => {
+            out.push_str("unreachable");
+        },
     }
 }
 
-struct MirModuleDisplay<'a> {
-    module: &'a MirModule,
-}
-
-impl fmt::Display for MirModuleDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for def in &self.module.structs {
-            writeln!(f, "{}\n", def.display(self.module))?;
-        }
-        for def in &self.module.enums {
-            writeln!(f, "{}\n", def.display(self.module))?;
-        }
-        for def in &self.module.protocols {
-            writeln!(f, "{}\n", def.display(self.module))?;
-        }
-        for def in &self.module.witnesses {
-            writeln!(f, "{}\n", def.display(self.module))?;
-        }
-        for def in &self.module.statics {
-            writeln!(f, "{}\n", def.display(self.module))?;
-        }
-        for def in &self.module.functions {
-            writeln!(f, "{}\n", def.display(self.module))?;
-        }
-        Ok(())
-    }
-}
-
-// === Op display ===
-
-impl fmt::Display for crate::op::Op {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::op::Op;
-        match self {
-            Op::Add(b, s) => write!(f, "{}.add.{}", b, s),
-            Op::Sub(b, s) => write!(f, "{}.sub.{}", b, s),
-            Op::Mul(b, s) => write!(f, "{}.mul.{}", b, s),
-            Op::Div(b, s) => write!(f, "{}.div.{}", b, s),
-            Op::Rem(b, s) => write!(f, "{}.rem.{}", b, s),
-            Op::Neg(b) => write!(f, "{}.neg", b),
-            Op::FAdd(b) => write!(f, "{}.add", b),
-            Op::FSub(b) => write!(f, "{}.sub", b),
-            Op::FMul(b) => write!(f, "{}.mul", b),
-            Op::FDiv(b) => write!(f, "{}.div", b),
-            Op::FNeg(b) => write!(f, "{}.neg", b),
-            Op::And(b) => write!(f, "{}.and", b),
-            Op::Or(b) => write!(f, "{}.or", b),
-            Op::Xor(b) => write!(f, "{}.xor", b),
-            Op::Shl(b) => write!(f, "{}.shl", b),
-            Op::Shr(b, s) => write!(f, "{}.shr.{}", b, s),
-            Op::Not(b) => write!(f, "{}.not", b),
-            Op::Popcount(b) => write!(f, "{}.popcount", b),
-            Op::Clz(b) => write!(f, "{}.clz", b),
-            Op::Ctz(b) => write!(f, "{}.ctz", b),
-            Op::Bswap(b) => write!(f, "{}.bswap", b),
-            Op::Eq(b) => write!(f, "{}.eq", b),
-            Op::Ne(b) => write!(f, "{}.ne", b),
-            Op::Lt(b, s) => write!(f, "{}.lt.{}", b, s),
-            Op::Le(b, s) => write!(f, "{}.le.{}", b, s),
-            Op::Gt(b, s) => write!(f, "{}.gt.{}", b, s),
-            Op::Ge(b, s) => write!(f, "{}.ge.{}", b, s),
-            Op::FEq(b) => write!(f, "{}.eq", b),
-            Op::FNe(b) => write!(f, "{}.ne", b),
-            Op::FLt(b) => write!(f, "{}.lt", b),
-            Op::FLe(b) => write!(f, "{}.le", b),
-            Op::FGt(b) => write!(f, "{}.gt", b),
-            Op::FGe(b) => write!(f, "{}.ge", b),
-            Op::BoolAnd => write!(f, "bool.and"),
-            Op::BoolOr => write!(f, "bool.or"),
-            Op::BoolNot => write!(f, "bool.not"),
-            Op::BoolEq => write!(f, "bool.eq"),
-            Op::IntToFloat(from, to) => write!(f, "{}.to.{}", from, to),
-            Op::FloatToInt(from, to) => write!(f, "{}.to.{}", from, to),
-            Op::IntWiden(from, to) => write!(f, "{}.sextend.{}", from, to),
-            Op::IntUnsignedWiden(from, to) => write!(f, "{}.uextend.{}", from, to),
-            Op::IntTruncate(from, to) => write!(f, "{}.truncate.{}", from, to),
-            Op::FloatWiden(from, to) => write!(f, "{}.widen.{}", from, to),
-            Op::FloatTruncate(from, to) => write!(f, "{}.truncate.{}", from, to),
-            Op::RefToImmut => write!(f, "ref.to.immut"),
-            Op::PtrOffset => write!(f, "ptr.offset"),
-            Op::PtrNull(_) => write!(f, "ptr.null"),
-            Op::PtrFromAddress(_) => write!(f, "ptr.from_address"),
-            Op::PtrToAddress => write!(f, "ptr.to_address"),
-            Op::PtrRead(_) => write!(f, "ptr.read"),
-            Op::PtrWrite(_) => write!(f, "ptr.write"),
-            Op::PtrIsNull => write!(f, "ptr.is_null"),
-            Op::PtrCast(_) => write!(f, "ptr.cast"),
-            Op::PtrBitcast(_) => write!(f, "ptr.bitcast"),
-            Op::RefToPtr => write!(f, "ref.to.ptr"),
-            Op::SizeOf(_) => write!(f, "sizeof"),
-            Op::AlignOf(_) => write!(f, "alignof"),
-            Op::StackAlloc(_) => write!(f, "stack_alloc"),
-            Op::StrPtr => write!(f, "str.ptr"),
-            Op::StrLen => write!(f, "str.len"),
-            Op::IntToString => write!(f, "int.to_string"),
-            Op::AtomicAdd => write!(f, "atomic.add"),
-            Op::AtomicSub => write!(f, "atomic.sub"),
-            Op::FloatConst(b, k) => {
-                let k_str = match k {
-                    crate::op::FloatConstantKind::Infinity => "infinity",
-                    crate::op::FloatConstantKind::Nan => "nan",
-                };
-                write!(f, "{}.{}", b, k_str)
-            },
-            Op::FloatPred(b, p) => {
-                let p_str = match p {
-                    crate::op::FloatPredicateKind::IsNan => "is_nan",
-                    crate::op::FloatPredicateKind::IsInfinite => "is_infinite",
-                };
-                write!(f, "{}.{}", b, p_str)
-            },
-            Op::FloatMath(b, op) => {
-                let op_str = match op {
-                    crate::op::FloatMathKind::Floor => "floor",
-                    crate::op::FloatMathKind::Ceil => "ceil",
-                    crate::op::FloatMathKind::Round => "round",
-                    crate::op::FloatMathKind::Trunc => "trunc",
-                    crate::op::FloatMathKind::Sqrt => "sqrt",
-                };
-                write!(f, "{}.{}", b, op_str)
-            },
-            Op::FloatFma(b) => write!(f, "{}.fma", b),
-            Op::FloatCopysign(b) => write!(f, "{}.copysign", b),
-        }
+fn fmt_switch_case(case: &SwitchCase) -> String {
+    match case {
+        SwitchCase::Wildcard => "_".into(),
+        SwitchCase::Variant(idx) => format!("variant {}", idx.index()),
+        SwitchCase::Bool(b) => format!("{}", b),
+        SwitchCase::IntLiteral(v) => format!("{}", v),
+        SwitchCase::IntRange { start, end } => format!("{}..={}", start, end),
+        SwitchCase::CharLiteral(c) => {
+            if let Some(ch) = char::from_u32(*c) {
+                format!("'{}'", ch.escape_default())
+            } else {
+                format!("\\u{{{:X}}}", c)
+            }
+        },
+        SwitchCase::CharRange { start, end } => {
+            let s = char::from_u32(*start).map_or_else(
+                || format!("\\u{{{:X}}}", start),
+                |ch| format!("'{}'", ch.escape_default()),
+            );
+            let e = char::from_u32(*end).map_or_else(
+                || format!("\\u{{{:X}}}", end),
+                |ch| format!("'{}'", ch.escape_default()),
+            );
+            format!("{}..={}", s, e)
+        },
     }
 }

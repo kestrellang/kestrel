@@ -119,7 +119,7 @@ public struct ArrayBuilder[T] {
     }
 
     /// Appends every element produced by `iterable`.
-    public mutating func appendFrom[I](iterable: I) where I: Iterable, I.Item = T {
+    public mutating func append[I](from iterable: I) where I: Iterable, I.Item = T {
         var iter = iterable.iter();
         while let .Some(item) = iter.next() {
             self.append(item)
@@ -160,8 +160,22 @@ public struct ArrayBuilder[T] {
 
     // -- Cleanup -------------------------------------------------------------
 
+    /// Drops any unbuilt elements, then frees the buffer.
+    ///
+    /// Only runs when the builder is dropped *without* `build()` — e.g.
+    /// construction abandoned on an early return. `build()` transfers the
+    /// buffer into an `Array` and resets `cap` to 0, so this is a no-op on a
+    /// built builder (the array's storage owns the elements then). On the
+    /// abandoned path the `len` written elements are still live and must be
+    /// dropped, or every non-trivial element (e.g. a `String`) leaks. The
+    /// builder is not `Cloneable`, so there is no aliasing copy to double-free.
     deinit {
         if self.cap > 0 {
+            var i: Int64 = 0;
+            while i < self.len {
+                self.ptr.offset(by: i).dropInPlace();
+                i = i + 1
+            };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)

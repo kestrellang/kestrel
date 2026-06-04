@@ -63,15 +63,17 @@ impl QueryFn for ResolveName {
 
             // 1. Selective imports (highest priority at this scope)
             if let Some(entities) = scope.selective_imports.get(&self.name)
-                && !entities.is_empty() {
-                    return check_ambiguity(ctx, entities.clone());
-                }
+                && !entities.is_empty()
+            {
+                return check_ambiguity(ctx, entities.clone());
+            }
 
             // 2. Local declarations
             if let Some(entities) = scope.declarations.get(&self.name)
-                && !entities.is_empty() {
-                    return check_ambiguity(ctx, entities.clone());
-                }
+                && !entities.is_empty()
+            {
+                return check_ambiguity(ctx, entities.clone());
+            }
 
             // 3. Wildcard imports: check each wildcard source module
             let mut wildcard_matches = Vec::new();
@@ -104,18 +106,18 @@ impl QueryFn for ResolveName {
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::Extension)
                 && let Some(entity) =
                     resolve_extension_type_param(ctx, current, &self.name, self.root)
-                {
-                    return NameResolution::Found(vec![entity]);
-                }
+            {
+                return NameResolution::Found(vec![entity]);
+            }
 
             // 5. Protocol extension associated types: if current is an extension
             //    targeting a protocol, check the protocol's associated types
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::Extension)
                 && let Some(entity) =
                     resolve_protocol_extension_assoc(ctx, current, &self.name, self.root)
-                {
-                    return NameResolution::Found(vec![entity]);
-                }
+            {
+                return NameResolution::Found(vec![entity]);
+            }
 
             // 6. Inherited protocol members: if current is a protocol,
             //    walk conformance hierarchy for matching associated types
@@ -183,7 +185,11 @@ fn resolve_extension_type_param(
     // Then check the target type's type parameters.
     let target_entity = ctx.query(ExtensionTargetEntity { extension, root })?;
     let type_params = ctx.get::<TypeParams>(target_entity)?;
-    type_params.0.iter().find(|&&tp| ctx.get::<Name>(tp).is_some_and(|n| n.0 == name)).copied()
+    type_params
+        .0
+        .iter()
+        .find(|&&tp| ctx.get::<Name>(tp).is_some_and(|n| n.0 == name))
+        .copied()
 }
 
 /// Check if an extension targets a protocol, and if so, look up the

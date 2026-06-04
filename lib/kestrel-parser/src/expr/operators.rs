@@ -21,7 +21,9 @@ pub(super) fn unary_op_parser<'tokens>()
                 .map_with(|tok, e| (tok, to_kestrel_span(e.span())))
                 .or(just(Token::Plus).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
                 .or(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span(e.span())))),
+                .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+                .or(just(Token::DotDotLess).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+                .or(just(Token::DotDotEquals).map_with(|tok, e| (tok, to_kestrel_span(e.span())))),
         )
         .boxed()
 }

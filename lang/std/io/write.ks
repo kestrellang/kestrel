@@ -194,7 +194,7 @@ public struct Buffer: Writable, Cloneable {
 /// var file = try File.create("output.bin");
 /// try writeAll(file, from: data.asSlice());
 /// ```
-public func writeAll[W](mutating writer: W, from buf: ArraySlice[UInt8]) -> Result[(), IoError] where W: Writable {
+public func writeAll[W](mutating writer: W, from buf: ArraySlice[UInt8]) -> Result[(), IoError] where W: Writable, W: not Copyable {
     var written: Int64 = 0;
     while written < buf.count {
         let remaining = ArraySlice(pointer: buf.pointer.offset(by: written), count: buf.count - written);
@@ -208,37 +208,29 @@ public func writeAll[W](mutating writer: W, from buf: ArraySlice[UInt8]) -> Resu
 }
 
 /// Writes a single byte, looping internally until it lands.
-public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Writable {
+public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError] where W: Writable, W: not Copyable {
     var buf = Array[UInt8](capacity: 1);
     buf.append(byte);
     let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
     writeAll(writer, from: slice)
 }
 
-/// Writes the UTF-8 encoding of `s`. Empty strings short-circuit. Currently
-/// emits one byte per call into the writer — fine for buffered sinks like
-/// `Buffer`, expensive for raw `File`/`Stdout` (TODO: collect into a slice
-/// first).
-public func writeString[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Writable {
-    // Get the byte count and pointer from string
-    let byteCount = s.byteCount;
-    if byteCount == 0 {
+/// Writes the UTF-8 encoding of `s`. Empty strings short-circuit.
+///
+/// Hands the string's whole byte range to `writeAll` in one pass via a
+/// non-owning `asByteSlice()` view — one `write` per buffer rather than one
+/// per byte (the old path allocated a 1-byte `Array` and issued a syscall
+/// for every character, which dominated raw `Stdout`/`File` output).
+public func writeString[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Writable, W: not Copyable {
+    if s.byteCount == 0 {
         return .Ok(())
     }
-    // Create a slice from the string's internal bytes
-    // Note: String stores bytes internally, we need to access them
-    var i: Int64 = 0;
-    while i < byteCount {
-        let byte = s.bytes(unchecked: i);
-        try writeByte(writer, byte);
-        i = i + 1
-    };
-    .Ok(())
+    writeAll(writer, from: s.asByteSlice())
 }
 
 /// Writes `s` followed by a single `\n`. Does not append `\r` on any
 /// platform — Kestrel writes Unix line endings everywhere by default.
-public func writeLine[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Writable {
+public func writeLine[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Writable, W: not Copyable {
     try writeString(writer, s);
     writeByte(writer, 10)  // '\n'
 }

@@ -15,8 +15,9 @@ func unwrap_or(opt: Option, default: std.numeric.Int64) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
-    let some = Option.Some(value: 42);
-    if unwrap_or(some, 0) != 42 { return 1 }
+    let someOpt = Option.Some(value: 42);
+    if unwrap_or(someOpt, 0) != 42 { return 1 }
     0
 }

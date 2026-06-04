@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x: lang.f32 = 42.0;
     let y = lang.cast_f32_f64(x);

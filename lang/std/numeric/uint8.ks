@@ -11,10 +11,13 @@ import std.core.(
     AddAssign, SubtractAssign, MultiplyAssign, DivideAssign, ModuloAssign,
     BitwiseAndAssign, BitwiseOrAssign, BitwiseXorAssign, LeftShiftAssign, RightShiftAssign,
     ExpressibleByIntLiteral, Convertible, Defaultable,
-    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange
+    RangeConstructible, ClosedRangeConstructible, Range, ClosedRange,
+    RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
+    RangeFrom, RangeUpTo, RangeThrough
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
+import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
 
 /// A 8-bit unsigned integer.
@@ -81,6 +84,9 @@ public struct UInt8:
     FFISafe,
     RangeConstructible,
     ClosedRangeConstructible,
+    RangeFromConstructible,
+    RangeUpToConstructible,
+    RangeThroughConstructible,
     Convertible[Int8],
     Convertible[Int16],
     Convertible[Int32],
@@ -338,6 +344,21 @@ public struct UInt8:
         ClosedRange[UInt8](self, end)
     }
 
+    /// Builds a partial range `self..` (from self, no upper bound).
+    public func rangeFrom() -> RangeFrom[UInt8] {
+        RangeFrom[UInt8](self)
+    }
+
+    /// Builds a partial range `..<self` (up to self, exclusive).
+    public func rangeUpTo() -> RangeUpTo[UInt8] {
+        RangeUpTo[UInt8](self)
+    }
+
+    /// Builds a partial range `..=self` (through self, inclusive).
+    public func rangeThrough() -> RangeThrough[UInt8] {
+        RangeThrough[UInt8](self)
+    }
+
     // ========================================================================
     // HASHING
     // ========================================================================
@@ -367,6 +388,9 @@ public struct UInt8:
     type RightShift.Output = UInt8
     type RangeConstructible.Output = Range[UInt8]
     type ClosedRangeConstructible.Output = ClosedRange[UInt8]
+    type RangeFromConstructible.Output = RangeFrom[UInt8]
+    type RangeUpToConstructible.Output = RangeUpTo[UInt8]
+    type RangeThroughConstructible.Output = RangeThrough[UInt8]
 
     // ========================================================================
     // ARITHMETIC (Wrapping - Default)
@@ -374,13 +398,13 @@ public struct UInt8:
 
     /// `self + other`, wrapping on overflow. Use `addChecked` to detect or
     /// `addSaturating` to clamp.
-    public func add(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.raw, other.raw)) }
+    public consuming func add(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_add(self.raw, other.raw)) }
 
     /// `self - other`, wrapping on overflow.
-    public func subtract(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.raw, other.raw)) }
+    public consuming func subtract(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_sub(self.raw, other.raw)) }
 
     /// `self * other`, wrapping on overflow.
-    public func multiply(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.raw, other.raw)) }
+    public consuming func multiply(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_mul(self.raw, other.raw)) }
 
     /// Truncating integer division (`self / other`). For signed types,
     /// `minValue / -1` wraps; use `divideChecked` to detect.
@@ -389,7 +413,7 @@ public struct UInt8:
     ///
     /// Traps on division by zero (LLVM `udiv`/`sdiv` are UB on zero — the
     /// process aborts before producing a result).
-    public func divide(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_div(self.raw, other.raw)) }
 
     /// `self % other` — truncated remainder; the result has the sign of
     /// `self` for signed types.
@@ -397,7 +421,7 @@ public struct UInt8:
     /// # Errors
     ///
     /// Traps on division by zero, like `divide`.
-    public func modulo(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.raw, other.raw)) }
+    public consuming func modulo(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.raw, other.raw)) }
 
     
     
@@ -582,25 +606,25 @@ public struct UInt8:
     // ========================================================================
 
     /// Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
-    public func bitwiseAnd(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_and(self.raw, other.raw)) }
+    public consuming func bitwiseAnd(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_and(self.raw, other.raw)) }
 
     /// Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
-    public func bitwiseOr(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_or(self.raw, other.raw)) }
+    public consuming func bitwiseOr(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_or(self.raw, other.raw)) }
 
     /// Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
-    public func bitwiseXor(other: UInt8) -> UInt8 { UInt8(raw: lang.i8_xor(self.raw, other.raw)) }
+    public consuming func bitwiseXor(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_xor(self.raw, other.raw)) }
 
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
-    public func bitwiseNot() -> UInt8 { UInt8(raw: lang.i8_not(self.raw)) }
+    public consuming func bitwiseNot() -> UInt8 { UInt8(raw: lang.i8_not(self.raw)) }
 
     /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
     /// — pre-mask the count if you can't guarantee the bound.
-    public func shiftLeft(by count: Int64) -> UInt8 { UInt8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count.raw))) }
+    public consuming func shiftLeft(consuming by count: Int64) -> UInt8 { UInt8(raw: lang.i8_shl(self.raw, lang.cast_i64_i8(count.raw))) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
     /// logical (zero-filling) for unsigned. Same `count` precondition as
     /// `shiftLeft`.
-    public func shiftRight(by count: Int64) -> UInt8 { UInt8(raw: lang.i8_unsigned_shr(self.raw, lang.cast_i64_i8(count.raw))) }
+    public consuming func shiftRight(consuming by count: Int64) -> UInt8 { UInt8(raw: lang.i8_unsigned_shr(self.raw, lang.cast_i64_i8(count.raw))) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the
     /// MSB re-enter at the LSB.
@@ -702,11 +726,13 @@ public struct UInt8:
         result
     }
 
-    /// Reassembles a `UInt8` from 1 bytes in native (host) byte
-    /// order. Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> UInt8? {
+    /// @name From Bytes
+    /// Reassembles a `UInt8` from 1 bytes in native byte order.
+    /// Returns `null` if the input is not exactly 1 bytes long.
+    public init[S](fromBytes fromBytes: S)? where S: Slice[UInt8] {
+        let bytes = fromBytes.asSlice();
         if bytes.count != 1 {
-            return .None
+            return null
         }
         var value = UInt8.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
@@ -715,14 +741,16 @@ public struct UInt8:
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }
-        .Some(value)
+        self.raw = value.raw;
     }
 
+    /// @name From Bytes Big Endian
     /// Reassembles a `UInt8` from 1 bytes in big-endian order.
-    /// Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> UInt8? {
+    /// Returns `null` if the input is not exactly 1 bytes long.
+    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Slice[UInt8] {
+        let bytes = fromBytesBigEndian.asSlice();
         if bytes.count != 1 {
-            return .None
+            return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -731,14 +759,16 @@ public struct UInt8:
             result = (result << 8) | byteVal;
             i = i + 1
         }
-        .Some(UInt8(from: result))
+        self.raw = UInt8(from: result).raw;
     }
 
+    /// @name From Bytes Little Endian
     /// Reassembles a `UInt8` from 1 bytes in little-endian order.
-    /// Returns `None` if the input is not exactly 1 bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> UInt8? {
+    /// Returns `null` if the input is not exactly 1 bytes long.
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Slice[UInt8] {
+        let bytes = fromBytesLittleEndian.asSlice();
         if bytes.count != 1 {
-            return .None
+            return null
         }
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -748,48 +778,45 @@ public struct UInt8:
             result = result | (byteVal << shift);
             i = i + 1
         }
-        .Some(UInt8(from: result))
+        self.raw = UInt8(from: result).raw;
     }
 
     // ========================================================================
     // PARSING
     // ========================================================================
 
+    /// @name Parse
     /// Parses a base-10 unsigned integer literal, optionally prefixed
-    /// with `+`. A leading `-` is rejected. Returns `None` for an empty
+    /// with `+`. A leading `-` is rejected. Returns `null` for an empty
     /// string, a non-digit character, or a value that does not fit in
     /// `UInt8`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt8.parse("42");   // Some(42)
-    /// UInt8.parse("-1");   // None  (no sign for unsigned)
-    /// UInt8.parse("");     // None
+    /// let n = UInt8(parsing: "42");   // Some(42)
+    /// let bad = UInt8(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public static func parse(string: String) -> UInt8? {
+    public init(parsing string: String)? {
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
         var index: Int64 = 0;
 
-        // Check for optional + sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 43 {  // '+'
+        if firstByteVal == 43 {
             index = 1
-        } else if firstByteVal == 45 {  // '-' not allowed for unsigned
-            return .None
+        } else if firstByteVal == 45 {
+            return null
         }
 
-        // Must have at least one digit
         if index >= len {
-            return .None
+            return null
         }
 
-        // Parse digits using UInt64 for accumulation
         var result: UInt64 = 0;
         let maxBeforeMultiply: UInt64 = 1844674407370955161;
         let maxVal: UInt64 = UInt64(from: UInt8.maxValue);
@@ -798,71 +825,66 @@ public struct UInt8:
             let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = UInt64(from: byte);
 
-            // Check if digit (0-9 = 48-57)
             if byteVal < 48 or byteVal > 57 {
-                return .None
+                return null
             }
 
             let digit = byteVal - 48;
 
-            // Check for overflow before multiply
             if result > maxBeforeMultiply {
-                return .None
+                return null
             }
             result = result * 10;
 
-            // Check for overflow before add
             if result > UInt64.maxValue - digit {
-                return .None
+                return null
             }
             result = result + digit;
 
             index = index + 1
         }
 
-        // Check bounds for target type
         if result > maxVal {
-            return .None
+            return null
         }
 
-        .Some(UInt8(from: result))
+        self.raw = UInt8(from: result).raw;
     }
-    /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-    /// a–z are case-insensitive and represent digit values 10–35. A
+    /// @name Parse Radix
+    /// Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+    /// a-z are case-insensitive and represent digit values 10-35. A
     /// leading `+` is allowed but a leading `-` is rejected. Returns
-    /// `None` for an out-of-range radix, an empty string, an
+    /// `null` for an out-of-range radix, an empty string, an
     /// unrecognised digit, or a value that overflows `UInt8`.
     ///
     /// # Examples
     ///
     /// ```
-    /// UInt8.parse("ff", 16);     // Some(255 if it fits, else None)
-    /// UInt8.parse("101010", 2);  // Some(42)
+    /// let n = UInt8(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+    /// let m = UInt8(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public static func parse(string: String, radix: Int64) -> UInt8? {
+    public init(parsing string: String, radix radix: Int64)? {
         if radix < 2 or radix > 36 {
-            return .None
+            return null
         }
 
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
         var index: Int64 = 0;
 
-        // Optional `+`; reject leading `-` outright.
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {
             index = 1
         } else if firstByteVal == 45 {
-            return .None
+            return null
         }
 
-        // Must have at least one digit
         if index >= len {
-            return .None
+            return null
         }
 
         let radixU: UInt64 = UInt64(from: radix);
@@ -881,22 +903,22 @@ public struct UInt8:
             } else if byteVal >= 97 and byteVal <= 122 {
                 byteVal - 87
             } else {
-                return .None
+                return null
             };
 
             if digit >= radix {
-                return .None
+                return null
             }
 
             let digitU: UInt64 = UInt64(from: digit);
             if result > (maxVal - digitU) / radixU {
-                return .None
+                return null
             }
             result = result * radixU + digitU;
             index = index + 1
         }
 
-        .Some(UInt8(from: result))
+        self.raw = UInt8(from: result).raw;
     }
 
     // ========================================================================
@@ -952,9 +974,9 @@ public struct UInt8:
         var result = String();
 
         if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }
 
         if options.alternate {

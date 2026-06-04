@@ -19,6 +19,7 @@ func extract_sum(c: Container) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let container = Container.Full(data: Data(value: 30), extra: 12);
     if extract_sum(container) != 42 { return 1 }

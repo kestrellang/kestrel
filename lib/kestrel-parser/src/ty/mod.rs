@@ -176,6 +176,16 @@ pub(crate) fn ty_parser<'tokens>()
         // - (T, U, ...) -> Tuple
         // - (...) -> T -> Function
         let paren_types = {
+            // A parenthesized type element, optionally prefixed by `mutating`
+            // (only meaningful in function-type param position; stripped for
+            // grouping/tuple). Yields `(Option<mutating-span>, TyVariant)`.
+            let elem = skip_trivia()
+                .ignore_then(
+                    just(Token::Mutating)
+                        .map_with(|_, e| to_kestrel_span(e.span()))
+                        .or_not(),
+                )
+                .then(ty.clone());
             skip_trivia()
                 .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(
@@ -185,7 +195,7 @@ pub(crate) fn ty_parser<'tokens>()
                         .map(|rparen| (Vec::new(), false, rparen))
                         .or(
                             // At least one type
-                            ty.clone()
+                            elem.clone()
                                 .then(
                                     // Check for comma after first element
                                     skip_trivia()
@@ -195,7 +205,7 @@ pub(crate) fn ty_parser<'tokens>()
                                         )
                                         .then(
                                             // After comma: more types separated by comma
-                                            ty.clone()
+                                            elem.clone()
                                                 .separated_by(
                                                     skip_trivia().ignore_then(just(Token::Comma)),
                                                 )
@@ -225,15 +235,17 @@ pub(crate) fn ty_parser<'tokens>()
                 )
                 .map(|((lparen, (types, has_comma, rparen)), arrow_and_return)| {
                     if let Some((arrow_span, return_ty)) = arrow_and_return {
+                        // Function type: keep per-param `mutating` markers.
                         TyVariant::Function(lparen, types, rparen, arrow_span, Box::new(return_ty))
                     } else if types.is_empty() {
                         TyVariant::Unit(lparen, rparen)
                     } else if types.len() == 1 && !has_comma {
-                        // (T) - grouping, just return the inner type
-                        types.into_iter().next().unwrap()
+                        // (T) - grouping, just return the inner type (drop marker)
+                        types.into_iter().next().unwrap().1
                     } else {
-                        // (T,) or (T, U, ...) - tuple
-                        TyVariant::Tuple(lparen, types, rparen)
+                        // (T,) or (T, U, ...) - tuple (markers not meaningful)
+                        let elems = types.into_iter().map(|(_, t)| t).collect();
+                        TyVariant::Tuple(lparen, elems, rparen)
                     }
                 })
                 .boxed()
@@ -292,8 +304,40 @@ pub(crate) fn ty_parser<'tokens>()
             )
             .boxed();
 
-        // Try never first, then inferred, then paren types, then array/dict, then path
-        let base_ty = never
+        // Opaque type: some P, some P and Q
+        let some_type = skip_trivia()
+            .ignore_then(just(Token::Some).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(
+                // Each bound is a path type with optional type args
+                path_segments_parser()
+                    .then(
+                        skip_trivia()
+                            .ignore_then(just(Token::LBracket))
+                            .ignore_then(
+                                ty.clone()
+                                    .separated_by(just(Token::Comma))
+                                    .allow_trailing()
+                                    .collect::<Vec<_>>(),
+                            )
+                            .then_ignore(skip_trivia())
+                            .then_ignore(just(Token::RBracket))
+                            .or_not(),
+                    )
+                    .map(|(segments, args)| TyVariant::Path { segments, args })
+                    .separated_by(
+                        skip_trivia()
+                            .ignore_then(just(Token::And))
+                            .ignore_then(skip_trivia()),
+                    )
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .map(|(some_span, bounds)| TyVariant::Some(some_span, bounds))
+            .boxed();
+
+        // Try some first (prefix keyword), then never, inferred, parens, array/dict, path
+        let base_ty = some_type
+            .or(never)
             .or(inferred)
             .or(paren_types)
             .or(array_or_dict)
@@ -418,6 +462,9 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Result(success_ty, throws_span, error_ty) => {
             emit_result_type(sink, success_ty, throws_span.clone(), error_ty);
         },
+        TyVariant::Some(some_span, bounds) => {
+            emit_some_type(sink, some_span.clone(), bounds);
+        },
     }
 }
 
@@ -428,7 +475,15 @@ pub enum TyVariant {
     Never(Span),
     Inferred(Span), // _ type
     Tuple(Span, Vec<TyVariant>, Span),
-    Function(Span, Vec<TyVariant>, Span, Span, Box<TyVariant>),
+    /// Function type. Each param carries an optional `mutating` token span
+    /// (`Some` ⇒ a `mutating` by-reference parameter).
+    Function(
+        Span,
+        Vec<(Option<Span>, TyVariant)>,
+        Span,
+        Span,
+        Box<TyVariant>,
+    ),
     /// Path with optional type arguments: Foo or Foo[Int, String]
     Path {
         segments: Vec<Span>,
@@ -442,6 +497,8 @@ pub enum TyVariant {
     Optional(Box<TyVariant>, Span), // (base_type, question_span)
     /// Result type: T throws E
     Result(Box<TyVariant>, Span, Box<TyVariant>), // (success_type, throws_span, error_type)
+    /// Opaque type: some P, some P and Q
+    Some(Span, Vec<TyVariant>), // (some_span, bound types)
 }
 
 /// Emit events for an inferred type: _
@@ -548,7 +605,7 @@ pub(crate) fn emit_tuple_type(
 pub(crate) fn emit_function_type(
     sink: &mut EventSink,
     lparen: Span,
-    params: &[TyVariant],
+    params: &[(Option<Span>, TyVariant)],
     rparen: Span,
     arrow: Span,
     return_ty: &TyVariant,
@@ -560,7 +617,12 @@ pub(crate) fn emit_function_type(
     sink.start_node(SyntaxKind::TyList);
     sink.add_token(SyntaxKind::LParen, lparen);
 
-    for param in params {
+    for (mutating, param) in params {
+        // A `mutating` token sits in the TyList right before its param's Ty;
+        // the AST builder scans for it positionally (Phase 3).
+        if let Some(span) = mutating {
+            sink.add_token(SyntaxKind::Mutating, span.clone());
+        }
         emit_ty_variant(sink, param);
     }
 
@@ -644,6 +706,23 @@ pub(crate) fn emit_result_type(
     emit_ty_variant(sink, error_ty);
 
     sink.finish_node(); // Finish TyResult
+    sink.finish_node(); // Finish Ty
+}
+
+pub(crate) fn emit_some_type(sink: &mut EventSink, some_span: Span, bounds: &[TyVariant]) {
+    sink.start_node(SyntaxKind::Ty);
+    sink.start_node(SyntaxKind::TySome);
+
+    sink.add_token(SyntaxKind::Some, some_span);
+    for (i, bound) in bounds.iter().enumerate() {
+        if i > 0 {
+            // `and` tokens between bounds aren't tracked as separate spans
+            // since they're consumed during parsing; emit the bound type directly
+        }
+        emit_ty_variant(sink, bound);
+    }
+
+    sink.finish_node(); // Finish TySome
     sink.finish_node(); // Finish Ty
 }
 

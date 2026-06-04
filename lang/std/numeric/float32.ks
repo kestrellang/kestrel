@@ -394,14 +394,14 @@ public struct Float32:
 
     /// IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
     /// is inf.
-    public func add(other: Float32) -> Float32 { Float32(raw: lang.f32_add(self.raw, other.raw)) }
+    public consuming func add(consuming other: Float32) -> Float32 { Float32(raw: lang.f32_add(self.raw, other.raw)) }
 
     /// IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
-    public func subtract(other: Float32) -> Float32 { Float32(raw: lang.f32_sub(self.raw, other.raw)) }
+    public consuming func subtract(consuming other: Float32) -> Float32 { Float32(raw: lang.f32_sub(self.raw, other.raw)) }
 
     /// IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
     /// the result follows the usual algebra.
-    public func multiply(other: Float32) -> Float32 { Float32(raw: lang.f32_mul(self.raw, other.raw)) }
+    public consuming func multiply(consuming other: Float32) -> Float32 { Float32(raw: lang.f32_mul(self.raw, other.raw)) }
 
     /// IEEE 754 division. Unlike integer divide, dividing by zero does not
     /// trap — it produces ±infinity (or NaN for `0.0 / 0.0`).
@@ -418,11 +418,11 @@ public struct Float32:
     /// 1.0 / 0.0;                  // inf
     /// 0.0 / 0.0;                  // nan
     /// ```
-    public func divide(other: Float32) -> Float32 { Float32(raw: lang.f32_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: Float32) -> Float32 { Float32(raw: lang.f32_div(self.raw, other.raw)) }
 
     /// IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
     /// is `+0.0`.
-    public func negate() -> Float32 { Float32(raw: lang.f32_neg(self.raw)) }
+    public consuming func negate() -> Float32 { Float32(raw: lang.f32_neg(self.raw)) }
 
     // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS
@@ -781,60 +781,54 @@ public struct Float32:
     // PARSING
     // ========================================================================
 
+    /// @name Parsing
     /// Parses a `Float32` from a string. Recognises decimal
     /// (`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
     /// tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
-    /// (case-insensitive). Returns `None` for any other input.
+    /// (case-insensitive). Returns `null` for any other input.
     ///
     /// # Examples
     ///
     /// ```
-    /// Float32.parse("3.14");      // Some(3.14)
-    /// Float32.parse("-2.5e10");   // Some(-2.5e10)
-    /// Float32.parse("inf");       // Some(infinity)
-    /// Float32.parse("nan");       // Some(nan)
-    /// Float32.parse("abc");       // None
-    /// Float32.parse("");          // None
+    /// Float32(parsing: "3.14");      // Some(3.14)
+    /// Float32(parsing: "-2.5e10");   // Some(-2.5e10)
+    /// Float32(parsing: "inf");       // Some(infinity)
+    /// Float32(parsing: "nan");       // Some(nan)
+    /// Float32(parsing: "abc");       // None
+    /// Float32(parsing: "");          // None
     /// ```
-    public static func parse(string: String) -> Float32? {
+    public init(parsing string: String)? {
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
-        // Check for special values
-        // "nan"
         if len == 3 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
             let b2: UInt8 = string.bytes(unchecked: 2);
-            // 'n' or 'N' = 110 or 78
-            // 'a' or 'A' = 97 or 65
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             if isN0 and isA1 and isN2 {
-                return .Some(Float32.nan)
+                self.raw = lang.f32_nan();
+                return
             }
         }
 
-        // "inf"
         if len == 3 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
             let b2: UInt8 = string.bytes(unchecked: 2);
-            // 'i' or 'I' = 105 or 73
-            // 'n' or 'N' = 110 or 78
-            // 'f' or 'F' = 102 or 70
             let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
             if isI and isN and isF {
-                return .Some(Float32.infinity)
+                self.raw = lang.f32_infinity();
+                return
             }
         }
 
-        // "-inf"
         if len == 4 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
@@ -845,11 +839,11 @@ public struct Float32:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isMinus and isI and isN and isF {
-                return .Some(Float32(raw: lang.f32_neg(lang.f32_infinity())))
+                self.raw = lang.f32_neg(lang.f32_infinity());
+                return
             }
         }
 
-        // "+inf"
         if len == 4 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
@@ -860,13 +854,12 @@ public struct Float32:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isPlus and isI and isN and isF {
-                return .Some(Float32.infinity)
+                self.raw = lang.f32_infinity();
+                return
             }
         }
 
-        // "infinity"
         if len == 8 {
-            // Check for "infinity" (case insensitive)
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
             let b2: UInt8 = string.bytes(unchecked: 2);
@@ -884,30 +877,27 @@ public struct Float32:
             let isT6 = Int64(from: b6) == 116 or Int64(from: b6) == 84;
             let isY7 = Int64(from: b7) == 121 or Int64(from: b7) == 89;
             if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {
-                return .Some(Float32.infinity)
+                self.raw = lang.f32_infinity();
+                return
             }
         }
 
-        // Parse regular number: [+-]?[0-9]*[.]?[0-9]*([eE][+-]?[0-9]+)?
         var index: Int64 = 0;
         var isNegative = false;
 
-        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {  // '-'
+        if firstByteVal == 45 {
             isNegative = true;
             index = 1
-        } else if firstByteVal == 43 {  // '+'
+        } else if firstByteVal == 43 {
             index = 1
         }
 
-        // Must have something after sign
         if index >= len {
-            return .None
+            return null
         }
 
-        // Parse integer part - inline digit check (48='0', 57='9')
         var integerPart: Float32 = 0.0;
         var hasIntegerPart = false;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
@@ -922,11 +912,10 @@ public struct Float32:
             }
         }
 
-        // Parse fractional part
         var fractionalPart: Float32 = 0.0;
         var hasFractionalPart = false;
 
-        if index < len and currentByte == 46 {  // '.'
+        if index < len and currentByte == 46 {
             index = index + 1;
             var divisor: Float32 = 10.0;
 
@@ -945,31 +934,29 @@ public struct Float32:
             }
         }
 
-        // Must have at least integer or fractional part
         if not hasIntegerPart and not hasFractionalPart {
-            return .None
+            return null
         }
 
         var result = integerPart + fractionalPart;
 
-        // Parse exponent part
-        if index < len and (currentByte == 101 or currentByte == 69) {  // 'e' or 'E'
+        if index < len and (currentByte == 101 or currentByte == 69) {
             index = index + 1;
 
             if index >= len {
-                return .None  // 'e' with no exponent
+                return null
             }
 
             var expNegative = false;
             currentByte = Int64(from: string.bytes(unchecked: index));
 
-            if currentByte == 45 {  // '-'
+            if currentByte == 45 {
                 expNegative = true;
                 index = index + 1;
                 if index < len {
                     currentByte = Int64(from: string.bytes(unchecked: index))
                 }
-            } else if currentByte == 43 {  // '+'
+            } else if currentByte == 43 {
                 index = index + 1;
                 if index < len {
                     currentByte = Int64(from: string.bytes(unchecked: index))
@@ -977,7 +964,7 @@ public struct Float32:
             }
 
             if index >= len {
-                return .None  // No exponent digits
+                return null
             }
 
             var exponent: Int64 = 0;
@@ -993,10 +980,9 @@ public struct Float32:
             }
 
             if not hasExpDigit {
-                return .None
+                return null
             }
 
-            // Apply exponent using pow
             let expFloat = Float32(from: exponent);
             let ten: Float32 = 10.0;
             if expNegative {
@@ -1006,17 +992,15 @@ public struct Float32:
             }
         }
 
-        // Check for trailing characters
         if index != len {
-            return .None
+            return null
         }
 
-        // Apply sign
         if isNegative {
             result = result.negate()
         }
 
-        .Some(result)
+        self.raw = result.raw;
     }
 
     // ========================================================================
@@ -1233,11 +1217,11 @@ public struct Float32:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendChar('-')
+                result.append(char: '-')
             } else if options.sign == .Always {
-                result.appendChar('+')
+                result.append(char: '+')
             } else if options.sign == .Space {
-                result.appendChar(' ')
+                result.append(char: ' ')
             }
         }
         if trimTrailingZeros {
@@ -1286,7 +1270,7 @@ public struct Float32:
 
         result.append(number);
         if suffixPercent {
-            result.appendChar('%')
+            result.append(char: '%')
         }
 
         _writePadded(into: writer, result, options)

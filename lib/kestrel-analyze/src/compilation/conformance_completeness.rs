@@ -26,6 +26,9 @@
 //!
 //! ### E462 -- `conflicting_associated_type` (Error, Correctness)
 //! **Message:** "conflicting associated type '{name}' inherited by protocol '{proto}'"
+//!
+//! ### E464 -- `init_effect_mismatch` (Error, Correctness)
+//! **Message:** "init has wrong effect for protocol '{proto}'"
 
 use std::collections::{HashMap, HashSet};
 
@@ -35,7 +38,7 @@ use crate::traits::{CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, Settable,
+    Callable, ConformanceItem, Conformances, InitEffect, Name, NodeKind, QualifiedTarget, Settable,
     TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
@@ -106,6 +109,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E464",
+        name: "init_effect_mismatch",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct ConformanceCompletenessAnalyzer;
@@ -148,13 +157,15 @@ fn check_entity(cx: &CompilationContext<'_>, entity: Entity, diags: &mut Vec<Ana
         && let Some(target) = cx.query.query(ExtensionTargetEntity {
             extension: entity,
             root: cx.root,
-        }) {
-            // Only check if this extension declares new conformances
-            if let Some(conf) = cx.query.get::<Conformances>(entity)
-                && !conf.0.is_empty() {
-                    check_extension_conformances(cx, entity, target, diags);
-                }
+        })
+    {
+        // Only check if this extension declares new conformances
+        if let Some(conf) = cx.query.get::<Conformances>(entity)
+            && !conf.0.is_empty()
+        {
+            check_extension_conformances(cx, entity, target, diags);
         }
+    }
 
     for &child in cx.query.children_of(entity) {
         check_entity(cx, child, diags);
@@ -185,7 +196,14 @@ fn check_type_conformances(
 
         let proto_param_subs =
             build_proto_param_subs(cx, entity, protocol, ast_ty, conforming_entity);
-        check_protocol_requirements(cx, entity, protocol, conforming_entity, &proto_param_subs, diags);
+        check_protocol_requirements(
+            cx,
+            entity,
+            protocol,
+            conforming_entity,
+            &proto_param_subs,
+            diags,
+        );
     }
 }
 
@@ -211,8 +229,7 @@ fn check_extension_conformances(
             continue;
         }
 
-        let proto_param_subs =
-            build_proto_param_subs(cx, target, protocol, ast_ty, extension);
+        let proto_param_subs = build_proto_param_subs(cx, target, protocol, ast_ty, extension);
         check_protocol_requirements(cx, target, protocol, extension, &proto_param_subs, diags);
     }
 }
@@ -254,6 +271,17 @@ fn check_protocol_requirements(
             continue;
         }
         let child = member.entity;
+        // A protocol method with an inline body is rejected separately by
+        // E417 (`protocol_method_has_body`). Emitting E454 in addition would
+        // double-flag the same mistake and tell the user to re-implement a
+        // method that's already (illegally) implemented. Skip — the body is
+        // visible to readers as a (would-be) default, so the conformance is
+        // not missing in the sense E454 is meant to flag.
+        if cx.query.get::<kestrel_ast_builder::Body>(child).is_some()
+            || cx.query.get::<kestrel_ast_builder::Valued>(child).is_some()
+        {
+            continue;
+        }
         let child_kind = cx.query.get::<NodeKind>(child);
         let Some(name) = member_lookup_name(cx, child) else {
             continue;
@@ -261,8 +289,8 @@ fn check_protocol_requirements(
         let proto_name = util::entity_name(cx.query, member.declaring_protocol);
 
         match child_kind {
-            Some(NodeKind::Function | NodeKind::Subscript) => {
-                // Required method — look for an overload on the impl side
+            Some(NodeKind::Function | NodeKind::Subscript | NodeKind::Initializer) => {
+                // Required method/init — look for an overload on the impl side
                 // whose signature shape (arity + labels) matches the
                 // protocol requirement. A name match with the wrong shape
                 // is treated as "not implemented" (lib1 parity: the impl
@@ -327,17 +355,24 @@ fn check_protocol_requirements(
                 }
 
                 if let Some(impl_method) = matched_impl {
-                    check_method_return_type(
-                        cx,
-                        child,
-                        impl_method,
-                        type_entity,
-                        member.declaring_protocol,
-                        proto_param_subs,
-                        &name,
-                        &proto_name,
-                        diags,
-                    );
+                    // Init return types are derived from the effect ((), ()?, () throws E),
+                    // so skip the structural return type check — check_init_effect validates
+                    // effect compatibility instead. Without this skip, widening (non-failable
+                    // satisfying failable) triggers a spurious E458 for () vs Optional[()].
+                    if !matches!(child_kind, Some(NodeKind::Initializer)) {
+                        check_method_return_type(
+                            cx,
+                            child,
+                            impl_method,
+                            type_entity,
+                            member.declaring_protocol,
+                            proto_param_subs,
+                            &name,
+                            &proto_name,
+                            diags,
+                        );
+                    }
+                    check_init_effect(cx, child, impl_method, &proto_name, diags);
                 }
             },
             Some(NodeKind::Field) => {
@@ -732,7 +767,8 @@ fn find_protocol_extension_assoc_binding(
                 }
                 if cx
                     .query
-                    .get::<Name>(child).is_none_or(|name| name.0 != assoc_name)
+                    .get::<Name>(child)
+                    .is_none_or(|name| name.0 != assoc_name)
                 {
                     continue;
                 }
@@ -773,6 +809,63 @@ fn resolve_qualified_target(cx: &CompilationContext<'_>, alias: Entity) -> Optio
 /// Check that an impl method's return type matches the protocol method's.
 /// Return annotations are lowered to HIR and compared after substituting the
 /// conforming type for `Self` and resolving associated-type bindings.
+/// Check that an impl init's effect is compatible with the protocol requirement.
+/// Non-effectful satisfies effectful (widening), but not the reverse.
+fn check_init_effect(
+    cx: &CompilationContext<'_>,
+    proto_member: Entity,
+    impl_member: Entity,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let proto_effect = cx.query.get::<InitEffect>(proto_member);
+    let impl_effect = cx.query.get::<InitEffect>(impl_member);
+
+    // Only relevant when at least one side has an effect
+    if proto_effect.is_none() && impl_effect.is_none() {
+        return;
+    }
+
+    let compatible = match (proto_effect, impl_effect) {
+        (None, None) => true,
+        // Widening: non-effectful satisfies effectful
+        (Some(InitEffect::Failable), None) => true,
+        (Some(InitEffect::Throwing), None) => true,
+        // Same effect
+        (Some(InitEffect::Failable), Some(InitEffect::Failable)) => true,
+        (Some(InitEffect::Throwing), Some(InitEffect::Throwing)) => true,
+        // All other combinations are incompatible
+        _ => false,
+    };
+
+    if !compatible {
+        let expected = match proto_effect {
+            None => "non-failable init",
+            Some(InitEffect::Failable) => "failable init (init()?)",
+            Some(InitEffect::Throwing) => "throwing init (init() throws E)",
+        };
+        let found = match impl_effect {
+            None => "non-failable init",
+            Some(InitEffect::Failable) => "failable init (init()?)",
+            Some(InitEffect::Throwing) => "throwing init (init() throws E)",
+        };
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[9].id, // E464
+            severity: DESCRIPTORS[9].default_severity,
+            message: format!(
+                "init has wrong effect for protocol '{}': expected {}, found {}",
+                proto_name, expected, found,
+            ),
+            labels: vec![DiagLabel {
+                span: util::entity_span(cx.query, impl_member),
+                message: format!("expected {} here", expected),
+                is_primary: true,
+            }],
+            notes: vec![],
+        });
+    }
+}
+
 fn check_method_return_type(
     cx: &CompilationContext<'_>,
     proto_method: Entity,
@@ -944,22 +1037,27 @@ fn build_proto_param_subs(
     // If the conformance is on an extension, its type params are distinct
     // entities from the struct's. Build a mapping so resolved extension params
     // are translated to the corresponding struct params.
-    let ext_to_struct: HashMap<Entity, Entity> =
-        if decl_entity != type_entity && cx.query.get::<NodeKind>(decl_entity) == Some(&NodeKind::Extension) {
-            let ext_params = cx
-                .query
-                .get::<TypeParams>(decl_entity)
-                .map(|tp| &tp.0[..])
-                .unwrap_or(&[]);
-            let struct_params = cx
-                .query
-                .get::<TypeParams>(type_entity)
-                .map(|tp| &tp.0[..])
-                .unwrap_or(&[]);
-            ext_params.iter().zip(struct_params.iter()).map(|(&e, &s)| (e, s)).collect()
-        } else {
-            HashMap::new()
-        };
+    let ext_to_struct: HashMap<Entity, Entity> = if decl_entity != type_entity
+        && cx.query.get::<NodeKind>(decl_entity) == Some(&NodeKind::Extension)
+    {
+        let ext_params = cx
+            .query
+            .get::<TypeParams>(decl_entity)
+            .map(|tp| &tp.0[..])
+            .unwrap_or(&[]);
+        let struct_params = cx
+            .query
+            .get::<TypeParams>(type_entity)
+            .map(|tp| &tp.0[..])
+            .unwrap_or(&[]);
+        ext_params
+            .iter()
+            .zip(struct_params.iter())
+            .map(|(&e, &s)| (e, s))
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     let mut subs = Vec::new();
     for (&proto_param, ast_arg) in proto_params.iter().zip(ast_type_args.iter()) {
@@ -1007,19 +1105,20 @@ fn resolve_conformance_type_arg(
                             .collect();
                         Some(ResolvedTy::Named { entity, args })
                     }
-                }
+                },
                 _ => None,
             }
-        }
+        },
         AstType::Tuple(elems, _) => {
             let resolved: Vec<ResolvedTy> = elems
                 .iter()
                 .filter_map(|e| resolve_conformance_type_arg(cx, e, context, ext_to_struct))
                 .collect();
             Some(ResolvedTy::Tuple(resolved))
-        }
+        },
         AstType::Function {
             params,
+            param_conventions,
             return_type,
             ..
         } => {
@@ -1027,13 +1126,13 @@ fn resolve_conformance_type_arg(
                 .iter()
                 .filter_map(|p| resolve_conformance_type_arg(cx, p, context, ext_to_struct))
                 .collect();
-            let ret =
-                resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
+            let ret = resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
             Some(ResolvedTy::Function {
                 params,
+                conventions: param_conventions.clone(),
                 ret: Box::new(ret),
             })
-        }
+        },
         AstType::Unit(_) => Some(ResolvedTy::Tuple(Vec::new())),
         AstType::Never(_) => Some(ResolvedTy::Never),
         _ => None,
@@ -1309,9 +1408,10 @@ fn collect_from_entity(
             Some(NodeKind::TypeAlias) => {
                 // Only count type aliases with a binding (TypeAnnotation = concrete type)
                 if let Some(name) = name
-                    && cx.query.get::<TypeAnnotation>(child).is_some() {
-                        type_aliases.insert(name);
-                    }
+                    && cx.query.get::<TypeAnnotation>(child).is_some()
+                {
+                    type_aliases.insert(name);
+                }
             },
             Some(NodeKind::Field) => {
                 if let Some(name) = name {
@@ -1353,17 +1453,24 @@ fn collect_provided_members_for_conformance(
 
     for member in candidates {
         if let TypeMemberSource::ProtocolExtension {
-            protocol, extension,
+            protocol,
+            extension,
         } = member.source
         {
-            let subs = subs_cache.entry(protocol).or_insert_with(|| {
-                build_protocol_param_substitution(cx, type_entity, protocol)
-            });
+            let subs = subs_cache
+                .entry(protocol)
+                .or_insert_with(|| build_protocol_param_substitution(cx, type_entity, protocol));
             if !extension_clauses_entailed(cx, extension, subs, &context_clauses) {
                 continue;
             }
         }
-        bin_member(cx, member.entity, &mut methods, &mut type_aliases, &mut fields);
+        bin_member(
+            cx,
+            member.entity,
+            &mut methods,
+            &mut type_aliases,
+            &mut fields,
+        );
     }
 
     ProvidedMembers {
@@ -1449,8 +1556,7 @@ fn build_protocol_param_substitution(
     else {
         return HashMap::new();
     };
-    let subs =
-        build_proto_param_subs(cx, type_entity, proto, &conformance_ast, conformance_decl);
+    let subs = build_proto_param_subs(cx, type_entity, proto, &conformance_ast, conformance_decl);
     subs.into_iter().collect()
 }
 

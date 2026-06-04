@@ -30,6 +30,7 @@ struct Idx {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let b = Box(v0: 30);
     let i = Idx(value: 2);

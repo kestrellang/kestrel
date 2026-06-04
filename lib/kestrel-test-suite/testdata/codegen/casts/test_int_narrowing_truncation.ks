@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // 256 truncated to i8 should be 0
     let x: lang.i64 = 256;

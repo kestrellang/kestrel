@@ -238,14 +238,14 @@ public func toUppercase(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path
     if cp >= 97 and cp <= 122 {
-        return Char(cp - 32)
+        return Char(unchecked: cp - 32)
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = UPPER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = UPPER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
-    Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
+    Char(unchecked: UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
 /// Single-codepoint lowercase mapping for `c`. Same caveats as
@@ -255,14 +255,14 @@ public func toLowercase(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path
     if cp >= 65 and cp <= 90 {
-        return Char(cp + 32)
+        return Char(unchecked: cp + 32)
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = LOWER_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = LOWER_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
-    Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
+    Char(unchecked: UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
 /// Single-codepoint titlecase mapping for `c`. Differs from
@@ -273,14 +273,14 @@ public func toTitlecase(c: Char) -> Char {
     let cp = c.value();
     // ASCII fast path (same as uppercase)
     if cp >= 97 and cp <= 122 {
-        return Char(cp - 32)
+        return Char(unchecked: cp - 32)
     }
     if cp > 0x10FFFF { return c }
     let blockIdx = TITLE_STAGE1(unchecked: Int64(from: cp.shiftRight(by: 8)));
     let stage2_idx = Int64(from: blockIdx).multiply(256).add(Int64(from: cp.bitwiseAnd(UInt32(intLiteral: 0xFF))));
     let delta = TITLE_STAGE2(unchecked: stage2_idx);
     if delta == 0 { return c }
-    Char(UInt32(from: Int64(from: cp).add(Int64(from: delta))))
+    Char(unchecked: UInt32(from: Int64(from: cp).add(Int64(from: delta))))
 }
 
 /// `true` iff uppercasing `c` produces more than one codepoint.
@@ -317,9 +317,9 @@ public func uppercaseExpansion(c: Char) -> String {
         let entry = UPPER_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1
@@ -350,9 +350,9 @@ public func lowercaseExpansion(c: Char) -> String {
         let entry = LOWER_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1
@@ -381,9 +381,9 @@ public func titlecaseExpansion(c: Char) -> String {
         let entry = TITLE_EXPANSIONS(unchecked: i);
         if UInt32(from: entry.0) == cp {
             var result = String();
-            result.appendChar(Char(UInt32(from: entry.2)));
-            if entry.1 >= 2 { result.appendChar(Char(UInt32(from: entry.3))) }
-            if entry.1 >= 3 { result.appendChar(Char(UInt32(from: entry.4))) }
+            result.append(char: Char(unchecked: UInt32(from: entry.2)));
+            if entry.1 >= 2 { result.append(char: Char(unchecked: UInt32(from: entry.3))) }
+            if entry.1 >= 3 { result.append(char: Char(unchecked: UInt32(from: entry.4))) }
             return result
         }
         i = i + 1

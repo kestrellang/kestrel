@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{CstNode, DeclSpan, FileId, FilePath, Name, NodeKind};
+use kestrel_ast_builder::{CstNode, DeclSpan, FilePath, Name, NodeKind};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId;
@@ -25,7 +25,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::position::LineIndex;
-use crate::references::{self, RefKind, ReferenceSite};
+use crate::references::{self, RefKind, ReferenceSite, clip_to_identifier};
 use crate::semantic;
 use crate::server::{SharedState, path_to_url, url_to_path};
 
@@ -172,12 +172,10 @@ fn target_at(world: &World, file_entity: Entity, offset: usize, root: Entity) ->
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                if let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root) {
-                    return Some(t);
-                }
-            }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
+        {
+            return Some(t);
         }
     }
     let decl = semantic::enclosing_decl_at(world, file_entity, offset)?;
@@ -217,7 +215,7 @@ fn identifier_for_target(world: &World, root: Entity, target: &Target) -> Option
     match target {
         Target::Entity(e) => {
             // Reject stdlib entities — they have no FilePath ancestor.
-            entity_file(world, *e)?;
+            crate::references::entity_file(world, *e)?;
             // Reject if no `Name` (anonymous decl).
             let name = world.get::<Name>(*e).map(|n| n.0.clone())?;
             // Reject modules — `module` declaration spans the whole file in
@@ -252,8 +250,8 @@ fn collect_sites(world: &World, root: Entity, target: &Target) -> Vec<ReferenceS
 fn push_decl_site(world: &World, root: Entity, target: &Target, sites: &mut Vec<ReferenceSite>) {
     if let Some((_, span)) = identifier_for_target(world, root, target) {
         let file = match target {
-            Target::Entity(e) => entity_file(world, *e),
-            Target::Local { body, .. } => entity_file(world, *body),
+            Target::Entity(e) => crate::references::entity_file(world, *e),
+            Target::Local { body, .. } => crate::references::entity_file(world, *body),
         };
         if let Some(file) = file {
             sites.push(ReferenceSite {
@@ -263,20 +261,6 @@ fn push_decl_site(world: &World, root: Entity, target: &Target, sites: &mut Vec<
             });
         }
     }
-}
-
-fn entity_file(world: &World, entity: Entity) -> Option<Entity> {
-    if let Some(fid) = world.get::<FileId>(entity) {
-        return Some(fid.0);
-    }
-    let mut cur = world.parent_of(entity);
-    while let Some(e) = cur {
-        if let Some(fid) = world.get::<FileId>(e) {
-            return Some(fid.0);
-        }
-        cur = world.parent_of(e);
-    }
-    None
 }
 
 // ===== Validation =====
@@ -370,7 +354,7 @@ fn would_collide(res: &NameResolution, target: Entity) -> bool {
             // Collision only if the resolution doesn't already include our
             // target. Function overloads share names so seeing the target
             // in the list is fine.
-            !entities.iter().any(|&e| e == target)
+            !entities.contains(&target)
         },
         NameResolution::Ambiguous(_) => true,
         NameResolution::NotFound => false,
@@ -424,33 +408,10 @@ fn build_workspace_edit(
     }
 }
 
-fn clip_to_identifier(source: &str, span: &Span, kind: RefKind) -> Span {
-    if matches!(kind, RefKind::Direct) {
-        return span.clone();
-    }
-    let text = match source.get(span.start..span.end) {
-        Some(t) => t,
-        None => return span.clone(),
-    };
-    let trailing_start_in_text = text
-        .char_indices()
-        .rev()
-        .take_while(|(_, c)| is_ident_char(*c))
-        .last()
-        .map(|(i, _)| i);
-    match trailing_start_in_text {
-        Some(start) => Span::new(span.file_id, span.start + start..span.end),
-        None => span.clone(),
-    }
-}
-
-fn is_ident_char(c: char) -> bool {
-    c == '_' || c.is_alphanumeric()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kestrel_ast_builder::FileId;
     use kestrel_compiler::Compiler;
 
     fn find_decl(world: &World, file: Entity, name: &str) -> Entity {
@@ -458,10 +419,10 @@ mod tests {
             if n.0 != name {
                 continue;
             }
-            if let Some(fid) = world.get::<FileId>(e) {
-                if fid.0 == file {
-                    return e;
-                }
+            if let Some(fid) = world.get::<FileId>(e)
+                && fid.0 == file
+            {
+                return e;
             }
         }
         panic!("no decl `{name}` in file");

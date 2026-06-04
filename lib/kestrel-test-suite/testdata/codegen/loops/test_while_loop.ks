@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     var x: std.numeric.Int64 = 0;
     while x < 42 {

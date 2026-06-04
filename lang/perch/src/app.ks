@@ -6,10 +6,11 @@ module perch.app
 import http.method.(HttpMethod)
 import perch.request.(Request)
 import perch.response.(Response)
-import perch.context.(MiddlewareResult)
-import perch.router.(Router, GroupBuilder)
+import perch.context.(MiddlewareResult, Middleware)
+import perch.router.(Router, GroupBuilder, Routes)
 import perch.parse.(parseHttpRequest)
 import perch.send.(sendResponse)
+import http.content.(Text)
 import std.io.error.(IoError)
 
 /// A Perch web application parameterized by a context type `T`.
@@ -24,13 +25,13 @@ import std.io.error.(IoError)
 /// struct Ctx {}
 ///
 /// var app = App(Ctx());
-/// app.use(logger[Ctx]());
-/// app.onGet("/", { (req: Request, ctx: Ctx) in
-///     Response.ok(text: "Hello, world!")
+/// app.use(Logger[Ctx]());
+/// app.route(get: "/", { (req: Request, ctx: Ctx) in
+///     Response.ok(Text("Hello, world!"))
 /// });
 /// let _ = app.listen(8080);
 /// ```
-public struct App[T] {
+public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
     var router: Router[T]
     var context: T
 
@@ -40,12 +41,18 @@ public struct App[T] {
         self.context = context
     }
 
+    public func clone() -> App[T] {
+        var copy = App[T](self.context.clone());
+        copy.router = self.router.clone();
+        copy
+    }
+
     // ========================================================================
     // MIDDLEWARE
     // ========================================================================
 
     /// Adds global middleware that runs on every request.
-    public mutating func use(middleware: (Request, T) -> MiddlewareResult) {
+    public mutating func use[M](middleware: M) where M: Middleware[T] {
         self.router.use(middleware)
     }
 
@@ -53,39 +60,8 @@ public struct App[T] {
     // ROUTE REGISTRATION
     // ========================================================================
 
-    /// Registers a GET route.
-    public mutating func onGet(path: String, handler: (Request, T) -> Response) {
-        self.router.onGet(path, handler)
-    }
-
-    /// Registers a POST route.
-    public mutating func onPost(path: String, handler: (Request, T) -> Response) {
-        self.router.onPost(path, handler)
-    }
-
-    /// Registers a PUT route.
-    public mutating func onPut(path: String, handler: (Request, T) -> Response) {
-        self.router.onPut(path, handler)
-    }
-
-    /// Registers a DELETE route.
-    public mutating func onDelete(path: String, handler: (Request, T) -> Response) {
-        self.router.onDelete(path, handler)
-    }
-
-    /// Registers a PATCH route.
-    public mutating func onPatch(path: String, handler: (Request, T) -> Response) {
-        self.router.onPatch(path, handler)
-    }
-
-    /// Registers a HEAD route.
-    public mutating func onHead(path: String, handler: (Request, T) -> Response) {
-        self.router.onHead(path, handler)
-    }
-
-    /// Registers an OPTIONS route.
-    public mutating func onOptions(path: String, handler: (Request, T) -> Response) {
-        self.router.onOptions(path, handler)
+    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
+        self.router.addRoute(method, path, handler)
     }
 
     /// Adds a route group with shared prefix and middleware.
@@ -112,19 +88,30 @@ public struct App[T] {
         let _ = println("Perch listening on port \(port)");
 
         loop {
-            var stream = try listener.accept();
-            let fd = stream.rawFd();
+            // match instead of try: workaround for compiler bug where
+            // try in a loop defers $try_value deinit past the next
+            // accept(), closing the new connection's fd.
+            match listener.accept() {
+                .Ok(stream) => {
+                    let fd = stream.rawFd();
 
-            match parseHttpRequest(fd) {
-                .Ok(request) => {
-                    let response = self.dispatch(request);
-                    let _ = sendResponse(response, to: fd);
+                    match parseHttpRequest(fd) {
+                        .Ok(request) => {
+                            let response = self.dispatch(request);
+                            let _ = sendResponse(response, to: fd);
+                        },
+                        .Err(_) => {
+                            let badReq = Response.badRequest(Text("Bad Request"));
+                            let _ = sendResponse(badReq, to: fd);
+                        }
+                    }
                 },
                 .Err(_) => {
-                    let _ = sendResponse(Response.badRequest("Bad Request"), to: fd);
+                    break
                 }
             }
         }
+        .Ok(())
     }
 
     // ========================================================================
@@ -133,12 +120,11 @@ public struct App[T] {
 
     /// Dispatches a request through the middleware pipeline and route handler.
     ///
-    /// Execution order: global middleware → group middleware → route
-    /// middleware → handler. The first middleware that returns `.Respond`
-    /// short-circuits the chain. Returns 404 if no route matches.
+    /// Execution order: global middleware → group middleware → handler.
+    /// The first middleware that returns `.Respond` short-circuits the
+    /// chain. Returns 404 if no route matches.
     func dispatch(request: Request) -> Response {
         var req = request;
-
         for mw in self.router.globalMiddleware {
             match mw(req, self.context) {
                 .Continue(enriched) => { req = enriched },
@@ -150,7 +136,7 @@ public struct App[T] {
             return Response.notFound();
         }
 
-        req = req.withPathParams(matchResult.params);
+        req.pathParams = matchResult.params;
 
         for mw in matchResult.groupMiddleware {
             match mw(req, self.context) {

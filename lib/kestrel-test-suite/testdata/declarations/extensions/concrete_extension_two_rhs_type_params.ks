@@ -17,6 +17,7 @@ extend Tag: Pair[A, B] {
     public func describe(a a: A, b b: B) -> lang.i64 { 7 }
 }
 
+@main
 func main() -> lang.i64 {
     let t = Tag();
     let a: lang.i64 = 100;

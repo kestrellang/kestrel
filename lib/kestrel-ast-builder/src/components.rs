@@ -83,6 +83,13 @@ pub struct Typed;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TypeAnnotation(pub AstType);
 
+/// Marks an init as failable (`?`) or throwing (`throws E`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum InitEffect {
+    Failable,
+    Throwing,
+}
+
 /// Has a parameter list, can be invoked.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Callable {

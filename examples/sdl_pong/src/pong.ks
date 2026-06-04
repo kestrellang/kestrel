@@ -1,6 +1,6 @@
 module SdlPong
 
-import Sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
+import sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
 
 // --- Game Components ---
 
@@ -163,7 +163,8 @@ struct InputState {
 
 // --- Main Game ---
 
-func main() -> Int32 {
+@main
+func main() -> lang.i32 {
     var app = SDLApp(title: "Pong", width: 800, height: 600);
     var ball = Ball.create();
     var paddle1 = Paddle.left();

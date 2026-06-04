@@ -33,7 +33,7 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
 
     /// @name From Value
     /// Allocates fresh storage holding `value` with refcount 1.
-    public init(value: T) {
+    public init(consuming value: T) {
         self.inner = RcBox(value);
     }
 
@@ -43,9 +43,11 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
         self.inner = box;
     }
 
-    /// Read access — no clone, no refcount check.
+    /// Read access — clones the value so the caller gets an independent
+    /// copy. getValue() returns a raw bitwise copy from the heap; cloning
+    /// ensures owned resources (byte buffers, etc.) are properly duplicated.
     public func read() -> T {
-        self.inner.getValue()
+        self.inner.getValue().clone()
     }
 
     /// Write access — clones storage if shared, then returns the
@@ -59,8 +61,28 @@ public struct CowBox[T]: Cloneable where T: Cloneable {
 
     /// Writes `value` into the storage in place. Only valid after
     /// a preceding `write()` call (which ensures uniqueness).
-    public func setValue(value: T) {
+    /// Takes `value` by consuming so the drop pass sees the caller's
+    /// local as moved (Dead) — prevents double-free of shared buffers.
+    public func setValue(consuming value: T) {
         self.inner.setValue(value)
+    }
+
+    /// In-place mutation barrier: ensures unique storage (deep-copying if
+    /// shared), then passes the heap value to `body` as a `mutating` argument
+    /// to mutate directly — no per-call clone or write-back. This is the O(1)
+    /// replacement for the `read()` → modify → `setValue()` dance.
+    public mutating func modify[R](body: (mutating T) -> R) -> R {
+        if self.inner.isUnique() == false {
+            self.inner = RcBox(self.inner.getValue().clone())
+        }
+        self.inner.modify(body)
+    }
+
+    /// Returns a pointer to the wrapped value on the heap, bypassing
+    /// the clone that `read()` / `getValue()` would create. Use this
+    /// to read individual scalar fields without triggering `T.deinit`.
+    public func valuePtr() -> Pointer[T] {
+        self.inner.valuePtr()
     }
 
     /// Returns `true` when no other clone shares this storage.

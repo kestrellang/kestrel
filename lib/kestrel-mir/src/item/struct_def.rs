@@ -1,30 +1,37 @@
-//! Struct definitions.
-
-use crate::id::FieldId;
-use crate::item::TypeParamDef;
-use crate::ty::MirTy;
-use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
-/// A struct definition.
-#[derive(Debug, Clone)]
-pub struct StructDef {
-    /// The ECS entity for this struct.
-    pub entity: Entity,
-    /// Fully qualified name.
+use crate::TyId;
+
+use super::{TypeInfo, TypeParamDef};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldDef {
     pub name: String,
-    /// Generic type parameters.
+    pub ty: TyId,
+}
+
+impl FieldDef {
+    pub fn new(name: impl Into<String>, ty: TyId) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDef {
+    pub entity: Entity,
+    pub name: String,
     pub type_params: Vec<TypeParamDef>,
-    /// Fields in declaration order.
     pub fields: Vec<FieldDef>,
-    /// Field lookup by name.
-    pub fields_by_name: IndexMap<String, FieldId>,
-    /// Precomputed layout (filled by the layout pass).
-    pub layout: Option<StructLayout>,
-    /// Fields that need dropping, in drop order (filled by the layout pass).
-    pub drop_fields: Vec<FieldId>,
-    /// Whether this type needs drop code at all.
-    pub needs_drop: bool,
+    pub type_info: TypeInfo,
+    /// Type-param positions that gate this type's *conditional* Copyable
+    /// conformance (`struct X: not Copyable` + `extend X: Copyable where
+    /// T: Copyable`). Empty unless conditionally copyable. Drives
+    /// per-instantiation `copy_behavior`: `X[args]` is Copyable iff every gating
+    /// `args[i]` is. See `kestrel_semantics::ConditionalCopyableParams`.
+    pub conditionally_copyable: Vec<usize>,
 }
 
 impl StructDef {
@@ -34,52 +41,12 @@ impl StructDef {
             name: name.into(),
             type_params: Vec::new(),
             fields: Vec::new(),
-            fields_by_name: IndexMap::new(),
-            layout: None,
-            drop_fields: Vec::new(),
-            needs_drop: false,
+            type_info: TypeInfo::default(),
+            conditionally_copyable: Vec::new(),
         }
     }
 
-    /// Add a field and return its ID.
-    pub fn add_field(&mut self, field: FieldDef) -> FieldId {
-        let id = FieldId::new(self.fields.len());
-        self.fields_by_name.insert(field.name.clone(), id);
+    pub fn add_field(&mut self, field: FieldDef) {
         self.fields.push(field);
-        id
     }
-
-    /// Look up a field by name.
-    pub fn field_by_name(&self, name: &str) -> Option<FieldId> {
-        self.fields_by_name.get(name).copied()
-    }
-}
-
-/// A field in a struct or enum case.
-#[derive(Debug, Clone)]
-pub struct FieldDef {
-    /// Field name (or numeric index for tuple-like fields).
-    pub name: String,
-    /// The type of this field.
-    pub ty: MirTy,
-}
-
-impl FieldDef {
-    pub fn new(name: impl Into<String>, ty: MirTy) -> Self {
-        Self {
-            name: name.into(),
-            ty,
-        }
-    }
-}
-
-/// Precomputed struct memory layout.
-#[derive(Debug, Clone)]
-pub struct StructLayout {
-    /// Total size in bytes.
-    pub size: u64,
-    /// Alignment in bytes.
-    pub align: u64,
-    /// Byte offset of each field, in field declaration order.
-    pub field_offsets: Vec<u64>,
 }

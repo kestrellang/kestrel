@@ -40,8 +40,8 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     build_hir_ty_for_entity(ctx, owner, root, entity, segments, span)
                 },
                 TypeResolution::SelfType => {
-                    if let Some(self_entity) = find_self_type(ctx, owner, root) {
-                        build_self_hir_ty(ctx, self_entity, span)
+                    if let Some(ty) = lower_self_hir_ty(ctx, owner, root, span) {
+                        ty
                     } else {
                         ctx.accumulate(
                             Diagnostic::error()
@@ -106,6 +106,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
 
         AstType::Function {
             params,
+            param_conventions,
             return_type,
             span,
         } => {
@@ -116,6 +117,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             let lowered_ret = Box::new(lower_ast_type(ctx, owner, root, return_type));
             HirTy::Function {
                 params: lowered_params,
+                param_conventions: param_conventions.clone(),
                 ret: lowered_ret,
                 span: span.clone(),
             }
@@ -128,15 +130,35 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         AstType::Optional(inner, span) => {
             lower_sugar_type(ctx, owner, root, "Optional", &[inner.as_ref()], span)
         },
-        AstType::Dictionary(key, val, span) => {
-            lower_sugar_type(ctx, owner, root, "Dictionary", &[key.as_ref(), val.as_ref()], span)
-        },
-        AstType::Result { ok, err, span } => {
-            lower_sugar_type(ctx, owner, root, "Result", &[ok.as_ref(), err.as_ref()], span)
-        },
+        AstType::Dictionary(key, val, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            "Dictionary",
+            &[key.as_ref(), val.as_ref()],
+            span,
+        ),
+        AstType::Result { ok, err, span } => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            "Result",
+            &[ok.as_ref(), err.as_ref()],
+            span,
+        ),
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
+        AstType::Some { bounds, span } => {
+            let hir_bounds: Vec<HirTy> = bounds
+                .iter()
+                .map(|b| lower_ast_type(ctx, owner, root, b))
+                .collect();
+            HirTy::Opaque {
+                bounds: hir_bounds,
+                span: span.clone(),
+            }
+        },
     }
 }
 
@@ -199,10 +221,12 @@ fn build_hir_ty_for_entity(
             // Trivial (non-generic, bound-free) aliases with a concrete
             // TypeAnnotation are eagerly expanded — avoids constraint bloat
             // for `type Fd = Int32` style declarations.
-            if is_trivial_alias(ctx, entity) && args.is_empty()
-                && let Some(ann) = ctx.get::<TypeAnnotation>(entity) {
-                    return lower_ast_type(ctx, owner, root, &ann.0);
-                }
+            if is_trivial_alias(ctx, entity)
+                && args.is_empty()
+                && let Some(ann) = ctx.get::<TypeAnnotation>(entity)
+            {
+                return lower_ast_type(ctx, owner, root, &ann.0);
+            }
             // Non-associated aliases (parameterized or constrained) flow as
             // AliasUse. The solver reduces concrete ones via Reduce.
             HirTy::AliasUse {
@@ -277,35 +301,106 @@ fn build_assoc_projection_base(
         lower_ast_type(ctx, owner, root, &prefix)
     } else {
         // Bare `Item` inside the protocol — base is Self.
-        if let Some(self_entity) = find_self_type(ctx, owner, root) {
-            build_self_hir_ty(ctx, self_entity, span)
-        } else {
-            HirTy::Error(span.clone())
-        }
+        lower_self_hir_ty(ctx, owner, root, span).unwrap_or_else(|| HirTy::Error(span.clone()))
     }
 }
 
-/// Build a HirTy for a `Self`-resolved entity (returned by `find_self_type`).
+/// Lower `Self` (in type position) to a fully-parameterized `HirTy`.
 ///
-/// `find_self_type` resolves Self to the nearest Struct/Enum/Protocol (or an
-/// extension's target type), so we dispatch on NodeKind here. The protocol
-/// case emits `HirTy::SelfType` — the abstract implementer — so
-/// monomorphization can substitute it with the concrete caller type.
-/// Struct/Enum cases stay concrete because their entity is fully known.
-fn build_self_hir_ty(ctx: &QueryContext<'_>, self_entity: Entity, span: &Span) -> HirTy {
-    match ctx.get::<NodeKind>(self_entity).cloned() {
-        Some(NodeKind::Enum) => HirTy::Enum {
-            entity: self_entity,
-            args: Vec::new(),
-            span: span.clone(),
-        },
-        Some(NodeKind::Protocol) => HirTy::SelfType(self_entity, span.clone()),
-        Some(NodeKind::TypeParameter) => HirTy::Param(self_entity, span.clone()),
-        _ => HirTy::Struct {
-            entity: self_entity,
-            args: Vec::new(),
-            span: span.clone(),
-        },
+/// Walks up from `owner` to the nearest Struct/Enum/Protocol or Extension.
+/// Returns `None` only if `Self` appears outside any type/extension/protocol
+/// scope — the caller emits the diagnostic.
+///
+/// Critically, the resulting `HirTy` carries the *right* type args:
+///   - `extend Box[lang.i64] { ... Self ... }` → `Box[i64]`
+///   - `extend Box[T] { ... Self ... }`        → `Box[T]` (T = extension's type param)
+///   - `struct Box[T] { ... Self ... }`        → `Box[T]` (T = struct's type param)
+///   - `protocol P { ... Self ... }`           → `HirTy::SelfType(P)` (abstract; witness substitutes)
+///
+/// Without these args, `-> Self` in a generic-target extension lowers to the
+/// bare entity (e.g. `Box`) and unifies as the unparameterized type, producing
+/// "expected Box got Box[i64]" at call sites.
+fn lower_self_hir_ty(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    span: &Span,
+) -> Option<HirTy> {
+    let mut current = Some(owner);
+    while let Some(entity) = current {
+        match ctx.get::<NodeKind>(entity).cloned() {
+            Some(NodeKind::Extension) => {
+                // Lower the extension's target AstType directly — it already
+                // carries any type args from the source (e.g. `Box[lang.i64]`
+                // or `Box[T]`). Resolve in the extension's own scope so its
+                // type parameters are visible.
+                let target = ctx.get::<ExtensionTarget>(entity)?;
+                let target_ast = target.0.clone();
+                let mut ty = lower_ast_type(ctx, entity, root, &target_ast);
+                // Override the span so diagnostics point at the `Self` use site
+                // rather than the extension header.
+                override_span(&mut ty, span);
+                // Protocol target: emit SelfType, not Protocol — Self in a
+                // protocol-extension body must remain abstract for witness
+                // substitution.
+                if let HirTy::Protocol { entity: p, .. } = ty {
+                    return Some(HirTy::SelfType(p, span.clone()));
+                }
+                return Some(ty);
+            },
+            Some(NodeKind::Struct) => {
+                return Some(HirTy::Struct {
+                    entity,
+                    args: self_param_args(ctx, entity, span),
+                    span: span.clone(),
+                });
+            },
+            Some(NodeKind::Enum) => {
+                return Some(HirTy::Enum {
+                    entity,
+                    args: self_param_args(ctx, entity, span),
+                    span: span.clone(),
+                });
+            },
+            Some(NodeKind::Protocol) => {
+                return Some(HirTy::SelfType(entity, span.clone()));
+            },
+            _ => current = ctx.parent_of(entity),
+        }
+    }
+    None
+}
+
+/// Type-param entities of `entity` lifted to `HirTy::Param` so that
+/// `Self` inside a generic struct/enum body refers to the parameterized
+/// shape (`Box[T]`), not the bare entity.
+fn self_param_args(ctx: &QueryContext<'_>, entity: Entity, span: &Span) -> Vec<HirTy> {
+    ctx.get::<TypeParams>(entity)
+        .map(|tp| {
+            tp.0.iter()
+                .map(|&p| HirTy::Param(p, span.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Replace the top-level span of `ty` with `span`. Used when reusing a
+/// lowered AstType (e.g. an extension target) as the body of `Self`.
+fn override_span(ty: &mut HirTy, span: &Span) {
+    match ty {
+        HirTy::Struct { span: s, .. }
+        | HirTy::Enum { span: s, .. }
+        | HirTy::Protocol { span: s, .. }
+        | HirTy::AliasUse { span: s, .. }
+        | HirTy::Tuple(_, s)
+        | HirTy::Function { span: s, .. }
+        | HirTy::Param(_, s)
+        | HirTy::SelfType(_, s)
+        | HirTy::AssocProjection { span: s, .. }
+        | HirTy::Error(s)
+        | HirTy::Infer(s)
+        | HirTy::Never(s)
+        | HirTy::Opaque { span: s, .. } => *s = span.clone(),
     }
 }
 
@@ -454,31 +549,6 @@ fn resolve_std_type(
         TypeResolution::Found(entity) => Some(entity),
         _ => None,
     }
-}
-
-/// Find the enclosing type entity for Self resolution.
-/// Walks up from owner to find the nearest Struct/Enum/Protocol.
-/// For extensions, resolves to the extension's target type (not the extension itself).
-fn find_self_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity) -> Option<Entity> {
-    let mut current = Some(owner);
-    while let Some(entity) = current {
-        match ctx.get::<NodeKind>(entity) {
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol) => {
-                return Some(entity);
-            },
-            Some(NodeKind::Extension) => {
-                // Resolve to the extension's target type, not the extension itself
-                return ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: entity,
-                    root,
-                });
-            },
-            _ => {
-                current = ctx.parent_of(entity);
-            },
-        }
-    }
-    None
 }
 
 // ===== LowerCtx delegation =====
@@ -653,7 +723,8 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Result { span, .. }
         | AstType::Unit(span)
         | AstType::Never(span)
-        | AstType::Inferred(span) => span.clone(),
+        | AstType::Inferred(span)
+        | AstType::Some { span, .. } => span.clone(),
     }
 }
 

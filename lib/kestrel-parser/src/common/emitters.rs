@@ -10,7 +10,7 @@ use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
     AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
-    FunctionBodyData, InitializerDeclarationData, ParameterAccessMode, ParameterData,
+    FunctionBodyData, InitEffect, InitializerDeclarationData, ParameterAccessMode, ParameterData,
     TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
@@ -282,6 +282,7 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
         lparen,
         parameters,
         rparen,
+        effect,
         where_clause,
         body,
     } = data;
@@ -297,6 +298,20 @@ pub fn emit_initializer_declaration(sink: &mut EventSink, data: InitializerDecla
     }
 
     emit_parameter_list(sink, lparen, parameters, rparen);
+
+    if let Some(eff) = effect {
+        sink.start_node(SyntaxKind::InitEffect);
+        match eff {
+            InitEffect::Failable(q_span) => {
+                sink.add_token(SyntaxKind::Question, q_span);
+            },
+            InitEffect::Throwing(throws_span, err_ty) => {
+                sink.add_token(SyntaxKind::Throws, throws_span);
+                emit_ty_variant(sink, &err_ty);
+            },
+        }
+        sink.finish_node();
+    }
 
     if let Some(wc) = where_clause {
         emit_where_clause(sink, wc);

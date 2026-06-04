@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use kestrel_ast::arena::Arena;
+use kestrel_ast_builder::InitEffect;
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
@@ -44,9 +45,9 @@ pub(crate) struct LowerCtx<'a> {
     /// Local scope stack (innermost last)
     scopes: Vec<HashMap<String, LocalId>>,
 
-    /// Statements that originated from guard-let desugaring.
+    /// Statements that originated from guard desugaring.
     /// Populated during lowering, transferred to HirBody for analysis.
-    pub guard_let_stmts: Vec<HirStmtId>,
+    pub guard_stmts: Vec<HirStmtId>,
     /// Original condition expressions from while-loop desugaring.
     /// Populated during lowering, used by condition type analyzer.
     pub while_conditions: Vec<HirExprId>,
@@ -71,7 +72,7 @@ impl<'a> LowerCtx<'a> {
             locals: Arena::new(),
             params: Vec::new(),
             scopes: vec![HashMap::new()], // start with one scope for params
-            guard_let_stmts: Vec::new(),
+            guard_stmts: Vec::new(),
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
@@ -103,11 +104,13 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Current scope depth (for closure capture detection).
+    #[allow(dead_code)]
     pub fn scope_depth(&self) -> usize {
         self.scopes.len()
     }
 
     /// Scope depth at which a local was created.
+    #[allow(dead_code)]
     pub fn local_scope_depth(&self, id: LocalId) -> Option<usize> {
         self.local_depths.get(&id).copied()
     }
@@ -158,177 +161,27 @@ impl<'a> LowerCtx<'a> {
         self.loop_labels.iter().any(|l| l.as_deref() == Some(label))
     }
 
-    // ===== Capture detection =====
+    // ===== Init effect helpers =====
 
-    /// Walk a closure body and collect locals defined before `entry_depth`.
-    pub fn collect_captures(&self, block: &HirBlock, entry_depth: usize) -> Vec<LocalId> {
-        use std::collections::HashSet;
-        let mut seen = HashSet::new();
-        let mut captures = Vec::new();
-        self.walk_block_for_captures(block, entry_depth, &mut seen, &mut captures);
-        captures
-    }
-
-    fn walk_block_for_captures(
-        &self,
-        block: &HirBlock,
-        entry_depth: usize,
-        seen: &mut std::collections::HashSet<LocalId>,
-        captures: &mut Vec<LocalId>,
-    ) {
-        for &stmt_id in &block.stmts {
-            self.walk_stmt_for_captures(stmt_id, entry_depth, seen, captures);
-        }
-        if let Some(tail) = block.tail_expr {
-            self.walk_expr_for_captures(tail, entry_depth, seen, captures);
-        }
-    }
-
-    fn walk_stmt_for_captures(
-        &self,
-        id: HirStmtId,
-        entry_depth: usize,
-        seen: &mut std::collections::HashSet<LocalId>,
-        captures: &mut Vec<LocalId>,
-    ) {
-        match &self.stmts[id] {
-            HirStmt::Expr { expr, .. } => {
-                self.walk_expr_for_captures(*expr, entry_depth, seen, captures);
-            },
-            HirStmt::Let { value, .. } => {
-                if let Some(v) = value {
-                    self.walk_expr_for_captures(*v, entry_depth, seen, captures);
-                }
-            },
-            HirStmt::Deinit { .. } => {},
-        }
-    }
-
-    fn walk_expr_for_captures(
-        &self,
-        id: HirExprId,
-        entry_depth: usize,
-        seen: &mut std::collections::HashSet<LocalId>,
-        captures: &mut Vec<LocalId>,
-    ) {
-        match &self.exprs[id] {
-            HirExpr::Local(local_id, _) => {
-                if seen.insert(*local_id)
-                    && let Some(depth) = self.local_scope_depth(*local_id)
-                        && depth <= entry_depth {
-                            captures.push(*local_id);
-                        }
-            },
-            // Skip nested closures — they compute their own captures
-            HirExpr::Closure { .. } => {},
-            // Recurse into all other expression kinds
-            _ => self.walk_expr_children(id, entry_depth, seen, captures),
-        }
-    }
-
-    /// Walk child expressions of an expr for capture detection.
-    fn walk_expr_children(
-        &self,
-        id: HirExprId,
-        entry_depth: usize,
-        seen: &mut std::collections::HashSet<LocalId>,
-        captures: &mut Vec<LocalId>,
-    ) {
-        match &self.exprs[id] {
-            HirExpr::Literal { .. }
-            | HirExpr::Local(..)
-            | HirExpr::Def(..)
-            | HirExpr::OverloadSet { .. }
-            | HirExpr::Error { .. }
-            | HirExpr::Break { .. }
-            | HirExpr::Continue { .. } => {},
-
-            HirExpr::Call { callee, args, .. } => {
-                self.walk_expr_for_captures(*callee, entry_depth, seen, captures);
-                for arg in args {
-                    self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::MethodCall { receiver, args, .. } => {
-                self.walk_expr_for_captures(*receiver, entry_depth, seen, captures);
-                for arg in args {
-                    self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::ProtocolCall { receiver, args, .. } => {
-                self.walk_expr_for_captures(*receiver, entry_depth, seen, captures);
-                for arg in args {
-                    self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
-                self.walk_expr_for_captures(*base, entry_depth, seen, captures);
-            },
-            HirExpr::ImplicitMember { args, .. } => {
-                if let Some(args) = args {
-                    for arg in args {
-                        self.walk_expr_for_captures(arg.value, entry_depth, seen, captures);
-                    }
-                }
-            },
-            HirExpr::Assign { target, value, .. } => {
-                self.walk_expr_for_captures(*target, entry_depth, seen, captures);
-                self.walk_expr_for_captures(*value, entry_depth, seen, captures);
-            },
-            HirExpr::Tuple { elements, .. } => {
-                for &e in elements {
-                    self.walk_expr_for_captures(e, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::Array { elements, .. } => {
-                for &e in elements {
-                    self.walk_expr_for_captures(e, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::Dict { entries, .. } => {
-                for entry in entries {
-                    self.walk_expr_for_captures(entry.key, entry_depth, seen, captures);
-                    self.walk_expr_for_captures(entry.value, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::If {
-                condition,
-                then_body,
-                else_body,
-                ..
-            } => {
-                self.walk_expr_for_captures(*condition, entry_depth, seen, captures);
-                self.walk_block_for_captures(then_body, entry_depth, seen, captures);
-                if let Some(else_b) = else_body {
-                    self.walk_block_for_captures(else_b, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::Match {
-                scrutinee, arms, ..
-            } => {
-                self.walk_expr_for_captures(*scrutinee, entry_depth, seen, captures);
-                for arm in arms {
-                    if let Some(g) = arm.guard {
-                        self.walk_expr_for_captures(g, entry_depth, seen, captures);
-                    }
-                    self.walk_expr_for_captures(arm.body, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::Loop { body, .. } => {
-                self.walk_block_for_captures(body, entry_depth, seen, captures);
-            },
-            HirExpr::Block { body, .. } => {
-                self.walk_block_for_captures(body, entry_depth, seen, captures);
-            },
-            HirExpr::Return { value, .. } => {
-                if let Some(v) = value {
-                    self.walk_expr_for_captures(*v, entry_depth, seen, captures);
-                }
-            },
-            HirExpr::Closure { .. } => {}, // already handled
-            HirExpr::Sugar { inner, .. } => {
-                self.walk_expr_for_captures(*inner, entry_depth, seen, captures);
-            },
-        }
+    /// For failable/throwing inits, wrap a bare success return in `.Some(())` or `.Ok(())`.
+    /// Returns `None` if the owner isn't an effectful init.
+    pub fn wrap_init_success_value(&mut self, span: Span) -> Option<HirExprId> {
+        let effect = self.ctx.get::<InitEffect>(self.owner)?;
+        let unit_expr = self.alloc_expr(HirExpr::Tuple {
+            elements: vec![],
+            span: span.clone(),
+        });
+        let wrapper_name = match effect {
+            InitEffect::Failable => "Some",
+            InitEffect::Throwing => "Ok",
+        };
+        Some(self.alloc_expr(HirExpr::ImplicitMember {
+            name: HirName::name(wrapper_name),
+            args: Some(vec![HirCallArg {
+                label: None,
+                value: unit_expr,
+            }]),
+            span,
+        }))
     }
 }

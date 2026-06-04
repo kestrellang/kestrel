@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let s: std.text.String = "hello";
 
@@ -13,12 +14,12 @@ module Test
             if chars(unchecked: 4).isEqual(to: 'o') == false { return 3 }
 
             // iter() with map
-            let upper = s.iter().map({ (c) in c.uppercased() }).collect();
+            let upper = s.iter().map(as: { (c) in c.uppercased() }).collect();
             if upper.count != 5 { return 4 }
             if upper(unchecked: 0).isEqual(to: 'H') == false { return 5 }
 
             // iter() with filter
-            let vowels = s.iter().filter(matching: { (c) in
+            let vowels = s.iter().filter(where: { (c) in
                 c.isEqual(to: 'a') or c.isEqual(to: 'e') or c.isEqual(to: 'i') or c.isEqual(to: 'o') or c.isEqual(to: 'u')
             }).collect();
             if vowels.count != 2 { return 6 }

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // toBytesBigEndian / fromBytesBigEndian round-trip
             let val: std.numeric.Int64 = 258;  // 0x0000000000000102
@@ -30,21 +31,21 @@ module Test
             if b7 != 2 { return 9 }
 
             // fromBytesBigEndian round-trip
-            let recovered = std.numeric.Int64.fromBytesBigEndian(bytes);
+            let recovered = std.numeric.Int64(fromBytesBigEndian: bytes);
             if recovered.isNone() { return 10 }
             if recovered.unwrap() != 258 { return 11 }
 
             // Round-trip with zero
             let zeroVal: std.numeric.Int64 = 0;
             let zeroBytes = zeroVal.toBytesBigEndian();
-            let zeroRecovered = std.numeric.Int64.fromBytesBigEndian(zeroBytes);
+            let zeroRecovered = std.numeric.Int64(fromBytesBigEndian: zeroBytes);
             if zeroRecovered.isNone() { return 12 }
             if zeroRecovered.unwrap() != 0 { return 13 }
 
             // Round-trip with negative value
             let negVal: std.numeric.Int64 = -1;
             let negBytes = negVal.toBytesBigEndian();
-            let negRecovered = std.numeric.Int64.fromBytesBigEndian(negBytes);
+            let negRecovered = std.numeric.Int64(fromBytesBigEndian: negBytes);
             if negRecovered.isNone() { return 14 }
             if negRecovered.unwrap() != -1 { return 15 }
 

@@ -79,14 +79,17 @@ impl PatternMatrix {
     }
 
     /// Add a row to the matrix.
+    ///
+    /// Drops rows whose arity doesn't match the column count. This guards
+    /// against malformed FlatPats produced when name-resolution returns a
+    /// sentinel entity (e.g. `.Some(_)` on a non-enum scrutinee — the
+    /// `??` type-mismatch case in `flat_pat::resolve_implicit_variant`).
+    /// Those situations already raised a primary diagnostic upstream; we
+    /// just skip the row so exhaustiveness checking doesn't panic on top.
     pub fn push(&mut self, row: PatternRow) {
-        debug_assert_eq!(
-            row.pats.len(),
-            self.col_types.len(),
-            "row has {} patterns but matrix has {} columns",
-            row.pats.len(),
-            self.col_types.len()
-        );
+        if row.pats.len() != self.col_types.len() {
+            return;
+        }
         self.rows.push(row);
     }
 

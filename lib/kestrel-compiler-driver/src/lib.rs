@@ -70,12 +70,13 @@ impl<'a> CompilerDriver<'a> {
                                 .or_insert(0) += 1;
                         }
                         if let InferError::TypeMismatch { .. } = err
-                            && let Some(detail) = typed.error_details.get(i) {
-                                *summary
-                                    .type_mismatch_breakdown
-                                    .entry(detail.clone())
-                                    .or_insert(0) += 1;
-                            }
+                            && let Some(detail) = typed.error_details.get(i)
+                        {
+                            *summary
+                                .type_mismatch_breakdown
+                                .entry(detail.clone())
+                                .or_insert(0) += 1;
+                        }
                     }
 
                     if summary.error_samples.len() < 50 {
@@ -130,8 +131,11 @@ impl<'a> CompilerDriver<'a> {
     ///
     /// Fires `analyze_bodies`, `analyze_decls`, and `analyze_compilation` in
     /// sequence. Results are memoized per `(analyzer, entity)` in the query
-    /// cache.
-    pub fn analyze_all(&self) -> AnalyzeSummary {
+    /// cache. `is_executable` reports whether this compilation is producing a
+    /// binary; it gates the entry-point requirement (E618). Pass `true` for
+    /// `kestrel build` / execution tests, `false` for libraries, `kestrel
+    /// check`, the LSP, and diagnostics tests.
+    pub fn analyze_all(&self, is_executable: bool) -> AnalyzeSummary {
         let world = self.compiler.world();
         let root = self.compiler.root();
 
@@ -142,7 +146,11 @@ impl<'a> CompilerDriver<'a> {
         let ctx = world.query_context();
         let mut diags = kestrel_analyze::analyze_bodies(&ctx, root, &body_entities);
         diags.extend(kestrel_analyze::analyze_decls(&ctx, root, &decl_entities));
-        diags.extend(kestrel_analyze::analyze_compilation(&ctx, root));
+        diags.extend(kestrel_analyze::analyze_compilation(
+            &ctx,
+            root,
+            is_executable,
+        ));
 
         let mut summary = AnalyzeSummary::default();
         for d in &diags {
@@ -234,6 +242,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::NoMember { .. } => "NoMember",
         InferError::AmbiguousMember { .. } => "AmbiguousMember",
         InferError::MemberNotVisible { .. } => "MemberNotVisible",
+        InferError::MemberIsStatic { .. } => "MemberIsStatic",
         InferError::NoAssociatedType { .. } => "NoAssociatedType",
         InferError::InfiniteType { .. } => "InfiniteType",
         InferError::FromHir { .. } => "FromHir",
@@ -253,7 +262,9 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::TupleIndexOnNonTuple { .. } => "TupleIndexOnNonTuple",
         InferError::TupleIndexOutOfBounds { .. } => "TupleIndexOutOfBounds",
         InferError::MemberAccessOnPrimitive { .. } => "MemberAccessOnPrimitive",
-        InferError::PrimitiveMethodNotCalled { .. } => "PrimitiveMethodNotCalled",
+        InferError::MethodNotCalled { .. } => "MethodNotCalled",
+        InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
+        InferError::ConventionMismatch { .. } => "ConventionMismatch",
     }
 }
 
@@ -279,6 +290,12 @@ fn format_error(err: &InferError) -> String {
         InferError::MemberNotVisible { name, .. } => {
             format!(
                 "MemberNotVisible '{}' at {}:{}",
+                name, span.file_id, span.start
+            )
+        },
+        InferError::MemberIsStatic { name, .. } => {
+            format!(
+                "MemberIsStatic '{}' at {}:{}",
                 name, span.file_id, span.start
             )
         },
@@ -381,10 +398,16 @@ fn format_error(err: &InferError) -> String {
             "MemberAccessOnPrimitive '{}' at {}:{}",
             name, span.file_id, span.start
         ),
-        InferError::PrimitiveMethodNotCalled { method, .. } => format!(
+        InferError::MethodNotCalled { method, .. } => format!(
             "PrimitiveMethodNotCalled '{}' at {}:{}",
             method, span.file_id, span.start
         ),
+        InferError::CircularOpaqueReturn { .. } => {
+            format!("CircularOpaqueReturn at {}:{}", span.file_id, span.start)
+        },
+        InferError::ConventionMismatch { .. } => {
+            format!("ConventionMismatch at {}:{}", span.file_id, span.start)
+        },
     }
 }
 
@@ -554,7 +577,7 @@ mod tests {
 
         let driver = CompilerDriver::new(&c);
         let _infer = driver.infer_all();
-        let summary = driver.analyze_all();
+        let summary = driver.analyze_all(false);
         eprintln!("{}", summary);
     }
 

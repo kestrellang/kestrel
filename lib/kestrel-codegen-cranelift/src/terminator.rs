@@ -1,43 +1,97 @@
-//! Terminator compilation — block exit instructions.
-//!
-//! Fixes the lib1 Switch last-case bug: uses `jump` instead of `brif(same, same)`.
-
-use crate::common::{self, is_aggregate};
-use crate::context::CodegenContext;
-use crate::error::CodegenError;
-use crate::function::FunctionState;
-use crate::place;
-use crate::rvalue;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::immediates::Offset32;
-use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value as CrValue};
+use cranelift_codegen::ir::instructions::BlockArg;
+use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value};
 use cranelift_frontend::FunctionBuilder;
-use kestrel_codegen::{NamedKind, substitute_type_with_self};
-use kestrel_mir::{MirTy, SwitchCase, Terminator, TerminatorKind, Value};
 
-/// Compile a block terminator.
-pub fn compile_terminator(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+use kestrel_mir::terminator::{SwitchCase, Terminator, TerminatorKind};
+use kestrel_mir::{MirTy, ValueId};
+
+use crate::abi::{self, ReturnMode};
+use crate::error::CodegenError;
+use crate::func::FuncCompiler;
+use crate::inst::find_mono_enum;
+use crate::mem;
+use crate::ty::TypeRepr;
+
+fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
+    vals.iter().map(|v| BlockArg::Value(*v)).collect()
+}
+
+/// Coerce values to match the target block's declared param types.
+fn coerce_block_args(
     builder: &mut FunctionBuilder,
-    terminator: &Terminator,
+    target: ir::Block,
+    vals: &[Value],
+) -> Vec<Value> {
+    let param_types: Vec<ir::Type> = builder
+        .block_params(target)
+        .iter()
+        .map(|&p| builder.func.dfg.value_type(p))
+        .collect();
+
+    vals.iter()
+        .enumerate()
+        .map(|(i, &val)| {
+            let actual = builder.func.dfg.value_type(val);
+            let expected = param_types.get(i).copied().unwrap_or(actual);
+            if actual == expected {
+                val
+            } else if actual.bytes() < expected.bytes() && actual.is_int() && expected.is_int() {
+                builder.ins().uextend(expected, val)
+            } else if actual.bytes() > expected.bytes() && actual.is_int() && expected.is_int() {
+                builder.ins().ireduce(expected, val)
+            } else {
+                val
+            }
+        })
+        .collect()
+}
+
+pub fn compile_terminator(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    term: &Terminator,
 ) -> Result<(), CodegenError> {
-    match &terminator.kind {
-        TerminatorKind::Return(value) => compile_return(ctx, state, builder, value),
-        TerminatorKind::Jump(target) => {
-            let cl_block = state.block_map[target];
-            builder.ins().jump(cl_block, &[]);
+    match &term.kind {
+        // value: VALUE → return register or sret copy
+        TerminatorKind::Return(value_id) => compile_return(fc, builder, *value_id),
+
+        // args: VALUE each → block params
+        TerminatorKind::Jump { target, args } => {
+            let block = fc.block_map[target.index()];
+            let cl_args: Vec<Value> = args
+                .iter()
+                .map(|v| fc.resolve_scalar(builder, *v))
+                .collect();
+            let coerced = coerce_block_args(builder, block, &cl_args);
+            let ba = to_block_args(&coerced);
+            builder.ins().jump(block, &ba);
             Ok(())
         },
+
+        // condition: VALUE (bool), then/else_args: VALUE each → block params
         TerminatorKind::Branch {
             condition,
             then_block,
+            then_args,
             else_block,
-        } => compile_branch(ctx, state, builder, condition, *then_block, *else_block),
+            else_args,
+        } => compile_branch(
+            fc,
+            builder,
+            *condition,
+            *then_block,
+            then_args,
+            *else_block,
+            else_args,
+        ),
+
+        // discriminant: VALUE (int/enum tag), case args: VALUE each → block params
         TerminatorKind::Switch {
             discriminant,
             cases,
-        } => compile_switch(ctx, state, builder, discriminant, cases),
+        } => compile_switch(fc, builder, *discriminant, cases),
         TerminatorKind::Panic(_msg) => {
             builder.ins().trap(TrapCode::unwrap_user(1));
             Ok(())
@@ -50,268 +104,258 @@ pub fn compile_terminator(
 }
 
 fn compile_return(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
-    value: &Value,
+    value_id: ValueId,
 ) -> Result<(), CodegenError> {
-    let ret_ty = substitute_type_with_self(
-        &state.func_def.ret,
-        &state.subst,
-        state.self_type.as_ref(),
-        ctx.module,
-    );
+    let ret_repr = fc
+        .ctx
+        .tc
+        .repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let ret_mode = abi::return_mode(ret_repr, fc.is_main);
 
-    // Unit/Never return — both compile to void in the Cranelift signature.
-    if ret_ty.is_unit() || matches!(ret_ty, MirTy::Never) {
-        if state.is_main {
-            let zero = builder.ins().iconst(ir::types::I64, 0);
-            builder.ins().return_(&[zero]);
-        } else {
+    match ret_mode {
+        ReturnMode::Direct(_t) => {
+            let val = fc.resolve_scalar(builder, value_id);
+            if fc.is_main {
+                let final_val = match ret_repr {
+                    TypeRepr::Scalar(st) if st == ir::types::I64 => val,
+                    TypeRepr::Scalar(st) if st.bytes() < 8 => {
+                        builder.ins().sextend(ir::types::I64, val)
+                    },
+                    TypeRepr::Aggregate { .. } => {
+                        builder
+                            .ins()
+                            .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0))
+                    },
+                    TypeRepr::Zst => builder.ins().iconst(ir::types::I64, 0),
+                    _ => val,
+                };
+                builder.ins().return_(&[final_val]);
+            } else {
+                builder.ins().return_(&[val]);
+            }
+        },
+        ReturnMode::Sret => {
+            let sret_ptr = fc
+                .sret_ptr
+                .expect("sret_ptr must be set for Sret return mode");
+            let val = fc.get_value(builder, value_id);
+            mem::copy_aggregate(builder, ret_repr.size(), sret_ptr, val);
             builder.ins().return_(&[]);
-        }
-        return Ok(());
-    }
-
-    let val = rvalue::compile_value(ctx, state, builder, value)?;
-
-    if let Some(sret_ptr) = state.sret_ptr {
-        // Aggregate return via sret pointer
-        common::copy_aggregate(builder, &mut ctx.layouts, &ret_ty, sret_ptr, val);
-        builder.ins().return_(&[]);
-    } else if state.is_main {
-        // Main returns i64 — may need to extract from wrapper struct
-        if is_aggregate(&ret_ty, &mut ctx.layouts) {
-            let loaded = builder
-                .ins()
-                .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0));
-            builder.ins().return_(&[loaded]);
-        } else {
-            builder.ins().return_(&[val]);
-        }
-    } else if is_aggregate(&ret_ty, &mut ctx.layouts) {
-        // Non-sret aggregate return: if the value is a scalar (e.g., Bool literal
-        // compiled as i8 but return type is Named{Bool} which is a pointer),
-        // we need to check the value's Cranelift type vs the signature's return type.
-        let val_type = builder.func.dfg.value_type(val);
-        let sig_ret_type = builder.func.signature.returns.first().map(|r| r.value_type);
-        if Some(val_type) != sig_ret_type && sig_ret_type.is_some() {
-            // Value type mismatch — store scalar to stack, return pointer
-            let ptr_ty = common::ptr_type(ctx.target);
-            let layout = ctx.layouts.layout_of(&ret_ty);
-            let size = if layout.size == 0 { 1 } else { layout.size };
-            let slot = builder.create_sized_stack_slot(ir::StackSlotData::new(
-                ir::StackSlotKind::ExplicitSlot,
-                size as u32,
-                common::align_to_shift(layout.align),
-            ));
-            let addr = builder.ins().stack_addr(ptr_ty, slot, Offset32::new(0));
-            builder
-                .ins()
-                .store(MemFlags::new(), val, addr, Offset32::new(0));
-            builder.ins().return_(&[addr]);
-        } else {
-            builder.ins().return_(&[val]);
-        }
-    } else {
-        builder.ins().return_(&[val]);
+        },
+        ReturnMode::Void => {
+            builder.ins().return_(&[]);
+        },
     }
 
     Ok(())
 }
 
 fn compile_branch(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
-    condition: &Value,
+    condition: ValueId,
     then_block: kestrel_mir::BlockId,
+    then_args: &[ValueId],
     else_block: kestrel_mir::BlockId,
+    else_args: &[ValueId],
 ) -> Result<(), CodegenError> {
-    let cond_raw = rvalue::compile_value(ctx, state, builder, condition)?;
-
-    // Bool is Named (aggregate) — a Place read returns a pointer; a bool
-    // immediate arrives as a scalar I8. Discriminate by the cranelift value
-    // type: I8 means scalar, anything else is the aggregate pointer and we
-    // load the byte at offset 0.
-    //
-    // This width-equality check is safe *only* because I8 can never equal
-    // any supported target's pointer size. Do NOT copy this pattern for
-    // wider primitive wrappers (Int64, UInt64, Float64) — their widths
-    // collide with 64-bit `ptr_type` and the wrong branch would be taken.
-    // For switch discriminants and anywhere else that needs a scalar out
-    // of a possibly-wrapped primitive Place, use
-    // `place::compile_place_read_scalar` instead.
-    let cond_val = if builder.func.dfg.value_type(cond_raw) == ir::types::I8 {
-        cond_raw
-    } else {
-        builder
-            .ins()
-            .load(ir::types::I8, MemFlags::new(), cond_raw, Offset32::new(0))
-    };
-
-    // Convert i8 bool to branch condition
+    let cond_val = fc.resolve_scalar(builder, condition);
     let cmp = builder.ins().icmp_imm(IntCC::NotEqual, cond_val, 0);
 
-    let then_cl = state.block_map[&then_block];
-    let else_cl = state.block_map[&else_block];
-    builder.ins().brif(cmp, then_cl, &[], else_cl, &[]);
+    let then_cl = fc.block_map[then_block.index()];
+    let else_cl = fc.block_map[else_block.index()];
+
+    let then_vals: Vec<Value> = then_args
+        .iter()
+        .map(|v| fc.resolve_scalar(builder, *v))
+        .collect();
+    let else_vals: Vec<Value> = else_args
+        .iter()
+        .map(|v| fc.resolve_scalar(builder, *v))
+        .collect();
+    let then_coerced = coerce_block_args(builder, then_cl, &then_vals);
+    let else_coerced = coerce_block_args(builder, else_cl, &else_vals);
+    let then_ba = to_block_args(&then_coerced);
+    let else_ba = to_block_args(&else_coerced);
+
+    builder
+        .ins()
+        .brif(cmp, then_cl, &then_ba, else_cl, &else_ba);
 
     Ok(())
 }
 
 fn compile_switch(
-    ctx: &mut CodegenContext,
-    state: &FunctionState,
+    fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
-    discriminant: &kestrel_mir::Place,
-    cases: &[(SwitchCase, kestrel_mir::BlockId)],
+    discriminant: ValueId,
+    cases: &[kestrel_mir::terminator::SwitchArm],
 ) -> Result<(), CodegenError> {
-    // Fast path: single case → unconditional jump.
-    if cases.len() == 1 {
-        let (_, target_block) = &cases[0];
-        let target_cl = state.block_map[target_block];
-        builder.ins().jump(target_cl, &[]);
+    let disc_val = fc.resolve_scalar(builder, discriminant);
+
+    // Determine discriminant width from the value's type
+    let disc_ty = fc.body.values[discriminant.index()].ty;
+    let arena = &fc.ctx.module.ty_arena;
+    let disc_width = match arena.get(disc_ty) {
+        MirTy::Named { entity, type_args } => {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
+                crate::ty::int_bits_to_cl(e.discriminant_width)
+            } else {
+                ir::types::I64
+            }
+        },
+        MirTy::Bool => ir::types::I8,
+        MirTy::I8 => ir::types::I8,
+        MirTy::I16 => ir::types::I16,
+        MirTy::I32 => ir::types::I32,
+        MirTy::I64 => ir::types::I64,
+        _ => ir::types::I64,
+    };
+
+    // If the discriminant was loaded via Discriminant instruction, its Cranelift
+    // value already has the right width. But if it's a wider type (e.g., the
+    // value IS the enum as a scalar), we need to load the tag.
+    let disc_cl_ty = builder.func.dfg.value_type(disc_val);
+    let disc_val = if disc_cl_ty != disc_width {
+        // The value is the enum itself (scalar repr); load the discriminant from it
+        if disc_cl_ty.bytes() > disc_width.bytes() {
+            builder.ins().ireduce(disc_width, disc_val)
+        } else {
+            disc_val
+        }
+    } else {
+        disc_val
+    };
+
+    // Find wildcard
+    let wildcard = cases
+        .iter()
+        .find(|arm| matches!(arm.pattern, SwitchCase::Wildcard));
+    let wildcard_info = wildcard.map(|arm| {
+        let cl_block = fc.block_map[arm.target.index()];
+        let cl_args: Vec<Value> = arm
+            .args
+            .iter()
+            .map(|v| fc.resolve_scalar(builder, *v))
+            .collect();
+        let coerced = coerce_block_args(builder, cl_block, &cl_args);
+        (cl_block, coerced)
+    });
+
+    let concrete_cases: Vec<_> = cases
+        .iter()
+        .filter(|arm| !matches!(arm.pattern, SwitchCase::Wildcard))
+        .collect();
+
+    if concrete_cases.is_empty() {
+        if let Some((default_block, default_args)) = &wildcard_info {
+            let ba = to_block_args(default_args);
+            builder.ins().jump(*default_block, &ba);
+        } else {
+            builder.ins().trap(TrapCode::unwrap_user(2));
+        }
         return Ok(());
     }
 
-    // Probe the discriminant's type to decide the scalar width we need.
-    //   - Enum: always I32 (the discriminant tag at offset 0).
-    //   - Everything else: the primitive width of the type (I8 for Bool, I64
-    //     for Int64, …). `compile_place_read_scalar` centralizes the
-    //     aggregate-vs-scalar load — do NOT reinvent that decision here.
-    let probe_ty = common::get_place_type(
-        ctx.module,
-        state.body,
-        discriminant,
-        &state.subst,
-        state.self_type.as_ref(),
-        &ctx.layouts,
-    )?;
-    let enum_id = match &probe_ty {
-        MirTy::Named { entity, .. } => match ctx.layouts.resolve_named(*entity) {
-            NamedKind::Enum(id) => Some(id),
-            _ => None,
-        },
-        _ => None,
-    };
-    let width_ty = if enum_id.is_some() {
-        ir::types::I32
-    } else {
-        primitive_width_ty(ctx, &probe_ty)
-    };
+    for (i, arm) in concrete_cases.iter().enumerate() {
+        let target = fc.block_map[arm.target.index()];
+        let raw_args: Vec<Value> = arm
+            .args
+            .iter()
+            .map(|v| fc.resolve_scalar(builder, *v))
+            .collect();
+        let target_args = coerce_block_args(builder, target, &raw_args);
+        let is_last = i == concrete_cases.len() - 1;
 
-    let (discr_val, _) =
-        place::compile_place_read_scalar(ctx, state, builder, discriminant, width_ty)?;
-
-    for (i, (case, target_block)) in cases.iter().enumerate() {
-        let target_cl = state.block_map[target_block];
-
-        // Wildcard case or exhaustive last arm: unconditional jump.
-        if case.is_wildcard() || i == cases.len() - 1 {
-            builder.ins().jump(target_cl, &[]);
-            return Ok(());
-        }
-
-        let cmp = match case {
-            SwitchCase::Wildcard => unreachable!("handled above"),
-            SwitchCase::Variant(name) => {
-                // case_by_name keys on short names; fully-qualified names
-                // (e.g. "std.core.Ordering.Less") get trimmed here.
-                let expected = if let Some(eid) = enum_id {
-                    let enum_def = &ctx.module.enums[eid.index()];
-                    enum_def
-                        .case_by_name(common::short_name(name))
-                        .map(|c| c.discriminant as i64)
-                        .unwrap_or(i as i64)
-                } else {
-                    i as i64
-                };
-                builder.ins().icmp_imm(IntCC::Equal, discr_val, expected)
+        match &arm.pattern {
+            SwitchCase::Variant(idx) => {
+                let cmp = builder
+                    .ins()
+                    .icmp_imm(IntCC::Equal, disc_val, idx.index() as i64);
+                emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
-            SwitchCase::Bool(b) => builder.ins().icmp_imm(IntCC::Equal, discr_val, *b as i64),
-            SwitchCase::IntLiteral(v) => builder.ins().icmp_imm(IntCC::Equal, discr_val, *v),
-            SwitchCase::IntRange { start, end } => {
-                range_test(builder, discr_val, *start, *end, /*signed*/ true)
+            SwitchCase::Bool(b) => {
+                let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *b as i64);
+                emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
+            },
+            SwitchCase::IntLiteral(v) => {
+                let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *v);
+                emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
             SwitchCase::CharLiteral(c) => {
-                builder.ins().icmp_imm(IntCC::Equal, discr_val, *c as i64)
+                let cmp = builder.ins().icmp_imm(IntCC::Equal, disc_val, *c as i64);
+                emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
+            },
+            SwitchCase::IntRange { start, end } => {
+                let ge = builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedGreaterThanOrEqual, disc_val, *start);
+                let le = builder
+                    .ins()
+                    .icmp_imm(IntCC::SignedLessThanOrEqual, disc_val, *end);
+                let in_range = builder.ins().band(ge, le);
+                emit_case_branch(
+                    builder,
+                    in_range,
+                    target,
+                    &target_args,
+                    is_last,
+                    &wildcard_info,
+                );
             },
             SwitchCase::CharRange { start, end } => {
-                range_test(
+                let ge = builder.ins().icmp_imm(
+                    IntCC::UnsignedGreaterThanOrEqual,
+                    disc_val,
+                    *start as i64,
+                );
+                let le =
+                    builder
+                        .ins()
+                        .icmp_imm(IntCC::UnsignedLessThanOrEqual, disc_val, *end as i64);
+                let in_range = builder.ins().band(ge, le);
+                emit_case_branch(
                     builder,
-                    discr_val,
-                    start.map(|s| s as i64),
-                    end.map(|e| e as i64),
-                    /*signed*/ false,
-                )
+                    in_range,
+                    target,
+                    &target_args,
+                    is_last,
+                    &wildcard_info,
+                );
             },
-            SwitchCase::StringLiteral(_) => {
-                // String-literal cases are diverted to a `Matchable.matches`
-                // call chain in `kestrel-mir-lower::body_lower::emit_decision_tree`,
-                // so they should never reach codegen. If one does, the diversion
-                // was bypassed — fail loudly rather than silently falling through.
-                unreachable!(
-                    "SwitchCase::StringLiteral lowered to method dispatch in \
-                     kestrel-mir-lower; codegen should never see it"
-                )
-            },
-        };
-        let next_block = builder.create_block();
-        builder.ins().brif(cmp, target_cl, &[], next_block, &[]);
-        builder.switch_to_block(next_block);
-        builder.seal_block(next_block);
+            SwitchCase::Wildcard => unreachable!(),
+        }
     }
 
-    // Fallthrough (shouldn't reach here for exhaustive matches)
-    builder.ins().trap(TrapCode::unwrap_user(4));
     Ok(())
 }
 
-/// Pick the cranelift integer type that matches the scrutinee's layout size.
-/// Works for `lang.iN` primitives and their stdlib wrappers (Bool, Char, Int64, …),
-/// which are all single-field structs whose byte layout matches the primitive.
-fn primitive_width_ty(ctx: &mut CodegenContext, ty: &MirTy) -> ir::Type {
-    match ty {
-        MirTy::Bool | MirTy::I8 => ir::types::I8,
-        MirTy::I16 => ir::types::I16,
-        MirTy::I32 | MirTy::F32 => ir::types::I32,
-        MirTy::I64 | MirTy::F64 => ir::types::I64,
-        _ => match ctx.layouts.layout_of(ty).size {
-            1 => ir::types::I8,
-            2 => ir::types::I16,
-            4 => ir::types::I32,
-            _ => ir::types::I64,
-        },
-    }
-}
-
-/// Build a boolean condition for `start <= val <= end`. Open bounds act as `true`.
-fn range_test(
+fn emit_case_branch(
     builder: &mut FunctionBuilder,
-    val: CrValue,
-    start: Option<i64>,
-    end: Option<i64>,
-    signed: bool,
-) -> CrValue {
-    let (gte, lte) = if signed {
-        (
-            IntCC::SignedGreaterThanOrEqual,
-            IntCC::SignedLessThanOrEqual,
-        )
+    cmp: Value,
+    target: ir::Block,
+    target_args: &[Value],
+    is_last: bool,
+    wildcard_info: &Option<(ir::Block, Vec<Value>)>,
+) {
+    let target_ba = to_block_args(target_args);
+    if is_last {
+        let (fallthrough, fallthrough_ba) = if let Some((block, args)) = wildcard_info {
+            (*block, to_block_args(args))
+        } else {
+            (target, target_ba.clone())
+        };
+        builder
+            .ins()
+            .brif(cmp, target, &target_ba, fallthrough, &fallthrough_ba);
     } else {
-        (
-            IntCC::UnsignedGreaterThanOrEqual,
-            IntCC::UnsignedLessThanOrEqual,
-        )
-    };
-    let low_ok = match start {
-        Some(s) => builder.ins().icmp_imm(gte, val, s),
-        None => builder.ins().iconst(ir::types::I8, 1),
-    };
-    let high_ok = match end {
-        Some(e) => builder.ins().icmp_imm(lte, val, e),
-        None => builder.ins().iconst(ir::types::I8, 1),
-    };
-    builder.ins().band(low_ok, high_ok)
+        let next_block = builder.create_block();
+        builder.ins().brif(cmp, target, &target_ba, next_block, &[]);
+        builder.switch_to_block(next_block);
+        builder.seal_block(next_block);
+    }
 }

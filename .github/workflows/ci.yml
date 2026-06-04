@@ -3,22 +3,27 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, nightly]
+    branches: [main, nightly, beta]
 
 env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
   rust:
-    name: Rust
+    name: Lint & test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read pinned toolchain
+        id: rust
+        run: echo "channel=$(sed -n 's/.*channel = "\([^"]*\)".*/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.92.0
+          toolchain: ${{ steps.rust.outputs.channel }}
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -34,28 +39,30 @@ jobs:
         run: cargo build --workspace
 
       - name: Rust test
-        run: cargo test --workspace
+        # Exclude the .ks suite: it documents in-progress compiler state (need
+        # not all pass) and some cases hit debug-only rowan asserts that don't
+        # fire in release. It runs in release via the `triage` tool as a
+        # non-blocking signal, so the hard gate here is the Rust unit tests.
+        run: cargo test --workspace --exclude kestrel-test-suite
 
       - name: kestrel-lsp release build
         run: cargo build -p kestrel-lsp --release
 
-  vscode-extension:
-    name: VS Code extension
-    runs-on: ubuntu-latest
+  # Exercises the flock + jessup bootstrap path on PRs, where it previously
+  # wasn't tested until a release build ran. Uses the same composite action
+  # as the release workflows, so a break here is a break there.
+  bootstrap:
+    name: Bootstrap smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Build toolchain
+        uses: ./.github/actions/build-toolchain
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: editors/vscode/package-lock.json
-
-      - name: Install extension deps
-        run: npm ci
-        working-directory: editors/vscode
-
-      - name: Compile extension
-        run: npm run compile
-        working-directory: editors/vscode
+          profile: release

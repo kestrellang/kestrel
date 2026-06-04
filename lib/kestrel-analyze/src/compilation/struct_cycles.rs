@@ -202,9 +202,10 @@ fn check_type(
                 root: cx.root,
             });
             if let TypeResolution::Found(entity) = result
-                && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Struct) {
-                    return enter_struct(cx, entity, detector, stack, direct, entry);
-                }
+                && cx.query.get::<NodeKind>(entity) == Some(&NodeKind::Struct)
+            {
+                return enter_struct(cx, entity, detector, stack, direct, entry);
+            }
             Ok(())
         },
         AstType::Tuple(elements, _) => {

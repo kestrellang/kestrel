@@ -46,7 +46,7 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             out.push(')');
         },
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function { params, ret, .. } => {
             out.push('(');
             for (i, p) in params.iter().enumerate() {
                 if i > 0 {
@@ -56,6 +56,23 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             out.push_str(") -> ");
             write_ty(world, ret, out);
+        },
+        ResolvedTy::AssocProjection { base, assoc } => {
+            write_ty(world, base, out);
+            out.push('.');
+            out.push_str(&name_of(world, *assoc).unwrap_or_else(|| "?".into()));
+        },
+        ResolvedTy::Opaque { bounds, .. } => {
+            out.push_str("some ");
+            for (i, (proto, _)) in bounds.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(" and ");
+                }
+                out.push_str(&entity_path(world, *proto));
+            }
+            if bounds.is_empty() {
+                out.push('?');
+            }
         },
         ResolvedTy::Never => out.push('!'),
         ResolvedTy::Error => out.push_str("<error>"),

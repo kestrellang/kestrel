@@ -7,14 +7,15 @@ enum Pattern: Formattable {
     case Pulsar
     case GosperGun
 
-    func format(options: FormatOptions = FormatOptions.default()) -> String {
-        match self {
+    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+        let s = match self {
             .Glider => "GLIDER",
             .Blinker => "BLINKER",
             .Lwss => "LWSS",
             .Pulsar => "PULSAR",
-            .GosperGun => "GOSPER GUN"
-        }
+            .GosperGun => "GOSPER GUN",
+        };
+        writer.append(s);
     }
 
     func stamp(mutating on grid: Grid, centerX cx: Int64, centerY cy: Int64) {

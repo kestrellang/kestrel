@@ -25,9 +25,7 @@
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
-use crate::util;
 use kestrel_ast_builder::NodeKind;
-use kestrel_semantics::{CopySemanticsReason, NominalCopySemantics};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E502",
@@ -52,37 +50,9 @@ impl DeclCheck for CloneableFieldAnalyzer {
         &[NodeKind::Struct, NodeKind::Enum]
     }
 
-    fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
-        let info = cx.query.query(NominalCopySemantics {
-            entity: cx.entity,
-            root: cx.root,
-        });
-
-        let CopySemanticsReason::CloneableChildRequiresConformance(child) = info.reason else {
-            return vec![];
-        };
-
-        let type_name = util::entity_name(cx.query, cx.entity);
-        let field_name = util::entity_name(cx.query, child);
-        let kind_str = match cx.kind {
-            NodeKind::Struct => "struct",
-            NodeKind::Enum => "enum",
-            _ => "type",
-        };
-
-        vec![AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[0].id,
-            severity: DESCRIPTORS[0].default_severity,
-            message: format!(
-                "{} '{}' has Cloneable field '{}' but does not conform to Cloneable",
-                kind_str, type_name, field_name
-            ),
-            labels: vec![DiagLabel {
-                span: util::entity_span(cx.query, cx.entity),
-                message: "this type needs to conform to Cloneable".into(),
-                is_primary: true,
-            }],
-            notes: vec!["types containing Cloneable fields must conform to Cloneable".into()],
-        }]
+    fn check(&self, _cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        // Clone shims are now auto-synthesized for all non-NotCopyable types,
+        // so explicit Cloneable conformance is no longer required.
+        vec![]
     }
 }

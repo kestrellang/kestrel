@@ -69,13 +69,16 @@ impl CodeBlock {
     }
 }
 
-/// Raw parsed data for a guard-let statement
-/// Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
+/// Raw parsed data for a guard statement
+/// Supports boolean guards, let-binding guards, and mixed chains:
+///   guard condition else { ... }
+///   guard let .Some(x) = a else { ... }
+///   guard condition, let .Some(x) = a, let .Some(y) = b else { ... }
 #[derive(Debug, Clone)]
-pub struct GuardLetData {
+pub struct GuardData {
     /// Span of 'guard' keyword
     pub guard_span: Span,
-    /// List of conditions (at least one let-binding, possibly followed by more let-bindings or bool conditions)
+    /// List of conditions (boolean expressions and/or let-bindings, comma-separated)
     pub conditions: Vec<IfCondition>,
     /// Span of 'else' keyword
     pub else_span: Span,
@@ -87,7 +90,7 @@ pub struct GuardLetData {
     pub else_rbrace: Span,
 }
 
-/// An item in a guard-let else block (simplified - no nested guard-let allowed)
+/// An item in a guard else block (simplified - no nested guard allowed)
 #[derive(Debug, Clone)]
 pub enum ElseBlockItem {
     /// A statement (variable declaration or expression with semicolon)
@@ -107,8 +110,8 @@ pub enum BlockItem {
     StatementExpr(ExprVariant),
     /// A trailing expression (no semicolon, determines block value)
     TrailingExpression(ExprVariant),
-    /// A guard-let statement (no semicolon required)
-    GuardLet(GuardLetData),
+    /// A guard statement (no semicolon required)
+    Guard(GuardData),
     /// Recovered range: tokens that didn't fit any block-item shape, skipped
     /// up to the next statement boundary (`}` or a statement-starter
     /// keyword) so the rest of the body still parses. Phase 6 of the
@@ -179,12 +182,12 @@ where
         .boxed()
 }
 
-/// Parser for an inline `guard let ... else { ... }` block item with chain
-/// support. Yields `BlockItem::GuardLet(GuardLetData)`.
+/// Parser for an inline `guard ... else { ... }` block item with chain
+/// support. Yields `BlockItem::Guard(GuardData)`.
 ///
-/// Conditions form a chain starting with at least one `let pattern = expr`,
-/// followed by zero or more comma-separated `let` or boolean conditions.
-pub(crate) fn guard_let_block_item_parser<'tokens, P, V>(
+/// Conditions form a comma-separated chain of one or more `let pattern = expr`
+/// bindings and/or boolean expressions.
+pub(crate) fn guard_block_item_parser<'tokens, P, V>(
     expr: P,
     inline_var_decl: V,
 ) -> impl Parser<'tokens, ParserInput<'tokens>, BlockItem, ParserExtra<'tokens>> + Clone
@@ -213,7 +216,8 @@ where
         .clone()
         .or(expr.clone().map(IfCondition::Expr));
 
-    let conditions = let_condition
+    let conditions = single_condition
+        .clone()
         .then(
             skip_trivia()
                 .ignore_then(just(Token::Comma))
@@ -246,7 +250,7 @@ where
         )
         .map(
             |(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
-                BlockItem::GuardLet(GuardLetData {
+                BlockItem::Guard(GuardData {
                     guard_span,
                     conditions,
                     else_span,
@@ -275,7 +279,7 @@ where
     P: Parser<'tokens, ParserInput<'tokens>, ExprVariant, ParserExtra<'tokens>> + Clone + 'tokens,
     V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
-    let guard_let = guard_let_block_item_parser(expr.clone(), inline_var_decl.clone());
+    let guard_stmt = guard_block_item_parser(expr.clone(), inline_var_decl.clone());
     let stmt_decl = inline_var_decl.map(BlockItem::Statement);
     let expr_item = expr
         .clone()
@@ -297,7 +301,7 @@ where
             }
         });
 
-    let block_item = guard_let.or(stmt_decl).or(expr_item);
+    let block_item = guard_stmt.or(stmt_decl).or(expr_item);
 
     block_item
         .repeated()
@@ -393,7 +397,7 @@ fn is_statement_like_expr(expr: &ExprVariant) -> bool {
 /// Parser for items inside a guard-let else block.
 /// This is a simplified version that doesn't allow nested guard-let statements
 /// to avoid recursive parser types.
-fn guard_let_else_items_parser<'tokens>()
+fn guard_else_items_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, Vec<ElseBlockItem>, ParserExtra<'tokens>> + Clone {
     // Variable declaration: let/var pattern: Type = expr;
     let var_decl = skip_trivia()
@@ -494,12 +498,14 @@ fn code_block_items_parser<'tokens>()
     //   - If statement-like: statement expression (no semicolon needed)
     //   - Otherwise: fail (will be retried as trailing expression)
 
-    // Guard-let statement: guard let pattern = expr, ... else { block }
-    // Supports chains: guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
+    // Guard statement: guard <condition>, ... else { block }
+    // Supports boolean guards, let-binding guards, and mixed chains:
+    //   guard condition else { ... }
+    //   guard let .Some(x) = a, let .Some(y) = b, x > 0 else { ... }
     // The else block is parsed inline to avoid recursive parser types
 
     // Single let condition: let pattern = expr
-    let guard_let_condition = skip_trivia()
+    let let_cond = skip_trivia()
         .ignore_then(just(Token::Let).map_with(|_, e| to_kestrel_span(e.span())))
         .then(pattern_parser())
         .then(
@@ -517,12 +523,11 @@ fn code_block_items_parser<'tokens>()
         );
 
     // Single condition: either let-binding or boolean expression
-    let guard_single_condition = guard_let_condition
-        .clone()
-        .or(expr_parser().map(IfCondition::Expr));
+    let guard_single_condition = let_cond.clone().or(expr_parser().map(IfCondition::Expr));
 
-    // Condition list: first must be let, followed by comma-separated conditions
-    let guard_conditions = guard_let_condition
+    // Condition list: one or more conditions (let-binding or boolean), comma-separated
+    let guard_conditions = guard_single_condition
+        .clone()
         .then(
             skip_trivia()
                 .ignore_then(just(Token::Comma))
@@ -536,7 +541,7 @@ fn code_block_items_parser<'tokens>()
             conditions
         });
 
-    let guard_let = skip_trivia()
+    let guard_stmt = skip_trivia()
         .ignore_then(just(Token::Guard).map_with(|_, e| to_kestrel_span(e.span())))
         .then(guard_conditions)
         .then(
@@ -546,14 +551,14 @@ fn code_block_items_parser<'tokens>()
             skip_trivia()
                 .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span()))),
         )
-        .then(guard_let_else_items_parser())
+        .then(guard_else_items_parser())
         .then(
             skip_trivia()
                 .ignore_then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span()))),
         )
         .map(
             |(((((guard_span, conditions), else_span), else_lbrace), else_items), else_rbrace)| {
-                BlockItem::GuardLet(GuardLetData {
+                BlockItem::Guard(GuardData {
                     guard_span,
                     conditions,
                     else_span,
@@ -675,7 +680,7 @@ fn code_block_items_parser<'tokens>()
     // `Recovered`, and let the outer `.repeated()` continue. Without this,
     // a half-typed line like `foo bar baz` would poison the entire body's
     // parse and break completion / hover for everything below it.
-    let block_item = guard_let
+    let block_item = guard_stmt
         .or(deinit_stmt)
         .or(var_decl)
         .or(expr_item)
@@ -792,8 +797,8 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
             BlockItem::TrailingExpression(expr) => {
                 emit_expr_variant(sink, expr);
             },
-            BlockItem::GuardLet(guard_data) => {
-                emit_guard_let(sink, guard_data);
+            BlockItem::Guard(guard_data) => {
+                emit_guard(sink, guard_data);
             },
             BlockItem::Recovered(span) => {
                 // Phase-6 recovery: wrap the skipped range as an Error node
@@ -814,15 +819,15 @@ pub fn emit_code_block(sink: &mut EventSink, data: &CodeBlockData) {
 }
 
 /// Emit events for a guard-let statement
-fn emit_guard_let(sink: &mut EventSink, data: &GuardLetData) {
+fn emit_guard(sink: &mut EventSink, data: &GuardData) {
     sink.start_node(SyntaxKind::Statement);
-    sink.start_node(SyntaxKind::GuardLetStatement);
+    sink.start_node(SyntaxKind::GuardStatement);
 
     // guard keyword
     sink.add_token(SyntaxKind::Guard, data.guard_span.clone());
     // Emit each condition in the chain
     for condition in &data.conditions {
-        emit_if_condition(sink, condition, SyntaxKind::GuardLetCondition);
+        emit_if_condition(sink, condition, SyntaxKind::GuardCondition);
     }
     // else keyword
     sink.add_token(SyntaxKind::Else, data.else_span.clone());
@@ -849,7 +854,7 @@ fn emit_guard_let(sink: &mut EventSink, data: &GuardLetData) {
     sink.add_token(SyntaxKind::RBrace, data.else_rbrace.clone());
     sink.finish_node(); // CodeBlock
 
-    sink.finish_node(); // GuardLetStatement
+    sink.finish_node(); // GuardStatement
     sink.finish_node(); // Statement
 }
 

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test filterMap with optionals
             var arr = std.collections.Array[std.result.Optional[std.numeric.Int64]]();
@@ -25,7 +26,7 @@ module Test
             nested.append(inner1);
             nested.append(inner2);
 
-            let flat = nested.iter().flatMap({ (arr) in arr.iter() }).collect();
+            let flat = nested.iter().flatMap(as: { (arr) in arr.iter() }).collect();
             if flat.count != 3 { return 4 }
             if flat(unchecked: 0) != 1 { return 5 }
             if flat(unchecked: 2) != 3 { return 6 }

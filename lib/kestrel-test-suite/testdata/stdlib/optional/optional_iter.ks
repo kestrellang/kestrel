@@ -3,10 +3,11 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test iter on Some - yields 1 element
-            let some: std.result.Optional[std.numeric.Int64] = .Some(42);
-            var iter = some.iter();
+            let someOpt: std.result.Optional[std.numeric.Int64] = .Some(42);
+            var iter = someOpt.iter();
             let first = iter.next();
             if first.isNone() { return 1 }
             if first.unwrap() != 42 { return 2 }

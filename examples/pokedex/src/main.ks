@@ -8,7 +8,8 @@ module pokedex.main
 import perch.app.(App)
 import perch.request.(Request)
 import perch.response.(Response)
-import perch.middleware.(logger)
+import perch.middleware.(Logger)
+import http.content.(Html)
 import swoop.swoop.(Swoop)
 import quill.json.parser.(parseJson)
 import pokedex.ui.(landingPageHtml, gridItemsHtml, detailPageHtml, errorPageHtml, filterKanto)
@@ -41,20 +42,20 @@ func handleSearch(req: Request, ctx: Ctx) -> Response {
         .None => ""
     };
     let entries = filterKanto(q, typeFilter);
-    Response.ok(html: gridItemsHtml(entries))
+    Response.ok(Html(gridItemsHtml(entries)))
 }
 
 func handlePokemon(req: Request, ctx: Ctx) -> Response {
     let idStr = match req.query("id") {
         .Some(v) => v,
-        .None => return Response.ok(html: errorPageHtml("Missing pokemon id."))
+        .None => return Response.ok(Html(errorPageHtml("Missing pokemon id.")))
     };
-    let id = match Int64.parse(idStr) {
+    let id = match Int64(parsing: idStr) {
         .Some(n) => n,
-        .None => return Response.ok(html: errorPageHtml("Invalid pokemon id."))
+        .None => return Response.ok(Html(errorPageHtml("Invalid pokemon id.")))
     };
     if id < 1 or id > 151 {
-        return Response.ok(html: errorPageHtml("That pokemon isn't in the Kanto pokedex."))
+        return Response.ok(Html(errorPageHtml("That pokemon isn't in the Kanto pokedex.")))
     };
 
     var url = String();
@@ -65,12 +66,12 @@ func handlePokemon(req: Request, ctx: Ctx) -> Response {
     match Swoop().fetch(url) {
         .Ok(res) => {
             match parseJson(res.body) {
-                .Ok(json) => Response.ok(html: detailPageHtml(json, id)),
-                .Err(e) => Response.ok(html: errorPageHtml("Failed to parse PokéAPI response."))
+                .Ok(json) => Response.ok(Html(detailPageHtml(json, id))),
+                .Err(e) => Response.ok(Html(errorPageHtml("Failed to parse PokéAPI response.")))
             }
         },
         .Err(e) => {
-            Response.ok(html: errorPageHtml("Could not reach PokéAPI."))
+            Response.ok(Html(errorPageHtml("Could not reach PokéAPI.")))
         }
     }
 }
@@ -79,30 +80,31 @@ func handlePokemon(req: Request, ctx: Ctx) -> Response {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     let landing = landingPageHtml();
     let ctx = Ctx(pokeApiBase: "https://pokeapi.co", landingHtml: landing);
     var app = App[Ctx](ctx);
-    app.use(logger[Ctx]());
+    app.use(Logger[Ctx]());
 
-    app.onGet("/", { (req: Request, ctx: Ctx) in
-        Response.ok(html: ctx.landingHtml)
+    app.route(get: "/", { (req: Request, ctx: Ctx) in
+        Response.ok(Html(ctx.landingHtml))
     });
 
-    app.onGet("/search", { (req: Request, ctx: Ctx) in
+    app.route(get: "/search", { (req: Request, ctx: Ctx) in
         handleSearch(req, ctx)
     });
 
-    app.onGet("/pokemon", { (req: Request, ctx: Ctx) in
+    app.route(get: "/pokemon", { (req: Request, ctx: Ctx) in
         handlePokemon(req, ctx)
     });
 
     let port: UInt16 = 8080;
-    let _ = println("Starting pokedex on http://localhost:8080");
+     println("Starting pokedex on http://localhost:8080");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = println("Error: " + e.description());
+             println("Error: " + e.description());
         }
     }
 }

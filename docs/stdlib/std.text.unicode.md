@@ -172,6 +172,24 @@ _Defined in `lang/std/text/unicode/grapheme_tables.ks`._
 
 ### Implements `Equatable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `isEqual`
 
 ```kestrel
@@ -181,6 +199,16 @@ public func isEqual(to: GraphemeBreakProperty) -> Bool
 Equality by ordinal — same variant, same value.
 
 _Defined in `lang/std/text/unicode/grapheme_tables.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 

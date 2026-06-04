@@ -21,6 +21,10 @@ use crate::runner::{self, RunResult};
 pub struct TestCompiler {
     compiler: Compiler,
     has_stdlib: bool,
+    /// Whether analysis treats this as an executable build (gates the
+    /// entry-point requirement E618). Execution tests set this true; diagnostics
+    /// tests default false and opt in via `// executable: true`.
+    is_executable: bool,
     /// Entities for test files (not stdlib files).
     test_files: Vec<(String, Entity)>,
     /// Cached results for lazy evaluation.
@@ -34,6 +38,7 @@ impl TestCompiler {
         Self {
             compiler: crate::test_compiler(false),
             has_stdlib: false,
+            is_executable: false,
             test_files: Vec::new(),
             infer_result: OnceCell::new(),
             analyze_result: OnceCell::new(),
@@ -45,10 +50,17 @@ impl TestCompiler {
         Self {
             compiler: crate::test_compiler(true),
             has_stdlib: true,
+            is_executable: false,
             test_files: Vec::new(),
             infer_result: OnceCell::new(),
             analyze_result: OnceCell::new(),
         }
+    }
+
+    /// Mark this compilation as producing an executable, so analysis enforces
+    /// the entry-point requirement (E618). Must be called before `analyze()`.
+    pub fn set_executable(&mut self, is_executable: bool) {
+        self.is_executable = is_executable;
     }
 
     /// Add a source file, parse, and build declarations.
@@ -70,12 +82,11 @@ impl TestCompiler {
     /// Run all registered analyzers.
     pub fn analyze(&self) -> &AnalyzeSummary {
         self.analyze_result
-            .get_or_init(|| CompilerDriver::new(&self.compiler).analyze_all())
+            .get_or_init(|| CompilerDriver::new(&self.compiler).analyze_all(self.is_executable))
     }
 
-    /// Collect all diagnostics from all stages as unified TestDiagnostics.
-    ///
-    /// Runs inference and analysis if not already done.
+    /// Collect all diagnostics from all stages as unified TestDiagnostics:
+    /// codespan (lex / parse / infer) and HIR-level analyzers.
     pub fn all_diagnostics(&self) -> Vec<TestDiagnostic> {
         // Ensure inference has run (triggers lex/parse/infer diagnostics)
         self.infer();
@@ -120,10 +131,12 @@ impl TestCompiler {
         result
     }
 
-    /// Lower to MIR. Runs inference first if needed.
-    pub fn mir(&self) -> MirModule {
+    /// Lower to MIR (OSSA). Runs inference first if needed.
+    pub fn mir(&self) -> Result<MirModule, String> {
         self.infer();
-        self.compiler.lower_to_mir()
+        self.compiler
+            .lower_to_mir()
+            .map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
     /// Compile, link, and run. Returns the run result.
@@ -163,7 +176,7 @@ impl TestCompiler {
     fn source_map(&self) -> Vec<(usize, String)> {
         let world = self.compiler.world();
         let mut sources = Vec::new();
-        for (_, &entity) in self.compiler.files() {
+        for &entity in self.compiler.files().values() {
             if let Some(source) = world.get::<SourceText>(entity) {
                 sources.push((entity.index(), source.0.clone()));
             }
@@ -277,8 +290,11 @@ impl TestCompiler {
 
     /// Assert the MIR output contains the given string.
     pub fn expect_mir_contains(&self, needle: &str) {
-        let mir = self.mir();
-        let mir_text = format!("{}", mir.display());
+        let mir = match self.mir() {
+            Ok(m) => m,
+            Err(e) => panic!("{e}"),
+        };
+        let mir_text = kestrel_mir::display::display_module(&mir);
         if !mir_text.contains(needle) {
             panic!(
                 "Expected MIR to contain '{}'\n\nActual MIR:\n{}",

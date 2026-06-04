@@ -1,17 +1,18 @@
-//! MIR type representation.
-//!
-//! Types are by value — no interning, no `Id<Ty>` indirection.
-//! Entity references point into the ECS for struct/enum/protocol/type-param identity.
+use std::collections::HashMap;
 
 use kestrel_hecs::Entity;
 
-/// MIR type representation.
-///
-/// Used by value wherever types appear. `Entity` references resolve to names
-/// via `MirModule.entity_names` for display.
+pub use crate::id::TyId;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParamConvention {
+    Borrow,
+    MutBorrow,
+    Consuming,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MirTy {
-    // === Primitives ===
     I8,
     I16,
     I32,
@@ -23,143 +24,122 @@ pub enum MirTy {
     Never,
     Str,
 
-    // === Pointers and references ===
-    /// `p[T]` — raw pointer
-    Pointer(Box<MirTy>),
-    /// `&T` — immutable reference
-    Ref(Box<MirTy>),
-    /// `&var T` — mutable reference
-    RefMut(Box<MirTy>),
+    Pointer(TyId),
 
-    // === Compound ===
-    /// `(T1, T2, ...)` — tuple type
-    Tuple(Vec<MirTy>),
-
-    /// Named type (struct, enum, protocol) with optional type arguments.
+    Tuple(Vec<TyId>),
     Named {
         entity: Entity,
-        type_args: Vec<MirTy>,
+        type_args: Vec<TyId>,
     },
 
-    // === Generics ===
-    /// Type parameter reference.
     TypeParam(Entity),
-
-    /// `Self` — the implementing type in a protocol context.
-    SelfType,
-
-    /// Associated type projection: `T.Element` where `T: Container`.
-    /// Resolved during monomorphization via witness table lookup.
     AssociatedProjection {
-        base: Box<MirTy>,
+        base: TyId,
         protocol: Entity,
-        name: String,
+        assoc_type: Entity,
     },
 
-    // === Function types ===
-    /// Thin function pointer (no environment, FFI-safe).
     FuncThin {
-        params: Vec<MirTy>,
-        ret: Box<MirTy>,
+        params: Vec<(TyId, ParamConvention)>,
+        ret: TyId,
     },
-
-    /// Thick callable (has environment, can escape).
     FuncThick {
-        params: Vec<MirTy>,
-        ret: Box<MirTy>,
+        params: Vec<(TyId, ParamConvention)>,
+        ret: TyId,
     },
 
-    /// Error/poison type — used when lowering fails.
     Error,
 }
 
-impl MirTy {
-    /// Canonical unit value — the empty tuple.
-    ///
-    /// MIR has no `Unit` variant; `()` *is* `Tuple([])`. HIR already uses this
-    /// representation (`AstType::Unit → HirTy::Tuple(Vec::new(), …)`), so
-    /// keeping MIR in sync removes a class of "which form did this come through
-    /// as?" bugs at the HIR→MIR boundary.
-    pub fn unit() -> Self {
-        MirTy::Tuple(Vec::new())
-    }
+#[derive(Debug, Clone)]
+pub struct TyArena {
+    types: Vec<MirTy>,
+    intern_map: HashMap<MirTy, TyId>,
+}
 
-    /// Check if this is the unit type (empty tuple).
-    pub fn is_unit(&self) -> bool {
-        matches!(self, MirTy::Tuple(elems) if elems.is_empty())
-    }
-
-    /// Check if this is a primitive integer type.
-    pub fn is_integer(&self) -> bool {
-        matches!(self, MirTy::I8 | MirTy::I16 | MirTy::I32 | MirTy::I64)
-    }
-
-    /// Check if this is a primitive float type.
-    pub fn is_float(&self) -> bool {
-        matches!(self, MirTy::F16 | MirTy::F32 | MirTy::F64)
-    }
-
-    /// Check if this is a reference type (immutable or mutable).
-    pub fn is_reference(&self) -> bool {
-        matches!(self, MirTy::Ref(_) | MirTy::RefMut(_))
-    }
-
-    /// Check if this is a pointer type.
-    pub fn is_pointer(&self) -> bool {
-        matches!(self, MirTy::Pointer(_))
-    }
-
-    /// Recursively check whether this type contains `MirTy::Error` anywhere.
-    /// Used by MIR-lower's validate pass (hard ICE backstop) and anywhere else
-    /// that needs to detect an unresolved-type leak from an upstream phase.
-    pub fn contains_error(&self) -> bool {
-        match self {
-            MirTy::Error => true,
-            MirTy::Named { type_args, .. } => type_args.iter().any(MirTy::contains_error),
-            MirTy::Tuple(tys) => tys.iter().any(MirTy::contains_error),
-            MirTy::Pointer(inner) | MirTy::Ref(inner) | MirTy::RefMut(inner) => {
-                inner.contains_error()
-            },
-            MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
-                params.iter().any(MirTy::contains_error) || ret.contains_error()
-            },
-            MirTy::AssociatedProjection { base, .. } => base.contains_error(),
-            MirTy::TypeParam(_)
-            | MirTy::SelfType
-            | MirTy::Never
-            | MirTy::Bool
-            | MirTy::I8
-            | MirTy::I16
-            | MirTy::I32
-            | MirTy::I64
-            | MirTy::F16
-            | MirTy::F32
-            | MirTy::F64
-            | MirTy::Str => false,
+impl TyArena {
+    pub fn new() -> Self {
+        Self {
+            types: Vec::new(),
+            intern_map: HashMap::new(),
         }
     }
 
-    /// Check if this type is trivially copyable (passed by value, no ownership transfer).
-    /// Includes primitives, refs, pointers, and thin function pointers.
-    pub fn is_trivially_copyable(&self) -> bool {
-        if self.is_unit() {
-            return true;
+    pub fn intern(&mut self, ty: MirTy) -> TyId {
+        if let Some(&id) = self.intern_map.get(&ty) {
+            return id;
         }
-        matches!(
-            self,
-            MirTy::I8
-                | MirTy::I16
-                | MirTy::I32
-                | MirTy::I64
-                | MirTy::F16
-                | MirTy::F32
-                | MirTy::F64
-                | MirTy::Bool
-                | MirTy::Never
-                | MirTy::Ref(_)
-                | MirTy::RefMut(_)
-                | MirTy::Pointer(_)
-                | MirTy::FuncThin { .. }
-        )
+        let id = TyId::new(self.types.len());
+        self.types.push(ty.clone());
+        self.intern_map.insert(ty, id);
+        id
+    }
+
+    pub fn get(&self, id: TyId) -> &MirTy {
+        &self.types[id.index()]
+    }
+
+    pub fn find(&self, predicate: impl Fn(&MirTy) -> bool) -> Option<TyId> {
+        self.types.iter().position(predicate).map(TyId::new)
+    }
+
+    pub fn len(&self) -> usize {
+        self.types.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.types.is_empty()
+    }
+
+    pub fn i8(&mut self) -> TyId {
+        self.intern(MirTy::I8)
+    }
+    pub fn i16(&mut self) -> TyId {
+        self.intern(MirTy::I16)
+    }
+    pub fn i32(&mut self) -> TyId {
+        self.intern(MirTy::I32)
+    }
+    pub fn i64(&mut self) -> TyId {
+        self.intern(MirTy::I64)
+    }
+    pub fn f16(&mut self) -> TyId {
+        self.intern(MirTy::F16)
+    }
+    pub fn f32(&mut self) -> TyId {
+        self.intern(MirTy::F32)
+    }
+    pub fn f64(&mut self) -> TyId {
+        self.intern(MirTy::F64)
+    }
+    pub fn bool(&mut self) -> TyId {
+        self.intern(MirTy::Bool)
+    }
+    pub fn never(&mut self) -> TyId {
+        self.intern(MirTy::Never)
+    }
+    pub fn str_ty(&mut self) -> TyId {
+        self.intern(MirTy::Str)
+    }
+    pub fn unit(&mut self) -> TyId {
+        self.intern(MirTy::Tuple(vec![]))
+    }
+    pub fn pointer(&mut self, pointee: TyId) -> TyId {
+        self.intern(MirTy::Pointer(pointee))
+    }
+    pub fn tuple(&mut self, elems: Vec<TyId>) -> TyId {
+        self.intern(MirTy::Tuple(elems))
+    }
+    pub fn named(&mut self, entity: Entity, type_args: Vec<TyId>) -> TyId {
+        self.intern(MirTy::Named { entity, type_args })
+    }
+    pub fn error(&mut self) -> TyId {
+        self.intern(MirTy::Error)
+    }
+}
+
+impl Default for TyArena {
+    fn default() -> Self {
+        Self::new()
     }
 }

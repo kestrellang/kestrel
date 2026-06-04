@@ -119,9 +119,10 @@ fn analyze_block(
     }
 
     if !state.diverged
-        && let Some(tail) = tail {
-            state = analyze_expr(cx, tail, state, false, pattern_bound, diags);
-        }
+        && let Some(tail) = tail
+    {
+        state = analyze_expr(cx, tail, state, false, pattern_bound, diags);
+    }
 
     // Propagate assignments back to the caller
     *assigned = state.assigned.clone();

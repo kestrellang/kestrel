@@ -7,8 +7,38 @@
 use kestrel_ast_builder::{DeclSpan, Name, Valued};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
+use kestrel_hir::res::LocalId;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind};
+use kestrel_type_infer::result::ResolvedTy;
+
+use crate::context::BodyContext;
+
+// ===== Mutability =====
+
+/// True if `local` is a closure parameter whose convention was inferred to
+/// `MutBorrow` (#106) — a mutable binding even without a `mutating` annotation
+/// (the convention came from the expected type). Explicitly-`mutating` params
+/// already carry `Local.is_mut == true`, so this only adds the inferred case.
+///
+/// Single source of truth for the inferred-mutability relaxation shared by the
+/// assignment (E200/E201) and access-mode (E203) analyzers.
+pub fn is_mut_borrow_param(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    for (id, expr) in cx.hir.exprs.iter() {
+        let HirExpr::Closure { params, .. } = expr else {
+            continue;
+        };
+        let Some(j) = params.iter().position(|p| p.local == local) else {
+            continue;
+        };
+        return matches!(
+            cx.typed.expr_types.get(&id),
+            Some(ResolvedTy::Function { conventions, .. })
+                if conventions.get(j) == Some(&kestrel_ast::ParamConvention::MutBorrow)
+        );
+    }
+    false
+}
 
 // ===== Span extraction =====
 
@@ -102,13 +132,14 @@ pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<S
         .unwrap_or(0);
     for elem in node.children_with_tokens() {
         if let SyntaxElement::Token(tok) = elem
-            && tok.kind() == SyntaxKind::RBrace {
-                let r = tok.text_range();
-                return Some(Span::new(
-                    file_id,
-                    usize::from(r.start())..usize::from(r.end()),
-                ));
-            }
+            && tok.kind() == SyntaxKind::RBrace
+        {
+            let r = tok.text_range();
+            return Some(Span::new(
+                file_id,
+                usize::from(r.start())..usize::from(r.end()),
+            ));
+        }
     }
     None
 }

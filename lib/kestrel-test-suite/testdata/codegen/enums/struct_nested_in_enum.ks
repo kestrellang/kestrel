@@ -20,6 +20,7 @@ func get_value(s: Shape) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let circle = Shape.Circle(center: Point(x: 10, y: 12), radius: 20);
     // 10 + 12 + 20 = 42

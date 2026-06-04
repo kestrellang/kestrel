@@ -8,6 +8,7 @@ func incrementAndGet(mutating n: std.numeric.Int64) -> std.numeric.Int64 {
     n
 }
 
+@main
 func main() -> lang.i64 {
     var x: std.numeric.Int64 = 41;
     let result = incrementAndGet(x);

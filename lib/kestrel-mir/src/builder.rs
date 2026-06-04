@@ -1,327 +1,562 @@
-//! Builders for constructing MIR functions and blocks.
-
-use crate::MirModule;
-use crate::body::{BasicBlock, LocalDef, MirBody};
-use crate::id::{BlockId, FunctionId, LocalId};
-use crate::immediate::Immediate;
-use crate::item::{ParamDef, WhereClause, WhereConstraint};
-use crate::op::Op;
-use crate::place::Place;
-use crate::statement::{CallArg, Callee, Rvalue, Statement, StatementKind};
-use crate::terminator::Terminator;
-use crate::ty::MirTy;
-use crate::value::Value;
 use kestrel_hecs::Entity;
 
-/// Builder for constructing functions.
-pub struct FunctionBuilder<'a> {
-    module: &'a mut MirModule,
-    id: FunctionId,
+use crate::block::BlockParam;
+use crate::body::OssaBody;
+use crate::callee::Callee;
+use crate::immediate::Immediate;
+use crate::inst::{CallArg, InstKind, Instruction};
+use crate::item::enum_def::EnumDef;
+use crate::item::protocol::ProtocolDef;
+use crate::item::struct_def::StructDef;
+use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
+use crate::ty::MirTy;
+use crate::value::{Ownership, ValueDef};
+use crate::{BlockId, FieldIdx, MirModule, Op, TyId, ValueId, VariantIdx};
+
+/// Builder for constructing OSSA bodies programmatically.
+pub struct OssaBuilder {
+    module: MirModule,
+    body: OssaBody,
+    current_block: BlockId,
+    next_entity: u32,
 }
 
-impl<'a> FunctionBuilder<'a> {
-    pub(crate) fn new(module: &'a mut MirModule, id: FunctionId) -> Self {
-        // Ensure the function has a body
-        let func = &mut module.functions[id.index()];
-        if func.body.is_none() {
-            func.body = Some(MirBody::new());
+impl OssaBuilder {
+    pub fn new(name: &str) -> Self {
+        let module = MirModule::new(name);
+        let mut body = OssaBody::new();
+        let entry = body.alloc_block();
+        body.entry = entry;
+        Self {
+            module,
+            body,
+            current_block: entry,
+            next_entity: 1,
         }
-        Self { module, id }
     }
 
-    /// Get the function ID.
-    pub fn id(&self) -> FunctionId {
-        self.id
+    pub fn fresh_entity(&mut self) -> Entity {
+        let e = Entity::from_raw(self.next_entity);
+        self.next_entity += 1;
+        e
     }
 
-    /// Access the function's body mutably.
-    fn body_mut(&mut self) -> &mut MirBody {
-        self.module.functions[self.id.index()]
-            .body
-            .as_mut()
-            .expect("function body should be initialized")
+    pub fn register_name(&mut self, entity: Entity, name: &str) {
+        self.module.register_name(entity, name);
     }
 
-    /// Add a type parameter.
-    pub fn type_param(&mut self, entity: Entity, name: impl Into<String>) {
-        let tp = crate::item::TypeParamDef::new(entity, name);
-        self.module.functions[self.id.index()].type_params.push(tp);
+    // -- Type interning --
+
+    pub fn ty(&mut self, ty: MirTy) -> TyId {
+        self.module.ty_arena.intern(ty)
+    }
+    pub fn i64(&mut self) -> TyId {
+        self.module.ty_arena.i64()
+    }
+    pub fn i32(&mut self) -> TyId {
+        self.module.ty_arena.i32()
+    }
+    pub fn bool(&mut self) -> TyId {
+        self.module.ty_arena.bool()
+    }
+    pub fn unit(&mut self) -> TyId {
+        self.module.ty_arena.unit()
+    }
+    pub fn str_ty(&mut self) -> TyId {
+        self.module.ty_arena.str_ty()
+    }
+    pub fn never(&mut self) -> TyId {
+        self.module.ty_arena.never()
+    }
+    pub fn pointer(&mut self, pointee: TyId) -> TyId {
+        self.module.ty_arena.pointer(pointee)
+    }
+    pub fn named(&mut self, entity: Entity, type_args: Vec<TyId>) -> TyId {
+        self.module.ty_arena.named(entity, type_args)
     }
 
-    /// Add a parameter and return the local ID it's bound to.
-    pub fn param(&mut self, name: impl Into<String>, ty: MirTy) -> LocalId {
-        self.param_with_label(name, ty, None)
+    // -- Type metadata --
+
+    pub fn add_struct(&mut self, def: StructDef) {
+        self.module.add_struct(def);
+    }
+    pub fn add_enum(&mut self, def: EnumDef) {
+        self.module.add_enum(def);
+    }
+    pub fn add_protocol(&mut self, def: ProtocolDef) {
+        self.module.add_protocol(def);
     }
 
-    /// Add a parameter with an optional external label.
-    pub fn param_with_label(
+    // -- Value allocation --
+
+    pub fn new_value(&mut self, ty: TyId, ownership: Ownership) -> ValueId {
+        let def = match ownership {
+            Ownership::Owned => ValueDef::owned(ty),
+            Ownership::Guaranteed => panic!("use new_guaranteed_value for @guaranteed"),
+        };
+        self.body.alloc_value(def)
+    }
+
+    pub fn new_guaranteed_value(&mut self, ty: TyId, source: ValueId) -> ValueId {
+        self.body.alloc_value(ValueDef::guaranteed(ty, source))
+    }
+
+    /// Allocate a value with ownership derived from type.
+    pub fn new_value_auto(&mut self, ty: TyId) -> ValueId {
+        self.new_value(ty, Ownership::Owned)
+    }
+
+    // -- Block management --
+
+    pub fn new_block(&mut self) -> BlockId {
+        self.body.alloc_block()
+    }
+
+    /// Create a block with typed, ownership-annotated params. Returns (block_id, param_value_ids).
+    pub fn new_block_with_params(
         &mut self,
-        name: impl Into<String>,
-        ty: MirTy,
-        label: Option<String>,
-    ) -> LocalId {
-        let name = name.into();
-        let local = LocalDef::new(name.clone(), ty.clone());
-        let local_id = self.body_mut().add_local(local);
-        self.body_mut().param_count += 1;
-
-        let param = ParamDef::with_label(name.clone(), local_id, ty, label);
-        let func = &mut self.module.functions[self.id.index()];
-        let param_idx = func.params.len();
-        func.params_by_name.insert(name.clone(), param_idx);
-        func.params.push(param);
-        func.locals_by_name.insert(name, local_id);
-
-        local_id
-    }
-
-    /// Add a local variable and return its ID.
-    pub fn local(&mut self, name: impl Into<String>, ty: MirTy) -> LocalId {
-        let name = name.into();
-        let local = LocalDef::new(name.clone(), ty);
-        let local_id = self.body_mut().add_local(local);
-        self.module.functions[self.id.index()]
-            .locals_by_name
-            .insert(name, local_id);
-        local_id
-    }
-
-    /// Set the where clause.
-    pub fn set_where_clause(&mut self, wc: WhereClause) {
-        self.module.functions[self.id.index()].where_clause = Some(wc);
-    }
-
-    /// Add a where clause constraint.
-    pub fn add_constraint(&mut self, constraint: WhereConstraint) {
-        let func = &mut self.module.functions[self.id.index()];
-        if func.where_clause.is_none() {
-            func.where_clause = Some(WhereClause::new());
+        params: &[(TyId, Ownership)],
+    ) -> (BlockId, Vec<ValueId>) {
+        let block = self.body.alloc_block();
+        let mut values = Vec::new();
+        for &(ty, ownership) in params {
+            let def = match ownership {
+                Ownership::Owned => ValueDef::owned(ty),
+                Ownership::Guaranteed => panic!("use add_guaranteed_block_param for @guaranteed"),
+            };
+            let val = self.body.alloc_value(def);
+            self.body.block_mut(block).params.push(BlockParam {
+                value: val,
+                ty,
+                ownership,
+            });
+            values.push(val);
         }
-        func.where_clause
-            .as_mut()
-            .unwrap()
-            .add_constraint(constraint);
+        (block, values)
     }
 
-    /// Add a new basic block. Sets as entry block on first call.
-    pub fn add_block(&mut self) -> BlockBuilder<'_> {
-        let block = BasicBlock::new();
-        let block_id = self.body_mut().add_block(block);
-
-        // First block is the entry block
-        if self.body_mut().blocks.len() == 1 {
-            self.body_mut().entry = block_id;
-        }
-
-        BlockBuilder {
-            module: self.module,
-            func_id: self.id,
-            block_id,
-        }
+    pub fn switch_to(&mut self, block: BlockId) {
+        self.current_block = block;
     }
 
-    /// Get a builder for an existing block.
-    pub fn block(&mut self, block_id: BlockId) -> BlockBuilder<'_> {
-        BlockBuilder {
-            module: self.module,
-            func_id: self.id,
-            block_id,
-        }
+    pub fn current_block(&self) -> BlockId {
+        self.current_block
     }
 
-    /// Get the entry block ID.
-    pub fn entry_block(&self) -> BlockId {
-        self.module.functions[self.id.index()]
-            .body
-            .as_ref()
-            .expect("function body should be initialized")
-            .entry
-    }
-}
+    // -- Instruction emission --
 
-/// Builder for constructing basic blocks.
-pub struct BlockBuilder<'a> {
-    module: &'a mut MirModule,
-    func_id: FunctionId,
-    block_id: BlockId,
-}
-
-impl<'a> BlockBuilder<'a> {
-    /// Get the block ID.
-    pub fn id(&self) -> BlockId {
-        self.block_id
+    fn emit(&mut self, kind: InstKind) {
+        self.body
+            .block_mut(self.current_block)
+            .insts
+            .push(Instruction::new(kind));
     }
 
-    /// Access the block mutably.
-    fn block_mut(&mut self) -> &mut BasicBlock {
-        self.module.functions[self.func_id.index()]
-            .body
-            .as_mut()
-            .expect("function body should be initialized")
-            .block_mut(self.block_id)
+    pub fn emit_copy_value(&mut self, operand: ValueId) -> ValueId {
+        let ty = self.body.value(operand).ty;
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::CopyValue { result, operand });
+        result
     }
 
-    // === Statements ===
-
-    /// Add a raw statement.
-    pub fn add_statement(&mut self, stmt: Statement) {
-        self.block_mut().stmts.push(stmt);
+    pub fn emit_move_value(&mut self, operand: ValueId) -> ValueId {
+        let ty = self.body.value(operand).ty;
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::MoveValue { result, operand });
+        result
     }
 
-    /// Add an assignment: `dest = rvalue`
-    pub fn assign(&mut self, dest: Place, rvalue: Rvalue) {
-        self.add_statement(Statement::new(StatementKind::Assign { dest, rvalue }));
+    pub fn emit_destroy_value(&mut self, operand: ValueId) {
+        self.emit(InstKind::DestroyValue { operand });
     }
 
-    /// `dest = move src`
-    pub fn assign_move(&mut self, dest: Place, src: Place) {
-        self.assign(dest, Rvalue::Move(src));
+    pub fn emit_begin_borrow(&mut self, operand: ValueId) -> ValueId {
+        let ty = self.body.value(operand).ty;
+        let result = self.new_guaranteed_value(ty, operand);
+        self.emit(InstKind::BeginBorrow { result, operand });
+        result
     }
 
-    /// `dest = copy src`
-    pub fn assign_copy(&mut self, dest: Place, src: Place) {
-        self.assign(dest, Rvalue::Copy(src));
+    pub fn emit_end_borrow(&mut self, operand: ValueId) {
+        self.emit(InstKind::EndBorrow { operand });
     }
 
-    /// `dest = ref src`
-    pub fn assign_ref(&mut self, dest: Place, src: Place) {
-        self.assign(dest, Rvalue::Ref(src));
+    pub fn emit_begin_mut_borrow(&mut self, operand: ValueId) -> ValueId {
+        let ty = self.body.value(operand).ty;
+        let result = self.new_guaranteed_value(ty, operand);
+        self.emit(InstKind::BeginMutBorrow { result, operand });
+        result
     }
 
-    /// `dest = ref var src`
-    pub fn assign_ref_mut(&mut self, dest: Place, src: Place) {
-        self.assign(dest, Rvalue::RefMut(src));
+    pub fn emit_end_mut_borrow(&mut self, operand: ValueId) {
+        self.emit(InstKind::EndMutBorrow { operand });
     }
 
-    /// `dest = <immediate>`
-    pub fn assign_const(&mut self, dest: Place, imm: Immediate) {
-        self.assign(dest, Rvalue::Const(imm));
+    pub fn emit_load(&mut self, address: ValueId, result_ty: TyId) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::Load { result, address });
+        result
     }
 
-    /// `dest = op1 arg`
-    pub fn assign_op1(&mut self, dest: Place, op: Op, arg: impl Into<Value>) {
-        self.assign(
-            dest,
-            Rvalue::Op1 {
-                op,
-                arg: arg.into(),
-            },
-        );
+    pub fn emit_copy_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::CopyAddr {
+            result,
+            address,
+            ty,
+        });
+        result
     }
 
-    /// `dest = op2 lhs, rhs`
-    pub fn assign_op2(
+    pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::Take {
+            result,
+            address,
+            ty,
+        });
+        result
+    }
+
+    pub fn emit_begin_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
+        let result = self.new_guaranteed_value(ty, address);
+        self.emit(InstKind::BeginBorrowAddr {
+            result,
+            address,
+            ty,
+        });
+        result
+    }
+
+    pub fn emit_begin_mut_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
+        let result = self.new_guaranteed_value(ty, address);
+        self.emit(InstKind::BeginMutBorrowAddr {
+            result,
+            address,
+            ty,
+        });
+        result
+    }
+
+    pub fn emit_store_init(&mut self, address: ValueId, value: ValueId) {
+        self.emit(InstKind::StoreInit { address, value });
+    }
+
+    pub fn emit_store_assign(&mut self, address: ValueId, value: ValueId) {
+        self.emit(InstKind::StoreAssign { address, value });
+    }
+
+    pub fn emit_destroy_addr(&mut self, address: ValueId, ty: TyId) {
+        self.emit(InstKind::DestroyAddr { address, ty });
+    }
+
+    pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {
+        let i32_ty = self.i32();
+        let result = self.new_value(i32_ty, Ownership::Owned);
+        self.emit(InstKind::Discriminant { result, operand });
+        result
+    }
+
+    pub fn emit_op1(&mut self, op: Op, arg: ValueId, result_ty: TyId) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::Op1 { result, op, arg });
+        result
+    }
+
+    pub fn emit_op2(&mut self, op: Op, lhs: ValueId, rhs: ValueId, result_ty: TyId) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::Op2 {
+            result,
+            op,
+            lhs,
+            rhs,
+        });
+        result
+    }
+
+    pub fn emit_op3(
         &mut self,
-        dest: Place,
         op: Op,
-        lhs: impl Into<Value>,
-        rhs: impl Into<Value>,
-    ) {
-        self.assign(
-            dest,
-            Rvalue::Op2 {
-                op,
-                lhs: lhs.into(),
-                rhs: rhs.into(),
-            },
-        );
+        a: ValueId,
+        b: ValueId,
+        c: ValueId,
+        result_ty: TyId,
+    ) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::Op3 {
+            result,
+            op,
+            a,
+            b,
+            c,
+        });
+        result
     }
 
-    /// `dest = op3 a, b, c`
-    pub fn assign_op3(
+    pub fn emit_literal(&mut self, value: Immediate) -> ValueId {
+        let ty = value.ty(&mut self.module.ty_arena);
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::Literal { result, value });
+        result
+    }
+
+    pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
+        let i64_ty = self.i64();
+        let result = self.new_value(i64_ty, Ownership::Owned);
+        self.emit(InstKind::GlobalRef { result, entity });
+        result
+    }
+
+    pub fn emit_struct(&mut self, ty: TyId, fields: Vec<(FieldIdx, ValueId)>) -> ValueId {
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::Struct { result, ty, fields });
+        result
+    }
+
+    pub fn emit_tuple(&mut self, ty: TyId, elements: Vec<ValueId>) -> ValueId {
+        let result = self.new_value(ty, Ownership::Owned);
+        self.emit(InstKind::Tuple { result, elements });
+        result
+    }
+
+    pub fn emit_enum(
         &mut self,
-        dest: Place,
-        op: Op,
-        a: impl Into<Value>,
-        b: impl Into<Value>,
-        c: impl Into<Value>,
-    ) {
-        self.assign(
-            dest,
-            Rvalue::Op3 {
-                op,
-                a: a.into(),
-                b: b.into(),
-                c: c.into(),
-            },
-        );
+        enum_ty: TyId,
+        variant: VariantIdx,
+        payload: Vec<ValueId>,
+    ) -> ValueId {
+        let result = self.new_value(enum_ty, Ownership::Owned);
+        self.emit(InstKind::Enum {
+            result,
+            enum_ty,
+            variant,
+            payload,
+        });
+        result
     }
 
-    /// `dest = construct Type { fields... }`
-    pub fn assign_construct(&mut self, dest: Place, ty: MirTy, fields: Vec<(String, Value)>) {
-        self.assign(dest, Rvalue::Construct { ty, fields });
-    }
-
-    /// `[dest =] call callee(args...)`
-    pub fn call(&mut self, dest: Option<Place>, callee: Callee, args: Vec<CallArg>) {
-        self.add_statement(Statement::new(StatementKind::Call { dest, callee, args }));
-    }
-
-    /// `dest = call func(args...)` — convenience for direct calls with borrow mode.
-    pub fn call_direct(&mut self, dest: Option<Place>, func: Entity, args: Vec<Value>) {
-        let call_args: Vec<CallArg> = args.into_iter().map(CallArg::borrow).collect();
-        self.call(dest, Callee::direct(func), call_args);
-    }
-
-    /// `deinit <place>`
-    pub fn deinit(&mut self, place: Place) {
-        self.add_statement(Statement::new(StatementKind::Deinit { place }));
-    }
-
-    /// `deinit <place> if <flag>`
-    pub fn deinit_if(&mut self, place: Place, flag: LocalId) {
-        self.add_statement(Statement::new(StatementKind::DeinitIf { place, flag }));
-    }
-
-    /// `<flag> = true/false`
-    pub fn set_deinit_flag(&mut self, flag: LocalId, value: bool) {
-        self.add_statement(Statement::new(StatementKind::SetDeinitFlag { flag, value }));
-    }
-
-    // === Terminators ===
-
-    /// Set the block's terminator.
-    pub fn terminate(&mut self, term: Terminator) {
-        self.block_mut().terminator = term;
-    }
-
-    /// `return <value>`
-    pub fn ret(&mut self, value: impl Into<Value>) {
-        self.terminate(Terminator::ret(value));
-    }
-
-    /// `return ()`
-    pub fn ret_unit(&mut self) {
-        self.ret(Immediate::unit());
-    }
-
-    /// `jump bb`
-    pub fn jump(&mut self, target: BlockId) {
-        self.terminate(Terminator::jump(target));
-    }
-
-    /// `branch if <cond>, bb_true else bb_false`
-    pub fn branch(
+    pub fn emit_array(
         &mut self,
-        condition: impl Into<Value>,
+        element_ty: TyId,
+        elements: Vec<ValueId>,
+        array_ty: TyId,
+    ) -> ValueId {
+        let result = self.new_value(array_ty, Ownership::Owned);
+        self.emit(InstKind::Array {
+            result,
+            element_ty,
+            elements,
+        });
+        result
+    }
+
+    pub fn emit_struct_extract(
+        &mut self,
+        operand: ValueId,
+        field: FieldIdx,
+        result_ty: TyId,
+    ) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::StructExtract {
+            result,
+            operand,
+            field,
+        });
+        result
+    }
+
+    pub fn emit_tuple_extract(&mut self, operand: ValueId, index: u32, result_ty: TyId) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::TupleExtract {
+            result,
+            operand,
+            index,
+        });
+        result
+    }
+
+    pub fn emit_enum_payload(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field: FieldIdx,
+        result_ty: TyId,
+    ) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::EnumPayload {
+            result,
+            operand,
+            variant,
+            field,
+        });
+        result
+    }
+
+    pub fn emit_destructure_struct(
+        &mut self,
+        operand: ValueId,
+        field_types: &[(TyId, Ownership)],
+    ) -> Vec<ValueId> {
+        let results: Vec<ValueId> = field_types
+            .iter()
+            .map(|&(ty, ownership)| self.new_value(ty, ownership))
+            .collect();
+        self.emit(InstKind::DestructureStruct {
+            results: results.clone(),
+            operand,
+        });
+        results
+    }
+
+    pub fn emit_destructure_tuple(
+        &mut self,
+        operand: ValueId,
+        elem_types: &[(TyId, Ownership)],
+    ) -> Vec<ValueId> {
+        let results: Vec<ValueId> = elem_types
+            .iter()
+            .map(|&(ty, ownership)| self.new_value(ty, ownership))
+            .collect();
+        self.emit(InstKind::DestructureTuple {
+            results: results.clone(),
+            operand,
+        });
+        results
+    }
+
+    pub fn emit_destructure_enum(
+        &mut self,
+        operand: ValueId,
+        variant: VariantIdx,
+        field_types: &[(TyId, Ownership)],
+    ) -> Vec<ValueId> {
+        let results: Vec<ValueId> = field_types
+            .iter()
+            .map(|&(ty, ownership)| self.new_value(ty, ownership))
+            .collect();
+        self.emit(InstKind::DestructureEnum {
+            results: results.clone(),
+            operand,
+            variant,
+        });
+        results
+    }
+
+    pub fn emit_call(
+        &mut self,
+        callee: Callee,
+        args: Vec<CallArg>,
+        result_ty: Option<(TyId, Ownership)>,
+    ) -> Option<ValueId> {
+        let result = result_ty.map(|(ty, ownership)| self.new_value(ty, ownership));
+        self.emit(InstKind::Call {
+            result,
+            callee,
+            args,
+        });
+        result
+    }
+
+    pub fn emit_apply_partial(
+        &mut self,
+        callee: Callee,
+        captures: Vec<ValueId>,
+        result_ty: TyId,
+    ) -> ValueId {
+        let result = self.new_value(result_ty, Ownership::Owned);
+        self.emit(InstKind::ApplyPartial {
+            result,
+            callee,
+            captures,
+        });
+        result
+    }
+
+    pub fn emit_field_addr(&mut self, base: ValueId, ty: TyId, field: FieldIdx) -> ValueId {
+        let ptr_ty = self.pointer(ty);
+        let result = self.new_value(ptr_ty, Ownership::Owned);
+        self.emit(InstKind::FieldAddr {
+            result,
+            base,
+            ty,
+            field,
+        });
+        result
+    }
+
+    pub fn emit_uninit(&mut self, ty: TyId) -> ValueId {
+        let ptr_ty = self.pointer(ty);
+        let result = self.new_value(ptr_ty, Ownership::Owned);
+        self.emit(InstKind::Uninit { result, ty });
+        result
+    }
+
+    // -- Terminators --
+
+    pub fn emit_return(&mut self, value: ValueId) {
+        self.body.block_mut(self.current_block).terminator =
+            Terminator::new(TerminatorKind::Return(value));
+    }
+
+    pub fn emit_jump(&mut self, target: BlockId, args: Vec<ValueId>) {
+        self.body.block_mut(self.current_block).terminator =
+            Terminator::new(TerminatorKind::Jump { target, args });
+    }
+
+    pub fn emit_branch(
+        &mut self,
+        condition: ValueId,
         then_block: BlockId,
+        then_args: Vec<ValueId>,
         else_block: BlockId,
+        else_args: Vec<ValueId>,
     ) {
-        self.terminate(Terminator::branch(condition, then_block, else_block));
+        self.body.block_mut(self.current_block).terminator =
+            Terminator::new(TerminatorKind::Branch {
+                condition,
+                then_block,
+                then_args,
+                else_block,
+                else_args,
+            });
     }
 
-    /// `switch <discriminant> { cases... }`
-    pub fn switch(&mut self, discriminant: Place, cases: Vec<(crate::SwitchCase, BlockId)>) {
-        self.terminate(Terminator::switch(discriminant, cases));
+    pub fn emit_switch(&mut self, discriminant: ValueId, cases: Vec<SwitchArm>) {
+        self.body.block_mut(self.current_block).terminator =
+            Terminator::new(TerminatorKind::Switch {
+                discriminant,
+                cases,
+            });
     }
 
-    /// `panic "message"`
-    pub fn panic(&mut self, message: impl Into<String>) {
-        self.terminate(Terminator::panic(message));
+    pub fn emit_panic(&mut self, message: impl Into<String>) {
+        self.body.block_mut(self.current_block).terminator =
+            Terminator::new(TerminatorKind::Panic(message.into()));
     }
 
-    /// `unreachable`
-    pub fn unreachable(&mut self) {
-        self.terminate(Terminator::unreachable());
+    pub fn emit_unreachable(&mut self) {
+        self.body.block_mut(self.current_block).terminator =
+            Terminator::new(TerminatorKind::Unreachable);
+    }
+
+    // -- Finalize --
+
+    pub fn finish(self) -> (OssaBody, MirModule) {
+        (self.body, self.module)
+    }
+
+    /// Access the module for type queries during building.
+    pub fn module(&self) -> &MirModule {
+        &self.module
+    }
+
+    /// Access the body for inspection during building.
+    pub fn body(&self) -> &OssaBody {
+        &self.body
+    }
+
+    /// Access the body mutably for advanced test scenarios.
+    pub fn body_mut(&mut self) -> &mut OssaBody {
+        &mut self.body
     }
 }

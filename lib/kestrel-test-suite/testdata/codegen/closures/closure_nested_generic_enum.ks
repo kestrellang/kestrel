@@ -12,6 +12,7 @@ enum MaybeProvider[T] {
     case Empty
 }
 
+@main
 func main() -> lang.i64 {
     let provider = MaybeProvider[std.numeric.Int64].Provider(
         make: { Wrapper[std.numeric.Int64](value: 42) }

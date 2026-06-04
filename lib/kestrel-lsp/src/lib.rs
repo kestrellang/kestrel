@@ -20,23 +20,57 @@ pub mod types;
 
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::server::{ServerState, SharedState};
 
+/// Debounce delay for `didChange` → diagnostics refresh. Coalesces rapid
+/// keystrokes so we don't rebuild the world on every character.
+const DEBOUNCE_MS: u64 = 150;
+
 pub struct Backend {
     client: Client,
     state: SharedState,
+    /// Poked by `did_change`; the debounce task waits on this and
+    /// coalesces notifications before triggering a refresh.
+    debounce_notify: Arc<Notify>,
 }
 
 impl Backend {
     pub fn new(client: Client) -> Self {
+        let state: SharedState = Arc::new(Mutex::new(ServerState::new()));
+        let debounce_notify = Arc::new(Notify::new());
+
+        // Spawn the debounce task. It waits for a notification, then
+        // sleeps DEBOUNCE_MS — resetting on each new notification — and
+        // fires a refresh only after the dust settles.
+        {
+            let state = state.clone();
+            let client = client.clone();
+            let notify = debounce_notify.clone();
+            tokio::spawn(async move {
+                loop {
+                    notify.notified().await;
+                    loop {
+                        tokio::select! {
+                            _ = tokio::time::sleep(
+                                std::time::Duration::from_millis(DEBOUNCE_MS),
+                            ) => break,
+                            _ = notify.notified() => continue,
+                        }
+                    }
+                    handlers::diagnostics::refresh(state.clone(), client.clone()).await;
+                }
+            });
+        }
+
         Self {
             client,
-            state: Arc::new(Mutex::new(ServerState::new())),
+            state,
+            debounce_notify,
         }
     }
 
@@ -158,8 +192,14 @@ impl LanguageServer for Backend {
                 .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from);
             let mut state = self.state.lock().await;
-            state.stdlib_path = stdlib;
+            // Auto-discover stdlib if not explicitly configured:
+            //   1. KESTREL_STD env var
+            //   2. <exe>/../lib/std (jessup toolchain layout)
+            state.stdlib_path = stdlib.or_else(default_std_path);
             state.flock_cache_path = cache;
+        } else {
+            let mut state = self.state.lock().await;
+            state.stdlib_path = default_std_path();
         }
 
         if let Some(folders) = params.workspace_folders {
@@ -202,6 +242,9 @@ impl LanguageServer for Backend {
                     retrigger_characters: None,
                     work_done_progress_options: Default::default(),
                 }),
+                document_highlight_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -247,6 +290,13 @@ impl LanguageServer for Backend {
         Ok(handlers::references::handle(self.state.clone(), params).await)
     }
 
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        Ok(handlers::document_highlight::handle(self.state.clone(), params).await)
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -279,6 +329,55 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         Ok(handlers::inlay_hints::handle(self.state.clone(), params).await)
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        Ok(handlers::workspace_symbols::handle(self.state.clone(), params).await)
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        Ok(handlers::call_hierarchy::prepare(self.state.clone(), params).await)
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        Ok(handlers::call_hierarchy::incoming(self.state.clone(), params).await)
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        Ok(handlers::call_hierarchy::outgoing(self.state.clone(), params).await)
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        Ok(handlers::type_hierarchy::prepare(self.state.clone(), params).await)
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        Ok(handlers::type_hierarchy::supertypes(self.state.clone(), params).await)
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        Ok(handlers::type_hierarchy::subtypes(self.state.clone(), params).await)
     }
 
     async fn initialized(&self, _: InitializedParams) {
@@ -322,7 +421,7 @@ impl LanguageServer for Backend {
             state.set_source(key, text);
             state.revision_token += 1;
         }
-        self.refresh().await;
+        self.debounce_notify.notify_one();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -434,4 +533,46 @@ impl LanguageServer for Backend {
 
         self.refresh().await;
     }
+}
+
+/// Auto-discover the stdlib directory, in priority order:
+///   1. `KESTREL_STD` env var
+///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
+///   3. `~/.jessup/bin/kestrel` symlink → resolve to toolchain's lib/std
+fn default_std_path() -> Option<std::path::PathBuf> {
+    if let Some(p) = std::env::var_os("KESTREL_STD") {
+        let p = std::path::PathBuf::from(p);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(p) = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("lib/std"))
+        && p.exists()
+    {
+        return Some(p);
+    }
+
+    // Follow the jessup kestrel symlink to find the active toolchain's stdlib.
+    // Covers the case where a bundled VSIX LSP binary can't use exe-relative.
+    if let Some(home) = std::env::var_os("HOME") {
+        let kestrel_link = std::path::PathBuf::from(home).join(".jessup/bin/kestrel");
+        if let Ok(resolved) = std::fs::read_link(&kestrel_link) {
+            let std_path = resolved
+                .parent()
+                .and_then(|p| p.parent())
+                .map(|p| p.join("lib/std"));
+            if let Some(p) = std_path
+                && p.exists()
+            {
+                return Some(p);
+            }
+        }
+    }
+
+    None
 }

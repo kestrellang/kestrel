@@ -53,6 +53,13 @@ pub enum InferError {
         span: Span,
     },
 
+    /// Member exists but is static — cannot be accessed on an instance.
+    MemberIsStatic {
+        receiver: TyVar,
+        name: String,
+        span: Span,
+    },
+
     /// No associated type with this name on the container.
     NoAssociatedType {
         container: TyVar,
@@ -185,11 +192,21 @@ pub enum InferError {
     /// Referencing a known primitive method without calling it.
     /// `x.toString` (when the user meant `x.toString()`) — primitive methods
     /// cannot be used as first-class values.
-    PrimitiveMethodNotCalled {
+    MethodNotCalled {
         receiver: TyVar,
         method: String,
         span: Span,
     },
+
+    /// Circular opaque type inference: the concrete type behind `some P`
+    /// is itself another `some P` from a mutually recursive call, so no
+    /// concrete type can be determined.
+    CircularOpaqueReturn { span: Span },
+
+    /// A `mutating` closure was passed where a non-mutating (`Borrow`/
+    /// `Consuming`) closure parameter is expected — the callee never lends a
+    /// mutable place, so the closure's write access can't be honored (#106).
+    ConventionMismatch { span: Span },
 }
 
 impl InferError {
@@ -201,6 +218,7 @@ impl InferError {
             | Self::NoMember { span, .. }
             | Self::AmbiguousMember { span, .. }
             | Self::MemberNotVisible { span, .. }
+            | Self::MemberIsStatic { span, .. }
             | Self::NoAssociatedType { span, .. }
             | Self::InfiniteType { span }
             | Self::FromHir { span }
@@ -220,7 +238,9 @@ impl InferError {
             | Self::TupleIndexOnNonTuple { span, .. }
             | Self::TupleIndexOutOfBounds { span, .. }
             | Self::MemberAccessOnPrimitive { span, .. }
-            | Self::PrimitiveMethodNotCalled { span, .. } => span,
+            | Self::MethodNotCalled { span, .. }
+            | Self::CircularOpaqueReturn { span }
+            | Self::ConventionMismatch { span } => span,
         }
     }
 }

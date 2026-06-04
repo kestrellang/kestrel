@@ -36,7 +36,7 @@ public func joinGuesses(guesses: Array[String]) -> String {
 
 /// Parse a non-negative seed, falling back to 1 on bad input.
 public func parseSeed(s: String) -> Int64 {
-    match Int64.parse(s) {
+    match Int64(parsing: s) {
         .Some(n) => if n > 0 { n } else { 1 },
         .None => 1
     }

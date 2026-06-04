@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- replaced() (non-mutating) ----
             let s1: std.text.String = "hello world hello";
@@ -51,9 +52,9 @@ module Test
             if adjParts.count != 3 { return 13 }
             if adjParts(unchecked: 1).toOwned().isEqual(to: "") == false { return 14 }
 
-            // ---- split(matching:) ----
+            // ---- split(where:) ----
             let s6: std.text.String = "hello world\tthere";
-            let wsParts = s6.split(matching: { (c) in c.isWhitespace }).collect();
+            let wsParts = s6.split(where: { (c) in c.isWhitespace }).collect();
             if wsParts.count != 3 { return 15 }
             if wsParts(unchecked: 0).toOwned().isEqual(to: "hello") == false { return 16 }
             if wsParts(unchecked: 1).toOwned().isEqual(to: "world") == false { return 17 }

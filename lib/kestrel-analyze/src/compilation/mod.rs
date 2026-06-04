@@ -6,6 +6,7 @@
 pub mod conformance_completeness;
 pub mod constraint_cycles;
 pub mod cycle_util;
+pub mod entry_point;
 pub mod extension_conflict;
 pub mod protocol_cycles;
 pub mod struct_cycles;

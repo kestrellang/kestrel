@@ -40,7 +40,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Body checks
     r.add_body_check(body::exhaustive_return::ExhaustiveReturnAnalyzer);
     r.add_body_check(body::dead_code::DeadCodeAnalyzer);
-    r.add_body_check(body::guard_let::GuardLetDivergenceAnalyzer);
+    r.add_body_check(body::guard::GuardDivergenceAnalyzer);
     r.add_body_check(body::type_check::TypeCheckAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
@@ -50,8 +50,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::definite_assignment::DefiniteAssignmentAnalyzer);
     r.add_body_check(body::initializer::InitializerAnalyzer);
     r.add_body_check(body::closure::ClosureAnalyzer);
-    r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
+    // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
+    r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
 
     // Wave 6: Pattern checks
     r.add_body_check(body::refutable_pattern::RefutablePatternAnalyzer);
@@ -81,6 +82,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);
+    r.add_decl_check(decl::indirect_enum::IndirectEnumAnalyzer);
     r.add_decl_check(decl::parent_protocol_conformance::ParentProtocolConformanceAnalyzer);
     r.add_decl_check(decl::protocol_field_conformance::ProtocolFieldConformanceAnalyzer);
     r.add_decl_check(decl::generics::GenericsAnalyzer);
@@ -99,6 +101,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
         compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer,
     );
     r.add_compilation_check(compilation::unknown_attribute::UnknownAttributeAnalyzer);
+    r.add_compilation_check(compilation::entry_point::EntryPointAnalyzer);
 
     r
 }
@@ -242,13 +245,23 @@ pub fn analyze_decls(
 /// Run all compilation-check analyzers once over the whole compilation.
 ///
 /// Called from the compiler after body and decl checks. Compilation checks
-/// see all entities (e.g., for cross-entity cycle detection).
-pub fn analyze_compilation(ctx: &QueryContext<'_>, root: Entity) -> Vec<AnalyzeDiagnostic> {
+/// see all entities (e.g., for cross-entity cycle detection). `is_executable`
+/// reports whether this compilation is producing a binary, gating the
+/// entry-point requirement (E618).
+pub fn analyze_compilation(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    is_executable: bool,
+) -> Vec<AnalyzeDiagnostic> {
     let Some(registry) = ctx.get::<AnalyzerRegistryRef>(root) else {
         return vec![];
     };
 
-    let cx = CompilationContext { query: ctx, root };
+    let cx = CompilationContext {
+        query: ctx,
+        root,
+        is_executable,
+    };
 
     let mut all_diags = Vec::new();
     for analyzer in &registry.0.compilation_checks {

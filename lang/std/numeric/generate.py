@@ -453,20 +453,20 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         }}'''
         sign_prefix = '''
         if isNegative {
-            result.appendChar('-')
+            result.append(char: '-')
         } else if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }'''
     else:
         sign_handling = '''
         let isNegative = false;'''
         sign_prefix = '''
         if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }'''
 
     return f'''    // Formattable
@@ -570,85 +570,78 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
     # For signed types, handle negative numbers
     if signed:
-        base_parse = f'''    /// Parses a base-10 integer literal, optionally prefixed with `+` or
-    /// `-`. Returns `None` for an empty string, a non-digit character,
+        base_parse = f'''    /// @name Parsing
+    /// Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
+    /// Returns `null` for an empty string, a non-digit character,
     /// or a value that does not fit in `{type_name}`.
     ///
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse("42");    // Some(42)
-    /// {type_name}.parse("-7");    // Some(-7)
-    /// {type_name}.parse("abc");   // None
-    /// {type_name}.parse("");      // None
+    /// {type_name}(parsing: "42");    // Some(42)
+    /// {type_name}(parsing: "-7");    // Some(-7)
+    /// {type_name}(parsing: "abc");   // None
     /// ```
-    public static func parse(string: String) -> {type_name}? {{
+    public init(parsing string: String)? {{
         let len = string.byteCount;
         if len == 0 {{
-            return .None
+            return null
         }}
 
         var index: Int64 = 0;
         var isNegative = false;
 
-        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {{  // '-'
+        if firstByteVal == 45 {{
             isNegative = true;
             index = 1
-        }} else if firstByteVal == 43 {{  // '+'
+        }} else if firstByteVal == 43 {{
             index = 1
         }}
 
-        // Must have at least one digit
         if index >= len {{
-            return .None
+            return null
         }}
 
-        // Parse digits using Int64 for accumulation
         var result: Int64 = 0;
-        let maxBeforeMultiply: Int64 = 922337203685477580;  // Int64.maxValue / 10
+        let maxBeforeMultiply: Int64 = 922337203685477580;
 
         while index < len {{
             let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = Int64(from: byte);
 
-            // Check if digit (0-9 = 48-57)
             if byteVal < 48 or byteVal > 57 {{
-                return .None
+                return null
             }}
 
             let digit = byteVal - 48;
 
-            // Check for overflow before multiply
             if result > maxBeforeMultiply {{
-                return .None
+                return null
             }}
             result = result * 10;
 
-            // Check for overflow before add
             if result > 9223372036854775807 - digit {{
-                return .None
+                return null
             }}
             result = result + digit;
 
             index = index + 1
         }}
 
-        // Apply sign and check bounds for target type
         if isNegative {{
             result = result.negate();
             if result < {min_val_expr} {{
-                return .None
+                return null
             }}
         }} else {{
             if result > {max_val_expr} {{
-                return .None
+                return null
             }}
         }}
 
-        .Some({return_expr})
+        self.raw = {return_expr}.raw;
     }}'''
         # Per-type magnitude bounds for the UInt64 accumulator.
         if type_name == "Int64":
@@ -658,44 +651,41 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
             neg_max_expr = f"UInt64(from: {type_name}.maxValue) + 1"
         radix_parse = f'''
-    /// Parses an integer in `radix` (base 2–36 inclusive). Letters a–z are
-    /// case-insensitive and represent digit values 10–35. Returns `None`
-    /// for an out-of-range radix, an empty string, an unrecognised digit,
-    /// or a value that overflows `{type_name}`.
+    /// @name Parsing with Radix
+    /// Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
+    /// case-insensitive and represent digit values 10-35.
     ///
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse("ff", 16);     // Some(255 if it fits, else None)
-    /// {type_name}.parse("101010", 2);  // Some(42)
-    /// {type_name}.parse("z", 36);      // Some(35)
+    /// {type_name}(parsing: "ff", radix: 16);     // Some(255 if it fits, else None)
+    /// {type_name}(parsing: "101010", radix: 2);  // Some(42)
+    /// {type_name}(parsing: "z", radix: 36);      // Some(35)
     /// ```
-    public static func parse(string: String, radix: Int64) -> {type_name}? {{
+    public init(parsing string: String, radix radix: Int64)? {{
         if radix < 2 or radix > 36 {{
-            return .None
+            return null
         }}
 
         let len = string.byteCount;
         if len == 0 {{
-            return .None
+            return null
         }}
 
         var index: Int64 = 0;
         var isNegative = false;
 
-        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {{  // '-'
+        if firstByteVal == 45 {{
             isNegative = true;
             index = 1
-        }} else if firstByteVal == 43 {{  // '+'
+        }} else if firstByteVal == 43 {{
             index = 1
         }}
 
-        // Must have at least one digit
         if index >= len {{
-            return .None
+            return null
         }}
 
         let radixU: UInt64 = UInt64(from: radix);
@@ -718,31 +708,26 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             }} else if byteVal >= 97 and byteVal <= 122 {{
                 byteVal - 87
             }} else {{
-                return .None
+                return null
             }};
 
             if digit >= radix {{
-                return .None
+                return null
             }}
 
             let digitU: UInt64 = UInt64(from: digit);
             if result > (maxMagnitude - digitU) / radixU {{
-                return .None
+                return null
             }}
             result = result * radixU + digitU;
             index = index + 1
         }}
 
-        // Magnitude fits — `result` ≤ maxMagnitude, which is `maxValue` for
-        // positives or `|minValue|` for negatives. For negatives we cast
-        // first (the `|minValue|` bit pattern reinterprets to `minValue`)
-        // then negate; two's-complement negation of `minValue` wraps back
-        // to `minValue`, so the boundary case lands correctly.
         let typedResult = {type_name}(from: result);
         if isNegative {{
-            .Some(typedResult.negate())
+            self.raw = typedResult.negate().raw
         }} else {{
-            .Some(typedResult)
+            self.raw = typedResult.raw
         }}
     }}'''
         return base_parse + radix_parse
@@ -750,41 +735,38 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         # Unsigned - no negative numbers allowed
         max_before_multiply = "1844674407370955161"  # UInt64.maxValue / 10
 
-        base_parse = f'''    /// Parses a base-10 unsigned integer literal, optionally prefixed
-    /// with `+`. A leading `-` is rejected. Returns `None` for an empty
+        base_parse = f'''    /// @name Parse
+    /// Parses a base-10 unsigned integer literal, optionally prefixed
+    /// with `+`. A leading `-` is rejected. Returns `null` for an empty
     /// string, a non-digit character, or a value that does not fit in
     /// `{type_name}`.
     ///
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse("42");   // Some(42)
-    /// {type_name}.parse("-1");   // None  (no sign for unsigned)
-    /// {type_name}.parse("");     // None
+    /// let n = {type_name}(parsing: "42");   // Some(42)
+    /// let bad = {type_name}(parsing: "-1"); // null (no sign for unsigned)
     /// ```
-    public static func parse(string: String) -> {type_name}? {{
+    public init(parsing string: String)? {{
         let len = string.byteCount;
         if len == 0 {{
-            return .None
+            return null
         }}
 
         var index: Int64 = 0;
 
-        // Check for optional + sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 43 {{  // '+'
+        if firstByteVal == 43 {{
             index = 1
-        }} else if firstByteVal == 45 {{  // '-' not allowed for unsigned
-            return .None
+        }} else if firstByteVal == 45 {{
+            return null
         }}
 
-        // Must have at least one digit
         if index >= len {{
-            return .None
+            return null
         }}
 
-        // Parse digits using UInt64 for accumulation
         var result: UInt64 = 0;
         let maxBeforeMultiply: UInt64 = {max_before_multiply};
         let maxVal: UInt64 = {max_val_expr};
@@ -793,34 +775,30 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             let byte: UInt8 = string.bytes(unchecked: index);
             let byteVal = UInt64(from: byte);
 
-            // Check if digit (0-9 = 48-57)
             if byteVal < 48 or byteVal > 57 {{
-                return .None
+                return null
             }}
 
             let digit = byteVal - 48;
 
-            // Check for overflow before multiply
             if result > maxBeforeMultiply {{
-                return .None
+                return null
             }}
             result = result * 10;
 
-            // Check for overflow before add
             if result > UInt64.maxValue - digit {{
-                return .None
+                return null
             }}
             result = result + digit;
 
             index = index + 1
         }}
 
-        // Check bounds for target type
         if result > maxVal {{
-            return .None
+            return null
         }}
 
-        .Some({return_expr})
+        self.raw = {return_expr}.raw;
     }}'''
         # Per-type max for the UInt64 accumulator (no sign bookkeeping).
         if type_name == "UInt64":
@@ -828,42 +806,41 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
         else:
             max_expr = f"UInt64(from: {type_name}.maxValue)"
         radix_parse = f'''
-    /// Parses an unsigned integer in `radix` (base 2–36 inclusive). Letters
-    /// a–z are case-insensitive and represent digit values 10–35. A
+    /// @name Parse Radix
+    /// Parses an unsigned integer in `radix` (base 2-36 inclusive). Letters
+    /// a-z are case-insensitive and represent digit values 10-35. A
     /// leading `+` is allowed but a leading `-` is rejected. Returns
-    /// `None` for an out-of-range radix, an empty string, an
+    /// `null` for an out-of-range radix, an empty string, an
     /// unrecognised digit, or a value that overflows `{type_name}`.
     ///
     /// # Examples
     ///
     /// ```
-    /// {type_name}.parse("ff", 16);     // Some(255 if it fits, else None)
-    /// {type_name}.parse("101010", 2);  // Some(42)
+    /// let n = {type_name}(parsing: "ff", radix: 16);      // Some(255 if it fits, else None)
+    /// let m = {type_name}(parsing: "101010", radix: 2);   // Some(42)
     /// ```
-    public static func parse(string: String, radix: Int64) -> {type_name}? {{
+    public init(parsing string: String, radix radix: Int64)? {{
         if radix < 2 or radix > 36 {{
-            return .None
+            return null
         }}
 
         let len = string.byteCount;
         if len == 0 {{
-            return .None
+            return null
         }}
 
         var index: Int64 = 0;
 
-        // Optional `+`; reject leading `-` outright.
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
         if firstByteVal == 43 {{
             index = 1
         }} else if firstByteVal == 45 {{
-            return .None
+            return null
         }}
 
-        // Must have at least one digit
         if index >= len {{
-            return .None
+            return null
         }}
 
         let radixU: UInt64 = UInt64(from: radix);
@@ -882,22 +859,22 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             }} else if byteVal >= 97 and byteVal <= 122 {{
                 byteVal - 87
             }} else {{
-                return .None
+                return null
             }};
 
             if digit >= radix {{
-                return .None
+                return null
             }}
 
             let digitU: UInt64 = UInt64(from: digit);
             if result > (maxVal - digitU) / radixU {{
-                return .None
+                return null
             }}
             result = result * radixU + digitU;
             index = index + 1
         }}
 
-        .Some({return_expr})
+        self.raw = {return_expr}.raw;
     }}'''
         return base_parse + radix_parse
 
@@ -972,11 +949,13 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
         result
     }}
 
-    /// Reassembles a `{type_name}` from {byte_count} bytes in native (host) byte
-    /// order. Returns `None` if the input is not exactly {byte_count} bytes long.
-    public static func fromBytes(bytes: std.collections.Array[UInt8]) -> {type_name}? {{
+    /// @name From Bytes
+    /// Reassembles a `{type_name}` from {byte_count} bytes in native byte order.
+    /// Returns `null` if the input is not exactly {byte_count} bytes long.
+    public init[S](fromBytes fromBytes: S)? where S: Slice[UInt8] {{
+        let bytes = fromBytes.asSlice();
         if bytes.count != {bc} {{
-            return .None
+            return null
         }}
         var value = {type_name}.zero;
         let ptr = Pointer(to: value).asRaw().cast[UInt8]();
@@ -985,14 +964,16 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
             ptr.offset(by: i).write(bytes(unchecked: i));
             i = i + 1
         }}
-        .Some(value)
+        self.raw = value.raw;
     }}
 
+    /// @name From Bytes Big Endian
     /// Reassembles a `{type_name}` from {byte_count} bytes in big-endian order.
-    /// Returns `None` if the input is not exactly {byte_count} bytes long.
-    public static func fromBytesBigEndian(bytes: std.collections.Array[UInt8]) -> {type_name}? {{
+    /// Returns `null` if the input is not exactly {byte_count} bytes long.
+    public init[S](fromBytesBigEndian fromBytesBigEndian: S)? where S: Slice[UInt8] {{
+        let bytes = fromBytesBigEndian.asSlice();
         if bytes.count != {bc} {{
-            return .None
+            return null
         }}
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -1001,14 +982,16 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
             result = (result << 8) | byteVal;
             i = i + 1
         }}
-        .Some({narrow_result})
+        self.raw = {narrow_result}.raw;
     }}
 
+    /// @name From Bytes Little Endian
     /// Reassembles a `{type_name}` from {byte_count} bytes in little-endian order.
-    /// Returns `None` if the input is not exactly {byte_count} bytes long.
-    public static func fromBytesLittleEndian(bytes: std.collections.Array[UInt8]) -> {type_name}? {{
+    /// Returns `null` if the input is not exactly {byte_count} bytes long.
+    public init[S](fromBytesLittleEndian fromBytesLittleEndian: S)? where S: Slice[UInt8] {{
+        let bytes = fromBytesLittleEndian.asSlice();
         if bytes.count != {bc} {{
-            return .None
+            return null
         }}
         var result: UInt64 = 0;
         var i: Int64 = 0;
@@ -1018,7 +1001,7 @@ def generate_integer_byte_conversion_method(type_name: str, bits: int, signed: b
             result = result | (byteVal << shift);
             i = i + 1
         }}
-        .Some({narrow_result})
+        self.raw = {narrow_result}.raw;
     }}'''
 
 
@@ -1057,7 +1040,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         negate_method = f"""/// Two's-complement negation. Wraps at the minimum value:
     /// `{type_name}.minValue.negate() == {type_name}.minValue`. Use
     /// `negateChecked` to surface the overflow.
-    public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
+    public consuming func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
         abs_method = f"""/// Absolute value. Wraps at the minimum value
     /// (`{type_name}.minValue.abs() == {type_name}.minValue`); use
     /// `absChecked` if that's a problem.
@@ -1195,60 +1178,54 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     """Generate the parse() method for float types."""
     lang_type = f"f{bits}"
 
-    method = '''    /// Parses a `__TYPE_NAME__` from a string. Recognises decimal
+    method = '''    /// @name Parsing
+    /// Parses a `__TYPE_NAME__` from a string. Recognises decimal
     /// (`"3.14"`), scientific (`"1.5e10"`, `"2.5E-3"`), and the special
     /// tokens `"inf"`, `"-inf"`, `"+inf"`, `"infinity"`, `"nan"`
-    /// (case-insensitive). Returns `None` for any other input.
+    /// (case-insensitive). Returns `null` for any other input.
     ///
     /// # Examples
     ///
     /// ```
-    /// __TYPE_NAME__.parse("3.14");      // Some(3.14)
-    /// __TYPE_NAME__.parse("-2.5e10");   // Some(-2.5e10)
-    /// __TYPE_NAME__.parse("inf");       // Some(infinity)
-    /// __TYPE_NAME__.parse("nan");       // Some(nan)
-    /// __TYPE_NAME__.parse("abc");       // None
-    /// __TYPE_NAME__.parse("");          // None
+    /// __TYPE_NAME__(parsing: "3.14");      // Some(3.14)
+    /// __TYPE_NAME__(parsing: "-2.5e10");   // Some(-2.5e10)
+    /// __TYPE_NAME__(parsing: "inf");       // Some(infinity)
+    /// __TYPE_NAME__(parsing: "nan");       // Some(nan)
+    /// __TYPE_NAME__(parsing: "abc");       // None
+    /// __TYPE_NAME__(parsing: "");          // None
     /// ```
-    public static func parse(string: String) -> __TYPE_NAME__? {
+    public init(parsing string: String)? {
         let len = string.byteCount;
         if len == 0 {
-            return .None
+            return null
         }
 
-        // Check for special values
-        // "nan"
         if len == 3 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
             let b2: UInt8 = string.bytes(unchecked: 2);
-            // 'n' or 'N' = 110 or 78
-            // 'a' or 'A' = 97 or 65
             let isN0 = Int64(from: b0) == 110 or Int64(from: b0) == 78;
             let isA1 = Int64(from: b1) == 97 or Int64(from: b1) == 65;
             let isN2 = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             if isN0 and isA1 and isN2 {
-                return .Some(__TYPE_NAME__.nan)
+                self.raw = lang.__LANG_TYPE___nan();
+                return
             }
         }
 
-        // "inf"
         if len == 3 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
             let b2: UInt8 = string.bytes(unchecked: 2);
-            // 'i' or 'I' = 105 or 73
-            // 'n' or 'N' = 110 or 78
-            // 'f' or 'F' = 102 or 70
             let isI = Int64(from: b0) == 105 or Int64(from: b0) == 73;
             let isN = Int64(from: b1) == 110 or Int64(from: b1) == 78;
             let isF = Int64(from: b2) == 102 or Int64(from: b2) == 70;
             if isI and isN and isF {
-                return .Some(__TYPE_NAME__.infinity)
+                self.raw = lang.__LANG_TYPE___infinity();
+                return
             }
         }
 
-        // "-inf"
         if len == 4 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
@@ -1259,11 +1236,11 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isMinus and isI and isN and isF {
-                return .Some(__TYPE_NAME__(raw: lang.__LANG_TYPE___neg(lang.__LANG_TYPE___infinity())))
+                self.raw = lang.__LANG_TYPE___neg(lang.__LANG_TYPE___infinity());
+                return
             }
         }
 
-        // "+inf"
         if len == 4 {
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
@@ -1274,13 +1251,12 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isN = Int64(from: b2) == 110 or Int64(from: b2) == 78;
             let isF = Int64(from: b3) == 102 or Int64(from: b3) == 70;
             if isPlus and isI and isN and isF {
-                return .Some(__TYPE_NAME__.infinity)
+                self.raw = lang.__LANG_TYPE___infinity();
+                return
             }
         }
 
-        // "infinity"
         if len == 8 {
-            // Check for "infinity" (case insensitive)
             let b0: UInt8 = string.bytes(unchecked: 0);
             let b1: UInt8 = string.bytes(unchecked: 1);
             let b2: UInt8 = string.bytes(unchecked: 2);
@@ -1298,30 +1274,27 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             let isT6 = Int64(from: b6) == 116 or Int64(from: b6) == 84;
             let isY7 = Int64(from: b7) == 121 or Int64(from: b7) == 89;
             if isI0 and isN1 and isF2 and isI3 and isN4 and isI5 and isT6 and isY7 {
-                return .Some(__TYPE_NAME__.infinity)
+                self.raw = lang.__LANG_TYPE___infinity();
+                return
             }
         }
 
-        // Parse regular number: [+-]?[0-9]*[.]?[0-9]*([eE][+-]?[0-9]+)?
         var index: Int64 = 0;
         var isNegative = false;
 
-        // Check for sign
         let firstByte: UInt8 = string.bytes(unchecked: 0);
         let firstByteVal = Int64(from: firstByte);
-        if firstByteVal == 45 {  // '-'
+        if firstByteVal == 45 {
             isNegative = true;
             index = 1
-        } else if firstByteVal == 43 {  // '+'
+        } else if firstByteVal == 43 {
             index = 1
         }
 
-        // Must have something after sign
         if index >= len {
-            return .None
+            return null
         }
 
-        // Parse integer part - inline digit check (48='0', 57='9')
         var integerPart: __TYPE_NAME__ = 0.0;
         var hasIntegerPart = false;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
@@ -1336,11 +1309,10 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
         }
 
-        // Parse fractional part
         var fractionalPart: __TYPE_NAME__ = 0.0;
         var hasFractionalPart = false;
 
-        if index < len and currentByte == 46 {  // '.'
+        if index < len and currentByte == 46 {
             index = index + 1;
             var divisor: __TYPE_NAME__ = 10.0;
 
@@ -1359,31 +1331,29 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
         }
 
-        // Must have at least integer or fractional part
         if not hasIntegerPart and not hasFractionalPart {
-            return .None
+            return null
         }
 
         var result = integerPart + fractionalPart;
 
-        // Parse exponent part
-        if index < len and (currentByte == 101 or currentByte == 69) {  // 'e' or 'E'
+        if index < len and (currentByte == 101 or currentByte == 69) {
             index = index + 1;
 
             if index >= len {
-                return .None  // 'e' with no exponent
+                return null
             }
 
             var expNegative = false;
             currentByte = Int64(from: string.bytes(unchecked: index));
 
-            if currentByte == 45 {  // '-'
+            if currentByte == 45 {
                 expNegative = true;
                 index = index + 1;
                 if index < len {
                     currentByte = Int64(from: string.bytes(unchecked: index))
                 }
-            } else if currentByte == 43 {  // '+'
+            } else if currentByte == 43 {
                 index = index + 1;
                 if index < len {
                     currentByte = Int64(from: string.bytes(unchecked: index))
@@ -1391,7 +1361,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
 
             if index >= len {
-                return .None  // No exponent digits
+                return null
             }
 
             var exponent: Int64 = 0;
@@ -1407,10 +1377,9 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
 
             if not hasExpDigit {
-                return .None
+                return null
             }
 
-            // Apply exponent using pow
             let expFloat = __TYPE_NAME__(from: exponent);
             let ten: __TYPE_NAME__ = 10.0;
             if expNegative {
@@ -1420,17 +1389,15 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
         }
 
-        // Check for trailing characters
         if index != len {
-            return .None
+            return null
         }
 
-        // Apply sign
         if isNegative {
             result = result.negate()
         }
 
-        .Some(result)
+        self.raw = result.raw;
     }'''
 
     return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
@@ -1650,11 +1617,11 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendChar('-')
+                result.append(char: '-')
             } else if options.sign == .Always {
-                result.appendChar('+')
+                result.append(char: '+')
             } else if options.sign == .Space {
-                result.appendChar(' ')
+                result.append(char: ' ')
             }
         }
         if trimTrailingZeros {
@@ -1703,7 +1670,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
 
         result.append(number);
         if suffixPercent {
-            result.appendChar('%')
+            result.append(char: '%')
         }
 
         _writePadded(into: writer, result, options)

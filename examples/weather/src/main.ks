@@ -7,11 +7,12 @@ module weather.main
 import perch.app.(App)
 import perch.request.(Request)
 import perch.response.(Response)
+import perch.middleware.(Logger)
+import http.content.(Html)
 import swoop.swoop.(Swoop)
 import quill.json.parser.(parseJson)
 import weather.ui.(pageHtml, searchResultsHtml, weatherPageHtml, errorHtml)
 import http.url.(percentEncode, percentDecode)
-import perch.middleware.(logger)
 
 // ============================================================================
 // CONTEXT
@@ -37,7 +38,7 @@ func handleSearch(req: Request, ctx: Ctx) -> Response {
         .None => ""
     };
     if city.byteCount == 0 {
-        return Response.ok(html: "")
+        return Response.ok(Html(""))
     };
 
     let url = ctx.geoBase + "/v1/search?name=" + percentEncode(city) + "&count=5&language=en";
@@ -45,12 +46,12 @@ func handleSearch(req: Request, ctx: Ctx) -> Response {
     match Swoop().fetch(url) {
         .Ok(res) => {
             match parseJson(res.body) {
-                .Ok(json) => Response.ok(html: searchResultsHtml(json)),
-                .Err(e) => Response.ok(html: errorHtml("Failed to parse response."))
+                .Ok(json) => Response.ok(Html(searchResultsHtml(json))),
+                .Err(e) => Response.ok(Html(errorHtml("Failed to parse response.")))
             }
         },
         .Err(e) => {
-            Response.ok(html: errorHtml("Could not reach weather service."))
+            Response.ok(Html(errorHtml("Could not reach weather service.")))
         }
     }
 }
@@ -58,11 +59,11 @@ func handleSearch(req: Request, ctx: Ctx) -> Response {
 func handleWeather(req: Request, ctx: Ctx) -> Response {
     let lat = match req.query("lat") {
         .Some(v) => v,
-        .None => return Response.ok(html: errorHtml("Missing latitude."))
+        .None => return Response.ok(Html(errorHtml("Missing latitude.")))
     };
     let lon = match req.query("lon") {
         .Some(v) => v,
-        .None => return Response.ok(html: errorHtml("Missing longitude."))
+        .None => return Response.ok(Html(errorHtml("Missing longitude.")))
     };
     let name = match req.query("name") {
         .Some(v) => percentDecode(v),
@@ -80,12 +81,12 @@ func handleWeather(req: Request, ctx: Ctx) -> Response {
     match Swoop().fetch(url) {
         .Ok(res) => {
             match parseJson(res.body) {
-                .Ok(json) => Response.ok(html: weatherPageHtml(json, name)),
-                .Err(e) => Response.ok(html: errorHtml("Failed to parse weather data."))
+                .Ok(json) => Response.ok(Html(weatherPageHtml(json, name))),
+                .Err(e) => Response.ok(Html(errorHtml("Failed to parse weather data.")))
             }
         },
         .Err(e) => {
-            Response.ok(html: errorHtml("Could not reach weather service."))
+            Response.ok(Html(errorHtml("Could not reach weather service.")))
         }
     }
 }
@@ -94,30 +95,31 @@ func handleWeather(req: Request, ctx: Ctx) -> Response {
 // MAIN
 // ============================================================================
 
+@main
 func main() {
     let landing = pageHtml();
     let ctx = Ctx(geoBase: "https://geocoding-api.open-meteo.com", weatherBase: "https://api.open-meteo.com", landingHtml: landing);
     var app = App[Ctx](ctx);
-    app.use(logger[Ctx]());
+    app.use(Logger[Ctx]());
 
-    app.onGet("/", { (req: Request, ctx: Ctx) in
-        Response.ok(html: ctx.landingHtml)
+    app.route(get: "/", { (req: Request, ctx: Ctx) in
+        Response.ok(Html(ctx.landingHtml))
     });
 
-    app.onGet("/search", { (req: Request, ctx: Ctx) in
+    app.route(get: "/search", { (req: Request, ctx: Ctx) in
         handleSearch(req, ctx)
     });
 
-    app.onGet("/weather", { (req: Request, ctx: Ctx) in
+    app.route(get: "/weather", { (req: Request, ctx: Ctx) in
         handleWeather(req, ctx)
     });
 
     let port: UInt16 = 8080;
-    let _ = println("Starting weather dashboard on http://localhost:8080");
+     println("Starting weather dashboard on http://localhost:8080");
     match app.listen(port) {
         .Ok(_) => {},
         .Err(e) => {
-            let _ = println("Error: " + e.description());
+             println("Error: " + e.description());
         }
     }
 }

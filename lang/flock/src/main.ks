@@ -28,14 +28,17 @@ import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
 // ENTRY POINT
 // ============================================================================
 
-func main() {
+@main
+func main() -> lang.i32 {
     let argv = getArgv();
 
     var cmd = Command("flock");
     cmd = cmd.about("Package manager for Kestrel");
     cmd = cmd.version("0.1.0");
-    cmd = cmd.subcommand(Command("build").about("Build the current package"));
-    cmd = cmd.subcommand(Command("run").about("Build and run the current package"));
+    cmd = cmd.subcommand(Command("build").about("Build the current package")
+        .argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)"));
+    cmd = cmd.subcommand(Command("run").about("Build and run the current package")
+        .argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)"));
     cmd = cmd.subcommand(Command("check").about("Type-check the current package"));
     cmd = cmd.subcommand(Command("init").about("Create a new flock.toml in the current directory"));
     cmd = cmd.subcommand(Command("publish").about("Publish a package to the registry"));
@@ -45,10 +48,16 @@ func main() {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
+                    // The subcommand's own flags live in submatches[0]; `--release`
+                    // turns on optimized codegen for build/run.
+                    var release = false;
+                    if matches.submatches.count > 0 {
+                        release = matches.submatches(unchecked: 0).hasFlag("release")
+                    }
                     if sub == "build" {
-                        handleBuild()
+                        handleBuild(release: release)
                     } else if sub == "run" {
-                        handleRun()
+                        handleRun(release: release)
                     } else if sub == "check" {
                         handleCheck()
                     } else if sub == "init" {
@@ -57,17 +66,25 @@ func main() {
                         handlePublish()
                     } else if sub == "update" {
                         handleUpdate()
+                    } else {
+                        0
                     }
                 },
                 .None => {
                     // No subcommand — show help
                     let _ = println(cmd.helpText());
+                    0
                 }
             }
         },
         .Err(e) => {
-            // ParseError.Message is used for --help output
+            // ParseError.Message carries --help/--version text (success); every
+            // other variant is a real usage error and must exit non-zero.
             let _ = eprintln(e.description());
+            match e {
+                .Message(_) => 0,
+                _ => 1
+            }
         }
     }
 }
@@ -76,56 +93,59 @@ func main() {
 // COMMAND HANDLERS
 // ============================================================================
 
-func handleBuild() {
+func handleBuild(release release: Bool) -> lang.i32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
-            var msg = String(); msg.append("Building "); msg.append(info.name); msg.append("...");
+            var msg = String(); msg.append("Building "); msg.append(info.name);
+            if release { msg.append(" (release)") };
+            msg.append("...");
             let _ = println(msg);
-            match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks) {
+            match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
                 .Ok(_) => {
                     var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(info.name); doneMsg.append(" successfully");
                     let _ = println(doneMsg);
+                    0
                 },
-                .Err(e) => { let _ = eprintln(e.description()); }
+                .Err(e) => { let _ = eprintln(e.description()); 1 }
             }
         }
     }
 }
 
-func handleRun() {
+func handleRun(release release: Bool) -> lang.i32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
-            match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks) {
-                .Ok(_) => {},
-                .Err(e) => { let _ = eprintln(e.description()); }
+            match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
+                .Ok(_) => 0,
+                .Err(e) => { let _ = eprintln(e.description()); 1 }
             }
         }
     }
 }
 
-func handleCheck() {
+func handleCheck() -> lang.i32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Checking "); msg.append(info.name); msg.append("...");
             let _ = println(msg);
-            match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String]()) {
-                .Ok(_) => { let _ = println("Check passed"); },
-                .Err(e) => { let _ = eprintln(e.description()); }
+            match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String](), release: false) {
+                .Ok(_) => { let _ = println("Check passed"); 0 },
+                .Err(e) => { let _ = eprintln(e.description()); 1 }
             }
         }
     }
 }
 
-func handleInit() {
+func handleInit() -> lang.i32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if fileExists( manifestPath) {
         let _ = eprintln("flock.toml already exists in this directory");
-        return
+        return 1
     }
 
     // Extract directory name as default package name
@@ -138,7 +158,7 @@ func handleInit() {
         .Ok(_) => { let _ = println("Created flock.toml"); },
         .Err(e) => {
             let _ = eprintln("Failed to create flock.toml");
-            return
+            return 1
         }
     }
 
@@ -149,15 +169,16 @@ func handleInit() {
         let _ = spawn(mkdirCmd);
         let _ = println("Created src/");
     }
+    0
 }
 
-func handlePublish() {
+func handlePublish() -> lang.i32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if not fileExists(manifestPath) {
         let _ = eprintln("flock.toml not found in current directory");
-        return
+        return 1
     }
 
     // Parse manifest
@@ -173,13 +194,13 @@ func handlePublish() {
     match readFileString(manifestPath) {
         .Err(_) => {
             let _ = eprintln("cannot read flock.toml");
-            return
+            return 1
         },
         .Ok(source) => {
             match parseManifest(source: source) {
                 .Err(e) => {
                     let _ = eprintln(e.description());
-                    return
+                    return 1
                 },
                 .Ok(m) => manifest = m
             }
@@ -196,7 +217,7 @@ func handlePublish() {
         .None => {
             let _ = eprintln("FLOCK_ORG environment variable not set");
             let _ = eprintln("Usage: FLOCK_ORG=myorg flock publish");
-            return
+            return 1
         }
     }
 
@@ -220,7 +241,7 @@ func handlePublish() {
             .None => {
                 let _ = eprintln("No auth token found.");
                 let _ = eprintln("Set FLOCK_TOKEN or save your token to ~/.kestrel/credentials");
-                return
+                return 1
             }
         }
     }
@@ -234,7 +255,7 @@ func handlePublish() {
     let tarExit = spawn(tarCmd);
     if tarExit != 0 {
         let _ = eprintln("failed to create archive");
-        return
+        return 1
     }
 
     // Generate docs (best-effort — publish continues without docs)
@@ -276,9 +297,10 @@ func handlePublish() {
     let _ = spawn(rmCmd);
     var rmDocsCmd = String(); rmDocsCmd.append("rm -rf "); rmDocsCmd.append(docsDir);
     let _ = spawn(rmDocsCmd);
+    0
 }
 
-func handleUpdate() {
+func handleUpdate() -> lang.i32 {
     let cwd = getcwd();
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
 
@@ -291,10 +313,11 @@ func handleUpdate() {
 
     // Re-resolve everything
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Dependencies updated for "); msg.append(info.name);
             let _ = println(msg);
+            0
         }
     }
 }

@@ -1,0 +1,11 @@
+; function: Test.touch
+bb0:
+    %v1 = literal i64 42  // @owned Int64
+    %v2 = field_addr %v0, Test.Handle, .0  // @owned Pointer[Int64]
+    store_assign %v2, %v1
+    %v3 = literal ()  // @owned ()
+    %v4 = literal ()  // @owned ()
+    destroy_value %v3
+    destroy_value %v2
+    return %v4
+

@@ -4,6 +4,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x = 42;
     let result = "value is \(x)";

@@ -25,7 +25,7 @@ public protocol Addable[Other = Self] {
 
     /// Returns `self + other`.
     @builtin(.AddOperatorMethod)
-    func add(other: Other) -> Output
+    consuming func add(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the `-` binary operator.
@@ -35,7 +35,7 @@ public protocol Subtractable[Other = Self] {
 
     /// Returns `self - other`.
     @builtin(.SubtractOperatorMethod)
-    func subtract(other: Other) -> Output
+    consuming func subtract(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the `*` operator.
@@ -58,7 +58,7 @@ public protocol Multipliable[Other = Self] {
 
     /// Returns `self * other`.
     @builtin(.MultiplyOperatorMethod)
-    func multiply(other: Other) -> Output
+    consuming func multiply(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the `/` operator.
@@ -71,7 +71,7 @@ public protocol Divisible[Other = Self] {
 
     /// Returns `self / other`.
     @builtin(.DivideOperatorMethod)
-    func divide(other: Other) -> Output
+    consuming func divide(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the `%` operator.
@@ -85,7 +85,7 @@ public protocol Modulo[Other = Self] {
 
     /// Returns `self % other`.
     @builtin(.ModuloOperatorMethod)
-    func modulo(other: Other) -> Output
+    consuming func modulo(consuming other: Other) -> Output
 }
 
 /// Raw protocol backing the unary `-` operator.
@@ -99,5 +99,5 @@ public protocol Negatable {
 
     /// Returns `-self`.
     @builtin(.NegateOperatorMethod)
-    func negate() -> Output
+    consuming func negate() -> Output
 }

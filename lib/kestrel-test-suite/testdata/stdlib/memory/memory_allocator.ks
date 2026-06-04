@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test SystemAllocator init
             var alloc = std.memory.SystemAllocator();

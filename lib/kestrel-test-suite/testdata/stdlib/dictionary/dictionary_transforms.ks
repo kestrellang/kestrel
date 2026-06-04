@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
             let _ = dict.insert(1, 10);
@@ -26,8 +27,8 @@ module Test
             if compacted(2).unwrap() != 200 { return 7 }
             if compacted(3).unwrap() != 300 { return 8 }
 
-            // Test filter(matching:)
-            let filtered = dict.filter(matching: { (k, v) in v >= 20 });
+            // Test filter(where:)
+            let filtered = dict.filter(where: { (k, v) in v >= 20 });
             if filtered.count != 2 { return 9 }
             if filtered.contains(1) { return 10 }
             if filtered(2).unwrap() != 20 { return 11 }

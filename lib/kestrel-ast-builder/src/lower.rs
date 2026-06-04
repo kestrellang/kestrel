@@ -122,16 +122,17 @@ impl LowerCtx {
                         || children[i + 1..]
                             .iter()
                             .all(|c| c.kind() == SyntaxKind::RBrace);
-                    if is_last && tail_expr.is_none()
+                    if is_last
+                        && tail_expr.is_none()
                         && let Some(inner) = child.children().next()
-                            && inner.kind() == SyntaxKind::ExpressionStatement
-                                && !has_semicolon(&inner)
-                            {
-                                // Promote to tail expression
-                                let expr_id = self.lower_expr_stmt_as_expr(&inner);
-                                tail_expr = Some(expr_id);
-                                continue;
-                            }
+                        && inner.kind() == SyntaxKind::ExpressionStatement
+                        && !has_semicolon(&inner)
+                    {
+                        // Promote to tail expression
+                        let expr_id = self.lower_expr_stmt_as_expr(&inner);
+                        tail_expr = Some(expr_id);
+                        continue;
+                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
@@ -159,7 +160,7 @@ impl LowerCtx {
         match node.kind() {
             SyntaxKind::VariableDeclaration => self.lower_variable_decl(node),
             SyntaxKind::ExpressionStatement => self.lower_expr_stmt(node),
-            SyntaxKind::GuardLetStatement => self.lower_guard_let(node),
+            SyntaxKind::GuardStatement => self.lower_guard(node),
             SyntaxKind::DeinitStatement => self.lower_deinit_stmt(node),
             _ => {
                 // Fallback: wrap as expression statement if it looks like an expr
@@ -215,12 +216,12 @@ impl LowerCtx {
                     found_equals = true;
                 } else if found_equals
                     && let Some(expr_node) = child.into_node()
-                        && (expr_node.kind() == SyntaxKind::Expression
-                            || is_expr_kind(expr_node.kind()))
-                        {
-                            result = Some(self.lower_expr(&expr_node));
-                            break;
-                        }
+                    && (expr_node.kind() == SyntaxKind::Expression
+                        || is_expr_kind(expr_node.kind()))
+                {
+                    result = Some(self.lower_expr(&expr_node));
+                    break;
+                }
             }
             result
         };
@@ -257,11 +258,11 @@ impl LowerCtx {
         self.alloc_stmt(AstStmt::Expr { expr, span })
     }
 
-    /// `guard let pattern = expr [, let pattern = expr] else { block }`
-    fn lower_guard_let(&mut self, node: &SyntaxNode) -> StmtId {
+    /// `guard <condition> [, <condition>] else { block }`
+    fn lower_guard(&mut self, node: &SyntaxNode) -> StmtId {
         let span = self.span(node);
 
-        let conditions = self.lower_let_conditions(node, SyntaxKind::GuardLetCondition);
+        let conditions = self.lower_let_conditions(node, SyntaxKind::GuardCondition);
 
         // Else block — find CodeBlock child
         let else_body = node
@@ -273,7 +274,7 @@ impl LowerCtx {
                 tail_expr: None,
             });
 
-        self.alloc_stmt(AstStmt::GuardLet {
+        self.alloc_stmt(AstStmt::Guard {
             conditions,
             else_body,
             span,
@@ -312,9 +313,7 @@ impl LowerCtx {
                 if let Some(text) = first_token_text(&node) {
                     let form = crate::string_token::classify_string_token(&text);
                     if form.body_end > form.body_start
-                        && string_contains_interpolation(
-                            &text[form.body_start..form.body_end],
-                        )
+                        && string_contains_interpolation(&text[form.body_start..form.body_end])
                     {
                         self.lower_interpolated_string_from_token(&text, &node)
                     } else {
@@ -324,9 +323,7 @@ impl LowerCtx {
                     self.lower_literal(&node, AstLiteral::String)
                 }
             },
-            SyntaxKind::ExprRawString => {
-                self.lower_literal(&node, AstLiteral::RawString)
-            },
+            SyntaxKind::ExprRawString => self.lower_literal(&node, AstLiteral::RawString),
             SyntaxKind::ExprChar => self.lower_literal(&node, AstLiteral::Char),
             SyntaxKind::ExprBool => {
                 let span = self.span(&node);
@@ -474,9 +471,10 @@ impl LowerCtx {
         // If no structured children, the interpolated string is a raw token —
         // treat entire text as a literal part
         if parts.is_empty()
-            && let Some(text) = first_token_text(node) {
-                parts.push(StringPart::Literal(text));
-            }
+            && let Some(text) = first_token_text(node)
+        {
+            parts.push(StringPart::Literal(text));
+        }
 
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
@@ -699,11 +697,12 @@ impl LowerCtx {
                     }
                 }
             } else if let Some(child) = elem.as_node()
-                && child.kind() == SyntaxKind::Missing {
-                    // Parser recovered `.<missing>` after a path; treat it
-                    // as a member access whose member name is empty.
-                    trailing_missing_member = true;
-                }
+                && child.kind() == SyntaxKind::Missing
+            {
+                // Parser recovered `.<missing>` after a path; treat it
+                // as a member access whose member name is empty.
+                trailing_missing_member = true;
+            }
         }
 
         if trailing_missing_member && !segments.is_empty() {
@@ -753,29 +752,30 @@ impl LowerCtx {
         let mut i = start_idx;
         while i < elements.len() {
             if let Some(token) = elements[i].as_token()
-                && token.kind() == SyntaxKind::Dot {
+                && token.kind() == SyntaxKind::Dot
+            {
+                i += 1;
+                if let Some(id_text) = member_identifier_at(&elements, i) {
                     i += 1;
-                    if let Some(id_text) = member_identifier_at(&elements, i) {
-                        i += 1;
 
-                        let type_args = elements
-                            .get(i)
-                            .and_then(|e| e.as_node())
-                            .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
-                            .map(|n| {
-                                i += 1;
-                                extract_type_args(n, self.file_id)
-                            });
-
-                        current = self.alloc_expr(AstExpr::MemberAccess {
-                            base: current,
-                            member: id_text,
-                            type_args,
-                            span: span.clone(),
+                    let type_args = elements
+                        .get(i)
+                        .and_then(|e| e.as_node())
+                        .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
+                        .map(|n| {
+                            i += 1;
+                            extract_type_args(n, self.file_id)
                         });
-                        continue;
-                    }
+
+                    current = self.alloc_expr(AstExpr::MemberAccess {
+                        base: current,
+                        member: id_text,
+                        type_args,
+                        span: span.clone(),
+                    });
+                    continue;
                 }
+            }
             i += 1;
         }
 
@@ -866,12 +866,17 @@ impl LowerCtx {
             .map(|c| self.lower_expr(&c))
             .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span: span.clone() }));
 
-        // For now, only Unwrap (!) postfix operator
-        self.alloc_expr(AstExpr::Postfix {
-            operand,
-            op: PostfixOp::Unwrap,
-            span,
-        })
+        let op = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| matches!(t.kind(), SyntaxKind::Bang | SyntaxKind::DotDot))
+            .map(|t| match t.kind() {
+                SyntaxKind::DotDot => PostfixOp::RangeFrom,
+                _ => PostfixOp::Unwrap,
+            })
+            .unwrap_or(PostfixOp::Unwrap);
+
+        self.alloc_expr(AstExpr::Postfix { operand, op, span })
     }
 
     fn lower_binary(&mut self, node: &SyntaxNode) -> ExprId {
@@ -1100,11 +1105,11 @@ impl LowerCtx {
             if let Some(expr_node) = node.children().find(|c| {
                 (c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
                     && c.kind() != SyntaxKind::CodeBlock
-            })
-                && appears_before_code_block(node, &expr_node) {
-                    let expr = self.lower_expr(&expr_node);
-                    conditions.push(IfCondition::Expr(expr));
-                }
+            }) && appears_before_code_block(node, &expr_node)
+            {
+                let expr = self.lower_expr(&expr_node);
+                conditions.push(IfCondition::Expr(expr));
+            }
         }
 
         conditions
@@ -1301,7 +1306,17 @@ impl LowerCtx {
                             .find(|c| is_type_kind(c.kind()))
                             .and_then(|c| ast_type_from_cst(&c, self.file_id));
 
-                        ClosureParam { pattern, ty }
+                        // A leading `mutating` token marks a by-reference param.
+                        let is_mut = param_node.children_with_tokens().any(|e| {
+                            e.as_token()
+                                .is_some_and(|t| t.kind() == SyntaxKind::Mutating)
+                        });
+
+                        ClosureParam {
+                            pattern,
+                            ty,
+                            is_mut,
+                        }
                     })
                     .collect()
             })
@@ -1319,6 +1334,7 @@ impl LowerCtx {
             params.push(ClosureParam {
                 pattern: pat,
                 ty: None,
+                is_mut: false,
             });
         }
 
@@ -1344,6 +1360,23 @@ impl LowerCtx {
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::Statement => {
+                    // Demote any pending tail expression (e.g. a statement-like
+                    // `while`/`for`/`if` that preceded this statement) to a
+                    // statement FIRST, so source order is preserved. Without
+                    // this, a statement after such an expression was appended to
+                    // `stmts` while the expression stayed as `tail_expr`, lowering
+                    // the later statement *before* the loop.
+                    if let Some(prev) = tail_expr.take() {
+                        let prev_span = match &self.exprs[prev] {
+                            AstExpr::Error { span } => span.clone(),
+                            _ => Span::synthetic(self.file_id),
+                        };
+                        let stmt = self.alloc_stmt(AstStmt::Expr {
+                            expr: prev,
+                            span: prev_span,
+                        });
+                        stmts.push(stmt);
+                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
@@ -1472,6 +1505,8 @@ impl LowerCtx {
             SyntaxKind::LiteralPattern => self.lower_literal_pattern(&node),
             SyntaxKind::RangePattern => self.lower_range_pattern(&node),
             SyntaxKind::EnumPattern => self.lower_enum_pattern(&node),
+            SyntaxKind::NullPattern => self.lower_null_pattern(&node),
+            SyntaxKind::SomePattern => self.lower_some_pattern(&node),
             SyntaxKind::StructPattern => self.lower_struct_pattern(&node),
             SyntaxKind::ArrayPattern => self.lower_array_pattern(&node),
             SyntaxKind::AtPattern => self.lower_at_pattern(&node),
@@ -1708,6 +1743,38 @@ impl LowerCtx {
         })
     }
 
+    /// Lower the `null` keyword pattern to `AstPat::Enum { case_name: "None" }`.
+    /// Bare sugar for matching `Optional.None`; type-checking enforces the
+    /// scrutinee is `Optional[T]` via existing enum-case resolution.
+    fn lower_null_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+        self.alloc_pat(AstPat::Enum {
+            case_name: "None".to_string(),
+            args: vec![],
+            span,
+        })
+    }
+
+    /// Lower `some PAT` to `AstPat::Enum { case_name: "Some", args: [PAT] }`.
+    /// The inner pattern is lowered recursively; nested sugar like `some some x`
+    /// or `some null` flows through naturally.
+    fn lower_some_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+        let inner = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Pattern || is_pattern_kind(c.kind()))
+            .map(|p| self.lower_pat(&p))
+            .unwrap_or_else(|| self.alloc_pat(AstPat::Error { span: span.clone() }));
+        self.alloc_pat(AstPat::Enum {
+            case_name: "Some".to_string(),
+            args: vec![EnumPatArg {
+                label: None,
+                pattern: inner,
+            }],
+            span,
+        })
+    }
+
     /// Extract label from an EnumPatternArg: Identifier followed by Colon.
     fn extract_pattern_arg_label(&self, node: &SyntaxNode) -> Option<String> {
         let mut iter = node.children_with_tokens().filter(|e| {
@@ -1868,7 +1935,7 @@ impl LowerCtx {
 
     // ===== Shared helpers =====
 
-    /// Lower IfLetCondition/WhileLetCondition/GuardLetCondition nodes.
+    /// Lower IfLetCondition/WhileLetCondition/GuardCondition nodes.
     fn lower_let_conditions(
         &mut self,
         parent: &SyntaxNode,
@@ -2005,6 +2072,8 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::LiteralPattern
             | SyntaxKind::RangePattern
             | SyntaxKind::EnumPattern
+            | SyntaxKind::NullPattern
+            | SyntaxKind::SomePattern
             | SyntaxKind::StructPattern
             | SyntaxKind::ArrayPattern
             | SyntaxKind::AtPattern
@@ -2102,6 +2171,8 @@ fn token_to_unary_op(kind: SyntaxKind) -> Option<UnaryOp> {
         SyntaxKind::Not => Some(UnaryOp::LogicalNot),
         SyntaxKind::Bang => Some(UnaryOp::BitNot),
         SyntaxKind::Plus => Some(UnaryOp::Pos),
+        SyntaxKind::DotDotLess => Some(UnaryOp::RangeUpTo),
+        SyntaxKind::DotDotEquals => Some(UnaryOp::RangeThrough),
         _ => None,
     }
 }
@@ -2150,6 +2221,9 @@ fn token_to_compound_assign_op(kind: SyntaxKind) -> Option<CompoundAssignOp> {
 }
 
 #[cfg(test)]
+// String-interpolation/closure helpers are defined after this module by design;
+// keep them co-located with the lowering code rather than hoisting above the tests.
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::build::build_declarations;

@@ -51,9 +51,9 @@ pub fn build_type_parameters(
                 .children()
                 .find(|c| is_type_kind(c.kind()))
                 .and_then(|c| ast_type_from_cst(&c, file_id))
-            {
-                world.set(entity, TypeAnnotation(ty));
-            }
+        {
+            world.set(entity, TypeAnnotation(ty));
+        }
 
         param_entities.push(entity);
     }

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // tryForEach: forEach where action returns Result
             // All succeed

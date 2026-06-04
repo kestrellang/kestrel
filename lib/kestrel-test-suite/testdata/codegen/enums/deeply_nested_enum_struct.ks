@@ -24,6 +24,7 @@ func extract(o: Outer) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let outer = Outer(
         middle: Middle.Value(inner: Inner(value: 30)),

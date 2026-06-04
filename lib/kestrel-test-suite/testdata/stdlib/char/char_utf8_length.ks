@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ASCII char = 1 byte
             let a: std.text.Char = 'a';

@@ -19,6 +19,7 @@ func clear(mutating opt: Option) {
     opt = Option.None;
 }
 
+@main
 func main() -> lang.i64 {
     var opt = Option.Some(value: 42);
     if is_some(opt) == false { return 1 }

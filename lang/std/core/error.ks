@@ -11,12 +11,16 @@ module std.core
 /// them — `Continue` flows to the next instruction, `Break` lowers into a
 /// branch back to the function's epilogue via `FromResidual`.
 @builtin(.ControlFlowEnum)
-public enum ControlFlow[C, B] {
+public enum ControlFlow[C, B]: not Copyable {
     /// Normal flow — carries the value to use as the operator result.
     case Continue(C)
     /// Residual-return flow — carries the residual to propagate via `FromResidual`.
     case Break(B)
 }
+
+/// Move-only by default so `tryExtract()` can carry a non-Copyable success or
+/// residual payload; bit-copyable only when both payloads are Copyable.
+extend ControlFlow[C, B]: Copyable where C: Copyable, B: Copyable { }
 
 /// Protocol enabling the `try expr` operator.
 ///
@@ -45,7 +49,7 @@ public protocol Tryable {
 
     /// Splits `self` into the success value or the early-return residual.
     @builtin(.TryExtractMethod)
-    func tryExtract() -> ControlFlow[Output, Residual]
+    consuming func tryExtract() -> ControlFlow[Output, Residual]
 }
 
 /// Protocol that lets a return type absorb a `try`-propagated residual.
@@ -69,6 +73,9 @@ public protocol FromResidual[Residual] {
 @builtin(.FromValueProtocol)
 protocol FromValue[Output] {
     /// Lifts `value` into an instance of the conforming type.
+    /// Takes `value` `consuming`: the promotion site transfers ownership, so
+    /// `from` moves it into the wrapper rather than cloning a borrow and leaking
+    /// the original (the kestrel-wall per-GET query-result leak).
     @builtin(.FromValueMethod)
-    static func from(value: Output) -> Self
+    static func from(consuming value: Output) -> Self
 }

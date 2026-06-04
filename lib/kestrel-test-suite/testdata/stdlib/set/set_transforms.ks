@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(1);
@@ -11,8 +12,8 @@ module Test
             let _ = s.insert(4);
             let _ = s.insert(5);
 
-            // Test filter(matching:)
-            let evens = s.filter(matching: { (x) in x % 2 == 0 });
+            // Test filter(where:)
+            let evens = s.filter(where: { (x) in x % 2 == 0 });
             if evens.count != 2 { return 1 }
             if evens.contains(2) == false { return 2 }
             if evens.contains(4) == false { return 3 }

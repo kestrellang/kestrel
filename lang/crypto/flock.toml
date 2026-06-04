@@ -1,0 +1,9 @@
+[package]
+name = "crypto"
+version = "0.1.0"
+description = "Cryptographic hash functions for Kestrel"
+author = "jkpdino"
+license = "MIT"
+repository = "https://github.com/kestrellang/kestrel"
+
+[dependencies]

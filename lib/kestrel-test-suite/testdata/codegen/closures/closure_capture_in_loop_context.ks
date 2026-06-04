@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let base: std.numeric.Int64 = 40;
     let f = { (x: std.numeric.Int64) in base + x };

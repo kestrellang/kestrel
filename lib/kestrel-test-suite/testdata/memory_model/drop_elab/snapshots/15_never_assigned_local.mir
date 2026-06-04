@@ -1,0 +1,22 @@
+; function: Test.example
+bb0:
+    branch %v0, bb1, bb2
+
+bb1:
+    %v1 = literal i64 1  // @owned Int64
+    %v2 = struct Test.Handle { .0: %v1 }  // @owned Test.Handle
+    %v3 = move_value %v2  // @owned Test.Handle
+    %v4 = call Test.consume(%v3)  // @owned ()
+    %v5 = literal ()  // @owned ()
+    destroy_value %v4
+    return %v5
+
+bb2:
+    %v8 = literal ()  // @owned ()
+    jump bb3(%v8)
+
+bb3(%v9: @owned ()):
+    %v10 = literal ()  // @owned ()
+    destroy_value %v9
+    return %v10
+

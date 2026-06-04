@@ -7,12 +7,13 @@
 use std::path::Path;
 
 use kestrel_mir::MirModule;
+use kestrel_mir::display::{display_module, display_module_filtered};
 
 /// Check the MIR output against a golden snapshot file.
 ///
 /// - `test_path`: path to the `.ks` test file (snapshot stored alongside)
-/// - `mir`: the lowered MIR module
-/// - `filter`: optional function name to extract (by `FunctionDef.name`)
+/// - `mir`: the lowered MIR (OSSA) module
+/// - `filter`: optional function-name substring to restrict output to
 /// - `snapshot_name`: optional override for the snapshot filename
 pub fn check_mir_snapshot(
     test_path: &Path,
@@ -20,10 +21,20 @@ pub fn check_mir_snapshot(
     filter: Option<&str>,
     snapshot_name: Option<&str>,
 ) -> Result<(), String> {
-    let actual = if let Some(func_name) = filter {
-        extract_function_mir(mir, func_name)?
-    } else {
-        format!("{}", mir.display())
+    let actual = match filter {
+        Some(func_name) => {
+            let rendered = display_module_filtered(mir, func_name);
+            if rendered.trim().is_empty() {
+                let available: Vec<&str> =
+                    mir.functions.values().map(|f| f.name.as_str()).collect();
+                return Err(format!(
+                    "Function matching '{}' not found in MIR. Available: {:?}",
+                    func_name, available
+                ));
+            }
+            rendered
+        },
+        None => display_module(mir),
     };
 
     let snapshot_dir = test_path.parent().unwrap().join("snapshots");
@@ -66,21 +77,4 @@ pub fn check_mir_snapshot(
             actual.trim()
         ))
     }
-}
-
-/// Extract the MIR display text for a single function by name.
-fn extract_function_mir(mir: &MirModule, func_name: &str) -> Result<String, String> {
-    let func = mir
-        .functions
-        .iter()
-        .find(|f| f.name == func_name || f.name.ends_with(&format!(".{}", func_name)))
-        .ok_or_else(|| {
-            let available: Vec<&str> = mir.functions.iter().map(|f| f.name.as_str()).collect();
-            format!(
-                "Function '{}' not found in MIR. Available: {:?}",
-                func_name, available
-            )
-        })?;
-
-    Ok(format!("{}", func.display(mir)))
 }

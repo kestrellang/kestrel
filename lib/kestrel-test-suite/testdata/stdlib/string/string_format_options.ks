@@ -11,6 +11,7 @@ module Test
             opts
         }
 
+        @main
         func main() -> lang.i64 {
             let s: std.text.String = "test";
 

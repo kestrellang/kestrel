@@ -39,4 +39,9 @@ pub struct CompilationContext<'a> {
     pub query: &'a QueryContext<'a>,
     /// Root module entity.
     pub root: Entity,
+    /// True when the current compilation is producing an executable binary
+    /// (`kestrel build`, execution tests). Library / `kestrel check` / LSP /
+    /// diagnostics-test runs pass `false`. Gates the "missing `@main`" check
+    /// (E618), which must not fire on non-executable compilations.
+    pub is_executable: bool,
 }

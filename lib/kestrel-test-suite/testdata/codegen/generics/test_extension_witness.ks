@@ -21,6 +21,7 @@ func do_double[T](x: T) -> std.numeric.Int64 where T: Doubler {
     x.double()
 }
 
+@main
 func main() -> lang.i64 {
     let n = Num(value: 21);
     if do_double[Num](n) != 42 { return 1 }

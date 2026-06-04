@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     var opt: std.numeric.Int64? = .Some(3);
     var sum: std.numeric.Int64 = 0;

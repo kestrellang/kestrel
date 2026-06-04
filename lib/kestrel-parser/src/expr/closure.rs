@@ -47,19 +47,29 @@ where
     V: Parser<'tokens, ParserInput<'tokens>, StmtVariant, ParserExtra<'tokens>> + Clone + 'tokens,
 {
     let closure_param = skip_trivia()
-        .ignore_then(crate::common::parsers::parameter_pattern_parser())
+        .ignore_then(
+            just(Token::Mutating)
+                .map_with(|_, e| to_kestrel_span(e.span()))
+                .or_not(),
+        )
+        .then(crate::common::parsers::parameter_pattern_parser())
         .then(
             skip_trivia()
                 .ignore_then(just(Token::Colon).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(ty_parser())
                 .or_not(),
         )
-        .map(|(pattern, ty_opt)| {
+        .map(|((mutating, pattern), ty_opt)| {
             let (colon, ty) = match ty_opt {
                 Some((c, t)) => (Some(c), Some(t)),
                 None => (None, None),
             };
-            ClosureParamData { pattern, colon, ty }
+            ClosureParamData {
+                mutating,
+                pattern,
+                colon,
+                ty,
+            }
         });
 
     let closure_params = skip_trivia()

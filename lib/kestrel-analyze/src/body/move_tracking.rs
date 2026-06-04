@@ -48,7 +48,10 @@ use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
-use kestrel_semantics::{CopyRequirement, ExplicitlyNegatesProtocol, TypeParamCopyRequirement};
+use kestrel_semantics::{
+    ConditionalCopyableParams, CopyRequirement, CopySemantics, ExplicitlyNegatesProtocol,
+    NominalCopySemantics, TypeParamCopyRequirement,
+};
 use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::BodyContext;
@@ -66,6 +69,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E501",
         name: "maybe_moved",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E503",
+        name: "move_out_of_borrow",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -96,6 +105,7 @@ impl BodyCheck for MoveTrackingAnalyzer {
         let mcx = MoveCtx {
             cx,
             copyable: copyable_entity,
+            borrow_bound: compute_borrow_bound(cx),
         };
         let mut diags = Vec::new();
         let state = State::empty();
@@ -154,6 +164,12 @@ struct MoveCtx<'a> {
     /// negate Copyable so everything reads as copyable — matching the
     /// permissive lib1 behavior for stdlib-less fixtures.
     copyable: Option<Entity>,
+    /// Locals bound by a pattern whose scrutinee is a *borrowed* place. Moving
+    /// one (consuming call / `let b = x` / `return x`) is illegal — you cannot
+    /// move a non-Copyable value out of a borrow. The property is static (a
+    /// function of the binding's pattern, not the dataflow), so it's computed
+    /// once up front rather than threaded through `State`.
+    borrow_bound: HashSet<LocalId>,
 }
 
 // ===== Walker (shape modelled on definite_assignment.rs) =====
@@ -172,9 +188,10 @@ fn analyze_block(
         state = analyze_stmt(mcx, stmt_id, state, diags);
     }
     if !state.diverged
-        && let Some(tail) = tail {
-            state = analyze_expr(mcx, tail, state, false, diags);
-        }
+        && let Some(tail) = tail
+    {
+        state = analyze_expr(mcx, tail, state, false, diags);
+    }
     state
 }
 
@@ -192,15 +209,10 @@ fn analyze_stmt(
                 // Only simple Local-on-RHS triggers a move — field/method/call
                 // RHS is never a partial move (matches lib1).
                 if let Some(src) = rhs_local(mcx.cx.hir, *val)
-                    && local_is_non_copyable(mcx, src) {
-                        state.moves.insert(
-                            src,
-                            MoveInfo {
-                                kind: MoveKind::Definite,
-                                site: *val,
-                            },
-                        );
-                    }
+                    && local_is_non_copyable(mcx, src)
+                {
+                    record_move(mcx, &mut state, diags, src, *val);
+                }
                 // Freshly bound local is valid — remove any stale move state
                 // under the same id (shouldn't happen, but defensive).
                 state.moves.remove(local);
@@ -260,10 +272,11 @@ fn analyze_expr(
         HirExpr::Local(local_id, span) => {
             if !is_assign_target
                 && let Some(info) = state.moves.get(local_id).copied()
-                    && state.reported.insert(*local_id) {
-                        let name = hir.locals[*local_id].name.clone();
-                        emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
-                    }
+                && state.reported.insert(*local_id)
+            {
+                let name = hir.locals[*local_id].name.clone();
+                emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
+            }
         },
 
         // ===== Assignment =====
@@ -275,13 +288,7 @@ fn analyze_expr(
             if let Some(src) = rhs_local(hir, *value) {
                 let targeting_self = rhs_local(hir, *target) == Some(src);
                 if !targeting_self && local_is_non_copyable(mcx, src) {
-                    state.moves.insert(
-                        src,
-                        MoveInfo {
-                            kind: MoveKind::Definite,
-                            site: *value,
-                        },
-                    );
+                    record_move(mcx, &mut state, diags, src, *value);
                 }
             }
             // A Local being written to is refreshed (new value lands there).
@@ -392,15 +399,10 @@ fn analyze_expr(
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
                 if let Some(src) = rhs_local(hir, *val)
-                    && local_is_non_copyable(mcx, src) {
-                        state.moves.insert(
-                            src,
-                            MoveInfo {
-                                kind: MoveKind::Definite,
-                                site: *val,
-                            },
-                        );
-                    }
+                    && local_is_non_copyable(mcx, src)
+                {
+                    record_move(mcx, &mut state, diags, src, *val);
+                }
             }
         },
 
@@ -424,7 +426,7 @@ fn analyze_expr(
                 _ => mcx.cx.typed.resolutions.get(callee).copied(),
             };
             if let Some(entity) = callee_entity {
-                apply_call_moves(mcx, entity, args, None, &mut state);
+                apply_call_moves(mcx, entity, args, None, &mut state, diags);
             }
         },
         HirExpr::MethodCall { receiver, args, .. } => {
@@ -433,7 +435,7 @@ fn analyze_expr(
                 state = analyze_expr(mcx, arg.value, state, false, diags);
             }
             if let Some(&entity) = mcx.cx.typed.resolutions.get(&id) {
-                apply_call_moves(mcx, entity, args, Some(*receiver), &mut state);
+                apply_call_moves(mcx, entity, args, Some(*receiver), &mut state, diags);
             }
         },
         HirExpr::ProtocolCall {
@@ -450,7 +452,7 @@ fn analyze_expr(
             if let Some(method_entity) =
                 find_protocol_method(mcx.cx, *protocol, method.as_str_or_empty())
             {
-                apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state);
+                apply_call_moves(mcx, method_entity, args, Some(*receiver), &mut state, diags);
             }
         },
 
@@ -496,9 +498,10 @@ fn analyze_expr(
     // runs to completion without break) — don't let the Never-type shortcut
     // override that.
     if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id)
-        && !matches!(&hir.exprs[id], HirExpr::Loop { .. }) {
-            state.diverged = true;
-        }
+        && !matches!(&hir.exprs[id], HirExpr::Loop { .. })
+    {
+        state.diverged = true;
+    }
 
     state
 }
@@ -513,6 +516,7 @@ fn apply_call_moves(
     args: &[HirCallArg],
     receiver: Option<HirExprId>,
     state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let Some(callable) = mcx.cx.query.get::<Callable>(callee) else {
         return;
@@ -520,15 +524,10 @@ fn apply_call_moves(
 
     if let (Some(recv_id), Some(ReceiverKind::Consuming)) = (receiver, callable.receiver.as_ref())
         && let Some(src) = rhs_local(mcx.cx.hir, recv_id)
-            && local_is_non_copyable(mcx, src) {
-                state.moves.insert(
-                    src,
-                    MoveInfo {
-                        kind: MoveKind::Definite,
-                        site: recv_id,
-                    },
-                );
-            }
+        && local_is_non_copyable(mcx, src)
+    {
+        record_move(mcx, state, diags, src, recv_id);
+    }
 
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = callable.params.get(i) else {
@@ -538,15 +537,10 @@ fn apply_call_moves(
             continue;
         }
         if let Some(src) = rhs_local(mcx.cx.hir, arg.value)
-            && local_is_non_copyable(mcx, src) {
-                state.moves.insert(
-                    src,
-                    MoveInfo {
-                        kind: MoveKind::Definite,
-                        site: arg.value,
-                    },
-                );
-            }
+            && local_is_non_copyable(mcx, src)
+        {
+            record_move(mcx, state, diags, src, arg.value);
+        }
     }
 }
 
@@ -561,13 +555,271 @@ fn rhs_local(hir: &HirBody, expr: HirExprId) -> Option<LocalId> {
     }
 }
 
+// ===== Move-out-of-borrow (S1) =====
+
+/// Precompute every local that is bound by a pattern whose scrutinee is a
+/// *borrowed* place. Moving such a binding is a move-out-of-borrow error. The
+/// property is static, so one pass over the expression arena suffices.
+fn compute_borrow_bound(cx: &BodyContext<'_>) -> HashSet<LocalId> {
+    let mut set = HashSet::new();
+    for (_, expr) in cx.hir.exprs.iter() {
+        if let HirExpr::Match {
+            scrutinee, arms, ..
+        } = expr
+            && !scrutinee_root_is_owned(cx, *scrutinee)
+        {
+            for arm in arms {
+                collect_pattern_bindings(cx.hir, arm.pattern, &mut set);
+            }
+        }
+    }
+    set
+}
+
+/// True if the matched expression denotes a value this function *owns* (and may
+/// therefore move payloads out of). A field/tuple projection inherits its
+/// base's ownership; calls/literals produce owned temporaries; a bare local is
+/// owned unless it is a borrowed/`mutating` parameter. Conservative: anything
+/// uncertain reads as owned so we never reject a valid program.
+fn scrutinee_root_is_owned(cx: &BodyContext<'_>, expr: HirExprId) -> bool {
+    match &cx.hir.exprs[expr] {
+        HirExpr::Local(local, _) => local_is_owned_place(cx, *local),
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+            scrutinee_root_is_owned(cx, *base)
+        },
+        HirExpr::Sugar { inner, .. } => scrutinee_root_is_owned(cx, *inner),
+        _ => true,
+    }
+}
+
+/// Whether a local names an owned place. A `let`/`var` local is owned; a
+/// parameter is owned only if declared `consuming` (`self` only if the receiver
+/// is `consuming`). Plain and `mutating` parameters are borrows.
+fn local_is_owned_place(cx: &BodyContext<'_>, local: LocalId) -> bool {
+    if !cx.hir.params.contains(&local) {
+        return true; // a `let`/`var` local — owned
+    }
+    let Some(callable) = cx.query.get::<Callable>(cx.entity) else {
+        return true; // can't determine the convention — stay permissive
+    };
+    let name = cx.hir.locals[local].name.as_str();
+    if name == "self" {
+        return matches!(callable.receiver, Some(ReceiverKind::Consuming));
+    }
+    match callable.params.iter().find(|p| p.name == name) {
+        Some(p) => p.is_consuming,
+        None => true,
+    }
+}
+
+/// Collect every binding local introduced by a pattern (recursing through
+/// tuple/variant/struct/array/or/at sub-patterns) into `out`.
+fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<LocalId>) {
+    match &hir.pats[pat] {
+        HirPat::Binding { local, .. } => {
+            out.insert(*local);
+        },
+        HirPat::At {
+            binding,
+            subpattern,
+            ..
+        } => {
+            out.insert(*binding);
+            collect_pattern_bindings(hir, *subpattern, out);
+        },
+        HirPat::Tuple { prefix, suffix, .. } => {
+            for &p in prefix.iter().chain(suffix) {
+                collect_pattern_bindings(hir, p, out);
+            }
+        },
+        HirPat::Array {
+            prefix,
+            rest,
+            suffix,
+            ..
+        } => {
+            for &p in prefix.iter().chain(suffix) {
+                collect_pattern_bindings(hir, p, out);
+            }
+            if let Some(Some(local)) = rest {
+                out.insert(*local);
+            }
+        },
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+            for arg in args {
+                collect_pattern_bindings(hir, arg.pattern, out);
+            }
+        },
+        HirPat::Struct { fields, .. } => {
+            for field in fields {
+                if let Some(p) = field.pattern {
+                    collect_pattern_bindings(hir, p, out);
+                }
+            }
+        },
+        HirPat::Or { alternatives, .. } => {
+            for &p in alternatives {
+                collect_pattern_bindings(hir, p, out);
+            }
+        },
+        HirPat::Wildcard { .. }
+        | HirPat::Literal { .. }
+        | HirPat::Range { .. }
+        | HirPat::Error { .. } => {},
+    }
+}
+
+/// Record that `src` is moved at `site`. If `src` is a pattern binding rooted in
+/// a borrowed scrutinee, the move is illegal — emit E503 (move-out-of-borrow)
+/// rather than just tracking it.
+fn record_move(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    src: LocalId,
+    site: HirExprId,
+) {
+    if mcx.borrow_bound.contains(&src) && state.reported.insert(src) {
+        let name = mcx.cx.hir.locals[src].name.clone();
+        let span = util::expr_span(mcx.cx.hir, site);
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[2].id,
+            severity: DESCRIPTORS[2].default_severity,
+            message: format!("cannot move '{name}' out of a borrowed value"),
+            labels: vec![DiagLabel {
+                span,
+                message: "cannot move a non-copyable value out of a borrow".into(),
+                is_primary: true,
+            }],
+            notes: vec![
+                "the matched value is borrowed; make the scrutinee owned (e.g. a \
+                 `consuming` parameter) to move its contents"
+                    .into(),
+            ],
+        });
+    }
+    state.moves.insert(
+        src,
+        MoveInfo {
+            kind: MoveKind::Definite,
+            site,
+        },
+    );
+}
+
 // ===== Copyable query =====
 
 fn local_is_non_copyable(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
     let Some(ty) = mcx.cx.typed.local_types.get(&local) else {
         return false;
     };
+    // With the Copyable builtin available, use the canonical per-instantiation
+    // copy semantics: it folds a conditional `Copyable where T: Copyable`
+    // conformance over the concrete type args and recognizes Cloneable types
+    // (implicitly cloned on use, not moved). Only `NotCopyable` actually moves.
+    // Without the builtin (minimal stdlib-less fixtures) fall back to the
+    // structural `: not Copyable` heuristic.
+    if mcx.copyable.is_some() {
+        return resolved_ty_copy_semantics(mcx, ty) == CopySemantics::NotCopyable;
+    }
     !ty_is_copyable(mcx, ty)
+}
+
+/// Per-instantiation copy semantics of a resolved type, mirroring
+/// `kestrel_semantics::hir_type_copy_semantics` on `ResolvedTy`. Both Copyable
+/// and Cloneable are duplicable (a use copies/clones, never moves); only
+/// `NotCopyable` forces a move.
+fn resolved_ty_copy_semantics(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> CopySemantics {
+    match ty {
+        ResolvedTy::Named { entity, args } => nominal_instance_copy_semantics(mcx, *entity, args),
+        ResolvedTy::SelfType { entity } => {
+            mcx.cx
+                .query
+                .query(NominalCopySemantics {
+                    entity: *entity,
+                    root: mcx.cx.root,
+                })
+                .semantics
+        },
+        ResolvedTy::Param { entity } => match mcx.cx.query.query(TypeParamCopyRequirement {
+            param: *entity,
+            context: mcx.cx.entity,
+            root: mcx.cx.root,
+        }) {
+            CopyRequirement::RequiresCloneable => CopySemantics::Cloneable,
+            CopyRequirement::RequiresCopyable => CopySemantics::Copyable,
+            CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
+        },
+        ResolvedTy::Tuple(elems) => fold_elem_copy_semantics(mcx, elems),
+        // Assoc projections are Copyable-by-default (matches
+        // `hir_type_copy_semantics`); functions/never/error are pointer-like.
+        _ => CopySemantics::Copyable,
+    }
+}
+
+/// Copy semantics of a concrete nominal instance `entity[args]`, folding a
+/// conditional `Copyable where …` conformance over the gating arg positions.
+/// Mirrors `kestrel_semantics::nominal_instance_copy_semantics`.
+fn nominal_instance_copy_semantics(
+    mcx: &MoveCtx<'_>,
+    entity: Entity,
+    args: &[ResolvedTy],
+) -> CopySemantics {
+    let base = mcx
+        .cx
+        .query
+        .query(NominalCopySemantics {
+            entity,
+            root: mcx.cx.root,
+        })
+        .semantics;
+    if base != CopySemantics::NotCopyable {
+        return base;
+    }
+    // A `not Copyable` base may still be conditionally Copyable per-instantiation.
+    let positions = mcx.cx.query.query(ConditionalCopyableParams {
+        entity,
+        root: mcx.cx.root,
+    });
+    if positions.is_empty() {
+        return CopySemantics::NotCopyable;
+    }
+    let mut saw_cloneable = false;
+    for pos in positions {
+        // A missing gating arg means the instance can't be proven Copyable.
+        let Some(arg) = args.get(pos) else {
+            return CopySemantics::NotCopyable;
+        };
+        match resolved_ty_copy_semantics(mcx, arg) {
+            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
+            CopySemantics::Cloneable => saw_cloneable = true,
+            CopySemantics::Copyable => {},
+        }
+    }
+    if saw_cloneable {
+        CopySemantics::Cloneable
+    } else {
+        CopySemantics::Copyable
+    }
+}
+
+/// Fold copy semantics across aggregate members / gating args: any
+/// `NotCopyable` → `NotCopyable`, else any `Cloneable` → `Cloneable`, else
+/// `Copyable`.
+fn fold_elem_copy_semantics(mcx: &MoveCtx<'_>, elems: &[ResolvedTy]) -> CopySemantics {
+    let mut saw_cloneable = false;
+    for elem in elems {
+        match resolved_ty_copy_semantics(mcx, elem) {
+            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
+            CopySemantics::Cloneable => saw_cloneable = true,
+            CopySemantics::Copyable => {},
+        }
+    }
+    if saw_cloneable {
+        CopySemantics::Cloneable
+    } else {
+        CopySemantics::Copyable
+    }
 }
 
 fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
@@ -943,9 +1195,10 @@ fn deinit_site(hir: &HirBody, local: LocalId) -> HirExprId {
     // anchor for downstream secondary labels.
     for (id, expr) in hir.exprs.iter() {
         if let HirExpr::Local(l, _) = expr
-            && *l == local {
-                return id;
-            }
+            && *l == local
+        {
+            return id;
+        }
     }
     // Fallback: the first expression in the arena.
     hir.exprs
