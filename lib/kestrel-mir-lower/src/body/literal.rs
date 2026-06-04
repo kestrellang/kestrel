@@ -8,7 +8,6 @@
 
 use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hecs::Entity;
-use kestrel_name_res::{ProtocolAssociatedTypes, ResolveBuiltin, extensions::ExtensionsFor};
 use kestrel_hir::body::{HirDictEntry, HirExprId, HirLiteral};
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
@@ -16,6 +15,7 @@ use kestrel_mir::item::function::FunctionKind;
 use kestrel_mir::{
     Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
 };
+use kestrel_name_res::{ProtocolAssociatedTypes, ResolveBuiltin, extensions::ExtensionsFor};
 use kestrel_reporting::{Diagnostic, Label};
 
 use super::OssaBodyCtx;
@@ -182,9 +182,11 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.query.accumulate(
                 Diagnostic::error()
                     .with_message(format!("cannot lower {what} to type `{ty_str}`"))
-                    .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
-                        format!("no usable `{protocol}` initializer was resolved"),
-                    )])
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(format!(
+                            "no usable `{protocol}` initializer was resolved"
+                        )),
+                    ])
                     .with_notes(vec![format!(
                         "`{ty_str}` must conform to `{protocol}` and provide {init_sig}"
                     )]),

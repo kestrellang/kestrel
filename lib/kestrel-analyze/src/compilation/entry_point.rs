@@ -147,7 +147,9 @@ fn is_free_function(cx: &CompilationContext<'_>, entity: Entity) -> bool {
     // A free function's parent is a Module; a method's parent is the enclosing
     // Struct / Enum / Extension / Protocol.
     matches!(
-        cx.query.parent_of(entity).and_then(|p| cx.query.get::<NodeKind>(p)),
+        cx.query
+            .parent_of(entity)
+            .and_then(|p| cx.query.get::<NodeKind>(p)),
         Some(NodeKind::Module)
     )
 }
@@ -242,9 +244,7 @@ fn invalid_return_diag(cx: &CompilationContext<'_>, entity: Entity) -> AnalyzeDi
             message: "`@main` must return `()` or a primitive integer (lang.i8/i16/i32/i64)".into(),
             is_primary: true,
         }],
-        notes: vec![
-            "the entry point returns the process exit code via the C ABI".into(),
-        ],
+        notes: vec!["the entry point returns the process exit code via the C ABI".into()],
     }
 }
 

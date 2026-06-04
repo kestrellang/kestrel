@@ -134,7 +134,9 @@ impl TestCompiler {
     /// Lower to MIR (OSSA). Runs inference first if needed.
     pub fn mir(&self) -> Result<MirModule, String> {
         self.infer();
-        self.compiler.lower_to_mir().map_err(|e| format!("MIR lowering failed: {e}"))
+        self.compiler
+            .lower_to_mir()
+            .map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
     /// Compile, link, and run. Returns the run result.

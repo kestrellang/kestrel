@@ -39,8 +39,14 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 /// `kestrel-compiler-driver` / frontmatter (`@platform`). `@dummy` is a
 /// test-only placeholder kept recognized so parser-level attribute tests
 /// stay free of semantic noise.
-const KNOWN_ATTRIBUTES: &[&str] =
-    &["builtin", "dummy", "extern", "fileconstant", "main", "platform"];
+const KNOWN_ATTRIBUTES: &[&str] = &[
+    "builtin",
+    "dummy",
+    "extern",
+    "fileconstant",
+    "main",
+    "platform",
+];
 
 pub struct UnknownAttributeAnalyzer;
 

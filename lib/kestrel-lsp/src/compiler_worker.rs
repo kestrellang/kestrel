@@ -292,14 +292,14 @@ fn sync_user(
         match state.user_text.get(path) {
             Some(old_text) if old_text == new_text => {
                 // Unchanged — skip, keep existing entity + cache
-            }
+            },
             _ => {
                 // Changed content or new file
                 if state.user_text.contains_key(path) {
                     paths_to_unbuild.push(path.clone());
                 }
                 paths_to_build.push(path.clone());
-            }
+            },
         }
     }
 
@@ -437,25 +437,18 @@ mod tests {
         // When one file changes, other files' entities must survive.
         let handle = CompilerHandle::spawn();
         let stdlib = arc_map(&[]);
-        let user_v1 = arc_map(&[
-            ("/u/a.ks", "module A"),
-            ("/u/b.ks", "module B"),
-        ]);
+        let user_v1 = arc_map(&[("/u/a.ks", "module A"), ("/u/b.ks", "module B")]);
         let user_v2 = arc_map(&[
             ("/u/a.ks", "module A"),
             ("/u/b.ks", "module B\nstruct X {}"),
         ]);
 
         let (ea1, eb1): (Entity, Entity) = handle
-            .with_compiler(stdlib.clone(), user_v1, |_, b| {
-                (b["/u/a.ks"], b["/u/b.ks"])
-            })
+            .with_compiler(stdlib.clone(), user_v1, |_, b| (b["/u/a.ks"], b["/u/b.ks"]))
             .await
             .unwrap();
         let (ea2, eb2): (Entity, Entity) = handle
-            .with_compiler(stdlib, user_v2, |_, b| {
-                (b["/u/a.ks"], b["/u/b.ks"])
-            })
+            .with_compiler(stdlib, user_v2, |_, b| (b["/u/a.ks"], b["/u/b.ks"]))
             .await
             .unwrap();
         assert_eq!(ea1, ea2, "unchanged file A must keep its entity");
@@ -466,15 +459,9 @@ mod tests {
     async fn incremental_handles_added_and_removed_files() {
         let handle = CompilerHandle::spawn();
         let stdlib = arc_map(&[]);
-        let user_v1 = arc_map(&[
-            ("/u/a.ks", "module A"),
-            ("/u/b.ks", "module B"),
-        ]);
+        let user_v1 = arc_map(&[("/u/a.ks", "module A"), ("/u/b.ks", "module B")]);
         // Remove b.ks, add c.ks
-        let user_v2 = arc_map(&[
-            ("/u/a.ks", "module A"),
-            ("/u/c.ks", "module C"),
-        ]);
+        let user_v2 = arc_map(&[("/u/a.ks", "module A"), ("/u/c.ks", "module C")]);
 
         let ea1: Entity = handle
             .with_compiler(stdlib.clone(), user_v1, |_, b| b["/u/a.ks"])

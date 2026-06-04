@@ -1282,16 +1282,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// rejects this first (E503); this fires only for shapes it can't see, so
     /// the build fails with a real error instead of an OSSA-verify ICE.
     fn emit_move_out_of_borrow_backstop(&mut self, ty: TyId) {
-        let span = self.current_span.clone().unwrap_or_else(|| Span::synthetic(0));
+        let span = self
+            .current_span
+            .clone()
+            .unwrap_or_else(|| Span::synthetic(0));
         let ty_str = kestrel_mir::display::ty_to_string(ty, &self.ctx.module);
         self.ctx.query.accumulate(
             Diagnostic::error()
                 .with_message(format!(
                     "cannot move non-copyable value of type `{ty_str}` out of a borrow"
                 ))
-                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
-                    "a non-copyable value cannot be moved out of a borrowed place",
-                )]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(
+                        "a non-copyable value cannot be moved out of a borrowed place",
+                    ),
+                ]),
         );
     }
 

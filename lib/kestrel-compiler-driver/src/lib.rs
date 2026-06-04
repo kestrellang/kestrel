@@ -146,7 +146,11 @@ impl<'a> CompilerDriver<'a> {
         let ctx = world.query_context();
         let mut diags = kestrel_analyze::analyze_bodies(&ctx, root, &body_entities);
         diags.extend(kestrel_analyze::analyze_decls(&ctx, root, &decl_entities));
-        diags.extend(kestrel_analyze::analyze_compilation(&ctx, root, is_executable));
+        diags.extend(kestrel_analyze::analyze_compilation(
+            &ctx,
+            root,
+            is_executable,
+        ));
 
         let mut summary = AnalyzeSummary::default();
         for d in &diags {

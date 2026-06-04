@@ -150,28 +150,43 @@ mod tests {
     fn skip_leading_default() {
         // adding(months: 1, days: 10) — skip leading `years`
         let plan = bind_arguments(&adding_params(), &[Some("months"), Some("days")]).unwrap();
-        assert_eq!(plan, vec![Binding::Default, Binding::Arg(0), Binding::Arg(1)]);
+        assert_eq!(
+            plan,
+            vec![Binding::Default, Binding::Arg(0), Binding::Arg(1)]
+        );
     }
 
     #[test]
     fn skip_middle_default() {
         // adding(years: 1, days: 10) — skip middle `months`
         let plan = bind_arguments(&adding_params(), &[Some("years"), Some("days")]).unwrap();
-        assert_eq!(plan, vec![Binding::Arg(0), Binding::Default, Binding::Arg(1)]);
+        assert_eq!(
+            plan,
+            vec![Binding::Arg(0), Binding::Default, Binding::Arg(1)]
+        );
     }
 
     #[test]
     fn skip_trailing_default() {
         // adding(years: 1, months: 2) — omit trailing `days`
         let plan = bind_arguments(&adding_params(), &[Some("years"), Some("months")]).unwrap();
-        assert_eq!(plan, vec![Binding::Arg(0), Binding::Arg(1), Binding::Default]);
+        assert_eq!(
+            plan,
+            vec![Binding::Arg(0), Binding::Arg(1), Binding::Default]
+        );
     }
 
     #[test]
     fn all_explicit() {
-        let plan =
-            bind_arguments(&adding_params(), &[Some("years"), Some("months"), Some("days")]).unwrap();
-        assert_eq!(plan, vec![Binding::Arg(0), Binding::Arg(1), Binding::Arg(2)]);
+        let plan = bind_arguments(
+            &adding_params(),
+            &[Some("years"), Some("months"), Some("days")],
+        )
+        .unwrap();
+        assert_eq!(
+            plan,
+            vec![Binding::Arg(0), Binding::Arg(1), Binding::Arg(2)]
+        );
     }
 
     #[test]
@@ -249,6 +264,12 @@ mod tests {
     #[test]
     fn too_many_arguments() {
         let err = bind_arguments(&adding_params(), &[None, None, None, None]).unwrap_err();
-        assert_eq!(err, BindError::TooManyArguments { expected: 3, got: 4 });
+        assert_eq!(
+            err,
+            BindError::TooManyArguments {
+                expected: 3,
+                got: 4
+            }
+        );
     }
 }

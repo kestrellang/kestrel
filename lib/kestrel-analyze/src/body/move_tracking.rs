@@ -188,9 +188,10 @@ fn analyze_block(
         state = analyze_stmt(mcx, stmt_id, state, diags);
     }
     if !state.diverged
-        && let Some(tail) = tail {
-            state = analyze_expr(mcx, tail, state, false, diags);
-        }
+        && let Some(tail) = tail
+    {
+        state = analyze_expr(mcx, tail, state, false, diags);
+    }
     state
 }
 
@@ -208,9 +209,10 @@ fn analyze_stmt(
                 // Only simple Local-on-RHS triggers a move — field/method/call
                 // RHS is never a partial move (matches lib1).
                 if let Some(src) = rhs_local(mcx.cx.hir, *val)
-                    && local_is_non_copyable(mcx, src) {
-                        record_move(mcx, &mut state, diags, src, *val);
-                    }
+                    && local_is_non_copyable(mcx, src)
+                {
+                    record_move(mcx, &mut state, diags, src, *val);
+                }
                 // Freshly bound local is valid — remove any stale move state
                 // under the same id (shouldn't happen, but defensive).
                 state.moves.remove(local);
@@ -270,10 +272,11 @@ fn analyze_expr(
         HirExpr::Local(local_id, span) => {
             if !is_assign_target
                 && let Some(info) = state.moves.get(local_id).copied()
-                    && state.reported.insert(*local_id) {
-                        let name = hir.locals[*local_id].name.clone();
-                        emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
-                    }
+                && state.reported.insert(*local_id)
+            {
+                let name = hir.locals[*local_id].name.clone();
+                emit_move_diagnostic(mcx.cx, diags, info, id, span.clone(), &name);
+            }
         },
 
         // ===== Assignment =====
@@ -396,9 +399,10 @@ fn analyze_expr(
             if let Some(val) = value {
                 state = analyze_expr(mcx, *val, state, false, diags);
                 if let Some(src) = rhs_local(hir, *val)
-                    && local_is_non_copyable(mcx, src) {
-                        record_move(mcx, &mut state, diags, src, *val);
-                    }
+                    && local_is_non_copyable(mcx, src)
+                {
+                    record_move(mcx, &mut state, diags, src, *val);
+                }
             }
         },
 
@@ -494,9 +498,10 @@ fn analyze_expr(
     // runs to completion without break) — don't let the Never-type shortcut
     // override that.
     if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id)
-        && !matches!(&hir.exprs[id], HirExpr::Loop { .. }) {
-            state.diverged = true;
-        }
+        && !matches!(&hir.exprs[id], HirExpr::Loop { .. })
+    {
+        state.diverged = true;
+    }
 
     state
 }
@@ -519,9 +524,10 @@ fn apply_call_moves(
 
     if let (Some(recv_id), Some(ReceiverKind::Consuming)) = (receiver, callable.receiver.as_ref())
         && let Some(src) = rhs_local(mcx.cx.hir, recv_id)
-            && local_is_non_copyable(mcx, src) {
-                record_move(mcx, state, diags, src, recv_id);
-            }
+        && local_is_non_copyable(mcx, src)
+    {
+        record_move(mcx, state, diags, src, recv_id);
+    }
 
     for (i, arg) in args.iter().enumerate() {
         let Some(param) = callable.params.get(i) else {
@@ -531,9 +537,10 @@ fn apply_call_moves(
             continue;
         }
         if let Some(src) = rhs_local(mcx.cx.hir, arg.value)
-            && local_is_non_copyable(mcx, src) {
-                record_move(mcx, state, diags, src, arg.value);
-            }
+            && local_is_non_copyable(mcx, src)
+        {
+            record_move(mcx, state, diags, src, arg.value);
+        }
     }
 }
 
@@ -1188,9 +1195,10 @@ fn deinit_site(hir: &HirBody, local: LocalId) -> HirExprId {
     // anchor for downstream secondary labels.
     for (id, expr) in hir.exprs.iter() {
         if let HirExpr::Local(l, _) = expr
-            && *l == local {
-                return id;
-            }
+            && *l == local
+        {
+            return id;
+        }
     }
     // Fallback: the first expression in the arena.
     hir.exprs
