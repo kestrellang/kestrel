@@ -1,120 +1,80 @@
-//! Values — operand-level reads of places, with ownership and borrow modes
-//! folded directly into the variants.
-//!
-//! Stage 3 of the greenfield memory model: the previous `Value::Place(Place)`
-//! was ownership-agnostic, with passing modes carried separately via
-//! `CallArg.mode`. Now every value-producing position in the IR records its
-//! own mode at the leaf, and `CallArg` / `PassingMode` are gone.
-//!
-//! Variant choice at each site is driven by the source type's
-//! `CopyBehavior`. The verifier (Stage 6) enforces the legality rules; the
-//! summary is:
-//!
-//! - `Value::Move(p)` — ownership transfer, source is dead after.
-//! - `Value::Copy(p)` — bitwise copy, source remains valid.
-//! - `Value::Ref(p)` / `Value::RefMut(p)` — borrow without transferring
-//!   ownership.
-//! - `Value::Const(_)` — literal, no place involved.
+use crate::{TyId, ValueId};
+use kestrel_span::Span;
 
-use crate::immediate::Immediate;
-use crate::place::Place;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Ownership {
+    Owned,
+    Guaranteed,
+}
 
-/// Operand-level read of a place (or a constant).
-///
-/// Reads carry their ownership/borrow mode inline. See the module docs for
-/// the legality rules.
 #[derive(Debug, Clone)]
-pub enum Value {
-    /// `copy <place>` — bitwise read without invalidating the source.
-    Copy(Place),
-    /// `move <place>` — take ownership of `place`'s value, invalidating the
-    /// source. Legal only when the type's `CopyBehavior` is `None`.
-    Move(Place),
-    /// `&<place>` — immutable borrow.
-    Ref(Place),
-    /// `&var <place>` — mutable borrow.
-    RefMut(Place),
-    /// A constant value.
-    Const(Immediate),
+pub struct ValueDef {
+    pub ty: TyId,
+    pub ownership: Ownership,
+    /// For @guaranteed values: which @owned value is frozen by this borrow.
+    /// Propagates through block args and forwarding extractions.
+    pub borrow_source: Option<ValueId>,
+    /// Source location of the instruction/expression that defined this value,
+    /// when known. Metadata only — used to give verifier ICEs a precise span;
+    /// excluded from `PartialEq` so it never affects value identity. Synthetic
+    /// values (shims, thunks) carry `None`.
+    pub span: Option<Span>,
 }
 
-impl Value {
-    /// True iff this value reads from a place (any variant except `Const`).
-    pub fn is_place_read(&self) -> bool {
-        !matches!(self, Value::Const(_))
-    }
-
-    /// True iff this value is a constant.
-    pub fn is_const(&self) -> bool {
-        matches!(self, Value::Const(_))
-    }
-
-    /// Return the underlying place for any place-reading variant, else
-    /// `None` for `Const`.
-    pub fn as_place(&self) -> Option<&Place> {
-        match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Some(p),
-            Value::Const(_) => None,
-        }
-    }
-
-    /// Return the underlying immediate, if this is a `Const`.
-    pub fn as_immediate(&self) -> Option<&Immediate> {
-        match self {
-            Value::Const(i) => Some(i),
-            _ => None,
-        }
-    }
-
-    /// Re-mode a place-reading value as a `Copy`. Constants are unchanged.
-    pub fn into_copy(self) -> Value {
-        match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Copy(p),
-            Value::Const(_) => self,
-        }
-    }
-
-    /// Re-mode a place-reading value as a `Move`. Constants are unchanged
-    /// (and constructing a Move of a constant is meaningless; the verifier
-    /// (Stage 6) will reject Move on non-affine types).
-    pub fn into_move(self) -> Value {
-        match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Move(p),
-            Value::Const(_) => self,
-        }
-    }
-
-    /// Re-mode a place-reading value as a `Ref`. Constants are unchanged.
-    pub fn into_ref(self) -> Value {
-        match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::Ref(p),
-            Value::Const(_) => self,
-        }
-    }
-
-    /// Re-mode a place-reading value as a `RefMut`. Constants are unchanged.
-    pub fn into_ref_mut(self) -> Value {
-        match self {
-            Value::Copy(p) | Value::Move(p) | Value::Ref(p) | Value::RefMut(p) => Value::RefMut(p),
-            Value::Const(_) => self,
-        }
+// Hand-written so `span` (metadata) is excluded from value identity: two values
+// that agree on type/ownership/borrow_source are equal regardless of span.
+impl PartialEq for ValueDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.ty == other.ty
+            && self.ownership == other.ownership
+            && self.borrow_source == other.borrow_source
     }
 }
 
-impl From<Immediate> for Value {
-    fn from(i: Immediate) -> Self {
-        Value::Const(i)
+impl ValueDef {
+    pub fn owned(ty: TyId) -> Self {
+        Self {
+            ty,
+            ownership: Ownership::Owned,
+            borrow_source: None,
+            span: None,
+        }
+    }
+
+    pub fn guaranteed(ty: TyId, source: ValueId) -> Self {
+        Self {
+            ty,
+            ownership: Ownership::Guaranteed,
+            borrow_source: Some(source),
+            span: None,
+        }
+    }
+
+    /// Attach a defining span, builder-style.
+    pub fn with_span(mut self, span: Option<Span>) -> Self {
+        self.span = span;
+        self
     }
 }
 
-/// Convenience: a bare `Place` defaults to `Value::Copy(place)`.
-///
-/// Used by the MIR builder helpers (`assign_op*`, `branch`, `ret`) where the
-/// caller has a `Place` in hand and the operand is a pure read on a
-/// Bitwise-copyable type (primitive op args, branch conditions, etc.). Sites
-/// that need a different mode must construct the `Value` variant explicitly.
-impl From<Place> for Value {
-    fn from(p: Place) -> Self {
-        Value::Copy(p)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // `span` is metadata, not identity: two values that agree on
+    // ty/ownership/borrow_source must compare equal regardless of span.
+    #[test]
+    fn span_excluded_from_equality() {
+        let ty = TyId::new(0);
+        let a = ValueDef::owned(ty);
+        let b = ValueDef::owned(ty).with_span(Some(Span::synthetic(0)));
+        assert_eq!(a, b);
+        assert_eq!(a.with_span(Some(Span::new(0, 1..2))), b);
+    }
+
+    #[test]
+    fn with_span_sets_field() {
+        let v = ValueDef::owned(TyId::new(0)).with_span(Some(Span::synthetic(0)));
+        assert!(v.span.is_some());
     }
 }

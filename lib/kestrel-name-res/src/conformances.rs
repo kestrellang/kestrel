@@ -382,7 +382,7 @@ where
 ///
 /// Uses the conformance-bearing entity as resolution context — protocol
 /// names are top-level so they resolve from any scope.
-fn resolve_conformance_entity(
+pub fn resolve_conformance_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     context: Entity,

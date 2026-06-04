@@ -1118,6 +1118,7 @@ fn resolve_conformance_type_arg(
         },
         AstType::Function {
             params,
+            param_conventions,
             return_type,
             ..
         } => {
@@ -1128,6 +1129,7 @@ fn resolve_conformance_type_arg(
             let ret = resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
             Some(ResolvedTy::Function {
                 params,
+                conventions: param_conventions.clone(),
                 ret: Box::new(ret),
             })
         },

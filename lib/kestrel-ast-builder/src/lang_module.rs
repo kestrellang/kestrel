@@ -471,11 +471,28 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         &[("ptr", ptr_t.clone())],
         t.clone(),
     );
+    // Mutable by-reference view of the pointee (used by `Pointer.withMut`).
+    // Lowers to `BeginMutBorrowAddr`; the result is passed as a `mutating`
+    // closure arg so the pointee is mutated in place.
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_mut_borrow",
+        &[("ptr", ptr_t.clone())],
+        t.clone(),
+    );
     seed_generic_fn(
         world,
         lang,
         "ptr_write",
         &[("ptr", ptr_t.clone()), ("value", t.clone())],
+        unit_ty(),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "drop_in_place",
+        &[("ptr", ptr_t.clone())],
         unit_ty(),
     );
     seed_generic_fn(

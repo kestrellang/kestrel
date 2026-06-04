@@ -1,32 +1,35 @@
-func Test.example(cond: &bool) -> ()
-{
-    locals:
-        %h: Test.Handle
-        %_t0: Test.Handle
-        %_t1: ()
-        %_t2: Test.Handle
-        %_t3: Test.Handle
+; function: Test.example
+bb0:
+    %v1 = literal i64 0  // @owned Int64
+    %v2 = struct Test.Handle { .0: %v1 }  // @owned Test.Handle
+    %v3 = uninit Test.Handle  // @owned Pointer[Test.Handle]
+    store_init %v3, %v2
+    %v4 = uninit Bool  // @owned Pointer[Bool]
+    %v5 = literal true  // @owned Bool
+    store_init %v4, %v5
+    branch %v0, bb1(%v3, %v4), bb2(%v3, %v4)
 
-    bb0:
-        %_t0 = construct Test.Handle { fd: i64.literal 0 }
-        %h = move %_t0
-        branch if copy %self, bb1 else bb2
+bb1(%v6: @owned Pointer[Test.Handle], %v7: @owned Pointer[Bool]):
+    %v10 = literal i64 1  // @owned Int64
+    %v11 = struct Test.Handle { .0: %v10 }  // @owned Test.Handle
+    store_assign %v6, %v11
+    %v12 = literal ()  // @owned ()
+    %v13 = literal ()  // @owned ()
+    destroy_value %v12
+    jump bb3(%v13, %v6, %v7)
 
-    bb1:
-        %_t2 = construct Test.Handle { fd: i64.literal 1 }
-        call Test.Handle.deinit(ref var %h)
-        %h = move %_t2
-        %_t1 = ()
-        jump bb3
+bb2(%v8: @owned Pointer[Test.Handle], %v9: @owned Pointer[Bool]):
+    %v14 = literal i64 2  // @owned Int64
+    %v15 = struct Test.Handle { .0: %v14 }  // @owned Test.Handle
+    store_assign %v8, %v15
+    %v16 = literal ()  // @owned ()
+    %v17 = literal ()  // @owned ()
+    destroy_value %v16
+    jump bb3(%v17, %v8, %v9)
 
-    bb2:
-        %_t3 = construct Test.Handle { fd: i64.literal 2 }
-        call Test.Handle.deinit(ref var %h)
-        %h = move %_t3
-        %_t1 = ()
-        jump bb3
+bb3(%v18: @owned (), %v19: @owned Pointer[Test.Handle], %v20: @owned Pointer[Bool]):
+    destroy_addr %v3, Test.Handle
+    destroy_value %v20
+    destroy_value %v19
+    return %v18
 
-    bb3:
-        call Test.Handle.deinit(ref var %h)
-        return copy %_t1
-}

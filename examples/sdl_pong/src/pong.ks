@@ -1,6 +1,6 @@
 module SdlPong
 
-import Sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
+import sdl.(Color, Rectangle, Milliseconds, Key, Event, Renderer, SDLApp)
 
 // --- Game Components ---
 

@@ -34,8 +34,10 @@ func main() {
     var cmd = Command("flock");
     cmd = cmd.about("Package manager for Kestrel");
     cmd = cmd.version("0.1.0");
-    cmd = cmd.subcommand(Command("build").about("Build the current package"));
-    cmd = cmd.subcommand(Command("run").about("Build and run the current package"));
+    cmd = cmd.subcommand(Command("build").about("Build the current package")
+        .argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)"));
+    cmd = cmd.subcommand(Command("run").about("Build and run the current package")
+        .argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)"));
     cmd = cmd.subcommand(Command("check").about("Type-check the current package"));
     cmd = cmd.subcommand(Command("init").about("Create a new flock.toml in the current directory"));
     cmd = cmd.subcommand(Command("publish").about("Publish a package to the registry"));
@@ -45,10 +47,16 @@ func main() {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
+                    // The subcommand's own flags live in submatches[0]; `--release`
+                    // turns on optimized codegen for build/run.
+                    var release = false;
+                    if matches.submatches.count > 0 {
+                        release = matches.submatches(unchecked: 0).hasFlag("release")
+                    }
                     if sub == "build" {
-                        handleBuild()
+                        handleBuild(release: release)
                     } else if sub == "run" {
-                        handleRun()
+                        handleRun(release: release)
                     } else if sub == "check" {
                         handleCheck()
                     } else if sub == "init" {
@@ -76,13 +84,15 @@ func main() {
 // COMMAND HANDLERS
 // ============================================================================
 
-func handleBuild() {
+func handleBuild(release release: Bool) {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); },
         .Ok(info) => {
-            var msg = String(); msg.append("Building "); msg.append(info.name); msg.append("...");
+            var msg = String(); msg.append("Building "); msg.append(info.name);
+            if release { msg.append(" (release)") };
+            msg.append("...");
             let _ = println(msg);
-            match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks) {
+            match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
                 .Ok(_) => {
                     var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(info.name); doneMsg.append(" successfully");
                     let _ = println(doneMsg);
@@ -93,11 +103,11 @@ func handleBuild() {
     }
 }
 
-func handleRun() {
+func handleRun(release release: Bool) {
     match resolveAndDiscover() {
         .Err(e) => { let _ = eprintln(e.description()); },
         .Ok(info) => {
-            match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks) {
+            match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
                 .Ok(_) => {},
                 .Err(e) => { let _ = eprintln(e.description()); }
             }
@@ -111,7 +121,7 @@ func handleCheck() {
         .Ok(info) => {
             var msg = String(); msg.append("Checking "); msg.append(info.name); msg.append("...");
             let _ = println(msg);
-            match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String]()) {
+            match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String](), release: false) {
                 .Ok(_) => { let _ = println("Check passed"); },
                 .Err(e) => { let _ = eprintln(e.description()); }
             }

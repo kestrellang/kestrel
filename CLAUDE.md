@@ -3,6 +3,7 @@ Information on the project structure, workflows, quick references, and patterns 
 ## Agent Rules
 
 - Never change a test in order to cajole it to pass, unless I tell you explicitly to, or it uses invalid kestrel syntax. Don't add #[ignore] to tests
+- Tests should document the state of the compiler, they don't need to all pass. If a behavior is not working yet, you should add a test to ensure it gets fixed.
 - If you hit a roadblock, stop and ask for guidance. Don't revert your changes, throw away changes, or anything. After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
 - There will be multiple agents working at the same time in this codebase
 

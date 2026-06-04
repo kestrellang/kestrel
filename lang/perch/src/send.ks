@@ -3,7 +3,6 @@
 module perch.send
 
 import perch.response.(Response)
-import http.wire.(stringToBytes)
 import std.io.error.(IoError)
 
 /// Serializes and sends an HTTP response over a socket file descriptor.
@@ -49,11 +48,15 @@ func sendAllBytes(fileDescriptor: Int32, content: String) -> Result[(), IoError]
         return .Ok(())
     }
 
-    let buffer = stringToBytes(content);
+    // Write the response string's UTF-8 bytes straight to the socket.
+    // asByteSlice() is a non-owning view over `content`'s live buffer —
+    // no toBytes() array allocation, no COW clone, no per-byte copy.
+    // `content` outlives this loop, so the pointer stays valid.
+    let bytes = content.asByteSlice();
 
     var sent: Int64 = 0;
     while sent < length {
-        let ptr = buffer.asPointer().offset(by: sent);
+        let ptr = bytes.pointer.offset(by: sent);
         let remaining = length - sent;
         let bytesWritten = send(fileDescriptor, ptr, remaining, 0);
         if bytesWritten < 0 {

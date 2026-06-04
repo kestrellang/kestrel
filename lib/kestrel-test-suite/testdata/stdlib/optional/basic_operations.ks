@@ -16,9 +16,9 @@ module Test
             // Test unwrap
             if someOpt.unwrap() != 42 { return 5 }
 
-            // Test unwrapOr
-            if someOpt.unwrapOr(0) != 42 { return 6 }
-            if none.unwrapOr(99) != 99 { return 7 }
+            // Test unwrap(or:)
+            if someOpt.unwrap(or: 0) != 42 { return 6 }
+            if none.unwrap(or: 99) != 99 { return 7 }
 
             0
         }

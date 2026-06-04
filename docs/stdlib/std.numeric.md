@@ -1037,6 +1037,14 @@ _Defined in `lang/std/numeric/float32.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -1059,7 +1067,95 @@ answer.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -1078,6 +1174,16 @@ Float64.nan.isEqual(to: Float64.nan);      // false (!)
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Formattable`
 
@@ -1102,6 +1208,20 @@ Formats the float directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Addable`
 
@@ -1148,7 +1268,7 @@ _Defined in `lang/std/numeric/float32.ks`._
 #### function `add`
 
 ```kestrel
-public func add(Float32) -> Float32
+public consuming func add(consuming Float32) -> Float32
 ```
 
 IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
@@ -1179,7 +1299,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(Float32) -> Float32
+public consuming func subtract(consuming Float32) -> Float32
 ```
 
 IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
@@ -1199,7 +1319,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(Float32) -> Float32
+public consuming func multiply(consuming Float32) -> Float32
 ```
 
 IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
@@ -1230,7 +1350,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(Float32) -> Float32
+public consuming func divide(consuming Float32) -> Float32
 ```
 
 IEEE 754 division. Unlike integer divide, dividing by zero does not
@@ -1264,7 +1384,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `negate`
 
 ```kestrel
-public func negate() -> Float32
+public consuming func negate() -> Float32
 ```
 
 IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
@@ -2345,6 +2465,14 @@ _Defined in `lang/std/numeric/float64.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -2367,7 +2495,95 @@ answer.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -2386,6 +2602,16 @@ Float64.nan.isEqual(to: Float64.nan);      // false (!)
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Formattable`
 
@@ -2410,6 +2636,20 @@ Formats the float directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Addable`
 
@@ -2456,7 +2696,7 @@ _Defined in `lang/std/numeric/float64.ks`._
 #### function `add`
 
 ```kestrel
-public func add(Float64) -> Float64
+public consuming func add(consuming Float64) -> Float64
 ```
 
 IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
@@ -2487,7 +2727,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(Float64) -> Float64
+public consuming func subtract(consuming Float64) -> Float64
 ```
 
 IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
@@ -2507,7 +2747,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(Float64) -> Float64
+public consuming func multiply(consuming Float64) -> Float64
 ```
 
 IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
@@ -2538,7 +2778,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(Float64) -> Float64
+public consuming func divide(consuming Float64) -> Float64
 ```
 
 IEEE 754 division. Unlike integer divide, dividing by zero does not
@@ -2572,7 +2812,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `negate`
 
 ```kestrel
-public func negate() -> Float64
+public consuming func negate() -> Float64
 ```
 
 IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
@@ -3346,6 +3586,14 @@ _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -3365,7 +3613,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -3383,6 +3719,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -3420,6 +3766,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/int16.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -3575,7 +3935,7 @@ _Defined in `lang/std/numeric/int16.ks`._
 #### function `add`
 
 ```kestrel
-public func add(Int16) -> Int16
+public consuming func add(consuming Int16) -> Int16
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -3606,7 +3966,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(Int16) -> Int16
+public consuming func subtract(consuming Int16) -> Int16
 ```
 
 `self - other`, wrapping on overflow.
@@ -3626,7 +3986,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(Int16) -> Int16
+public consuming func multiply(consuming Int16) -> Int16
 ```
 
 `self * other`, wrapping on overflow.
@@ -3656,7 +4016,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(Int16) -> Int16
+public consuming func divide(consuming Int16) -> Int16
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -3682,7 +4042,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(Int16) -> Int16
+public consuming func modulo(consuming Int16) -> Int16
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -3707,7 +4067,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `negate`
 
 ```kestrel
-public func negate() -> Int16
+public consuming func negate() -> Int16
 ```
 
 Two's-complement negation. Wraps at the minimum value:
@@ -3729,7 +4089,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(Int16) -> Int16
+public consuming func bitwiseAnd(consuming Int16) -> Int16
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -3749,7 +4109,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(Int16) -> Int16
+public consuming func bitwiseOr(consuming Int16) -> Int16
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -3769,7 +4129,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(Int16) -> Int16
+public consuming func bitwiseXor(consuming Int16) -> Int16
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -3789,7 +4149,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> Int16
+public consuming func bitwiseNot() -> Int16
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -3809,7 +4169,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> Int16
+public consuming func shiftLeft(by: consuming Int64) -> Int16
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -3830,7 +4190,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> Int16
+public consuming func shiftRight(by: consuming Int64) -> Int16
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -4803,6 +5163,14 @@ _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -4822,7 +5190,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -4840,6 +5296,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -4877,6 +5343,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/int32.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -5032,7 +5512,7 @@ _Defined in `lang/std/numeric/int32.ks`._
 #### function `add`
 
 ```kestrel
-public func add(Int32) -> Int32
+public consuming func add(consuming Int32) -> Int32
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -5063,7 +5543,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(Int32) -> Int32
+public consuming func subtract(consuming Int32) -> Int32
 ```
 
 `self - other`, wrapping on overflow.
@@ -5083,7 +5563,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(Int32) -> Int32
+public consuming func multiply(consuming Int32) -> Int32
 ```
 
 `self * other`, wrapping on overflow.
@@ -5113,7 +5593,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(Int32) -> Int32
+public consuming func divide(consuming Int32) -> Int32
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -5139,7 +5619,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(Int32) -> Int32
+public consuming func modulo(consuming Int32) -> Int32
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -5164,7 +5644,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `negate`
 
 ```kestrel
-public func negate() -> Int32
+public consuming func negate() -> Int32
 ```
 
 Two's-complement negation. Wraps at the minimum value:
@@ -5186,7 +5666,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(Int32) -> Int32
+public consuming func bitwiseAnd(consuming Int32) -> Int32
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -5206,7 +5686,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(Int32) -> Int32
+public consuming func bitwiseOr(consuming Int32) -> Int32
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -5226,7 +5706,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(Int32) -> Int32
+public consuming func bitwiseXor(consuming Int32) -> Int32
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -5246,7 +5726,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> Int32
+public consuming func bitwiseNot() -> Int32
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -5266,7 +5746,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> Int32
+public consuming func shiftLeft(by: consuming Int64) -> Int32
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -5287,7 +5767,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> Int32
+public consuming func shiftRight(by: consuming Int64) -> Int32
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -6260,6 +6740,14 @@ _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -6279,7 +6767,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -6297,6 +6873,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -6334,6 +6920,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/int64.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -6489,7 +7089,7 @@ _Defined in `lang/std/numeric/int64.ks`._
 #### function `add`
 
 ```kestrel
-public func add(Int64) -> Int64
+public consuming func add(consuming Int64) -> Int64
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -6520,7 +7120,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(Int64) -> Int64
+public consuming func subtract(consuming Int64) -> Int64
 ```
 
 `self - other`, wrapping on overflow.
@@ -6540,7 +7140,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(Int64) -> Int64
+public consuming func multiply(consuming Int64) -> Int64
 ```
 
 `self * other`, wrapping on overflow.
@@ -6570,7 +7170,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(Int64) -> Int64
+public consuming func divide(consuming Int64) -> Int64
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -6596,7 +7196,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(Int64) -> Int64
+public consuming func modulo(consuming Int64) -> Int64
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -6621,7 +7221,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `negate`
 
 ```kestrel
-public func negate() -> Int64
+public consuming func negate() -> Int64
 ```
 
 Two's-complement negation. Wraps at the minimum value:
@@ -6643,7 +7243,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(Int64) -> Int64
+public consuming func bitwiseAnd(consuming Int64) -> Int64
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -6663,7 +7263,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(Int64) -> Int64
+public consuming func bitwiseOr(consuming Int64) -> Int64
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -6683,7 +7283,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(Int64) -> Int64
+public consuming func bitwiseXor(consuming Int64) -> Int64
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -6703,7 +7303,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> Int64
+public consuming func bitwiseNot() -> Int64
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -6723,7 +7323,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> Int64
+public consuming func shiftLeft(by: consuming Int64) -> Int64
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -6744,7 +7344,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> Int64
+public consuming func shiftRight(by: consuming Int64) -> Int64
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -8075,6 +8675,14 @@ _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -8094,7 +8702,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -8112,6 +8808,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -8149,6 +8855,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/int8.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -8304,7 +9024,7 @@ _Defined in `lang/std/numeric/int8.ks`._
 #### function `add`
 
 ```kestrel
-public func add(Int8) -> Int8
+public consuming func add(consuming Int8) -> Int8
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -8335,7 +9055,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(Int8) -> Int8
+public consuming func subtract(consuming Int8) -> Int8
 ```
 
 `self - other`, wrapping on overflow.
@@ -8355,7 +9075,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(Int8) -> Int8
+public consuming func multiply(consuming Int8) -> Int8
 ```
 
 `self * other`, wrapping on overflow.
@@ -8385,7 +9105,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(Int8) -> Int8
+public consuming func divide(consuming Int8) -> Int8
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -8411,7 +9131,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(Int8) -> Int8
+public consuming func modulo(consuming Int8) -> Int8
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -8436,7 +9156,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `negate`
 
 ```kestrel
-public func negate() -> Int8
+public consuming func negate() -> Int8
 ```
 
 Two's-complement negation. Wraps at the minimum value:
@@ -8458,7 +9178,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(Int8) -> Int8
+public consuming func bitwiseAnd(consuming Int8) -> Int8
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -8478,7 +9198,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(Int8) -> Int8
+public consuming func bitwiseOr(consuming Int8) -> Int8
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -8498,7 +9218,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(Int8) -> Int8
+public consuming func bitwiseXor(consuming Int8) -> Int8
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -8518,7 +9238,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> Int8
+public consuming func bitwiseNot() -> Int8
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -8538,7 +9258,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> Int8
+public consuming func shiftLeft(by: consuming Int64) -> Int8
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -8559,7 +9279,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> Int8
+public consuming func shiftRight(by: consuming Int64) -> Int8
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -8888,6 +9608,28 @@ var rng = Lcg64(seed: 42);
 _Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `RandomNumberGenerator`
+
+#### function `nextInt`
+
+```kestrel
+public mutating func nextInt(below: Int64) -> Int64
+```
+
+Returns a uniformly distributed integer in `[0, upperBound)`.
+Returns `0` when `upperBound <= 0` rather than panicking.
+
+Uses naive modulo for simplicity — for `upperBound` close to
+`UInt64.maxValue` the result has slight bias toward smaller values.
+If you need exact uniformity, sample `nextUInt64()` and reject.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+let roll = rng.nextInt(below: 6);   // 0..5
+```
+
+_Defined in `lang/std/numeric/random.ks`._
 
 #### function `nextUInt64`
 
@@ -9707,6 +10449,14 @@ _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -9726,7 +10476,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -9744,6 +10582,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -9781,6 +10629,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -9928,7 +10790,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 #### function `add`
 
 ```kestrel
-public func add(UInt16) -> UInt16
+public consuming func add(consuming UInt16) -> UInt16
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -9959,7 +10821,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(UInt16) -> UInt16
+public consuming func subtract(consuming UInt16) -> UInt16
 ```
 
 `self - other`, wrapping on overflow.
@@ -9979,7 +10841,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(UInt16) -> UInt16
+public consuming func multiply(consuming UInt16) -> UInt16
 ```
 
 `self * other`, wrapping on overflow.
@@ -10009,7 +10871,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(UInt16) -> UInt16
+public consuming func divide(consuming UInt16) -> UInt16
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -10035,7 +10897,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(UInt16) -> UInt16
+public consuming func modulo(consuming UInt16) -> UInt16
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -10060,7 +10922,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(UInt16) -> UInt16
+public consuming func bitwiseAnd(consuming UInt16) -> UInt16
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -10080,7 +10942,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(UInt16) -> UInt16
+public consuming func bitwiseOr(consuming UInt16) -> UInt16
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -10100,7 +10962,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(UInt16) -> UInt16
+public consuming func bitwiseXor(consuming UInt16) -> UInt16
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -10120,7 +10982,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> UInt16
+public consuming func bitwiseNot() -> UInt16
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -10140,7 +11002,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> UInt16
+public consuming func shiftLeft(by: consuming Int64) -> UInt16
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -10161,7 +11023,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> UInt16
+public consuming func shiftRight(by: consuming Int64) -> UInt16
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -11081,6 +11943,14 @@ _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -11100,7 +11970,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -11118,6 +12076,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -11155,6 +12123,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -11302,7 +12284,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 #### function `add`
 
 ```kestrel
-public func add(UInt32) -> UInt32
+public consuming func add(consuming UInt32) -> UInt32
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -11333,7 +12315,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(UInt32) -> UInt32
+public consuming func subtract(consuming UInt32) -> UInt32
 ```
 
 `self - other`, wrapping on overflow.
@@ -11353,7 +12335,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(UInt32) -> UInt32
+public consuming func multiply(consuming UInt32) -> UInt32
 ```
 
 `self * other`, wrapping on overflow.
@@ -11383,7 +12365,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(UInt32) -> UInt32
+public consuming func divide(consuming UInt32) -> UInt32
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -11409,7 +12391,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(UInt32) -> UInt32
+public consuming func modulo(consuming UInt32) -> UInt32
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -11434,7 +12416,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(UInt32) -> UInt32
+public consuming func bitwiseAnd(consuming UInt32) -> UInt32
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -11454,7 +12436,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(UInt32) -> UInt32
+public consuming func bitwiseOr(consuming UInt32) -> UInt32
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -11474,7 +12456,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(UInt32) -> UInt32
+public consuming func bitwiseXor(consuming UInt32) -> UInt32
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -11494,7 +12476,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> UInt32
+public consuming func bitwiseNot() -> UInt32
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -11514,7 +12496,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> UInt32
+public consuming func shiftLeft(by: consuming Int64) -> UInt32
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -11535,7 +12517,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> UInt32
+public consuming func shiftRight(by: consuming Int64) -> UInt32
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -12455,6 +13437,14 @@ _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -12474,7 +13464,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -12492,6 +13570,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -12529,6 +13617,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -12676,7 +13778,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 #### function `add`
 
 ```kestrel
-public func add(UInt64) -> UInt64
+public consuming func add(consuming UInt64) -> UInt64
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -12707,7 +13809,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(UInt64) -> UInt64
+public consuming func subtract(consuming UInt64) -> UInt64
 ```
 
 `self - other`, wrapping on overflow.
@@ -12727,7 +13829,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(UInt64) -> UInt64
+public consuming func multiply(consuming UInt64) -> UInt64
 ```
 
 `self * other`, wrapping on overflow.
@@ -12757,7 +13859,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(UInt64) -> UInt64
+public consuming func divide(consuming UInt64) -> UInt64
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -12783,7 +13885,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(UInt64) -> UInt64
+public consuming func modulo(consuming UInt64) -> UInt64
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -12808,7 +13910,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(UInt64) -> UInt64
+public consuming func bitwiseAnd(consuming UInt64) -> UInt64
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -12828,7 +13930,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(UInt64) -> UInt64
+public consuming func bitwiseOr(consuming UInt64) -> UInt64
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -12848,7 +13950,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(UInt64) -> UInt64
+public consuming func bitwiseXor(consuming UInt64) -> UInt64
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -12868,7 +13970,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> UInt64
+public consuming func bitwiseNot() -> UInt64
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -12888,7 +13990,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> UInt64
+public consuming func shiftLeft(by: consuming Int64) -> UInt64
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -12909,7 +14011,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> UInt64
+public consuming func shiftRight(by: consuming Int64) -> UInt64
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,
@@ -13829,6 +14931,14 @@ _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Comparable`
 
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
 #### function `compare`
 
 ```kestrel
@@ -13848,7 +14958,95 @@ using two's-complement ordering; unsigned types use natural ordering.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Self) -> Bool
+```
+
+`>` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Self) -> Bool
+```
+
+`>=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtLeast`
+
+```kestrel
+public func isAtLeast(Self) -> Bool
+```
+
+`start..` lower-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isAtMost`
+
+```kestrel
+public func isAtMost(Self) -> Bool
+```
+
+`..=end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `isBelow`
+
+```kestrel
+public func isBelow(Self) -> Bool
+```
+
+`..<end` upper-bound check, derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Self) -> Bool
+```
+
+`<` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Self) -> Bool
+```
+
+`<=` derived from `compare`.
+
+_Defined in `lang/std/core/protocols.ks`._
+
 ### Implements `Equatable`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/core/protocols.ks`._
+
+#### function `equal`
+
+```kestrel
+public func equal(to: Self) -> Bool
+```
+
+Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 #### function `isEqual`
 
@@ -13866,6 +15064,16 @@ Bit-for-bit equality. Backs the `==` operator.
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `notEqual`
+
+```kestrel
+public func notEqual(to: Self) -> Bool
+```
+
+Default `!=`: delegates to `==` so there's a single source of truth.
+
+_Defined in `lang/std/core/protocols.ks`._
 
 ### Implements `Matchable`
 
@@ -13903,6 +15111,20 @@ Formats the integer directly into `writer`, honouring the supplied
 ```
 
 _Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `formatted`
+
+```kestrel
+public func formatted(FormatOptions) -> String
+```
+
+Returns this value rendered as a `String`.
+
+Convenience wrapper: creates a `StringBuilder`, calls
+`format(into:)`, and returns the built string. Uses a distinct
+name to avoid overload-resolution ambiguity with `format(into:)`.
+
+_Defined in `lang/std/text/format.ks`._
 
 ### Implements `Hashable`
 
@@ -14050,7 +15272,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 #### function `add`
 
 ```kestrel
-public func add(UInt8) -> UInt8
+public consuming func add(consuming UInt8) -> UInt8
 ```
 
 `self + other`, wrapping on overflow. Use `addChecked` to detect or
@@ -14081,7 +15303,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `subtract`
 
 ```kestrel
-public func subtract(UInt8) -> UInt8
+public consuming func subtract(consuming UInt8) -> UInt8
 ```
 
 `self - other`, wrapping on overflow.
@@ -14101,7 +15323,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `multiply`
 
 ```kestrel
-public func multiply(UInt8) -> UInt8
+public consuming func multiply(consuming UInt8) -> UInt8
 ```
 
 `self * other`, wrapping on overflow.
@@ -14131,7 +15353,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `divide`
 
 ```kestrel
-public func divide(UInt8) -> UInt8
+public consuming func divide(consuming UInt8) -> UInt8
 ```
 
 Truncating integer division (`self / other`). For signed types,
@@ -14157,7 +15379,7 @@ _Defined in `lang/std/core/arithmetic.ks`._
 #### function `modulo`
 
 ```kestrel
-public func modulo(UInt8) -> UInt8
+public consuming func modulo(consuming UInt8) -> UInt8
 ```
 
 `self % other` — truncated remainder; the result has the sign of
@@ -14182,7 +15404,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseAnd`
 
 ```kestrel
-public func bitwiseAnd(UInt8) -> UInt8
+public consuming func bitwiseAnd(consuming UInt8) -> UInt8
 ```
 
 Bitwise AND. `0b1010 & 0b1100 == 0b1000`.
@@ -14202,7 +15424,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseOr`
 
 ```kestrel
-public func bitwiseOr(UInt8) -> UInt8
+public consuming func bitwiseOr(consuming UInt8) -> UInt8
 ```
 
 Bitwise OR. `0b1010 | 0b1100 == 0b1110`.
@@ -14222,7 +15444,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseXor`
 
 ```kestrel
-public func bitwiseXor(UInt8) -> UInt8
+public consuming func bitwiseXor(consuming UInt8) -> UInt8
 ```
 
 Bitwise XOR. `0b1010 ^ 0b1100 == 0b0110`.
@@ -14242,7 +15464,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `bitwiseNot`
 
 ```kestrel
-public func bitwiseNot() -> UInt8
+public consuming func bitwiseNot() -> UInt8
 ```
 
 Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
@@ -14262,7 +15484,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftLeft`
 
 ```kestrel
-public func shiftLeft(by: Int64) -> UInt8
+public consuming func shiftLeft(by: consuming Int64) -> UInt8
 ```
 
 Left shift by `count`. Behavior is undefined when `count >= bitWidth`
@@ -14283,7 +15505,7 @@ _Defined in `lang/std/core/bitwise.ks`._
 #### function `shiftRight`
 
 ```kestrel
-public func shiftRight(by: Int64) -> UInt8
+public consuming func shiftRight(by: consuming Int64) -> UInt8
 ```
 
 Right shift by `count`. Arithmetic (sign-extending) for signed types,

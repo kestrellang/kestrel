@@ -1,156 +1,147 @@
-//! Immediate values — constants and references.
-
-use crate::op::{FloatBits, IntBits};
-use crate::ty::MirTy;
 use kestrel_hecs::Entity;
 
-/// An immediate (constant) value.
-#[derive(Debug, Clone)]
+use crate::ty::TyArena;
+use crate::{FloatBits, IntBits, MonoFuncId, TyId};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImmediateKind {
+    IntLiteral {
+        bits: IntBits,
+        value: i128,
+    },
+    FloatLiteral {
+        bits: FloatBits,
+        value: f64,
+    },
+    BoolLiteral(bool),
+    StringLiteral(String),
+    StringPointer(String),
+    Unit,
+    FunctionRef {
+        func: Entity,
+        type_args: Vec<TyId>,
+        self_type: Option<TyId>,
+    },
+    MonoFunctionRef(MonoFuncId),
+    NullPtr(TyId),
+    SizeOf(TyId),
+    AlignOf(TyId),
+    FloatInfinity(FloatBits),
+    FloatNan(FloatBits),
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Immediate {
     pub kind: ImmediateKind,
 }
 
-/// The different kinds of immediate values.
-#[derive(Debug, Clone)]
-pub enum ImmediateKind {
-    /// Integer literal with explicit bit width.
-    IntLiteral { bits: IntBits, value: i128 },
-    /// Float literal with explicit bit width.
-    FloatLiteral { bits: FloatBits, value: f64 },
-    /// Boolean literal.
-    BoolLiteral(bool),
-    /// String literal (fat pointer: ptr + len).
-    StringLiteral(String),
-    /// String pointer (just the pointer to string data, without length).
-    StringPointer(String),
-    /// Unit value `()`.
-    Unit,
-    /// Reference to a function.
-    FunctionRef { func: Entity, type_args: Vec<MirTy> },
-    /// Witness method reference for use as a function value.
-    WitnessMethod {
-        protocol: Entity,
-        method: String,
-        for_type: MirTy,
-    },
-    /// Null pointer of a given type.
-    NullPtr(MirTy),
-    /// Error/poison value — used when lowering fails.
-    Error,
-}
-
 impl Immediate {
-    /// Create an i8 literal.
-    pub fn i8(value: i8) -> Self {
-        Self::int(IntBits::I8, value as i128)
+    pub fn new(kind: ImmediateKind) -> Self {
+        Self { kind }
     }
 
-    /// Create an i16 literal.
-    pub fn i16(value: i16) -> Self {
-        Self::int(IntBits::I16, value as i128)
+    pub fn i8(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I8,
+            value,
+        })
     }
-
-    /// Create an i32 literal.
-    pub fn i32(value: i32) -> Self {
-        Self::int(IntBits::I32, value as i128)
+    pub fn i16(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I16,
+            value,
+        })
     }
-
-    /// Create an i64 literal.
-    pub fn i64(value: i64) -> Self {
-        Self::int(IntBits::I64, value as i128)
+    pub fn i32(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I32,
+            value,
+        })
     }
-
-    /// Create an integer literal with explicit bit width.
-    pub fn int(bits: IntBits, value: i128) -> Self {
-        Self {
-            kind: ImmediateKind::IntLiteral { bits, value },
-        }
+    pub fn i64(value: i128) -> Self {
+        Self::new(ImmediateKind::IntLiteral {
+            bits: IntBits::I64,
+            value,
+        })
     }
-
-    /// Create an f32 literal.
-    pub fn f32(value: f32) -> Self {
-        Self::float(FloatBits::F32, value as f64)
+    pub fn f32(value: f64) -> Self {
+        Self::new(ImmediateKind::FloatLiteral {
+            bits: FloatBits::F32,
+            value,
+        })
     }
-
-    /// Create an f64 literal.
     pub fn f64(value: f64) -> Self {
-        Self::float(FloatBits::F64, value)
+        Self::new(ImmediateKind::FloatLiteral {
+            bits: FloatBits::F64,
+            value,
+        })
     }
-
-    /// Create a float literal with explicit bit width.
-    pub fn float(bits: FloatBits, value: f64) -> Self {
-        Self {
-            kind: ImmediateKind::FloatLiteral { bits, value },
-        }
-    }
-
-    /// Create a boolean literal.
     pub fn bool(value: bool) -> Self {
-        Self {
-            kind: ImmediateKind::BoolLiteral(value),
-        }
+        Self::new(ImmediateKind::BoolLiteral(value))
     }
-
-    /// Create a string literal.
-    pub fn string(value: impl Into<String>) -> Self {
-        Self {
-            kind: ImmediateKind::StringLiteral(value.into()),
-        }
+    pub fn string(s: impl Into<String>) -> Self {
+        Self::new(ImmediateKind::StringLiteral(s.into()))
     }
-
-    /// Create a string pointer.
-    pub fn string_ptr(value: impl Into<String>) -> Self {
-        Self {
-            kind: ImmediateKind::StringPointer(value.into()),
-        }
+    pub fn string_pointer(s: impl Into<String>) -> Self {
+        Self::new(ImmediateKind::StringPointer(s.into()))
     }
-
-    /// Create a unit value.
     pub fn unit() -> Self {
-        Self {
-            kind: ImmediateKind::Unit,
-        }
+        Self::new(ImmediateKind::Unit)
     }
 
-    /// Create a function reference.
-    pub fn function_ref(func: Entity) -> Self {
-        Self {
-            kind: ImmediateKind::FunctionRef {
-                func,
-                type_args: Vec::new(),
-            },
-        }
+    pub fn function_ref(func: Entity, type_args: Vec<TyId>, self_type: Option<TyId>) -> Self {
+        Self::new(ImmediateKind::FunctionRef {
+            func,
+            type_args,
+            self_type,
+        })
     }
 
-    /// Create a function reference with type arguments.
-    pub fn function_ref_generic(func: Entity, type_args: Vec<MirTy>) -> Self {
-        Self {
-            kind: ImmediateKind::FunctionRef { func, type_args },
-        }
+    pub fn null_ptr(ty: TyId) -> Self {
+        Self::new(ImmediateKind::NullPtr(ty))
     }
-
-    /// Create a witness method reference.
-    pub fn witness_method(protocol: Entity, method: impl Into<String>, for_type: MirTy) -> Self {
-        Self {
-            kind: ImmediateKind::WitnessMethod {
-                protocol,
-                method: method.into(),
-                for_type,
-            },
-        }
+    pub fn size_of(ty: TyId) -> Self {
+        Self::new(ImmediateKind::SizeOf(ty))
     }
-
-    /// Create a null pointer.
-    pub fn null_ptr(ty: MirTy) -> Self {
-        Self {
-            kind: ImmediateKind::NullPtr(ty),
-        }
+    pub fn align_of(ty: TyId) -> Self {
+        Self::new(ImmediateKind::AlignOf(ty))
     }
-
-    /// Create an error/poison value.
     pub fn error() -> Self {
-        Self {
-            kind: ImmediateKind::Error,
+        Self::new(ImmediateKind::Error)
+    }
+
+    pub fn ty(&self, arena: &mut TyArena) -> TyId {
+        match &self.kind {
+            ImmediateKind::IntLiteral { bits, .. } => match bits {
+                IntBits::I8 => arena.i8(),
+                IntBits::I16 => arena.i16(),
+                IntBits::I32 => arena.i32(),
+                IntBits::I64 => arena.i64(),
+            },
+            ImmediateKind::FloatLiteral { bits, .. } => match bits {
+                FloatBits::F16 => arena.f16(),
+                FloatBits::F32 => arena.f32(),
+                FloatBits::F64 => arena.f64(),
+            },
+            ImmediateKind::BoolLiteral(_) => arena.bool(),
+            ImmediateKind::StringLiteral(_) => arena.str_ty(),
+            ImmediateKind::StringPointer(_) => {
+                let i8 = arena.i8();
+                arena.pointer(i8)
+            },
+            ImmediateKind::Unit => arena.unit(),
+            ImmediateKind::NullPtr(ty) | ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) => {
+                *ty
+            },
+            ImmediateKind::FloatInfinity(bits) | ImmediateKind::FloatNan(bits) => match bits {
+                FloatBits::F16 => arena.f16(),
+                FloatBits::F32 => arena.f32(),
+                FloatBits::F64 => arena.f64(),
+            },
+            ImmediateKind::FunctionRef { .. }
+            | ImmediateKind::MonoFunctionRef(_)
+            | ImmediateKind::Error => arena.error(),
         }
     }
 }

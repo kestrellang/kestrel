@@ -99,15 +99,20 @@ public protocol ArrayMatchable {
 }
 
 /// Blanket extension giving every `Equatable` type the `==` and `!=`
-/// operators with `Bool` results. Implements `isNotEqual` in terms of
+/// operators with `Bool` results. Implements `notEqual` in terms of
 /// `isEqual` so conformers only need to write the equality method.
 extend Equatable: Equal[Self], NotEqual[Self] {
     type Equal.Output = Bool
     type NotEqual.Output = Bool
 
-    /// Default `!=` derived from `isEqual`.
-    public func isNotEqual(to other: Self) -> Bool {
-        if self.isEqual(to: other) { false } else { true }
+    /// Bridges `Equal.equal(to:)` to `Equatable.isEqual(to:)`.
+    public func equal(to other: Self) -> Bool {
+        self.isEqual(to: other)
+    }
+
+    /// Default `!=`: delegates to `==` so there's a single source of truth.
+    public func notEqual(to other: Self) -> Bool {
+        if self.equal(to: other) { false } else { true }
     }
 }
 
@@ -144,12 +149,11 @@ public protocol Comparable: Equatable {
 /// Blanket extension giving every `Comparable` type the four ordering
 /// operators plus a sharper `!=`. All derived from a single `compare`
 /// call to avoid repeated dispatch.
-extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self], NotEqual[Self] {
+extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[Self] {
     type Less.Output = Bool
     type LessOrEqual.Output = Bool
     type Greater.Output = Bool
     type GreaterOrEqual.Output = Bool
-    type NotEqual.Output = Bool
 
     /// `<` derived from `compare`.
     public func lessThan(other: Self) -> Bool {
@@ -169,12 +173,6 @@ extend Comparable: Less[Self], LessOrEqual[Self], Greater[Self], GreaterOrEqual[
     /// `>=` derived from `compare`.
     public func greaterThanOrEqual(other: Self) -> Bool {
         self.compare(other) != Ordering.Less
-    }
-
-    /// `!=` derived from `compare`. Shadows the `Equatable` default with
-    /// a single dispatch.
-    public func isNotEqual(to other: Self) -> Bool {
-        self.compare(other) != Ordering.Equal
     }
 }
 

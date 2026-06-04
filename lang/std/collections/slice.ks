@@ -990,7 +990,7 @@ extend Slice[T] {
     /// let v = [1, -1, 2, 3, -1, 4].split(where: { it < 0 });
     /// for seg in v { ... }
     /// ```
-    public func split(where predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
+    public func split(consuming where predicate: (T) -> Bool) -> ArraySplitWhereView[T] {
         ArraySplitWhereView(slice: self.asSlice(), predicate: predicate)
     }
 

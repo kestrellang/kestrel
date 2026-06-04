@@ -286,8 +286,81 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_notes(vec![
                     "mutually recursive functions with 'some' return types must have at least one non-opaque base case".into(),
                 ]),
+            InferError::ConventionMismatch { .. } => Diagnostic::error()
+                .with_message(
+                    "convention mismatch: cannot pass a mutating closure where a non-mutating parameter is expected",
+                )
+                .with_labels(vec![
+                    Label::primary(file_id, range)
+                        .with_message("mutating closure not allowed here"),
+                ]),
         }
     }
+}
+
+// ===== MIR diagnostics =====
+
+/// Resolve a span for a diagnostic: prefer the provided span, fall back to
+/// the entity's DeclSpan from the World, then to a synthetic span.
+fn resolve_span(span: Option<&Span>, entity: Entity, world: &World) -> Span {
+    if let Some(s) = span {
+        return s.clone();
+    }
+    world
+        .get::<kestrel_ast_builder::DeclSpan>(entity)
+        .map(|s| s.0.clone())
+        .unwrap_or_else(|| Span::synthetic(0))
+}
+
+pub fn mir_verify_error_to_diagnostic(
+    error: &kestrel_mir::verify::VerifyError,
+    world: &World,
+) -> Diagnostic<usize> {
+    let span = resolve_span(error.span.as_ref(), error.entity, world);
+
+    let location = match error.inst {
+        Some(i) => format!(" at bb{}[{}]", error.block.index(), i),
+        None => format!(" at bb{}", error.block.index()),
+    };
+
+    Diagnostic::bug()
+        .with_message(format!(
+            "internal compiler error: OSSA verify failed in '{}'{}: {}",
+            error.func_name, location, error.message
+        ))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range()).with_message(&error.message),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
+}
+
+pub fn mir_mono_verify_error_to_diagnostic(
+    error: &kestrel_mir::mono::verify::MonoVerifyError,
+    module: &kestrel_mir::mono::MonoModule,
+    world: &World,
+) -> Diagnostic<usize> {
+    let func = &module.functions[error.func_idx];
+    let span = resolve_span(error.span.as_ref(), func.source, world);
+
+    let location = match (error.block, error.inst) {
+        (Some(b), Some(i)) => format!(" at bb{}[{}]", b.index(), i),
+        (Some(b), None) => format!(" at bb{}", b.index()),
+        _ => String::new(),
+    };
+
+    Diagnostic::bug()
+        .with_message(format!(
+            "internal compiler error: post-mono verify failed in '{}'{}: {}",
+            func.name, location, error.message
+        ))
+        .with_labels(vec![
+            Label::primary(span.file_id, span.range()).with_message(&error.message),
+        ])
+        .with_notes(vec![
+            "this is an internal compiler error; please file a bug report".into(),
+        ])
 }
 
 // ===== File provider =====

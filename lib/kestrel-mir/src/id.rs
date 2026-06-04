@@ -1,7 +1,3 @@
-//! Newtype IDs for MIR items.
-//!
-//! Each ID is a u32 index into the corresponding Vec in MirModule or MirBody.
-
 macro_rules! define_id {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -10,11 +6,45 @@ macro_rules! define_id {
 
         impl $name {
             pub fn new(index: usize) -> Self {
+                debug_assert!(index <= u32::MAX as usize, "{} index overflow: {index}", stringify!($name));
                 Self(index as u32)
             }
 
             pub fn index(self) -> usize {
                 self.0 as usize
+            }
+
+            pub fn raw(self) -> u32 {
+                self.0
+            }
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}({})", stringify!($name), self.0)
+            }
+        }
+    };
+}
+
+macro_rules! define_idx {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $name(u16);
+
+        impl $name {
+            pub fn new(index: usize) -> Self {
+                debug_assert!(index <= u16::MAX as usize, "{} index overflow: {index}", stringify!($name));
+                Self(index as u16)
+            }
+
+            pub fn index(self) -> usize {
+                self.0 as usize
+            }
+
+            pub fn raw(self) -> u16 {
+                self.0
             }
         }
 
@@ -27,42 +57,27 @@ macro_rules! define_id {
 }
 
 define_id!(
-    /// Index into `MirModule.functions`.
-    FunctionId
+    /// Index into `TyArena.types`.
+    TyId
 );
 define_id!(
-    /// Index into `MirModule.structs`.
-    StructId
-);
-define_id!(
-    /// Index into `MirModule.enums`.
-    EnumId
-);
-define_id!(
-    /// Index into `MirModule.protocols`.
-    ProtocolId
-);
-define_id!(
-    /// Index into `MirModule.witnesses`.
-    WitnessId
-);
-define_id!(
-    /// Index into `MirModule.statics`.
-    StaticId
-);
-define_id!(
-    /// Index into `MirModule.closures`.
-    ClosureId
-);
-define_id!(
-    /// Index into `StructDef.fields`.
-    FieldId
-);
-define_id!(
-    /// Index into `MirBody.blocks`.
+    /// Index into `OssaBody.blocks`.
     BlockId
 );
 define_id!(
-    /// Index into `MirBody.locals`.
-    LocalId
+    /// SSA value identifier, unique per function body.
+    ValueId
+);
+define_id!(
+    /// Index into `MonoModule.functions`.
+    MonoFuncId
+);
+
+define_idx!(
+    /// Index into `StructDef.fields` or `EnumCaseDef.payload_fields`.
+    FieldIdx
+);
+define_idx!(
+    /// Index into `EnumDef.cases`.
+    VariantIdx
 );

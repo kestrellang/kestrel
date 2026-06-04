@@ -1,6 +1,8 @@
 module notes.ui
 
-public func appCss() -> String {
+import html.builder.(raw, Document)
+
+public func appCss() -> Document {
     var s = String(capacity: 12288);
 
     // Reset & base
@@ -112,5 +114,5 @@ public func appCss() -> String {
     // Responsive
     s.append(##"@media(max-width:768px){.app{grid-template-columns:1fr}.sidebar{display:none}.content{padding:20px 16px}}"##);
 
-    s
+    raw(s)
 }

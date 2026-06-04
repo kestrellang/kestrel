@@ -199,11 +199,17 @@ fn normalize_hir_type(
                 .map(|elem| normalize_hir_type(qctx, root, elem, env, state))
                 .collect(),
         ),
-        HirTy::Function { params, ret, .. } => ResolvedTy::Function {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => ResolvedTy::Function {
             params: params
                 .iter()
                 .map(|param| normalize_hir_type(qctx, root, param, env, state))
                 .collect(),
+            conventions: param_conventions.clone(),
             ret: Box::new(normalize_hir_type(qctx, root, ret, env, state)),
         },
         HirTy::Never(_) => ResolvedTy::Never,
@@ -231,7 +237,7 @@ fn contains_error(ty: &ResolvedTy) -> bool {
     match ty {
         ResolvedTy::Error => true,
         ResolvedTy::Named { args, .. } | ResolvedTy::Tuple(args) => args.iter().any(contains_error),
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function { params, ret, .. } => {
             params.iter().any(contains_error) || contains_error(ret)
         },
         ResolvedTy::AssocProjection { base, .. } => contains_error(base),

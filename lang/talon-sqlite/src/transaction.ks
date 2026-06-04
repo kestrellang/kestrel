@@ -2,7 +2,7 @@
 
 module talon.sqlite.transaction
 
-import talon.sqlite.connection.(executeOnDb, queryOnDb)
+import talon.sqlite.connection.(executeOnDb, queryOnDb, lastInsertRowIdOnDb)
 import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(FromRow)
@@ -26,5 +26,9 @@ public struct Transaction: SqliteExecutor {
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
         queryOnDb[R](self.db, sql)
+    }
+
+    public func lastInsertRowId() -> Int64 {
+        lastInsertRowIdOnDb(self.db)
     }
 }

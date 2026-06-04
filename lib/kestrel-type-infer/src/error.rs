@@ -202,6 +202,11 @@ pub enum InferError {
     /// is itself another `some P` from a mutually recursive call, so no
     /// concrete type can be determined.
     CircularOpaqueReturn { span: Span },
+
+    /// A `mutating` closure was passed where a non-mutating (`Borrow`/
+    /// `Consuming`) closure parameter is expected — the callee never lends a
+    /// mutable place, so the closure's write access can't be honored (#106).
+    ConventionMismatch { span: Span },
 }
 
 impl InferError {
@@ -234,7 +239,8 @@ impl InferError {
             | Self::TupleIndexOutOfBounds { span, .. }
             | Self::MemberAccessOnPrimitive { span, .. }
             | Self::MethodNotCalled { span, .. }
-            | Self::CircularOpaqueReturn { span } => span,
+            | Self::CircularOpaqueReturn { span }
+            | Self::ConventionMismatch { span } => span,
         }
     }
 }

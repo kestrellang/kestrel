@@ -20,21 +20,23 @@ import flock.error.(FlockError)
 /// linkLibs: libraries and object files to link (-l flags)
 /// linkPaths: library search paths (-L flags)
 /// frameworks: macOS frameworks (--framework flags)
+/// release: when true, build optimized (passes `-O 2`); ignored for check
 public func invokeCompiler(
     mode mode: String,
     sources sources: Array[String],
     output output: Optional[String],
     linkLibs linkLibs: Array[String],
     linkPaths linkPaths: Array[String],
-    frameworks frameworks: Array[String]
+    frameworks frameworks: Array[String],
+    release release: Bool
 ) -> Result[(), FlockError] {
     if mode == "run" {
-        return invokeRun(sources: sources, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks)
+        return invokeRun(sources: sources, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks, release: release)
     }
     if mode == "check" {
         return invokeCheck(sources: sources)
     }
-    invokeBuild(sources: sources, output: output, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks)
+    invokeBuild(sources: sources, output: output, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks, release: release)
 }
 
 // ----------------------------------------------------------------------------
@@ -46,11 +48,18 @@ func invokeBuild(
     output output: Optional[String],
     linkLibs linkLibs: Array[String],
     linkPaths linkPaths: Array[String],
-    frameworks frameworks: Array[String]
+    frameworks frameworks: Array[String],
+    release release: Bool
 ) -> Result[(), FlockError] {
     var cmd = String();
     cmd.append(compilerPath());
     cmd.append(" build");
+
+    // `--release` maps to the compiler's `-O 2` (Cranelift speed_and_size).
+    // Default (debug) builds omit the flag, leaving the compiler at -O 0.
+    if release {
+        cmd.append(" -O 2")
+    }
 
     for source in sources {
         cmd.append(" ");
@@ -90,7 +99,8 @@ func invokeRun(
     sources sources: Array[String],
     linkLibs linkLibs: Array[String],
     linkPaths linkPaths: Array[String],
-    frameworks frameworks: Array[String]
+    frameworks frameworks: Array[String],
+    release release: Bool
 ) -> Result[(), FlockError] {
     // `mktemp -t flock-run` works on both macOS and Linux.
     let tempPath = captureOutput("mktemp -t flock-run");
@@ -98,7 +108,7 @@ func invokeRun(
         return .Err(FlockError.IoError("failed to create temp file for run"))
     }
 
-    match invokeBuild(sources: sources, output: .Some(tempPath), linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks) {
+    match invokeBuild(sources: sources, output: .Some(tempPath), linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks, release: release) {
         .Err(e) => {
             cleanupTemp(path: tempPath);
             return .Err(e)

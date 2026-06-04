@@ -10,6 +10,7 @@ use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
+use kestrel_name_res::ResolveBuiltin;
 use kestrel_span::Span;
 
 use crate::constraint::{CallArg, Constraint, labels_match};
@@ -166,6 +167,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 let arg_tvs = gen_call_args(ctx, hir, args);
                 let result_tv = ctx.fresh();
                 ctx.overloaded_call(vec![*entity], vec![], arg_tvs, result_tv, id, span.clone());
+                // Early return bypasses the generic insert at the end of gen_expr,
+                // so record the expression type here — otherwise MIR lowering finds
+                // no type for the enum-case construction and falls back to Error.
+                ctx.expr_types.insert(id, result_tv);
                 return result_tv;
             }
 
@@ -550,7 +555,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // === Closures ===
-        HirExpr::Closure { params, body, .. } => gen_closure(ctx, hir, params, body),
+        HirExpr::Closure { params, body, .. } => {
+            // Mark this expr as a closure *literal* so `solve_call` may upgrade
+            // its inferred param convention (the no-annotation `MutBorrow`
+            // inference applies to literals only, not named function values).
+            ctx.closure_literal_exprs.insert(id);
+            gen_closure(ctx, hir, params, body)
+        },
 
         // === Aggregates ===
         HirExpr::Array { elements, span } => {
@@ -981,8 +992,7 @@ fn gen_struct_init(
     let fresh_args: Vec<TyVar> = type_params.iter().map(|_| ctx.fresh()).collect();
 
     // Constrain fresh type args with explicit type args or deferred defaults
-    for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate()
-    {
+    for (i, (&fresh_tv, &param_entity)) in fresh_args.iter().zip(type_params.iter()).enumerate() {
         if let Some(hir_ty) = explicit_type_args.get(i) {
             let explicit_tv = lower_hir_ty(ctx, hir_ty);
             ctx.equal(fresh_tv, explicit_tv, span.clone());
@@ -1341,8 +1351,23 @@ fn gen_closure(
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
 
+    // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
+    // otherwise `Consuming` (the default, matching ordinary closures). The
+    // no-annotation→MutBorrow inference from an expected type is handled
+    // separately during solving.
+    let conventions: Vec<kestrel_ast::ParamConvention> = params
+        .iter()
+        .map(|p| {
+            if p.is_mut {
+                kestrel_ast::ParamConvention::MutBorrow
+            } else {
+                kestrel_ast::ParamConvention::Consuming
+            }
+        })
+        .collect();
+
     // Build function type and track closure flexibility
-    let fn_tv = ctx.function(param_tvs, body_tv);
+    let fn_tv = ctx.function_conv(param_tvs, conventions, body_tv);
 
     if params.is_empty() {
         // No explicit params, no `it` — adapts to any expected arity
@@ -1688,6 +1713,70 @@ fn emit_where_clause_constraints_with_subs(
     }
 }
 
+/// Strategy-1 well-formedness: every time a nominal type `N[A, B, …]` is
+/// *formed* (annotation, parameter, return, field, nested arg), each type arg
+/// must satisfy `N`'s copy bound for that position. A Copyable-by-default
+/// container (`Array`, `Optional`, `Result`, …) carries an injected
+/// `T: Copyable` bound (see `where_clauses::inject_implicit_copyable_bounds`);
+/// emitting it here — at type formation, not only at value-`Def` references —
+/// is what rejects `Result[Buffer]` (a Copyable type holding a non-Copyable
+/// value) at its source site with a clean `DoesNotConform`, instead of letting
+/// it reach the post-mono containment backstop (Inv-3b) as an ICE.
+///
+/// Scoped deliberately to the Copyable/Cloneable bounds: other where-clause
+/// bounds (`Hashable`, `Comparable`, …) are already enforced at
+/// value-construction sites, so surfacing them here would be an orthogonal,
+/// larger change. The helper only pushes `conforms` constraints (it never
+/// re-enters `lower_hir_ty`), so it can't recurse — nested args get their own
+/// well-formedness from the recursive lowering of `arg_tvs` above.
+fn emit_copyable_wellformedness(
+    ctx: &mut InferCtx<'_>,
+    entity: Entity,
+    arg_tvs: &[TyVar],
+    span: &Span,
+) {
+    let copyable = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Copyable,
+        root: ctx.root,
+    });
+    let cloneable = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Cloneable,
+        root: ctx.root,
+    });
+    if copyable.is_none() && cloneable.is_none() {
+        return;
+    }
+    // Positional map from the type's declared params to the formed args.
+    let Some(params) = ctx
+        .query_ctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+    else {
+        return;
+    };
+    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root: ctx.root,
+    });
+    for clause in where_clauses {
+        let crate::resolve::WhereClause::Bound {
+            param, protocol, ..
+        } = clause
+        else {
+            continue;
+        };
+        if Some(protocol) != copyable && Some(protocol) != cloneable {
+            continue;
+        }
+        let Some(pos) = params.iter().position(|p| *p == param) else {
+            continue;
+        };
+        if let Some(&tv) = arg_tvs.get(pos) {
+            ctx.conforms(tv, protocol, span.clone());
+        }
+    }
+}
+
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.
 pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
     lower_hir_ty_with_subs(ctx, ty, &[])
@@ -1827,13 +1916,18 @@ fn lower_return_ty_with_opaque(
                 .collect();
             ctx.tuple(tvs)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let param_tvs: Vec<TyVar> = params
                 .iter()
                 .map(|p| lower_return_ty_with_opaque(ctx, p, callee, subs))
                 .collect();
             let ret_tv = lower_return_ty_with_opaque(ctx, ret, callee, subs);
-            ctx.function(param_tvs, ret_tv)
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
         },
         // Non-structural types: delegate to the standard path
         _ => lower_hir_ty_with_subs(ctx, ret_hir, subs),
@@ -1881,18 +1975,20 @@ pub(crate) fn lower_hir_ty_with_subs(
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
     match ty {
-        HirTy::Struct { entity, args, .. } => {
+        HirTy::Struct { entity, args, span } => {
             let arg_tvs: Vec<TyVar> = args
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
+            emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
             ctx.struct_ty(*entity, arg_tvs)
         },
-        HirTy::Enum { entity, args, .. } => {
+        HirTy::Enum { entity, args, span } => {
             let arg_tvs: Vec<TyVar> = args
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
+            emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
             ctx.enum_ty(*entity, arg_tvs)
         },
         HirTy::Protocol { entity, args, .. } => {
@@ -1948,13 +2044,18 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .collect();
             ctx.tuple(elem_tvs)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => {
             let param_tvs: Vec<TyVar> = params
                 .iter()
                 .map(|p| lower_hir_ty_with_subs(ctx, p, subs))
                 .collect();
             let ret_tv = lower_hir_ty_with_subs(ctx, ret, subs);
-            ctx.function(param_tvs, ret_tv)
+            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
         },
         HirTy::Param(entity, _) => {
             // Check substitution map first (for instantiated type params)

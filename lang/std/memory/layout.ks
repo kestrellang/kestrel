@@ -42,7 +42,7 @@ public struct Layout: Equatable {
 
     /// Layout for a single value of `T` — uses the compiler-known
     /// `sizeof` and `alignof` for the type.
-    public static func of[T]() -> Layout {
+    public static func of[T]() -> Layout where T: not Copyable {
         Layout(size: Int64(intLiteral: lang.sizeof[T]()), alignment: Int64(intLiteral: lang.alignof[T]()))
     }
 

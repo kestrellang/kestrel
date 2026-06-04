@@ -833,15 +833,15 @@ mod tests {
         assert!(!world.has::<Callable>(less), "plain case has no Callable");
 
         // Methods
-        let equals_fn =
+        let is_equal_fn =
             find_child_by_name(&world, ordering, &NodeKind::Function, "isEqual").unwrap();
-        let callable = world.get::<Callable>(equals_fn).unwrap();
+        let callable = world.get::<Callable>(is_equal_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
         assert_eq!(callable.params[0].name, "other");
-        assert!(world.has::<Valued>(equals_fn), "has body");
-        assert_eq!(world.get::<Vis>(equals_fn), Some(&Vis::Public));
+        assert!(world.has::<Valued>(is_equal_fn), "has body");
+        assert_eq!(world.get::<Vis>(is_equal_fn), Some(&Vis::Public));
         // Return type
-        let ret = world.get::<TypeAnnotation>(equals_fn).unwrap();
+        let ret = world.get::<TypeAnnotation>(is_equal_fn).unwrap();
         match &ret.0 {
             AstType::Named { segments, .. } => {
                 assert_eq!(segments.len(), 1);
@@ -1053,6 +1053,10 @@ mod tests {
             AstType::Unit(_) => "()".into(),
             AstType::Never(_) => "Never".into(),
             AstType::Inferred(_) => "_".into(),
+            AstType::Some { bounds, .. } => {
+                let b: Vec<_> = bounds.iter().map(type_name).collect();
+                format!("some {}", b.join(" + "))
+            },
         }
     }
 }

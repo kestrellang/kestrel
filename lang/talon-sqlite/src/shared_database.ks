@@ -7,7 +7,7 @@
 module talon.sqlite.shared_database
 
 import talon.sqlite.ffi
-import talon.sqlite.connection.(executeOnDb, queryOnDb, execRawOnDb)
+import talon.sqlite.connection.(executeOnDb, queryOnDb, execRawOnDb, lastInsertRowIdOnDb)
 import talon.sqlite.transaction.(Transaction)
 import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.error.(SqliteError)
@@ -77,6 +77,10 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
         queryOnDb[R](self.ptr.read().db, sql)
+    }
+
+    public func lastInsertRowId() -> Int64 {
+        lastInsertRowIdOnDb(self.ptr.read().db)
     }
 
     public func transaction(body: (Transaction) -> () throws SqliteError) -> () throws SqliteError {

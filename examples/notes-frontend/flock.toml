@@ -14,3 +14,4 @@ swoop = { path = "../../lang/swoop" }
 http = { path = "../../lang/http" }
 quill = { path = "../../lang/quill" }
 quill-json = { path = "../../lang/quill-json" }
+html-builder = { path = "../../lang/html-builder" }

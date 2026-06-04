@@ -167,6 +167,10 @@ pub enum Builtin {
     CoalesceOperatorProtocol,
     CoalesceOperatorMethod,
 
+    // ===== Force unwrap =====
+    ForceUnwrapOperatorProtocol,
+    ForceUnwrapOperatorMethod,
+
     // ===== Boolean conditional =====
     BooleanConditional,
 
@@ -235,6 +239,7 @@ pub enum Builtin {
     // ===== Builtin structs =====
     ArrayStruct,
     SliceStruct,
+    ManuallyDropStruct,
 
     // ===== String interpolation =====
     DefaultStringInterpolation,
@@ -352,6 +357,10 @@ impl Builtin {
             Self::CoalesceOperatorProtocol => "Coalesce",
             Self::CoalesceOperatorMethod => "CoalesceOperatorMethod",
 
+            // Force unwrap
+            Self::ForceUnwrapOperatorProtocol => "ForceUnwrap",
+            Self::ForceUnwrapOperatorMethod => "ForceUnwrapOperatorMethod",
+
             // Boolean conditional
             Self::BooleanConditional => "BooleanConditional",
 
@@ -420,6 +429,7 @@ impl Builtin {
             // Builtin structs
             Self::ArrayStruct => "ArrayStruct",
             Self::SliceStruct => "SliceStruct",
+            Self::ManuallyDropStruct => "ManuallyDrop",
 
             // String interpolation
             Self::DefaultStringInterpolation => "DefaultStringInterpolation",
@@ -537,6 +547,10 @@ impl Builtin {
             "CoalesceOperatorProtocol" => Some(Self::CoalesceOperatorProtocol),
             "CoalesceOperatorMethod" => Some(Self::CoalesceOperatorMethod),
 
+            // Force unwrap
+            "ForceUnwrapOperatorProtocol" => Some(Self::ForceUnwrapOperatorProtocol),
+            "ForceUnwrapOperatorMethod" => Some(Self::ForceUnwrapOperatorMethod),
+
             // Boolean conditional
             "BooleanConditional" => Some(Self::BooleanConditional),
 
@@ -605,6 +619,7 @@ impl Builtin {
             // Builtin structs
             "ArrayStruct" => Some(Self::ArrayStruct),
             "SliceStruct" => Some(Self::SliceStruct),
+            "ManuallyDropStruct" => Some(Self::ManuallyDropStruct),
 
             // String interpolation
             "DefaultStringInterpolation" => Some(Self::DefaultStringInterpolation),
@@ -701,6 +716,7 @@ impl Builtin {
             | Self::LogicalOrOperatorProtocol
             | Self::LogicalNotOperatorProtocol
             | Self::CoalesceOperatorProtocol
+            | Self::ForceUnwrapOperatorProtocol
             | Self::ExclusiveRangeOperatorProtocol
             | Self::InclusiveRangeOperatorProtocol
             | Self::RangeFromOperatorProtocol
@@ -740,6 +756,7 @@ impl Builtin {
             | Self::LogicalOrOperatorMethod
             | Self::LogicalNotOperatorMethod
             | Self::CoalesceOperatorMethod
+            | Self::ForceUnwrapOperatorMethod
             | Self::ExclusiveRangeOperatorMethod
             | Self::InclusiveRangeOperatorMethod
             | Self::RangeFromOperatorMethod
@@ -783,7 +800,7 @@ impl Builtin {
             | Self::ResultTypeOperator => BuiltinKind::TypeAlias,
 
             // Builtin structs
-            Self::ArrayStruct | Self::SliceStruct => BuiltinKind::Struct,
+            Self::ArrayStruct | Self::SliceStruct | Self::ManuallyDropStruct => BuiltinKind::Struct,
 
             // String interpolation
             Self::DefaultStringInterpolation | Self::FormatOptions => BuiltinKind::Struct,

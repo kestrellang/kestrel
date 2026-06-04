@@ -7,7 +7,7 @@ import std.io.stdio.println
 struct MyError {}
 
 func handleExplicit(r: std.result.Result[std.numeric.Int64, MyError]) -> std.numeric.Int64 {
-    r.unwrapOr(0)
+    r.unwrap(or: 0)
 }
 
 func main() -> lang.i64 {

@@ -7,6 +7,7 @@ import perch.middleware.(Logger)
 import http.content.(Html)
 import http.cookie.(Cookie)
 import quill.value.(Value)
+import html.builder.(Document)
 
 import notes.api.(
     apiLogin, apiRegister,
@@ -24,6 +25,8 @@ struct Ctx: Cloneable {
     var x: Int64
     func clone() -> Ctx { Ctx(x: self.x) }
 }
+
+func render(doc: Document) -> Html { Html(doc.render()) }
 
 func main() {
     var app = App[Ctx](Ctx(x: 0));
@@ -75,7 +78,7 @@ func main() {
 func handleLoginPage(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
     if token.byteCount > 0 { return Response.redirect(to: "/") };
-    Response.ok(Html(loginPage("")))
+    Response.ok(render(doc: loginPage("")))
 }
 
 func handleLoginSubmit(req: Request, ctx: Ctx) -> Response {
@@ -84,21 +87,21 @@ func handleLoginSubmit(req: Request, ctx: Ctx) -> Response {
     let password = formField(fields, "password");
 
     guard let .Ok(apiRes) = apiLogin(email, password) else {
-        return Response.ok(Html(loginPage("Could not connect to the API")))
+        return Response.ok(render(doc: loginPage("Could not connect to the API")))
     }
     guard apiRes.status.isSuccess() else {
-        return Response.ok(Html(loginPage("Invalid email or password")))
+        return Response.ok(render(doc: loginPage("Invalid email or password")))
     }
     guard let .Ok(json) = apiRes.json() else {
-        return Response.ok(Html(loginPage("Unexpected response")))
+        return Response.ok(render(doc: loginPage("Unexpected response")))
     }
 
     let token = match json.value(forKey: "token") {
         .Some(t) => match t {
             .Str(s) => s,
-            _ => return Response.ok(Html(loginPage("Unexpected response")))
+            _ => return Response.ok(render(doc: loginPage("Unexpected response")))
         },
-        .None => return Response.ok(Html(loginPage("Unexpected response")))
+        .None => return Response.ok(render(doc: loginPage("Unexpected response")))
     };
 
     var cookie = Cookie("token", token);
@@ -109,7 +112,7 @@ func handleLoginSubmit(req: Request, ctx: Ctx) -> Response {
 }
 
 func handleRegisterPage(req: Request, ctx: Ctx) -> Response {
-    Response.ok(Html(registerPage("")))
+    Response.ok(render(doc: registerPage("")))
 }
 
 func handleRegisterSubmit(req: Request, ctx: Ctx) -> Response {
@@ -120,7 +123,7 @@ func handleRegisterSubmit(req: Request, ctx: Ctx) -> Response {
     let password = formField(fields, "password");
 
     guard let .Ok(apiRes) = apiRegister(email, firstName, lastName, password) else {
-        return Response.ok(Html(registerPage("Could not connect to the API")))
+        return Response.ok(render(doc: registerPage("Could not connect to the API")))
     }
     guard apiRes.status.isSuccess() else {
         let msg = match apiRes.json() {
@@ -130,7 +133,7 @@ func handleRegisterSubmit(req: Request, ctx: Ctx) -> Response {
             },
             .Err(_) => "Registration failed"
         };
-        return Response.ok(Html(registerPage(msg)))
+        return Response.ok(render(doc: registerPage(msg)))
     }
 
     Response.redirect(to: "/login")
@@ -177,7 +180,7 @@ func handleNewNote(req: Request, ctx: Ctx) -> Response {
         .None => 0
     };
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("New Note — Notes", folderSidebar(folders, folderId), noteEditorView(.None, folderId))))
+    Response.ok(render(doc: appShell("New Note — Notes", folderSidebar(folders, folderId), noteEditorView(.None, folderId))))
 }
 
 func handleViewNote(req: Request, ctx: Ctx) -> Response {
@@ -197,7 +200,7 @@ func handleViewNote(req: Request, ctx: Ctx) -> Response {
         return Response.redirect(to: "/")
     }
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("Note — Notes", folderSidebar(folders, 0), noteDetailView(note, folders))))
+    Response.ok(render(doc: appShell("Note — Notes", folderSidebar(folders, 0), noteDetailView(note, folders))))
 }
 
 func handleEditNote(req: Request, ctx: Ctx) -> Response {
@@ -221,7 +224,7 @@ func handleEditNote(req: Request, ctx: Ctx) -> Response {
         .None => 0
     };
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("Edit Note — Notes", folderSidebar(folders, 0), noteEditorView(.Some(note), noteFolderId))))
+    Response.ok(render(doc: appShell("Edit Note — Notes", folderSidebar(folders, 0), noteEditorView(.Some(note), noteFolderId))))
 }
 
 // ============================================================================
@@ -240,10 +243,10 @@ func handleNotesFragment(req: Request, ctx: Ctx) -> Response {
         .None => 0
     };
     if folderId == 0 {
-        Response.ok(Html(noteListView(allNotes, "All Notes")))
+        Response.ok(render(doc: noteListView(allNotes, "All Notes")))
     } else {
         let filtered = filterByFolder(allNotes, folderId);
-        Response.ok(Html(noteListView(filtered, "Folder")))
+        Response.ok(render(doc: noteListView(filtered, "Folder")))
     }
 }
 
@@ -264,7 +267,7 @@ func handleNoteFragment(req: Request, ctx: Ctx) -> Response {
         return Response.internalServerError()
     }
     let folders = loadFolders(token);
-    Response.ok(Html(noteDetailView(note, folders)))
+    Response.ok(render(doc: noteDetailView(note, folders)))
 }
 
 func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -287,7 +290,7 @@ func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
         .Some(v) => match v { .Int(n) => n, _ => 0 },
         .None => 0
     };
-    Response.ok(Html(noteEditorView(.Some(note), noteFolderId)))
+    Response.ok(render(doc: noteEditorView(.Some(note), noteFolderId)))
 }
 
 func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -307,7 +310,7 @@ func handleCreateNoteFragment(req: Request, ctx: Ctx) -> Response {
         return Response.internalServerError()
     }
     let folders = loadFolders(token);
-    Response.ok(Html(noteDetailView(note, folders)))
+    Response.ok(render(doc: noteDetailView(note, folders)))
 }
 
 func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -330,7 +333,7 @@ func handleUpdateNoteFragment(req: Request, ctx: Ctx) -> Response {
         return Response.internalServerError()
     }
     let folders = loadFolders(token);
-    Response.ok(Html(noteDetailView(note, folders)))
+    Response.ok(render(doc: noteDetailView(note, folders)))
 }
 
 func handleMoveNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -355,7 +358,7 @@ func handleMoveNoteFragment(req: Request, ctx: Ctx) -> Response {
         return Response.internalServerError()
     }
     let folders = loadFolders(token);
-    Response.ok(Html(noteDetailView(note, folders)))
+    Response.ok(render(doc: noteDetailView(note, folders)))
 }
 
 func handleDeleteNoteFragment(req: Request, ctx: Ctx) -> Response {
@@ -372,7 +375,7 @@ func handleDeleteNoteFragment(req: Request, ctx: Ctx) -> Response {
         return Response.internalServerError()
     }
     let notes = loadNotes(token);
-    Response.ok(Html(noteListView(notes, "All Notes")))
+    Response.ok(render(doc: noteListView(notes, "All Notes")))
 }
 
 func handleCreateFolderFragment(req: Request, ctx: Ctx) -> Response {
@@ -381,18 +384,18 @@ func handleCreateFolderFragment(req: Request, ctx: Ctx) -> Response {
     let fields = parseForm(req.body);
     let name = formField(fields, "name");
     guard name.byteCount > 0 else {
-        return Response.ok(Html(folderSidebar(loadFolders(token), 0)))
+        return Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
     }
     guard let .Ok(_) = apiCreateFolder(token, name) else {
         return Response.internalServerError()
     }
-    Response.ok(Html(folderSidebar(loadFolders(token), 0)))
+    Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
 }
 
 func handleSidebarFragment(req: Request, ctx: Ctx) -> Response {
     let token = getToken(req);
     guard token.byteCount > 0 else { return Response.unauthorized() }
-    Response.ok(Html(folderSidebar(loadFolders(token), 0)))
+    Response.ok(render(doc: folderSidebar(loadFolders(token), 0)))
 }
 
 // ============================================================================
@@ -402,7 +405,7 @@ func handleSidebarFragment(req: Request, ctx: Ctx) -> Response {
 func renderAppPage(token: String, folderId: Int64, title: String) -> Response {
     let notes = loadNotes(token);
     let folders = loadFolders(token);
-    Response.ok(Html(appShell("\(title) — Notes", folderSidebar(folders, folderId), noteListView(notes, title))))
+    Response.ok(render(doc: appShell("\(title) — Notes", folderSidebar(folders, folderId), noteListView(notes, title))))
 }
 
 func loadNotes(token: String) -> Array[Value] {

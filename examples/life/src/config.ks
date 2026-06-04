@@ -44,11 +44,15 @@ struct Config {
 
         let finalCell = if cellSize > 0 { cellSize } else { autoCellSize(width: width, height: height) };
 
+        // Interactive runs throttle to ~12.5 gens/sec for a watchable animation;
+        // headless benchmarks step every iteration so `--iters` == generations.
+        let stepDelayMs = if headlessIters > 0 { 0 } else { 80 };
+
         Config(
             width: width,
             height: height,
             cellSize: finalCell,
-            stepDelayMs: 80,
+            stepDelayMs: stepDelayMs,
             headlessIters: headlessIters
         )
     }

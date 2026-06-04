@@ -48,7 +48,7 @@ public enum Ordering: Equatable, Formattable {
         }
     }
 
-    // isNotEqual: provided by extend Equatable: Equal[Self], NotEqual[Self]
+    // notEqual: provided by extend Equatable: Equal[Self], NotEqual[Self]
     // in std.core.protocols.
 
     /// Swaps `Less` and `Greater`; leaves `Equal` alone. Useful for sorting

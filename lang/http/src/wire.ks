@@ -82,11 +82,7 @@ public func parseDecimal(s: String) -> Int64 {
 /// bytes(0);     // 72  ('H')
 /// ```
 public func stringToBytes(s: String) -> Array[UInt8] {
-    var buffer = Array[UInt8](capacity: s.byteCount);
-    for i in 0..<s.byteCount {
-        buffer.append(s.bytes(unchecked: i))
-    }
-    buffer
+    s.toBytes()
 }
 
 /// Returns the numeric value of a hex digit byte (0–15), or `-1` if

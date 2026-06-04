@@ -70,7 +70,7 @@ public struct Headers: Cloneable {
     /// ```
     public func value(forName name: String) -> String? {
         for (key, value) in self.entries {
-            if key.equalsCaseInsensitive(name) {
+            if key.equalsIgnoreAsciiCase(name) {
                 return .Some(value)
             }
         }
@@ -92,7 +92,7 @@ public struct Headers: Cloneable {
     public func values(forName name: String) -> Array[String] {
         var result = Array[String]();
         for (key, value) in self.entries {
-            if key.equalsCaseInsensitive(name) {
+            if key.equalsIgnoreAsciiCase(name) {
                 result.append(value)
             }
         }
@@ -146,7 +146,7 @@ public struct Headers: Cloneable {
         var i: Int64 = 0;
         while i < self.entries.count {
             let pair = self.entries(unchecked: i);
-            if pair.0.equalsCaseInsensitive(name) {
+            if pair.0.equalsIgnoreAsciiCase(name) {
                 let _ = self.entries.remove(at: i);
             } else {
                 i = i + 1

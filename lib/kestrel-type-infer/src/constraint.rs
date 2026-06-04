@@ -4,6 +4,7 @@
 //! during constraint generation and consumed by the fixpoint solver.
 
 use kestrel_ast_builder::AstParam;
+use kestrel_ast_builder::arg_binding::{BindParam, binds};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::ty::HirTy;
@@ -174,16 +175,13 @@ pub struct CallArg {
     pub value: HirExprId,
 }
 
-/// Check if call arg labels match a callable's param labels.
-/// Arg count must be between required params (no default) and total params,
-/// and each provided arg label must match the corresponding param label.
+/// Check if call arg labels can bind to a callable's params. Arguments bind in
+/// declaration order with defaulted params skippable anywhere (not just
+/// trailing). Single source of truth: `kestrel_ast_builder::arg_binding`.
 pub fn labels_match(params: &[AstParam], arg_labels: &[Option<&str>]) -> bool {
-    let required = params.iter().filter(|p| p.default_entity.is_none()).count();
-    if arg_labels.len() < required || arg_labels.len() > params.len() {
-        return false;
-    }
-    params
+    let bind_params: Vec<BindParam> = params
         .iter()
-        .zip(arg_labels.iter())
-        .all(|(param, arg_label)| param.label.as_deref() == *arg_label)
+        .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
+        .collect();
+    binds(&bind_params, arg_labels)
 }

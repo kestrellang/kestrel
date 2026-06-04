@@ -38,9 +38,27 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
         c_sources: stdlib_c_sources(),
         ..Default::default()
     };
-    compiler
-        .compile_and_link(&exe_path, &options)
-        .map_err(|e| format!("codegen/link failed: {e}"))?;
+    let link_result = compiler.compile_and_link(&exe_path, &options).map_err(|e| format!("{e}"));
+    if let Err(e) = link_result {
+        let mut msg = format!("codegen/link failed: {e}");
+        let diagnostics = compiler.diagnostics();
+        if !diagnostics.is_empty() {
+            let files = kestrel_compiler::diagnostic::WorldFiles::from_world(
+                compiler.world(),
+                compiler.files(),
+            );
+            let config = codespan_reporting::term::Config::default();
+            let mut buf = codespan_reporting::term::termcolor::NoColor::new(Vec::new());
+            for diag in &diagnostics {
+                let _ = codespan_reporting::term::emit_to_write_style(&mut buf, &config, &files, diag);
+            }
+            if let Ok(rendered) = String::from_utf8(buf.into_inner()) {
+                msg.push('\n');
+                msg.push_str(&rendered);
+            }
+        }
+        return Err(msg);
+    }
 
     let output = std::process::Command::new(&exe_path)
         .output()

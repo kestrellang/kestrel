@@ -11,7 +11,7 @@
 //!   never terminates via a failed bind).
 //! - **`Guard`**: `E309` when the user pattern is irrefutable (the
 //!   `else { ... }` branch is dead code).
-//! - **`ForLoop` / `LetDestructure` / `TryOp` / `UnwrapOp`**: nothing —
+//! - **`ForLoop` / `LetDestructure` / `TryOp`**: nothing —
 //!   these desugared shapes are always exhaustive by construction and
 //!   their irrefutability is checked by dedicated analyzers (e.g.
 //!   `for_loop_pattern`, `refutable_pattern`).
@@ -132,7 +132,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 MatchSource::WhileLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E308", &mut diags);
                 },
-                MatchSource::Guard => {
+                MatchSource::Guard | MatchSource::GuardLet => {
                     check_irrefutable_let(cx, *scrutinee, arms, "E309", &mut diags);
                 },
                 // Desugared matches whose arm shape is synthetic and always
@@ -141,8 +141,7 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 MatchSource::ForLoop
                 | MatchSource::LetDestructure
                 | MatchSource::ParamDestructure
-                | MatchSource::TryOp
-                | MatchSource::UnwrapOp => {},
+                | MatchSource::TryOp => {},
             }
         }
 

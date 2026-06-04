@@ -1,15 +1,24 @@
-func Test.example() -> ()
-{
-    locals:
-        %outer: Test.Handle
-        %inner: Test.Handle
-        %_t0: Test.Handle
-        %_t1: func escaping() -> ()
+; function: Test.example
+bb0:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
+    %v2 = apply_partial Test.example.closure.0.thunk()  // @owned @thick () -> ()
+    destroy_value %v1
+    return %v2
 
-    bb0:
-        %_t0 = construct Test.Handle { fd: i64.literal 1 }
-        %self = move %_t0
-        %_t1 = apply partial Test.example.closure.0()
-        call Test.Handle.deinit(ref var %self)
-        return copy %_t1
-}
+
+; function: Test.example.closure.0
+bb0:
+    %v1 = literal i64 2  // @owned Int64
+    %v2 = struct Test.Handle { .0: %v1 }  // @owned Test.Handle
+    %v3 = literal ()  // @owned ()
+    destroy_value %v2
+    return %v3
+
+
+; function: Test.example.closure.0.thunk
+bb0(%v0: @owned Pointer[()]):
+    call Test.example.closure.0(%v0)
+    %v1 = literal ()  // @owned ()
+    return %v1
+

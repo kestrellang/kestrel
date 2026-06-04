@@ -74,3 +74,8 @@ func sqlite3_column_text(stmt: RawPointer, col: Int32) -> RawPointer
 
 @extern(.C, mangleName: "sqlite3_column_bytes")
 func sqlite3_column_bytes(stmt: RawPointer, col: Int32) -> Int32
+
+// rowid of the most recent successful INSERT on this connection. A direct C
+// call — no statement to prepare/step/finalize, unlike `SELECT last_insert_rowid()`.
+@extern(.C, mangleName: "sqlite3_last_insert_rowid")
+func sqlite3_last_insert_rowid(db: RawPointer) -> Int64

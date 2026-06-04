@@ -400,6 +400,14 @@ public struct TcpListener {
         if clientFd < 0 {
             return .Err(IoError.last())
         }
+        // Disable Nagle's algorithm on the connection. These are request/
+        // response sockets — the response should leave immediately, not wait
+        // to coalesce with a write that isn't coming. TCP_NODELAY is not
+        // reliably inherited from the listener, so set it per accepted fd.
+        // Best-effort: a failure here doesn't make the connection unusable.
+        var nodelay: Int32 = 1;
+        let optPtr = Pointer(to: nodelay).cast[UInt8]();
+        let _ = libc.setsockopt(clientFd, libc.IPPROTO_TCP(), libc.TCP_NODELAY(), optPtr, 4);
         .Ok(TcpStream(clientFd))
     }
 

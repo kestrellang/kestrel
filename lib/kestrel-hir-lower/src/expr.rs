@@ -88,9 +88,10 @@ impl LowerCtx<'_> {
             AstExpr::Unary { op, operand, span } => {
                 self.desugar_unary_op(body, &op, operand, &span)
             },
-            AstExpr::Postfix { operand, op, span } => match op {
-                PostfixOp::Unwrap => self.desugar_unwrap(body, operand, &span),
-                PostfixOp::RangeFrom => self.desugar_postfix_op(body, &op, operand, &span),
+            AstExpr::Postfix { operand, op, span } => {
+                // Both `!` (Unwrap) and `..` (RangeFrom) desugar to a
+                // ProtocolCall via the operator → protocol table.
+                self.desugar_postfix_op(body, &op, operand, &span)
             },
             AstExpr::Binary { .. } => self.lower_binary_with_precedence(body, id),
             AstExpr::Assignment { lhs, rhs, span } => {
@@ -1158,8 +1159,89 @@ impl LowerCtx<'_> {
         else_body: Option<&ElseBody>,
         span: &Span,
     ) -> HirExprId {
-        // Scope enclosing the condition + then-body so `if let` pattern bindings
-        // are visible in the then-body but not in else or after the expression.
+        // If the condition is a single `if let`, desugar directly to a Match
+        // so that pattern bindings stay in the same arm as the then-body.
+        // The bool-returning match + if-branch strategy breaks OSSA dominance
+        // because bindings created inside the match don't dominate the if's
+        // then-block.
+        if conditions.len() == 1 && matches!(&conditions[0], IfCondition::Let { .. }) {
+            if let IfCondition::Let { pattern, value } = &conditions[0] {
+                self.push_scope();
+                let lowered_value = self.lower_expr(body, *value);
+                let lowered_pat = self.lower_pat(body, *pattern);
+                let then_block = self.lower_block(body, then_body);
+                self.pop_scope();
+
+                let else_block = else_body.map(|eb| match eb {
+                    ElseBody::Block(block) => self.lower_block(body, block),
+                    ElseBody::ElseIf(expr_id) => {
+                        let lowered = self.lower_expr(body, *expr_id);
+                        HirBlock {
+                            stmts: Vec::new(),
+                            tail_expr: Some(lowered),
+                        }
+                    },
+                });
+                let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+
+                let then_tail = then_block.tail_expr.unwrap_or_else(|| {
+                    self.alloc_expr(HirExpr::Tuple {
+                        elements: Vec::new(),
+                        span: span.clone(),
+                    })
+                });
+                let then_arm_body = if then_block.stmts.is_empty() {
+                    then_tail
+                } else {
+                    self.alloc_expr(HirExpr::Block {
+                        body: then_block,
+                        span: span.clone(),
+                    })
+                };
+
+                let else_arm_body = if let Some(eb) = else_block {
+                    let tail = eb.tail_expr.unwrap_or_else(|| {
+                        self.alloc_expr(HirExpr::Tuple {
+                            elements: Vec::new(),
+                            span: span.clone(),
+                        })
+                    });
+                    if eb.stmts.is_empty() {
+                        tail
+                    } else {
+                        self.alloc_expr(HirExpr::Block {
+                            body: eb,
+                            span: span.clone(),
+                        })
+                    }
+                } else {
+                    self.alloc_expr(HirExpr::Tuple {
+                        elements: Vec::new(),
+                        span: span.clone(),
+                    })
+                };
+
+                return self.alloc_expr(HirExpr::Match {
+                    scrutinee: lowered_value,
+                    arms: vec![
+                        HirMatchArm {
+                            pattern: lowered_pat,
+                            guard: None,
+                            body: then_arm_body,
+                        },
+                        HirMatchArm {
+                            pattern: wildcard,
+                            guard: None,
+                            body: else_arm_body,
+                        },
+                    ],
+                    source: MatchSource::IfLet,
+                    span: span.clone(),
+                });
+            }
+        }
+
+        // Regular if expression (no pattern binding)
         self.push_scope();
         let condition = self.lower_if_conditions(body, conditions, MatchSource::IfLet, span);
         let then_block = self.lower_block(body, then_body);
@@ -1259,7 +1341,6 @@ impl LowerCtx<'_> {
         closure_body: &AstBlock,
         span: &Span,
     ) -> HirExprId {
-        let closure_entry_depth = self.scope_depth();
         self.push_scope();
 
         // For complex patterns (tuple, struct), create a synthetic local
@@ -1281,7 +1362,11 @@ impl LowerCtx<'_> {
                         (name, false, true)
                     },
                 };
-                let local = self.define_local(&name, is_mut, span.clone());
+                // A `mutating` closure param (`p.is_mut`) makes the binding
+                // mutable so `x`/`x.field` assignment is allowed (no E604/E201)
+                // and the body lowers the param as a by-reference place.
+                let param_is_mut = is_mut || p.is_mut;
+                let local = self.define_local(&name, param_is_mut, span.clone());
                 let ty = p.ty.as_ref().map(|t| self.lower_type(t));
 
                 let pattern = if needs_desugar {
@@ -1312,7 +1397,12 @@ impl LowerCtx<'_> {
                     None
                 };
 
-                HirClosureParam { local, ty, pattern }
+                HirClosureParam {
+                    local,
+                    ty,
+                    pattern,
+                    is_mut: param_is_mut,
+                }
             })
             .collect();
 
@@ -1324,15 +1414,12 @@ impl LowerCtx<'_> {
             lowered_body.stmts = desugar_stmts;
         }
 
-        // Collect captured locals: any local referenced in the body that was
-        // defined at a scope depth <= closure_entry_depth (i.e., outside this closure)
-        let captures = self.collect_captures(&lowered_body, closure_entry_depth);
-
         self.pop_scope();
 
+        // Captures are computed post-inference by the `ClosureCaptures` query
+        // (kestrel-type-infer), the single source of truth — not recorded here.
         self.alloc_expr(HirExpr::Closure {
             params: hir_params,
-            captures,
             body: lowered_body,
             span: span.clone(),
         })
@@ -1376,18 +1463,150 @@ impl LowerCtx<'_> {
     /// Lower an AST block to an HIR block.
     pub(crate) fn lower_block(&mut self, body: &AstBody, block: &AstBlock) -> HirBlock {
         self.push_scope();
+        let result = self.lower_block_stmts(body, &block.stmts, block.tail_expr);
+        self.pop_scope();
+        result
+    }
 
-        let stmts: Vec<HirStmtId> = block
-            .stmts
-            .iter()
-            .map(|&id| self.lower_stmt(body, id))
-            .collect();
+    /// Lower a sequence of statements + optional tail expression.
+    /// Detects `guard let` and CPS-transforms: the remaining block becomes the
+    /// match arm's body so pattern bindings stay in scope under OSSA.
+    /// Chained `guard let`s nest naturally via recursion.
+    pub(crate) fn lower_block_stmts(
+        &mut self,
+        body: &AstBody,
+        stmts: &[StmtId],
+        tail_expr: Option<ExprId>,
+    ) -> HirBlock {
+        use kestrel_ast::ast_body::{AstStmt, IfCondition};
 
-        let tail_expr = block.tail_expr.map(|id| self.lower_expr(body, id));
+        for (i, &stmt_id) in stmts.iter().enumerate() {
+            let is_guard_let = matches!(
+                &body.stmts[stmt_id],
+                AstStmt::Guard { conditions, .. }
+                    if conditions.len() == 1
+                    && matches!(&conditions[0], IfCondition::Let { .. })
+            );
+            if !is_guard_let {
+                continue;
+            }
 
+            let AstStmt::Guard {
+                conditions,
+                else_body,
+                span,
+            } = &body.stmts[stmt_id]
+            else {
+                unreachable!();
+            };
+            let IfCondition::Let { pattern, value } = &conditions[0] else {
+                unreachable!();
+            };
+
+            // Lower preceding statements normally
+            let prev: Vec<HirStmtId> = stmts[..i]
+                .iter()
+                .map(|&id| self.lower_stmt(body, id))
+                .collect();
+
+            // CPS: wrap remaining stmts + tail as the pattern arm body
+            let match_expr = self.lower_guard_let_cps(
+                body,
+                *pattern,
+                *value,
+                else_body,
+                &stmts[i + 1..],
+                tail_expr,
+                span,
+            );
+
+            return HirBlock {
+                stmts: prev,
+                tail_expr: Some(match_expr),
+            };
+        }
+
+        // No guard-let found — lower everything normally
+        let lowered: Vec<HirStmtId> = stmts.iter().map(|&id| self.lower_stmt(body, id)).collect();
+        let tail = tail_expr.map(|id| self.lower_expr(body, id));
+        HirBlock {
+            stmts: lowered,
+            tail_expr: tail,
+        }
+    }
+
+    /// CPS-desugar `guard let <pattern> = <value> else { <else_body> }`:
+    /// ```text
+    /// match value {
+    ///     pattern => { <remaining stmts + tail> }
+    ///     _       => { <else_body> }
+    /// }
+    /// ```
+    fn lower_guard_let_cps(
+        &mut self,
+        body: &AstBody,
+        pattern: PatId,
+        value: ExprId,
+        else_body: &AstBlock,
+        remaining_stmts: &[StmtId],
+        tail_expr: Option<ExprId>,
+        span: &Span,
+    ) -> HirExprId {
+        let scrutinee = self.lower_expr(body, value);
+
+        // The pattern bindings are visible only in the continuation (the rest
+        // of the enclosing block), not in the else block. Scope the pattern +
+        // continuation so the bindings don't leak into the else body — mirrors
+        // the if-let lowering in `lower_if`.
+        self.push_scope();
+        let pat = self.lower_pat(body, pattern);
+
+        // Continuation: remaining stmts + tail (recurses for chained guards)
+        let continuation = self.lower_block_stmts(body, remaining_stmts, tail_expr);
+        let cont_body = self.hir_block_to_expr(continuation, span);
         self.pop_scope();
 
-        HirBlock { stmts, tail_expr }
+        // Else body (must diverge) — lowered outside the pattern's scope so the
+        // bindings are undefined here.
+        let else_block = self.lower_block(body, else_body);
+        let else_arm_body = self.hir_block_to_expr(else_block, span);
+
+        let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+
+        self.alloc_expr(HirExpr::Match {
+            scrutinee,
+            arms: vec![
+                HirMatchArm {
+                    pattern: pat,
+                    guard: None,
+                    body: cont_body,
+                },
+                HirMatchArm {
+                    pattern: wildcard,
+                    guard: None,
+                    body: else_arm_body,
+                },
+            ],
+            source: MatchSource::GuardLet,
+            span: span.clone(),
+        })
+    }
+
+    /// Convert an HirBlock into a single HirExprId.
+    fn hir_block_to_expr(&mut self, block: HirBlock, span: &Span) -> HirExprId {
+        if block.stmts.is_empty() {
+            block.tail_expr.unwrap_or_else(|| {
+                self.alloc_expr(HirExpr::Tuple {
+                    elements: Vec::new(),
+                    span: span.clone(),
+                })
+            })
+        } else {
+            self.alloc_expr(HirExpr::Block {
+                body: block,
+                span: span.clone(),
+            })
+        }
     }
 
     /// Validate break/continue: must be inside a loop, and label (if any) must be in scope.

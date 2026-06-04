@@ -178,7 +178,7 @@ public struct Cursor: Readable, Cloneable {
 ///     .None => /* EOF */ break
 /// }
 /// ```
-public func readByte(mutating reader: some Readable) -> Result[Optional[UInt8], IoError] {
+public func readByte[R](mutating reader: R) -> Result[Optional[UInt8], IoError] where R: Readable, R: not Copyable {
     var buf = Array[UInt8](capacity: 1);
     buf.append(0);
     let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
@@ -200,7 +200,7 @@ public func readByte(mutating reader: some Readable) -> Result[Optional[UInt8], 
 /// var file = try File.open("input.bin");
 /// let total = try readAll(file, into: bytes);
 /// ```
-public func readAll(mutating reader: some Readable, mutating into buf: Array[UInt8]) -> Result[Int64, IoError] {
+public func readAll[R](mutating reader: R, mutating into buf: Array[UInt8]) -> Result[Int64, IoError] where R: Readable, R: not Copyable {
     var total: Int64 = 0;
     var chunk = Array[UInt8](capacity: 4096);
     // Initialize chunk with zeros
@@ -241,7 +241,7 @@ public func readAll(mutating reader: some Readable, mutating into buf: Array[UIn
 /// var header = Array[UInt8](repeating: 0, count: 16);
 /// try readExact(file, into: header.asSlice());   // must read 16 bytes
 /// ```
-public func readExact(mutating reader: some Readable, into buf: ArraySlice[UInt8]) -> Result[(), IoError] {
+public func readExact[R](mutating reader: R, into buf: ArraySlice[UInt8]) -> Result[(), IoError] where R: Readable, R: not Copyable {
     var filled: Int64 = 0;
     while filled < buf.count {
         let remaining = ArraySlice(pointer: buf.pointer.offset(by: filled), count: buf.count - filled);

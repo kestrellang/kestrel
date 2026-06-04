@@ -1,6 +1,7 @@
-func Test.consume(h: Test.Handle) -> ()
-{
-    bb0:
-        call Test.sink(move %self)
-        return ()
-}
+; function: Test.consume
+bb0:
+    %v1 = call Test.sink(%v0)  // @owned ()
+    %v2 = literal ()  // @owned ()
+    destroy_value %v1
+    return %v2
+

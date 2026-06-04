@@ -8,13 +8,10 @@ kestrel-compiler = { path = "lib/kestrel-compiler" }
 kestrel-compiler-driver = { path = "lib/kestrel-compiler-driver" }
 kestrel-ast-builder = { path = "lib/kestrel-ast-builder" }
 kestrel-analyze = { path = "lib/kestrel-analyze" }
-kestrel-hecs = { path = "lib/kestrel-hecs" }
-kestrel-mir = { path = "lib/kestrel-mir" }
 kestrel-reporting = { path = "lib/kestrel-reporting" }
-kestrel-mir-lower = { path = "lib/kestrel-mir-lower" }
-kestrel-ownership = { path = "lib/kestrel-ownership" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
+kestrel-mir = { path = "lib/kestrel-mir" }
 codespan-reporting = { workspace = true }
 clap = { workspace = true }
 
@@ -38,6 +35,7 @@ tokio = { version = "1.52.1", features = ["full"] }
 toml = "0.8"
 tower-lsp = "0.20"
 unicode-xid = "0.2"
+smallvec = "1"
 walkdir = "2"
 
 
@@ -61,15 +59,14 @@ members = [
     "lib/kestrel-analyze",
     "lib/kestrel-debug",
     "lib/kestrel-reporting",
-    "lib/kestrel-mir",
-    "lib/kestrel-mir-lower",
-    "lib/kestrel-ownership",
     "lib/kestrel-codegen",
-    "lib/kestrel-codegen-cranelift",
     "lib/kestrel-doc",
     "lib/kestrel-lsp",
+    "lib/kestrel-mir",
+    "lib/kestrel-mir-lower",
+    "lib/kestrel-codegen-cranelift",
     "lib/kestrel-test-suite",
-    # "external/triage",  # TEMP: excluded during memory-model rewrite; restore before merging
+    "external/triage",
 ]
 exclude = ["registry", "external/flock-registry"]
 

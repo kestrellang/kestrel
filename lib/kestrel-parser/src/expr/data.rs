@@ -298,6 +298,8 @@ pub struct ClosureParamsData {
 /// Supports destructuring patterns like `(a, b)` or `Point { x, y }`.
 #[derive(Debug, Clone)]
 pub struct ClosureParamData {
+    /// Span of a leading `mutating` keyword (`Some` ⇒ by-reference param).
+    pub mutating: Option<Span>,
     pub pattern: crate::pattern::PatternVariant,
     pub colon: Option<Span>,
     pub ty: Option<TyVariant>,

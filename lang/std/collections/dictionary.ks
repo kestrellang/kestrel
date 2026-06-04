@@ -246,14 +246,28 @@ struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: De
         }
     }
 
-    /// Frees the bucket array.
+    /// Drops every bucket payload, then frees the bucket array.
     ///
-    /// Runs when the last `RcBox` reference to this storage drops.
-    /// Skips deallocation entirely when `cap == 0` (no buffer was
-    /// allocated). Bucket payloads are not destructed individually —
-    /// `K` and `V` are treated as trivially droppable here.
+    /// Runs when the last `RcBox` reference to this storage drops (COW
+    /// guarantees the buffer is uniquely owned at that point, so each
+    /// payload is dropped exactly once — no double-free). Skips
+    /// everything when `cap == 0` (no buffer was ever allocated).
+    ///
+    /// The `0..<cap` loop runs `Bucket`'s destructor in place on every
+    /// slot — open addressing scatters live entries across the whole
+    /// buffer, and every slot is initialized (to `.Empty` at minimum),
+    /// so all `cap` slots must be visited, not just `len`. `dropInPlace`
+    /// is a no-op for `.Empty`/`.Deleted` and drops the `K`/`V` payload
+    /// of each `.Occupied` slot. Skipping these destructors (the previous
+    /// behavior) leaked the owned heap of every non-trivial key and value,
+    /// e.g. the `String`s inside a `Dictionary[String, String]`.
     deinit {
         if self.cap > 0 {
+            var i: Int64 = 0;
+            while i < self.cap {
+                self.buckets.offset(by: i).dropInPlace();
+                i = i + 1
+            };
             let layout = Layout.array[Bucket[K, V]](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.buckets.asRaw(), layout)
@@ -339,11 +353,11 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     private var storage: CowBox[DictionaryStorage[K, V, H]]
 
     /// Returns the bucket-array pointer from storage. Internal helper.
-    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.read().buckets }
+    private func buckets() -> Pointer[Bucket[K, V]] { self.storage.valuePtr().with { (s) in s.buckets } }
     /// Returns the live-entry count from storage. Internal helper.
-    private func len() -> Int64 { self.storage.read().len }
+    private func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
     /// Returns the total bucket capacity from storage. Internal helper.
-    private func cap() -> Int64 { self.storage.read().cap }
+    private func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
 
     /// COW write barrier — ensures the storage is uniquely owned.
     private mutating func makeUnique() {
@@ -1008,10 +1022,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         // Find empty slot
         let maybeSlot = self.findEmptySlot(hashValue);
         if let .Some(slotIndex) = maybeSlot {
-            var s = self.storage.read();
-            s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
-            s.len = s.len + 1;
-            self.storage.setValue(s)
+            self.storage.modify { (mutating s) in
+                s.buckets.offset(by: slotIndex).write(.Occupied(key, value, hashValue));
+                s.len = s.len + 1
+            }
         } else {
             fatalError("Dictionary insert failed - no empty slot")
         }
@@ -1037,17 +1051,18 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         if let .Some(index) = maybeIndex {
             self.makeUnique();
-            var s = self.storage.read();
-            let bucket = s.buckets.offset(by: index).read();
-            let removedValue: V? = match bucket {
-                .Occupied(_, v, _) => .Some(v),
-                _ => .None
-            };
+            let removedValue = self.storage.modify { (mutating s) in
+                let bucket = s.buckets.offset(by: index).read();
+                let rv: V? = match bucket {
+                    .Occupied(_, v, _) => .Some(v),
+                    _ => .None
+                };
 
-            // Mark as deleted (tombstone)
-            s.buckets.offset(by: index).write(.Deleted);
-            s.len = s.len - 1;
-            self.storage.setValue(s);
+                // Mark as deleted (tombstone)
+                s.buckets.offset(by: index).write(.Deleted);
+                s.len = s.len - 1;
+                rv
+            };
 
             return removedValue
         }
@@ -1070,12 +1085,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        var s = self.storage.read();
-        for i in 0..<s.cap {
-            s.buckets.offset(by: i).write(.Empty);
+        self.storage.modify { (mutating s) in
+            for i in 0..<s.cap {
+                s.buckets.offset(by: i).write(.Empty);
+            }
+            s.len = 0
         }
-        s.len = 0;
-        self.storage.setValue(s)
     }
 
     /// Applies `transform` to the existing value for `key` and writes
@@ -1242,7 +1257,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
     /// var dict = ["a": 1, "b": 2, "c": 3];
     /// dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
     /// ```
-    public mutating func removeAll(where predicate: (K, V) -> Bool) {
+    public mutating func removeAll(consuming where predicate: (K, V) -> Bool) {
         self.retain(where: { (k, v) in not predicate(k, v) })
     }
 

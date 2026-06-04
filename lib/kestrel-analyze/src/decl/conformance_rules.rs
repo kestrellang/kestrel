@@ -55,7 +55,10 @@ use kestrel_ast_builder::NodeKind;
 use kestrel_hir::Builtin;
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_name_res::{EntityBuiltin, ResolveBuiltin};
-use kestrel_semantics::{ProtocolAllowsNegativeConformance, ProtocolRefines, ResolvedConformances};
+use kestrel_semantics::{
+    CopySemanticsReason, NominalCopySemantics, ProtocolAllowsNegativeConformance, ProtocolRefines,
+    ResolvedConformances,
+};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -73,6 +76,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E424",
         name: "negative_conformance_requires_language_feature",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E425",
+        name: "copyable_with_non_copyable_field",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -107,8 +116,89 @@ impl DeclCheck for ConformanceRulesAnalyzer {
         check_disallowed_enum(cx, &set, &mut diags);
         check_copyable_conflict(cx, &set, &mut diags);
         check_negative_requires_builtin(cx, &set, &mut diags);
+        check_explicit_copyable_noncopyable_child(cx, &set, &mut diags);
         diags
     }
+}
+
+/// Invariant 3a: a type that *explicitly* conforms to `Copyable` (or a protocol
+/// refining it, e.g. `Cloneable`) must not contain a non-Copyable field. The
+/// classifier silently downgrades such a type to `NotCopyable`, so without this
+/// the explicit annotation is ignored rather than diagnosed. Reuses the
+/// `NonCopyableChild` reason the classifier already computes (no field re-walk).
+fn check_explicit_copyable_noncopyable_child(
+    cx: &DeclContext<'_>,
+    set: &kestrel_semantics::ResolvedConformanceSet,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let Some(copyable) = cx.query.query(ResolveBuiltin {
+        builtin: Builtin::Copyable,
+        root: cx.root,
+    }) else {
+        return;
+    };
+
+    // An explicit positive conformance that requires Copyable (Copyable itself
+    // or any protocol refining it).
+    let explicit = set.positives().find(|item| {
+        item.protocol().is_some_and(|p| {
+            p == copyable
+                || cx.query.query(ProtocolRefines {
+                    protocol: p,
+                    base: copyable,
+                    root: cx.root,
+                })
+        })
+    });
+    let Some(pos_item) = explicit else {
+        return;
+    };
+    let Some(pos_proto) = pos_item.protocol() else {
+        return;
+    };
+
+    // Only fire when a child actually forces NotCopyable — reuse the
+    // classifier's reason rather than re-walking fields.
+    let info = cx.query.query(NominalCopySemantics {
+        entity: cx.entity,
+        root: cx.root,
+    });
+    let CopySemanticsReason::NonCopyableChild(child) = info.reason else {
+        return;
+    };
+
+    // `: SomeProtocol, not Copyable` is the E423 case; don't double-report.
+    if set
+        .negatives()
+        .any(|item| item.protocol() == Some(copyable))
+    {
+        return;
+    }
+
+    let type_name = util::entity_name(cx.query, cx.entity);
+    let proto_name = util::entity_name(cx.query, pos_proto);
+    let child_name = util::entity_name(cx.query, child);
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[3].id,
+        severity: DESCRIPTORS[3].default_severity,
+        message: format!(
+            "'{}' conforms to `{}` but contains non-Copyable field '{}'",
+            type_name, proto_name, child_name
+        ),
+        labels: vec![
+            DiagLabel {
+                span: pos_item.span.clone(),
+                message: format!("this conformance requires `{}`", proto_name),
+                is_primary: true,
+            },
+            DiagLabel {
+                span: util::entity_span(cx.query, child),
+                message: "this field is not Copyable".into(),
+                is_primary: false,
+            },
+        ],
+        notes: vec!["a Copyable type's fields must all be Copyable".into()],
+    });
 }
 
 fn check_disallowed_enum(
