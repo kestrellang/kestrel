@@ -657,12 +657,17 @@ func printIntegrationHints() {
     let _ = println("");
     let _ = println("Optional integrations (run the ones you want):");
     let _ = println("");
-    let _ = println("  Editor extension (VS Code / Cursor / VSCodium):");
-    let _ = println("    code --install-extension kestrel-lang.kestrel");
+    let _ = println("  Editor extension (VS Code / Cursor): download the .vsix for your");
+    let _ = println("  platform from https://github.com/kestrellang/kestrel-vscode/releases/latest");
+    let _ = println("  then run: code --install-extension <file>.vsix");
     let _ = println("");
-    let _ = println("  AI agent plugin (Kestrel language guidance + LSP):");
-    let _ = println("    claude plugin add kestrellang/kestrel-plugin   # Claude Code");
-    let _ = println("    codex plugin add kestrellang/kestrel-plugin    # Codex");
+    let _ = println("  Claude Code plugin (Kestrel guidance + kestrel-lsp):");
+    let _ = println("    claude plugin marketplace add kestrellang/kestrel-plugin");
+    let _ = println("    claude plugin install kestrel-plugin@kestrel");
+    let _ = println("");
+    let _ = println("  Codex plugin:");
+    let _ = println("    codex plugin marketplace add kestrellang/kestrel-plugin");
+    let _ = println("    codex plugin add kestrel-plugin@kestrel");
 }
 
 // ============================================================================
