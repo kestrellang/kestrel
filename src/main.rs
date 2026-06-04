@@ -12,7 +12,18 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
 use kestrel_codegen::TargetConfig as CodegenTargetConfig;
 use kestrel_codegen_cranelift as cranelift_backend;
+use kestrel_codegen_llvm as llvm_backend;
 use kestrel_compiler::{Compiler, Severity};
+
+/// Selectable code generation backend.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
+enum Backend {
+    /// Cranelift backend (default).
+    #[default]
+    Cranelift,
+    /// LLVM backend (via inkwell / LLVM 18).
+    Llvm,
+}
 use kestrel_compiler_driver::CompilerDriver;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -106,6 +117,10 @@ struct BuildArgs {
     /// Link a macOS framework (repeatable).
     #[arg(long = "framework", value_name = "NAME")]
     frameworks: Vec<String>,
+
+    /// Code generation backend.
+    #[arg(long = "backend", value_name = "BACKEND", default_value = "cranelift")]
+    backend: Backend,
 }
 
 #[derive(Args)]
@@ -213,15 +228,49 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
 
     let c_sources = collect_stdlib_c_sources(std_dir.as_deref());
 
-    let options = cranelift_backend::CodegenOptions {
-        opt_level: args.opt_level,
-        libraries: args.libraries,
-        library_paths: args.library_paths,
-        frameworks: args.frameworks,
-        c_sources,
-        ..Default::default()
+    // `KESTREL_BACKEND` env var overrides `--backend` (lets tools that shell out
+    // to `kestrel build` — e.g. flock — select a backend without the flag).
+    let backend = match std::env::var("KESTREL_BACKEND").as_deref() {
+        Ok("llvm") => Backend::Llvm,
+        Ok("cranelift") => Backend::Cranelift,
+        _ => args.backend,
     };
-    let result = compiler.compile_and_link(&output_path, &options);
+
+    // `KESTREL_OPT` overrides `-O` (lets tools that shell out to `kestrel build`
+    // — e.g. an older flock without `--release` — pick an optimization level).
+    let opt_level = std::env::var("KESTREL_OPT")
+        .ok()
+        .and_then(|s| s.parse::<u8>().ok())
+        .unwrap_or(args.opt_level);
+
+    let result = match backend {
+        Backend::Cranelift => {
+            let options = cranelift_backend::CodegenOptions {
+                opt_level,
+                libraries: args.libraries,
+                library_paths: args.library_paths,
+                frameworks: args.frameworks,
+                c_sources,
+                ..Default::default()
+            };
+            compiler
+                .compile_and_link(&output_path, &options)
+                .map_err(|e| e.to_string())
+        },
+        Backend::Llvm => {
+            let options = llvm_backend::CodegenOptions {
+                opt_level,
+                libraries: args.libraries,
+                library_paths: args.library_paths,
+                frameworks: args.frameworks,
+                c_sources,
+                ..Default::default()
+            };
+            compiler
+                .compile_and_link_llvm(&output_path, &options)
+                .map_err(|e| e.to_string())
+        },
+    };
     driver.emit_diagnostics().ok();
     result.map_err(|e| {
         eprintln!("error: {}", e);

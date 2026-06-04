@@ -11,6 +11,7 @@ kestrel-analyze = { path = "lib/kestrel-analyze" }
 kestrel-reporting = { path = "lib/kestrel-reporting" }
 kestrel-codegen = { path = "lib/kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "lib/kestrel-codegen-cranelift" }
+kestrel-codegen-llvm = { path = "lib/kestrel-codegen-llvm" }
 kestrel-mir = { path = "lib/kestrel-mir" }
 codespan-reporting = { workspace = true }
 clap = { workspace = true }
@@ -65,6 +66,7 @@ members = [
     "lib/kestrel-mir",
     "lib/kestrel-mir-lower",
     "lib/kestrel-codegen-cranelift",
+    "lib/kestrel-codegen-llvm",
     "lib/kestrel-test-suite",
     "external/triage",
 ]

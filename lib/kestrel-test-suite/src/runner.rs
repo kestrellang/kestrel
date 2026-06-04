@@ -1,4 +1,8 @@
 //! Compile, link, and execute Kestrel programs for end-to-end testing.
+//!
+//! Backend is selected via the `KESTREL_BACKEND` env var (`llvm` selects the
+//! LLVM backend; anything else uses the default Cranelift backend) — see
+//! `compile_and_run`. This lets the same suite validate both backends.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,11 +38,22 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift::CodegenOptions {
-        c_sources: stdlib_c_sources(),
-        ..Default::default()
+    // Backend selection: KESTREL_BACKEND=llvm runs the LLVM backend (default is
+    // Cranelift), so the same suite can validate both backends.
+    let use_llvm = std::env::var("KESTREL_BACKEND").as_deref() == Ok("llvm");
+    let link_result = if use_llvm {
+        let options = kestrel_codegen_llvm::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler.compile_and_link_llvm(&exe_path, &options).map_err(|e| format!("{e}"))
+    } else {
+        let options = kestrel_codegen_cranelift::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler.compile_and_link(&exe_path, &options).map_err(|e| format!("{e}"))
     };
-    let link_result = compiler.compile_and_link(&exe_path, &options).map_err(|e| format!("{e}"));
     if let Err(e) = link_result {
         let mut msg = format!("codegen/link failed: {e}");
         let diagnostics = compiler.diagnostics();

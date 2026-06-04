@@ -272,6 +272,23 @@ impl Compiler {
         kestrel_codegen_cranelift::compile_and_link(&mono, &target, options, output_path)
     }
 
+    /// Same as [`Self::compile_and_link`] but uses the LLVM backend. Reuses the
+    /// shared lower -> monomorphize pipeline (whose errors are mapped into the
+    /// LLVM backend's error type) and hands the `MonoModule` to the LLVM codegen.
+    #[allow(clippy::result_large_err)]
+    pub fn compile_and_link_llvm(
+        &self,
+        output_path: &Path,
+        options: &kestrel_codegen_llvm::CodegenOptions,
+    ) -> Result<(), kestrel_codegen_llvm::CodegenError> {
+        let to_llvm =
+            |e: kestrel_codegen_cranelift::CodegenError| kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string());
+        let mir = self.lower_to_mir().map_err(to_llvm)?;
+        let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
+        let target = kestrel_codegen::TargetConfig::host();
+        kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn monomorphize_mir(
         &self,
