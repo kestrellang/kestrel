@@ -2,13 +2,14 @@
 // stdlib: false
 // mir-filter: Test.example
 
-// Scenario: a `match` arm binds an enum payload and moves it into a
-// consuming call.
+// Scenario: a `match` on an *owned* (`consuming`) scrutinee binds an enum
+// payload and moves it into a consuming call. The arm must move the payload
+// OUT of the scrutinee (`destructure_enum` + `move_value`), not copy it — the
+// payload is non-Copyable. The `.empty` arm has no binding, so the dataflow
+// joins a moved-out path with a non-moved one.
 //
-// At Stage 7 the payload binding is its own local. After the consuming
-// call, the binding's path is uninit at the arm's join with the
-// `Default` arm. The dataflow joins both arms; the resulting state
-// determines whether the binding gets `Drop`, `DropIf`, or no drop.
+// The borrowed-scrutinee counterpart (which is rejected with E503) lives in
+// `copy_semantics/move_out_of_borrowed_match_payload.ks`.
 
 module Test
 import Prelude
@@ -28,7 +29,7 @@ enum Opt: not Copyable {
 
 func consume(consuming h: Handle) {}
 
-func example(o: Opt) {
+func example(consuming o: Opt) {
     match o {
         .value(h: payload) => consume(payload),
         .empty => {}

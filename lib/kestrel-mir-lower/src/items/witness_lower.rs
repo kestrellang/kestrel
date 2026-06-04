@@ -502,7 +502,11 @@ fn bind_associated_types(
     }
 }
 
-fn find_associated_type(ctx: &mut LowerCtx, parent: Entity, assoc_entity: Entity) -> Option<TyId> {
+pub(crate) fn find_associated_type(
+    ctx: &mut LowerCtx,
+    parent: Entity,
+    assoc_entity: Entity,
+) -> Option<TyId> {
     let target_name = ctx.world.get::<Name>(assoc_entity)?.0.clone();
     for &child in ctx.world.children_of(parent) {
         if ctx.world.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
