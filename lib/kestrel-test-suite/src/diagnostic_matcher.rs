@@ -63,9 +63,11 @@ pub fn from_codespan_diagnostics(
             .labels
             .iter()
             .find(|l| l.style == codespan_reporting::diagnostic::LabelStyle::Primary)
-            && !label.message.is_empty() && label.message != diag.message {
-                message = format!("{}: {}", message, label.message);
-            }
+            && !label.message.is_empty()
+            && label.message != diag.message
+        {
+            message = format!("{}: {}", message, label.message);
+        }
 
         result.push(TestDiagnostic {
             severity,
@@ -258,9 +260,9 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
                 return false;
             }
             // If a message is specified, check substring (case-insensitive)
-            message.as_ref().is_none_or(|msg| {
-                diag.message.to_lowercase().contains(&msg.to_lowercase())
-            })
+            message
+                .as_ref()
+                .is_none_or(|msg| diag.message.to_lowercase().contains(&msg.to_lowercase()))
         },
         AnnotationKind::ErrorCode { code } => {
             if diag.severity != TestSeverity::Error {
@@ -272,9 +274,9 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
             if diag.severity != TestSeverity::Warning {
                 return false;
             }
-            message.as_ref().is_none_or(|msg| {
-                diag.message.to_lowercase().contains(&msg.to_lowercase())
-            })
+            message
+                .as_ref()
+                .is_none_or(|msg| diag.message.to_lowercase().contains(&msg.to_lowercase()))
         },
     }
 }

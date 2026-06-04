@@ -996,12 +996,12 @@ impl LowerCtx<'_> {
                     // If format spec is present, parse it and build FormatOptions
                     if let Some(spec_str) = format
                         && let Some(opts_expr) = self.build_format_options_from_spec(spec_str, span)
-                        {
-                            args.push(HirCallArg {
-                                label: None,
-                                value: opts_expr,
-                            });
-                        }
+                    {
+                        args.push(HirCallArg {
+                            label: None,
+                            value: opts_expr,
+                        });
+                    }
 
                     let append = self.alloc_expr(HirExpr::MethodCall {
                         receiver: dsi_ref,

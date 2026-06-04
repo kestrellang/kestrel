@@ -481,9 +481,10 @@ impl<'a> CollectionContext<'a> {
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
         if let Some(first_param) = func.params.first()
-            && let MirTy::TypeParam(e) = self.arena.get(first_param.ty) {
-                return !known_tps.contains(e);
-            }
+            && let MirTy::TypeParam(e) = self.arena.get(first_param.ty)
+        {
+            return !known_tps.contains(e);
+        }
         false
     }
 
@@ -643,10 +644,11 @@ pub fn build_subst(
                     for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
                         if let Some(&proto_expr) = wit.proto_type_args.get(pi)
                             && let MirTy::TypeParam(ext_entity) = arena.get(proto_expr)
-                                && !subst.type_params.contains_key(ext_entity)
-                                    && let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
-                                        subst.type_params.insert(*ext_entity, cv);
-                                    }
+                            && !subst.type_params.contains_key(ext_entity)
+                            && let Some(&cv) = subst.type_params.get(&wc_arg_entity)
+                        {
+                            subst.type_params.insert(*ext_entity, cv);
+                        }
                     }
                     for (entity, ty) in &bindings {
                         subst.type_params.entry(*entity).or_insert(*ty);
@@ -681,9 +683,10 @@ pub fn detect_implicit_protocol(
 ) -> Option<Entity> {
     if let Some(first_param) = func.params.first()
         && let MirTy::TypeParam(entity) = arena.get(first_param.ty)
-            && protocols.contains_key(entity) {
-                return Some(*entity);
-            }
+        && protocols.contains_key(entity)
+    {
+        return Some(*entity);
+    }
     // Closures inside protocol default methods inherit self_type but their
     // first param is env pointer, not Self. Scan their types for protocol
     // TypeParams, gated by function kind to avoid scanning every method.
@@ -776,9 +779,10 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
                     protocol,
                     resolved_base,
                     assoc_type,
-                ) {
-                    return deep_resolve(arena, witnesses, bound, depth + 1);
-                }
+                )
+            {
+                return deep_resolve(arena, witnesses, bound, depth + 1);
+            }
             if resolved_base != base {
                 arena.intern(MirTy::AssociatedProjection {
                     base: resolved_base,

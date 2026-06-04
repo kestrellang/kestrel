@@ -264,13 +264,14 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
     // the direct parent (Subscript/Field); EnclosingContainer skips
     // one further to the type container — we need the intermediate one.
     if query_ctx.get::<EnclosingContainer>(entity).is_some()
-        && let Some(accessor_owner) = query_ctx.parent_of(entity) {
-            let owner_clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
-                entity: accessor_owner,
-                root: ctx.root,
-            });
-            clauses.extend(owner_clauses);
-        }
+        && let Some(accessor_owner) = query_ctx.parent_of(entity)
+    {
+        let owner_clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
+            entity: accessor_owner,
+            root: ctx.root,
+        });
+        clauses.extend(owner_clauses);
+    }
     if clauses.is_empty() {
         return;
     }
@@ -428,9 +429,10 @@ fn create_return_type_with_opaque(
                 let bound_tv = generate::lower_hir_ty(ctx, bound);
                 let resolved = ctx.resolve(bound_tv);
                 if let ty::TySlot::Resolved(ty::TyKind::Protocol {
-                        entity: proto,
-                        args,
-                    }) = &ctx.types[resolved.0 as usize] {
+                    entity: proto,
+                    args,
+                }) = &ctx.types[resolved.0 as usize]
+                {
                     opaque_bounds.push((*proto, args.clone()));
                     ctx.conforms(concrete_ret, *proto, span.clone());
                 }

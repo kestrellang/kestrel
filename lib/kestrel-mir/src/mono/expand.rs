@@ -542,10 +542,12 @@ fn expand_function(
                     .collect();
                 for (i, caps) in arg_caps {
                     if let Some(param) = body.blocks[target.index()].params.get(i)
-                        && let std::collections::hash_map::Entry::Vacant(e) = closure_captures.entry(param.value) {
-                            e.insert(caps);
-                            changed = true;
-                        }
+                        && let std::collections::hash_map::Entry::Vacant(e) =
+                            closure_captures.entry(param.value)
+                    {
+                        e.insert(caps);
+                        changed = true;
+                    }
                 }
             }
         }
@@ -739,32 +741,33 @@ fn expand_function(
                     if let MirTy::Pointer(pointee) = ty_arena.get(addr_ty) {
                         let pointee = *pointee;
                         if let MirTy::Named { entity, type_args } = ty_arena.get(pointee)
-                            && !is_drop_self(skip_self, *entity, type_args) {
-                                let key = (*entity, type_args.clone());
-                                if let Some(&shim_id) = shim_lookup.get(&key) {
-                                    let tmp = body.alloc_value(ValueDef::owned(pointee));
-                                    new_insts.push(Instruction {
-                                        kind: InstKind::Take {
-                                            result: tmp,
-                                            address,
-                                            ty: pointee,
-                                        },
-                                        span: span.clone(),
-                                    });
-                                    new_insts.push(Instruction {
-                                        kind: InstKind::Call {
-                                            result: None,
-                                            callee: Callee::Resolved(shim_id),
-                                            args: vec![CallArg {
-                                                value: tmp,
-                                                convention: ParamConvention::Consuming,
-                                            }],
-                                        },
-                                        span: span.clone(),
-                                    });
-                                    expanded = true;
-                                }
+                            && !is_drop_self(skip_self, *entity, type_args)
+                        {
+                            let key = (*entity, type_args.clone());
+                            if let Some(&shim_id) = shim_lookup.get(&key) {
+                                let tmp = body.alloc_value(ValueDef::owned(pointee));
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Take {
+                                        result: tmp,
+                                        address,
+                                        ty: pointee,
+                                    },
+                                    span: span.clone(),
+                                });
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Call {
+                                        result: None,
+                                        callee: Callee::Resolved(shim_id),
+                                        args: vec![CallArg {
+                                            value: tmp,
+                                            convention: ParamConvention::Consuming,
+                                        }],
+                                    },
+                                    span: span.clone(),
+                                });
+                                expanded = true;
                             }
+                        }
                     }
                     new_insts.push(Instruction {
                         kind: if expanded {
@@ -904,18 +907,19 @@ fn expand_function(
                     // Keyed per-instantiation: only THIS monomorphization's copy
                     // behavior matters (see `not_copyable` construction).
                     if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty)
-                        && not_copyable.contains(&(*entity, type_args.clone())) {
-                            let target = remap_value(operand, &value_remap);
-                            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                                eprintln!(
-                                    "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
-                                    func.name
-                                );
-                            }
-                            value_remap.insert(result, target);
-                            moved_values.insert(target);
-                            continue;
+                        && not_copyable.contains(&(*entity, type_args.clone()))
+                    {
+                        let target = remap_value(operand, &value_remap);
+                        if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                            eprintln!(
+                                "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
+                                func.name
+                            );
                         }
+                        value_remap.insert(result, target);
+                        moved_values.insert(target);
+                        continue;
+                    }
 
                     // @guaranteed operands are ByRef pointers — CopyValue must be
                     // preserved so codegen loads from the pointer (Option B invariant).

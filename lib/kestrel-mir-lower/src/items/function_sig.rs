@@ -107,26 +107,25 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     }
 
     // @extern
-    if is_extern
-        && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
-            for attr in &attrs.0 {
-                if attr.name == "extern" {
-                    let symbol_name = attr
-                        .args
-                        .iter()
-                        .find(|a| a.label.as_deref() == Some("mangleName"))
-                        .map(|a| a.value.trim_matches('"').to_string())
-                        .unwrap_or_else(|| {
-                            def.name.rsplit('.').next().unwrap_or(&def.name).to_string()
-                        });
-                    def.extern_info = Some(ExternInfo {
-                        calling_convention: CallingConvention::C,
-                        symbol_name,
+    if is_extern && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
+        for attr in &attrs.0 {
+            if attr.name == "extern" {
+                let symbol_name = attr
+                    .args
+                    .iter()
+                    .find(|a| a.label.as_deref() == Some("mangleName"))
+                    .map(|a| a.value.trim_matches('"').to_string())
+                    .unwrap_or_else(|| {
+                        def.name.rsplit('.').next().unwrap_or(&def.name).to_string()
                     });
-                    break;
-                }
+                def.extern_info = Some(ExternInfo {
+                    calling_convention: CallingConvention::C,
+                    symbol_name,
+                });
+                break;
             }
         }
+    }
 
     // Intrinsic functions have no body
     if ctx.world.get::<Intrinsic>(entity).is_some() {
@@ -234,17 +233,18 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
     };
 
     if let Some(source) = type_params_source
-        && let Some(type_params) = ctx.world.get::<TypeParams>(source) {
-            for &tp_entity in &type_params.0 {
-                ctx.register_name(tp_entity);
-                let tp_name = ctx
-                    .world
-                    .get::<kestrel_ast_builder::Name>(tp_entity)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
-            }
+        && let Some(type_params) = ctx.world.get::<TypeParams>(source)
+    {
+        for &tp_entity in &type_params.0 {
+            ctx.register_name(tp_entity);
+            let tp_name = ctx
+                .world
+                .get::<kestrel_ast_builder::Name>(tp_entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            def.type_params.push(TypeParamDef::new(tp_entity, tp_name));
         }
+    }
 
     // Extension's own free type params (e.g. `extend Int64: ArrayIndex[T]`)
     if matches!(parent_kind, Some(NodeKind::Extension))

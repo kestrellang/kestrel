@@ -79,9 +79,10 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
             },
             InstKind::EndBorrow { operand } | InstKind::EndMutBorrow { operand } => {
                 if let Some(&src) = borrow_source_map.get(operand)
-                    && let Some(count) = frozen.get_mut(&src) {
-                        *count = count.saturating_sub(1);
-                    }
+                    && let Some(count) = frozen.get_mut(&src)
+                {
+                    *count = count.saturating_sub(1);
+                }
             },
             _ => {},
         }
@@ -144,16 +145,17 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
             continue;
         }
         if replace_with_move.contains(&idx)
-            && let InstKind::CopyValue { result, operand } = &inst.kind {
-                new_insts.push(crate::inst::Instruction {
-                    kind: InstKind::MoveValue {
-                        result: *result,
-                        operand: *operand,
-                    },
-                    span: inst.span,
-                });
-                continue;
-            }
+            && let InstKind::CopyValue { result, operand } = &inst.kind
+        {
+            new_insts.push(crate::inst::Instruction {
+                kind: InstKind::MoveValue {
+                    result: *result,
+                    operand: *operand,
+                },
+                span: inst.span,
+            });
+            continue;
+        }
         new_insts.push(inst);
     }
     body.blocks[block_idx].insts = new_insts;

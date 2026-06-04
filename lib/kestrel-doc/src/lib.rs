@@ -502,13 +502,14 @@ fn protocol_short_name(world: &World, protocol: Entity) -> String {
 
 fn module_path_for(world: &World, entity: Entity) -> String {
     if let Some(parent) = world.parent_of(entity)
-        && matches!(world.get::<NodeKind>(parent), Some(NodeKind::Module)) {
-            let mp = module_path(world, parent);
-            if let Some(name) = world.get::<Name>(entity) {
-                return format!("{}.{}", mp, name.0);
-            }
-            return mp;
+        && matches!(world.get::<NodeKind>(parent), Some(NodeKind::Module))
+    {
+        let mp = module_path(world, parent);
+        if let Some(name) = world.get::<Name>(entity) {
+            return format!("{}.{}", mp, name.0);
         }
+        return mp;
+    }
     String::new()
 }
 

@@ -1164,81 +1164,83 @@ impl LowerCtx<'_> {
         // The bool-returning match + if-branch strategy breaks OSSA dominance
         // because bindings created inside the match don't dominate the if's
         // then-block.
-        if conditions.len() == 1 && matches!(&conditions[0], IfCondition::Let { .. })
-            && let IfCondition::Let { pattern, value } = &conditions[0] {
-                self.push_scope();
-                let lowered_value = self.lower_expr(body, *value);
-                let lowered_pat = self.lower_pat(body, *pattern);
-                let then_block = self.lower_block(body, then_body);
-                self.pop_scope();
+        if conditions.len() == 1
+            && matches!(&conditions[0], IfCondition::Let { .. })
+            && let IfCondition::Let { pattern, value } = &conditions[0]
+        {
+            self.push_scope();
+            let lowered_value = self.lower_expr(body, *value);
+            let lowered_pat = self.lower_pat(body, *pattern);
+            let then_block = self.lower_block(body, then_body);
+            self.pop_scope();
 
-                let else_block = else_body.map(|eb| match eb {
-                    ElseBody::Block(block) => self.lower_block(body, block),
-                    ElseBody::ElseIf(expr_id) => {
-                        let lowered = self.lower_expr(body, *expr_id);
-                        HirBlock {
-                            stmts: Vec::new(),
-                            tail_expr: Some(lowered),
-                        }
-                    },
-                });
-                let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+            let else_block = else_body.map(|eb| match eb {
+                ElseBody::Block(block) => self.lower_block(body, block),
+                ElseBody::ElseIf(expr_id) => {
+                    let lowered = self.lower_expr(body, *expr_id);
+                    HirBlock {
+                        stmts: Vec::new(),
+                        tail_expr: Some(lowered),
+                    }
+                },
+            });
+            let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
 
-                let then_tail = then_block.tail_expr.unwrap_or_else(|| {
+            let then_tail = then_block.tail_expr.unwrap_or_else(|| {
+                self.alloc_expr(HirExpr::Tuple {
+                    elements: Vec::new(),
+                    span: span.clone(),
+                })
+            });
+            let then_arm_body = if then_block.stmts.is_empty() {
+                then_tail
+            } else {
+                self.alloc_expr(HirExpr::Block {
+                    body: then_block,
+                    span: span.clone(),
+                })
+            };
+
+            let else_arm_body = if let Some(eb) = else_block {
+                let tail = eb.tail_expr.unwrap_or_else(|| {
                     self.alloc_expr(HirExpr::Tuple {
                         elements: Vec::new(),
                         span: span.clone(),
                     })
                 });
-                let then_arm_body = if then_block.stmts.is_empty() {
-                    then_tail
+                if eb.stmts.is_empty() {
+                    tail
                 } else {
                     self.alloc_expr(HirExpr::Block {
-                        body: then_block,
+                        body: eb,
                         span: span.clone(),
                     })
-                };
-
-                let else_arm_body = if let Some(eb) = else_block {
-                    let tail = eb.tail_expr.unwrap_or_else(|| {
-                        self.alloc_expr(HirExpr::Tuple {
-                            elements: Vec::new(),
-                            span: span.clone(),
-                        })
-                    });
-                    if eb.stmts.is_empty() {
-                        tail
-                    } else {
-                        self.alloc_expr(HirExpr::Block {
-                            body: eb,
-                            span: span.clone(),
-                        })
-                    }
-                } else {
-                    self.alloc_expr(HirExpr::Tuple {
-                        elements: Vec::new(),
-                        span: span.clone(),
-                    })
-                };
-
-                return self.alloc_expr(HirExpr::Match {
-                    scrutinee: lowered_value,
-                    arms: vec![
-                        HirMatchArm {
-                            pattern: lowered_pat,
-                            guard: None,
-                            body: then_arm_body,
-                        },
-                        HirMatchArm {
-                            pattern: wildcard,
-                            guard: None,
-                            body: else_arm_body,
-                        },
-                    ],
-                    source: MatchSource::IfLet,
+                }
+            } else {
+                self.alloc_expr(HirExpr::Tuple {
+                    elements: Vec::new(),
                     span: span.clone(),
-                });
-            }
+                })
+            };
+
+            return self.alloc_expr(HirExpr::Match {
+                scrutinee: lowered_value,
+                arms: vec![
+                    HirMatchArm {
+                        pattern: lowered_pat,
+                        guard: None,
+                        body: then_arm_body,
+                    },
+                    HirMatchArm {
+                        pattern: wildcard,
+                        guard: None,
+                        body: else_arm_body,
+                    },
+                ],
+                source: MatchSource::IfLet,
+                span: span.clone(),
+            });
+        }
 
         // Regular if expression (no pattern binding)
         self.push_scope();

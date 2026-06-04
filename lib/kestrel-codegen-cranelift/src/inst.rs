@@ -449,9 +449,10 @@ fn resolve_iconst(builder: &FunctionBuilder, val: Value) -> Option<i64> {
     let dfg = &builder.func.dfg;
     let val = dfg.resolve_aliases(val);
     if let ir::ValueDef::Result(inst, 0) = dfg.value_def(val)
-        && let InstructionData::UnaryImm { imm, .. } = dfg.insts[inst] {
-            return Some(imm.bits());
-        }
+        && let InstructionData::UnaryImm { imm, .. } = dfg.insts[inst]
+    {
+        return Some(imm.bits());
+    }
     None
 }
 
@@ -892,22 +893,23 @@ fn store_variant_payload(
         let type_args = type_args.clone();
         if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc)
             && let Some(Layout::Enum(el)) = &e.type_info.layout
-                && let Some(vl) = el.variant_layouts.get(variant.index()) {
-                    for (i, &value_id) in payload.iter().enumerate() {
-                        let val = fc.resolve_scalar(builder, value_id);
-                        let field_offset = vl.field_offsets.get(i).copied().unwrap_or_else(|| {
-                            panic!("ICE: enum variant field offset missing for field {i}")
-                        });
-                        let total_offset = payload_offset + field_offset;
-                        let field_ty = e.cases[variant.index()].payload_fields[i].ty;
-                        let field_repr =
-                            fc.ctx
-                                .tc
-                                .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-                        let dest = builder.ins().iadd_imm(slot, total_offset as i64);
-                        mem::store_to_repr(builder, field_repr, dest, val);
-                    }
-                }
+            && let Some(vl) = el.variant_layouts.get(variant.index())
+        {
+            for (i, &value_id) in payload.iter().enumerate() {
+                let val = fc.resolve_scalar(builder, value_id);
+                let field_offset = vl.field_offsets.get(i).copied().unwrap_or_else(|| {
+                    panic!("ICE: enum variant field offset missing for field {i}")
+                });
+                let total_offset = payload_offset + field_offset;
+                let field_ty = e.cases[variant.index()].payload_fields[i].ty;
+                let field_repr = fc
+                    .ctx
+                    .tc
+                    .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                let dest = builder.ins().iadd_imm(slot, total_offset as i64);
+                mem::store_to_repr(builder, field_repr, dest, val);
+            }
+        }
     }
     Ok(())
 }
@@ -1155,25 +1157,26 @@ fn compile_enum_payload(
         if let Some(e) = find_mono_enum(&entity, &type_args, fc.ctx.module, &fc.ctx.tc) {
             let payload_offset = e.payload_offset();
             if let Some(Layout::Enum(el)) = &e.type_info.layout
-                && let Some(vl) = el.variant_layouts.get(variant.index()) {
-                    let field_offset = vl.field_offsets[field.index()];
-                    let total_offset = payload_offset + field_offset;
-                    let addr = builder.ins().iadd_imm(base, total_offset as i64);
-                    if is_borrowed {
-                        return Ok(addr);
-                    }
-                    let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
-                    let field_repr =
-                        fc.ctx
-                            .tc
-                            .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-                    return Ok(mem::load_from_repr(
-                        builder,
-                        field_repr,
-                        addr,
-                        fc.ctx.ptr_ty,
-                    ));
+                && let Some(vl) = el.variant_layouts.get(variant.index())
+            {
+                let field_offset = vl.field_offsets[field.index()];
+                let total_offset = payload_offset + field_offset;
+                let addr = builder.ins().iadd_imm(base, total_offset as i64);
+                if is_borrowed {
+                    return Ok(addr);
                 }
+                let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
+                let field_repr = fc
+                    .ctx
+                    .tc
+                    .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                return Ok(mem::load_from_repr(
+                    builder,
+                    field_repr,
+                    addr,
+                    fc.ctx.ptr_ty,
+                ));
+            }
         }
     }
 
@@ -1678,9 +1681,10 @@ fn struct_field_offset(
         let entity = *entity;
         let type_args = type_args.clone();
         if let Some(s) = find_mono_struct(&entity, &type_args, module, tc)
-            && let Some(Layout::Struct(sl)) = &s.type_info.layout {
-                return sl.field_offsets[field_idx.index()];
-            }
+            && let Some(Layout::Struct(sl)) = &s.type_info.layout
+        {
+            return sl.field_offsets[field_idx.index()];
+        }
     }
     0
 }

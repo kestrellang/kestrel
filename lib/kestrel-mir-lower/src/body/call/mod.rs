@@ -24,9 +24,10 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
     ) -> ValueId {
         if let Some(entity) = self.resolve_callee_entity_from_expr(callee_expr)
-            && let Some(val) = intrinsic::try_intrinsic(self, expr_id, callee_expr, entity, args) {
-                return val;
-            }
+            && let Some(val) = intrinsic::try_intrinsic(self, expr_id, callee_expr, entity, args)
+        {
+            return val;
+        }
 
         if let Some(val) = self.try_enum_construct(expr_id, callee_expr, args) {
             return val;
@@ -49,11 +50,11 @@ impl OssaBodyCtx<'_, '_> {
         if self.body_context.is_protocol_extension()
             && let MirTy::Named { entity, type_args } =
                 self.ctx.module.ty_arena.get(receiver_ty).clone()
-                && type_args.is_empty()
-                    && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
-                {
-                    receiver_ty = crate::ty::build_self_type(self.ctx, entity);
-                }
+            && type_args.is_empty()
+            && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
+        {
+            receiver_ty = crate::ty::build_self_type(self.ctx, entity);
+        }
 
         let resolved_entity = self
             .typed
@@ -84,19 +85,20 @@ impl OssaBodyCtx<'_, '_> {
             });
             if let Some((se, field_idx)) = field_info
                 && let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx)
-                    && matches!(
-                        self.ctx.module.ty_arena.get(field_ty),
-                        MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
-                    ) {
-                        let base_val = self.lower_expr_for_borrow(receiver_expr);
-                        let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
-                        let call_args = self.lower_call_args_default(args);
-                        let callee = match self.ctx.module.ty_arena.get(field_ty) {
-                            MirTy::FuncThin { .. } => Callee::Thin(field_val),
-                            _ => Callee::Thick(field_val),
-                        };
-                        return self.emit_call_returning(callee, call_args, result_ty);
-                    }
+                && matches!(
+                    self.ctx.module.ty_arena.get(field_ty),
+                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+                )
+            {
+                let base_val = self.lower_expr_for_borrow(receiver_expr);
+                let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
+                let call_args = self.lower_call_args_default(args);
+                let callee = match self.ctx.module.ty_arena.get(field_ty) {
+                    MirTy::FuncThin { .. } => Callee::Thin(field_val),
+                    _ => Callee::Thick(field_val),
+                };
+                return self.emit_call_returning(callee, call_args, result_ty);
+            }
         }
 
         let method_type_args = if let Some(hir_args) = hir_type_args {
@@ -250,24 +252,24 @@ impl OssaBodyCtx<'_, '_> {
                 if matches!(
                     receiver_convention,
                     ParamConvention::Borrow | ParamConvention::MutBorrow
-                )
-                    && let Some(base_addr) = self.try_field_addr_chain(receiver_expr) {
-                        let old_receiver = call_args[0].value;
-                        if self.body.value(old_receiver).borrow_source.is_some() {
-                            self.emit_end_borrow(old_receiver);
-                        }
-                        let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
-                        let borrow = if receiver_convention == ParamConvention::MutBorrow {
-                            self.emit_begin_mut_borrow_addr(faddr, field_ty)
-                        } else {
-                            self.emit_begin_borrow_addr(faddr, field_ty)
-                        };
-                        call_args[0] = CallArg {
-                            value: borrow,
-                            convention: receiver_convention,
-                        };
-                        return (field_ty, call_args);
+                ) && let Some(base_addr) = self.try_field_addr_chain(receiver_expr)
+                {
+                    let old_receiver = call_args[0].value;
+                    if self.body.value(old_receiver).borrow_source.is_some() {
+                        self.emit_end_borrow(old_receiver);
                     }
+                    let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
+                    let borrow = if receiver_convention == ParamConvention::MutBorrow {
+                        self.emit_begin_mut_borrow_addr(faddr, field_ty)
+                    } else {
+                        self.emit_begin_borrow_addr(faddr, field_ty)
+                    };
+                    call_args[0] = CallArg {
+                        value: borrow,
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
+                }
                 // Fallback (non-addressable base, e.g. `makeBag().items(i)`):
                 // extract the field value and use it as the receiver.
                 let old_receiver = call_args[0].value;
@@ -810,9 +812,10 @@ impl OssaBodyCtx<'_, '_> {
     /// it is dropped once at scope exit.
     fn lower_callee_value(&mut self, callee_expr: HirExprId) -> ValueId {
         if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr]
-            && !self.is_var_local(hir_local) {
-                return self.map_local(*hir_local);
-            }
+            && !self.is_var_local(hir_local)
+        {
+            return self.map_local(*hir_local);
+        }
         self.lower_expr(callee_expr)
     }
 

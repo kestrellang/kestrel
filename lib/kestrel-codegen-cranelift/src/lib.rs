@@ -19,8 +19,7 @@ pub(crate) static LINK_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub use error::CodegenError;
 
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct CodegenOptions {
     pub opt_level: u8,
     pub libraries: Vec<String>,
@@ -29,7 +28,6 @@ pub struct CodegenOptions {
     pub c_sources: Vec<std::path::PathBuf>,
     pub emit_clif: bool,
 }
-
 
 pub struct CompilationResult {
     pub object_bytes: Vec<u8>,

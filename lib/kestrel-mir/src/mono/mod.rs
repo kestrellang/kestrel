@@ -509,16 +509,18 @@ fn substitute_callee_and_resolve(
             }
             // Nested callees (closures/thunks) inherit parent's self_type
             // so rewrite_callee can look them up with the correct key.
-            if self_type.is_none() && parent_self.is_some()
+            if self_type.is_none()
+                && parent_self.is_some()
                 && let Some(f) = functions.get(func)
-                    && matches!(
-                        f.kind,
-                        FunctionKind::Closure { .. }
-                            | FunctionKind::ClosureCall { .. }
-                            | FunctionKind::Thunk { .. }
-                    ) {
-                        *self_type = parent_self;
-                    }
+                && matches!(
+                    f.kind,
+                    FunctionKind::Closure { .. }
+                        | FunctionKind::ClosureCall { .. }
+                        | FunctionKind::Thunk { .. }
+                )
+            {
+                *self_type = parent_self;
+            }
         },
         Callee::Witness {
             protocol,
@@ -572,13 +574,14 @@ fn resolve_witnesses_to_direct(body_result: &mut MonoBodyResult) {
                 callee: callee @ Callee::Witness { .. },
                 ..
             } = &mut inst.kind
-                && let Some(target_key) = body_result.resolved_witnesses.get(&(bi, ii)) {
-                    *callee = Callee::Direct {
-                        func: target_key.func_entity,
-                        type_args: target_key.type_args.clone(),
-                        self_type: target_key.self_type,
-                    };
-                }
+                && let Some(target_key) = body_result.resolved_witnesses.get(&(bi, ii))
+            {
+                *callee = Callee::Direct {
+                    func: target_key.func_entity,
+                    type_args: target_key.type_args.clone(),
+                    self_type: target_key.self_type,
+                };
+            }
         }
     }
 }

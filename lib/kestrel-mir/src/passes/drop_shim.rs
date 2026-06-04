@@ -253,9 +253,10 @@ fn generate_struct_shim(
         let field_ty = struct_def.fields[i].ty;
         insts.push(Instruction::new(InstKind::DestroyValue { operand: *fv }));
         if droppable_set.contains(&fi)
-            && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
-                field_type_entities.push(*entity);
-            }
+            && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty)
+        {
+            field_type_entities.push(*entity);
+        }
     }
 
     // 4. Return unit
@@ -448,9 +449,10 @@ fn generate_enum_shim(
             let field_ty = case_def.payload_fields[i].ty;
             variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: *pv }));
             if droppable_set.contains(&fi)
-                && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
-                    field_type_entities.push(*entity);
-                }
+                && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty)
+            {
+                field_type_entities.push(*entity);
+            }
         }
 
         body.block_mut(variant_block).insts = variant_insts;

@@ -286,9 +286,11 @@ fn classify(
             }
             // A move whose source is still referenced elsewhere = live duplicate.
             if let InstKind::MoveValue { operand, .. } = kind
-                && heap(*operand) && uses.get(operand).copied().unwrap_or(0) > 1 {
-                    return Some(DupKind::UseAfterMove);
-                }
+                && heap(*operand)
+                && uses.get(operand).copied().unwrap_or(0) > 1
+            {
+                return Some(DupKind::UseAfterMove);
+            }
             None
         },
 

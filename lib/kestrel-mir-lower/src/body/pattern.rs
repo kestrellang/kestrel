@@ -66,15 +66,14 @@ impl OssaBodyCtx<'_, '_> {
     fn lower_match_scrutinee(&mut self, scrutinee_expr: HirExprId) -> ValueId {
         let expr = self.hir.exprs[scrutinee_expr].clone();
         if let HirExpr::Local(hir_local, _) = &expr
-            && !self.is_var_local(hir_local) {
-                let val = self.map_local(*hir_local);
-                let vdef = self.body.value(val);
-                if vdef.ownership == Ownership::Owned
-                    && self.copy_behavior_is_mono_dependent(vdef.ty)
-                {
-                    return self.emit_move_value(val);
-                }
+            && !self.is_var_local(hir_local)
+        {
+            let val = self.map_local(*hir_local);
+            let vdef = self.body.value(val);
+            if vdef.ownership == Ownership::Owned && self.copy_behavior_is_mono_dependent(vdef.ty) {
+                return self.emit_move_value(val);
             }
+        }
         self.lower_expr(scrutinee_expr)
     }
 
@@ -1155,24 +1154,21 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(sdef) = self.ctx.module.structs.get(&entity)
-                && let Some(idx) = sdef.fields.iter().position(|f| f.name == field_name) {
-                    let mut field_ty = sdef.fields[idx].ty;
+            && let Some(idx) = sdef.fields.iter().position(|f| f.name == field_name)
+        {
+            let mut field_ty = sdef.fields[idx].ty;
 
-                    // Substitute generic type params if needed
-                    if !type_args.is_empty() {
-                        let mut subst = kestrel_mir::SubstMap::new();
-                        for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
-                            subst.type_params.insert(tp.entity, arg);
-                        }
-                        field_ty = kestrel_mir::substitute(
-                            &mut self.ctx.module.ty_arena,
-                            field_ty,
-                            &subst,
-                        );
-                    }
-
-                    return (FieldIdx::new(idx), field_ty);
+            // Substitute generic type params if needed
+            if !type_args.is_empty() {
+                let mut subst = kestrel_mir::SubstMap::new();
+                for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(tp.entity, arg);
                 }
+                field_ty = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+            }
+
+            return (FieldIdx::new(idx), field_ty);
+        }
 
         // Fallback: unresolved field — use index 0 and the error type.
         // This can happen with generic types before monomorphization.
@@ -1207,29 +1203,25 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-                && let Some(case) = edef.cases.get(variant_idx.index())
-                    && let Some(idx) = case
-                        .payload_fields
-                        .iter()
-                        .position(|f| f.name == field_name)
-                    {
-                        let mut field_ty = case.payload_fields[idx].ty;
+            && let Some(case) = edef.cases.get(variant_idx.index())
+            && let Some(idx) = case
+                .payload_fields
+                .iter()
+                .position(|f| f.name == field_name)
+        {
+            let mut field_ty = case.payload_fields[idx].ty;
 
-                        // Substitute generic type params if needed
-                        if !type_args.is_empty() {
-                            let mut subst = kestrel_mir::SubstMap::new();
-                            for (tp, &arg) in edef.type_params.iter().zip(type_args.iter()) {
-                                subst.type_params.insert(tp.entity, arg);
-                            }
-                            field_ty = kestrel_mir::substitute(
-                                &mut self.ctx.module.ty_arena,
-                                field_ty,
-                                &subst,
-                            );
-                        }
+            // Substitute generic type params if needed
+            if !type_args.is_empty() {
+                let mut subst = kestrel_mir::SubstMap::new();
+                for (tp, &arg) in edef.type_params.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(tp.entity, arg);
+                }
+                field_ty = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+            }
 
-                        return (FieldIdx::new(idx), field_ty);
-                    }
+            return (FieldIdx::new(idx), field_ty);
+        }
 
         // Fallback: unresolved payload field
         (FieldIdx::new(0), self.ctx.module.ty_arena.error())
@@ -1251,22 +1243,19 @@ impl OssaBodyCtx<'_, '_> {
 
         if let Some(entity) = entity
             && let Some(edef) = self.ctx.module.enums.get(&entity)
-                && let Some(case) = edef.cases.get(variant_idx.index())
-                    && let Some(field) = case.payload_fields.get(field_idx.index()) {
-                        let mut field_ty = field.ty;
-                        if !type_args.is_empty() {
-                            let mut subst = kestrel_mir::SubstMap::new();
-                            for (tp, &arg) in edef.type_params.iter().zip(type_args.iter()) {
-                                subst.type_params.insert(tp.entity, arg);
-                            }
-                            field_ty = kestrel_mir::substitute(
-                                &mut self.ctx.module.ty_arena,
-                                field_ty,
-                                &subst,
-                            );
-                        }
-                        return field_ty;
-                    }
+            && let Some(case) = edef.cases.get(variant_idx.index())
+            && let Some(field) = case.payload_fields.get(field_idx.index())
+        {
+            let mut field_ty = field.ty;
+            if !type_args.is_empty() {
+                let mut subst = kestrel_mir::SubstMap::new();
+                for (tp, &arg) in edef.type_params.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(tp.entity, arg);
+                }
+                field_ty = kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+            }
+            return field_ty;
+        }
 
         self.ctx.module.ty_arena.error()
     }
