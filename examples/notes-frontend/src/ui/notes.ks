@@ -23,10 +23,10 @@ public func noteListView(notes: Array[Value], listTitle: String) -> Document {
 }
 
 func noteList(notes: Array[Value]) -> Document {
-    var cards = Document(capacity: 4096);
+    var cards = Document();
     var i: Int64 = 0;
     while i < notes.count {
-        cards.append(other: noteCard(notes(unchecked: i)));
+        cards.append(noteCard(notes(unchecked: i)));
         i = i + 1
     };
     div([cls("note-list")]) { cards }
@@ -96,7 +96,7 @@ func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> 
     } else {
         [attr("value", "0")]
     };
-    opts.append(other: option(noneAttrs) { text("No folder") });
+    opts.append(option(noneAttrs) { text("No folder") });
 
     var i: Int64 = 0;
     while i < folders.count {
@@ -108,7 +108,7 @@ func folderPicker(nid: Int64, currentFolderId: Int64, folders: Array[Value]) -> 
         } else {
             [attr("value", "\(fid)")]
         };
-        opts.append(other: option(optAttrs) { text(name) });
+        opts.append(option(optAttrs) { text(name) });
         i = i + 1
     };
 

@@ -19,7 +19,7 @@ public func folderSidebar(folders: Array[Value], activeFolderId: Int64) -> Docum
         let name = getStr(folder, "name");
         let itemCls = if fid == activeFolderId { "folder-item active" } else { "folder-item" };
         items.append(
-            other: anchor([cls(itemCls), href("/folder/\(fid)"),
+            anchor([cls(itemCls), href("/folder/\(fid)"),
                     hxGet("/fragments/notes?folderId=\(fid)"), hxTarget("#content"),
                     hxSwap("innerHTML"), hxPushUrl("/folder/\(fid)")]) {
                 iconSized("folder", 16)

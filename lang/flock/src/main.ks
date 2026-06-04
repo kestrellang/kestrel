@@ -28,7 +28,7 @@ import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
 // ENTRY POINT
 // ============================================================================
 
-func main() {
+func main() -> Int32 {
     let argv = getArgv();
 
     var cmd = Command("flock");
@@ -65,17 +65,25 @@ func main() {
                         handlePublish()
                     } else if sub == "update" {
                         handleUpdate()
+                    } else {
+                        0
                     }
                 },
                 .None => {
                     // No subcommand — show help
                     let _ = println(cmd.helpText());
+                    0
                 }
             }
         },
         .Err(e) => {
-            // ParseError.Message is used for --help output
+            // ParseError.Message carries --help/--version text (success); every
+            // other variant is a real usage error and must exit non-zero.
             let _ = eprintln(e.description());
+            match e {
+                .Message(_) => 0,
+                _ => 1
+            }
         }
     }
 }
@@ -84,9 +92,9 @@ func main() {
 // COMMAND HANDLERS
 // ============================================================================
 
-func handleBuild(release release: Bool) {
+func handleBuild(release release: Bool) -> Int32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Building "); msg.append(info.name);
             if release { msg.append(" (release)") };
@@ -96,46 +104,47 @@ func handleBuild(release release: Bool) {
                 .Ok(_) => {
                     var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(info.name); doneMsg.append(" successfully");
                     let _ = println(doneMsg);
+                    0
                 },
-                .Err(e) => { let _ = eprintln(e.description()); }
+                .Err(e) => { let _ = eprintln(e.description()); 1 }
             }
         }
     }
 }
 
-func handleRun(release release: Bool) {
+func handleRun(release release: Bool) -> Int32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
             match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
-                .Ok(_) => {},
-                .Err(e) => { let _ = eprintln(e.description()); }
+                .Ok(_) => 0,
+                .Err(e) => { let _ = eprintln(e.description()); 1 }
             }
         }
     }
 }
 
-func handleCheck() {
+func handleCheck() -> Int32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Checking "); msg.append(info.name); msg.append("...");
             let _ = println(msg);
             match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String](), release: false) {
-                .Ok(_) => { let _ = println("Check passed"); },
-                .Err(e) => { let _ = eprintln(e.description()); }
+                .Ok(_) => { let _ = println("Check passed"); 0 },
+                .Err(e) => { let _ = eprintln(e.description()); 1 }
             }
         }
     }
 }
 
-func handleInit() {
+func handleInit() -> Int32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if fileExists( manifestPath) {
         let _ = eprintln("flock.toml already exists in this directory");
-        return
+        return 1
     }
 
     // Extract directory name as default package name
@@ -148,7 +157,7 @@ func handleInit() {
         .Ok(_) => { let _ = println("Created flock.toml"); },
         .Err(e) => {
             let _ = eprintln("Failed to create flock.toml");
-            return
+            return 1
         }
     }
 
@@ -159,15 +168,16 @@ func handleInit() {
         let _ = spawn(mkdirCmd);
         let _ = println("Created src/");
     }
+    0
 }
 
-func handlePublish() {
+func handlePublish() -> Int32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if not fileExists(manifestPath) {
         let _ = eprintln("flock.toml not found in current directory");
-        return
+        return 1
     }
 
     // Parse manifest
@@ -183,13 +193,13 @@ func handlePublish() {
     match readFileString(manifestPath) {
         .Err(_) => {
             let _ = eprintln("cannot read flock.toml");
-            return
+            return 1
         },
         .Ok(source) => {
             match parseManifest(source: source) {
                 .Err(e) => {
                     let _ = eprintln(e.description());
-                    return
+                    return 1
                 },
                 .Ok(m) => manifest = m
             }
@@ -206,7 +216,7 @@ func handlePublish() {
         .None => {
             let _ = eprintln("FLOCK_ORG environment variable not set");
             let _ = eprintln("Usage: FLOCK_ORG=myorg flock publish");
-            return
+            return 1
         }
     }
 
@@ -230,7 +240,7 @@ func handlePublish() {
             .None => {
                 let _ = eprintln("No auth token found.");
                 let _ = eprintln("Set FLOCK_TOKEN or save your token to ~/.kestrel/credentials");
-                return
+                return 1
             }
         }
     }
@@ -244,7 +254,7 @@ func handlePublish() {
     let tarExit = spawn(tarCmd);
     if tarExit != 0 {
         let _ = eprintln("failed to create archive");
-        return
+        return 1
     }
 
     // Generate docs (best-effort — publish continues without docs)
@@ -286,9 +296,10 @@ func handlePublish() {
     let _ = spawn(rmCmd);
     var rmDocsCmd = String(); rmDocsCmd.append("rm -rf "); rmDocsCmd.append(docsDir);
     let _ = spawn(rmDocsCmd);
+    0
 }
 
-func handleUpdate() {
+func handleUpdate() -> Int32 {
     let cwd = getcwd();
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
 
@@ -301,10 +312,11 @@ func handleUpdate() {
 
     // Re-resolve everything
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); },
+        .Err(e) => { let _ = eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Dependencies updated for "); msg.append(info.name);
             let _ = println(msg);
+            0
         }
     }
 }

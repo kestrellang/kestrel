@@ -26,7 +26,7 @@ struct Ctx: Cloneable {
     func clone() -> Ctx { Ctx(x: self.x) }
 }
 
-func render(doc: Document) -> Html { Html(doc.render()) }
+func render(doc doc: Document) -> Html { Html(doc.render()) }
 
 func main() {
     var app = App[Ctx](Ctx(x: 0));
