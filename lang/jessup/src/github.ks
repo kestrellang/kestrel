@@ -175,7 +175,11 @@ func findAssetInRelease(json json: Value, platform platform: Platform) -> Result
                             .Some(nameVal) => {
                                 match nameVal.asString() {
                                     .Some(name) => {
-                                        if stringContains(haystack: name, needle: target) and stringContains(haystack: name, needle: ".tar.gz") {
+                                        // Match the kestrel toolchain tarball specifically.
+                                        // Releases also carry a `jessup-<target>.tar.gz`, which
+                                        // shares the same target suffix — require the `kestrel`
+                                        // prefix so we don't grab the jessup binary by mistake.
+                                        if stringContains(haystack: name, needle: "kestrel") and stringContains(haystack: name, needle: target) and stringContains(haystack: name, needle: ".tar.gz") {
                                             // Found matching asset — get browser_download_url
                                             match asset.value(forKey: "browser_download_url") {
                                                 .Some(urlVal) => {
