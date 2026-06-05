@@ -129,6 +129,11 @@ fn synthesize_main_wrapper(ctx: &mut LowerCtx, master_init: Option<Entity>) {
             }));
     }
 
+    // Branch on the user `@main`'s return type. INVARIANT: this set must track
+    // `kestrel-analyze`'s `exitable_return_type` (E616) — the analyzer accepts
+    // exactly the types lowered here. `()`/`!`/`lang.iN` are handled structurally
+    // (no `Exitable` conformance, so they work with no stdlib); everything else
+    // goes through the `Exitable.report()` witness.
     let run_mir = ctx.module.ty_arena.get(run_ret).clone();
 
     if matches!(&run_mir, MirTy::Tuple(elems) if elems.is_empty()) {

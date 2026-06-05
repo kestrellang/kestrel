@@ -12,6 +12,16 @@
 > the unit-specialized `Result[(), E]` conforms (the generic
 > `Result[T: Exitable, E]` overlaps it and ICEs); `()` / `!` stay wrapper
 > special-cases (they cannot be `extend`ed).
+>
+> **Update (0.17 — conformance specialization).** The last two limitations were
+> lifted (see `conformance-specialization.md`): `()` and `!` now **conform** to
+> `Exitable` via synthetic `lang.()`/`lang.!` entities, the `Result` conformance
+> is now the **generic** `extend Result[T, E]: Exitable where T: Exitable` (the
+> overlap ICE is fixed by most-specific-wins), and E616 recurses through `Result`
+> on its Ok type. So `main() -> T throws E` works for any `Exitable` `T`
+> (`-> Int64 throws E`, `-> ExitCode throws E`, …), not just unit. The `@main`
+> wrapper still structurally special-cases a *direct* `-> ()` / `-> !` return
+> (`Tuple([])` → exit 0, `Never` → unreachable).
 
 ## Summary
 

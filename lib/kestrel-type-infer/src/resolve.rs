@@ -272,8 +272,23 @@ impl TypeResolver for WorldResolver<'_> {
             }
         }
 
-        let Some(entity) = receiver_ty.entity() else {
-            return Err(MemberError::NotFound);
+        let entity = match receiver_ty.entity() {
+            Some(e) => e,
+            // Structural singletons resolve members via their synthetic `lang`
+            // entities, so a direct `().foo()` / `().tag()` call finds members
+            // and conformances added by `extend ()` / `extend (): P`.
+            None => {
+                let lang_name = match receiver_ty {
+                    TyKind::Tuple(elems) if elems.is_empty() => "()",
+                    TyKind::Never => "!",
+                    _ => return Err(MemberError::NotFound),
+                };
+                match kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, lang_name)
+                {
+                    Some(e) => e,
+                    None => return Err(MemberError::NotFound),
+                }
+            },
         };
         let entity = &entity;
 
@@ -528,6 +543,32 @@ impl TypeResolver for WorldResolver<'_> {
                     &mut visited,
                 );
                 all_protocols.contains(&protocol)
+            },
+            // Structural singletons conform via their synthetic `lang` entities
+            // (`extend (): P` / `extend !: P`), keyed the same as nominal types.
+            TyKind::Tuple(elems) if elems.is_empty() => {
+                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "()")
+                    .map(|e| {
+                        self.ctx
+                            .query(kestrel_name_res::ConformingProtocols {
+                                entity: e,
+                                root: self.root,
+                            })
+                            .contains(&protocol)
+                    })
+                    .unwrap_or(false)
+            },
+            TyKind::Never => {
+                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "!")
+                    .map(|e| {
+                        self.ctx
+                            .query(kestrel_name_res::ConformingProtocols {
+                                entity: e,
+                                root: self.root,
+                            })
+                            .contains(&protocol)
+                    })
+                    .unwrap_or(false)
             },
             _ => false,
         }

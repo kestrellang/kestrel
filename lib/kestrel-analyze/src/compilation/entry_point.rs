@@ -42,10 +42,11 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast::AstType;
 use kestrel_ast_builder::{Attributes, DeclSpan, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_hir::builtin::Builtin;
+use kestrel_hir::ty::HirTy;
+use kestrel_hir_lower::lower_ast_type;
 use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_span::Span;
 
@@ -165,30 +166,46 @@ fn main_return_type_ok(cx: &CompilationContext<'_>, entity: Entity) -> bool {
     let Some(TypeAnnotation(ty)) = cx.query.get::<TypeAnnotation>(entity) else {
         return true; // no `-> T` ⇒ Void
     };
+    // Classify the resolved HIR type, not the raw AST type, so the conformance
+    // check sees the actual (possibly intrinsic / structural / sugar) type.
+    let ret = lower_ast_type(cx.query, entity, cx.root, ty);
+    exitable_return_type(cx, &ret)
+}
+
+/// Whether `ty` is a valid `@main` return type.
+///
+/// Accepts exactly what the `@main` wrapper can lower
+/// (`kestrel-mir-lower::synthesize_main_wrapper`): `()` (`Tuple([])` → exit 0),
+/// `!` (`Never` → unreachable), and raw `lang.iN` (sign-extend; #109 back-compat)
+/// are handled STRUCTURALLY — no `Exitable` conformance — so they're valid even
+/// with no stdlib (the `Exitable` protocol lives in `std.os`). Everything else
+/// must conform to `Exitable`.
+///
+/// `main() -> T throws E` is `Result[T, E]`, which conforms via its generic
+/// conformance; whether `T` satisfies that conformance's `where T: Exitable`
+/// bound is the conformance system's concern, not this check's — so `Result` is
+/// NOT special-cased here.
+///
+/// INVARIANT: the accepted set must track `synthesize_main_wrapper`'s branches —
+/// a type accepted here that the wrapper can't lower is an ICE; a type the
+/// wrapper handles but this rejects is a spurious E616.
+fn exitable_return_type(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
     match ty {
-        AstType::Unit(_) => true,
-        AstType::Never(_) => true,
-        // `main() throws E` desugars to `Result[(), E]`. Only the unit-Ok `Result`
-        // conforms to `Exitable` (v1), so accept `Result` only when its Ok is `()`.
-        AstType::Result { ok, .. } => matches!(ok.as_ref(), AstType::Unit(_)),
-        AstType::Named { segments, .. } => {
-            let context = cx.query.parent_of(entity).unwrap_or(cx.root);
-            let segs: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-            match cx.query.query(ResolveTypePath {
-                segments: segs,
-                context,
-                root: cx.root,
-            }) {
-                // Keep the raw `lang.iN` primitives for back-compat (#109); accept
-                // any other type (incl. stdlib `IntN`/`ExitCode`) that conforms to
-                // `Exitable`.
-                TypeResolution::Found(resolved) => {
-                    is_lang_primitive_int(cx, resolved) || conforms_to_exitable(cx, resolved)
-                },
-                _ => true, // unresolved — let the resolution error handle it
-            }
+        // Wrapper-structural: no `Exitable` conformance needed, so valid even with
+        // no stdlib (cf. `synthesize_main_wrapper`'s `Tuple`/`Never` branches).
+        HirTy::Tuple(elems, _) if elems.is_empty() => true,
+        HirTy::Never(_) => true,
+        // Raw `lang.iN` (back-compat) or any type conforming to `Exitable` —
+        // stdlib `IntN`/`ExitCode`, `Result` (via its generic conformance), or a
+        // user conformer.
+        HirTy::Struct { entity, .. }
+        | HirTy::Enum { entity, .. }
+        | HirTy::Protocol { entity, .. } => {
+            is_lang_primitive_int(cx, *entity) || conforms_to_exitable(cx, *entity)
         },
-        _ => false, // float / tuple / function / optional / array / etc.
+        // Unresolved type — defer to the resolution error rather than double-report.
+        HirTy::Error(_) => true,
+        _ => false, // non-empty tuple / function / type-param / inferred / etc.
     }
 }
 
@@ -197,7 +214,7 @@ fn conforms_to_exitable(cx: &CompilationContext<'_>, entity: Entity) -> bool {
     let Some(exitable) = cx.query.query(ResolveBuiltin {
         builtin: Builtin::Exitable,
         root: cx.root,
-    }) else {
+    }) else {Can
         return false;
     };
     cx.query

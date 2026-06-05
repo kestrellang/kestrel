@@ -3,7 +3,7 @@
 //! Finds extensions for a given type entity and resolves extension
 //! target types from AstType to entities.
 
-use kestrel_ast_builder::{ExtensionTarget, NodeKind};
+use kestrel_ast_builder::{ExtensionTarget, Name, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
@@ -43,6 +43,14 @@ impl QueryFn for ExtensionTargetEntity {
         let target = ctx.get::<ExtensionTarget>(self.extension)?;
         let ast_type = &target.0;
 
+        // Structural singletons `()` and `!` resolve to synthetic `lang` entities
+        // (named "()" / "!") so they can be extension targets.
+        match ast_type {
+            kestrel_ast::AstType::Unit(..) => return resolve_lang_child(ctx, self.root, "()"),
+            kestrel_ast::AstType::Never(..) => return resolve_lang_child(ctx, self.root, "!"),
+            _ => {},
+        }
+
         // Extract path segments from the AstType
         let kestrel_ast::AstType::Named { segments, .. } = ast_type else {
             return None;
@@ -64,6 +72,19 @@ impl QueryFn for ExtensionTargetEntity {
             _ => None,
         }
     }
+}
+
+/// Resolve a synthetic child of the `lang` module by its (possibly
+/// non-identifier) name — used for the structural singletons `()` / `!`.
+pub fn resolve_lang_child(ctx: &QueryContext<'_>, root: Entity, name: &str) -> Option<Entity> {
+    let lang = ctx.children_of(root).iter().copied().find(|&c| {
+        ctx.get::<NodeKind>(c) == Some(&NodeKind::Module)
+            && ctx.get::<Name>(c).map(|n| n.0 == "lang").unwrap_or(false)
+    })?;
+    ctx.children_of(lang)
+        .iter()
+        .copied()
+        .find(|&c| ctx.get::<Name>(c).map(|n| n.0 == name).unwrap_or(false))
 }
 
 // ===== ExtensionsFor =====

@@ -85,15 +85,29 @@ extend UInt64: Exitable {
 }
 
 // ============================================================================
-// Throwing `main`: `main() throws E` desugars to `Result[(), E]`. On `.Ok`
-// the process exits 0; on `.Err` the error is printed to stderr and the
-// process exits non-zero. Specialized on unit only (see exitable design doc).
+// Structural singletons. `()` — a `main` with no explicit return, and the `.Ok`
+// payload of `main() throws E` — exits 0. `!` is uninhabited, so its `report()`
+// is never reached; the conformance only lets `!` satisfy an `Exitable` bound.
 // ============================================================================
 
-extend Result[(), E]: Exitable where E: Formattable {
+extend (): Exitable {
+    consuming func report() -> ExitCode { ExitCode.success }
+}
+extend !: Exitable {
+    consuming func report() -> ExitCode { ExitCode.failure } // unreachable
+}
+
+// ============================================================================
+// Throwing `main`: `main() throws E` desugars to `Result[(), E]`, but the
+// conformance is generic over any `Exitable` `Ok` type — on `.Ok(value)` the
+// value's own `report()` gives the exit code (`()` → 0); on `.Err` the error is
+// printed to stderr and the process exits non-zero.
+// ============================================================================
+
+extend Result[T, E]: Exitable where T: Exitable, E: Formattable {
     consuming func report() -> ExitCode {
         match self {
-            .Ok(_)      => ExitCode.success,
+            .Ok(value)  => value.report(),
             .Err(error) => {
                 let _ = eprintln(error);
                 ExitCode.failure

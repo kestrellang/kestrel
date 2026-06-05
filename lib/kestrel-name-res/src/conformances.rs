@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind};
+use kestrel_ast_builder::{ConformanceItem, Conformances, ExtensionTarget, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::extensions::ExtensionsFor;
@@ -95,7 +95,12 @@ impl QueryFn for ConformingProtocolInstantiations {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
         let mut instantiations: Vec<(Entity, Entity, Vec<AstType>)> = Vec::new();
-        let mut visited: HashSet<(Entity, Vec<AstType>)> = HashSet::new();
+        // Key includes the source's implementing-type args (third element) so
+        // OVERLAPPING conformances with the same protocol + protocol-args but
+        // different implementing types — `extend Box[T]: P` vs
+        // `extend Box[lang.i64]: P` — are kept as distinct sources rather than
+        // collapsed (which would hide the specialization from witness lowering).
+        let mut visited: HashSet<(Entity, Vec<AstType>, Vec<AstType>)> = HashSet::new();
 
         // Direct conformances on the type itself
         gather_protocol_instantiations(
@@ -165,10 +170,23 @@ fn gather_protocol_instantiations(
     entity: Entity,
     root: Entity,
     instantiations: &mut Vec<(Entity, Entity, Vec<AstType>)>,
-    visited: &mut HashSet<(Entity, Vec<AstType>)>,
+    visited: &mut HashSet<(Entity, Vec<AstType>, Vec<AstType>)>,
 ) {
     let Some(conformances) = ctx.get::<Conformances>(entity) else {
         return;
+    };
+
+    // The implementing-type args of this source: the concrete `[lang.i64]` of
+    // `extend Box[lang.i64]` vs the `[T]` of `extend Box[T]`. Empty for direct
+    // (non-extension) conformances. Disambiguates overlapping specializations.
+    let source_target_args: Vec<AstType> = if ctx.get::<NodeKind>(entity)
+        == Some(&NodeKind::Extension)
+    {
+        ctx.get::<ExtensionTarget>(entity)
+            .map(|t| extract_ast_type_args(&t.0))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
     };
 
     for item in &conformances.0 {
@@ -185,7 +203,7 @@ fn gather_protocol_instantiations(
         }
 
         let type_args = extract_ast_type_args(ast_ty);
-        let key = (resolved, type_args.clone());
+        let key = (resolved, type_args.clone(), source_target_args.clone());
         if !visited.insert(key) {
             continue;
         }

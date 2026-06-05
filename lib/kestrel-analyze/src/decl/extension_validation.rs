@@ -21,7 +21,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{ExtensionTarget, Intrinsic, NodeKind, TypeParams};
+use kestrel_ast_builder::{ExtensionTarget, NodeKind, TypeParams};
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -81,15 +81,15 @@ impl DeclCheck for ExtensionValidationAnalyzer {
 
         match resolution {
             TypeResolution::Found(entity) => {
-                // Check 1: target must be a struct, enum, or protocol (not intrinsic)
+                // Check 1: target must be a struct, enum, or protocol. Intrinsic
+                // types (`lang.i64`, etc.) ARE extendable — they're seeded as
+                // `NodeKind::Struct`; only non-nominal targets (type aliases,
+                // unknown) are rejected.
                 let kind = cx.query.get::<NodeKind>(entity);
-                let is_intrinsic = cx.query.has::<Intrinsic>(entity);
-                if is_intrinsic
-                    || !matches!(
-                        kind,
-                        Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
-                    )
-                {
+                if !matches!(
+                    kind,
+                    Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
+                ) {
                     diags.push(AnalyzeDiagnostic {
                         descriptor_id: DESCRIPTORS[0].id,
                         severity: DESCRIPTORS[0].default_severity,

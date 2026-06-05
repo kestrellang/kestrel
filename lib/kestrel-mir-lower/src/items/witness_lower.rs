@@ -5,6 +5,8 @@ use kestrel_ast_builder::{
     Callable, Name, NodeKind, Settable, Subscript as SubscriptMarker, TypeParams,
 };
 use kestrel_hecs::Entity;
+use kestrel_hir::ty::HirTy;
+use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
 use kestrel_mir::item::witness::{WitnessDef, WitnessMethodBinding};
 use kestrel_mir::{MirTy, SubstMap, TyId, TypeParamDef, WitnessMethodKey, substitute};
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
@@ -15,41 +17,31 @@ use kestrel_name_res::{
 };
 
 use crate::context::LowerCtx;
-use crate::ty::{lower_type, resolve_callable_types, resolve_type_annotation};
+use crate::ty::{lower_named_type, lower_type, resolve_callable_types, resolve_type_annotation};
 
 /// Generate witness tables for all struct and enum entities.
 pub fn lower_witnesses(ctx: &mut LowerCtx) {
-    let type_entities: Vec<(Entity, TyId, Vec<TypeParamDef>)> = ctx
-        .module
-        .structs
-        .values()
-        .map(|s| {
-            let type_args: Vec<TyId> = s
-                .type_params
-                .iter()
-                .map(|tp| ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
-                .collect();
-            let ty = ctx.module.ty_arena.named(s.entity, type_args);
-            (s.entity, ty, s.type_params.clone())
-        })
-        .collect();
+    // Collect (entity, type_params) first so we can take `&mut ctx` to build each
+    // implementing type below (the borrow checker won't let us hold the
+    // `structs`/`enums` iterator while mutating the arena).
+    let mut entities: Vec<(Entity, Vec<TypeParamDef>)> = Vec::new();
+    for s in ctx.module.structs.values() {
+        entities.push((s.entity, s.type_params.clone()));
+    }
+    for e in ctx.module.enums.values() {
+        entities.push((e.entity, e.type_params.clone()));
+    }
 
-    let enum_entities: Vec<(Entity, TyId, Vec<TypeParamDef>)> = ctx
-        .module
-        .enums
-        .values()
-        .map(|e| {
-            let type_args: Vec<TyId> = e
-                .type_params
-                .iter()
-                .map(|tp| ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
-                .collect();
-            let ty = ctx.module.ty_arena.named(e.entity, type_args);
-            (e.entity, ty, e.type_params.clone())
-        })
-        .collect();
-
-    for (entity, impl_ty, type_params) in type_entities.into_iter().chain(enum_entities) {
+    for (entity, type_params) in entities {
+        let type_args: Vec<TyId> = type_params
+            .iter()
+            .map(|tp| ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
+            .collect();
+        // `lower_named_type` maps intrinsic `lang.*` entities to their primitive
+        // `MirTy` (e.g. `lang.i64` → `I64`) so a witness from `extend lang.i64: P`
+        // matches the primitive self type at call sites; normal structs/enums
+        // stay `Named { entity, .. }`.
+        let impl_ty = lower_named_type(ctx, entity, type_args);
         lower_witnesses_for_type(ctx, entity, impl_ty, &type_params);
     }
 }
@@ -81,16 +73,37 @@ fn lower_witnesses_for_type(
         };
         let proto_type_args = lower_protocol_type_args(ctx, owner_for_args, ast_type_args);
 
+        // A specialized extension (`extend Box[lang.i64]: P`) gets a CONCRETE
+        // implementing type and binds its OWN method impls, so the mono witness
+        // selector prefers it over a generic `extend Box[T]: P`. Generic
+        // extensions and direct conformances keep the generic implementing type.
+        let concrete_args =
+            if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
+                lower_concrete_target_args(ctx, *source)
+            } else {
+                None
+            };
+        let prefer_source = concrete_args.is_some();
+        let witness_impl_ty = match &concrete_args {
+            Some(args) => ctx.module.ty_arena.named(type_entity, args.clone()),
+            None => impl_ty,
+        };
+
         // Build type args for witness method bindings.
         // These are TypeParam TyIds that the monomorphizer will substitute through
         // the pattern-match bindings to get concrete types.
         // Combine: impl type params (from the struct/enum) + protocol type args
         // (which may include extension free params like T in `extend Int64: SeqIndex[T]`).
         let impl_type_arg_tys: Vec<TyId> = {
-            let mut tys: Vec<TyId> = impl_type_params
-                .iter()
-                .map(|tp| ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
-                .collect();
+            // Concrete witnesses use the concrete args (no pattern bindings to
+            // substitute at mono time); generic witnesses use the struct params.
+            let mut tys: Vec<TyId> = match &concrete_args {
+                Some(args) => args.clone(),
+                None => impl_type_params
+                    .iter()
+                    .map(|tp| ctx.module.ty_arena.intern(MirTy::TypeParam(tp.entity)))
+                    .collect(),
+            };
             let impl_entities: std::collections::HashSet<kestrel_hecs::Entity> =
                 impl_type_params.iter().map(|tp| tp.entity).collect();
             for &pta in &proto_type_args {
@@ -105,7 +118,7 @@ fn lower_witnesses_for_type(
             tys
         };
 
-        let mut witness = WitnessDef::new(*protocol, impl_ty);
+        let mut witness = WitnessDef::new(*protocol, witness_impl_ty);
         witness.proto_type_args = proto_type_args.clone();
         ctx.register_name(*protocol);
 
@@ -166,10 +179,74 @@ fn lower_witnesses_for_type(
             })
             .collect();
 
-        for (method_key, method_name, member) in &method_entries {
-            let expected_param_types = expected_param_types_for(ctx, member.entity, &proto_subst);
+        bind_witness_methods(
+            ctx,
+            &mut witness,
+            &method_entries,
+            type_entity,
+            *source,
+            &proto_subst,
+            &impl_type_arg_tys,
+            prefer_source,
+        );
 
-            let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
+        // Bind associated types
+        bind_associated_types(
+            ctx,
+            &mut witness,
+            type_entity,
+            &extensions,
+            *protocol,
+            *source,
+            witness_impl_ty,
+        );
+
+        ctx.module.add_witness(witness);
+    }
+}
+
+/// Bind each protocol method to a concrete impl function on `witness`. Faithful
+/// extraction of the original inline binding (type-member discovery →
+/// conformance-providing protocol-extension → protocol-extension default).
+///
+/// When `prefer_source` is set (specialized concrete witnesses), the source
+/// extension's OWN impls win over the merged type-member discovery, so
+/// `extend Box[lang.i64]: P` binds its own method rather than the generic one.
+/// With `prefer_source == false` this reproduces the original behavior exactly.
+#[allow(clippy::too_many_arguments)]
+fn bind_witness_methods(
+    ctx: &mut LowerCtx,
+    witness: &mut WitnessDef,
+    method_entries: &[(WitnessMethodKey, String, ProtocolMember)],
+    type_entity: Entity,
+    source: Entity,
+    proto_subst: &std::collections::HashMap<Entity, TyId>,
+    impl_type_arg_tys: &[TyId],
+    prefer_source: bool,
+) {
+    for (method_key, method_name, member) in method_entries {
+        let expected_param_types = expected_param_types_for(ctx, member.entity, proto_subst);
+
+        let lookup_name = method_name.strip_suffix(".set").unwrap_or(method_name);
+
+        // Specialized concrete witness: try the source extension's own impls first.
+        let mut impl_func = None;
+        if prefer_source {
+            let source_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
+            impl_func = if method_name.ends_with(".set") {
+                find_setter_among(ctx, &source_children)
+            } else {
+                find_impl_among(
+                    ctx,
+                    &source_children,
+                    method_name,
+                    Some(&method_key.labels),
+                    expected_param_types.as_deref(),
+                )
+            };
+        }
+
+        if impl_func.is_none() {
             let candidates = ctx.query.query(TypeMembersByName {
                 type_entity,
                 name: lookup_name.to_string(),
@@ -189,7 +266,7 @@ fn lower_witnesses_for_type(
                 .map(|tm| tm.entity)
                 .collect();
 
-            let impl_func = if method_name.ends_with(".set") {
+            impl_func = if method_name.ends_with(".set") {
                 find_setter_among(ctx, &type_side)
             } else {
                 find_impl_among(
@@ -200,87 +277,82 @@ fn lower_witnesses_for_type(
                     expected_param_types.as_deref(),
                 )
             };
+        }
 
-            if let Some(impl_func) = impl_func {
+        if let Some(impl_func) = impl_func {
+            ctx.register_name(impl_func);
+            witness.add_method(WitnessMethodBinding::new(
+                method_key.clone(),
+                impl_func,
+                impl_type_arg_tys.to_vec(),
+            ));
+            continue;
+        }
+
+        // Conformance-providing protocol extension: when a blanket like
+        // `extend Equatable: NotEqual[Self]` provides the conformance,
+        // search the extension's children for the method implementation.
+        // Only applies when the extension targets a protocol, not a concrete type.
+        let source_is_protocol_ext = matches!(
+            ctx.world.get::<NodeKind>(source),
+            Some(NodeKind::Extension)
+        ) && source != type_entity
+            && ctx
+                .query
+                .query(ExtensionTargetEntity {
+                    extension: source,
+                    root: ctx.root,
+                })
+                .is_some_and(|target| {
+                    matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol))
+                });
+        if source_is_protocol_ext {
+            let ext_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
+            let ext_impl = if method_name.ends_with(".set") {
+                find_setter_among(ctx, &ext_children)
+            } else {
+                find_impl_among(ctx, &ext_children, lookup_name, Some(&method_key.labels), None)
+            };
+            if let Some(impl_func) = ext_impl {
                 ctx.register_name(impl_func);
                 witness.add_method(WitnessMethodBinding::new(
                     method_key.clone(),
                     impl_func,
-                    impl_type_arg_tys.clone(),
+                    impl_type_arg_tys.to_vec(),
                 ));
                 continue;
             }
-
-            // Conformance-providing protocol extension: when a blanket like
-            // `extend Equatable: NotEqual[Self]` provides the conformance,
-            // search the extension's children for the method implementation.
-            // Only applies when the extension targets a protocol, not a concrete type.
-            let source_is_protocol_ext = matches!(
-                ctx.world.get::<NodeKind>(*source),
-                Some(NodeKind::Extension)
-            ) && *source != type_entity
-                && ctx
-                    .query
-                    .query(ExtensionTargetEntity {
-                        extension: *source,
-                        root: ctx.root,
-                    })
-                    .is_some_and(|target| {
-                        matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol))
-                    });
-            if source_is_protocol_ext {
-                let ext_children: Vec<Entity> = ctx.world.children_of(*source).to_vec();
-                let ext_impl = if method_name.ends_with(".set") {
-                    find_setter_among(ctx, &ext_children)
-                } else {
-                    find_impl_among(
-                        ctx,
-                        &ext_children,
-                        lookup_name,
-                        Some(&method_key.labels),
-                        None,
-                    )
-                };
-                if let Some(impl_func) = ext_impl {
-                    ctx.register_name(impl_func);
-                    witness.add_method(WitnessMethodBinding::new(
-                        method_key.clone(),
-                        impl_func,
-                        impl_type_arg_tys.clone(),
-                    ));
-                    continue;
-                }
-            }
-
-            // Protocol extension default
-            if member.extension.is_some() {
-                let bind_entity = if method_name.ends_with(".set") {
-                    find_setter_among(ctx, &[member.entity]).unwrap_or(member.entity)
-                } else {
-                    member.entity
-                };
-                ctx.register_name(bind_entity);
-                witness.add_method(WitnessMethodBinding::new(
-                    method_key.clone(),
-                    bind_entity,
-                    impl_type_arg_tys.clone(),
-                ));
-            }
         }
 
-        // Bind associated types
-        bind_associated_types(
-            ctx,
-            &mut witness,
-            type_entity,
-            &extensions,
-            *protocol,
-            *source,
-            impl_ty,
-        );
-
-        ctx.module.add_witness(witness);
+        // Protocol extension default
+        if member.extension.is_some() {
+            let bind_entity = if method_name.ends_with(".set") {
+                find_setter_among(ctx, &[member.entity]).unwrap_or(member.entity)
+            } else {
+                member.entity
+            };
+            ctx.register_name(bind_entity);
+            witness.add_method(WitnessMethodBinding::new(
+                method_key.clone(),
+                bind_entity,
+                impl_type_arg_tys.to_vec(),
+            ));
+        }
     }
+}
+
+/// If `source` is an extension whose target type has ≥1 concrete (non-param)
+/// type arg (e.g. `extend Box[lang.i64]`), lower those args to `TyId`s. Returns
+/// `None` for fully-generic extensions (`extend Box[T]`) and arg-less targets.
+fn lower_concrete_target_args(ctx: &mut LowerCtx, source: Entity) -> Option<Vec<TyId>> {
+    let hir_args = ctx.query.query(LowerExtensionTargetTypeArgs {
+        extension: source,
+        root: ctx.root,
+    })?;
+    if hir_args.is_empty() || !hir_args.iter().any(|t| !matches!(t, HirTy::Param(..))) {
+        return None;
+    }
+    Some(hir_args.iter().map(|h| lower_type(ctx, h)).collect())
 }
 
 fn lower_protocol_type_args(
