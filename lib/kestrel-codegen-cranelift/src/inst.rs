@@ -181,10 +181,25 @@ pub fn compile_inst(
                 &fc.ctx.tc,
             );
             let val = match repr {
-                TypeRepr::Scalar(_) if is_guaranteed => {
-                    builder
+                TypeRepr::Scalar(scalar_ty) if is_guaranteed => {
+                    // Load the scalar through the borrow at its OWN width, then
+                    // normalize to `disc_width`. `disc_width` is the enum tag
+                    // width and defaults to I32 for a non-enum Named type (e.g.
+                    // `Bool`, a newtype over `lang.i1`); loading `disc_width`
+                    // bytes from a 1-byte value over-reads adjacent memory, so a
+                    // `match b { true => .., _ => .. }` compared the tag against
+                    // garbage and always took the default. For a pure-discriminant
+                    // enum `scalar_ty == disc_width`, so this is a no-op there.
+                    let loaded = builder
                         .ins()
-                        .load(disc_width, MemFlags::new(), base, Offset32::new(0))
+                        .load(scalar_ty, MemFlags::new(), base, Offset32::new(0));
+                    if scalar_ty == disc_width {
+                        loaded
+                    } else if scalar_ty.bytes() > disc_width.bytes() {
+                        builder.ins().ireduce(disc_width, loaded)
+                    } else {
+                        builder.ins().uextend(disc_width, loaded)
+                    }
                 },
                 TypeRepr::Scalar(_) => {
                     let actual = builder.func.dfg.value_type(base);
