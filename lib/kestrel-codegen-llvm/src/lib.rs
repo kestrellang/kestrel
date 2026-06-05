@@ -37,7 +37,7 @@ pub use error::CodegenError;
 /// Options controlling code generation and linking. Field-compatible with the
 /// Cranelift backend's `CodegenOptions`, except `emit_ir`/`ir_text` replace the
 /// Cranelift-specific `emit_clif`/`clif_text` (the dumped text is LLVM IR).
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CodegenOptions {
     pub opt_level: u8,
     pub libraries: Vec<String>,
@@ -46,19 +46,6 @@ pub struct CodegenOptions {
     pub c_sources: Vec<std::path::PathBuf>,
     /// Emit textual LLVM IR (per function) into `CompilationResult::ir_text`.
     pub emit_ir: bool,
-}
-
-impl Default for CodegenOptions {
-    fn default() -> Self {
-        Self {
-            opt_level: 0,
-            libraries: Vec::new(),
-            library_paths: Vec::new(),
-            frameworks: Vec::new(),
-            c_sources: Vec::new(),
-            emit_ir: false,
-        }
-    }
 }
 
 pub struct CompilationResult {
