@@ -29,6 +29,11 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # `kestrel-codegen-llvm` (built by `cargo clippy/build --workspace` below)
+      # needs LLVM 18 via inkwell/llvm-sys.
+      - name: Install LLVM 18
+        uses: ./.github/actions/install-llvm
+
       - name: Rust fmt
         run: cargo fmt --check
 
