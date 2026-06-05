@@ -540,7 +540,9 @@ struct StdLookupError {
 
 /// Locate the stdlib via, in priority order:
 ///   1. `KESTREL_STD` env var (matches kestrel-test-suite convention)
-///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
+///   2. `<canonicalized-exe>/../lib/std` (jessup-installed toolchain layout;
+///      the exe is canonicalized so the `~/.jessup/bin/kestrel` symlink resolves
+///      to the active toolchain's `lib/std` rather than `~/.jessup/lib/std`)
 ///   3. `<CARGO_MANIFEST_DIR>/lang/std` baked at build time (in-repo dev)
 ///
 /// Each candidate must `exists()` to win; otherwise we fall through and
@@ -557,16 +559,22 @@ fn default_std_path() -> Result<PathBuf, StdLookupError> {
         tried.push(("KESTREL_STD", p));
     }
 
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(p) = exe
+    if let Ok(exe) = std::env::current_exe() {
+        // Resolve symlinks first: jessup installs `~/.jessup/bin/kestrel` as a
+        // symlink into `~/.jessup/toolchains/<name>/bin/`, and `flock` invokes us
+        // through that link. Without canonicalizing, `<exe>/../../lib/std` points at
+        // the non-existent `~/.jessup/lib/std` instead of the toolchain's stdlib.
+        let real = std::fs::canonicalize(&exe).unwrap_or(exe);
+        if let Some(p) = real
             .parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("lib/std"))
-    {
-        if p.exists() {
-            return Ok(p);
+        {
+            if p.exists() {
+                return Ok(p);
+            }
+            tried.push(("exe-relative", p));
         }
-        tried.push(("exe-relative", p));
     }
 
     let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
