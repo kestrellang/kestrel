@@ -15,6 +15,7 @@ func double_if_some(opt: Option) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let result = double_if_some(Option.Some(value: 21));
     if result != 42 { return 1 }

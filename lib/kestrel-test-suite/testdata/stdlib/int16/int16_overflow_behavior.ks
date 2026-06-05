@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let maxVal = std.numeric.Int16.maxValue;
             let minVal = std.numeric.Int16.minValue;

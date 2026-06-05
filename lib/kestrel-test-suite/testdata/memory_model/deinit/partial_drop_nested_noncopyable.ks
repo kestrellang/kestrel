@@ -31,6 +31,7 @@ func test_success() {
     // Both inners alive, deinited at scope exit
 }
 
+@main
 func main() -> lang.i64 {
     // Fail after a: only Inner(id:1) deinited by partial drop
     deinit_count = 0;

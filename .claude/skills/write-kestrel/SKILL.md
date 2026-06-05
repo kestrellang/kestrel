@@ -107,6 +107,38 @@ struct File: not Copyable { var handle: Int64; }
 let f2 = f1;  // MOVED — f1 invalid
 ```
 
+### Writing `clone()`
+
+Inside a `clone()` body, **`self` is a bitwise copy**. The compiler deliberately
+suppresses clone-insertion there (otherwise `clone()` would call itself forever),
+so returning `self` — or a payload bound out of `self` — **aliases** any heap field
+(`String`, `Array`, `Dictionary`, `Rc`, …) instead of duplicating it. Both the
+original and the "copy" then free the same buffer → double-free / use-after-free.
+Deep-clone every heap payload explicitly:
+
+```kestrel
+// WRONG — `{ self }` bit-copies, aliasing the String; double-free on drop
+enum Token: Cloneable {
+    case Plain
+    case Literal(String)
+    func clone() -> Token { self }
+}
+
+// RIGHT — clone each heap payload; bare `self` is fine only for payload-less cases
+enum Token: Cloneable {
+    case Plain
+    case Literal(String)
+    func clone() -> Token {
+        match self { .Literal(s) => .Literal(s.clone()), _ => self }
+    }
+}
+```
+
+Same rule for structs: `func clone() -> Box { self }` aliases the fields — instead
+build a fresh value and `.clone()` each heap field. (Types that *don't* hand-write
+`clone()` get correct compiler-synthesized cloning; the footgun is specific to a
+hand-written body that returns `self`.)
+
 ## Enums
 
 ```kestrel
@@ -422,6 +454,7 @@ struct Connection: not Copyable { deinit { self.close(); } }         // RAII
 - Subscripts use `dict(key)` not `dict[key]` — brackets are for type parameters only.
 - `let _ = expr;` needs a semicolon when it's the only statement in a void body.
 - Structs with `String`/`Array`/`Dictionary` fields need explicit `Cloneable` conformance.
+- Inside a hand-written `clone()`, `self` is a **bitwise copy** — deep-clone heap fields explicitly; `clone() { self }` aliases them → double-free. (See *Writing `clone()`*.)
 - Multi-line method chaining (`.foo()\n.bar()`) doesn't parse — use intermediate variables.
 - Closures that capture variables can't be returned from functions.
 - `F.Type` metatype syntax is not yet supported.

@@ -15,6 +15,7 @@ func setValue(mutating i: Inner, n: std.numeric.Int64) {
     i.value = n;
 }
 
+@main
 func main() -> lang.i64 {
     var o = Outer(inner: Inner(value: 0));
     setValue(o.inner, 42);

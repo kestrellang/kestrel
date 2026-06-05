@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- reduce() ----
             let sum = [1, 2, 3, 4].iter().reduce(by: { (a, b) in a + b });

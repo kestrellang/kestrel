@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let p1 = std.numeric.Int64(parsing: "42", radix: 10);
             if p1.isNone() { return 1 }

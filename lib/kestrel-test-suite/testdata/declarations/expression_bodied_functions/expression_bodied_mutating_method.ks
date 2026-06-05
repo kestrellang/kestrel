@@ -10,7 +10,8 @@ struct Counter {
     mutating func reset() -> () = self.count = 0
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     var c = Counter(count: 10);
     c.reset();
     let _ = println(c.count);

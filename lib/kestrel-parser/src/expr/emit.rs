@@ -878,6 +878,11 @@ fn emit_closure_expr(
                 sink.add_token(SyntaxKind::Comma, params_data.commas[i - 1].clone());
             }
             sink.start_node(SyntaxKind::ClosureParam);
+            // `mutating` token sits at the head of the ClosureParam node; the
+            // AST builder scans for it (Phase 3).
+            if let Some(ref m) = param.mutating {
+                sink.add_token(SyntaxKind::Mutating, m.clone());
+            }
             crate::pattern::emit_pattern_variant(sink, &param.pattern);
             if let Some(ref colon) = param.colon {
                 sink.add_token(SyntaxKind::Colon, colon.clone());

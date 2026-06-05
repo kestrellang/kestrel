@@ -9,7 +9,37 @@
 use crate::ctx::InferCtx;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
+use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
+use kestrel_name_res::expand_protocol_closure;
+
+/// Whether two associated-type entities denote the same projected type for
+/// unification. True when they're the same entity, or when they share a name
+/// AND their parent protocols are refinement-related (one transitively refines
+/// the other). The name alone is *not* sufficient: unrelated protocols can each
+/// declare a same-named assoc type (`Foo.Item` vs `Bar.Item`) bound to
+/// different concrete types, and collapsing those would silently mask a type
+/// error. The refinement gate admits the genuine case — `Iterator.Item` ≡
+/// `Iterable.Item` via the blanket `extend Iterator: Iterable` (so
+/// `T.TargetIterator.Item` unifies with bare `T.Item`) — while rejecting
+/// coincidental name clashes. Single source of truth for both the
+/// TypeAlias/TypeAlias and AssocProjection/TypeAlias arms below.
+fn assoc_entities_unify(ctx: &InferCtx<'_>, a: Entity, b: Entity) -> bool {
+    if a == b {
+        return true;
+    }
+    let (Some(na), Some(nb)) = (ctx.query_ctx.get::<Name>(a), ctx.query_ctx.get::<Name>(b)) else {
+        return false;
+    };
+    if na.0 != nb.0 {
+        return false;
+    }
+    let (Some(pa), Some(pb)) = (ctx.query_ctx.parent_of(a), ctx.query_ctx.parent_of(b)) else {
+        return false;
+    };
+    expand_protocol_closure(ctx.query_ctx, ctx.root, [pa]).contains(&pb)
+        || expand_protocol_closure(ctx.query_ctx, ctx.root, [pb]).contains(&pa)
+}
 
 /// Unification failure reason.
 #[derive(Debug)]
@@ -63,9 +93,10 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         // (e.g., integer literal vs string literal in if/else branches).
         (TySlot::Unresolved { literal: lit_a }, TySlot::Unresolved { literal: lit_b }) => {
             if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b)
-                && a_kind != b_kind {
-                    return Err(UnifyError::Mismatch);
-                }
+                && a_kind != b_kind
+            {
+                return Err(UnifyError::Mismatch);
+            }
             // Propagate wildcard status: if either side is a wildcard, the root
             // (b, since a redirects to b) must also be a wildcard so that
             // report_unresolved_slots skips it.
@@ -168,10 +199,9 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             Ok(())
         },
 
-        // TypeAlias vs TypeAlias: allow name-based matching as a fallback.
-        // Different protocols can define associated types with the same name
-        // (e.g. Iterator.Item and Iterable.Item). These are logically the same
-        // when one protocol refines another. Require same arg count.
+        // TypeAlias vs TypeAlias: same entity, or same-named assoc types from
+        // refinement-related protocols (e.g. Iterator.Item ≡ Iterable.Item) —
+        // see `assoc_entities_unify`. Require same arg count.
         (
             TyKind::TypeAlias {
                 entity: ea,
@@ -182,13 +212,7 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
                 args: ab,
             },
         ) => {
-            let same_entity = ea == eb;
-            let same_name = !same_entity && {
-                let na = ctx.query_ctx.get::<Name>(*ea);
-                let nb = ctx.query_ctx.get::<Name>(*eb);
-                matches!((na, nb), (Some(a), Some(b)) if a.0 == b.0)
-            };
-            if !same_entity && !same_name {
+            if !assoc_entities_unify(ctx, *ea, *eb) {
                 return Err(UnifyError::Mismatch);
             }
             if aa.len() != ab.len() {
@@ -218,10 +242,12 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             TyKind::Function {
                 params: pa,
                 ret: ra,
+                ..
             },
             TyKind::Function {
                 params: pb,
                 ret: rb,
+                ..
             },
         ) => {
             if pa.len() != pb.len() {
@@ -286,14 +312,16 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             unify(ctx, *ba, *bb)
         },
 
-        // AssocProjection vs bare TypeAlias: they refer to the same underlying
-        // associated-type entity and should unify. This arises when a protocol
-        // method's return type references the assoc type bare (`Self.Item` or
-        // just `Item`) — the declared receiver comes back as AssocProjection
-        // from a concrete receiver's projection, while the return is TypeAlias.
+        // AssocProjection vs bare TypeAlias: the bare TypeAlias has already
+        // dropped its base (e.g. a protocol method's return references the assoc
+        // type bare), so the base can't be compared — fall back to matching the
+        // assoc entities via `assoc_entities_unify` (same entity, or same-named
+        // across refinement-related protocols). This is what lets
+        // `T.TargetIterator.Item` (Iterator.Item) unify with bare `T.Item`
+        // (Iterable.Item), since `extend Iterator: Iterable` relates them.
         (TyKind::AssocProjection { assoc: a, .. }, TyKind::TypeAlias { entity: e, .. })
         | (TyKind::TypeAlias { entity: e, .. }, TyKind::AssocProjection { assoc: a, .. })
-            if a == e =>
+            if assoc_entities_unify(ctx, *a, *e) =>
         {
             Ok(())
         },
@@ -364,7 +392,7 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
             }
             Ok(())
         },
-        TySlot::Resolved(TyKind::Function { params, ret }) => {
+        TySlot::Resolved(TyKind::Function { params, ret, .. }) => {
             for &p in params {
                 occurs_check(ctx, tv, p)?;
             }
@@ -372,7 +400,9 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
         },
         TySlot::Resolved(TyKind::AssocProjection { base, .. }) => occurs_check(ctx, tv, *base),
         TySlot::Resolved(TyKind::Opaque {
-            bounds, origin_args, ..
+            bounds,
+            origin_args,
+            ..
         }) => {
             for (_, args) in bounds {
                 for &arg in args {
@@ -405,6 +435,9 @@ pub fn conforms_to_literal_protocol(ctx: &InferCtx<'_>, ty: &TyKind, lit: Litera
         LiteralKind::Null => Builtin::ExpressibleByNullLiteral,
         LiteralKind::Array => Builtin::InternalExpressibleByArrayLiteral,
         LiteralKind::Dictionary => Builtin::InternalExpressibleByDictionaryLiteral,
+        // Accumulator type — InterpolationLink validates the type through
+        // associated type resolution, so accept any concrete type here.
+        LiteralKind::StringInterpolation => return true,
     };
     let Some(protocol) = ctx.resolver.builtin(feature) else {
         return false;
@@ -658,7 +691,9 @@ mod tests {
         ctx.loop_break_tys.pop();
 
         assert!(ctx.is_concrete(break_tv));
-        assert!(matches!(ctx.slot(break_tv), TySlot::Resolved(TyKind::Tuple(elems)) if elems.is_empty()));
+        assert!(
+            matches!(ctx.slot(break_tv), TySlot::Resolved(TyKind::Tuple(elems)) if elems.is_empty())
+        );
     }
 
     #[test]

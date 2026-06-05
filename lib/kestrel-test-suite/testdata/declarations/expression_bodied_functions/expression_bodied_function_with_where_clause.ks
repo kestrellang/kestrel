@@ -14,7 +14,8 @@ extend std.numeric.Int64: Doubler {
 
 func doubleIt[T](x: T) -> T where T: Doubler = x.double()
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(doubleIt(21));
     0
 }

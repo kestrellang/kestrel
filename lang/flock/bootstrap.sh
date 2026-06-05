@@ -47,55 +47,27 @@ elif [ "$PLATFORM" = "linux" ]; then
     EXTRA_LINK_FLAGS="-l m"
 fi
 
+# Dependency packages, in dependency order. Keep this list in sync with the
+# [dependencies] table in flock.toml. Every `.ks` under each package's `src/`
+# is compiled — globbing instead of listing individual files means renamed or
+# added sources are picked up automatically (the old hand-maintained list drifted
+# out of sync, e.g. swoop's body.ks -> content.ks).
+DEP_PACKAGES="quill quill-toml quill-json clutch http swoop"
+
+SOURCES=()
+for pkg in $DEP_PACKAGES; do
+    for f in "$LANG_DIR/$pkg/src"/*.ks; do
+        SOURCES+=("$f")
+    done
+done
+# flock's own sources (compiled last).
+for f in "$SCRIPT_DIR/src"/*.ks; do
+    SOURCES+=("$f")
+done
+
 "$KESTREL" build \
     --std "$LANG_DIR/std" \
-    "$LANG_DIR/quill/src/error.ks" \
-    "$LANG_DIR/quill/src/value.ks" \
-    "$LANG_DIR/quill/src/serialize.ks" \
-    "$LANG_DIR/quill/src/format.ks" \
-    "$LANG_DIR/quill/src/deserialize.ks" \
-    "$LANG_DIR/quill-toml/src/TomlParseError.ks" \
-    "$LANG_DIR/quill-toml/src/Parser.ks" \
-    "$LANG_DIR/quill-toml/src/Emitter.ks" \
-    "$LANG_DIR/quill-toml/src/Toml.ks" \
-    "$LANG_DIR/quill-json/src/JsonParseError.ks" \
-    "$LANG_DIR/quill-json/src/Parser.ks" \
-    "$LANG_DIR/quill-json/src/Emitter.ks" \
-    "$LANG_DIR/quill-json/src/Json.ks" \
-    "$LANG_DIR/clutch/src/ParseError.ks" \
-    "$LANG_DIR/clutch/src/Argument.ks" \
-    "$LANG_DIR/clutch/src/ArgumentMatches.ks" \
-    "$LANG_DIR/clutch/src/parser.ks" \
-    "$LANG_DIR/clutch/src/help.ks" \
-    "$LANG_DIR/clutch/src/command.ks" \
-    "$LANG_DIR/clutch/src/os.ks" \
-    "$LANG_DIR/clutch/src/clutch.ks" \
-    "$LANG_DIR/http/src/method.ks" \
-    "$LANG_DIR/http/src/url.ks" \
-    "$LANG_DIR/http/src/status.ks" \
-    "$LANG_DIR/http/src/cookie.ks" \
-    "$LANG_DIR/http/src/headers.ks" \
-    "$LANG_DIR/http/src/wire.ks" \
-    "$LANG_DIR/swoop/src/Error.ks" \
-    "$LANG_DIR/swoop/src/Response.ks" \
-    "$LANG_DIR/swoop/src/Body.ks" \
-    "$LANG_DIR/swoop/src/Url.ks" \
-    "$LANG_DIR/swoop/src/Send.ks" \
-    "$LANG_DIR/swoop/src/Swoop.ks" \
-    "$LANG_DIR/swoop/src/Tls.ks" \
-    "$SCRIPT_DIR/src/error.ks" \
-    "$SCRIPT_DIR/src/version.ks" \
-    "$SCRIPT_DIR/src/dependency.ks" \
-    "$SCRIPT_DIR/src/manifest.ks" \
-    "$SCRIPT_DIR/src/source.ks" \
-    "$SCRIPT_DIR/src/discover.ks" \
-    "$SCRIPT_DIR/src/compiler.ks" \
-    "$SCRIPT_DIR/src/registry.ks" \
-    "$SCRIPT_DIR/src/registry_source.ks" \
-    "$SCRIPT_DIR/src/cache.ks" \
-    "$SCRIPT_DIR/src/lock.ks" \
-    "$SCRIPT_DIR/src/graph.ks" \
-    "$SCRIPT_DIR/src/main.ks" \
+    "${SOURCES[@]}" \
     -o "$SCRIPT_DIR/flock" \
     -l ssl -l crypto \
     $OPENSSL_LIB_FLAG $EXTRA_LINK_FLAGS

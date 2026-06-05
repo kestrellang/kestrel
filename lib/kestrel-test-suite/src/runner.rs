@@ -1,4 +1,8 @@
 //! Compile, link, and execute Kestrel programs for end-to-end testing.
+//!
+//! Backend is selected via the `KESTREL_BACKEND` env var (`llvm` selects the
+//! LLVM backend; anything else uses the default Cranelift backend) — see
+//! `compile_and_run`. This lets the same suite validate both backends.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,10 +38,47 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    let options = kestrel_codegen_cranelift::CodegenOptions::default();
-    compiler
-        .compile_and_link(&exe_path, &options)
-        .map_err(|e| format!("codegen/link failed: {e}"))?;
+    // Backend selection: KESTREL_BACKEND=llvm runs the LLVM backend (default is
+    // Cranelift), so the same suite can validate both backends.
+    let use_llvm = std::env::var("KESTREL_BACKEND").as_deref() == Ok("llvm");
+    let link_result = if use_llvm {
+        let options = kestrel_codegen_llvm::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler
+            .compile_and_link_llvm(&exe_path, &options)
+            .map_err(|e| format!("{e}"))
+    } else {
+        let options = kestrel_codegen_cranelift::CodegenOptions {
+            c_sources: stdlib_c_sources(),
+            ..Default::default()
+        };
+        compiler
+            .compile_and_link(&exe_path, &options)
+            .map_err(|e| format!("{e}"))
+    };
+    if let Err(e) = link_result {
+        let mut msg = format!("codegen/link failed: {e}");
+        let diagnostics = compiler.diagnostics();
+        if !diagnostics.is_empty() {
+            let files = kestrel_compiler::diagnostic::WorldFiles::from_world(
+                compiler.world(),
+                compiler.files(),
+            );
+            let config = codespan_reporting::term::Config::default();
+            let mut buf = codespan_reporting::term::termcolor::NoColor::new(Vec::new());
+            for diag in &diagnostics {
+                let _ =
+                    codespan_reporting::term::emit_to_write_style(&mut buf, &config, &files, diag);
+            }
+            if let Ok(rendered) = String::from_utf8(buf.into_inner()) {
+                msg.push('\n');
+                msg.push_str(&rendered);
+            }
+        }
+        return Err(msg);
+    }
 
     let output = std::process::Command::new(&exe_path)
         .output()
@@ -61,4 +102,21 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 fn temp_dir() -> PathBuf {
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("kestrel2_test_{}_{}", std::process::id(), id))
+}
+
+/// Collect C shim sources from the stdlib directory.
+fn stdlib_c_sources() -> Vec<PathBuf> {
+    let std_dir = if let Ok(path) = std::env::var("KESTREL_STD") {
+        PathBuf::from(path)
+    } else {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        std::path::Path::new(manifest)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("lang/std")
+    };
+    let shim = std_dir.join("io/libc_shims.c");
+    if shim.exists() { vec![shim] } else { vec![] }
 }

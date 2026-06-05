@@ -30,6 +30,7 @@ func test() {
     // 3 deinits from consume; r2 and r4 deinited at scope exit
 }
 
+@main
 func main() -> lang.i64 {
     test();
     // 3 consumed + 2 scope exit = 5 total

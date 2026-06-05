@@ -53,6 +53,7 @@ func test() {
     // Odd-indexed deinited at scope exit (10 more)
 }
 
+@main
 func main() -> lang.i64 {
     test();
     // 10 consumed + 10 scope exit = 20

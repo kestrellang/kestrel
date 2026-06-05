@@ -16,6 +16,7 @@ struct Box[T] {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let b = Box[lang.i64].make(value: 42);
     lang.i64_sub(b.value, 42)

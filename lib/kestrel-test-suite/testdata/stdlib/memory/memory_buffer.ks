@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create a buffer with SystemAllocator
             var alloc = std.memory.SystemAllocator();

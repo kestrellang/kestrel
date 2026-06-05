@@ -1,2 +1,7 @@
 [build]
 rustflags = ["-C", "symbol-mangling-version=v0"]
+
+# Required by llvm-sys (pulled in by inkwell) so the LLVM 18 backend can find
+# the Homebrew-installed LLVM 18.1 toolchain. Adjust if LLVM lives elsewhere.
+[env]
+LLVM_SYS_181_PREFIX = "/opt/homebrew/opt/llvm@18"

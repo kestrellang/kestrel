@@ -125,12 +125,18 @@ public struct StringBuilder: Cloneable {
         if self.len == 0 {
             return String()
         }
+        // Move the buffer into a fresh String. Disarm `self` FIRST so its deinit
+        // can't free the buffer the String now owns, then MOVE `storage` into the
+        // CowBox as its LAST use. `storage` must NOT be read afterward: a later
+        // use forces a `copy_value`, and because `StringStorage` is `Cloneable`
+        // that expands to a `clone()` — allocating a *fresh* buffer for the String
+        // and orphaning this builder's original buffer (one StringBuilder buffer
+        // leaked per `formatted()` / string-interpolation call).
         let storage = StringStorage(ptr: self.ptr, len: self.len, cap: self.cap);
-        let result = String(storage: CowBox(storage));
         self.ptr = Pointer[UInt8].nullPointer();
         self.len = 0;
         self.cap = 0;
-        result
+        String(storage: CowBox(storage))
     }
 
     /// Resets length to zero, keeping the allocated buffer for reuse.

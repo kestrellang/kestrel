@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // round() near maxValue — should not overflow
             let maxVal = std.numeric.Float32.maxValue;

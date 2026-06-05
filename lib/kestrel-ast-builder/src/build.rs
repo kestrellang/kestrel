@@ -697,9 +697,10 @@ mod tests {
         let deinit = find_child_by_kind(&world, s, &NodeKind::Deinit).unwrap();
 
         assert!(world.has::<Valued>(deinit));
-        // Deinits now have Callable with consuming self receiver
+        // Deinits receive &var (mutating) self — the caller owns the memory
+        // and deallocates after the deinit body runs cleanup.
         let callable = world.get::<Callable>(deinit).unwrap();
-        assert_eq!(callable.receiver, Some(ReceiverKind::Consuming));
+        assert_eq!(callable.receiver, Some(ReceiverKind::Mutating));
         assert!(callable.params.is_empty());
     }
 
@@ -802,7 +803,7 @@ mod tests {
 
         // Print the entity tree for visual inspection
         println!("\n=== ordering.ks entity tree ===\n");
-        print_entity_tree(&world, root, 0, file);
+        print_entity_tree(&world, root, 0);
         println!();
 
         // Verify import
@@ -810,7 +811,7 @@ mod tests {
         let path = world.get::<ModulePath>(import).unwrap();
         assert_eq!(path.0, vec!["std", "text"]);
         let items = world.get::<ImportItems>(import).unwrap();
-        assert_eq!(items.0.len(), 3); // String, FormatOptions, Formattable
+        assert_eq!(items.0.len(), 4); // String, StringBuilder, FormatOptions, Formattable
 
         // Verify enum Ordering
         let ordering = find_child_by_name(&world, core, &NodeKind::Enum, "Ordering").unwrap();
@@ -824,24 +825,25 @@ mod tests {
 
         // Documentation: descendants walk picks up trivia inside Visibility.
         let doc = world.get::<Documentation>(ordering).expect("doc attached");
-        assert!(doc.0.contains("comparing"), "doc: {}", doc.0);
+        assert!(doc.0.contains("comparison"), "doc: {}", doc.0);
 
         // Enum cases: Less, Equal, Greater
         let less = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Less").unwrap();
-        let equal = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Equal").unwrap();
-        let greater = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Greater").unwrap();
+        let _equal = find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Equal").unwrap();
+        let _greater =
+            find_child_by_name(&world, ordering, &NodeKind::EnumCase, "Greater").unwrap();
         assert!(!world.has::<Callable>(less), "plain case has no Callable");
 
         // Methods
-        let equals_fn =
+        let is_equal_fn =
             find_child_by_name(&world, ordering, &NodeKind::Function, "isEqual").unwrap();
-        let callable = world.get::<Callable>(equals_fn).unwrap();
+        let callable = world.get::<Callable>(is_equal_fn).unwrap();
         assert_eq!(callable.params.len(), 1);
         assert_eq!(callable.params[0].name, "other");
-        assert!(world.has::<Valued>(equals_fn), "has body");
-        assert_eq!(world.get::<Vis>(equals_fn), Some(&Vis::Public));
+        assert!(world.has::<Valued>(is_equal_fn), "has body");
+        assert_eq!(world.get::<Vis>(is_equal_fn), Some(&Vis::Public));
         // Return type
-        let ret = world.get::<TypeAnnotation>(equals_fn).unwrap();
+        let ret = world.get::<TypeAnnotation>(is_equal_fn).unwrap();
         match &ret.0 {
             AstType::Named { segments, .. } => {
                 assert_eq!(segments.len(), 1);
@@ -874,9 +876,11 @@ mod tests {
         let format_fn =
             find_child_by_name(&world, ordering, &NodeKind::Function, "format").unwrap();
         let callable = world.get::<Callable>(format_fn).unwrap();
-        assert_eq!(callable.params.len(), 1);
+        assert_eq!(callable.params.len(), 2);
+        // params[0] is `into writer: StringBuilder` (no default); params[1] is
+        // `options: FormatOptions = ...`, which carries the default.
         assert!(
-            callable.params[0].default_entity.is_some(),
+            callable.params[1].default_entity.is_some(),
             "format options has default value"
         );
 
@@ -892,13 +896,14 @@ mod tests {
             .count();
         assert_eq!(case_count, 3, "3 enum cases");
         assert_eq!(
-            fn_count, 6,
-            "6 methods (equals, notEquals, reverse, then, thenWith, format)"
+            fn_count, 5,
+            "5 in-file methods (isEqual, reverse, then, thenWith, format); \
+             notEqual is provided by an extension in std.core.protocols"
         );
     }
 
     /// Pretty-print the entity tree for debugging.
-    fn print_entity_tree(world: &World, entity: Entity, depth: usize, file: Entity) {
+    fn print_entity_tree(world: &World, entity: Entity, depth: usize) {
         let indent = "  ".repeat(depth);
         let kind = world.get::<NodeKind>(entity);
         let name = world.get::<Name>(entity);
@@ -1013,7 +1018,7 @@ mod tests {
         println!();
 
         for &child in world.children_of(entity) {
-            print_entity_tree(world, child, depth + 1, file);
+            print_entity_tree(world, child, depth + 1);
         }
     }
 
@@ -1053,6 +1058,10 @@ mod tests {
             AstType::Unit(_) => "()".into(),
             AstType::Never(_) => "Never".into(),
             AstType::Inferred(_) => "_".into(),
+            AstType::Some { bounds, .. } => {
+                let b: Vec<_> = bounds.iter().map(type_name).collect();
+                format!("some {}", b.join(" + "))
+            },
         }
     }
 }

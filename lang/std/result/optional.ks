@@ -49,7 +49,7 @@ import std.iter.(Iterator)
 /// when one is available (e.g. a non-zero pointer), so `Optional[Pointer]`
 /// is the same size as `Pointer`.
 @builtin(.OptionalEnum)
-public enum Optional[T] {
+public enum Optional[T]: not Copyable {
     /// Wraps a present value of `T`.
     @builtin(.OptionalSomeCase)
     case Some(T)
@@ -139,8 +139,8 @@ public enum Optional[T] {
     // ========================================================================
 
     /// Returns the wrapped value, panicking if `None`. Reach for
-    /// `unwrapOr`, `unwrap(or:)`, the `??` operator, or pattern
-    /// matching unless you can prove the value is `Some`.
+    /// `unwrap(or:)`, the `??` operator, or pattern matching unless
+    /// you can prove the value is `Some`.
     ///
     /// # Errors
     ///
@@ -180,32 +180,32 @@ public enum Optional[T] {
     }
 
     /// Returns the wrapped value or `default` when `None`. `default` is
-    /// always evaluated — use `unwrap(or:)` if computing it is
+    /// always evaluated — use `unwrap(orElse:)` if computing it is
     /// expensive.
     ///
     /// # Examples
     ///
     /// ```
-    /// Some(42).unwrapOr(0);   // 42
-    /// None.unwrapOr(0);       // 0
+    /// Some(42).unwrap(or: 0);   // 42
+    /// None.unwrap(or: 0);       // 0
     /// ```
-    public func unwrapOr(default: T) -> T {
+    public func unwrap(or default: T) -> T {
         match self {
             .Some(value) => value,
             .None => default
         }
     }
 
-    /// Like `unwrapOr`, but `defaultFn` is only called on `None`. Use this
+    /// Like `unwrap(or:)`, but `defaultFn` is only called on `None`. Use this
     /// when the default is expensive to compute or has side effects.
     ///
     /// # Examples
     ///
     /// ```
-    /// Some(42).unwrap(or: { expensiveDefault() });   // 42, no call
-    /// None.unwrap(or: { expensiveDefault() });       // calls fn
+    /// Some(42).unwrap(orElse: { expensiveDefault() });   // 42, no call
+    /// None.unwrap(orElse: { expensiveDefault() });       // calls fn
     /// ```
-    public func unwrap(or defaultFn: () -> T) -> T {
+    public func unwrap(orElse defaultFn: () -> T) -> T {
         match self {
             .Some(value) => value,
             .None => defaultFn()
@@ -519,6 +519,12 @@ public enum Optional[T] {
 // CONDITIONAL EXTENSIONS - EQUATABLE
 // ============================================================================
 
+/// `Optional` is move-only by default (`not Copyable`) so it can wrap a
+/// non-Copyable payload (e.g. `File?`). It regains copy semantics only when the
+/// wrapped type is itself Copyable — so `Int64?` is Copyable while `Array?`
+/// stays move-only.
+extend Optional[T]: Copyable where T: Copyable { }
+
 /// Equatable when the inner type is — `None == None` is true, `Some(a) ==
 /// Some(b)` defers to `T.isEqual`, and a present value is never equal to
 /// `None`.
@@ -664,10 +670,24 @@ extend Optional[T]: Tryable {
     type Residual = ()
 
     /// Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
-    public func tryExtract() -> ControlFlow[T, ()] {
+    public consuming func tryExtract() -> ControlFlow[T, ()] {
         match self {
             .Some(value) => .Continue(value),
             .None => .Break(())
+        }
+    }
+}
+
+/// `ForceUnwrap` — drives the postfix `!` operator. `value!` returns the
+/// wrapped value for `.Some`, or aborts via `fatalError` for `.None`.
+extend Optional[T]: ForceUnwrap {
+    type Output = T
+
+    /// Returns the wrapped value, trapping on `.None`. Backs `value!`.
+    public consuming func forceUnwrap() -> T {
+        match self {
+            .Some(value) => value,
+            .None => fatalError("unwrapped a nil Optional")
         }
     }
 }
@@ -685,8 +705,9 @@ extend Optional[T]: FromResidual[()] {
 /// `let x: Int? = 5` works without explicit `.Some`.
 extend Optional[T]: FromValue[T] {
     /// Wraps `value` in `.Some`. Called by the compiler at the promotion
-    /// site, not usually by user code.
-    public static func from(value: T) -> Optional[T] {
+    /// site, not usually by user code. `consuming` so `value` is moved into
+    /// `.Some` (no clone-and-leak of a borrowed original).
+    public static func from(consuming value: T) -> Optional[T] {
         .Some(value)
     }
 }

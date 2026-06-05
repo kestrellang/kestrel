@@ -15,7 +15,8 @@ func getValue[T](item: T) -> std.numeric.Int64 where T: HasValue {
     item.value
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let b = Box();
     if getValue[Box](b) != 42 { return 1 }
     0

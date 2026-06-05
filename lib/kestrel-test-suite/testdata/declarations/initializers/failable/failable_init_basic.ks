@@ -17,6 +17,7 @@ struct Wrapper {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let someOpt = Wrapper(from: 42);
     match someOpt {

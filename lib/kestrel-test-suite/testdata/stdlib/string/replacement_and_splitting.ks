@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- replaced() (non-mutating) ----
             let s1: std.text.String = "hello world hello";

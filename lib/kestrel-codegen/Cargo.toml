@@ -7,8 +7,4 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-kestrel-mir = { path = "../kestrel-mir" }
-kestrel-hecs = { path = "../kestrel-hecs" }
-kestrel-debug = { path = "../kestrel-debug" }
 target-lexicon = "0.12"
-indexmap = { workspace = true }

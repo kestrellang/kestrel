@@ -18,6 +18,7 @@ extend Counter {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let c = Counter(n: 4);
     let d = c.bumped();

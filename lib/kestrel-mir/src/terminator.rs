@@ -1,191 +1,136 @@
-//! Block terminators — how a basic block exits.
-
-use crate::id::BlockId;
-use crate::place::Place;
-use crate::value::Value;
 use kestrel_span::Span;
+use smallvec::SmallVec;
 
-/// A terminator ends a basic block. Every block must have exactly one.
-#[derive(Debug, Clone)]
+use crate::{BlockId, ValueId, VariantIdx};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SwitchCase {
+    Wildcard,
+    Variant(VariantIdx),
+    Bool(bool),
+    IntLiteral(i64),
+    IntRange { start: i64, end: i64 },
+    CharLiteral(u32),
+    CharRange { start: u32, end: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwitchArm {
+    pub pattern: SwitchCase,
+    pub target: BlockId,
+    pub args: Vec<ValueId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Terminator {
     pub kind: TerminatorKind,
     pub span: Option<Span>,
 }
 
-/// The different kinds of terminators.
-#[derive(Debug, Clone)]
+impl Terminator {
+    pub fn new(kind: TerminatorKind) -> Self {
+        Self { kind, span: None }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TerminatorKind {
-    /// `return <value>`
-    Return(Value),
-
-    /// `jump bb`
-    Jump(BlockId),
-
-    /// `branch if <cond>, bb_true else bb_false`
+    Return(ValueId),
+    Jump {
+        target: BlockId,
+        args: Vec<ValueId>,
+    },
     Branch {
-        condition: Value,
+        condition: ValueId,
         then_block: BlockId,
+        then_args: Vec<ValueId>,
         else_block: BlockId,
+        else_args: Vec<ValueId>,
     },
-
-    /// `switch <discriminant> { Case => bb, ... }`
     Switch {
-        discriminant: Place,
-        cases: Vec<(SwitchCase, BlockId)>,
+        discriminant: ValueId,
+        cases: Vec<SwitchArm>,
     },
-
-    /// `panic "message"`
     Panic(String),
-
-    /// `unreachable` — control flow should never reach here
     Unreachable,
 }
 
-/// A single arm of a `switch` terminator.
-///
-/// Replaces the earlier `String`-keyed scheme so codegen can test ranges
-/// and literal values without parsing case names.
-#[derive(Debug, Clone)]
-pub enum SwitchCase {
-    /// Default / wildcard arm — always matches. Emitted as an unconditional
-    /// jump at codegen.
-    Wildcard,
-    /// Enum variant, resolved by name against the enum definition.
-    Variant(String),
-    /// Boolean constant (True/False).
-    Bool(bool),
-    /// Exact integer literal.
-    IntLiteral(i64),
-    /// Integer range with inclusive bounds; `None` means the bound is open.
-    IntRange {
-        start: Option<i64>,
-        end: Option<i64>,
-    },
-    /// Character literal as a Unicode codepoint.
-    CharLiteral(u32),
-    /// Character range with inclusive bounds.
-    CharRange {
-        start: Option<u32>,
-        end: Option<u32>,
-    },
-    /// String literal (byte-equality test).
-    StringLiteral(String),
-}
-
-impl SwitchCase {
-    /// True if this arm unconditionally matches (wildcard).
-    pub fn is_wildcard(&self) -> bool {
-        matches!(self, SwitchCase::Wildcard)
-    }
-}
-
-impl std::fmt::Display for SwitchCase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl TerminatorKind {
+    /// Returns all successor block IDs.
+    pub fn successors(&self) -> SmallVec<[BlockId; 2]> {
         match self {
-            SwitchCase::Wildcard => write!(f, "_"),
-            SwitchCase::Variant(name) => write!(f, "{}", name),
-            SwitchCase::Bool(b) => write!(f, "{}", b),
-            SwitchCase::IntLiteral(n) => write!(f, "{}", n),
-            SwitchCase::IntRange { start, end } => {
-                if let Some(s) = start {
-                    write!(f, "{}", s)?;
-                }
-                write!(f, "..=")?;
-                if let Some(e) = end {
-                    write!(f, "{}", e)?;
-                }
-                Ok(())
-            },
-            SwitchCase::CharLiteral(c) => match char::from_u32(*c) {
-                Some(ch) => write!(f, "'{}'", ch),
-                None => write!(f, "\\u{{{:x}}}", c),
-            },
-            SwitchCase::CharRange { start, end } => {
-                if let Some(s) = start {
-                    if let Some(ch) = char::from_u32(*s) {
-                        write!(f, "'{}'", ch)?;
-                    } else {
-                        write!(f, "\\u{{{:x}}}", s)?;
-                    }
-                }
-                write!(f, "..=")?;
-                if let Some(e) = end {
-                    if let Some(ch) = char::from_u32(*e) {
-                        write!(f, "'{}'", ch)?;
-                    } else {
-                        write!(f, "\\u{{{:x}}}", e)?;
-                    }
-                }
-                Ok(())
-            },
-            SwitchCase::StringLiteral(s) => write!(f, "{:?}", s),
-        }
-    }
-}
-
-impl Terminator {
-    pub fn ret(value: impl Into<Value>) -> Self {
-        Self {
-            kind: TerminatorKind::Return(value.into()),
-            span: None,
-        }
-    }
-
-    pub fn jump(target: BlockId) -> Self {
-        Self {
-            kind: TerminatorKind::Jump(target),
-            span: None,
-        }
-    }
-
-    pub fn branch(condition: impl Into<Value>, then_block: BlockId, else_block: BlockId) -> Self {
-        Self {
-            kind: TerminatorKind::Branch {
-                condition: condition.into(),
-                then_block,
-                else_block,
-            },
-            span: None,
-        }
-    }
-
-    pub fn switch(discriminant: Place, cases: Vec<(SwitchCase, BlockId)>) -> Self {
-        Self {
-            kind: TerminatorKind::Switch {
-                discriminant,
-                cases,
-            },
-            span: None,
-        }
-    }
-
-    pub fn panic(message: impl Into<String>) -> Self {
-        Self {
-            kind: TerminatorKind::Panic(message.into()),
-            span: None,
-        }
-    }
-
-    pub fn unreachable() -> Self {
-        Self {
-            kind: TerminatorKind::Unreachable,
-            span: None,
-        }
-    }
-
-    /// Get the successor blocks of this terminator.
-    pub fn successors(&self) -> Vec<BlockId> {
-        match &self.kind {
             TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {
-                vec![]
+                SmallVec::new()
             },
-            TerminatorKind::Jump(target) => vec![*target],
+            TerminatorKind::Jump { target, .. } => SmallVec::from_elem(*target, 1),
             TerminatorKind::Branch {
                 then_block,
                 else_block,
                 ..
-            } => vec![*then_block, *else_block],
-            TerminatorKind::Switch { cases, .. } => cases.iter().map(|(_, b)| *b).collect(),
+            } => {
+                smallvec::smallvec![*then_block, *else_block]
+            },
+            TerminatorKind::Switch { cases, .. } => cases.iter().map(|arm| arm.target).collect(),
+        }
+    }
+
+    /// Returns all ValueIds used by this terminator.
+    pub fn operands(&self) -> SmallVec<[ValueId; 4]> {
+        match self {
+            TerminatorKind::Return(v) => SmallVec::from_elem(*v, 1),
+            TerminatorKind::Jump { args, .. } => args.iter().copied().collect(),
+            TerminatorKind::Branch {
+                condition,
+                then_args,
+                else_args,
+                ..
+            } => {
+                let mut ops = SmallVec::new();
+                ops.push(*condition);
+                ops.extend(then_args.iter().copied());
+                ops.extend(else_args.iter().copied());
+                ops
+            },
+            TerminatorKind::Switch {
+                discriminant,
+                cases,
+            } => {
+                let mut ops = SmallVec::new();
+                ops.push(*discriminant);
+                for arm in cases {
+                    ops.extend(arm.args.iter().copied());
+                }
+                ops
+            },
+            TerminatorKind::Panic(_) | TerminatorKind::Unreachable => SmallVec::new(),
+        }
+    }
+
+    /// Returns (successor_block, args) pairs for block argument checking.
+    pub fn successor_args(&self) -> SmallVec<[(BlockId, &[ValueId]); 2]> {
+        match self {
+            TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {
+                SmallVec::new()
+            },
+            TerminatorKind::Jump { target, args } => {
+                smallvec::smallvec![(*target, args.as_slice())]
+            },
+            TerminatorKind::Branch {
+                then_block,
+                then_args,
+                else_block,
+                else_args,
+                ..
+            } => {
+                smallvec::smallvec![
+                    (*then_block, then_args.as_slice()),
+                    (*else_block, else_args.as_slice()),
+                ]
+            },
+            TerminatorKind::Switch { cases, .. } => cases
+                .iter()
+                .map(|arm| (arm.target, arm.args.as_slice()))
+                .collect(),
         }
     }
 }

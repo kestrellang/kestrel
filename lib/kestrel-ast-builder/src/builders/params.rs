@@ -314,11 +314,13 @@ fn default_body_references_param<'a>(
 ) -> Option<&'a str> {
     let tail_id = body.tail_expr?;
     if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id]
-        && segments.len() == 1 && segments[0].type_args.is_none() {
-            return param_names
-                .iter()
-                .find(|&&p| p == segments[0].name)
-                .copied();
-        }
+        && segments.len() == 1
+        && segments[0].type_args.is_none()
+    {
+        return param_names
+            .iter()
+            .find(|&&p| p == segments[0].name)
+            .copied();
+    }
     None
 }

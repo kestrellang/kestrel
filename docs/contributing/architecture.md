@@ -64,15 +64,17 @@ Source text
     ▼
 ┌──────────────────────────────────────────────────────┐
 │  MIR LOWER       kestrel-mir-lower → kestrel-mir     │
-│  Entities + TypedBodies → MirModule (flat, explicit) │
-│  Places, Rvalues, Statements, Terminators.           │
-│  Generics stay generic — monomorphized at codegen.   │
+│  Entities + TypedBodies → MirModule (OSSA/SSA):      │
+│  ValueIds, Instructions, BasicBlocks, Terminators,   │
+│  ownership-checked. Generics stay generic until a    │
+│  later monomorphization MIR pass.                    │
 └──────────────────────────────────────────────────────┘
     │
     ▼
 ┌──────────────────────────────────────────────────────┐
 │  CODEGEN         kestrel-codegen + …-cranelift       │
-│  Monomorphize, mangle, emit Cranelift IR, link.      │
+│  Monomorphization already ran as a MIR pass;         │
+│  mangle, emit Cranelift IR, link.                    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -122,10 +124,10 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 | `kestrel-semantics` | Higher-level semantic queries (conformance, witness resolution). Used by infer/analyze. |
 | `kestrel-analyze` | Analyzer framework + every concrete analyzer. |
 | `kestrel-pattern-matching` | Exhaustiveness checking. |
-| `kestrel-mir` | MIR types: `MirModule`, `FunctionDef`, `Place`, `Rvalue`, `Statement`, `Terminator`. |
+| `kestrel-mir` | OSSA MIR types: `MirModule`, `FunctionDef`, `OssaBody`, `ValueId`, `Instruction`, `BasicBlock`, `Terminator`. SSA, not place-based (no `Place`/`Rvalue`/`Statement`). Also owns the MIR pass pipeline, monomorphization, type layout, and symbol mangling. |
 | `kestrel-mir-lower` | `LowerMir` query — entities + typed bodies → MIR. |
-| `kestrel-codegen` | Backend-agnostic: type layout, symbol mangling (`kestrel-codegen/src/mangle.rs`). |
-| `kestrel-codegen-cranelift` | Cranelift backend, monomorphization, linking. |
+| `kestrel-codegen` | Tiny backend-agnostic crate: target configuration (`TargetConfig`). Layout and mangling now live in `kestrel-mir`. |
+| `kestrel-codegen-cranelift` | Cranelift backend: lowers the already-monomorphized OSSA MIR → machine code and links. |
 | `kestrel-compiler` | Low-level compiler / query engine. Owns the `World`. |
 | `kestrel-compiler-driver` | High-level orchestration used by the CLI and tests. |
 | `kestrel-debug` | Introspection utilities. |
@@ -163,9 +165,9 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 6. ANALYZE      TypeCheckAnalyzer etc. run against the typed body.
                 Any mismatches turn into diagnostics.
 
-7. MIR LOWER    The method call becomes a concrete Call terminator
+7. MIR LOWER    The method call becomes a concrete Call instruction
                 whose callee is the resolved entity (generic if
-                needed; monomorphized at codegen time).
+                needed; monomorphized by a later MIR pass).
 ```
 
 ## Where the phase boundaries are (and aren't)

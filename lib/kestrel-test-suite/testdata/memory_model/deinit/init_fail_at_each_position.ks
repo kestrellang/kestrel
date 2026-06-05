@@ -40,6 +40,7 @@ func test_success() {
     // All 5 fields initialized, deinited at scope exit
 }
 
+@main
 func main() -> lang.i64 {
     // Fail at 1: only a initialized => 1 deinit from partial drop
     deinit_count = 0;

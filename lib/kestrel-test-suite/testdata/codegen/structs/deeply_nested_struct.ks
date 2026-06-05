@@ -17,6 +17,7 @@ struct Level1 {
     let top: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     let obj = Level1(
         middle: Level2(

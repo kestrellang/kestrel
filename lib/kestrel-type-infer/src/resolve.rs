@@ -4,6 +4,7 @@
 //! depends on this trait, not on concrete `QueryContext`. `WorldResolver`
 //! is the real implementation; tests can provide mocks.
 
+use kestrel_ast_builder::arg_binding::{BindParam, binds};
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
     TypeParams, Vis, WhereClause as AstWhereClause, WhereConstraint,
@@ -17,6 +18,10 @@ use kestrel_hir_lower::{
 use kestrel_name_res::{
     ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeMemberSource, TypeMembersByName,
     TypeResolution, expand_protocol_closure_in_place,
+};
+use kestrel_semantics::{
+    CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics,
+    TypeParamCopyRequirement,
 };
 use kestrel_span::Span;
 
@@ -88,6 +93,10 @@ pub enum MemberError {
     NotVisible {
         candidate: Entity,
         visibility: Vis,
+    },
+    /// Member exists but is static — cannot be called on an instance.
+    IsStatic {
+        candidate: Entity,
     },
 }
 
@@ -368,9 +377,18 @@ impl TypeResolver for WorldResolver<'_> {
             .collect();
 
         if instance_candidates.is_empty() {
-            // One final probe: a matching member that was filtered out by
-            // visibility? If so, report NotVisible so diagnostics can say
-            // "is private" rather than "no member".
+            // Check if any candidates were filtered for being static.
+            // all_candidates was consumed by the filter, so re-check the
+            // original type members for a static match.
+            if let Some(static_member) = type_members
+                .iter()
+                .find(|tm| self.ctx.has::<Static>(tm.entity))
+            {
+                return Err(MemberError::IsStatic {
+                    candidate: static_member.entity,
+                });
+            }
+            // A matching member that was filtered out by visibility?
             if let Some((candidate, visibility)) =
                 self.find_hidden_member(*entity, name, &extensions)
             {
@@ -442,6 +460,26 @@ impl TypeResolver for WorldResolver<'_> {
     }
 
     fn conforms_to(&self, ty: &TyKind, protocol: Entity) -> bool {
+        // Copyable / Cloneable are structural (copy-semantics), not *declared*
+        // conformances — `ConformingProtocols` only materializes explicit
+        // conformances + inheritance, so it never reports the implicit Copyable
+        // that default types carry. Answer these two builtins via the
+        // copy-semantics classifier instead, so plain types satisfy Copyable and
+        // only `not Copyable` (or non-copyable-child) types are rejected.
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Copyable,
+            root: self.root,
+        }) {
+            return self.copy_semantics_of(ty) != CopySemantics::NotCopyable;
+        }
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Cloneable,
+            root: self.root,
+        }) {
+            return self.copy_semantics_of(ty) == CopySemantics::Cloneable;
+        }
         match ty {
             TyKind::Struct { entity, .. }
             | TyKind::Enum { entity, .. }
@@ -1030,13 +1068,14 @@ impl WorldResolver<'_> {
             .unwrap_or_default();
         if let Some(parent) = self.ctx.parent_of(member)
             && matches!(self.ctx.get::<NodeKind>(parent), Some(NodeKind::Extension))
-                && let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent) {
-                    for &tp in &ext_params.0 {
-                        if !type_params.contains(&tp) {
-                            type_params.push(tp);
-                        }
-                    }
+            && let Some(ext_params) = self.ctx.get::<kestrel_ast_builder::TypeParams>(parent)
+        {
+            for &tp in &ext_params.0 {
+                if !type_params.contains(&tp) {
+                    type_params.push(tp);
                 }
+            }
+        }
 
         // Build parameter types from Callable component + lowered types
         let lowered_param_tys = self.ctx.query(LowerCallableTypes {
@@ -1310,26 +1349,15 @@ impl WorldResolver<'_> {
             return arg_labels.is_empty();
         };
 
-        let params = &callable.params;
-        let required_count = params.iter().filter(|p| p.default_entity.is_none()).count();
-
-        // Arity check: args must be >= required and <= total params
-        if arg_labels.len() < required_count || arg_labels.len() > params.len() {
-            return false;
-        }
-
-        // Label check: each arg label must match the corresponding param label
-        for (i, arg_label) in arg_labels.iter().enumerate() {
-            if i >= params.len() {
-                return false;
-            }
-            let param_label = params[i].label.as_deref();
-            if *arg_label != param_label {
-                return false;
-            }
-        }
-
-        true
+        // Match args to params in declaration order, allowing defaulted params
+        // to be skipped anywhere (not just trailing). Single source of truth:
+        // `arg_binding::bind_arguments`.
+        let bind_params: Vec<BindParam> = callable
+            .params
+            .iter()
+            .map(|p| BindParam::new(p.label.as_deref(), p.default_entity.is_some()))
+            .collect();
+        binds(&bind_params, arg_labels)
     }
 
     /// Check whether an entity could accept `arg_count` args based on arity alone
@@ -1407,9 +1435,10 @@ impl WorldResolver<'_> {
         for item in &conformances.0 {
             if let ConformanceItem::Positive(ast_ty, _) = item
                 && let Some(resolved) = self.resolve_type_entity(ast_ty)
-                    && resolved == protocol {
-                        return true;
-                    }
+                && resolved == protocol
+            {
+                return true;
+            }
         }
 
         false
@@ -1526,9 +1555,11 @@ impl WorldResolver<'_> {
                 protocol_type_args,
                 ..
             } = clause
-                && *param == param_entity && *protocol == protocol_entity {
-                    return protocol_type_args.clone();
-                }
+                && *param == param_entity
+                && *protocol == protocol_entity
+            {
+                return protocol_type_args.clone();
+            }
         }
 
         // Inherited match: where clause says T: ParentProtocol, and
@@ -1539,11 +1570,11 @@ impl WorldResolver<'_> {
                 param, protocol, ..
             } = clause
                 && *param == param_entity
-                    && let Some(args) =
-                        self.find_inherited_protocol_type_args(*protocol, protocol_entity)
-                    {
-                        return args;
-                    }
+                && let Some(args) =
+                    self.find_inherited_protocol_type_args(*protocol, protocol_entity)
+            {
+                return args;
+            }
         }
 
         Vec::new()
@@ -1577,9 +1608,9 @@ impl WorldResolver<'_> {
             if self.ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
                 && let Some(args) =
                     self.find_inherited_protocol_type_args(resolved, target_protocol)
-                {
-                    return Some(args);
-                }
+            {
+                return Some(args);
+            }
         }
         None
     }
@@ -1814,10 +1845,11 @@ impl WorldResolver<'_> {
             for item in &conformances.0 {
                 if let ConformanceItem::Positive(ast_ty, _) = item
                     && let Some(proto) = self.resolve_type_entity(ast_ty)
-                        && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
-                            && visited.insert(proto) {
-                                protocols.push(proto);
-                            }
+                    && self.ctx.get::<NodeKind>(proto) == Some(&NodeKind::Protocol)
+                    && visited.insert(proto)
+                {
+                    protocols.push(proto);
+                }
             }
         }
 
@@ -1909,6 +1941,57 @@ impl WorldResolver<'_> {
         protocols
     }
 
+    /// Copy-semantics of a resolved `TyKind`, mirroring `hir_type_copy_semantics`
+    /// in kestrel-semantics. Used to answer Copyable/Cloneable conformance
+    /// structurally (those are not declared conformances). Nested args are
+    /// `TyVar`s the resolver cannot resolve, but the entity-based queries
+    /// (`NominalCopySemantics`, `TypeParamCopyRequirement`) don't need them —
+    /// a struct/enum's copy-semantics is a function of its declared fields, and
+    /// invariant 1 prevents instantiating a default-param container with a
+    /// non-copyable arg in the first place, so the generic (arg-independent)
+    /// nominal classification is sufficient here. Only `Tuple` would need the
+    /// elements; it is handled permissively (the MIR layer's element-aware
+    /// `copy_behavior` + `copy_check` backstop a genuinely non-copyable element).
+    fn copy_semantics_of(&self, ty: &TyKind) -> CopySemantics {
+        match ty {
+            TyKind::Struct { entity, .. }
+            | TyKind::Enum { entity, .. }
+            | TyKind::SelfType { entity } => {
+                self.ctx
+                    .query(NominalCopySemantics {
+                        entity: *entity,
+                        root: self.root,
+                    })
+                    .semantics
+            },
+            TyKind::Param { entity } => {
+                let context = self.ctx.parent_of(*entity).unwrap_or(*entity);
+                match self.ctx.query(TypeParamCopyRequirement {
+                    param: *entity,
+                    context,
+                    root: self.root,
+                }) {
+                    CopyRequirement::RequiresCloneable => CopySemantics::Cloneable,
+                    CopyRequirement::RequiresCopyable => CopySemantics::Copyable,
+                    CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
+                }
+            },
+            // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
+            // are Copyable; an abstract associated projection is conservatively
+            // NotCopyable (not known to be copyable).
+            TyKind::Protocol { .. } | TyKind::Opaque { .. } => CopySemantics::Copyable,
+            TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
+            // Tuple elements aren't resolvable here; Function/Never/Error and
+            // reducible aliases never block a Copyable bound. Permissive — the
+            // MIR layer is element-aware for the cases that matter.
+            TyKind::Tuple(_)
+            | TyKind::Function { .. }
+            | TyKind::TypeAlias { .. }
+            | TyKind::Never
+            | TyKind::Error => CopySemantics::Copyable,
+        }
+    }
+
     /// Collect only the protocols directly listed as bounds on `param_entity`
     /// in where clauses on the param's parent and the owner hierarchy.
     /// Does NOT walk parent-protocol inheritance or conformance extensions.
@@ -1975,14 +2058,16 @@ impl WorldResolver<'_> {
                 ..
             } = constraint
                 && let Some(resolved_subj) = self.resolve_type_entity(subject)
-                    && resolved_subj == param_entity {
-                        for proto_ty in proto_types {
-                            if let Some(proto) = self.resolve_type_entity(proto_ty)
-                                && visited.insert(proto) {
-                                    protocols.push(proto);
-                                }
-                        }
+                && resolved_subj == param_entity
+            {
+                for proto_ty in proto_types {
+                    if let Some(proto) = self.resolve_type_entity(proto_ty)
+                        && visited.insert(proto)
+                    {
+                        protocols.push(proto);
                     }
+                }
+            }
         }
     }
 

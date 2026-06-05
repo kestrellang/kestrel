@@ -176,6 +176,16 @@ pub(crate) fn ty_parser<'tokens>()
         // - (T, U, ...) -> Tuple
         // - (...) -> T -> Function
         let paren_types = {
+            // A parenthesized type element, optionally prefixed by `mutating`
+            // (only meaningful in function-type param position; stripped for
+            // grouping/tuple). Yields `(Option<mutating-span>, TyVariant)`.
+            let elem = skip_trivia()
+                .ignore_then(
+                    just(Token::Mutating)
+                        .map_with(|_, e| to_kestrel_span(e.span()))
+                        .or_not(),
+                )
+                .then(ty.clone());
             skip_trivia()
                 .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
                 .then(
@@ -185,7 +195,7 @@ pub(crate) fn ty_parser<'tokens>()
                         .map(|rparen| (Vec::new(), false, rparen))
                         .or(
                             // At least one type
-                            ty.clone()
+                            elem.clone()
                                 .then(
                                     // Check for comma after first element
                                     skip_trivia()
@@ -195,7 +205,7 @@ pub(crate) fn ty_parser<'tokens>()
                                         )
                                         .then(
                                             // After comma: more types separated by comma
-                                            ty.clone()
+                                            elem.clone()
                                                 .separated_by(
                                                     skip_trivia().ignore_then(just(Token::Comma)),
                                                 )
@@ -225,15 +235,17 @@ pub(crate) fn ty_parser<'tokens>()
                 )
                 .map(|((lparen, (types, has_comma, rparen)), arrow_and_return)| {
                     if let Some((arrow_span, return_ty)) = arrow_and_return {
+                        // Function type: keep per-param `mutating` markers.
                         TyVariant::Function(lparen, types, rparen, arrow_span, Box::new(return_ty))
                     } else if types.is_empty() {
                         TyVariant::Unit(lparen, rparen)
                     } else if types.len() == 1 && !has_comma {
-                        // (T) - grouping, just return the inner type
-                        types.into_iter().next().unwrap()
+                        // (T) - grouping, just return the inner type (drop marker)
+                        types.into_iter().next().unwrap().1
                     } else {
-                        // (T,) or (T, U, ...) - tuple
-                        TyVariant::Tuple(lparen, types, rparen)
+                        // (T,) or (T, U, ...) - tuple (markers not meaningful)
+                        let elems = types.into_iter().map(|(_, t)| t).collect();
+                        TyVariant::Tuple(lparen, elems, rparen)
                     }
                 })
                 .boxed()
@@ -463,7 +475,15 @@ pub enum TyVariant {
     Never(Span),
     Inferred(Span), // _ type
     Tuple(Span, Vec<TyVariant>, Span),
-    Function(Span, Vec<TyVariant>, Span, Span, Box<TyVariant>),
+    /// Function type. Each param carries an optional `mutating` token span
+    /// (`Some` ⇒ a `mutating` by-reference parameter).
+    Function(
+        Span,
+        Vec<(Option<Span>, TyVariant)>,
+        Span,
+        Span,
+        Box<TyVariant>,
+    ),
     /// Path with optional type arguments: Foo or Foo[Int, String]
     Path {
         segments: Vec<Span>,
@@ -585,7 +605,7 @@ pub(crate) fn emit_tuple_type(
 pub(crate) fn emit_function_type(
     sink: &mut EventSink,
     lparen: Span,
-    params: &[TyVariant],
+    params: &[(Option<Span>, TyVariant)],
     rparen: Span,
     arrow: Span,
     return_ty: &TyVariant,
@@ -597,7 +617,12 @@ pub(crate) fn emit_function_type(
     sink.start_node(SyntaxKind::TyList);
     sink.add_token(SyntaxKind::LParen, lparen);
 
-    for param in params {
+    for (mutating, param) in params {
+        // A `mutating` token sits in the TyList right before its param's Ty;
+        // the AST builder scans for it positionally (Phase 3).
+        if let Some(span) = mutating {
+            sink.add_token(SyntaxKind::Mutating, span.clone());
+        }
         emit_ty_variant(sink, param);
     }
 

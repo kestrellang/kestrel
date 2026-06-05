@@ -6,6 +6,7 @@
 // the let-binding case.
 module Test
 
+@main
 func main() -> lang.i64 {
     var v: std.result.Optional[std.numeric.Int64] = null;
     v = 99;

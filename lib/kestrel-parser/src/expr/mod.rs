@@ -588,7 +588,8 @@ pub fn expr_parser<'tokens>()
 
         // Postfix pieces live in `postfix.rs`. `arg_list` is still named
         // locally because the condition-postfix logic below reuses it to
-        // pick out `PostfixOp::Call` forms (conditions forbid postfix-bang).
+        // pick out `PostfixOp::Call` forms (the condition grammar wires each
+        // postfix op in by hand: call, member, tuple-index, `..`, and `!`).
         let arg_list = postfix::arg_list_parser(expr.clone());
         let postfix_op = postfix::postfix_op_parser(expr.clone());
 
@@ -708,6 +709,20 @@ pub fn expr_parser<'tokens>()
                     })
             })
             .or(postfix::postfix_range_parser().map(|op| match op {
+                PostfixOp::PostfixOperator {
+                    operator,
+                    operator_span,
+                } => ConditionPostfixOp::PostfixOperator {
+                    operator,
+                    operator_span,
+                },
+                _ => unreachable!(),
+            }))
+            // Postfix `!` force-unwrap. Prefix `!` (negation) is handled by
+            // `condition_unary` and only ever appears with no preceding
+            // operand, so the two `Bang` uses don't conflict — see the full
+            // `expr` grammar, which supports both simultaneously.
+            .or(postfix::postfix_bang_parser().map(|op| match op {
                 PostfixOp::PostfixOperator {
                     operator,
                     operator_span,
@@ -1109,29 +1124,52 @@ pub fn expr_parser<'tokens>()
 
         let trailing_closure_arg = closure::trailing_closure_arg_parser(closure_expr_inline);
 
-        // Primary expressions
-        let primary = literal
-            .or(array_or_dict)
-            .or(paren_expr)
-            .or(if_expr)
+        // Statement-like primaries: if/while/loop/for/match/return/throw.
+        // These do NOT absorb a `.member` on the next line — preserving
+        // `.EnumCase` as implicit member access after block expressions.
+        let statement_like_primary = if_expr
             .or(while_expr)
             .or(loop_expr)
             .or(for_expr)
-            .or(break_expr)
-            .or(continue_expr)
+            .or(match_expr)
             .or(return_expr)
             .or(throw_expr)
-            .or(match_expr)
+            .boxed();
+
+        // Non-statement-like primaries: everything else. These support
+        // multi-line method chaining via newline-crossing `.member`.
+        let chainable_primary = literal
+            .or(array_or_dict)
+            .or(paren_expr)
+            .or(break_expr)
+            .or(continue_expr)
             .or(closure_expr)
             .or(implicit_member_access)
             .or(path)
             .boxed();
 
-        // Postfix expression with trailing closures. The fold into an
-        // ExprVariant tree is in `postfix::fold_postfix_ops`; trailing
-        // closures still thread through `attach_trailing_closures` here
-        // since that helper lives at module scope.
-        let postfix = primary
+        let fold_trailing_closures =
+            |result: ExprVariant, trailing_closures: Vec<CallArg>| -> ExprVariant {
+                if trailing_closures.is_empty() {
+                    result
+                } else {
+                    attach_trailing_closures(result, trailing_closures)
+                }
+            };
+
+        // Statement-like path: tight postfix only (no newline continuation)
+        let statement_like_postfix = statement_like_primary
+            .then(postfix_op.clone().repeated().collect::<Vec<_>>())
+            .then(trailing_closure_arg.clone().repeated().collect::<Vec<_>>())
+            .map(move |((base, ops), trailing_closures)| {
+                fold_trailing_closures(postfix::fold_postfix_ops(base, ops), trailing_closures)
+            })
+            .boxed();
+
+        // Chainable path: tight postfix + newline-crossing continuation
+        let continuation = postfix::continuation_postfix_op_parser(expr.clone());
+
+        let chainable_postfix = chainable_primary
             .then(postfix_op.repeated().collect::<Vec<_>>())
             .then(trailing_closure_arg.repeated().collect::<Vec<_>>())
             .map(|((base, ops), trailing_closures)| {
@@ -1142,7 +1180,18 @@ pub fn expr_parser<'tokens>()
                     attach_trailing_closures(result, trailing_closures)
                 }
             })
+            .then(continuation.repeated().collect::<Vec<_>>())
+            .map(|(base, steps)| {
+                let ops: Vec<postfix::PostfixOp> = steps.into_iter().flatten().collect();
+                if ops.is_empty() {
+                    base
+                } else {
+                    postfix::fold_postfix_ops(base, ops)
+                }
+            })
             .boxed();
+
+        let postfix = statement_like_postfix.or(chainable_postfix).boxed();
 
         // Unary expression - binds tighter than binary operators
         // so `not false or x` parses as `(not false) or x`, not `not (false or x)`

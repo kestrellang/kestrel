@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- uppercased() ----
             let a: std.text.Char = 'a';

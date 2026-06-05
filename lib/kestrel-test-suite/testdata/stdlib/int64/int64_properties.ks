@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // sign
             let pos: std.numeric.Int64 = 42;

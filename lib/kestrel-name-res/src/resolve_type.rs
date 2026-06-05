@@ -147,11 +147,11 @@ impl QueryFn for ResolveTypePath {
             if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
                 && let Some(assoc) =
                     resolve_assoc_type_nested(ctx, current, segment, self.context, self.root)
-                {
-                    current = assoc;
-                    continue;
-                }
-                // Fall through to child walk — the alias might have children
+            {
+                current = assoc;
+                continue;
+            }
+            // Fall through to child walk — the alias might have children
 
             // Otherwise walk children
             let visible = ctx.query(VisibleChildrenByName {
@@ -266,10 +266,11 @@ fn try_resolve_self_via_extension_target(
     for segment in &segments[1..] {
         // Check if resolved is a protocol — look for associated types
         if ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
-            && let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment) {
-                resolved = assoc;
-                continue;
-            }
+            && let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment)
+        {
+            resolved = assoc;
+            continue;
+        }
 
         // Check children by name (handles nested types, etc.)
         let visible = ctx.query(crate::VisibleChildrenByName {
@@ -574,11 +575,11 @@ pub fn resolve_assoc_type_nested(
                     let assoc_self_name = ctx.get::<Name>(assoc_type);
                     if let Some(name) = assoc_self_name
                         && segments.last().map(|s| &s.name) == Some(&name.0)
-                            && let Some(found) =
-                                search_protocols_for_assoc(ctx, protocols, assoc_name, anc, root)
-                            {
-                                return Some(found);
-                            }
+                        && let Some(found) =
+                            search_protocols_for_assoc(ctx, protocols, assoc_name, anc, root)
+                    {
+                        return Some(found);
+                    }
                 }
             }
         }

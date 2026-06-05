@@ -23,6 +23,7 @@ extend Box[lang.i64] {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let z = Box[lang.i64].zero();
     let n = Box[lang.i64].of(v: 42);

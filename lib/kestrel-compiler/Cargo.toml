@@ -20,9 +20,9 @@ kestrel-type-infer = { path = "../kestrel-type-infer" }
 kestrel-analyze = { path = "../kestrel-analyze" }
 kestrel-debug = { path = "../kestrel-debug" }
 kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-mir = { path = "../kestrel-mir" }
 kestrel-mir-lower = { path = "../kestrel-mir-lower" }
-kestrel-ownership = { path = "../kestrel-ownership" }
-kestrel-codegen = { path = "../kestrel-codegen" }
 kestrel-codegen-cranelift = { path = "../kestrel-codegen-cranelift" }
+kestrel-codegen-llvm = { path = "../kestrel-codegen-llvm" }
 codespan-reporting = { workspace = true }

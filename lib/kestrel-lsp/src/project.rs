@@ -141,46 +141,63 @@ fn collect_recursive(
 
     // Registry deps via flock.lock, resolved against the local flock cache.
     let lock_path = pkg_root.join("flock.lock");
-    if lock_path.is_file() {
-        if let Ok(raw) = std::fs::read_to_string(&lock_path) {
-            if let Ok(lock) = toml::from_str::<LockFile>(&raw) {
-                for entry in &lock.package {
-                    if entry.source == "path" {
-                        if let Some(p) = &entry.path {
-                            let dep_manifest = PathBuf::from(p).join("flock.toml");
-                            if dep_manifest.is_file() {
-                                collect_recursive(&dep_manifest, cache_root, visited, report);
-                            }
-                        }
-                        continue;
-                    }
-                    if entry.source != "registry" {
-                        continue;
-                    }
-                    let Some(cache) = cache_root else {
-                        report.missing_cache.push(format!(
-                            "{}@{} (no cache root: HOME unset and kestrel.flockCachePath not configured)",
-                            entry.name, entry.version
-                        ));
-                        continue;
-                    };
-                    // Names like "kestrel/swoop" already split into org/pkg
-                    // segments; bare names (e.g. "swoop") cache directly
-                    // under <cache>/<name>/<version>/.
-                    let pkg_dir = cache.join(&entry.name).join(&entry.version);
-                    let dep_manifest = pkg_dir.join("flock.toml");
+    if lock_path.is_file()
+        && let Ok(raw) = std::fs::read_to_string(&lock_path)
+        && let Ok(lock) = toml::from_str::<LockFile>(&raw)
+    {
+        for entry in &lock.package {
+            if entry.source == "path" {
+                if let Some(p) = &entry.path {
+                    let dep_manifest = PathBuf::from(p).join("flock.toml");
                     if dep_manifest.is_file() {
                         collect_recursive(&dep_manifest, cache_root, visited, report);
-                    } else {
-                        report.missing_cache.push(format!(
-                            "{}@{} (expected at {})",
-                            entry.name,
-                            entry.version,
-                            pkg_dir.display()
-                        ));
                     }
                 }
+                continue;
             }
+            if entry.source != "registry" {
+                continue;
+            }
+            let Some(cache) = cache_root else {
+                report.missing_cache.push(format!(
+                    "{}@{} (no cache root: HOME unset and kestrel.flockCachePath not configured)",
+                    entry.name, entry.version
+                ));
+                continue;
+            };
+            // Names like "kestrel/swoop" already split into org/pkg
+            // segments; bare names (e.g. "swoop") cache directly
+            // under <cache>/<name>/<version>/.
+            let pkg_dir = cache.join(&entry.name).join(&entry.version);
+            let dep_manifest = pkg_dir.join("flock.toml");
+            if dep_manifest.is_file() {
+                collect_recursive(&dep_manifest, cache_root, visited, report);
+            } else {
+                report.missing_cache.push(format!(
+                    "{}@{} (expected at {})",
+                    entry.name,
+                    entry.version,
+                    pkg_dir.display()
+                ));
+            }
+        }
+    }
+}
+
+/// Recursively collect every `.ks` file under `dir`. Used by both
+/// `collect_sources` (for package source dirs) and the LSP's stdlib loader
+/// when `kestrel.stdlibPath` is configured.
+pub fn walk_kestrel_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+    if !dir.is_dir() {
+        return;
+    }
+    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("ks") {
+            out.push(path.to_path_buf());
         }
     }
 }
@@ -266,23 +283,5 @@ source = "registry"
         let report = collect_sources(&pkg.join("flock.toml"), Some(&cache));
         assert_eq!(report.missing_cache.len(), 1);
         assert!(report.missing_cache[0].contains("missing@0.1.0"));
-    }
-}
-
-/// Recursively collect every `.ks` file under `dir`. Used by both
-/// `collect_sources` (for package source dirs) and the LSP's stdlib loader
-/// when `kestrel.stdlibPath` is configured.
-pub fn walk_kestrel_sources(dir: &Path, out: &mut Vec<PathBuf>) {
-    if !dir.is_dir() {
-        return;
-    }
-    for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("ks") {
-            out.push(path.to_path_buf());
-        }
     }
 }

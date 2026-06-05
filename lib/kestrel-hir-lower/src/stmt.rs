@@ -151,8 +151,7 @@ impl LowerCtx<'_> {
         let lowered_else = self.lower_block(body, else_body);
 
         // Build the condition check
-        let condition_expr =
-            self.lower_if_conditions(body, conditions, MatchSource::Guard, span);
+        let condition_expr = self.lower_if_conditions(body, conditions, MatchSource::Guard, span);
 
         // Guard: if condition fails (is false / pattern doesn't match), run else
         // The bindings from let-conditions are defined in the current scope (not nested)

@@ -11,6 +11,7 @@ func apply_binary(f: (std.numeric.Int64, std.numeric.Int64) -> std.numeric.Int64
     f(x, y)
 }
 
+@main
 func main() -> lang.i64 {
     if apply_binary(add, 20, 22) != 42 { return 1 }
     0

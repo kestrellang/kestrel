@@ -8,19 +8,14 @@
 //! also serializes access — which we'd need anyway since hECS is
 //! single-threaded internally.
 //!
-//! Phase 1 invalidation policy: stdlib loads once and is never touched
-//! again. On any user-side change (paths or content), every user file
-//! is despawned via [`Compiler::unbuild_file`] and rebuilt. Across a
-//! single editing session, every handler request on the same revision
-//! after the first sync is a pure cache hit — the previously-rebuilt
-//! `Compiler` plus its memoized query results stays live and is
-//! reused.
-//!
-//! Phase 2 will narrow the destruction set from "all user files" to
-//! "just the changed files." The function [`sync_user`] is where that
-//! policy change lands; the rest of the worker stays the same.
+//! Invalidation policy: stdlib loads once and is never touched again.
+//! On user-side changes, only files whose content actually changed (or
+//! were added/removed) are despawned and rebuilt. Unchanged files keep
+//! their entities and cached query results — downstream queries (infer,
+//! analyze) get automatic cache hits for bodies that didn't change.
 
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 use kestrel_compiler::Compiler;
@@ -135,7 +130,22 @@ fn run_worker(mut rx: mpsc::UnboundedReceiver<Request>) {
         // to swap stdlib entities out from under cached queries.
         let stdlib_reset = sync_stdlib(&mut state, &req.stdlib_sources);
         sync_user(&mut state, &req.user_sources, stdlib_reset);
-        (req.job)(&state.compiler, &state.by_path);
+        // Handler closures can panic (e.g. on unexpected compiler
+        // state). Catch and log rather than killing the worker — the
+        // oneshot reply_tx will be dropped, returning None to the
+        // caller, which every handler already handles gracefully.
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
+            (req.job)(&state.compiler, &state.by_path);
+        })) {
+            let msg = match payload.downcast_ref::<&str>() {
+                Some(s) => (*s).to_string(),
+                None => match payload.downcast_ref::<String>() {
+                    Some(s) => s.clone(),
+                    None => "unknown panic".to_string(),
+                },
+            };
+            eprintln!("[kestrel-lsp] worker caught panic: {msg}");
+        }
         if verify {
             verify_against_fresh(&state, &req.stdlib_sources, &req.user_sources);
         }
@@ -171,12 +181,12 @@ fn verify_against_fresh(
     }
     let driver = CompilerDriver::new(&fresh);
     let _ = driver.infer_all();
-    let _ = driver.analyze_all();
+    let _ = driver.analyze_all(false);
     let fresh_diags = fresh.diagnostics();
 
     let driver = CompilerDriver::new(&state.compiler);
     let _ = driver.infer_all();
-    let _ = driver.analyze_all();
+    let _ = driver.analyze_all(false);
     let live_diags = state.compiler.diagnostics();
 
     if live_diags.len() != fresh_diags.len() {
@@ -239,9 +249,11 @@ fn sync_stdlib(state: &mut WorkerState, stdlib_sources: &HashMap<String, String>
     was_initialized
 }
 
-/// Ensure the persistent `Compiler` reflects `user_sources`. Phase 1:
-/// any difference in the user source map (paths or content) triggers
-/// a full unbuild + rebuild of every user file.
+/// Ensure the persistent `Compiler` reflects `user_sources`.
+///
+/// Incremental policy: only unbuild+rebuild files whose content
+/// actually changed, plus any files that were added or removed.
+/// Unchanged files keep their entities and cached query results.
 ///
 /// `force_full_rebuild` is set by the caller when stdlib reset wiped
 /// everything — in that case we have no current state to compare, so
@@ -255,21 +267,72 @@ fn sync_user(
         return;
     }
 
-    // Phase 1 policy: rebuild every user file. Phase 2 will diff and
-    // pass only the changed paths to `rebuild_files`.
-    let current_paths: Vec<String> = state.user_text.keys().cloned().collect();
-    rebuild_files(state, &current_paths, user_sources);
+    if force_full_rebuild {
+        // Stdlib was reset — no surviving entities, rebuild everything.
+        let current_paths: Vec<String> = state.user_text.keys().cloned().collect();
+        rebuild_files(state, &current_paths, user_sources);
+        return;
+    }
+
+    // Compute the minimal set of paths that need unbuild+rebuild:
+    // 1. Removed: in current state but not in desired sources
+    // 2. Changed/added: content differs or path is new
+    let mut paths_to_unbuild: Vec<String> = Vec::new();
+    let mut paths_to_build: Vec<String> = Vec::new();
+
+    // Removed files
+    for path in state.user_text.keys() {
+        if !user_sources.contains_key(path) {
+            paths_to_unbuild.push(path.clone());
+        }
+    }
+
+    // Changed or added files
+    for (path, new_text) in user_sources {
+        match state.user_text.get(path) {
+            Some(old_text) if old_text == new_text => {
+                // Unchanged — skip, keep existing entity + cache
+            },
+            _ => {
+                // Changed content or new file
+                if state.user_text.contains_key(path) {
+                    paths_to_unbuild.push(path.clone());
+                }
+                paths_to_build.push(path.clone());
+            },
+        }
+    }
+
+    if paths_to_unbuild.is_empty() && paths_to_build.is_empty() {
+        return;
+    }
+
+    // Despawn invalidated file entities.
+    for path in &paths_to_unbuild {
+        if let Some(entity) = state.by_path.remove(path) {
+            state.compiler.unbuild_file(entity);
+        }
+        state.user_text.remove(path);
+    }
+
+    // Bump revision so change tracking sees this batch as a unit.
+    state.compiler.begin_revision();
+
+    // Build only the new/changed files in deterministic order.
+    paths_to_build.sort();
+    for path in &paths_to_build {
+        let text = &user_sources[path];
+        let entity = state.compiler.set_source(path, text.clone());
+        state.compiler.build(entity);
+        state.by_path.insert(path.clone(), entity);
+        state.user_text.insert(path.clone(), text.clone());
+    }
 }
 
-/// Despawn the file entities for `paths_to_unbuild`, then rebuild the
-/// compiler with the contents of `desired_user_sources`. Updates
-/// `state.user_text` and `state.by_path` to match.
-///
-/// **Phase 2 hook**: today this is called with `paths_to_unbuild =
-/// all_current_user_paths`, but the function works for any subset.
-/// To go incremental, change [`sync_user`] to compute just the
-/// changed paths and pass them here, then leave the unchanged
-/// entities (and their cached query results) alone.
+/// Full rebuild: despawn all `paths_to_unbuild`, then rebuild every
+/// file in `desired_user_sources`. Used only on forced full rebuilds
+/// (stdlib reset). The incremental path in [`sync_user`] handles
+/// partial rebuilds inline.
 fn rebuild_files(
     state: &mut WorkerState,
     paths_to_unbuild: &[String],
@@ -370,6 +433,51 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn incremental_preserves_unchanged_file_entities() {
+        // When one file changes, other files' entities must survive.
+        let handle = CompilerHandle::spawn();
+        let stdlib = arc_map(&[]);
+        let user_v1 = arc_map(&[("/u/a.ks", "module A"), ("/u/b.ks", "module B")]);
+        let user_v2 = arc_map(&[
+            ("/u/a.ks", "module A"),
+            ("/u/b.ks", "module B\nstruct X {}"),
+        ]);
+
+        let (ea1, eb1): (Entity, Entity) = handle
+            .with_compiler(stdlib.clone(), user_v1, |_, b| (b["/u/a.ks"], b["/u/b.ks"]))
+            .await
+            .unwrap();
+        let (ea2, eb2): (Entity, Entity) = handle
+            .with_compiler(stdlib, user_v2, |_, b| (b["/u/a.ks"], b["/u/b.ks"]))
+            .await
+            .unwrap();
+        assert_eq!(ea1, ea2, "unchanged file A must keep its entity");
+        assert_ne!(eb1, eb2, "changed file B must get a new entity");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn incremental_handles_added_and_removed_files() {
+        let handle = CompilerHandle::spawn();
+        let stdlib = arc_map(&[]);
+        let user_v1 = arc_map(&[("/u/a.ks", "module A"), ("/u/b.ks", "module B")]);
+        // Remove b.ks, add c.ks
+        let user_v2 = arc_map(&[("/u/a.ks", "module A"), ("/u/c.ks", "module C")]);
+
+        let ea1: Entity = handle
+            .with_compiler(stdlib.clone(), user_v1, |_, b| b["/u/a.ks"])
+            .await
+            .unwrap();
+        let result: (Entity, bool) = handle
+            .with_compiler(stdlib, user_v2, |_, b| {
+                (b["/u/a.ks"], b.contains_key("/u/b.ks"))
+            })
+            .await
+            .unwrap();
+        assert_eq!(ea1, result.0, "unchanged file A must keep its entity");
+        assert!(!result.1, "removed file B must be gone from by_path");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn unchanged_user_keeps_query_cache_warm() {
         // Two consecutive identical-input requests should run the parse
         // query once, not twice. Uses Compiler::query_exec_count to
@@ -428,7 +536,7 @@ mod tests {
             c.build(e);
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             c.diagnostics()
                 .iter()
                 .map(|d| d.message.clone())
@@ -444,7 +552,7 @@ mod tests {
             c.build(e);
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             c.diagnostics()
                 .iter()
                 .map(|d| d.message.clone())
@@ -497,7 +605,7 @@ mod tests {
             c.build(e);
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             let mut msgs: Vec<String> = c.diagnostics().iter().map(|d| d.message.clone()).collect();
             msgs.sort();
             msgs
@@ -510,7 +618,7 @@ mod tests {
             sync_user(&mut state, &user_map, false);
             let d = CompilerDriver::new(&state.compiler);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             let mut msgs: Vec<String> = state
                 .compiler
                 .diagnostics()
@@ -578,7 +686,7 @@ mod tests {
         sync_user(&mut state, &user_v2, false);
         let driver = CompilerDriver::new(&state.compiler);
         let _ = driver.infer_all();
-        let _ = driver.analyze_all();
+        let _ = driver.analyze_all(false);
         let mut worker_diags: Vec<String> = state
             .compiler
             .diagnostics()
@@ -594,7 +702,7 @@ mod tests {
         fresh.build(e);
         let driver = CompilerDriver::new(&fresh);
         let _ = driver.infer_all();
-        let _ = driver.analyze_all();
+        let _ = driver.analyze_all(false);
         let mut fresh_diags: Vec<String> = fresh
             .diagnostics()
             .iter()

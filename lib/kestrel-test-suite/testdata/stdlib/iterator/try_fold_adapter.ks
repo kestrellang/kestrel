@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // tryFold: fold where combine returns Result
             // Successful fold - all Ok. The error type `E` is unused here,

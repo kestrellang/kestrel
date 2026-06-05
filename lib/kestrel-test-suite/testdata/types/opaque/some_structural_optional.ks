@@ -23,6 +23,7 @@ func maybeShape(flag: std.core.Bool) -> std.result.Optional[some Shape] {
     null
 }
 
+@main
 func main() -> lang.i64 {
     match maybeShape(true) {
         some s => {

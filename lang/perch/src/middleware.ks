@@ -1,9 +1,9 @@
-// Built-in middleware
+/// Built-in middleware components.
 
 module perch.middleware
 
 import perch.request.(Request)
-import perch.context.(MiddlewareResult)
+import perch.context.(MiddlewareResult, Middleware)
 import perch.response.(Response)
 
 /// Logging middleware that prints the HTTP method and path for each request.
@@ -14,11 +14,13 @@ import perch.response.(Response)
 ///
 /// ```
 /// var app = App(context: ctx);
-/// app.use(logger[Ctx]());
+/// app.use(Logger[Ctx]());
 /// ```
-public func logger[T]() -> (Request, T) -> MiddlewareResult {
-    { (request: Request, ctx: T) in
+public struct Logger[T]: Middleware[T], Cloneable {
+    public func handle(request: Request, ctx: T) -> MiddlewareResult {
         let _ = println(request.method.toString() + " " + request.path);
         .Continue(request)
     }
+
+    public func clone() -> Logger[T] = Logger[T]()
 }

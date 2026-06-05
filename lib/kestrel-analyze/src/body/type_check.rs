@@ -90,11 +90,12 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             "type does not conform".into(),
         ),
         InferError::NoMember { name, .. } => (
-            // `detail` already comes formatted as "no method 'X' on type 'Y'"
-            // (see kestrel_type_infer::result::describe_error), so we surface
-            // it directly as the diagnostic message.
             detail.to_string(),
-            format!("'{}' not found", name),
+            if name == "subscript" {
+                "no matching subscript".into()
+            } else {
+                format!("'{}' not found", name)
+            },
         ),
         InferError::AmbiguousMember { name, .. } => (
             format!("ambiguous member '{}': {}", name, detail),
@@ -112,6 +113,13 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
                 format!("{} member", vis),
             )
         },
+        InferError::MemberIsStatic { name, .. } => (
+            format!(
+                "'{}' is a static member and cannot be used on an instance",
+                name
+            ),
+            format!("use the type name to call '{}'", name),
+        ),
         InferError::NoAssociatedType { name, .. } => (
             format!("no associated type '{}': {}", name, detail),
             format!("'{}' not found", name),
@@ -218,12 +226,17 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("cannot access member on type: {}", detail),
             format!("'{}' not available", name),
         ),
-        InferError::PrimitiveMethodNotCalled { method, .. } => {
+        InferError::MethodNotCalled { method, .. } => {
             (detail.to_string(), format!("add () to call '{}'", method))
         },
-        InferError::CircularOpaqueReturn { .. } => {
-            ("circular opaque return type".into(), "concrete type cannot be determined".into())
-        },
+        InferError::CircularOpaqueReturn { .. } => (
+            "circular opaque return type".into(),
+            "concrete type cannot be determined".into(),
+        ),
+        InferError::ConventionMismatch { .. } => (
+            format!("convention mismatch: {}", detail),
+            "mutating closure not allowed here".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

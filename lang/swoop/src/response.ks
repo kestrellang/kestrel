@@ -24,10 +24,10 @@ import swoop.error.(SwoopError)
 /// }
 /// ```
 public struct Response: Cloneable {
-    public var status: StatusCode
-    public var headers: Headers
-    public var body: String
-    public var bodyBytes: Array[UInt8]
+    public let status: StatusCode
+    public let headers: Headers
+    public let body: String
+    public let bodyBytes: Array[UInt8]
 
     public init(status: StatusCode, headers: Headers, body: String, bodyBytes: Array[UInt8]) {
         self.status = status;

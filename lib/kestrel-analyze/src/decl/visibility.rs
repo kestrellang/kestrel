@@ -168,25 +168,26 @@ fn check_callable(cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
     }
 
     if let Some(TypeAnnotation(ret_ty)) = cx.query.get::<TypeAnnotation>(cx.entity)
-        && let Some(hit) = first_less_visible(cx, ret_ty) {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
-                message: format!(
-                    "return type of '{}' is less visible than the function",
-                    name
-                ),
-                labels: vec![DiagLabel {
-                    span,
-                    message: "return type is less visible than function".into(),
-                    is_primary: true,
-                }],
-                notes: vec![format!(
-                    "function is public but return type is {}",
-                    vis_label(&hit)
-                )],
-            });
-        }
+        && let Some(hit) = first_less_visible(cx, ret_ty)
+    {
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[0].id,
+            severity: DESCRIPTORS[0].default_severity,
+            message: format!(
+                "return type of '{}' is less visible than the function",
+                name
+            ),
+            labels: vec![DiagLabel {
+                span,
+                message: "return type is less visible than function".into(),
+                is_primary: true,
+            }],
+            notes: vec![format!(
+                "function is public but return type is {}",
+                vis_label(&hit)
+            )],
+        });
+    }
 
     diags
 }
@@ -280,11 +281,11 @@ fn first_less_visible(cx: &DeclContext<'_>, ty: &AstType) -> Option<Vis> {
                 segments: segs,
                 context,
                 root: cx.root,
-            })
-                && let Some(v) = cx.query.get::<Vis>(e)
-                    && !matches!(*v, Vis::Public) {
-                        return Some(v.clone());
-                    }
+            }) && let Some(v) = cx.query.get::<Vis>(e)
+                && !matches!(*v, Vis::Public)
+            {
+                return Some(v.clone());
+            }
             for seg in segments {
                 for arg in &seg.type_args {
                     if let Some(hit) = first_less_visible(cx, arg) {

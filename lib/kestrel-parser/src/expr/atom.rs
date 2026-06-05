@@ -131,6 +131,10 @@ mod tests {
             dbg.contains("ExprRawString"),
             "expected ExprRawString in tree, got:\n{dbg}"
         );
-        assert!(result.errors.is_empty(), "unexpected errors: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "unexpected errors: {:?}",
+            result.errors
+        );
     }
 }

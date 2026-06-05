@@ -12,7 +12,8 @@ public var globalComputedVar: std.numeric.Int64 {
     set { _g = newValue }
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(globalComputedVar);
     globalComputedVar = 2;
     let _ = println(globalComputedVar);

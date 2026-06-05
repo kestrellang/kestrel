@@ -1,15 +1,15 @@
 [package]
 name = "swoop"
-version = "0.2.1"
+version = "0.3.0"
 description = "HTTP client library for Kestrel"
 author = "jkpdino"
 license = "MIT"
 repository = "https://github.com/kestrellang/kestrel"
 
 [dependencies]
-kestrel/http = { version = "0.2.1" }
-kestrel/quill = { version = "0.2.1" }
-kestrel/quill-json = { version = "0.2.1" }
+http = { path = "../http" }
+quill = { path = "../quill" }
+quill-json = { path = "../quill-json" }
 
 [build]
 link = ["ssl", "crypto"]

@@ -327,6 +327,9 @@ where
 {
     use kestrel_ast_builder::Callable;
 
+    // Check whether `parent` declares conformance to `protocol` — either
+    // directly or via a refining protocol (e.g. declaring
+    // ExpressibleByStringInterpolation implies ExpressibleByStringLiteral).
     let declares_protocol = |parent: Entity| -> bool {
         let Some(conformances) = ctx.get::<Conformances>(parent) else {
             return false;
@@ -335,7 +338,18 @@ where
             let ConformanceItem::Positive(ast_ty, _) = item else {
                 return false;
             };
-            resolve_conformance_entity(ctx, ast_ty, parent, root) == Some(protocol)
+            let Some(declared) = resolve_conformance_entity(ctx, ast_ty, parent, root) else {
+                return false;
+            };
+            if declared == protocol {
+                return true;
+            }
+            // Check if the declared protocol refines the target protocol
+            let transitive = ctx.query(ConformingProtocols {
+                entity: declared,
+                root,
+            });
+            transitive.contains(&protocol)
         })
     };
 
@@ -347,16 +361,18 @@ where
     };
 
     if declares_protocol(target)
-        && let Some(init) = matching_init_in(target) {
-            return Some(init);
-        }
+        && let Some(init) = matching_init_in(target)
+    {
+        return Some(init);
+    }
 
     let extensions = ctx.query(ExtensionsFor { target, root });
     for ext in extensions {
         if declares_protocol(ext)
-            && let Some(init) = matching_init_in(ext) {
-                return Some(init);
-            }
+            && let Some(init) = matching_init_in(ext)
+        {
+            return Some(init);
+        }
     }
 
     None
@@ -366,7 +382,7 @@ where
 ///
 /// Uses the conformance-bearing entity as resolution context — protocol
 /// names are top-level so they resolve from any scope.
-fn resolve_conformance_entity(
+pub fn resolve_conformance_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     context: Entity,

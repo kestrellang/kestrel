@@ -68,6 +68,7 @@ func create_many() {
     let r49 = Resource(id: 49);
 }
 
+@main
 func main() -> lang.i64 {
     create_many();
     if deinit_count != 50 { return 1; }

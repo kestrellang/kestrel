@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- lowercaseAscii() (mutating) ----
             var s1: std.text.String = "Hello WORLD";

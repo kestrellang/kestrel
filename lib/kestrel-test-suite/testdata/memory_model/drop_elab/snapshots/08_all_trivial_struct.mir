@@ -1,11 +1,9 @@
-func Test.example() -> ()
-{
-    locals:
-        %p: Test.Point
-        %_t0: Test.Point
+; function: Test.example
+bb0:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = literal i64 2  // @owned Int64
+    %v2 = struct Test.Point { .0: %v0, .1: %v1 }  // @owned Test.Point
+    %v3 = literal ()  // @owned ()
+    destroy_value %v2
+    return %v3
 
-    bb0:
-        %_t0 = construct Test.Point { x: i64.literal 1, y: i64.literal 2 }
-        %p = copy %_t0
-        return ()
-}

@@ -40,8 +40,10 @@ site must pick the right variant:
 | `for p in iter` | `ForLoop` | nothing (for_loop_pattern handles refutability) |
 | `let <complex> = v` | `LetDestructure` | nothing |
 | `try e` | `TryOp` | nothing |
-| `e!` | `UnwrapOp` | nothing |
 | `match v { … }` | `UserMatch` | full exhaustiveness suite |
+
+(`e!` force-unwrap does **not** produce a `Match` — it lowers to a
+`ForceUnwrap.forceUnwrap()` `ProtocolCall`; see `kestrel-hir-lower/AGENTS.md`.)
 
 Adding a new desugaring that produces a `Match`? Add a variant to
 `MatchSource` rather than reusing an existing one — the source is also

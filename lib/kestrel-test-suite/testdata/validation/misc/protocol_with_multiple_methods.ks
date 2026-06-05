@@ -4,5 +4,5 @@
 module Test
 protocol Hashable {
     func hash() -> lang.i64
-    func equals(other to: lang.i64) -> lang.i1
+    func isEqual(to other: lang.i64) -> lang.i1
 }

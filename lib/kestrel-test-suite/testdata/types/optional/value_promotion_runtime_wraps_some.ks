@@ -7,6 +7,7 @@
 // match read a garbage Optional discriminant, falling into `.None`.
 module Test
 
+@main
 func main() -> lang.i64 {
     let v: std.result.Optional[std.numeric.Int64] = 42;
     match v {

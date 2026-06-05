@@ -38,6 +38,7 @@ func test() {
     // Deinit order: L5(5), L4(4), L3(3), L2(2), L1(1) => 54321
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if deinit_order != 54321 { return 1; }

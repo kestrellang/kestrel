@@ -66,7 +66,7 @@ func emitTable(obj: Dictionary[String, Value], mutating buf: String, prefix: Str
     for (key, val) in obj.iter() {
         match val {
             .Obj(subObj) => {
-                let fullKey = if prefix.byteCount > 0 {
+                let fullKey = if not prefix.isEmpty {
                     prefix + "." + key
                 } else {
                     key
@@ -102,18 +102,7 @@ func emitTomlValue(value: Value, mutating buf: String) {
         .Float(f) => {
             let s = "\(f)";
             buf.append(s);
-            // Ensure float has decimal point
-            var hasDot = false;
-            var i: Int64 = 0;
-            let len = s.byteCount;
-            while i < len {
-                let b = s.bytes(unchecked: i);
-                if b == 46 or b == 101 or b == 69 {
-                    hasDot = true
-                }
-                i = i + 1
-            }
-            if not hasDot {
+            if not s.contains(where: { (c) in c == '.' or c == 'e' or c == 'E' }) {
                 buf.append(".0")
             }
         },
@@ -152,20 +141,11 @@ func emitKey(key: String, mutating buf: String) {
 
 /// Returns `true` if the string is a valid bare TOML key (`[A-Za-z0-9_-]+`).
 func isBareKey(s: String) -> Bool {
-    let len = s.byteCount;
-    if len == 0 {
+    if s.isEmpty {
         return false
     }
-    var i: Int64 = 0;
-    while i < len {
-        let b = s.bytes(unchecked: i);
-        let isAlpha = (b >= 65 and b <= 90) or (b >= 97 and b <= 122);
-        let isDigit = b >= 48 and b <= 57;
-        let isDash = b == 45;
-        let isUnderscore = b == 95;
-        if isAlpha or isDigit or isDash or isUnderscore {
-            i = i + 1
-        } else {
+    for c in s {
+        if not (c.isAsciiLetter or c.isAsciiDigit or c == '-' or c == '_') {
             return false
         }
     }
@@ -174,27 +154,24 @@ func isBareKey(s: String) -> Bool {
 
 /// Emits a basic quoted TOML string, escaping `"`, `\`, and control characters.
 func emitTomlString(s: String, mutating buf: String) {
+    let backspace = Char(8).unwrap();
     buf.append("\"");
-    var i: Int64 = 0;
-    let len = s.byteCount;
-    while i < len {
-        let b = s.bytes(unchecked: i);
-        if b == 34 {
+    for c in s {
+        if c == '"' {
             buf.append("\\\"")
-        } else if b == 92 {
+        } else if c == '\\' {
             buf.append("\\\\")
-        } else if b == 10 {
+        } else if c == '\n' {
             buf.append("\\n")
-        } else if b == 13 {
+        } else if c == '\r' {
             buf.append("\\r")
-        } else if b == 9 {
+        } else if c == '\t' {
             buf.append("\\t")
-        } else if b == 8 {
+        } else if c == backspace {
             buf.append("\\b")
         } else {
-            buf.append(char: Char(UInt32(from: b)).unwrap())
+            buf.append(char: c)
         }
-        i = i + 1
     }
     buf.append("\"")
 }

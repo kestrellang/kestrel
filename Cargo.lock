@@ -743,6 +743,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "inkwell"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7decbc9dfa45a4a827a6ff7b822c113b1285678a937e84213417d4ca8a095782"
+dependencies = [
+ "bitflags 2.11.1",
+ "inkwell_internals",
+ "libc",
+ "llvm-sys",
+ "thiserror",
+]
+
+[[package]]
+name = "inkwell_internals"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cfe97ee860815a90ed17e09639513269e39420a7440f3f4c996f238c514cf8d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -756,7 +780,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "kestrel"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "clap",
  "codespan-reporting",
@@ -764,18 +788,16 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-codegen",
  "kestrel-codegen-cranelift",
+ "kestrel-codegen-llvm",
  "kestrel-compiler",
  "kestrel-compiler-driver",
- "kestrel-hecs",
  "kestrel-mir",
- "kestrel-mir-lower",
- "kestrel-ownership",
  "kestrel-reporting",
 ]
 
 [[package]]
 name = "kestrel-analyze"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -794,14 +816,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-ast"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-span",
 ]
 
 [[package]]
 name = "kestrel-ast-builder"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
@@ -814,18 +836,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-codegen"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
- "indexmap",
- "kestrel-debug",
- "kestrel-hecs",
- "kestrel-mir",
  "target-lexicon 0.12.16",
 ]
 
 [[package]]
 name = "kestrel-codegen-cranelift"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -834,26 +852,33 @@ dependencies = [
  "cranelift-object",
  "indexmap",
  "kestrel-codegen",
- "kestrel-compiler",
- "kestrel-compiler-driver",
- "kestrel-debug",
  "kestrel-hecs",
  "kestrel-mir",
- "kestrel-mir-lower",
- "kestrel-reporting",
- "stacker",
+ "target-lexicon 0.12.16",
+]
+
+[[package]]
+name = "kestrel-codegen-llvm"
+version = "0.17.0"
+dependencies = [
+ "indexmap",
+ "inkwell",
+ "kestrel-codegen",
+ "kestrel-hecs",
+ "kestrel-mir",
  "target-lexicon 0.12.16",
 ]
 
 [[package]]
 name = "kestrel-compiler"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
  "kestrel-ast-builder",
  "kestrel-codegen",
  "kestrel-codegen-cranelift",
+ "kestrel-codegen-llvm",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
@@ -862,7 +887,6 @@ dependencies = [
  "kestrel-mir",
  "kestrel-mir-lower",
  "kestrel-name-res",
- "kestrel-ownership",
  "kestrel-parser",
  "kestrel-reporting",
  "kestrel-span",
@@ -872,7 +896,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-compiler-driver"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
@@ -885,11 +909,11 @@ dependencies = [
 
 [[package]]
 name = "kestrel-debug"
-version = "0.16.0"
+version = "0.17.0"
 
 [[package]]
 name = "kestrel-doc"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "clap",
  "kestrel-ast-builder",
@@ -902,11 +926,11 @@ dependencies = [
 
 [[package]]
 name = "kestrel-hecs"
-version = "0.16.0"
+version = "0.17.0"
 
 [[package]]
 name = "kestrel-hir"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
@@ -915,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-hir-lower"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -932,7 +956,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-lexer"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-span",
  "logos",
@@ -941,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-lsp"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
@@ -969,19 +993,24 @@ dependencies = [
 
 [[package]]
 name = "kestrel-mir"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "indexmap",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-span",
+ "smallvec",
 ]
 
 [[package]]
 name = "kestrel-mir-lower"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
+ "indexmap",
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-codegen",
+ "kestrel-codegen-cranelift",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",
@@ -994,11 +1023,12 @@ dependencies = [
  "kestrel-semantics",
  "kestrel-span",
  "kestrel-type-infer",
+ "smallvec",
 ]
 
 [[package]]
 name = "kestrel-name-res"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -1011,17 +1041,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "kestrel-ownership"
-version = "0.16.0"
-dependencies = [
- "kestrel-hecs",
- "kestrel-mir",
- "kestrel-span",
-]
-
-[[package]]
 name = "kestrel-parser"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "chumsky",
  "kestrel-lexer",
@@ -1032,7 +1053,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-pattern-matching"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -1045,14 +1066,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-reporting"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
 name = "kestrel-semantics"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
@@ -1065,14 +1086,14 @@ dependencies = [
 
 [[package]]
 name = "kestrel-span"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
 ]
 
 [[package]]
 name = "kestrel-syntax-tree"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "kestrel-lexer",
  "kestrel-span",
@@ -1081,19 +1102,17 @@ dependencies = [
 
 [[package]]
 name = "kestrel-test-suite"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-analyze",
  "kestrel-ast-builder",
- "kestrel-codegen",
  "kestrel-codegen-cranelift",
+ "kestrel-codegen-llvm",
  "kestrel-compiler",
  "kestrel-compiler-driver",
  "kestrel-hecs",
  "kestrel-mir",
- "kestrel-mir-lower",
- "kestrel-ownership",
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-type-infer",
@@ -1103,7 +1122,7 @@ dependencies = [
 
 [[package]]
 name = "kestrel-type-infer"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "codespan-reporting",
  "kestrel-ast",
@@ -1115,9 +1134,16 @@ dependencies = [
  "kestrel-lexer",
  "kestrel-name-res",
  "kestrel-parser",
+ "kestrel-semantics",
  "kestrel-span",
  "kestrel-syntax-tree",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "leb128fmt"
@@ -1160,6 +1186,20 @@ name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
+
+[[package]]
+name = "llvm-sys"
+version = "181.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e24aad69cbdb0c6ebe777262e9e6314dceba0d6e6a2a63e47563ccd293a2eda8"
+dependencies = [
+ "anyhow",
+ "cc",
+ "lazy_static",
+ "libc",
+ "regex-lite",
+ "semver",
+]
 
 [[package]]
 name = "lock_api"
@@ -1414,6 +1454,12 @@ dependencies = [
  "memchr",
  "regex-syntax 0.8.10",
 ]
+
+[[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
 name = "regex-syntax"
@@ -1672,6 +1718,26 @@ name = "text-size"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233"
+
+[[package]]
+name = "thiserror"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "tinystr"

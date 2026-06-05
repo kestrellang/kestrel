@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // removeSubrange with RangeFrom: remove from index 3 onward
             var a = [10, 20, 30, 40, 50];

@@ -18,6 +18,7 @@ struct Resource: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let r = Resource(id: 1);
     let cond: Bool = true;

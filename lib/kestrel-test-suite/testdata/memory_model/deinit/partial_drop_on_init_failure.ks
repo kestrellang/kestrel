@@ -28,6 +28,7 @@ struct Container: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     // Failed init: resource is initialized but value is not.
     // Resource.deinit should be called for the partially-initialized self.

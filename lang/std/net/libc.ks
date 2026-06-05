@@ -70,6 +70,14 @@ public func SO_REUSEADDR() -> Int32 { 0x0004 }
 @platform(.linux)
 public func SO_REUSEADDR() -> Int32 { 2 }
 
+/// `TCP_NODELAY` — disable Nagle's algorithm on a TCP socket.
+///
+/// Pass as the `optname` argument of `setsockopt()` with the
+/// `IPPROTO_TCP` level (not `SOL_SOCKET`) so small writes are sent
+/// immediately instead of being held to coalesce with a later write.
+/// The value is `1` on both darwin and linux.
+public func TCP_NODELAY() -> Int32 { 1 }
+
 /// `INADDR_ANY` — wildcard IPv4 address (`0.0.0.0`).
 ///
 /// Use as the `sin_addr` field of a `sockaddr_in` to bind a server

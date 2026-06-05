@@ -15,6 +15,7 @@ struct MyList: _ExpressibleByArrayLiteral {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let list: MyList = [1, 2, 3];
     list.count.raw

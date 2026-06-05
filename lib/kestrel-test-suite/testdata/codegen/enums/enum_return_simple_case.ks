@@ -14,6 +14,7 @@ func get_direction() -> Direction {
     Direction.Up
 }
 
+@main
 func main() -> lang.i64 {
     let d = get_direction();
     match d {

@@ -14,7 +14,8 @@ struct Thing: Valuable {
     func value() -> std.numeric.Int64 = self.n * 2
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let t = Thing(n: 21);
     let _ = println(t.value());
     0

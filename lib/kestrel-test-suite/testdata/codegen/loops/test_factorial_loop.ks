@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     var n: std.numeric.Int64 = 5;
     var result: std.numeric.Int64 = 1;

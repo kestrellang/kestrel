@@ -3,9 +3,9 @@
 //! Most of M2's "what's at the cursor?" logic funnels through these helpers
 //! so handlers stay narrow and the lookup rules stay in one place.
 
-use kestrel_ast_builder::{Body, DeclSpan, FileId, NodeKind, Valued};
+use kestrel_ast_builder::{Body, DeclSpan, FileId, FilePath, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
-use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
+use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat, HirPatId};
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
 use rowan::TextSize;
@@ -13,6 +13,15 @@ use rowan::TextSize;
 /// Look up the file entity for a compiler-key path.
 pub fn file_entity_for_path(compiler: &kestrel_compiler::Compiler, path: &str) -> Option<Entity> {
     compiler.files().get(path).copied()
+}
+
+/// Find the on-disk path of the file that contains `entity`.
+pub fn entity_file_path(world: &World, entity: Entity) -> Option<String> {
+    if let Some(p) = world.get::<FilePath>(entity) {
+        return Some(p.0.clone());
+    }
+    let fid = world.get::<FileId>(entity)?;
+    world.get::<FilePath>(fid.0).map(|p| p.0.clone())
 }
 
 /// Smallest entity with a `Valued` body whose CST range contains `offset` and
@@ -80,6 +89,38 @@ pub fn hir_expr_at(body: &HirBody, offset: usize) -> Option<HirExprId> {
     let mut best: Option<(HirExprId, usize)> = None;
     for (id, expr) in body.exprs.iter() {
         let span = hir_expr_span(expr);
+        if span.start <= offset && offset <= span.end {
+            let len = span.end - span.start;
+            if best.map(|(_, l)| len < l).unwrap_or(true) {
+                best = Some((id, len));
+            }
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+pub fn hir_pat_span(pat: &HirPat) -> Span {
+    match pat {
+        HirPat::Wildcard { span }
+        | HirPat::Binding { span, .. }
+        | HirPat::Tuple { span, .. }
+        | HirPat::Literal { span, .. }
+        | HirPat::Range { span, .. }
+        | HirPat::Variant { span, .. }
+        | HirPat::ImplicitVariant { span, .. }
+        | HirPat::Struct { span, .. }
+        | HirPat::Array { span, .. }
+        | HirPat::Or { span, .. }
+        | HirPat::At { span, .. }
+        | HirPat::Error { span } => span.clone(),
+    }
+}
+
+/// Find the smallest HIR pattern whose span contains `offset`.
+pub fn hir_pat_at(body: &HirBody, offset: usize) -> Option<HirPatId> {
+    let mut best: Option<(HirPatId, usize)> = None;
+    for (id, pat) in body.pats.iter() {
+        let span = hir_pat_span(pat);
         if span.start <= offset && offset <= span.end {
             let len = span.end - span.start;
             if best.map(|(_, l)| len < l).unwrap_or(true) {

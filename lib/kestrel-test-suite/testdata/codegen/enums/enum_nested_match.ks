@@ -25,6 +25,7 @@ func add_options(a: Option, b: Option) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let a = Option.Some(value: 20);
     let b = Option.Some(value: 22);

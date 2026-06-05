@@ -188,9 +188,11 @@ fn collect_lhs_target_names(world: &World, entity: Entity) -> HashSet<String> {
     };
     for arg in &last.type_args {
         if let AstType::Named { segments: segs, .. } = arg
-            && segs.len() == 1 && segs[0].type_args.is_empty() {
-                names.insert(segs[0].name.clone());
-            }
+            && segs.len() == 1
+            && segs[0].type_args.is_empty()
+        {
+            names.insert(segs[0].name.clone());
+        }
     }
     names
 }

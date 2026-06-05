@@ -17,6 +17,7 @@ func color_value(c: Color) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     if color_value(Color.Blue) != 42 { return 1 }
     0

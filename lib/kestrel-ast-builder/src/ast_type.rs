@@ -72,16 +72,36 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             //   2. Ty — return type
             let mut children = node.children();
 
-            // First child: TyList with parameter types
-            let params = children
+            // First child: TyList with parameter types. Walk tokens+nodes
+            // positionally so a `mutating` token attaches to the following
+            // param type as `MutBorrow`; otherwise the param is `Consuming`.
+            let (params, param_conventions) = children
                 .next()
                 .filter(|c| c.kind() == SyntaxKind::TyList)
                 .map(|ty_list| {
-                    ty_list
-                        .children()
-                        .filter(|c| is_type_node(c.kind()))
-                        .filter_map(|c| ast_type_from_cst(&c, file_id))
-                        .collect::<Vec<_>>()
+                    let mut params: Vec<AstType> = Vec::new();
+                    let mut conventions: Vec<kestrel_ast::ParamConvention> = Vec::new();
+                    let mut pending_mut = false;
+                    for child in ty_list.children_with_tokens() {
+                        if let Some(tok) = child.as_token() {
+                            if tok.kind() == SyntaxKind::Mutating {
+                                pending_mut = true;
+                            }
+                        } else if let Some(n) = child.as_node()
+                            && is_type_node(n.kind())
+                        {
+                            if let Some(ty) = ast_type_from_cst(n, file_id) {
+                                params.push(ty);
+                                conventions.push(if pending_mut {
+                                    kestrel_ast::ParamConvention::MutBorrow
+                                } else {
+                                    kestrel_ast::ParamConvention::Consuming
+                                });
+                            }
+                            pending_mut = false;
+                        }
+                    }
+                    (params, conventions)
                 })
                 .unwrap_or_default();
 
@@ -94,6 +114,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
 
             Some(AstType::Function {
                 params,
+                param_conventions,
                 return_type: Box::new(return_type),
                 span,
             })

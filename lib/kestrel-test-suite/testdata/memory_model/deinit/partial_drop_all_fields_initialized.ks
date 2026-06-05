@@ -27,6 +27,7 @@ struct TwoResources: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let failed = TwoResources(fail_late: 1);
     match failed {

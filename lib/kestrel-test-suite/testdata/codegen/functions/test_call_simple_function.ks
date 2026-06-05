@@ -7,6 +7,7 @@ func add(a: std.numeric.Int64, b: std.numeric.Int64) -> std.numeric.Int64 {
     a + b
 }
 
+@main
 func main() -> lang.i64 {
     if add(20, 22) != 42 { return 1 }
     0

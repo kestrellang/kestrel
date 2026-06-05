@@ -4,14 +4,72 @@ module perch.router
 
 import http.method.(HttpMethod)
 import perch.request.(Request)
-import perch.context.(MiddlewareResult)
+import perch.context.(MiddlewareResult, Middleware)
 import perch.response.(Response)
+
+// ============================================================================
+// ROUTES PROTOCOL
+// ============================================================================
+
+/// A type that can register HTTP route handlers.
+///
+/// Conform to this protocol by implementing `addRoute`. The seven
+/// verb methods — `route(get:)`, `route(post:)`, etc. — are provided
+/// automatically by the blanket extension.
+///
+/// # Examples
+///
+/// ```
+/// app.route(get: "/users", listUsers);
+/// app.route(post: "/users", createUser);
+/// app.route(delete: "/users/:id", deleteUser);
+/// ```
+public protocol Routes[T] {
+    mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response)
+}
+
+extend Routes {
+    /// Registers a GET route.
+    public mutating func route(get path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Get, path, handler)
+    }
+
+    /// Registers a POST route.
+    public mutating func route(post path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Post, path, handler)
+    }
+
+    /// Registers a PUT route.
+    public mutating func route(put path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Put, path, handler)
+    }
+
+    /// Registers a DELETE route.
+    public mutating func route(delete path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Delete, path, handler)
+    }
+
+    /// Registers a PATCH route.
+    public mutating func route(patch path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Patch, path, handler)
+    }
+
+    /// Registers a HEAD route.
+    public mutating func route(head path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Head, path, handler)
+    }
+
+    /// Registers an OPTIONS route.
+    public mutating func route(options path: String, handler: (Request, T) -> Response) {
+        self.addRoute(HttpMethod.Options, path, handler)
+    }
+}
 
 // ============================================================================
 // ROUTE
 // ============================================================================
 
-/// A route maps an HTTP method + path pattern to middleware and a handler.
+/// A route maps an HTTP method + path pattern to a handler.
 ///
 /// Path patterns support `:name` segments for parameter extraction.
 /// For example, `"/users/:id"` matches `"/users/42"` and binds
@@ -65,12 +123,12 @@ public struct RouteGroup[T]: Cloneable {
 ///
 /// ```
 /// var api = GroupBuilder[Ctx]("/api");
-/// api.use(requireAuth[Ctx]());
-/// api.onGet("/users", listUsers);
-/// api.onGet("/users/:id", getUser);
+/// api.use(RequireAuth[Ctx]());
+/// api.route(get: "/users", listUsers);
+/// api.route(get: "/users/:id", getUser);
 /// app.addGroup(api);
 /// ```
-public struct GroupBuilder[T]: Cloneable {
+public struct GroupBuilder[T]: Cloneable, Routes[T] {
     var prefix: String
     var middleware: Array[(Request, T) -> MiddlewareResult]
     var routes: Array[Route[T]]
@@ -83,94 +141,15 @@ public struct GroupBuilder[T]: Cloneable {
     }
 
     /// Adds middleware to this group.
-    public mutating func use(middleware: (Request, T) -> MiddlewareResult) {
-        self.middleware.append(middleware)
+    public mutating func use[M](middleware: M) where M: Middleware[T] {
+        self.middleware.append({ (req: Request, ctx: T) in middleware.handle(req, ctx) })
     }
 
-    /// Registers a GET route in this group.
-    public mutating func onGet(path: String, handler: (Request, T) -> Response) {
+    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
         let fullPath = self.prefix + path;
         let segments = splitPathSegments(fullPath);
         self.routes.append(Route[T](
-            method: HttpMethod.Get,
-            pattern: fullPath,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a POST route in this group.
-    public mutating func onPost(path: String, handler: (Request, T) -> Response) {
-        let fullPath = self.prefix + path;
-        let segments = splitPathSegments(fullPath);
-        self.routes.append(Route[T](
-            method: HttpMethod.Post,
-            pattern: fullPath,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a PUT route in this group.
-    public mutating func onPut(path: String, handler: (Request, T) -> Response) {
-        let fullPath = self.prefix + path;
-        let segments = splitPathSegments(fullPath);
-        self.routes.append(Route[T](
-            method: HttpMethod.Put,
-            pattern: fullPath,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a DELETE route in this group.
-    public mutating func onDelete(path: String, handler: (Request, T) -> Response) {
-        let fullPath = self.prefix + path;
-        let segments = splitPathSegments(fullPath);
-        self.routes.append(Route[T](
-            method: HttpMethod.Delete,
-            pattern: fullPath,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a PATCH route in this group.
-    public mutating func onPatch(path: String, handler: (Request, T) -> Response) {
-        let fullPath = self.prefix + path;
-        let segments = splitPathSegments(fullPath);
-        self.routes.append(Route[T](
-            method: HttpMethod.Patch,
-            pattern: fullPath,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a HEAD route in this group.
-    public mutating func onHead(path: String, handler: (Request, T) -> Response) {
-        let fullPath = self.prefix + path;
-        let segments = splitPathSegments(fullPath);
-        self.routes.append(Route[T](
-            method: HttpMethod.Head,
-            pattern: fullPath,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers an OPTIONS route in this group.
-    public mutating func onOptions(path: String, handler: (Request, T) -> Response) {
-        let fullPath = self.prefix + path;
-        let segments = splitPathSegments(fullPath);
-        self.routes.append(Route[T](
-            method: HttpMethod.Options,
+            method: method,
             pattern: fullPath,
             patternSegments: segments,
             middleware: Array[(Request, T) -> MiddlewareResult](),
@@ -216,7 +195,7 @@ struct MatchResult[T]: Cloneable {
 /// Route matching checks groups first (in registration order), then
 /// standalone routes. The first match wins — later routes for the same
 /// method and pattern are shadowed.
-public struct Router[T]: Cloneable {
+public struct Router[T]: Cloneable, Routes[T] {
     public var globalMiddleware: Array[(Request, T) -> MiddlewareResult]
     var groups: Array[RouteGroup[T]]
     var routes: Array[Route[T]]
@@ -229,87 +208,14 @@ public struct Router[T]: Cloneable {
     }
 
     /// Adds global middleware that runs on every request.
-    public mutating func use(middleware: (Request, T) -> MiddlewareResult) {
-        self.globalMiddleware.append(middleware)
+    public mutating func use[M](middleware: M) where M: Middleware[T] {
+        self.globalMiddleware.append({ (req: Request, ctx: T) in middleware.handle(req, ctx) })
     }
 
-    /// Registers a GET route.
-    public mutating func onGet(path: String, handler: (Request, T) -> Response) {
+    public mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response) {
         let segments = splitPathSegments(path);
         self.routes.append(Route[T](
-            method: HttpMethod.Get,
-            pattern: path,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a POST route.
-    public mutating func onPost(path: String, handler: (Request, T) -> Response) {
-        let segments = splitPathSegments(path);
-        self.routes.append(Route[T](
-            method: HttpMethod.Post,
-            pattern: path,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a PUT route.
-    public mutating func onPut(path: String, handler: (Request, T) -> Response) {
-        let segments = splitPathSegments(path);
-        self.routes.append(Route[T](
-            method: HttpMethod.Put,
-            pattern: path,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a DELETE route.
-    public mutating func onDelete(path: String, handler: (Request, T) -> Response) {
-        let segments = splitPathSegments(path);
-        self.routes.append(Route[T](
-            method: HttpMethod.Delete,
-            pattern: path,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a PATCH route.
-    public mutating func onPatch(path: String, handler: (Request, T) -> Response) {
-        let segments = splitPathSegments(path);
-        self.routes.append(Route[T](
-            method: HttpMethod.Patch,
-            pattern: path,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers a HEAD route.
-    public mutating func onHead(path: String, handler: (Request, T) -> Response) {
-        let segments = splitPathSegments(path);
-        self.routes.append(Route[T](
-            method: HttpMethod.Head,
-            pattern: path,
-            patternSegments: segments,
-            middleware: Array[(Request, T) -> MiddlewareResult](),
-            handler: handler
-        ))
-    }
-
-    /// Registers an OPTIONS route.
-    public mutating func onOptions(path: String, handler: (Request, T) -> Response) {
-        let segments = splitPathSegments(path);
-        self.routes.append(Route[T](
-            method: HttpMethod.Options,
+            method: method,
             pattern: path,
             patternSegments: segments,
             middleware: Array[(Request, T) -> MiddlewareResult](),
@@ -330,10 +236,9 @@ public struct Router[T]: Cloneable {
 
     /// Finds a matching route for the given method and path segments.
     func findRoute(method: HttpMethod, segments: Array[String]) -> MatchResult[T]? {
-        // Check group routes first
         for group in self.groups {
             for route in group.routes {
-                if methodMatches(route.method, method) {
+                if route.method.toString() == method.toString() {
                     match matchPath(segments, route.patternSegments) {
                         .Some(params) => {
                             return .Some(MatchResult[T](
@@ -349,9 +254,8 @@ public struct Router[T]: Cloneable {
             }
         }
 
-        // Check standalone routes
         for route in self.routes {
-            if methodMatches(route.method, method) {
+            if route.method.toString() == method.toString() {
                 match matchPath(segments, route.patternSegments) {
                     .Some(params) => {
                         return .Some(MatchResult[T](
@@ -406,11 +310,6 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
     }
 
     .Some(params)
-}
-
-/// Returns true if two HTTP methods are the same.
-func methodMatches(expected: HttpMethod, actual: HttpMethod) -> Bool {
-    expected.toString() == actual.toString()
 }
 
 /// Splits a path into non-empty segments.

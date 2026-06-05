@@ -15,6 +15,7 @@ func classify(c: Char) -> Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let lowerA: Char = 'a';
     let lowerY: Char = 'y';

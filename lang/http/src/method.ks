@@ -34,7 +34,7 @@ module http.method
 /// # Representation
 ///
 /// Nullary tagged enum — no payload on any case.
-public enum HttpMethod {
+public enum HttpMethod: Equatable {
     /// `GET` — retrieve a resource.
     case Get
     /// `POST` — submit data to a resource.
@@ -49,6 +49,20 @@ public enum HttpMethod {
     case Head
     /// `OPTIONS` — describe the communication options for a resource.
     case Options
+
+    /// Returns `true` if two methods are the same variant.
+    public func isEqual(to other: HttpMethod) -> Bool {
+        match (self, other) {
+            (.Get, .Get) => true,
+            (.Post, .Post) => true,
+            (.Put, .Put) => true,
+            (.Delete, .Delete) => true,
+            (.Patch, .Patch) => true,
+            (.Head, .Head) => true,
+            (.Options, .Options) => true,
+            _ => false
+        }
+    }
 
     /// Returns the method name as an uppercase string matching the
     /// HTTP/1.1 wire format.

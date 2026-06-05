@@ -607,7 +607,7 @@ mod tests {
             c.build(f);
             let driver = kestrel_compiler_driver::CompilerDriver::new(&c);
             let _ = driver.infer_all();
-            let _ = driver.analyze_all();
+            let _ = driver.analyze_all(false);
             let diags = c.diagnostics();
             let msgs: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
             // Diagnostic must carry the sink's file_id, not the chumsky

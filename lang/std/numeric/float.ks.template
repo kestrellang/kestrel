@@ -394,14 +394,14 @@ public struct {{TYPE_NAME}}:
 
     /// IEEE 754 addition. NaN propagates; `inf + (-inf)` is NaN; finite + inf
     /// is inf.
-    public func add(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
+    public consuming func add(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_add(self.raw, other.raw)) }
 
     /// IEEE 754 subtraction. `inf - inf` is NaN; otherwise mirrors `add`.
-    public func subtract(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
+    public consuming func subtract(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_sub(self.raw, other.raw)) }
 
     /// IEEE 754 multiplication. NaN propagates; `inf * 0` is NaN; sign of
     /// the result follows the usual algebra.
-    public func multiply(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
+    public consuming func multiply(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_mul(self.raw, other.raw)) }
 
     /// IEEE 754 division. Unlike integer divide, dividing by zero does not
     /// trap — it produces ±infinity (or NaN for `0.0 / 0.0`).
@@ -418,11 +418,11 @@ public struct {{TYPE_NAME}}:
     /// 1.0 / 0.0;                  // inf
     /// 0.0 / 0.0;                  // nan
     /// ```
-    public func divide(other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.raw, other.raw)) }
+    public consuming func divide(consuming other: {{TYPE_NAME}}) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_div(self.raw, other.raw)) }
 
     /// IEEE 754 negation — flips the sign bit. `-nan` is still NaN; `-(-0.0)`
     /// is `+0.0`.
-    public func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw)) }
+    public consuming func negate() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_neg(self.raw)) }
 
     // ========================================================================
     // BASIC MATHEMATICAL FUNCTIONS

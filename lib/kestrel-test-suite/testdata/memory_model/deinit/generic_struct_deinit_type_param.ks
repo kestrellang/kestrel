@@ -27,6 +27,7 @@ func test() {
     // Scope exit: Box.deinit (count=1), then Resource.deinit (count=2)
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if deinit_count != 2 { return 1; }

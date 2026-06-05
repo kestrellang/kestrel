@@ -37,7 +37,7 @@ import std.result.(Optional)
 ///
 /// A two-case tagged union — discriminant plus the larger of `T` / `E`.
 /// Niche optimisation applies the same way it does to `Optional`.
-public enum Result[T, E]: Tryable {
+public enum Result[T, E]: Tryable, not Copyable {
     /// The success branch — wraps a `T`.
     case Ok(T)
 
@@ -98,7 +98,7 @@ public enum Result[T, E]: Tryable {
     /// Drives `try` — `Continue(value)` for `.Ok`, `Break(error)` for
     /// `.Err`. Defined inline because `Tryable` is declared in the enum's
     /// conformance list above.
-    public func tryExtract() -> ControlFlow[T, E] {
+    public consuming func tryExtract() -> ControlFlow[T, E] {
         match self {
             .Ok(value) => .Continue(value),
             .Err(error) => .Break(error)
@@ -109,8 +109,8 @@ public enum Result[T, E]: Tryable {
     // UNWRAPPING - SUCCESS VALUE
     // ========================================================================
 
-    /// Returns the success value, panicking if `Err`. Use `unwrapOr`,
-    /// `unwrap(or:)`, or pattern matching unless you can prove the
+    /// Returns the success value, panicking if `Err`. Use
+    /// `unwrap(or:)` or pattern matching unless you can prove the
     /// result is `Ok`.
     ///
     /// # Errors
@@ -124,19 +124,19 @@ public enum Result[T, E]: Tryable {
     }
 
     /// Returns the success value or `default` on `Err`. `default` is
-    /// always evaluated — use `unwrap(or:)` if computing it is
+    /// always evaluated — use `unwrap(orElse:)` if computing it is
     /// expensive or depends on the error.
-    public func unwrapOr(default: T) -> T {
+    public func unwrap(or default: T) -> T {
         match self {
             .Ok(value) => value,
             .Err(_) => default
         }
     }
 
-    /// Like `unwrapOr`, but `defaultFn` receives the error value and is
+    /// Like `unwrap(or:)`, but `defaultFn` receives the error value and is
     /// only invoked on `Err`. Useful when the recovery value depends on
     /// what went wrong.
-    public func unwrap(or defaultFn: (E) -> T) -> T {
+    public func unwrap(orElse defaultFn: (E) -> T) -> T {
         match self {
             .Ok(value) => value,
             .Err(error) => defaultFn(error)
@@ -296,6 +296,13 @@ public enum Result[T, E]: Tryable {
 // PROTOCOL CONFORMANCES
 // ============================================================================
 
+/// `Result` is move-only by default (`not Copyable`) so it can carry a
+/// non-Copyable payload (e.g. `Result[File, E]`). It regains bit-copy
+/// semantics only when *both* payloads are themselves Copyable — so
+/// `Result[Int64, Error]` is Copyable while `Result[Array[Int64], E]` stays
+/// move-only.
+extend Result[T, E]: Copyable where T: Copyable, E: Copyable { }
+
 /// `FromResidual[E]` — converts a `try`-propagated error back into
 /// `.Err`, so chains of `try` returning results compose.
 extend Result[T, E]: FromResidual[E] {
@@ -310,8 +317,9 @@ extend Result[T, E]: FromResidual[E] {
 /// write `let r: Int throws Error = 42` without explicit `.Ok`.
 extend Result[T, E]: FromValue[T] {
     /// Wraps `value` in `.Ok`. Called by the compiler at the promotion
-    /// site, not usually by user code.
-    public static func from(value: T) -> Result[T, E] {
+    /// site, not usually by user code. `consuming` so `value` is moved into
+    /// `.Ok` (no clone-and-leak of a borrowed original).
+    public static func from(consuming value: T) -> Result[T, E] {
         .Ok(value)
     }
 }

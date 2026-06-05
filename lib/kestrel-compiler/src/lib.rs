@@ -204,78 +204,189 @@ impl Compiler {
 }
 
 impl Compiler {
-    /// Lower to MIR and run all post-lowering passes.
-    ///
-    /// Call after inference has been run (e.g. via
-    /// `CompilerDriver::infer_all()` from `kestrel-compiler-driver`).
-    ///
-    /// Pipeline order:
-    /// 1. MIR lowering
-    /// 2. `kestrel-ownership` — emits `Drop` / `DropIf` (move check + drop
-    ///    elaboration). This is the only pass that produces destructor
-    ///    statements; lowering itself must never emit them.
-    /// 3. Thunk + layout passes
-    ///
-    /// Set `KESTREL_VERIFY_MIR=1` to run [`MirModule::verify`] at the
-    /// pre-drop-elab and post-pass stages. Stage 6 keeps verification
-    /// warn-only — diagnostics print to stderr but don't fail the build.
-    /// Stage 8 will flip the pre-drop-elab "no Drop/DropIf" check to a
-    /// hard error.
-    pub fn lower_to_mir(&self) -> kestrel_mir::MirModule {
-        self.lower_to_mir_with_diagnostics().0
-    }
+    // ================================================================
+    // MIR (OSSA) pipeline
+    // ================================================================
 
-    /// Same as [`Self::lower_to_mir`] but also returns the
-    /// [`kestrel_ownership::Diagnostics`] (E500/E501) accumulated by the
-    /// move-check pass. Callers that surface user diagnostics (the CLI,
-    /// the test harness) use this variant; callers that just need the
-    /// MIR module for codegen / inspection can use the plain wrapper.
-    pub fn lower_to_mir_with_diagnostics(
-        &self,
-    ) -> (kestrel_mir::MirModule, kestrel_ownership::Diagnostics) {
-        let verify_on = std::env::var_os("KESTREL_VERIFY_MIR").is_some();
-        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
-        if verify_on {
-            kestrel_mir::passes::verify_with_stage(
-                &mir,
-                kestrel_mir::passes::VerifyStage::PreDropElab,
-            )
-            .dump_if_errors();
-        }
-        let diags = kestrel_ownership::run(&mut mir);
-        let mir = mir.with_all_passes();
-        if verify_on {
-            mir.verify().dump_if_errors();
-        }
-        (mir, diags)
-    }
-
-    /// Lower to MIR, run all passes, and compile to native object code.
-    ///
-    /// Call after inference has been run. Returns the raw object file bytes.
+    /// Lower to MIR (OSSA), run the pass pipeline, and verify.
     #[allow(clippy::result_large_err)]
-    pub fn compile_to_object(
-        &self,
-    ) -> Result<Vec<u8>, kestrel_codegen_cranelift::error::CodegenError> {
-        let mir = self.lower_to_mir();
-        let target = kestrel_codegen::TargetConfig::host();
-        let options = kestrel_codegen_cranelift::CodegenOptions::default();
-        let result = kestrel_codegen_cranelift::compile(&mir, &target, &options)?;
-        Ok(result.object_bytes)
+    /// Raw MIR lowering with NO pass pipeline or verification — for
+    /// inspecting lowering output even when other functions fail to verify.
+    pub fn lower_to_mir_raw(&self) -> kestrel_mir::MirModule {
+        kestrel_mir_lower::lower_module(self.world(), self.root())
     }
 
-    /// Lower to MIR, run all passes, compile, and link to an executable.
-    ///
-    /// Call after inference has been run.
+    pub fn lower_to_mir(
+        &self,
+    ) -> Result<kestrel_mir::MirModule, kestrel_codegen_cranelift::CodegenError> {
+        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
+        let target = kestrel_mir::TargetConfig::host_64();
+        let mut next_entity = self.world().entity_count() as u32;
+        let errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
+        if !errors.is_empty() {
+            let ctx = self.world().query_context();
+            for error in &errors {
+                ctx.accumulate(diagnostic::mir_verify_error_to_diagnostic(
+                    error,
+                    self.world(),
+                ));
+            }
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
+                format!("OSSA verification failed with {} error(s)", errors.len()),
+            ));
+        }
+        Ok(mir)
+    }
+
+    /// Best-effort lowering to a PRE-MONO `Stage` for inspection (`kestrel dump
+    /// mir -s <stage>`). Runs passes up to `stop`; runs verify only at
+    /// `Stage::Verify`. Returns the module plus any verify errors (empty unless
+    /// `stop == Verify`). Never aborts and never accumulates diagnostics — the
+    /// caller decides whether/how to surface errors.
+    pub fn lower_to_mir_stage(
+        &self,
+        stop: kestrel_mir::passes::Stage,
+    ) -> (
+        kestrel_mir::MirModule,
+        Vec<kestrel_mir::verify::VerifyError>,
+    ) {
+        debug_assert!(stop.is_pre_mono());
+        let mut mir = kestrel_mir_lower::lower_module(self.world(), self.root());
+        let target = kestrel_mir::TargetConfig::host_64();
+        let mut next_entity = self.world().entity_count() as u32;
+        let errors =
+            kestrel_mir::passes::run_pipeline_until(&mut mir, &target, &mut next_entity, stop);
+        (mir, errors)
+    }
+
+    /// Lower to MIR, monomorphize, expand, compile, and link to an executable.
     #[allow(clippy::result_large_err)]
     pub fn compile_and_link(
         &self,
         output_path: &Path,
         options: &kestrel_codegen_cranelift::CodegenOptions,
-    ) -> Result<(), kestrel_codegen_cranelift::error::CodegenError> {
-        let mir = self.lower_to_mir();
+    ) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
+        let mir = self.lower_to_mir()?;
+        let mono = self.monomorphize_mir(mir)?;
         let target = kestrel_codegen::TargetConfig::host();
-        kestrel_codegen_cranelift::compile_and_link(&mir, &target, options, output_path)
+        kestrel_codegen_cranelift::compile_and_link(&mono, &target, options, output_path)
+    }
+
+    /// Same as [`Self::compile_and_link`] but uses the LLVM backend. Reuses the
+    /// shared lower -> monomorphize pipeline (whose errors are mapped into the
+    /// LLVM backend's error type) and hands the `MonoModule` to the LLVM codegen.
+    #[allow(clippy::result_large_err)]
+    pub fn compile_and_link_llvm(
+        &self,
+        output_path: &Path,
+        options: &kestrel_codegen_llvm::CodegenOptions,
+    ) -> Result<(), kestrel_codegen_llvm::CodegenError> {
+        let to_llvm =
+            |e: kestrel_codegen_cranelift::CodegenError| kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string());
+        let mir = self.lower_to_mir().map_err(to_llvm)?;
+        let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
+        let target = kestrel_codegen::TargetConfig::host();
+        kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn monomorphize_mir(
+        &self,
+        mir: kestrel_mir::MirModule,
+    ) -> Result<kestrel_mir::mono::MonoModule, kestrel_codegen_cranelift::CodegenError> {
+        let target = kestrel_mir::TargetConfig::host_64();
+        let generic_functions = mir.functions.clone();
+
+        let mut mono = kestrel_mir::mono::monomorphize(mir, &target).map_err(|errs| {
+            let detail = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            kestrel_codegen_cranelift::CodegenError::Unsupported(format!(
+                "monomorphization failed with {} error(s): {detail}",
+                errs.len(),
+            ))
+        })?;
+
+        // Collapse conservative copy+destroy pairs into moves before expand turns
+        // CopyValue/DestroyValue into real clone()/drop calls. The lowering copies
+        // every @owned value (emit_value_use) by design and defers cleanup to here.
+        kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+
+        kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
+
+        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        kestrel_mir::mono::audit::run_audit(&mono);
+
+        let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
+        if !mono_verify.is_ok() {
+            let ctx = self.world().query_context();
+            for error in &mono_verify.errors {
+                ctx.accumulate(diagnostic::mir_mono_verify_error_to_diagnostic(
+                    error,
+                    &mono,
+                    self.world(),
+                ));
+            }
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
+                format!(
+                    "post-mono verification failed with {} error(s)",
+                    mono_verify.errors.len()
+                ),
+            ));
+        }
+
+        Ok(mono)
+    }
+
+    /// Run monomorphization up to a POST-MONO `Stage` for inspection (`kestrel
+    /// dump mir -s {mono,copy-prop,expand}`). Best-effort: returns the module
+    /// plus any `verify_mono` errors (populated only at `Stage::Expand`, where
+    /// verification runs). The only hard failure is `mono::monomorphize` itself
+    /// — there'd be no module to show. Mirrors [`Self::monomorphize_mir`] but
+    /// stops early and does not abort on post-mono verify errors.
+    #[allow(clippy::result_large_err)]
+    pub fn monomorphize_mir_until(
+        &self,
+        mir: kestrel_mir::MirModule,
+        stop: kestrel_mir::passes::Stage,
+    ) -> Result<
+        (
+            kestrel_mir::mono::MonoModule,
+            Vec<kestrel_mir::mono::MonoVerifyError>,
+        ),
+        kestrel_codegen_cranelift::CodegenError,
+    > {
+        debug_assert!(stop.is_post_mono());
+        let target = kestrel_mir::TargetConfig::host_64();
+        let generic_functions = mir.functions.clone();
+
+        let mut mono = kestrel_mir::mono::monomorphize(mir, &target).map_err(|errs| {
+            let detail = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            kestrel_codegen_cranelift::CodegenError::Unsupported(format!(
+                "monomorphization failed with {} error(s): {detail}",
+                errs.len(),
+            ))
+        })?;
+        if stop == kestrel_mir::passes::Stage::Mono {
+            return Ok((mono, Vec::new()));
+        }
+
+        kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+        if stop == kestrel_mir::passes::Stage::CopyProp {
+            return Ok((mono, Vec::new()));
+        }
+
+        kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
+        // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
+        kestrel_mir::mono::audit::run_audit(&mono);
+        let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
+        Ok((mono, mono_verify.errors))
     }
 
     /// Load all .ks files from a directory, parse and build declarations.
@@ -545,16 +656,12 @@ mod tests {
         let child_kinds: Vec<_> = result.tree.children().map(|n| n.kind()).collect();
         // SourceFile children are module declaration + struct declaration nodes
         assert!(
-            child_kinds
-                .iter()
-                .any(|k| *k == SyntaxKind::ModuleDeclaration),
+            child_kinds.contains(&SyntaxKind::ModuleDeclaration),
             "expected ModuleDeclaration, got {:?}",
             child_kinds
         );
         assert!(
-            child_kinds
-                .iter()
-                .any(|k| *k == SyntaxKind::StructDeclaration),
+            child_kinds.contains(&SyntaxKind::StructDeclaration),
             "expected StructDeclaration, got {:?}",
             child_kinds
         );
@@ -776,7 +883,7 @@ mod tests {
             );
         }
         assert!(
-            c.files.get("t.ks").is_none(),
+            !c.files.contains_key("t.ks"),
             "path entry should be dropped"
         );
     }

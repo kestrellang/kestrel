@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create data for cursor
             let byte10: std.numeric.UInt8 = 10;

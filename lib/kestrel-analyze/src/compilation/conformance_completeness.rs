@@ -157,13 +157,15 @@ fn check_entity(cx: &CompilationContext<'_>, entity: Entity, diags: &mut Vec<Ana
         && let Some(target) = cx.query.query(ExtensionTargetEntity {
             extension: entity,
             root: cx.root,
-        }) {
-            // Only check if this extension declares new conformances
-            if let Some(conf) = cx.query.get::<Conformances>(entity)
-                && !conf.0.is_empty() {
-                    check_extension_conformances(cx, entity, target, diags);
-                }
+        })
+    {
+        // Only check if this extension declares new conformances
+        if let Some(conf) = cx.query.get::<Conformances>(entity)
+            && !conf.0.is_empty()
+        {
+            check_extension_conformances(cx, entity, target, diags);
         }
+    }
 
     for &child in cx.query.children_of(entity) {
         check_entity(cx, child, diags);
@@ -194,7 +196,14 @@ fn check_type_conformances(
 
         let proto_param_subs =
             build_proto_param_subs(cx, entity, protocol, ast_ty, conforming_entity);
-        check_protocol_requirements(cx, entity, protocol, conforming_entity, &proto_param_subs, diags);
+        check_protocol_requirements(
+            cx,
+            entity,
+            protocol,
+            conforming_entity,
+            &proto_param_subs,
+            diags,
+        );
     }
 }
 
@@ -220,8 +229,7 @@ fn check_extension_conformances(
             continue;
         }
 
-        let proto_param_subs =
-            build_proto_param_subs(cx, target, protocol, ast_ty, extension);
+        let proto_param_subs = build_proto_param_subs(cx, target, protocol, ast_ty, extension);
         check_protocol_requirements(cx, target, protocol, extension, &proto_param_subs, diags);
     }
 }
@@ -759,7 +767,8 @@ fn find_protocol_extension_assoc_binding(
                 }
                 if cx
                     .query
-                    .get::<Name>(child).is_none_or(|name| name.0 != assoc_name)
+                    .get::<Name>(child)
+                    .is_none_or(|name| name.0 != assoc_name)
                 {
                     continue;
                 }
@@ -1028,22 +1037,27 @@ fn build_proto_param_subs(
     // If the conformance is on an extension, its type params are distinct
     // entities from the struct's. Build a mapping so resolved extension params
     // are translated to the corresponding struct params.
-    let ext_to_struct: HashMap<Entity, Entity> =
-        if decl_entity != type_entity && cx.query.get::<NodeKind>(decl_entity) == Some(&NodeKind::Extension) {
-            let ext_params = cx
-                .query
-                .get::<TypeParams>(decl_entity)
-                .map(|tp| &tp.0[..])
-                .unwrap_or(&[]);
-            let struct_params = cx
-                .query
-                .get::<TypeParams>(type_entity)
-                .map(|tp| &tp.0[..])
-                .unwrap_or(&[]);
-            ext_params.iter().zip(struct_params.iter()).map(|(&e, &s)| (e, s)).collect()
-        } else {
-            HashMap::new()
-        };
+    let ext_to_struct: HashMap<Entity, Entity> = if decl_entity != type_entity
+        && cx.query.get::<NodeKind>(decl_entity) == Some(&NodeKind::Extension)
+    {
+        let ext_params = cx
+            .query
+            .get::<TypeParams>(decl_entity)
+            .map(|tp| &tp.0[..])
+            .unwrap_or(&[]);
+        let struct_params = cx
+            .query
+            .get::<TypeParams>(type_entity)
+            .map(|tp| &tp.0[..])
+            .unwrap_or(&[]);
+        ext_params
+            .iter()
+            .zip(struct_params.iter())
+            .map(|(&e, &s)| (e, s))
+            .collect()
+    } else {
+        HashMap::new()
+    };
 
     let mut subs = Vec::new();
     for (&proto_param, ast_arg) in proto_params.iter().zip(ast_type_args.iter()) {
@@ -1091,19 +1105,20 @@ fn resolve_conformance_type_arg(
                             .collect();
                         Some(ResolvedTy::Named { entity, args })
                     }
-                }
+                },
                 _ => None,
             }
-        }
+        },
         AstType::Tuple(elems, _) => {
             let resolved: Vec<ResolvedTy> = elems
                 .iter()
                 .filter_map(|e| resolve_conformance_type_arg(cx, e, context, ext_to_struct))
                 .collect();
             Some(ResolvedTy::Tuple(resolved))
-        }
+        },
         AstType::Function {
             params,
+            param_conventions,
             return_type,
             ..
         } => {
@@ -1111,13 +1126,13 @@ fn resolve_conformance_type_arg(
                 .iter()
                 .filter_map(|p| resolve_conformance_type_arg(cx, p, context, ext_to_struct))
                 .collect();
-            let ret =
-                resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
+            let ret = resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
             Some(ResolvedTy::Function {
                 params,
+                conventions: param_conventions.clone(),
                 ret: Box::new(ret),
             })
-        }
+        },
         AstType::Unit(_) => Some(ResolvedTy::Tuple(Vec::new())),
         AstType::Never(_) => Some(ResolvedTy::Never),
         _ => None,
@@ -1393,9 +1408,10 @@ fn collect_from_entity(
             Some(NodeKind::TypeAlias) => {
                 // Only count type aliases with a binding (TypeAnnotation = concrete type)
                 if let Some(name) = name
-                    && cx.query.get::<TypeAnnotation>(child).is_some() {
-                        type_aliases.insert(name);
-                    }
+                    && cx.query.get::<TypeAnnotation>(child).is_some()
+                {
+                    type_aliases.insert(name);
+                }
             },
             Some(NodeKind::Field) => {
                 if let Some(name) = name {
@@ -1437,17 +1453,24 @@ fn collect_provided_members_for_conformance(
 
     for member in candidates {
         if let TypeMemberSource::ProtocolExtension {
-            protocol, extension,
+            protocol,
+            extension,
         } = member.source
         {
-            let subs = subs_cache.entry(protocol).or_insert_with(|| {
-                build_protocol_param_substitution(cx, type_entity, protocol)
-            });
+            let subs = subs_cache
+                .entry(protocol)
+                .or_insert_with(|| build_protocol_param_substitution(cx, type_entity, protocol));
             if !extension_clauses_entailed(cx, extension, subs, &context_clauses) {
                 continue;
             }
         }
-        bin_member(cx, member.entity, &mut methods, &mut type_aliases, &mut fields);
+        bin_member(
+            cx,
+            member.entity,
+            &mut methods,
+            &mut type_aliases,
+            &mut fields,
+        );
     }
 
     ProvidedMembers {
@@ -1533,8 +1556,7 @@ fn build_protocol_param_substitution(
     else {
         return HashMap::new();
     };
-    let subs =
-        build_proto_param_subs(cx, type_entity, proto, &conformance_ast, conformance_decl);
+    let subs = build_proto_param_subs(cx, type_entity, proto, &conformance_ast, conformance_decl);
     subs.into_iter().collect()
 }
 

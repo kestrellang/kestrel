@@ -22,6 +22,7 @@ func makeShape() -> some Shape {
     Circle(radius: 3)
 }
 
+@main
 func main() -> lang.i64 {
     let s = makeShape();
     if s.area() != 9 { return 1 }

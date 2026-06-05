@@ -3,6 +3,7 @@ Information on the project structure, workflows, quick references, and patterns 
 ## Agent Rules
 
 - Never change a test in order to cajole it to pass, unless I tell you explicitly to, or it uses invalid kestrel syntax. Don't add #[ignore] to tests
+- Tests should document the state of the compiler, they don't need to all pass. If a behavior is not working yet, you should add a test to ensure it gets fixed.
 - If you hit a roadblock, stop and ask for guidance. Don't revert your changes, throw away changes, or anything. After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
 - There will be multiple agents working at the same time in this codebase
 
@@ -30,10 +31,6 @@ Make sure to consider incremental compilation.
 Avoid fragile solutions, use holistic solutions that won't break down the line
 When you fix a mistake, think about how you can avoid the same mistake being made later
 
-# Lib 2 rewrite
-
-We are rewriting it in lib, focus on that
-
 # Directory-scoped guidance (`AGENTS.md`)
 
 Before editing a file, look for an `AGENTS.md` in its directory or any parent
@@ -57,3 +54,7 @@ where the pattern applies). A one-line ask is enough: "Noticed we're doing X
 here — want me to add it to `path/AGENTS.md`?" Don't silently add entries,
 and don't hoard patterns for a session-ending summary — capture them as they
 come up, while the context is fresh.
+
+## Debugging
+
+Any time you have to trace something through compiler internals, use the kestrel-debug crate

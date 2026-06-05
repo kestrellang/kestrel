@@ -1,19 +1,16 @@
-func Test.example() -> ()
-{
-    locals:
-        %h: Test.Handle
-        %_t0: Test.Handle
+; function: Test.example
+bb0:
+    jump bb1
 
-    bb0:
-        jump bb1
+bb1:
+    %v0 = literal i64 1  // @owned Int64
+    %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
+    %v2 = move_value %v1  // @owned Test.Handle
+    %v3 = call Test.consume(%v2)  // @owned ()
+    destroy_value %v3
+    jump bb2
 
-    bb1:
-        scope_live %self
-        %_t0 = construct Test.Handle { fd: i64.literal 1 }
-        %self = move %_t0
-        call Test.consume(move %self)
-        jump bb2
+bb2:
+    %v6 = literal ()  // @owned ()
+    return %v6
 
-    bb2:
-        return ()
-}

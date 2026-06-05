@@ -128,20 +128,19 @@ pub fn type_references_in_file(
                 segments: segments.clone(),
                 context,
                 root,
-            }) {
-                if e == target {
-                    let ident = elem
-                        .children_with_tokens()
-                        .filter_map(|c| c.into_token())
-                        .find(|t| t.kind() == SyntaxKind::Identifier);
-                    if let Some(tok) = ident {
-                        let r = tok.text_range();
-                        sites.push(Span {
-                            file_id: file_entity.index(),
-                            start: r.start().into(),
-                            end: r.end().into(),
-                        });
-                    }
+            }) && e == target
+            {
+                let ident = elem
+                    .children_with_tokens()
+                    .filter_map(|c| c.into_token())
+                    .find(|t| t.kind() == SyntaxKind::Identifier);
+                if let Some(tok) = ident {
+                    let r = tok.text_range();
+                    sites.push(Span {
+                        file_id: file_entity.index(),
+                        start: r.start().into(),
+                        end: r.end().into(),
+                    });
                 }
             }
         }

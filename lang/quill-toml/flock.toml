@@ -1,10 +1,10 @@
 [package]
 name = "quill-toml"
-version = "0.2.1"
+version = "0.2.4"
 description = "TOML support for quill"
 author = "jkpdino"
 license = "MIT"
 repository = "https://github.com/kestrellang/kestrel"
 
 [dependencies]
-kestrel/quill = { version = "0.2.1" }
+quill = { path = "../quill" }

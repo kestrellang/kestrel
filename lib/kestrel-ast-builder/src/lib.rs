@@ -5,6 +5,7 @@
 //! expressions are deferred. Components describe capabilities (what an entity
 //! CAN DO) and are orthogonal and composable.
 
+pub mod arg_binding;
 pub mod ast_type;
 pub mod build;
 pub mod builders;

@@ -57,9 +57,10 @@ impl DeclCheck for StaticContextAnalyzer {
             && matches!(
                 cx.query.get::<NodeKind>(parent),
                 Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-            ) {
-                return vec![];
-            }
+            )
+        {
+            return vec![];
+        }
 
         let name = util::entity_name(cx.query, cx.entity);
         let span = util::entity_span(cx.query, cx.entity);

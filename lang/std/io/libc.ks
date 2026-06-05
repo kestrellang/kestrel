@@ -112,7 +112,9 @@ public func MODE_DEFAULT() -> Int32 { 420 }
 // RAW LIBC BINDINGS
 // ============================================================================
 
-@extern(.C, mangleName: "open")
+// Wrapped via libc_shims.c — POSIX open() is variadic and on Apple aarch64
+// variadic args use a different ABI (stack) than fixed args (registers).
+@extern(.C, mangleName: "kestrel_open")
 func libc_open(path: RawPointer, flags: Int32, mode: Int32) -> Int32
 
 @extern(.C, mangleName: "close")

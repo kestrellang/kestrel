@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // sort(by:) - descending order
             var arr = std.collections.Array[std.numeric.Int64]();

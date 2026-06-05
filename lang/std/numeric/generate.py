@@ -453,20 +453,20 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         }}'''
         sign_prefix = '''
         if isNegative {
-            result.appendChar('-')
+            result.append(char: '-')
         } else if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }'''
     else:
         sign_handling = '''
         let isNegative = false;'''
         sign_prefix = '''
         if options.sign == .Always {
-            result.appendChar('+')
+            result.append(char: '+')
         } else if options.sign == .Space {
-            result.appendChar(' ')
+            result.append(char: ' ')
         }'''
 
     return f'''    // Formattable
@@ -1040,7 +1040,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
         negate_method = f"""/// Two's-complement negation. Wraps at the minimum value:
     /// `{type_name}.minValue.negate() == {type_name}.minValue`. Use
     /// `negateChecked` to surface the overflow.
-    public func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
+    public consuming func negate() -> {type_name} {{ {type_name}(raw: lang.{lang_type}_neg(self.raw)) }}"""
         abs_method = f"""/// Absolute value. Wraps at the minimum value
     /// (`{type_name}.minValue.abs() == {type_name}.minValue`); use
     /// `absChecked` if that's a problem.
@@ -1617,11 +1617,11 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         var result = String();
         if allowSign {
             if isNegative {
-                result.appendChar('-')
+                result.append(char: '-')
             } else if options.sign == .Always {
-                result.appendChar('+')
+                result.append(char: '+')
             } else if options.sign == .Space {
-                result.appendChar(' ')
+                result.append(char: ' ')
             }
         }
         if trimTrailingZeros {
@@ -1670,7 +1670,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
 
         result.append(number);
         if suffixPercent {
-            result.appendChar('%')
+            result.append(char: '%')
         }
 
         _writePadded(into: writer, result, options)

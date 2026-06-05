@@ -56,8 +56,11 @@ pub enum MatchSource {
     IfLet,
     /// Desugared from `while let p = v { ... }`.
     WhileLet,
-    /// Desugared from `guard <condition> else { ... }` or `guard let p = v else { ... }`.
+    /// Desugared from `guard <condition> else { ... }` (bool-only, no pattern bindings).
     Guard,
+    /// CPS-desugared from `guard let p = v else { ... }`: pattern arm = continuation,
+    /// wildcard arm = else body (must diverge).
+    GuardLet,
     /// Desugared from `for p in iter { ... }` (the Option match on iterator.next()).
     ForLoop,
     /// Desugared from `let <pattern> = expr;`.
@@ -69,8 +72,6 @@ pub enum MatchSource {
     ParamDestructure,
     /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
     TryOp,
-    /// Desugared from `expr!` unwrap.
-    UnwrapOp,
 }
 
 impl MatchSource {
@@ -190,7 +191,6 @@ pub enum HirExpr {
     },
     Closure {
         params: Vec<HirClosureParam>,
-        captures: Vec<LocalId>,
         body: HirBlock,
         span: Span,
     },
@@ -534,6 +534,10 @@ pub struct HirClosureParam {
     /// Present for destructured params (tuple/struct). `None` for simple
     /// bindings and wildcards (the `local` already captures those).
     pub pattern: Option<HirPatId>,
+    /// `true` when the param was written `mutating` (by-reference). Inference
+    /// may additionally treat a param as `MutBorrow` based on the expected
+    /// type even when this is `false`.
+    pub is_mut: bool,
 }
 
 /// A single argument in an enum/variant pattern.
@@ -589,13 +593,13 @@ pub const BINARY_OP_PROTOCOLS: &[(BinaryOp, Builtin, &str, Option<&str>)] = &[
     (
         BinaryOp::Eq,
         Builtin::EqualsOperatorProtocol,
-        "isEqual",
+        "equal",
         Some("to"),
     ),
     (
         BinaryOp::Ne,
         Builtin::NotEqualsOperatorProtocol,
-        "isNotEqual",
+        "notEqual",
         Some("to"),
     ),
     (
@@ -716,11 +720,18 @@ pub const UNARY_OP_PROTOCOLS: &[(UnaryOp, Builtin, &str)] = &[
 ];
 
 /// (operator, protocol_builtin, method_name)
-pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[(
-    PostfixOp::RangeFrom,
-    Builtin::RangeFromOperatorProtocol,
-    "rangeFrom",
-)];
+pub const POSTFIX_OP_PROTOCOLS: &[(PostfixOp, Builtin, &str)] = &[
+    (
+        PostfixOp::RangeFrom,
+        Builtin::RangeFromOperatorProtocol,
+        "rangeFrom",
+    ),
+    (
+        PostfixOp::Unwrap,
+        Builtin::ForceUnwrapOperatorProtocol,
+        "forceUnwrap",
+    ),
+];
 
 /// (operator, protocol_builtin, method_name, arg_label)
 ///

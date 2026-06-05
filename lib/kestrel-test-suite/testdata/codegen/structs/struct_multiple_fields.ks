@@ -9,6 +9,7 @@ struct Data {
     let c: std.numeric.Int64
 }
 
+@main
 func main() -> lang.i64 {
     let d = Data(a: 10, b: 20, c: 12);
     if d.a + d.b + d.c != 42 { return 1 }

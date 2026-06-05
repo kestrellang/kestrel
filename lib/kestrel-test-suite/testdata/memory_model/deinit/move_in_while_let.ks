@@ -24,6 +24,7 @@ func produce(n: Int64) -> Resource? {
     return .None;
 }
 
+@main
 func main() -> lang.i64 {
     var counter: Int64 = 3;
     while let .Some(v) = produce(counter) {

@@ -10,6 +10,8 @@ use kestrel_hir::body::HirExprId;
 use kestrel_hir::res::LocalId;
 use kestrel_span::Span;
 
+use kestrel_hir::ty::HirTy;
+
 use crate::constraint::{CallArg, Constraint};
 use crate::error::InferError;
 use crate::resolve::TypeResolver;
@@ -55,6 +57,12 @@ pub struct InferCtx<'a> {
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
+
+    /// MethodCall exprs where the resolution went through a field access.
+    /// Maps expr → field entity. MIR lowering must interpose a field
+    /// projection before the call (the resolution points to the subscript/
+    /// method on the field's type, not the receiver's type).
+    pub(crate) field_subscripts: HashMap<HirExprId, Entity>,
 
     /// Promotion info for Coerce sites that needed wrapping.
     pub(crate) promotions: HashMap<HirExprId, PromotionInfo>,
@@ -103,6 +111,12 @@ pub struct InferCtx<'a> {
     /// Implicit-it closure TyVars: 1 param named "it", requires exactly 1-param context.
     pub(crate) closure_it: HashSet<TyVar>,
 
+    /// HirExprIds of closure-*literal* expressions, recorded during constraint
+    /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
+    /// convention upgrade to literals only — a named function value's
+    /// conventions reflect its real ABI and must not be rewritten.
+    pub(crate) closure_literal_exprs: HashSet<HirExprId>,
+
     /// TyVars that were unified with `Never` while still unresolved.
     /// `unify(Never, Unresolved)` is intentionally a no-op — Never is
     /// the bottom type and shouldn't pin a TyVar that a sibling arm
@@ -125,6 +139,17 @@ pub struct InferCtx<'a> {
     /// literal. Set by `HirStmt::Let` when the annotation is `Dictionary[K, V]`
     /// or the `[K: V]` type operator has already lowered to Dictionary.
     pub(crate) expected_dict_entry: Option<(TyVar, TyVar)>,
+
+    /// Expression ID of the accumulator init call inside a Sugar::StringInterpolation.
+    /// Set by `mark_sugar_primary`, consumed by `gen_expr` for Call. Replaces the
+    /// concrete DefaultStringInterpolation init with a deferred type variable so
+    /// the accumulator type can be resolved from context.
+    pub(crate) interpolation_init_expr: Option<kestrel_hir::body::HirExprId>,
+
+    /// The accumulator type variable for the current string interpolation.
+    /// Set during the init interception, consumed by the Sugar handler to
+    /// emit the InterpolationLink constraint.
+    pub(crate) interpolation_acc_tv: Option<TyVar>,
 
     /// TyVars created from an explicit `_` (HirTy::Infer) in a type-argument
     /// position. These intentionally stay unresolved when the caller doesn't
@@ -151,6 +176,11 @@ pub struct InferCtx<'a> {
     /// Set in `create_return_type` when the return annotation is `HirTy::Opaque`.
     /// Used by `build_result` to extract the concrete type for `TypedBody`.
     pub(crate) opaque_return: Option<OpaqueReturnInfo>,
+
+    /// Deferred type-parameter defaults (e.g. `H = DefaultHasher`).
+    /// Applied after constraint solving: only type vars still unconstrained
+    /// get their default, so generic bodies like `Set.init()` keep `H` free.
+    pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -194,6 +224,7 @@ impl<'a> InferCtx<'a> {
             errored_coerce_exprs: HashSet::new(),
             poison_protocol_call_recv_on_failure: HashSet::new(),
             resolutions: HashMap::new(),
+            field_subscripts: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),
             type_arg_spans: HashMap::new(),
@@ -207,13 +238,17 @@ impl<'a> InferCtx<'a> {
             type_param_defs: HashMap::new(),
             closure_flex: HashSet::new(),
             closure_it: HashSet::new(),
+            closure_literal_exprs: HashSet::new(),
             never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
             expected_dict_entry: None,
+            interpolation_init_expr: None,
+            interpolation_acc_tv: None,
             wildcard_tvars: HashSet::new(),
             witness_protocol_args: HashMap::new(),
             loop_break_tys: Vec::new(),
             opaque_return: None,
+            type_param_defaults: Vec::new(),
         }
     }
 
@@ -362,6 +397,17 @@ impl<'a> InferCtx<'a> {
         result
     }
 
+    /// Allocate a TyVar directly resolved to an AssocProjection.
+    /// Unlike `project_associated`, this does NOT emit an Associated constraint —
+    /// use when the projection must survive as-is (e.g. cycle-breaking in
+    /// `solve_associated` where re-emitting the constraint would loop).
+    pub fn assoc_projection(&mut self, base: TyVar, assoc: Entity) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::AssocProjection { base, assoc }));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar bound to a Tuple type.
     pub fn tuple(&mut self, elements: Vec<TyVar>) -> TyVar {
         let idx = self.types.len() as u32;
@@ -369,12 +415,46 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
-    /// Allocate a TyVar bound to a Function type.
+    /// Allocate a TyVar bound to a Function type. Convenience: every param
+    /// defaults to `Consuming` (the pre-#106 convention). Use
+    /// [`Self::function_conv`] to carry explicit `mutating` conventions.
     pub fn function(&mut self, params: Vec<TyVar>, ret: TyVar) -> TyVar {
+        let conventions = vec![kestrel_ast::ParamConvention::Consuming; params.len()];
+        self.function_conv(params, conventions, ret)
+    }
+
+    /// Allocate a TyVar bound to a Function type with explicit per-param
+    /// conventions (parallel to `params`).
+    pub fn function_conv(
+        &mut self,
+        params: Vec<TyVar>,
+        conventions: Vec<kestrel_ast::ParamConvention>,
+        ret: TyVar,
+    ) -> TyVar {
         let idx = self.types.len() as u32;
-        self.types
-            .push(TySlot::Resolved(TyKind::Function { params, ret }));
+        self.types.push(TySlot::Resolved(TyKind::Function {
+            params,
+            conventions,
+            ret,
+        }));
         TyVar(idx)
+    }
+
+    /// Overwrite the resolved `TyKind::Function` conventions of `tv` in place.
+    /// Used by `solve_call` to upgrade a closure literal's inferred param
+    /// convention (e.g. `Consuming` → `MutBorrow`) once the expected parameter
+    /// type is known. No-op if `tv` does not resolve to a function type.
+    pub fn set_function_conventions(
+        &mut self,
+        tv: TyVar,
+        conventions: Vec<kestrel_ast::ParamConvention>,
+    ) {
+        let root = self.resolve(tv);
+        if let TySlot::Resolved(TyKind::Function { conventions: c, .. }) =
+            &mut self.types[root.0 as usize]
+        {
+            *c = conventions;
+        }
     }
 
     /// Allocate a TyVar bound to Never.
@@ -654,6 +734,14 @@ impl<'a> InferCtx<'a> {
             args,
             result,
             expr,
+            span,
+        });
+    }
+
+    pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
+        self.constraints.push(Constraint::InterpolationLink {
+            result_tv,
+            acc_tv,
             span,
         });
     }

@@ -56,8 +56,13 @@ pub enum TyKind {
     /// Tuple type.
     Tuple(Vec<TyVar>),
 
-    /// Function type: (params) → return.
-    Function { params: Vec<TyVar>, ret: TyVar },
+    /// Function type: (params) → return. `conventions` is parallel to `params`
+    /// (a `mutating` closure/function param is `MutBorrow`, else `Consuming`).
+    Function {
+        params: Vec<TyVar>,
+        conventions: Vec<kestrel_ast::ParamConvention>,
+        ret: TyVar,
+    },
 
     /// Type parameter from a generic declaration.
     Param { entity: Entity },
@@ -142,4 +147,6 @@ pub enum LiteralKind {
     Array,
     /// Dictionary literal — default: `@builtin(.DefaultDictionaryLiteralType)[_, _]`
     Dictionary,
+    /// String interpolation accumulator — default: `@builtin(.DefaultStringInterpolation)`
+    StringInterpolation,
 }

@@ -4,6 +4,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // Multi-line raw: indent strip applies but no escape decoding.
     let s = #"""

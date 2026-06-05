@@ -26,6 +26,11 @@ pub struct TypedBody {
     /// Used by codegen to know which function to call.
     pub resolutions: HashMap<HirExprId, Entity>,
 
+    /// MethodCall exprs where the call resolved through a field access.
+    /// Maps expr → field entity. MIR lowering interposes a field projection
+    /// before the call so the receiver is the field value, not `self`.
+    pub field_subscripts: HashMap<HirExprId, Entity>,
+
     /// Promotion info for expressions that need wrapping.
     /// Codegen inserts FromValue.from() calls at these sites.
     pub promotions: HashMap<HirExprId, ResolvedPromotion>,
@@ -106,6 +111,8 @@ pub enum ResolvedTy {
     Tuple(Vec<ResolvedTy>),
     Function {
         params: Vec<ResolvedTy>,
+        /// Parallel to `params`; carries the `mutating` convention to MIR.
+        conventions: Vec<kestrel_ast::ParamConvention>,
         ret: Box<ResolvedTy>,
     },
     /// Opaque return type from a call to a function with `some P` return.
@@ -175,11 +182,16 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .map(|&tv| resolve_to_concrete(ctx, tv))
                 .collect(),
         ),
-        TyKind::Function { params, ret } => ResolvedTy::Function {
+        TyKind::Function {
+            params,
+            conventions,
+            ret,
+        } => ResolvedTy::Function {
             params: params
                 .iter()
                 .map(|&tv| resolve_to_concrete(ctx, tv))
                 .collect(),
+            conventions: conventions.clone(),
             ret: Box::new(resolve_to_concrete(ctx, *ret)),
         },
         TyKind::Opaque {
@@ -262,6 +274,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         expr_types,
         local_types,
         resolutions,
+        field_subscripts: ctx.field_subscripts.clone(),
         promotions,
         type_args,
         errors: ctx.errors.clone(),
@@ -292,6 +305,7 @@ fn literal_kind_name(lit: LiteralKind) -> &'static str {
         LiteralKind::Null => "null literal",
         LiteralKind::Array => "array literal",
         LiteralKind::Dictionary => "dictionary literal",
+        LiteralKind::StringInterpolation => "string interpolation",
     }
 }
 
@@ -345,7 +359,7 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 format!("({})", strs.join(", "))
             }
         },
-        TyKind::Function { params, ret } => {
+        TyKind::Function { params, ret, .. } => {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
             format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
         },
@@ -404,6 +418,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             // method calls, field/property access) say "no member 'X' on
             // type 'T'". The init wording is special-cased because lib1's
             // `resolve_delegating_init` path produced its own diagnostic.
+            if name == "subscript" {
+                return format!(
+                    "no matching subscript on type '{}'",
+                    describe_tyvar(ctx, *receiver)
+                );
+            }
             let kind = if *is_call && name == "init" {
                 "method"
             } else {
@@ -421,6 +441,13 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         },
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)
+        },
+        InferError::MemberIsStatic { receiver, name, .. } => {
+            format!(
+                "'{}' is a static member of '{}' and cannot be used on an instance",
+                name,
+                describe_tyvar(ctx, *receiver)
+            )
         },
         InferError::NoAssociatedType {
             container, name, ..
@@ -519,15 +546,16 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             name,
             describe_tyvar(ctx, *receiver)
         ),
-        InferError::PrimitiveMethodNotCalled {
+        InferError::MethodNotCalled {
             receiver, method, ..
         } => format!(
-            "primitive method '{}' on '{}' must be called",
+            "method '{}' on '{}' must be called",
             method,
             describe_tyvar(ctx, *receiver)
         ),
-        InferError::CircularOpaqueReturn { .. } => {
-            "circular opaque return type".into()
+        InferError::CircularOpaqueReturn { .. } => "circular opaque return type".into(),
+        InferError::ConventionMismatch { .. } => {
+            "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
     }
 }

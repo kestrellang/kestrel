@@ -29,6 +29,7 @@ func test_return() -> Int64 {
     return deinit_count;
 }
 
+@main
 func main() -> lang.i64 {
     let result = test_return();
     // Iterations 0,1,2: inner deinited at end of each = 3

@@ -86,6 +86,8 @@ This preview rounds out the type system surface — opaque and existential types
 
 Existential types (`any Protocol`) — boxed via `GlobalAllocator`, with vtables carrying drop / size / align plus the protocol methods. `any P` is non-Copyable; `Cloneable` is conditional on `P: Cloneable`. Escaping closures get the same boxing treatment when a closure outlives its frame. `indirect case` enum variants heap-box their payloads via the same allocator.
 
+> **TODO — `Pointer(to: <non-place>)` silently addresses a temporary.** `Pointer(to:)` should only be expressible against a *place* (a local `var`, a stored field, etc.), where it addresses real storage and write-through works. Today it also accepts an rvalue — most insidiously a subscript getter result like `Pointer(to: arr(i))` — and silently takes the address of a throwaway stack temporary. The value-semantics are technically correct (you got a pointer to *a* copy of the value), but it's a sharp FFI footgun: a C out-param write (e.g. `kestrel_system_timezone_name(Pointer(to: buf(0)), 256)`) overflows the 1-byte temporary → stack corruption, not a buffer fill. `arr.asPointer()` is the correct idiom for element storage. Fix in 0.17: reject `Pointer(to: <non-place>)` at the type-check layer with a diagnostic that points at `.asPointer()` / suggests binding to a `var` first. (Surfaced 2026-06-02 in datetime's `TimeZone.system`/`name`/`abbreviationAt`.)
+
 ## 0.18 — Attribute system
 
 The full attribute pipeline parsed and propagated through AST → HIR → MIR. Auto-derived protocols arrive (`@derive(Equatable, Hashable, Cloneable, Comparable)`), along with built-in attributes (`@inline`, `@deprecated`).

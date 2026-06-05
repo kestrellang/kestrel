@@ -37,6 +37,7 @@ struct Box: HasCount {
     func count() -> lang.i64 { return self.items; }
 }
 
+@main
 func main() -> lang.i64 {
     let b = Bag(3);
     let x = Box(5);

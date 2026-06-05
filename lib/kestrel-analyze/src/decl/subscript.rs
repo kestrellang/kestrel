@@ -74,28 +74,30 @@ impl DeclCheck for SubscriptAnalyzer {
 
         // Check 1: subscript must have at least one parameter
         if let Some(callable) = cx.query.get::<Callable>(cx.entity)
-            && callable.params.is_empty() {
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[0].id,
-                    severity: DESCRIPTORS[0].default_severity,
-                    message: "subscript must have at least one parameter".into(),
-                    labels: vec![DiagLabel {
-                        span: span.clone(),
-                        message: "add at least one parameter".into(),
-                        is_primary: true,
-                    }],
-                    notes: vec![
-                        "Subscripts provide indexed access and require parameters.".into(),
-                        "Use a computed property instead if no parameters are needed.".into(),
-                    ],
-                });
-            }
+            && callable.params.is_empty()
+        {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[0].id,
+                severity: DESCRIPTORS[0].default_severity,
+                message: "subscript must have at least one parameter".into(),
+                labels: vec![DiagLabel {
+                    span: span.clone(),
+                    message: "add at least one parameter".into(),
+                    is_primary: true,
+                }],
+                notes: vec![
+                    "Subscripts provide indexed access and require parameters.".into(),
+                    "Use a computed property instead if no parameters are needed.".into(),
+                ],
+            });
+        }
 
         // Check 2: subscript must have a body (unless inside a protocol)
         if let Some(parent) = cx.query.parent_of(cx.entity)
-            && matches!(cx.query.get::<NodeKind>(parent), Some(NodeKind::Protocol)) {
-                return diags;
-            }
+            && matches!(cx.query.get::<NodeKind>(parent), Some(NodeKind::Protocol))
+        {
+            return diags;
+        }
 
         let has_body = cx.query.get::<Body>(cx.entity).is_some()
             || cx.query.get::<Valued>(cx.entity).is_some();

@@ -23,6 +23,7 @@ extend Pair[A, B] {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let p = Pair[lang.i64, lang.i64].make(a: 10, b: 32);
     lang.i64_sub(lang.i64_add(p.first, p.second), 42)

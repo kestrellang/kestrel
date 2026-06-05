@@ -22,6 +22,7 @@ func unwrap_or(opt: Option, default: std.numeric.Int64) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var opt = Option.Some(value: 21);
     double_in_place(opt);

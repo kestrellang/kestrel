@@ -5,7 +5,8 @@ module std.text
 import std.core.(Bool, Equatable, Comparable, Ordering, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
-import std.memory.(Pointer, RawPointer)
+import std.memory.(Pointer, RawPointer, ArraySlice)
+import std.collections.(Array)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
 import std.text.(Formattable, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
@@ -106,6 +107,51 @@ extend Str {
     /// ```
     public func toOwned() -> String {
         self.asSlice().toOwned()
+    }
+
+    /// Copies this string's raw UTF-8 bytes into a new `Array[UInt8]`.
+    ///
+    /// Single bulk copy of the whole byte range (one buffer clone +
+    /// one memcpy-style loop), so it is O(n) — unlike appending byte
+    /// by byte, where each COW write re-clones the whole buffer and
+    /// the total cost is O(n²).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "Hi".toBytes().count;  // 2
+    /// "Hi".toBytes()(0);     // 72  ('H')
+    /// ```
+    public func toBytes() -> Array[UInt8] {
+        let slice = self.asSlice();
+        let n = slice.byteCount;
+        var buffer = Array[UInt8](capacity: n);
+        if n == 0 {
+            return buffer
+        }
+        // ArraySlice is a non-owning view over the live string buffer;
+        // append(contentsOf:) copies out of it in a single pass.
+        buffer.append(contentsOf: ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: n));
+        buffer
+    }
+
+    /// Returns a non-owning `ArraySlice[UInt8]` view over this string's
+    /// raw UTF-8 bytes — no copy, no allocation. The slice borrows the
+    /// live string buffer, so it must not outlive the string (or any
+    /// mutation of it). O(1).
+    ///
+    /// Use this to hand the bytes to a sink (a socket, a hasher, an
+    /// FFI call) without materializing an `Array[UInt8]` via `toBytes()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = "Hi".asByteSlice();
+    /// bytes.count;  // 2
+    /// ```
+    public func asByteSlice() -> ArraySlice[UInt8] {
+        let slice = self.asSlice();
+        ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: slice.byteCount)
     }
 
     // -- Iteration -----------------------------------------------------------
@@ -340,7 +386,7 @@ extend Str {
     /// ```
     /// "hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
     /// ```
-    public func split(where predicate: (Char) -> Bool) -> SplitWhereView {
+    public func split(consuming where predicate: (Char) -> Bool) -> SplitWhereView {
         SplitWhereView(slice: self.asSlice(), where: predicate)
     }
 
@@ -784,6 +830,41 @@ extend Str {
     /// ```
     public func equalsCaseInsensitive(other: String) -> Bool {
         self.caseFolded().isEqual(to: other.caseFolded())
+    }
+
+    /// ASCII case-insensitive equality — folds only `A`–`Z` ↔ `a`–`z`;
+    /// bytes `>= 0x80` must match exactly.
+    ///
+    /// Allocates nothing: it compares the raw UTF-8 bytes in place behind a
+    /// length fast-path, so it is far cheaper than `equalsCaseInsensitive`,
+    /// which builds two Unicode-folded `String`s. Use it for ASCII tokens
+    /// such as HTTP header names, where Unicode folding is unnecessary.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// "Content-Type".equalsIgnoreAsciiCase("content-type");  // true
+    /// "Content-Type".equalsIgnoreAsciiCase("Host");          // false
+    /// ```
+    public func equalsIgnoreAsciiCase(other: some Str) -> Bool {
+        let a = self.asByteSlice();
+        let b = other.asByteSlice();
+        if a.count != b.count {
+            return false
+        }
+        var i: Int64 = 0;
+        while i < a.count {
+            var x = a.pointer.offset(by: i).read();
+            var y = b.pointer.offset(by: i).read();
+            // Fold A–Z (0x41–0x5A) to lower case; leave everything else.
+            if x >= 65 and x <= 90 { x = x + 32 };
+            if y >= 65 and y <= 90 { y = y + 32 };
+            if x != y {
+                return false
+            };
+            i = i + 1
+        };
+        true
     }
 
     /// Returns a new string with Unicode case folding applied to

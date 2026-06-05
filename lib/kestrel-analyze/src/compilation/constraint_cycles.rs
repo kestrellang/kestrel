@@ -190,9 +190,10 @@ fn collect_param_refs(
                     context,
                     root: cx.root,
                 })
-                    && param_set.contains(&e) {
-                        out.push(e);
-                    }
+                && param_set.contains(&e)
+            {
+                out.push(e);
+            }
             for seg in segments {
                 for t in &seg.type_args {
                     collect_param_refs(cx, t, context, param_set, out);

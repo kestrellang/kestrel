@@ -5,19 +5,25 @@
 //! that performs the fix. The descriptor ID lands in `Diagnostic.code` via
 //! `convert.rs::AnalyzeDiagnostic→Diagnostic`.
 //!
-//! First implemented fix:
+//! Implemented fixes:
 //! - **E002 — unreachable_code**: delete the unreachable statement /
 //!   expression. The diagnostic's primary range already spans exactly the
 //!   code to remove; we extend it forward to consume the trailing newline
 //!   so the file doesn't keep a blank line.
+//! - **E200 — assign_to_immutable**: change `let` to `var` at the local's
+//!   declaration site. Requires compiler access to locate the declaration.
 
 use std::collections::HashMap;
 
+use kestrel_hir::body::HirExpr;
+use kestrel_hir_lower::LowerBody;
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
     Diagnostic, NumberOrString, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 
+use crate::position::LineIndex;
+use crate::semantic;
 use crate::server::{SharedState, url_to_path};
 
 pub async fn handle(state: SharedState, params: CodeActionParams) -> Option<CodeActionResponse> {
@@ -30,11 +36,39 @@ pub async fn handle(state: SharedState, params: CodeActionParams) -> Option<Code
     };
 
     let mut actions: Vec<CodeActionOrCommand> = Vec::new();
+
+    // Text-only actions (no compiler needed).
+    let mut has_let_to_var = false;
     for diag in &params.context.diagnostics {
-        if let Some(action) = build_action(diag, &uri, source.as_deref()) {
-            actions.push(CodeActionOrCommand::CodeAction(action));
+        match diag_code(diag) {
+            Some("E002") => {
+                actions.push(CodeActionOrCommand::CodeAction(remove_dead_code_action(
+                    diag,
+                    &uri,
+                    source.as_deref(),
+                )));
+            },
+            // E200: assign to immutable local; E203: let binding to mutating param.
+            // Both fix by changing `let` to `var` at the declaration site.
+            Some("E200" | "E203") => has_let_to_var = true,
+            _ => {},
         }
     }
+
+    // Compiler-backed actions: change `let` → `var`.
+    if has_let_to_var {
+        let let_diags: Vec<Diagnostic> = params
+            .context
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(diag_code(d), Some("E200" | "E203")))
+            .cloned()
+            .collect();
+        if let Some(fixes) = handle_let_to_var(&state, &uri, &path, &let_diags).await {
+            actions.extend(fixes);
+        }
+    }
+
     if actions.is_empty() {
         None
     } else {
@@ -42,20 +76,15 @@ pub async fn handle(state: SharedState, params: CodeActionParams) -> Option<Code
     }
 }
 
-fn build_action(diag: &Diagnostic, uri: &Url, source: Option<&str>) -> Option<CodeAction> {
-    let code = match diag.code.as_ref()? {
-        NumberOrString::String(s) => s.as_str(),
-        NumberOrString::Number(_) => return None,
-    };
-    match code {
-        "E002" => Some(remove_dead_code_action(diag, uri, source)),
-        _ => None,
+fn diag_code(diag: &Diagnostic) -> Option<&str> {
+    match diag.code.as_ref()? {
+        NumberOrString::String(s) => Some(s.as_str()),
+        NumberOrString::Number(_) => None,
     }
 }
 
-/// E002 fix: delete the unreachable statement/expression range. We extend
-/// the deletion forward to swallow the trailing newline so we don't leave
-/// a blank line behind.
+// ===== E002 — remove unreachable code =====
+
 fn remove_dead_code_action(diag: &Diagnostic, uri: &Url, source: Option<&str>) -> CodeAction {
     let extended_end = source
         .map(|src| extend_through_newline(src, diag.range.end))
@@ -90,8 +119,6 @@ fn remove_dead_code_action(diag: &Diagnostic, uri: &Url, source: Option<&str>) -
     }
 }
 
-/// If the character at `pos` is the start of a line break, advance past it
-/// (handles `\n` and `\r\n`). Otherwise return `pos` unchanged.
 fn extend_through_newline(source: &str, pos: Position) -> Position {
     let mut line: usize = 0;
     let mut col_utf16: usize = 0;
@@ -100,7 +127,6 @@ fn extend_through_newline(source: &str, pos: Position) -> Position {
     let mut chars = source.char_indices().peekable();
     while let Some(&(_, c)) = chars.peek() {
         if line == target_line && col_utf16 == target_col {
-            // Found the position; check if next char is a newline.
             return match c {
                 '\n' => Position {
                     line: pos.line + 1,
@@ -129,6 +155,115 @@ fn extend_through_newline(source: &str, pos: Position) -> Position {
         }
     }
     pos
+}
+
+// ===== E200 — change `let` to `var` =====
+
+async fn handle_let_to_var(
+    state: &SharedState,
+    uri: &Url,
+    path: &str,
+    diags: &[Diagnostic],
+) -> Option<Vec<CodeActionOrCommand>> {
+    let (handle, stdlib, user, sources, line_index) = {
+        let s = state.lock().await;
+        let li = s.docs.get(uri).map(|d| d.line_index.clone())?;
+        let (stdlib, user) = s.partition_sources();
+        (
+            s.compiler_handle.clone(),
+            stdlib,
+            user,
+            s.sources.clone(),
+            li,
+        )
+    };
+
+    let offsets: Vec<usize> = diags
+        .iter()
+        .map(|d| line_index.position_to_offset(d.range.start))
+        .collect();
+    let diags_owned = diags.to_vec();
+    let path_owned = path.to_string();
+    let uri_owned = uri.clone();
+
+    handle
+        .with_compiler(
+            stdlib,
+            user,
+            move |compiler, _by_path| -> Option<Vec<CodeActionOrCommand>> {
+                let file_entity = semantic::file_entity_for_path(compiler, &path_owned)?;
+                let world = compiler.world();
+                let root = compiler.root();
+                let source = sources.get(&path_owned)?;
+
+                let mut actions = Vec::new();
+                for (diag, offset) in diags_owned.iter().zip(offsets.iter()) {
+                    let Some(body_entity) = semantic::body_entity_at(world, file_entity, *offset)
+                    else {
+                        continue;
+                    };
+                    let ctx = world.query_context();
+                    let Some(hir) = ctx.query(LowerBody {
+                        entity: body_entity,
+                        root,
+                    }) else {
+                        continue;
+                    };
+                    let Some(expr_id) = semantic::hir_expr_at(&hir, *offset) else {
+                        continue;
+                    };
+                    let HirExpr::Local(local_id, _) = &hir.exprs[expr_id] else {
+                        continue;
+                    };
+                    let local = &hir.locals[*local_id];
+                    let decl_start = local.span.start;
+
+                    // Search backward from the name for the `let` keyword.
+                    let search_start = decl_start.saturating_sub(20);
+                    let prefix = &source[search_start..decl_start];
+                    let Some(let_in_prefix) = prefix.rfind("let") else {
+                        continue;
+                    };
+                    let let_start = search_start + let_in_prefix;
+                    let let_end = let_start + 3;
+
+                    let li = LineIndex::new(source.clone());
+                    let edit_range = li.range_for(let_start, let_end);
+
+                    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+                    changes.insert(
+                        uri_owned.clone(),
+                        vec![TextEdit {
+                            range: edit_range,
+                            new_text: "var".to_string(),
+                        }],
+                    );
+
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: format!("Change 'let' to 'var' for '{}'", local.name),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![diag.clone()]),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            document_changes: None,
+                            change_annotations: None,
+                        }),
+                        command: None,
+                        is_preferred: Some(true),
+                        disabled: None,
+                        data: None,
+                    }));
+                }
+
+                if actions.is_empty() {
+                    None
+                } else {
+                    Some(actions)
+                }
+            },
+        )
+        .await
+        .flatten()
 }
 
 #[cfg(test)]
@@ -188,7 +323,8 @@ mod tests {
             message: "unreachable code".into(),
             ..Default::default()
         };
-        let action = build_action(&diag, &uri, Some("ok\nok\nbad code\nrest")).expect("action");
+        assert_eq!(diag_code(&diag), Some("E002"));
+        let action = remove_dead_code_action(&diag, &uri, Some("ok\nok\nbad code\nrest"));
         assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
         assert!(action.title.contains("Remove unreachable"));
         let edit = action.edit.unwrap();
@@ -200,11 +336,24 @@ mod tests {
 
     #[test]
     fn build_action_unknown_code_returns_none() {
-        let uri = Url::parse("file:///tmp/x.ks").unwrap();
         let diag = Diagnostic {
             code: Some(NumberOrString::String("E999".into())),
             ..Default::default()
         };
-        assert!(build_action(&diag, &uri, None).is_none());
+        assert_eq!(diag_code(&diag), Some("E999"));
+    }
+
+    #[test]
+    fn e200_finds_let_keyword() {
+        // Simulate finding `let` before a local name at byte offset 15.
+        let src = "module T\nfunc f() {\n    let x = 1;\n    x = 2;\n}\n";
+        let let_pos = src.find("let x").unwrap();
+        let x_pos = src.find("let x").unwrap() + "let ".len();
+        let search_start = x_pos.saturating_sub(20);
+        let prefix = &src[search_start..x_pos];
+        let found = prefix.rfind("let").unwrap();
+        let actual_let = search_start + found;
+        assert_eq!(actual_let, let_pos);
+        assert_eq!(&src[actual_let..actual_let + 3], "let");
     }
 }

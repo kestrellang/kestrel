@@ -48,7 +48,7 @@ struct DequeStorage[T]: Cloneable {
     /// Returns an empty storage with a null pointer when `len == 0`.
     /// Panics if allocation fails.
     func clone() -> DequeStorage[T] {
-        if self.len == 0 {
+        if self.cap == 0 {
             return DequeStorage(
                 ptr: Pointer[T].nullPointer(),
                 len: 0,
@@ -56,7 +56,7 @@ struct DequeStorage[T]: Cloneable {
                 head: 0
             )
         }
-        let layout = Layout.array[T](self.len);
+        let layout = Layout.array[T](self.cap);
         var allocator = SystemAllocator();
         let result = allocator.allocate(layout);
         if let .Some(rawPtr) = result {
@@ -66,15 +66,30 @@ struct DequeStorage[T]: Cloneable {
                 if phys >= self.cap { phys = phys - self.cap; }
                 newPtr.offset(by: i).write(self.ptr.offset(by: phys).read());
             }
-            DequeStorage(ptr: newPtr, len: self.len, cap: self.len, head: 0)
+            DequeStorage(ptr: newPtr, len: self.len, cap: self.cap, head: 0)
         } else {
             fatalError("DequeStorage clone allocation failed")
         }
     }
 
-    /// Frees the underlying ring buffer if one was allocated.
+    /// Drops every live element, then frees the underlying ring buffer.
+    ///
+    /// Runs when the last `RcBox` reference to this storage drops (COW
+    /// guarantees the buffer is uniquely owned, so each element is dropped
+    /// exactly once). The `len` live elements occupy ring positions
+    /// `(head + i) % cap`; uninitialized slots are skipped. Skipping these
+    /// destructors (the previous behavior) leaked the owned heap of every
+    /// non-trivial element, e.g. the `String`s in a `Deque[String]`. For a
+    /// trivially-droppable `T` the per-element `dropInPlace` is a no-op.
     deinit {
         if self.cap > 0 {
+            var i: Int64 = 0;
+            while i < self.len {
+                var phys = self.head + i;
+                if phys >= self.cap { phys = phys - self.cap; };
+                self.ptr.offset(by: phys).dropInPlace();
+                i = i + 1
+            };
             let layout = Layout.array[T](self.cap);
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
@@ -196,13 +211,13 @@ public struct Deque[T]: Iterable, Cloneable {
     // -- internal helpers --
 
     /// Reads the current element count from the COW storage.
-    fileprivate func len() -> Int64 { self.storage.read().len }
+    fileprivate func len() -> Int64 { self.storage.valuePtr().with { (s) in s.len } }
     /// Reads the current buffer capacity from the COW storage.
-    fileprivate func cap() -> Int64 { self.storage.read().cap }
+    fileprivate func cap() -> Int64 { self.storage.valuePtr().with { (s) in s.cap } }
     /// Reads the ring-buffer head offset from the COW storage.
-    fileprivate func head() -> Int64 { self.storage.read().head }
+    fileprivate func head() -> Int64 { self.storage.valuePtr().with { (s) in s.head } }
     /// Reads the raw element pointer from the COW storage.
-    fileprivate func rawPtr() -> Pointer[T] { self.storage.read().ptr }
+    fileprivate func rawPtr() -> Pointer[T] { self.storage.valuePtr().with { (s) in s.ptr } }
 
     // ========================================================================
     // CONSTRUCTORS
@@ -396,10 +411,10 @@ public struct Deque[T]: Iterable, Cloneable {
     /// d.isEmpty;  // true
     /// ```
     public mutating func clear() {
-        var s = self.storage.write();
-        s.len = 0;
-        s.head = 0;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            s.len = 0;
+            s.head = 0
+        }
     }
 
     // ========================================================================
@@ -421,12 +436,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func pushBack(element: T) {
         self.grow(minCapacity: self.len() + 1);
-        var s = self.storage.write();
-        var tail = s.head + s.len;
-        if tail >= s.cap { tail = tail - s.cap; }
-        s.ptr.offset(by: tail).write(element);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            var tail = s.head + s.len;
+            if tail >= s.cap { tail = tail - s.cap; }
+            s.ptr.offset(by: tail).write(element);
+            s.len = s.len + 1
+        }
     }
 
     /// Prepends `element` to the front of the deque. O(1) amortized.
@@ -444,12 +459,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func pushFront(element: T) {
         self.grow(minCapacity: self.len() + 1);
-        var s = self.storage.write();
-        s.head = s.head - 1;
-        if s.head < 0 { s.head = s.cap - 1; }
-        s.ptr.offset(by: s.head).write(element);
-        s.len = s.len + 1;
-        self.storage.setValue(s)
+        self.storage.modify { (mutating s) in
+            s.head = s.head - 1;
+            if s.head < 0 { s.head = s.cap - 1; }
+            s.ptr.offset(by: s.head).write(element);
+            s.len = s.len + 1
+        }
     }
 
     // ========================================================================
@@ -472,12 +487,13 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func popFront() -> T? {
         if self.len() == 0 { return .None; }
-        var s = self.storage.write();
-        let value = s.ptr.offset(by: s.head).read();
-        s.head = s.head + 1;
-        if s.head >= s.cap { s.head = 0; }
-        s.len = s.len - 1;
-        self.storage.setValue(s);
+        let value = self.storage.modify { (mutating s) in
+            let v = s.ptr.offset(by: s.head).read();
+            s.head = s.head + 1;
+            if s.head >= s.cap { s.head = 0; }
+            s.len = s.len - 1;
+            v
+        };
         .Some(value)
     }
 
@@ -497,12 +513,12 @@ public struct Deque[T]: Iterable, Cloneable {
     /// ```
     public mutating func popBack() -> T? {
         if self.len() == 0 { return .None; }
-        var s = self.storage.write();
-        s.len = s.len - 1;
-        var tail = s.head + s.len;
-        if tail >= s.cap { tail = tail - s.cap; }
-        let value = s.ptr.offset(by: tail).read();
-        self.storage.setValue(s);
+        let value = self.storage.modify { (mutating s) in
+            s.len = s.len - 1;
+            var tail = s.head + s.len;
+            if tail >= s.cap { tail = tail - s.cap; }
+            s.ptr.offset(by: tail).read()
+        };
         .Some(value)
     }
 

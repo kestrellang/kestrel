@@ -139,31 +139,32 @@ fn normalize_hir_type(
                 && let Some(alias_ty) = qctx.query(LowerTypeAnnotation {
                     entity: *entity,
                     root,
-                }) {
-                    let type_params = qctx
-                        .get::<TypeParams>(*entity)
-                        .map(|tp| tp.0.clone())
-                        .unwrap_or_default();
-                    let old_subs: Vec<(Entity, Option<ResolvedTy>)> = type_params
-                        .iter()
-                        .zip(norm_args.iter())
-                        .map(|(&param, arg)| (param, state.param_subs.insert(param, arg.clone())))
-                        .collect();
+                })
+            {
+                let type_params = qctx
+                    .get::<TypeParams>(*entity)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default();
+                let old_subs: Vec<(Entity, Option<ResolvedTy>)> = type_params
+                    .iter()
+                    .zip(norm_args.iter())
+                    .map(|(&param, arg)| (param, state.param_subs.insert(param, arg.clone())))
+                    .collect();
 
-                    state.alias_stack.push(*entity);
-                    let normalized = normalize_hir_type(qctx, root, &alias_ty, env, state);
-                    state.alias_stack.pop();
+                state.alias_stack.push(*entity);
+                let normalized = normalize_hir_type(qctx, root, &alias_ty, env, state);
+                state.alias_stack.pop();
 
-                    for (param, old) in old_subs {
-                        if let Some(old) = old {
-                            state.param_subs.insert(param, old);
-                        } else {
-                            state.param_subs.remove(&param);
-                        }
+                for (param, old) in old_subs {
+                    if let Some(old) = old {
+                        state.param_subs.insert(param, old);
+                    } else {
+                        state.param_subs.remove(&param);
                     }
-
-                    return normalized;
                 }
+
+                return normalized;
+            }
 
             ResolvedTy::Named {
                 entity: *entity,
@@ -198,11 +199,17 @@ fn normalize_hir_type(
                 .map(|elem| normalize_hir_type(qctx, root, elem, env, state))
                 .collect(),
         ),
-        HirTy::Function { params, ret, .. } => ResolvedTy::Function {
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            ..
+        } => ResolvedTy::Function {
             params: params
                 .iter()
                 .map(|param| normalize_hir_type(qctx, root, param, env, state))
                 .collect(),
+            conventions: param_conventions.clone(),
             ret: Box::new(normalize_hir_type(qctx, root, ret, env, state)),
         },
         HirTy::Never(_) => ResolvedTy::Never,
@@ -230,12 +237,18 @@ fn contains_error(ty: &ResolvedTy) -> bool {
     match ty {
         ResolvedTy::Error => true,
         ResolvedTy::Named { args, .. } | ResolvedTy::Tuple(args) => args.iter().any(contains_error),
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function { params, ret, .. } => {
             params.iter().any(contains_error) || contains_error(ret)
         },
         ResolvedTy::AssocProjection { base, .. } => contains_error(base),
-        ResolvedTy::Opaque { bounds, origin_args, .. } => {
-            bounds.iter().any(|(_, args)| args.iter().any(contains_error))
+        ResolvedTy::Opaque {
+            bounds,
+            origin_args,
+            ..
+        } => {
+            bounds
+                .iter()
+                .any(|(_, args)| args.iter().any(contains_error))
                 || origin_args.iter().any(contains_error)
         },
         ResolvedTy::Param { .. } | ResolvedTy::SelfType { .. } | ResolvedTy::Never => false,

@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{DeclSpan, FileId, FilePath};
+use kestrel_ast_builder::{DeclSpan, FilePath};
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::Local;
@@ -62,10 +62,9 @@ pub async fn handle(
                 let file_cst = compiler.parse(file_entity).tree;
                 if let Some((entity, _span)) =
                     crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+                    && let Some(loc) = target_to_location(world, &sources, Target::Entity(entity))
                 {
-                    if let Some(loc) = target_to_location(world, &sources, Target::Entity(entity)) {
-                        return Some(loc);
-                    }
+                    return Some(loc);
                 }
 
                 let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
@@ -132,7 +131,7 @@ fn target_to_location(
     match target {
         Target::Entity(entity) => {
             let span = world.get::<DeclSpan>(entity)?.0.clone();
-            let file_entity = entity_file(world, entity)?;
+            let file_entity = crate::references::entity_file(world, entity)?;
             let file_path = world.get::<FilePath>(file_entity).map(|p| p.0.clone())?;
             let url = path_to_url(&file_path)?;
             let source = sources.get(&file_path)?;
@@ -152,18 +151,4 @@ fn target_to_location(
             None
         },
     }
-}
-
-fn entity_file(world: &kestrel_hecs::World, entity: Entity) -> Option<Entity> {
-    if let Some(fid) = world.get::<FileId>(entity) {
-        return Some(fid.0);
-    }
-    let mut cur = world.parent_of(entity);
-    while let Some(e) = cur {
-        if let Some(fid) = world.get::<FileId>(e) {
-            return Some(fid.0);
-        }
-        cur = world.parent_of(e);
-    }
-    None
 }

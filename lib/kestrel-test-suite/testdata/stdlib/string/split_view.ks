@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // Verify extend Str methods work on StringSlice
     let s: std.text.String = "hello";

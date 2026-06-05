@@ -355,7 +355,7 @@ let results = await Task.all(tasks)
 let result = Result.from { try parse(s) }
 
 // value combinators for simple transforms
-parse(s).map { it * 2 }.unwrapOr(default: 0)
+parse(s).map { it * 2 }.unwrap(or: 0)
 ```
 
 ### When to Use Effects

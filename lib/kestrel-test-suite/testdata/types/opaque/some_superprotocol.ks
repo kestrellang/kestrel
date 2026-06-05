@@ -31,6 +31,7 @@ func makeShape() -> some Shape {
     Circle(r: 5)
 }
 
+@main
 func main() -> lang.i64 {
     let s = makeShape();
     if s.area() != 25 { return 1 }

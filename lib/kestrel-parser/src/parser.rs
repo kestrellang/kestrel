@@ -505,10 +505,10 @@ mod tests {
         for element in node.children_with_tokens() {
             if let Some(child) = element.clone().into_node() {
                 collect_token_texts(&child, kinds, texts);
-            } else if let Some(token) = element.into_token() {
-                if kinds.contains(&token.kind()) {
-                    texts.push(token.text().to_string());
-                }
+            } else if let Some(token) = element.into_token()
+                && kinds.contains(&token.kind())
+            {
+                texts.push(token.text().to_string());
             }
         }
     }

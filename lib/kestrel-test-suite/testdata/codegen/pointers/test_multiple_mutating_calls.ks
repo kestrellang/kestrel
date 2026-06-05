@@ -7,6 +7,7 @@ func add(mutating n: std.numeric.Int64, amount: std.numeric.Int64) {
     n = n + amount;
 }
 
+@main
 func main() -> lang.i64 {
     var x: std.numeric.Int64 = 0;
     add(x, 10);

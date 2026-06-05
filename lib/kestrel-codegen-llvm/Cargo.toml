@@ -1,0 +1,15 @@
+[package]
+name = "kestrel-codegen-llvm"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+kestrel-mir = { path = "../kestrel-mir" }
+kestrel-codegen = { path = "../kestrel-codegen" }
+kestrel-hecs = { path = "../kestrel-hecs" }
+inkwell = { version = "0.9", features = ["llvm18-1"] }
+target-lexicon = "0.12"
+indexmap = { workspace = true }

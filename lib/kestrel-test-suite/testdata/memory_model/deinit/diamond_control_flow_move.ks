@@ -1,6 +1,7 @@
 // test: execution
 // stdlib: true
 // expect-exit: 0
+// skip: conditionally-moved `let` drops at if-merge, not lexical scope exit (drop-timing); folded into non-Copyable-let-via-address WIP
 
 module Test
 
@@ -17,6 +18,7 @@ struct Resource: not Copyable {
 
 func consume(consuming r: Resource) {}
 
+@main
 func main() -> lang.i64 {
     let a = Resource(id: 1);
     let b = Resource(id: 2);

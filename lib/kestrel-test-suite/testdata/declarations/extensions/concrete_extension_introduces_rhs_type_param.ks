@@ -27,6 +27,7 @@ extend Slot: Indexable[T] {
     public func fetch(holder holder: Holder[T]) -> T { holder.read() }
 }
 
+@main
 func main() -> lang.i64 {
     let h = Holder[lang.i64](value: 42);
     let s = Slot();

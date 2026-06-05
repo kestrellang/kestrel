@@ -122,16 +122,17 @@ impl LowerCtx {
                         || children[i + 1..]
                             .iter()
                             .all(|c| c.kind() == SyntaxKind::RBrace);
-                    if is_last && tail_expr.is_none()
+                    if is_last
+                        && tail_expr.is_none()
                         && let Some(inner) = child.children().next()
-                            && inner.kind() == SyntaxKind::ExpressionStatement
-                                && !has_semicolon(&inner)
-                            {
-                                // Promote to tail expression
-                                let expr_id = self.lower_expr_stmt_as_expr(&inner);
-                                tail_expr = Some(expr_id);
-                                continue;
-                            }
+                        && inner.kind() == SyntaxKind::ExpressionStatement
+                        && !has_semicolon(&inner)
+                    {
+                        // Promote to tail expression
+                        let expr_id = self.lower_expr_stmt_as_expr(&inner);
+                        tail_expr = Some(expr_id);
+                        continue;
+                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
@@ -215,12 +216,12 @@ impl LowerCtx {
                     found_equals = true;
                 } else if found_equals
                     && let Some(expr_node) = child.into_node()
-                        && (expr_node.kind() == SyntaxKind::Expression
-                            || is_expr_kind(expr_node.kind()))
-                        {
-                            result = Some(self.lower_expr(&expr_node));
-                            break;
-                        }
+                    && (expr_node.kind() == SyntaxKind::Expression
+                        || is_expr_kind(expr_node.kind()))
+                {
+                    result = Some(self.lower_expr(&expr_node));
+                    break;
+                }
             }
             result
         };
@@ -312,9 +313,7 @@ impl LowerCtx {
                 if let Some(text) = first_token_text(&node) {
                     let form = crate::string_token::classify_string_token(&text);
                     if form.body_end > form.body_start
-                        && string_contains_interpolation(
-                            &text[form.body_start..form.body_end],
-                        )
+                        && string_contains_interpolation(&text[form.body_start..form.body_end])
                     {
                         self.lower_interpolated_string_from_token(&text, &node)
                     } else {
@@ -324,9 +323,7 @@ impl LowerCtx {
                     self.lower_literal(&node, AstLiteral::String)
                 }
             },
-            SyntaxKind::ExprRawString => {
-                self.lower_literal(&node, AstLiteral::RawString)
-            },
+            SyntaxKind::ExprRawString => self.lower_literal(&node, AstLiteral::RawString),
             SyntaxKind::ExprChar => self.lower_literal(&node, AstLiteral::Char),
             SyntaxKind::ExprBool => {
                 let span = self.span(&node);
@@ -474,9 +471,10 @@ impl LowerCtx {
         // If no structured children, the interpolated string is a raw token —
         // treat entire text as a literal part
         if parts.is_empty()
-            && let Some(text) = first_token_text(node) {
-                parts.push(StringPart::Literal(text));
-            }
+            && let Some(text) = first_token_text(node)
+        {
+            parts.push(StringPart::Literal(text));
+        }
 
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
@@ -699,11 +697,12 @@ impl LowerCtx {
                     }
                 }
             } else if let Some(child) = elem.as_node()
-                && child.kind() == SyntaxKind::Missing {
-                    // Parser recovered `.<missing>` after a path; treat it
-                    // as a member access whose member name is empty.
-                    trailing_missing_member = true;
-                }
+                && child.kind() == SyntaxKind::Missing
+            {
+                // Parser recovered `.<missing>` after a path; treat it
+                // as a member access whose member name is empty.
+                trailing_missing_member = true;
+            }
         }
 
         if trailing_missing_member && !segments.is_empty() {
@@ -753,29 +752,30 @@ impl LowerCtx {
         let mut i = start_idx;
         while i < elements.len() {
             if let Some(token) = elements[i].as_token()
-                && token.kind() == SyntaxKind::Dot {
+                && token.kind() == SyntaxKind::Dot
+            {
+                i += 1;
+                if let Some(id_text) = member_identifier_at(&elements, i) {
                     i += 1;
-                    if let Some(id_text) = member_identifier_at(&elements, i) {
-                        i += 1;
 
-                        let type_args = elements
-                            .get(i)
-                            .and_then(|e| e.as_node())
-                            .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
-                            .map(|n| {
-                                i += 1;
-                                extract_type_args(n, self.file_id)
-                            });
-
-                        current = self.alloc_expr(AstExpr::MemberAccess {
-                            base: current,
-                            member: id_text,
-                            type_args,
-                            span: span.clone(),
+                    let type_args = elements
+                        .get(i)
+                        .and_then(|e| e.as_node())
+                        .filter(|n| n.kind() == SyntaxKind::TypeArgumentList)
+                        .map(|n| {
+                            i += 1;
+                            extract_type_args(n, self.file_id)
                         });
-                        continue;
-                    }
+
+                    current = self.alloc_expr(AstExpr::MemberAccess {
+                        base: current,
+                        member: id_text,
+                        type_args,
+                        span: span.clone(),
+                    });
+                    continue;
                 }
+            }
             i += 1;
         }
 
@@ -876,11 +876,7 @@ impl LowerCtx {
             })
             .unwrap_or(PostfixOp::Unwrap);
 
-        self.alloc_expr(AstExpr::Postfix {
-            operand,
-            op,
-            span,
-        })
+        self.alloc_expr(AstExpr::Postfix { operand, op, span })
     }
 
     fn lower_binary(&mut self, node: &SyntaxNode) -> ExprId {
@@ -1109,11 +1105,11 @@ impl LowerCtx {
             if let Some(expr_node) = node.children().find(|c| {
                 (c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
                     && c.kind() != SyntaxKind::CodeBlock
-            })
-                && appears_before_code_block(node, &expr_node) {
-                    let expr = self.lower_expr(&expr_node);
-                    conditions.push(IfCondition::Expr(expr));
-                }
+            }) && appears_before_code_block(node, &expr_node)
+            {
+                let expr = self.lower_expr(&expr_node);
+                conditions.push(IfCondition::Expr(expr));
+            }
         }
 
         conditions
@@ -1310,7 +1306,17 @@ impl LowerCtx {
                             .find(|c| is_type_kind(c.kind()))
                             .and_then(|c| ast_type_from_cst(&c, self.file_id));
 
-                        ClosureParam { pattern, ty }
+                        // A leading `mutating` token marks a by-reference param.
+                        let is_mut = param_node.children_with_tokens().any(|e| {
+                            e.as_token()
+                                .is_some_and(|t| t.kind() == SyntaxKind::Mutating)
+                        });
+
+                        ClosureParam {
+                            pattern,
+                            ty,
+                            is_mut,
+                        }
                     })
                     .collect()
             })
@@ -1328,6 +1334,7 @@ impl LowerCtx {
             params.push(ClosureParam {
                 pattern: pat,
                 ty: None,
+                is_mut: false,
             });
         }
 
@@ -1353,6 +1360,23 @@ impl LowerCtx {
         for child in node.children() {
             match child.kind() {
                 SyntaxKind::Statement => {
+                    // Demote any pending tail expression (e.g. a statement-like
+                    // `while`/`for`/`if` that preceded this statement) to a
+                    // statement FIRST, so source order is preserved. Without
+                    // this, a statement after such an expression was appended to
+                    // `stmts` while the expression stayed as `tail_expr`, lowering
+                    // the later statement *before* the loop.
+                    if let Some(prev) = tail_expr.take() {
+                        let prev_span = match &self.exprs[prev] {
+                            AstExpr::Error { span } => span.clone(),
+                            _ => Span::synthetic(self.file_id),
+                        };
+                        let stmt = self.alloc_stmt(AstStmt::Expr {
+                            expr: prev,
+                            span: prev_span,
+                        });
+                        stmts.push(stmt);
+                    }
                     if let Some(inner) = child.children().next() {
                         let stmt_id = self.lower_stmt(&inner);
                         stmts.push(stmt_id);
@@ -2197,6 +2221,9 @@ fn token_to_compound_assign_op(kind: SyntaxKind) -> Option<CompoundAssignOp> {
 }
 
 #[cfg(test)]
+// String-interpolation/closure helpers are defined after this module by design;
+// keep them co-located with the lowering code rather than hoisting above the tests.
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::build::build_declarations;

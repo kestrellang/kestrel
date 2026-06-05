@@ -523,9 +523,7 @@ fn code_block_items_parser<'tokens>()
         );
 
     // Single condition: either let-binding or boolean expression
-    let guard_single_condition = let_cond
-        .clone()
-        .or(expr_parser().map(IfCondition::Expr));
+    let guard_single_condition = let_cond.clone().or(expr_parser().map(IfCondition::Expr));
 
     // Condition list: one or more conditions (let-binding or boolean), comma-separated
     let guard_conditions = guard_single_condition

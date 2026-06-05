@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let a: std.core.Bool = true;
     let b: std.core.Bool = true;

@@ -179,6 +179,14 @@ public struct BytesView: Iterable, Cloneable {
         get { index.readBytesClamped(from: self) }
     }
 
+    /// @name Wrapping
+    /// Reads at `index` with modulo wrap-around. Negative indices wrap
+    /// from the end: `view.bytes(wrapped: -1)` reads the last byte.
+    /// Returns `None` on an empty view.
+    public subscript[I](wrapped index: I) -> I.BytesWrappedYield where I: BytesWrappable {
+        get { index.readBytesWrapped(from: self) }
+    }
+
     /// Returns a `BytesIterator` positioned at byte 0.
     ///
     /// Required by `Iterable`. Each call produces a fresh iterator —
@@ -395,6 +403,14 @@ public struct CharsView: Iterable, Cloneable {
     /// yield `CharsView` (always valid, possibly empty).
     public subscript[I](clamped index: I) -> I.CharsClampedYield where I: CharsClampable {
         get { index.readCharsClamped(from: self) }
+    }
+
+    /// @name Wrapping
+    /// Reads at `index` with modulo wrap-around. Negative indices wrap
+    /// from the end: `view.chars(wrapped: -1)` reads the last char.
+    /// Returns `None` on an empty view.
+    public subscript[I](wrapped index: I) -> I.CharsWrappedYield where I: CharsWrappable {
+        get { index.readCharsWrapped(from: self) }
     }
 
     /// Internal: walk the buffer to find the byte offset of code-point
@@ -649,6 +665,14 @@ public struct GraphemesView: Iterable, Cloneable {
     /// range indexes yield `GraphemesView` (always valid, possibly empty).
     public subscript[I](clamped index: I) -> I.GraphemesClampedYield where I: GraphemesClampable {
         get { index.readGraphemesClamped(from: self) }
+    }
+
+    /// @name Wrapping
+    /// Reads at `index` with modulo wrap-around. Negative indices wrap
+    /// from the end: `view.graphemes(wrapped: -1)` reads the last
+    /// grapheme cluster. Returns `None` on an empty view.
+    public subscript[I](wrapped index: I) -> I.GraphemesWrappedYield where I: GraphemesWrappable {
+        get { index.readGraphemesWrapped(from: self) }
     }
 
     /// Internal: walk the segmenter to grapheme index `graphemeIndex`,
@@ -922,6 +946,14 @@ public struct LinesView: Iterable, Cloneable {
         get { index.readLinesClamped(from: self) }
     }
 
+    /// @name Wrapping
+    /// Reads at `index` with modulo wrap-around. Negative indices wrap
+    /// from the end: `view.lines(wrapped: -1)` reads the last line.
+    /// Returns `None` on an empty view.
+    public subscript[I](wrapped index: I) -> I.LinesWrappedYield where I: LinesWrappable {
+        get { index.readLinesWrapped(from: self) }
+    }
+
     /// Materializes the view as an owned `String` covering the entire
     /// underlying buffer (terminators included). O(n) — copies bytes.
     public func toString() -> String {
@@ -1118,6 +1150,11 @@ internal protocol BytesClampable {
     func readBytesClamped(from view: BytesView) -> BytesClampedYield
 }
 
+internal protocol BytesWrappable {
+    type BytesWrappedYield
+    func readBytesWrapped(from view: BytesView) -> BytesWrappedYield
+}
+
 extend Int64: BytesIndex {
     type BytesYield = UInt8
 
@@ -1152,6 +1189,20 @@ extend Int64: BytesClampable {
         var idx = self;
         if idx < 0 { idx = 0 }
         if idx >= len { idx = len - 1 }
+        .Some(view._readByteRaw(index: idx))
+    }
+}
+
+extend Int64: BytesWrappable {
+    type BytesWrappedYield = UInt8?
+
+    public func readBytesWrapped(from view: BytesView) -> UInt8? {
+        let len = view.count;
+        if len == 0 {
+            return .None
+        }
+        var idx = self % len;
+        if idx < 0 { idx = idx + len }
         .Some(view._readByteRaw(index: idx))
     }
 }
@@ -1205,6 +1256,24 @@ extend Range[Int64]: BytesClampable {
     }
 }
 
+extend Range[Int64]: BytesWrappable {
+    type BytesWrappedYield = BytesView
+
+    public func readBytesWrapped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        if len == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % len;
+        if s < 0 { s = s + len }
+        var span = self.end - self.start;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > len { e = len }
+        view._subView(startByte: s, endByte: e)
+    }
+}
+
 extend ClosedRange[Int64]: BytesIndex {
     type BytesYield = BytesView
 
@@ -1241,6 +1310,24 @@ extend ClosedRange[Int64]: BytesClampable {
         if end > len { end = len }
         if start > end { start = end }
         view._subView(startByte: start, endByte: end)
+    }
+}
+
+extend ClosedRange[Int64]: BytesWrappable {
+    type BytesWrappedYield = BytesView
+
+    public func readBytesWrapped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        if len == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % len;
+        if s < 0 { s = s + len }
+        var span = self.end - self.start + 1;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > len { e = len }
+        view._subView(startByte: s, endByte: e)
     }
 }
 
@@ -1302,6 +1389,20 @@ extend RangeFrom[Int64]: BytesClampable {
     }
 }
 
+extend RangeFrom[Int64]: BytesWrappable {
+    type BytesWrappedYield = BytesView
+
+    public func readBytesWrapped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        if len == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % len;
+        if s < 0 { s = s + len }
+        view._subView(startByte: s, endByte: len)
+    }
+}
+
 extend RangeFrom[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
         view(self).toString()
@@ -1341,6 +1442,20 @@ extend RangeUpTo[Int64]: BytesClampable {
         if end < 0 { end = 0 }
         if end > len { end = len }
         view._subView(startByte: 0, endByte: end)
+    }
+}
+
+extend RangeUpTo[Int64]: BytesWrappable {
+    type BytesWrappedYield = BytesView
+
+    public func readBytesWrapped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        if len == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % len;
+        if e < 0 { e = e + len }
+        view._subView(startByte: 0, endByte: e)
     }
 }
 
@@ -1386,6 +1501,21 @@ extend RangeThrough[Int64]: BytesClampable {
     }
 }
 
+extend RangeThrough[Int64]: BytesWrappable {
+    type BytesWrappedYield = BytesView
+
+    public func readBytesWrapped(from view: BytesView) -> BytesView {
+        let len = view.count;
+        if len == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % len;
+        if e < 0 { e = e + len }
+        e = e + 1;
+        view._subView(startByte: 0, endByte: e)
+    }
+}
+
 extend RangeThrough[Int64]: BytesSubstringIndex {
     public func readBytesSubstring(from view: BytesView) -> String {
         view(self).toString()
@@ -1412,6 +1542,11 @@ internal protocol CharsIndex {
 internal protocol CharsClampable {
     type CharsClampedYield
     func readCharsClamped(from view: CharsView) -> CharsClampedYield
+}
+
+internal protocol CharsWrappable {
+    type CharsWrappedYield
+    func readCharsWrapped(from view: CharsView) -> CharsWrappedYield
 }
 
 // Internal: walk to char-index `i` and decode that code point, or
@@ -1466,6 +1601,20 @@ extend Int64: CharsClampable {
     }
 }
 
+extend Int64: CharsWrappable {
+    type CharsWrappedYield = Char?
+
+    public func readCharsWrapped(from view: CharsView) -> Char? {
+        let n = view.count;
+        if n == 0 {
+            return .None
+        }
+        var idx = self % n;
+        if idx < 0 { idx = idx + n }
+        _charsViewCharAt(view: view, charIndex: idx)
+    }
+}
+
 extend Range[Int64]: CharsIndex {
     type CharsYield = CharsView
 
@@ -1508,6 +1657,26 @@ extend Range[Int64]: CharsClampable {
         if s < 0 { s = 0 }
         if e > n { e = n }
         if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend Range[Int64]: CharsWrappable {
+    type CharsWrappedYield = CharsView
+
+    public func readCharsWrapped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        var span = self.end - self.start;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > n { e = n }
         let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
         let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
         view._subView(startByte: startByte, endByte: endByte)
@@ -1557,6 +1726,26 @@ extend ClosedRange[Int64]: CharsClampable {
         if s < 0 { s = 0 }
         if e > n { e = n }
         if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend ClosedRange[Int64]: CharsWrappable {
+    type CharsWrappedYield = CharsView
+
+    public func readCharsWrapped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        var span = self.end - self.start + 1;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > n { e = n }
         let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
         let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
         view._subView(startByte: startByte, endByte: endByte)
@@ -1626,6 +1815,22 @@ extend RangeFrom[Int64]: CharsClampable {
     }
 }
 
+extend RangeFrom[Int64]: CharsWrappable {
+    type CharsWrappedYield = CharsView
+
+    public func readCharsWrapped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        let (startByte, _) = view._byteOffsetForCharIndex(charIndex: s);
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: n);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 extend RangeFrom[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
         view(self).toString()
@@ -1668,6 +1873,21 @@ extend RangeUpTo[Int64]: CharsClampable {
         var e = self.end;
         if e < 0 { e = 0 }
         if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeUpTo[Int64]: CharsWrappable {
+    type CharsWrappedYield = CharsView
+
+    public func readCharsWrapped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % n;
+        if e < 0 { e = e + n }
         let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
         view._subView(startByte: 0, endByte: endByte)
     }
@@ -1720,6 +1940,22 @@ extend RangeThrough[Int64]: CharsClampable {
     }
 }
 
+extend RangeThrough[Int64]: CharsWrappable {
+    type CharsWrappedYield = CharsView
+
+    public func readCharsWrapped(from view: CharsView) -> CharsView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % n;
+        if e < 0 { e = e + n }
+        e = e + 1;
+        let (endByte, _) = view._byteOffsetForCharIndex(charIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
 extend RangeThrough[Int64]: CharsSubstringIndex {
     public func readCharsSubstring(from view: CharsView) -> String {
         view(self).toString()
@@ -1745,6 +1981,11 @@ internal protocol GraphemesIndex {
 internal protocol GraphemesClampable {
     type GraphemesClampedYield
     func readGraphemesClamped(from view: GraphemesView) -> GraphemesClampedYield
+}
+
+internal protocol GraphemesWrappable {
+    type GraphemesWrappedYield
+    func readGraphemesWrapped(from view: GraphemesView) -> GraphemesWrappedYield
 }
 
 // Internal: walk the segmenter to grapheme index `i` and return that
@@ -1799,6 +2040,20 @@ extend Int64: GraphemesClampable {
     }
 }
 
+extend Int64: GraphemesWrappable {
+    type GraphemesWrappedYield = Grapheme?
+
+    public func readGraphemesWrapped(from view: GraphemesView) -> Grapheme? {
+        let n = view.count;
+        if n == 0 {
+            return .None
+        }
+        var idx = self % n;
+        if idx < 0 { idx = idx + n }
+        _graphemesViewAt(view: view, graphemeIndex: idx)
+    }
+}
+
 extend Range[Int64]: GraphemesIndex {
     type GraphemesYield = GraphemesView
 
@@ -1847,6 +2102,26 @@ extend Range[Int64]: GraphemesClampable {
     }
 }
 
+extend Range[Int64]: GraphemesWrappable {
+    type GraphemesWrappedYield = GraphemesView
+
+    public func readGraphemesWrapped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        var span = self.end - self.start;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > n { e = n }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 extend ClosedRange[Int64]: GraphemesIndex {
     type GraphemesYield = GraphemesView
 
@@ -1889,6 +2164,26 @@ extend ClosedRange[Int64]: GraphemesClampable {
         if s < 0 { s = 0 }
         if e > n { e = n }
         if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend ClosedRange[Int64]: GraphemesWrappable {
+    type GraphemesWrappedYield = GraphemesView
+
+    public func readGraphemesWrapped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        var span = self.end - self.start + 1;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > n { e = n }
         let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
         let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
         view._subView(startByte: startByte, endByte: endByte)
@@ -1958,6 +2253,22 @@ extend RangeFrom[Int64]: GraphemesClampable {
     }
 }
 
+extend RangeFrom[Int64]: GraphemesWrappable {
+    type GraphemesWrappedYield = GraphemesView
+
+    public func readGraphemesWrapped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        let (startByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: s);
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: n);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 extend RangeFrom[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
         view(self).toString()
@@ -2000,6 +2311,21 @@ extend RangeUpTo[Int64]: GraphemesClampable {
         var e = self.end;
         if e < 0 { e = 0 }
         if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeUpTo[Int64]: GraphemesWrappable {
+    type GraphemesWrappedYield = GraphemesView
+
+    public func readGraphemesWrapped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % n;
+        if e < 0 { e = e + n }
         let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
         view._subView(startByte: 0, endByte: endByte)
     }
@@ -2052,6 +2378,22 @@ extend RangeThrough[Int64]: GraphemesClampable {
     }
 }
 
+extend RangeThrough[Int64]: GraphemesWrappable {
+    type GraphemesWrappedYield = GraphemesView
+
+    public func readGraphemesWrapped(from view: GraphemesView) -> GraphemesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % n;
+        if e < 0 { e = e + n }
+        e = e + 1;
+        let (endByte, _) = view._byteOffsetForGraphemeIndex(graphemeIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
 extend RangeThrough[Int64]: GraphemesSubstringIndex {
     public func readGraphemesSubstring(from view: GraphemesView) -> String {
         view(self).toString()
@@ -2078,6 +2420,11 @@ internal protocol LinesIndex {
 internal protocol LinesClampable {
     type LinesClampedYield
     func readLinesClamped(from view: LinesView) -> LinesClampedYield
+}
+
+internal protocol LinesWrappable {
+    type LinesWrappedYield
+    func readLinesWrapped(from view: LinesView) -> LinesWrappedYield
 }
 
 // Internal: walk the iterator to line index `i` and return that line,
@@ -2132,6 +2479,20 @@ extend Int64: LinesClampable {
     }
 }
 
+extend Int64: LinesWrappable {
+    type LinesWrappedYield = String?
+
+    public func readLinesWrapped(from view: LinesView) -> String? {
+        let n = view.count;
+        if n == 0 {
+            return .None
+        }
+        var idx = self % n;
+        if idx < 0 { idx = idx + n }
+        _linesViewAt(view: view, lineIndex: idx)
+    }
+}
+
 extend Range[Int64]: LinesIndex {
     type LinesYield = LinesView
 
@@ -2180,6 +2541,26 @@ extend Range[Int64]: LinesClampable {
     }
 }
 
+extend Range[Int64]: LinesWrappable {
+    type LinesWrappedYield = LinesView
+
+    public func readLinesWrapped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        var span = self.end - self.start;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > n { e = n }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 extend ClosedRange[Int64]: LinesIndex {
     type LinesYield = LinesView
 
@@ -2222,6 +2603,26 @@ extend ClosedRange[Int64]: LinesClampable {
         if s < 0 { s = 0 }
         if e > n { e = n }
         if s > e { s = e }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
+extend ClosedRange[Int64]: LinesWrappable {
+    type LinesWrappedYield = LinesView
+
+    public func readLinesWrapped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        var span = self.end - self.start + 1;
+        if span < 0 { span = 0 }
+        var e = s + span;
+        if e > n { e = n }
         let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
         let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
         view._subView(startByte: startByte, endByte: endByte)
@@ -2291,6 +2692,22 @@ extend RangeFrom[Int64]: LinesClampable {
     }
 }
 
+extend RangeFrom[Int64]: LinesWrappable {
+    type LinesWrappedYield = LinesView
+
+    public func readLinesWrapped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var s = self.start % n;
+        if s < 0 { s = s + n }
+        let (startByte, _) = view._byteOffsetForLineIndex(lineIndex: s);
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: n);
+        view._subView(startByte: startByte, endByte: endByte)
+    }
+}
+
 extend RangeFrom[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
         view(self).toString()
@@ -2338,6 +2755,21 @@ extend RangeUpTo[Int64]: LinesClampable {
     }
 }
 
+extend RangeUpTo[Int64]: LinesWrappable {
+    type LinesWrappedYield = LinesView
+
+    public func readLinesWrapped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % n;
+        if e < 0 { e = e + n }
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
 extend RangeUpTo[Int64]: LinesSubstringIndex {
     public func readLinesSubstring(from view: LinesView) -> String {
         view(self).toString()
@@ -2380,6 +2812,22 @@ extend RangeThrough[Int64]: LinesClampable {
         var e = self.end + 1;
         if e < 0 { e = 0 }
         if e > n { e = n }
+        let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
+        view._subView(startByte: 0, endByte: endByte)
+    }
+}
+
+extend RangeThrough[Int64]: LinesWrappable {
+    type LinesWrappedYield = LinesView
+
+    public func readLinesWrapped(from view: LinesView) -> LinesView {
+        let n = view.count;
+        if n == 0 {
+            return view._subView(startByte: 0, endByte: 0)
+        }
+        var e = self.end % n;
+        if e < 0 { e = e + n }
+        e = e + 1;
         let (endByte, _) = view._byteOffsetForLineIndex(lineIndex: e);
         view._subView(startByte: 0, endByte: endByte)
     }
@@ -3206,7 +3654,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     fileprivate var index: Int64
     fileprivate var done: Bool
 
-    public init(slice slice: StringSlice, where predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, consuming where predicate: (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -3215,7 +3663,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         self.done = false;
     }
 
-    fileprivate init(slice slice: StringSlice, where predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
+    fileprivate init(slice slice: StringSlice, consuming where predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -3274,7 +3722,7 @@ public struct SplitWhereView: Iterable, Cloneable {
     fileprivate var slice: StringSlice
     fileprivate var predicate: (Char) -> Bool
 
-    public init(slice slice: StringSlice, where predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, consuming where predicate: (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
     }

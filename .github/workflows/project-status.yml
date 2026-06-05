@@ -1,98 +1,92 @@
-name: Project Status from PR
+name: Project Status
 
-# Updates the GitHub Project status of issues closed by a PR as the PR
-# moves through review, merge, and stabilization. The actual board
-# transitions are spelled out in docs/contributing/git.md.
+# Single source of truth for moving Project cards as PRs flow through the
+# release train. The selector depends on what merged where:
+#   topic   -> nightly   the issues that PR closes        -> Nightly
+#   nightly -> beta       every card in the Nightly column -> Beta   (bulk)
+#   beta    -> main       every card in the Beta column    -> Done   (bulk)
+#   fix     -> main       the issues that PR closes        -> Done
+# Promotion / forward-merge PRs close no issues, so the closing-issue selector
+# is a natural no-op for them; the head branch is what flags a bulk promotion.
+# See docs/contributing/git.md for the board model.
 #
-# Skipped silently if `vars.PROJECT_ID` is unset (e.g. forks, or before
-# the Project is wired up).
+# Skipped silently if `vars.PROJECT_ID` is unset (forks, or before the Project
+# is wired up).
 
 on:
   pull_request:
     types: [ready_for_review, closed]
 
+permissions:
+  contents: read
+
 jobs:
-  update-status:
+  update:
     if: ${{ vars.PROJECT_ID != '' }}
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - name: Resolve target status
-        id: target
+      - uses: actions/checkout@v4
+
+      - name: Resolve mode + target
+        id: plan
         env:
           ACTION: ${{ github.event.action }}
           MERGED: ${{ github.event.pull_request.merged }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          IN_REVIEW_ID: ${{ vars.PROJECT_STATUS_IN_REVIEW_ID }}
-          NIGHTLY_ID: ${{ vars.PROJECT_STATUS_NIGHTLY_ID }}
-          BETA_ID: ${{ vars.PROJECT_STATUS_BETA_ID }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          IN_REVIEW: ${{ vars.PROJECT_STATUS_IN_REVIEW_ID }}
+          NIGHTLY: ${{ vars.PROJECT_STATUS_NIGHTLY_ID }}
+          BETA: ${{ vars.PROJECT_STATUS_BETA_ID }}
+          DONE: ${{ vars.PROJECT_STATUS_DONE_ID }}
         run: |
           set -euo pipefail
-          STATUS_ID=""
-
+          mode=none; status=""; src=""; tgt=""
           if [ "$ACTION" = "ready_for_review" ]; then
-            STATUS_ID="$IN_REVIEW_ID"
-          elif [ "$ACTION" = "closed" ] && [ "$MERGED" = "true" ]; then
-            case "$BASE_REF" in
-              nightly) STATUS_ID="$NIGHTLY_ID" ;;
-              beta)    STATUS_ID="$BETA_ID" ;;
-              # main: hotfix merge — no status change here, the forward-merge
-              # to nightly/beta carries the item through the regular flow.
-              main)    STATUS_ID="" ;;
-              *)       STATUS_ID="" ;;
+            mode=closing; status="$IN_REVIEW"
+          elif [ "$MERGED" = "true" ]; then
+            case "$BASE" in
+              nightly)
+                mode=closing; status="$NIGHTLY" ;;
+              beta)
+                if [ "$HEAD" = "nightly" ]; then
+                  mode=bulk; src="$NIGHTLY"; tgt="$BETA"
+                else
+                  mode=closing; status="$BETA"
+                fi ;;
+              main)
+                if [ "$HEAD" = "beta" ]; then
+                  mode=bulk; src="$BETA"; tgt="$DONE"
+                else
+                  mode=closing; status="$DONE"
+                fi ;;
             esac
           fi
+          {
+            echo "mode=$mode"
+            echo "status=$status"
+            echo "src=$src"
+            echo "tgt=$tgt"
+          } >> "$GITHUB_OUTPUT"
 
-          echo "status_id=$STATUS_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Find closing issues
-        id: issues
-        if: ${{ steps.target.outputs.status_id != '' }}
-        env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          set -euo pipefail
-          # Returns a JSON array of issue node IDs that this PR closes.
-          ISSUE_IDS=$(gh api graphql \
-            -f query='query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { closingIssuesReferences(first: 20) { nodes { id } } } } }' \
-            -F owner="$REPO_OWNER" \
-            -F repo="$REPO_NAME" \
-            -F number="$PR_NUMBER" \
-            --jq '[.data.repository.pullRequest.closingIssuesReferences.nodes[].id]')
-          echo "ids=$ISSUE_IDS" >> "$GITHUB_OUTPUT"
-
-      - name: Update Project status
-        if: ${{ steps.target.outputs.status_id != '' && steps.issues.outputs.ids != '[]' }}
+      - name: Move the issues this PR closes
+        if: ${{ steps.plan.outputs.mode == 'closing' }}
         env:
           GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
           PROJECT_ID: ${{ vars.PROJECT_ID }}
           STATUS_FIELD_ID: ${{ vars.PROJECT_STATUS_FIELD_ID }}
-          STATUS_OPTION_ID: ${{ steps.target.outputs.status_id }}
-          ISSUE_IDS_JSON: ${{ steps.issues.outputs.ids }}
-        run: |
-          set -euo pipefail
+          TARGET: ${{ steps.plan.outputs.status }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: python3 scripts/setup/set_status.py --by-closing-issues
 
-          # For each closing issue: ensure it's in the project (idempotent), then update its Status.
-          echo "$ISSUE_IDS_JSON" | python3 -c '
-          import json, sys
-          for i in json.load(sys.stdin):
-              print(i)
-          ' | while read -r ISSUE_NODE_ID; do
-            [ -z "$ISSUE_NODE_ID" ] && continue
-
-            ITEM_ID=$(gh api graphql \
-              -f query='mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: {projectId: $project, contentId: $content}) { item { id } } }' \
-              -F project="$PROJECT_ID" \
-              -F content="$ISSUE_NODE_ID" \
-              --jq '.data.addProjectV2ItemById.item.id')
-
-            gh api graphql \
-              -f query='mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) { updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option }}) { projectV2Item { id } } }' \
-              -F project="$PROJECT_ID" \
-              -F item="$ITEM_ID" \
-              -F field="$STATUS_FIELD_ID" \
-              -F option="$STATUS_OPTION_ID"
-          done
+      - name: Promote a whole status column
+        if: ${{ steps.plan.outputs.mode == 'bulk' }}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_ID: ${{ vars.PROJECT_ID }}
+          STATUS_FIELD_ID: ${{ vars.PROJECT_STATUS_FIELD_ID }}
+          SOURCE_OPTION_ID: ${{ steps.plan.outputs.src }}
+          TARGET_OPTION_ID: ${{ steps.plan.outputs.tgt }}
+        run: python3 scripts/setup/set_status.py --by-status

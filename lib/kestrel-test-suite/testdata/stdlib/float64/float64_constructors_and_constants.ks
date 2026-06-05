@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // init() - default should be zero
             let defaultVal = std.numeric.Float64();

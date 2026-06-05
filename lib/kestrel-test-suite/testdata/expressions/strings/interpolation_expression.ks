@@ -6,6 +6,7 @@ module Test
 
 func double(n: Int64) -> Int64 { n * 2 }
 
+@main
 func main() -> lang.i64 {
     let x = 3;
     let y = 4;

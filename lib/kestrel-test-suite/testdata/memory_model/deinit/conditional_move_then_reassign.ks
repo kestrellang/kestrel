@@ -17,6 +17,7 @@ struct Resource: not Copyable {
 
 func consume(consuming r: Resource) {}
 
+@main
 func main() -> lang.i64 {
     var x = Resource(id: 1);
     let cond: Bool = false;
