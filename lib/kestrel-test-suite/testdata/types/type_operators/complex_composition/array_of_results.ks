@@ -12,7 +12,7 @@ func main() -> lang.i64 {
     arr.append(.Ok(1));
     arr.append(.Err(MyError()));
     arr.append(.Ok(3));
-    let _ = println(arr.count);
-    let _ = println(arr.first().unwrap().unwrap());
+     println(arr.count);
+     println(arr.first().unwrap().unwrap());
     0
 }

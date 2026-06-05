@@ -51,10 +51,10 @@ module Test
             d.pushBack(3);
             d.pushBack(4);
             // Deque is [1, 2, 3, 4]
-            let _ = d.popFront(); // removes 1
+             d.popFront(); // removes 1
             if d.first().unwrap() != 2 { return 18 }
             if d.last().unwrap() != 4 { return 19 }
-            let _ = d.popBack(); // removes 4
+             d.popBack(); // removes 4
             if d.first().unwrap() != 2 { return 20 }
             if d.last().unwrap() != 3 { return 21 }
 

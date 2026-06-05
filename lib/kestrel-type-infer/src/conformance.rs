@@ -153,7 +153,10 @@ fn extension_bounds_hold_impl(
     recv_args: &[HirTy],
     root: Entity,
 ) -> bool {
-    let clauses = ctx.query(WhereClausesOf { entity: extension, root });
+    let clauses = ctx.query(WhereClausesOf {
+        entity: extension,
+        root,
+    });
     if clauses.is_empty() {
         return true;
     }
@@ -250,7 +253,9 @@ fn hir_ty_matches(pattern: &HirTy, concrete: &HirTy) -> bool {
                 args: ca,
                 ..
             },
-        ) => pe == ce && pa.len() == ca.len() && pa.iter().zip(ca).all(|(x, y)| hir_ty_matches(x, y)),
+        ) => {
+            pe == ce && pa.len() == ca.len() && pa.iter().zip(ca).all(|(x, y)| hir_ty_matches(x, y))
+        },
         (HirTy::Tuple(pe, _), HirTy::Tuple(ce, _)) => {
             pe.len() == ce.len() && pe.iter().zip(ce).all(|(x, y)| hir_ty_matches(x, y))
         },

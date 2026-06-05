@@ -303,7 +303,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
 
         if pattern.starts(with: ":") {
             let paramName = pattern.asSlice().subslice(from: 1, to: pattern.byteCount).toOwned();
-            let _ = params.insert(paramName, actual);
+             params.insert(paramName, actual);
         } else if pattern != actual {
             return .None
         }

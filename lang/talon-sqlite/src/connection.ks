@@ -70,7 +70,7 @@ func executeOnDb(db: RawPointer, sql: SQL) -> () throws SqliteError {
     try bindParams(stmtRaw, sql.bindings);
 
     let stepResult = ffi.sqlite3_step(stmtRaw);
-    let _ = ffi.sqlite3_finalize(stmtRaw);
+     ffi.sqlite3_finalize(stmtRaw);
 
     if stepResult != ffi.SQLITE_OK() and stepResult != ffi.SQLITE_DONE() and stepResult != ffi.SQLITE_ROW() {
         throw SqliteError.Error(errorMessage(db));
@@ -107,11 +107,11 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
             break
         } else {
             let msg = errorMessage(db);
-            let _ = ffi.sqlite3_finalize(stmtRaw);
+             ffi.sqlite3_finalize(stmtRaw);
             throw SqliteError.Error(msg);
         }
     }
-    let _ = ffi.sqlite3_finalize(stmtRaw);
+     ffi.sqlite3_finalize(stmtRaw);
     results
 }
 
@@ -179,7 +179,7 @@ struct Connection: not Copyable {
 
         if result != ffi.SQLITE_OK() {
             if not dbRaw.isNull {
-                let _ = ffi.sqlite3_close(dbRaw);
+                 ffi.sqlite3_close(dbRaw);
             }
             return .Err(SqliteError.Error("failed to open database: " + path));
         }
@@ -200,7 +200,7 @@ struct Connection: not Copyable {
 
     deinit {
         if not self.db.isNull {
-            let _ = ffi.sqlite3_close(self.db);
+             ffi.sqlite3_close(self.db);
         }
     }
 }

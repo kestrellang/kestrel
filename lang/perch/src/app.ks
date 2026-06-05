@@ -29,7 +29,7 @@ import std.io.error.(IoError)
 /// app.route(get: "/", { (req: Request, ctx: Ctx) in
 ///     Response.ok(Text("Hello, world!"))
 /// });
-/// let _ = app.listen(8080);
+///  app.listen(8080);
 /// ```
 public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
     var router: Router[T]
@@ -85,7 +85,7 @@ public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
     /// already in use, permission denied).
     public func listen(port: UInt16) -> Result[(), IoError] {
         var listener = try TcpListener.bind(port);
-        let _ = println("Perch listening on port \(port)");
+         println("Perch listening on port \(port)");
 
         loop {
             // match instead of try: workaround for compiler bug where
@@ -98,11 +98,11 @@ public struct App[T]: Cloneable, Routes[T] where T: Cloneable {
                     match parseHttpRequest(fd) {
                         .Ok(request) => {
                             let response = self.dispatch(request);
-                            let _ = sendResponse(response, to: fd);
+                             sendResponse(response, to: fd);
                         },
                         .Err(_) => {
                             let badReq = Response.badRequest(Text("Bad Request"));
-                            let _ = sendResponse(badReq, to: fd);
+                             sendResponse(badReq, to: fd);
                         }
                     }
                 },

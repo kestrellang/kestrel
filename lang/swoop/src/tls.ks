@@ -152,11 +152,11 @@ public struct TlsStream: Readable, Writable, Cloneable {
         if self.conn.isUnique() {
             let h = self.conn.getValue();
             // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
-            let _ = libc_SSL_shutdown(h.ssl);
+             libc_SSL_shutdown(h.ssl);
             libc_SSL_free(h.ssl);
             libc_SSL_CTX_free(h.ctx);
             if h.fd >= 0 {
-                let _ = posix_close(h.fd.raw);
+                 posix_close(h.fd.raw);
             }
         }
     }
@@ -172,7 +172,7 @@ extend TlsStream {
         // One-time init (safe to call multiple times)
         // OPENSSL_INIT_LOAD_SSL_STRINGS (0x00200000) | OPENSSL_INIT_LOAD_CRYPTO_STRINGS (0x00000002)
         let initOpts: Int64 = 2097154;
-        let _ = libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
+         libc_OPENSSL_init_ssl(initOpts.raw, lang.ptr_null[lang.i8]());
 
         // TCP connect, then take ownership of the fd
         var tcpStream = try TcpStream.connect(host, port);
@@ -182,12 +182,12 @@ extend TlsStream {
         let method = libc_TLS_client_method();
         let ctx = libc_SSL_CTX_new(method);
         if lang.ptr_is_null(ctx) {
-            let _ = posix_close(fd.raw);
+             posix_close(fd.raw);
             return .Err(IoError(code: 1))
         }
 
         // Load system CA certificates and enable peer verification
-        let _ = libc_SSL_CTX_set_default_verify_paths(ctx);
+         libc_SSL_CTX_set_default_verify_paths(ctx);
         let verifyMode = SSL_VERIFY_PEER();
         libc_SSL_CTX_set_verify(ctx, verifyMode.raw, lang.ptr_null[lang.i8]());
 
@@ -195,17 +195,17 @@ extend TlsStream {
         let ssl = libc_SSL_new(ctx);
         if lang.ptr_is_null(ssl) {
             libc_SSL_CTX_free(ctx);
-            let _ = posix_close(fd.raw);
+             posix_close(fd.raw);
             return .Err(IoError(code: 2))
         }
 
         // Attach socket fd
-        let _ = libc_SSL_set_fd(ssl, fd.raw);
+         libc_SSL_set_fd(ssl, fd.raw);
 
         // Set SNI hostname (null-terminated)
         var hostBuf = stringToBytes(host);
         hostBuf.append(0);
-        let _ = libc_SSL_ctrl(
+         libc_SSL_ctrl(
             ssl,
             SSL_CTRL_SET_TLSEXT_HOSTNAME().raw,
             0,
@@ -217,7 +217,7 @@ extend TlsStream {
         if connectResult != 1 {
             libc_SSL_free(ssl);
             libc_SSL_CTX_free(ctx);
-            let _ = posix_close(fd.raw);
+             posix_close(fd.raw);
             return .Err(IoError(code: connectResult))
         }
 

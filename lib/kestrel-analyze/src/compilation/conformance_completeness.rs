@@ -309,9 +309,7 @@ fn check_protocol_requirements(
                         cands
                             .iter()
                             .copied()
-                            .filter(|&c| {
-                                signatures_match(proto_call, cx.query.get::<Callable>(c))
-                            })
+                            .filter(|&c| signatures_match(proto_call, cx.query.get::<Callable>(c)))
                             .collect()
                     })
                     .unwrap_or_default();

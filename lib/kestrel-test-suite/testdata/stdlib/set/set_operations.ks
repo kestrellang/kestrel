@@ -7,14 +7,14 @@ module Test
         func main() -> lang.i64 {
             // Setup two sets: a = {1, 2, 3}, b = {2, 3, 4}
             var a = std.collections.Set[std.numeric.Int64]();
-            let _ = a.insert(1);
-            let _ = a.insert(2);
-            let _ = a.insert(3);
+             a.insert(1);
+             a.insert(2);
+             a.insert(3);
 
             var b = std.collections.Set[std.numeric.Int64]();
-            let _ = b.insert(2);
-            let _ = b.insert(3);
-            let _ = b.insert(4);
+             b.insert(2);
+             b.insert(3);
+             b.insert(4);
 
             // Test union() - non-mutating
             let u = a.union(b);
@@ -44,17 +44,17 @@ module Test
 
             // Test formUnion() - mutating
             var fu = std.collections.Set[std.numeric.Int64]();
-            let _ = fu.insert(1);
-            let _ = fu.insert(2);
+             fu.insert(1);
+             fu.insert(2);
             fu.formUnion(b);
             if fu.count != 4 { return 15 }
             if fu.contains(4) == false { return 16 }
 
             // Test formIntersection() - mutating
             var fi = std.collections.Set[std.numeric.Int64]();
-            let _ = fi.insert(1);
-            let _ = fi.insert(2);
-            let _ = fi.insert(3);
+             fi.insert(1);
+             fi.insert(2);
+             fi.insert(3);
             fi.formIntersection(b);
             if fi.count != 2 { return 17 }
             if fi.contains(2) == false { return 18 }
@@ -62,18 +62,18 @@ module Test
 
             // Test formDifference() - mutating
             var fd = std.collections.Set[std.numeric.Int64]();
-            let _ = fd.insert(1);
-            let _ = fd.insert(2);
-            let _ = fd.insert(3);
+             fd.insert(1);
+             fd.insert(2);
+             fd.insert(3);
             fd.formDifference(b);
             if fd.count != 1 { return 20 }
             if fd.contains(1) == false { return 21 }
 
             // Test formSymmetricDifference() - mutating
             var fsd = std.collections.Set[std.numeric.Int64]();
-            let _ = fsd.insert(1);
-            let _ = fsd.insert(2);
-            let _ = fsd.insert(3);
+             fsd.insert(1);
+             fsd.insert(2);
+             fsd.insert(3);
             fsd.formSymmetricDifference(b);
             if fsd.count != 2 { return 22 }
             if fsd.contains(1) == false { return 23 }

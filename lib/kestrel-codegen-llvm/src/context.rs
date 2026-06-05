@@ -115,7 +115,10 @@ impl<'ctx> CodegenCtx<'ctx> {
         // definition; this catches inter-function/declaration issues).
         if let Err(e) = self.llmod.verify() {
             if std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok() {
-                eprintln!("warning: LLVM module verification failed:\n{}", e.to_string());
+                eprintln!(
+                    "warning: LLVM module verification failed:\n{}",
+                    e.to_string()
+                );
             }
         }
 
@@ -195,9 +198,7 @@ impl<'ctx> CodegenCtx<'ctx> {
 
         let bytes = build_init_bytes(size, s.initializer.as_ref().map(|i| &i.kind));
         let init = self.cx.const_string(&bytes, false);
-        let global = self
-            .llmod
-            .add_global(init.get_type(), None, &s.name);
+        let global = self.llmod.add_global(init.get_type(), None, &s.name);
         global.set_initializer(&init);
         // Writable: every static is populated at startup by __kestrel_init_statics.
         global.set_constant(false);
@@ -219,7 +220,10 @@ impl<'ctx> CodegenCtx<'ctx> {
         };
 
         let file_bytes = std::fs::read(&path).map_err(|e| {
-            CodegenError::DataSection(format!("failed to read file constant '{}': {e}", path.display()))
+            CodegenError::DataSection(format!(
+                "failed to read file constant '{}': {e}",
+                path.display()
+            ))
         })?;
 
         // Raw read-only blob.
@@ -232,7 +236,9 @@ impl<'ctx> CodegenCtx<'ctx> {
         raw_global.set_linkage(Linkage::Internal);
 
         // Slice header { ptr, len } pointing at the blob.
-        let elem_repr = self.tc.repr(fcd.element_ty, &self.module.ty_arena, self.module);
+        let elem_repr = self
+            .tc
+            .repr(fcd.element_ty, &self.module.ty_arena, self.module);
         let elem_size = elem_repr.size().max(1);
         let count = file_bytes.len() as u64 / elem_size;
 
@@ -319,7 +325,10 @@ impl<'ctx> CodegenCtx<'ctx> {
                             // the whole broken function so the offending instruction
                             // has context (the function is about to be trap-stubbed).
                             use inkwell::values::AnyValue;
-                            eprintln!("=== broken fn {func_name} ===\n{}", fn_value.print_to_string().to_string());
+                            eprintln!(
+                                "=== broken fn {func_name} ===\n{}",
+                                fn_value.print_to_string().to_string()
+                            );
                         }
                         errors.push((func_name, "LLVM function verification failed".into()));
                         self.reset_to_trap_stub(fn_value);
@@ -344,7 +353,12 @@ impl<'ctx> CodegenCtx<'ctx> {
         }
 
         if !errors.is_empty() {
-            let body_count = self.module.functions.iter().filter(|f| f.body.is_some()).count();
+            let body_count = self
+                .module
+                .functions
+                .iter()
+                .filter(|f| f.body.is_some())
+                .count();
             eprintln!(
                 "warning: {} of {} functions failed to compile (skipped):",
                 errors.len(),

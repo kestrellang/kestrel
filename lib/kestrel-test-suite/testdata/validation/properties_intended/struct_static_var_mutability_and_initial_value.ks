@@ -11,8 +11,8 @@ public struct Foo {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(Foo.structStaticVar);
+     println(Foo.structStaticVar);
     Foo.structStaticVar = 2;
-    let _ = println(Foo.structStaticVar);
+     println(Foo.structStaticVar);
     0
 }

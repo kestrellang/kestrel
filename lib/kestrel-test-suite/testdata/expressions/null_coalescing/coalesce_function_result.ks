@@ -12,7 +12,7 @@ func findValue(key: Int) -> Int? {
 }
 
 func main() -> lang.i64 {
-    let _ = println(findValue(1) ?? 0);
-    let _ = println(findValue(2) ?? 0);
+     println(findValue(1) ?? 0);
+     println(findValue(2) ?? 0);
     0
 }

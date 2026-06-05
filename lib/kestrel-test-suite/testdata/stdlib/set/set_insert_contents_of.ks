@@ -6,7 +6,7 @@ module Test
         @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
-            let _ = s.insert(1);
+             s.insert(1);
 
             // Insert contents of an array
             var arr = std.collections.Array[std.numeric.Int64]();

@@ -10,6 +10,6 @@ func main() -> lang.i64 {
     arr.append(10);
     arr.append(20);
     arr.append(30);
-    let _ = println(arr.count);
+     println(arr.count);
     0
 }

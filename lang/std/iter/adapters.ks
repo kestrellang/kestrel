@@ -775,7 +775,7 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
 
         var i = 0;
         while i < self.step - 1 {
-            let _ = self.inner.next();
+             self.inner.next();
             i = i + 1;
         }
         self.inner.next()

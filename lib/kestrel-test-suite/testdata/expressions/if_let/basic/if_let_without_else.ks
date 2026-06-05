@@ -10,6 +10,6 @@ enum Option[T] {
 
 func test(opt: Option[lang.i64]) {
     if let .Some(value) = opt {
-        let _ = value;
+         value;
     }
 }

@@ -34,7 +34,7 @@ struct Router[T]: Cloneable {
             let route = self.routes(unchecked: i);
             var j: Int64 = 0;
             while j < route.middleware.count {
-                let _ = route.middleware(unchecked: j);
+                 route.middleware(unchecked: j);
                 j = j + 1
             }
             i = i + 1

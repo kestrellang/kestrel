@@ -96,7 +96,7 @@ public func captureOutput(command: String) -> String {
     }
 
     free(buf);
-    let _ = libc_pclose(stream);
+     libc_pclose(stream);
 
     trimEnd(output)
 }

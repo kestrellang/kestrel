@@ -16,8 +16,8 @@ public struct Foo {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(Foo.structStaticComputedVar);
+     println(Foo.structStaticComputedVar);
     Foo.structStaticComputedVar = 7;
-    let _ = println(Foo.structStaticComputedVar);
+     println(Foo.structStaticComputedVar);
     0
 }

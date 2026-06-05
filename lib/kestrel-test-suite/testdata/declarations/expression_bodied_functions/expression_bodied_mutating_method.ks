@@ -14,6 +14,6 @@ struct Counter {
 func main() -> lang.i64 {
     var c = Counter(count: 10);
     c.reset();
-    let _ = println(c.count);
+     println(c.count);
     0
 }

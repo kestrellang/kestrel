@@ -47,7 +47,7 @@ import std.text.(String)
 /// func puts(s: CString) -> Int32
 ///
 /// let cstr = "Hello, C!".toCString();
-/// let _ = puts(cstr);
+///  puts(cstr);
 /// cstr.free();
 /// ```
 ///
@@ -155,7 +155,7 @@ extend String {
     ///
     /// ```
     /// let cstr = "Hello, C!".toCString();
-    /// let _ = puts(cstr);
+    ///  puts(cstr);
     /// cstr.free();
     /// ```
     public func toCString() -> CString {
@@ -168,7 +168,7 @@ extend String {
         if ptr.isNull == false {
             if byteCount > 0 {
                 let srcPtr = RawPointer(raw: self.bytes.asRaw());
-                let _ = memcpy(rawPtr, srcPtr, byteCount);
+                 memcpy(rawPtr, srcPtr, byteCount);
             }
 
             ptr.offset(by: byteCount).write(0);

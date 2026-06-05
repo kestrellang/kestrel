@@ -11,7 +11,7 @@ struct Flags {
 func main() -> lang.i64 {
     let f1 = Flags(enabled: true, visible: true);
     let f2 = Flags(enabled: true, visible: false);
-    let _ = println(f1.enabled and f1.visible);
-    let _ = println(f2.enabled and f2.visible);
+     println(f1.enabled and f1.visible);
+     println(f2.enabled and f2.visible);
     0
 }

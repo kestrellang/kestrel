@@ -246,7 +246,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         self.dict = Dictionary();
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
-            let _ = self.insert(elem);
+             self.insert(elem);
         }
     }
 
@@ -268,7 +268,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         self.dict = Dictionary(capacity: elements.count);
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
-            let _ = self.insert(elem);
+             self.insert(elem);
         }
     }
 
@@ -409,7 +409,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     public mutating func insert[I](contentsOf elements: I) where I: Iterable, I.Item = T {
         var iter = elements.iter();
         while let .Some(elem) = iter.next() {
-            let _ = self.insert(elem);
+             self.insert(elem);
         }
     }
 
@@ -428,7 +428,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     public mutating func formUnion(other: Set[T, H]) {
         var otherIter = other.iter();
         while let .Some(elem) = otherIter.next() {
-            let _ = self.insert(elem);
+             self.insert(elem);
         }
     }
 
@@ -491,7 +491,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
             }
         }
         for elem in toRemove {
-            let _ = self.remove( elem);
+             self.remove( elem);
         }
     }
 
@@ -514,7 +514,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
             }
         }
         for elem in toRemove {
-            let _ = self.remove( elem);
+             self.remove( elem);
         }
     }
 
@@ -541,7 +541,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
             }
         }
         for elem in toRemove {
-            let _ = self.remove( elem);
+             self.remove( elem);
         }
     }
 
@@ -567,7 +567,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
             }
         }
         for elem in toRemove {
-            let _ = self.remove( elem);
+             self.remove( elem);
         }
     }
 
@@ -604,10 +604,10 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         }
         
         for elem in toRemove {
-            let _ = self.remove( elem);
+             self.remove( elem);
         }
         for elem in toAdd {
-            let _ = self.insert(elem);
+             self.insert(elem);
         }
     }
 
@@ -654,7 +654,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
             if other.contains( elem) {
-                let _ = result.insert( elem);
+                 result.insert( elem);
             }
         }
         result
@@ -681,7 +681,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
             if not other.contains( elem) {
-                let _ = result.insert( elem);
+                 result.insert( elem);
             }
         }
         result
@@ -711,7 +711,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var selfIter = self.iter();
         while let .Some(elem) = selfIter.next() {
             if not other.contains( elem) {
-                let _ = result.insert( elem);
+                 result.insert( elem);
             }
         }
         
@@ -719,7 +719,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var otherIter = other.iter();
         while let .Some(elem) = otherIter.next() {
             if not self.contains( elem) {
-                let _ = result.insert( elem);
+                 result.insert( elem);
             }
         }
         
@@ -973,7 +973,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if predicate(elem) {
-                let _ = result.insert( elem);
+                 result.insert( elem);
             }
         }
         result
@@ -1002,7 +1002,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             let transformed = transform(elem);
-            let _ = result.insert( transformed);
+             result.insert( transformed);
         }
         result
     }
@@ -1026,7 +1026,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
             if let .Some(transformed) = transform(elem) {
-                let _ = result.insert( transformed);
+                 result.insert( transformed);
             }
         }
         result
@@ -1081,7 +1081,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
             var newDict = Dictionary[T, Unit, H](capacity: minimumCapacity);
             var iter = self.iter();
             while let .Some(elem) = iter.next() {
-                let _ = newDict.insert(elem, Unit());
+                 newDict.insert(elem, Unit());
             }
             self.dict = newDict;
         }
@@ -1105,7 +1105,7 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
             var newDict = Dictionary[T, Unit, H](capacity: self.count);
             var iter = self.iter();
             while let .Some(elem) = iter.next() {
-                let _ = newDict.insert(elem, Unit());
+                 newDict.insert(elem, Unit());
             }
             self.dict = newDict;
         }
@@ -1264,7 +1264,7 @@ extend Set[T, H] where T: Hashable, T: Cloneable, H: Hasher, H: Defaultable {
         var result = Set[T, H](capacity: self.count);
         var iter = self.iter();
         while let .Some(elem) = iter.next() {
-            let _ = result.insert( elem.clone());
+             result.insert( elem.clone());
         }
         result
     }
@@ -1385,7 +1385,7 @@ extend Set[T, H] where T: Hashable, T: Addable, T.Output = T, T: Defaultable, H:
 //         var result = Set[T, H]();
 //         var iterator = iter;
 //         while let .Some(elem) = iterator.next() {
-//             let _ = result.insert( elem);
+//              result.insert( elem);
 //         }
 //         result
 //     }

@@ -281,8 +281,9 @@ impl Compiler {
         output_path: &Path,
         options: &kestrel_codegen_llvm::CodegenOptions,
     ) -> Result<(), kestrel_codegen_llvm::CodegenError> {
-        let to_llvm =
-            |e: kestrel_codegen_cranelift::CodegenError| kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string());
+        let to_llvm = |e: kestrel_codegen_cranelift::CodegenError| {
+            kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string())
+        };
         let mir = self.lower_to_mir().map_err(to_llvm)?;
         let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
         let target = kestrel_codegen::TargetConfig::host();

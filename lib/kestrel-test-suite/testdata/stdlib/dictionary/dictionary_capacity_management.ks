@@ -17,9 +17,9 @@ module Test
             if dict2.count != 0 { return 4 }
 
             // Insert elements and verify they work after reserveCapacity
-            let _ = dict2.insert(1, 10);
-            let _ = dict2.insert(2, 20);
-            let _ = dict2.insert(3, 30);
+             dict2.insert(1, 10);
+             dict2.insert(2, 20);
+             dict2.insert(3, 30);
             if dict2.count != 3 { return 5 }
             if dict2(1).unwrap() != 10 { return 6 }
             if dict2(2).unwrap() != 20 { return 7 }
@@ -27,8 +27,8 @@ module Test
 
             // shrinkToFit - reduces capacity
             var dict3 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64](capacity: 256);
-            let _ = dict3.insert(1, 10);
-            let _ = dict3.insert(2, 20);
+             dict3.insert(1, 10);
+             dict3.insert(2, 20);
             let capBefore = dict3.capacity;
             dict3.shrinkToFit();
             let capAfter = dict3.capacity;

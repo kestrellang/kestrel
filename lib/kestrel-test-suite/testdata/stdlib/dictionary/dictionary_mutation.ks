@@ -7,16 +7,16 @@ module Test
         func main() -> lang.i64 {
             // Test clear()
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict.insert(1, 10);
-            let _ = dict.insert(2, 20);
-            let _ = dict.insert(3, 30);
+             dict.insert(1, 10);
+             dict.insert(2, 20);
+             dict.insert(3, 30);
             dict.clear();
             if dict.count != 0 { return 1 }
             if dict.isEmpty == false { return 2 }
 
             // Test update(key:with:) - key exists
-            let _ = dict.insert(1, 10);
-            let _ = dict.insert(2, 20);
+             dict.insert(1, 10);
+             dict.insert(2, 20);
             let updated = dict.update(1, with: { (v) in v * 10 });
             if updated == false { return 3 }
             if dict(1).unwrap() != 100 { return 4 }
@@ -35,11 +35,11 @@ module Test
 
             // Test merge()
             var base = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = base.insert(1, 10);
-            let _ = base.insert(2, 20);
+             base.insert(1, 10);
+             base.insert(2, 20);
             var other = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = other.insert(2, 200);
-            let _ = other.insert(3, 300);
+             other.insert(2, 200);
+             other.insert(3, 300);
             base.merge(other, uniquingKeysWith: { (old, new) in old + new });
             if base.count != 3 { return 8 }
             if base(1).unwrap() != 10 { return 9 }
@@ -48,10 +48,10 @@ module Test
 
             // Test retain(where:)
             var dict2 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict2.insert(1, 10);
-            let _ = dict2.insert(2, 20);
-            let _ = dict2.insert(3, 30);
-            let _ = dict2.insert(4, 40);
+             dict2.insert(1, 10);
+             dict2.insert(2, 20);
+             dict2.insert(3, 30);
+             dict2.insert(4, 40);
             dict2.retain(where: { (k, v) in v > 15 });
             if dict2.count != 3 { return 12 }
             if dict2.contains(1) { return 13 }
@@ -59,9 +59,9 @@ module Test
 
             // Test removeAll(where:)
             var dict3 = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict3.insert(1, 10);
-            let _ = dict3.insert(2, 20);
-            let _ = dict3.insert(3, 30);
+             dict3.insert(1, 10);
+             dict3.insert(2, 20);
+             dict3.insert(3, 30);
             dict3.removeAll(where: { (k, v) in v >= 20 });
             if dict3.count != 1 { return 15 }
             if dict3(1).unwrap() != 10 { return 16 }

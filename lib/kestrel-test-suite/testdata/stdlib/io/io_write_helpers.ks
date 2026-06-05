@@ -67,9 +67,9 @@ module Test
 
             // Test multiple writes accumulate
             var buf6 = std.io.write.Buffer();
-            let _ = std.io.write.writeString( buf6, "Hello");
-            let _ = std.io.write.writeString( buf6, " ");
-            let _ = std.io.write.writeString( buf6, "World");
+             std.io.write.writeString( buf6, "Hello");
+             std.io.write.writeString( buf6, " ");
+             std.io.write.writeString( buf6, "World");
             if buf6.toString().isEqual(to: "Hello World") == false { return 15 }
 
             0

@@ -19,6 +19,6 @@ struct MyErr: Formattable {
 
 @main
 func main() -> () throws MyErr {
-    let _ = println("ok");
+     println("ok");
     .Ok(())
 }

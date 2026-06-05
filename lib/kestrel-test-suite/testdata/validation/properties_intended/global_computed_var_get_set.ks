@@ -14,8 +14,8 @@ public var globalComputedVar: std.numeric.Int64 {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(globalComputedVar);
+     println(globalComputedVar);
     globalComputedVar = 2;
-    let _ = println(globalComputedVar);
+     println(globalComputedVar);
     0
 }

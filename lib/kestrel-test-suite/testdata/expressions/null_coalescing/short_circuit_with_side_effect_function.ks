@@ -4,7 +4,7 @@ module Main
 import std.io.stdio.println
 
 func getDefault() -> Int {
-    let _ = println("called");
+     println("called");
     999
 }
 
@@ -14,10 +14,10 @@ func main() -> lang.i64 {
 
     // x is Some, so getDefault should NOT be called
     let a = x ?? getDefault();
-    let _ = println(a);
+     println(a);
 
     // y is None, so getDefault SHOULD be called
     let b = y ?? getDefault();
-    let _ = println(b);
+     println(b);
     0
 }

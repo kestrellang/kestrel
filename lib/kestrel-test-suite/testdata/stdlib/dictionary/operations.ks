@@ -11,8 +11,8 @@ module Test
             if dict.isEmpty == false { return 1 }
 
             // Test insert and count
-            let _ = dict.insert(1, 100);
-            let _ = dict.insert(2, 200);
+             dict.insert(1, 100);
+             dict.insert(2, 200);
             if dict.count != 2 { return 2 }
 
             // Test contains

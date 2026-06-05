@@ -10,7 +10,7 @@ func main() -> lang.i64 {
     var arr: [std.numeric.Int64] = std.collections.Array[std.numeric.Int64]();
     arr.append(10);
     arr.append(20);
-    let _ = dict.insert(1, arr);
-    let _ = println(dict.getValue(1).unwrap().count);
+     dict.insert(1, arr);
+     println(dict.getValue(1).unwrap().count);
     0
 }

@@ -72,7 +72,7 @@ func main() -> lang.i32 {
                 },
                 .None => {
                     // No subcommand — show help
-                    let _ = println(cmd.helpText());
+                     println(cmd.helpText());
                     0
                 }
             }
@@ -80,7 +80,7 @@ func main() -> lang.i32 {
         .Err(e) => {
             // ParseError.Message carries --help/--version text (success); every
             // other variant is a real usage error and must exit non-zero.
-            let _ = eprintln(e.description());
+             eprintln(e.description());
             match e {
                 .Message(_) => 0,
                 _ => 1
@@ -95,19 +95,19 @@ func main() -> lang.i32 {
 
 func handleBuild(release release: Bool) -> lang.i32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); 1 },
+        .Err(e) => {  eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Building "); msg.append(info.name);
             if release { msg.append(" (release)") };
             msg.append("...");
-            let _ = println(msg);
+             println(msg);
             match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
                 .Ok(_) => {
                     var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(info.name); doneMsg.append(" successfully");
-                    let _ = println(doneMsg);
+                     println(doneMsg);
                     0
                 },
-                .Err(e) => { let _ = eprintln(e.description()); 1 }
+                .Err(e) => {  eprintln(e.description()); 1 }
             }
         }
     }
@@ -115,11 +115,11 @@ func handleBuild(release release: Bool) -> lang.i32 {
 
 func handleRun(release release: Bool) -> lang.i32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); 1 },
+        .Err(e) => {  eprintln(e.description()); 1 },
         .Ok(info) => {
             match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
                 .Ok(_) => 0,
-                .Err(e) => { let _ = eprintln(e.description()); 1 }
+                .Err(e) => {  eprintln(e.description()); 1 }
             }
         }
     }
@@ -127,13 +127,13 @@ func handleRun(release release: Bool) -> lang.i32 {
 
 func handleCheck() -> lang.i32 {
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); 1 },
+        .Err(e) => {  eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Checking "); msg.append(info.name); msg.append("...");
-            let _ = println(msg);
+             println(msg);
             match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String](), release: false) {
-                .Ok(_) => { let _ = println("Check passed"); 0 },
-                .Err(e) => { let _ = eprintln(e.description()); 1 }
+                .Ok(_) => {  println("Check passed"); 0 },
+                .Err(e) => {  eprintln(e.description()); 1 }
             }
         }
     }
@@ -144,7 +144,7 @@ func handleInit() -> lang.i32 {
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if fileExists( manifestPath) {
-        let _ = eprintln("flock.toml already exists in this directory");
+         eprintln("flock.toml already exists in this directory");
         return 1
     }
 
@@ -155,9 +155,9 @@ func handleInit() -> lang.i32 {
     content.append("[package]\nname = \""); content.append(dirName); content.append("\"\nversion = \"0.1.0\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
 
     match writeFileString(manifestPath, content) {
-        .Ok(_) => { let _ = println("Created flock.toml"); },
+        .Ok(_) => {  println("Created flock.toml"); },
         .Err(e) => {
-            let _ = eprintln("Failed to create flock.toml");
+             eprintln("Failed to create flock.toml");
             return 1
         }
     }
@@ -166,8 +166,8 @@ func handleInit() -> lang.i32 {
     let srcDir = joinPath(base: cwd, rel: "src");
     if not isDirectory( srcDir) {
         var mkdirCmd = String(); mkdirCmd.append("mkdir -p "); mkdirCmd.append(srcDir);
-        let _ = spawn(mkdirCmd);
-        let _ = println("Created src/");
+         spawn(mkdirCmd);
+         println("Created src/");
     }
     0
 }
@@ -177,7 +177,7 @@ func handlePublish() -> lang.i32 {
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if not fileExists(manifestPath) {
-        let _ = eprintln("flock.toml not found in current directory");
+         eprintln("flock.toml not found in current directory");
         return 1
     }
 
@@ -193,13 +193,13 @@ func handlePublish() -> lang.i32 {
     );
     match readFileString(manifestPath) {
         .Err(_) => {
-            let _ = eprintln("cannot read flock.toml");
+             eprintln("cannot read flock.toml");
             return 1
         },
         .Ok(source) => {
             match parseManifest(source: source) {
                 .Err(e) => {
-                    let _ = eprintln(e.description());
+                     eprintln(e.description());
                     return 1
                 },
                 .Ok(m) => manifest = m
@@ -215,8 +215,8 @@ func handlePublish() -> lang.i32 {
     match getenv("FLOCK_ORG") {
         .Some(o) => org = o,
         .None => {
-            let _ = eprintln("FLOCK_ORG environment variable not set");
-            let _ = eprintln("Usage: FLOCK_ORG=myorg flock publish");
+             eprintln("FLOCK_ORG environment variable not set");
+             eprintln("Usage: FLOCK_ORG=myorg flock publish");
             return 1
         }
     }
@@ -239,8 +239,8 @@ func handlePublish() -> lang.i32 {
         match getenv("FLOCK_TOKEN") {
             .Some(t) => token = t,
             .None => {
-                let _ = eprintln("No auth token found.");
-                let _ = eprintln("Set FLOCK_TOKEN or save your token to ~/.kestrel/credentials");
+                 eprintln("No auth token found.");
+                 eprintln("Set FLOCK_TOKEN or save your token to ~/.kestrel/credentials");
                 return 1
             }
         }
@@ -254,7 +254,7 @@ func handlePublish() -> lang.i32 {
     var tarCmd = String(); tarCmd.append("tar czf "); tarCmd.append(archivePath); tarCmd.append(" -C "); tarCmd.append(quoteArg(cwd)); tarCmd.append(" .");
     let tarExit = spawn(tarCmd);
     if tarExit != 0 {
-        let _ = eprintln("failed to create archive");
+         eprintln("failed to create archive");
         return 1
     }
 
@@ -270,33 +270,33 @@ func handlePublish() -> lang.i32 {
             hasDocs = true
         }
     } else {
-        let _ = eprintln("Note: docs not generated (kestrel-doc not available or source has errors)");
+         eprintln("Note: docs not generated (kestrel-doc not available or source has errors)");
     }
 
     // Upload archive via curl
     var url = String(); url.append(regUrl); url.append("/api/v1/packages/"); url.append(org); url.append("/"); url.append(name); url.append("/"); url.append(version);
     var curlCmd = String(); curlCmd.append("curl -s -X PUT "); curlCmd.append(quoteArg(url)); curlCmd.append(" -H \"Authorization: Bearer "); curlCmd.append(token); curlCmd.append("\" -H \"Content-Type: application/gzip\" --data-binary @"); curlCmd.append(archivePath);
     var pubMsg = String(); pubMsg.append("Publishing "); pubMsg.append(org); pubMsg.append("/"); pubMsg.append(name); pubMsg.append("@"); pubMsg.append(version); pubMsg.append(" to "); pubMsg.append(regUrl); pubMsg.append("...");
-    let _ = println(pubMsg);
+     println(pubMsg);
 
     let output = captureOutput(curlCmd);
-    let _ = println(output);
+     println(output);
 
     // Upload docs if generated
     if hasDocs {
         var docsPath = String(); docsPath.append(docsDir); docsPath.append("/docs.json");
         var docsUrl = String(); docsUrl.append(regUrl); docsUrl.append("/api/v1/packages/"); docsUrl.append(org); docsUrl.append("/"); docsUrl.append(name); docsUrl.append("/"); docsUrl.append(version); docsUrl.append("/docs");
         var docsCurlCmd = String(); docsCurlCmd.append("curl -s -X PUT "); docsCurlCmd.append(quoteArg(docsUrl)); docsCurlCmd.append(" -H \"Authorization: Bearer "); docsCurlCmd.append(token); docsCurlCmd.append("\" -H \"Content-Type: application/json\" --data-binary @"); docsCurlCmd.append(docsPath);
-        let _ = println("Uploading documentation...");
+         println("Uploading documentation...");
         let docsOutput = captureOutput(docsCurlCmd);
-        let _ = println(docsOutput);
+         println(docsOutput);
     }
 
     // Clean up
     var rmCmd = String(); rmCmd.append("rm -f "); rmCmd.append(archivePath);
-    let _ = spawn(rmCmd);
+     spawn(rmCmd);
     var rmDocsCmd = String(); rmDocsCmd.append("rm -rf "); rmDocsCmd.append(docsDir);
-    let _ = spawn(rmDocsCmd);
+     spawn(rmDocsCmd);
     0
 }
 
@@ -307,16 +307,16 @@ func handleUpdate() -> lang.i32 {
     // Delete existing lock file to force re-resolution
     if fileExists(lockPath) {
         var rmCmd = String(); rmCmd.append("rm "); rmCmd.append(lockPath);
-        let _ = spawn(rmCmd);
-        let _ = println("Removed flock.lock");
+         spawn(rmCmd);
+         println("Removed flock.lock");
     }
 
     // Re-resolve everything
     match resolveAndDiscover() {
-        .Err(e) => { let _ = eprintln(e.description()); 1 },
+        .Err(e) => {  eprintln(e.description()); 1 },
         .Ok(info) => {
             var msg = String(); msg.append("Dependencies updated for "); msg.append(info.name);
-            let _ = println(msg);
+             println(msg);
             0
         }
     }

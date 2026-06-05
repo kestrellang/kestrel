@@ -42,7 +42,7 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
 
         if result != ffi.SQLITE_OK() {
             if not dbRaw.isNull {
-                let _ = ffi.sqlite3_close(dbRaw);
+                 ffi.sqlite3_close(dbRaw);
             }
             throw SqliteError.Error("failed to open database: " + path);
         }
@@ -54,7 +54,7 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
             self.ptr = p.cast[SharedDbStorage]();
             self.ptr.write(SharedDbStorage(refCount: 1, db: dbRaw));
         } else {
-            let _ = ffi.sqlite3_close(dbRaw);
+             ffi.sqlite3_close(dbRaw);
             fatalError("SharedDatabase allocation failed")
         }
     }
@@ -90,7 +90,7 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
         match body(tx) {
             .Ok(_) => execRawOnDb(dbRaw, "COMMIT"),
             .Err(e) => {
-                let _ = execRawOnDb(dbRaw, "ROLLBACK");
+                 execRawOnDb(dbRaw, "ROLLBACK");
                 throw e;
             }
         }
@@ -102,7 +102,7 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
 
         if storage.refCount == 0 {
             if not storage.db.isNull {
-                let _ = ffi.sqlite3_close(storage.db);
+                 ffi.sqlite3_close(storage.db);
             }
             let layout = Layout.of[SharedDbStorage]();
             var allocator = SystemAllocator();

@@ -463,7 +463,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         self.init();
         var iter = pairs.iter();
         while let .Some(pair) = iter.next() {
-            let _ = self.insert( pair.0, pair.1);
+             self.insert( pair.0, pair.1);
         }
     }
 
@@ -499,12 +499,12 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
                 .Some(arr) => {
                     var newArr: Array[E] = arr;
                     newArr.append( element);
-                    let _ = self.insert( key, newArr);
+                     self.insert( key, newArr);
                 },
                 .None => {
                     var arr = Array[E]();
                     arr.append( element);
-                    let _ = self.insert( key, arr);
+                     self.insert( key, arr);
                 }
             }
         }
@@ -538,7 +538,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             if self.contains( pair.0) {
                 fatalError("Dictionary(uniquePairs:): duplicate key")
             }
-            let _ = self.insert( pair.0, pair.1);
+             self.insert( pair.0, pair.1);
         }
     }
 
@@ -673,10 +673,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         set {
             match newValue {
                 .Some(value) => {
-                    let _ = self.insert( key, value);
+                     self.insert( key, value);
                 },
                 .None => {
-                    let _ = self.remove( key);
+                     self.remove( key);
                 }
             }
         }
@@ -739,7 +739,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             }
         }
         set {
-            let _ = self.insert( key, newValue);
+             self.insert( key, newValue);
         }
     }
 
@@ -1111,7 +1111,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let maybeValue = self(key);
         match maybeValue {
             .Some(v) => {
-                let _ = self.insert( key, transform(v));
+                 self.insert( key, transform(v));
                 true
             },
             .None => false
@@ -1138,10 +1138,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         let maybeValue = self(key);
         match maybeValue {
             .Some(v) => {
-                let _ = self.insert( key, transform(v));
+                 self.insert( key, transform(v));
             },
             .None => {
-                let _ = self.insert( key, transform(defaultValue));
+                 self.insert( key, transform(defaultValue));
             }
         }
     }
@@ -1168,10 +1168,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let maybeExisting = self(pair.0);
             match maybeExisting {
                 .Some(existing) => {
-                    let _ = self.insert( pair.0, combine(existing, pair.1));
+                     self.insert( pair.0, combine(existing, pair.1));
                 },
                 .None => {
-                    let _ = self.insert( pair.0, pair.1);
+                     self.insert( pair.0, pair.1);
                 }
             }
         }
@@ -1199,10 +1199,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let maybeExisting = self(pair.0);
             match maybeExisting {
                 .Some(existing) => {
-                    let _ = self.insert( pair.0, combine(existing, pair.1));
+                     self.insert( pair.0, combine(existing, pair.1));
                 },
                 .None => {
-                    let _ = self.insert( pair.0, pair.1);
+                     self.insert( pair.0, pair.1);
                 }
             }
         }
@@ -1241,7 +1241,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
         var removeIter = keysToRemove.iter();
         while let .Some(key) = removeIter.next() {
-            let _ = self.remove( key);
+             self.remove( key);
         }
     }
 
@@ -1509,7 +1509,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    let _ = result.insert( key, transform(value));
+                     result.insert( key, transform(value));
                 },
                 _ => {}
             }
@@ -1542,7 +1542,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             match bucket {
                 .Occupied(key, value, _) => {
                     if let .Some(transformed) = transform(value) {
-                        let _ = result.insert( key, transformed);
+                         result.insert( key, transformed);
                     }
                 },
                 _ => {}
@@ -1574,7 +1574,7 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
             match bucket {
                 .Occupied(key, value, _) => {
                     if predicate(key, value) {
-                        let _ = result.insert( key, value);
+                         result.insert( key, value);
                     }
                 },
                 _ => {}
@@ -1847,7 +1847,7 @@ extend Dictionary[K, V, H] where K: Hashable, H: Hasher, H: Defaultable {
             let bucket = myBuckets.offset(by: i).read();
             match bucket {
                 .Occupied(key, value, _) => {
-                    let _ = result.insert( key, value);
+                     result.insert( key, value);
                 },
                 _ => {}
             }
@@ -2165,7 +2165,7 @@ extend Dictionary[K, V, H]: std.core._ExpressibleByDictionaryLiteral, std.core.E
         // Insert each key-value pair
         var iter = elements.iter();
         while let .Some(pair) = iter.next() {
-            let _ = self.insert(pair.0, pair.1);
+             self.insert(pair.0, pair.1);
         }
     }
 }

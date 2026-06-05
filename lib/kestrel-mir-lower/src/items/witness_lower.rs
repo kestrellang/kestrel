@@ -77,12 +77,14 @@ fn lower_witnesses_for_type(
         // implementing type and binds its OWN method impls, so the mono witness
         // selector prefers it over a generic `extend Box[T]: P`. Generic
         // extensions and direct conformances keep the generic implementing type.
-        let concrete_args =
-            if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
-                lower_concrete_target_args(ctx, *source)
-            } else {
-                None
-            };
+        let concrete_args = if matches!(
+            ctx.world.get::<NodeKind>(*source),
+            Some(NodeKind::Extension)
+        ) {
+            lower_concrete_target_args(ctx, *source)
+        } else {
+            None
+        };
         // Prefer the source extension's own method impls when EITHER the
         // implementing type is specialized (`extend Box[lang.i64]`) OR the
         // PROTOCOL args are concrete (`extend S: Producer[Int64]`). The latter
@@ -303,25 +305,30 @@ fn bind_witness_methods(
         // `extend Equatable: NotEqual[Self]` provides the conformance,
         // search the extension's children for the method implementation.
         // Only applies when the extension targets a protocol, not a concrete type.
-        let source_is_protocol_ext = matches!(
-            ctx.world.get::<NodeKind>(source),
-            Some(NodeKind::Extension)
-        ) && source != type_entity
-            && ctx
-                .query
-                .query(ExtensionTargetEntity {
-                    extension: source,
-                    root: ctx.root,
-                })
-                .is_some_and(|target| {
-                    matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol))
-                });
+        let source_is_protocol_ext =
+            matches!(ctx.world.get::<NodeKind>(source), Some(NodeKind::Extension))
+                && source != type_entity
+                && ctx
+                    .query
+                    .query(ExtensionTargetEntity {
+                        extension: source,
+                        root: ctx.root,
+                    })
+                    .is_some_and(|target| {
+                        matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol))
+                    });
         if source_is_protocol_ext {
             let ext_children: Vec<Entity> = ctx.world.children_of(source).to_vec();
             let ext_impl = if method_name.ends_with(".set") {
                 find_setter_among(ctx, &ext_children)
             } else {
-                find_impl_among(ctx, &ext_children, lookup_name, Some(&method_key.labels), None)
+                find_impl_among(
+                    ctx,
+                    &ext_children,
+                    lookup_name,
+                    Some(&method_key.labels),
+                    None,
+                )
             };
             if let Some(impl_func) = ext_impl {
                 ctx.register_name(impl_func);

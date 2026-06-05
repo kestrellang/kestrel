@@ -6,6 +6,6 @@ import std.result.Optional
 
 func main() -> lang.i64 {
     let x: Int? = .None;
-    let _ = println(x ?? 99);
+     println(x ?? 99);
     0
 }

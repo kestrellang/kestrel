@@ -19,7 +19,7 @@ func main() -> lang.i64 {
     var arr = Array[Int64]();
     var i = 0;
     while i < 100 {
-        let _ = mutate(arr, with: { (a) in a.append(i); a.count });
+         mutate(arr, with: { (a) in a.append(i); a.count });
         i = i + 1;
     }
     if arr.count != 100 { return 1 }

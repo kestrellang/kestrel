@@ -20,7 +20,7 @@ import std.io.error.(IoError)
 ///
 /// ```
 /// let response = Response.ok(Text("hello"));
-/// let _ = sendResponse(response, to: socketFd);
+///  sendResponse(response, to: socketFd);
 /// ```
 public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result[(), IoError] {
     var resp = String(capacity: 256 + response.bodyContent.byteCount);

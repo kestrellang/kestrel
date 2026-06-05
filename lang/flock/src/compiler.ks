@@ -129,7 +129,7 @@ func cleanupTemp(path path: String) {
     var rm = String();
     rm.append("rm -f ");
     rm.append(quoteArg(path));
-    let _ = spawn(rm);
+     spawn(rm);
 }
 
 // ----------------------------------------------------------------------------

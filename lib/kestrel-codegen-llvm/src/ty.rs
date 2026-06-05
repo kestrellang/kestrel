@@ -123,7 +123,10 @@ impl TypeCache {
     pub fn new(module: &MonoModule, ptr_size: u64) -> Self {
         // Pointer-width scalars are the LLVM `ptr`. `ScalarTy::Ptr::bytes()` is
         // hardcoded to 8, so a non-64-bit target would mis-size pointer fields.
-        debug_assert_eq!(ptr_size, 8, "ScalarTy::Ptr currently assumes 8-byte pointers");
+        debug_assert_eq!(
+            ptr_size, 8,
+            "ScalarTy::Ptr currently assumes 8-byte pointers"
+        );
         let ptr_scalar = ScalarTy::Ptr;
         Self {
             reprs: vec![None; module.ty_arena.len()],

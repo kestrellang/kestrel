@@ -90,9 +90,23 @@ fn compile_string_literal<'ctx>(
 
     // `{ ptr@0, i64 len@ptr_size }`: data is a real `ptr`, the length an integer.
     let slot = fc.alloca(ptr_size * 2, ptr_size);
-    mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), slot, data_ptr.into());
+    mem::store_to_repr(
+        cx,
+        builder,
+        ptr_size,
+        TypeRepr::Scalar(ptr_scalar),
+        slot,
+        data_ptr.into(),
+    );
     let len_dest = mem::field_gep(cx, builder, slot, ptr_size);
-    mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ScalarTy::I64), len_dest, len.into());
+    mem::store_to_repr(
+        cx,
+        builder,
+        ptr_size,
+        TypeRepr::Scalar(ScalarTy::I64),
+        len_dest,
+        len.into(),
+    );
 
     Ok(slot.into())
 }
@@ -103,7 +117,10 @@ fn compile_mono_func_ref<'ctx>(
     mono_id: MonoFuncId,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
     let func = fc.ctx.func_ids[mono_id.index()].ok_or_else(|| {
-        CodegenError::Unsupported(format!("mono function ref {} not declared", mono_id.index()))
+        CodegenError::Unsupported(format!(
+            "mono function ref {} not declared",
+            mono_id.index()
+        ))
     })?;
     Ok(func.as_global_value().as_pointer_value().into())
 }

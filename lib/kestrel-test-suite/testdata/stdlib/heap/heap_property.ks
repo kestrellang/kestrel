@@ -71,13 +71,13 @@ module Test
             if h5.peek().unwrap() != 5 { return 24 }
             h5.push(15);
             if h5.peek().unwrap() != 5 { return 25 }
-            let _ = h5.pop(); // removes 5
+             h5.pop(); // removes 5
             if h5.peek().unwrap() != 10 { return 26 }
             h5.push(3);
             if h5.peek().unwrap() != 3 { return 27 }
-            let _ = h5.pop(); // removes 3
+             h5.pop(); // removes 3
             if h5.peek().unwrap() != 10 { return 28 }
-            let _ = h5.pop(); // removes 10
+             h5.pop(); // removes 10
             if h5.peek().unwrap() != 15 { return 29 }
 
             // Single element

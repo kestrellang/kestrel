@@ -8,6 +8,6 @@ public func publicAnswer() -> std.numeric.Int64 = 99
 
 @main
 func main() -> lang.i64 {
-    let _ = println(publicAnswer());
+     println(publicAnswer());
     0
 }

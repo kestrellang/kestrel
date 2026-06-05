@@ -179,15 +179,14 @@ fn gather_protocol_instantiations(
     // The implementing-type args of this source: the concrete `[lang.i64]` of
     // `extend Box[lang.i64]` vs the `[T]` of `extend Box[T]`. Empty for direct
     // (non-extension) conformances. Disambiguates overlapping specializations.
-    let source_target_args: Vec<AstType> = if ctx.get::<NodeKind>(entity)
-        == Some(&NodeKind::Extension)
-    {
-        ctx.get::<ExtensionTarget>(entity)
-            .map(|t| extract_ast_type_args(&t.0))
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let source_target_args: Vec<AstType> =
+        if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+            ctx.get::<ExtensionTarget>(entity)
+                .map(|t| extract_ast_type_args(&t.0))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
     for item in &conformances.0 {
         let ConformanceItem::Positive(ast_ty, _) = item else {

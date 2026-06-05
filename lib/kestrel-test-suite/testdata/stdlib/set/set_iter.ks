@@ -6,9 +6,9 @@ module Test
         @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
-            let _ = s.insert(10);
-            let _ = s.insert(20);
-            let _ = s.insert(30);
+             s.insert(10);
+             s.insert(20);
+             s.insert(30);
 
             // Iterate and collect sum to verify all elements are visited
             var sum: std.numeric.Int64 = 0;

@@ -78,12 +78,12 @@ func main() {
                     }
                 },
                 .None => {
-                    let _ = println(cmd.helpText());
+                     println(cmd.helpText());
                 }
             }
         },
         .Err(e) => {
-            let _ = eprintln(e.description());
+             eprintln(e.description());
         }
     }
 }
@@ -109,7 +109,7 @@ func handleInstall(matches matches: ArgumentMatches) {
             match setDefault(toolchainName: name) {
                 .Ok(_) => {},
                 .Err(e) => {
-                    let _ = eprintln(e.description());
+                     eprintln(e.description());
                 }
             }
         },
@@ -117,7 +117,7 @@ func handleInstall(matches matches: ArgumentMatches) {
             var errMsg = String();
             errMsg.append("error: ");
             errMsg.append(e.description());
-            let _ = eprintln(errMsg);
+             eprintln(errMsg);
         }
     }
 }
@@ -129,7 +129,7 @@ func handleDefault(matches matches: ArgumentMatches) {
         match sub.value(of: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
-                let _ = eprintln("error: toolchain name required");
+                 eprintln("error: toolchain name required");
                 return
             }
         }
@@ -141,7 +141,7 @@ func handleDefault(matches matches: ArgumentMatches) {
             var errMsg = String();
             errMsg.append("error: ");
             errMsg.append(e.description());
-            let _ = eprintln(errMsg);
+             eprintln(errMsg);
         }
     }
 }
@@ -153,7 +153,7 @@ func handleList() {
             var errMsg = String();
             errMsg.append("error: ");
             errMsg.append(e.description());
-            let _ = eprintln(errMsg);
+             eprintln(errMsg);
         }
     }
 }
@@ -165,7 +165,7 @@ func handleUpdate() {
             var errMsg = String();
             errMsg.append("error: ");
             errMsg.append(e.description());
-            let _ = eprintln(errMsg);
+             eprintln(errMsg);
         }
     }
 }
@@ -177,7 +177,7 @@ func handleRemove(matches matches: ArgumentMatches) {
         match sub.value(of: "toolchain") {
             .Some(t) => toolchainName = t,
             .None => {
-                let _ = eprintln("error: toolchain name required");
+                 eprintln("error: toolchain name required");
                 return
             }
         }
@@ -189,7 +189,7 @@ func handleRemove(matches matches: ArgumentMatches) {
             var errMsg = String();
             errMsg.append("error: ");
             errMsg.append(e.description());
-            let _ = eprintln(errMsg);
+             eprintln(errMsg);
         }
     }
 }
@@ -201,7 +201,7 @@ func handleShow() {
             var errMsg = String();
             errMsg.append("error: ");
             errMsg.append(e.description());
-            let _ = eprintln(errMsg);
+             eprintln(errMsg);
         }
     }
 }
@@ -219,7 +219,7 @@ func handleSelf(matches matches: ArgumentMatches) {
                             var errMsg = String();
                             errMsg.append("error: ");
                             errMsg.append(e.description());
-                            let _ = eprintln(errMsg);
+                             eprintln(errMsg);
                         }
                     }
                     return
@@ -229,5 +229,5 @@ func handleSelf(matches matches: ArgumentMatches) {
         }
     }
 
-    let _ = eprintln("usage: jessup self update");
+     eprintln("usage: jessup self update");
 }

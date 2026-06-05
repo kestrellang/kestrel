@@ -14,6 +14,6 @@ struct Point {
 @main
 func main() -> lang.i64 {
     let p = Point(x: 3, y: 4);
-    let _ = println(p.sum());
+     println(p.sum());
     0
 }

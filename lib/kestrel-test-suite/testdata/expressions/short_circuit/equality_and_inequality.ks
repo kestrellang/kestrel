@@ -4,6 +4,6 @@ module Main
 import std.io.stdio.println
 
 func main() -> lang.i64 {
-    let _ = println(1 == 1 and 2 != 3);
+     println(1 == 1 and 2 != 3);
     0
 }

@@ -4,6 +4,6 @@
 module Main
 
 func test(x: lang.i64) -> lang.i64 {
-    let _ = x;
+     x;
     42
 }

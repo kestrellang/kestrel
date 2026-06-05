@@ -17,8 +17,8 @@ enum Foo {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(Foo.computed);
+     println(Foo.computed);
     Foo.computed = 7;
-    let _ = println(Foo.computed);
+     println(Foo.computed);
     0
 }

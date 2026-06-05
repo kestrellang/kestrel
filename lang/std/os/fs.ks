@@ -186,7 +186,7 @@ public func isFile(path: String) -> Bool {
 func statMode(path: String) -> Optional[Int32] {
     let cpath = path.toCString();
     let buf = malloc(STAT_BUF_SIZE());
-    let _ = memset(buf, 0, STAT_BUF_SIZE());
+     memset(buf, 0, STAT_BUF_SIZE());
 
     let result = libc_stat(cpath.raw.asRaw(), buf);
     cpath.free();
@@ -340,7 +340,7 @@ public func listDir(path: String) -> Array[String] {
         }
     }
 
-    let _ = libc_closedir(dirp);
+     libc_closedir(dirp);
     result
 }
 

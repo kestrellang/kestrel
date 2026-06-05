@@ -108,7 +108,13 @@ pub fn compile_terminator<'ctx>(
             else_block,
             else_args,
         } => compile_branch(
-            fc, builder, *condition, *then_block, then_args, *else_block, else_args,
+            fc,
+            builder,
+            *condition,
+            *then_block,
+            then_args,
+            *else_block,
+            else_args,
         ),
 
         TerminatorKind::Switch {
@@ -134,7 +140,10 @@ fn compile_return<'ctx>(
 ) -> Result<(), CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
-    let ret_repr = fc.ctx.tc.repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
+    let ret_repr = fc
+        .ctx
+        .tc
+        .repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
     let ret_mode = abi::return_mode(ret_repr);
 
     match ret_mode {
@@ -149,7 +158,9 @@ fn compile_return<'ctx>(
             builder.build_return(Some(&final_val)).unwrap();
         },
         ReturnMode::Sret => {
-            let sret_ptr = fc.sret_ptr.expect("sret_ptr must be set for Sret return mode");
+            let sret_ptr = fc
+                .sret_ptr
+                .expect("sret_ptr must be set for Sret return mode");
             let val = fc.get_value(value_id).into_pointer_value();
             mem::copy_aggregate(cx, builder, ptr_size, ret_repr.size(), sret_ptr, val);
             builder.build_return(None).unwrap();

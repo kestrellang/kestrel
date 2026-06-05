@@ -295,9 +295,11 @@ fn select_most_specific(
 /// is more specific than `Result[T, E]`, and `Wrap[i64]` than `Wrap[T]`.
 fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> bool {
     let mut ab = HashMap::new();
-    let a_is_instance_of_b = match_pattern(arena, b.implementing_type, a.implementing_type, &mut ab);
+    let a_is_instance_of_b =
+        match_pattern(arena, b.implementing_type, a.implementing_type, &mut ab);
     let mut ba = HashMap::new();
-    let b_is_instance_of_a = match_pattern(arena, a.implementing_type, b.implementing_type, &mut ba);
+    let b_is_instance_of_a =
+        match_pattern(arena, a.implementing_type, b.implementing_type, &mut ba);
     a_is_instance_of_b && !b_is_instance_of_a
 }
 

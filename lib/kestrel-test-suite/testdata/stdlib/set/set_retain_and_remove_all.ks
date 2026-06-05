@@ -7,11 +7,11 @@ module Test
         func main() -> lang.i64 {
             // Test retain(where:)
             var s = std.collections.Set[std.numeric.Int64]();
-            let _ = s.insert(1);
-            let _ = s.insert(2);
-            let _ = s.insert(3);
-            let _ = s.insert(4);
-            let _ = s.insert(5);
+             s.insert(1);
+             s.insert(2);
+             s.insert(3);
+             s.insert(4);
+             s.insert(5);
 
             s.retain(where: { (x) in x % 2 == 0 });
             if s.count != 2 { return 1 }
@@ -22,11 +22,11 @@ module Test
 
             // Test removeAll(where:)
             var s2 = std.collections.Set[std.numeric.Int64]();
-            let _ = s2.insert(1);
-            let _ = s2.insert(2);
-            let _ = s2.insert(3);
-            let _ = s2.insert(4);
-            let _ = s2.insert(5);
+             s2.insert(1);
+             s2.insert(2);
+             s2.insert(3);
+             s2.insert(4);
+             s2.insert(5);
 
             s2.removeAll(where: { (x) in x % 2 == 0 });
             if s2.count != 3 { return 6 }

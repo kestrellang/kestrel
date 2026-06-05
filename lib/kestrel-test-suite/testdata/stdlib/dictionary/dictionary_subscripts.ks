@@ -6,8 +6,8 @@ module Test
         @main
         func main() -> lang.i64 {
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = dict.insert(1, 10);
-            let _ = dict.insert(2, 20);
+             dict.insert(1, 10);
+             dict.insert(2, 20);
 
             // Test subscript(key:default:) - key exists
             let val1 = dict(1, default: 999);

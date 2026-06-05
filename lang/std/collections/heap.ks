@@ -188,7 +188,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
         }
         let min = self.data(0);
         self.data.swap(at: 0, with: n - 1);
-        let _ = self.data.pop();
+         self.data.pop();
         self.siftDown(0);
         .Some(min)
     }

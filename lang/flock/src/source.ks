@@ -124,7 +124,7 @@ public func joinPath(base base: String, rel rel: String) -> String {
         let part = relParts(unchecked: i);
         if part == ".." {
             if parts.count > 0 {
-                let _ = parts.pop();
+                 parts.pop();
             }
         } else if part == "." {
             // skip current dir

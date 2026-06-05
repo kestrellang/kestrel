@@ -89,7 +89,7 @@ public func getArgv() -> Array[String] {
         i = i + 1
     }
     let n = std.io.libc.read(fd, buf.asPointer(), 4096);
-    let _ = std.io.libc.close(fd);
+     std.io.libc.close(fd);
 
     if n <= 0 {
         return result

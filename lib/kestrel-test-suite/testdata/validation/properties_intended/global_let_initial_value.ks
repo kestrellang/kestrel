@@ -9,6 +9,6 @@ public let globalLet: std.numeric.Int64 = 7;
 
 @main
 func main() -> lang.i64 {
-    let _ = println(globalLet);
+     println(globalLet);
     0
 }

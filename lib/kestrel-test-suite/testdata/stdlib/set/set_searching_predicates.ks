@@ -6,11 +6,11 @@ module Test
         @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
-            let _ = s.insert(1);
-            let _ = s.insert(2);
-            let _ = s.insert(3);
-            let _ = s.insert(4);
-            let _ = s.insert(5);
+             s.insert(1);
+             s.insert(2);
+             s.insert(3);
+             s.insert(4);
+             s.insert(5);
 
             // Test contains(where:) - found
             if s.contains(where: { (x) in x > 3 }) == false { return 1 }

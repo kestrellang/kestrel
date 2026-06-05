@@ -7,28 +7,28 @@ module Test
         func main() -> lang.i64 {
             // equals(other:) - same dictionaries
             var a = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = a.insert(1, 10);
-            let _ = a.insert(2, 20);
-            let _ = a.insert(3, 30);
+             a.insert(1, 10);
+             a.insert(2, 20);
+             a.insert(3, 30);
 
             var b = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = b.insert(1, 10);
-            let _ = b.insert(2, 20);
-            let _ = b.insert(3, 30);
+             b.insert(1, 10);
+             b.insert(2, 20);
+             b.insert(3, 30);
 
             if a.isEqual(to: b) == false { return 1 }
 
             // equals - different values
             var c = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = c.insert(1, 10);
-            let _ = c.insert(2, 99);
-            let _ = c.insert(3, 30);
+             c.insert(1, 10);
+             c.insert(2, 99);
+             c.insert(3, 30);
             if a.isEqual(to: c) { return 2 }
 
             // equals - different count
             var d = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = d.insert(1, 10);
-            let _ = d.insert(2, 20);
+             d.insert(1, 10);
+             d.insert(2, 20);
             if a.isEqual(to: d) { return 3 }
 
             // equals - empty dictionaries
@@ -58,11 +58,11 @@ module Test
 
             // allKeys(of:) - multiple matches
             var multi = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();
-            let _ = multi.insert(1, 100);
-            let _ = multi.insert(2, 200);
-            let _ = multi.insert(3, 100);
-            let _ = multi.insert(4, 300);
-            let _ = multi.insert(5, 100);
+             multi.insert(1, 100);
+             multi.insert(2, 200);
+             multi.insert(3, 100);
+             multi.insert(4, 300);
+             multi.insert(5, 100);
             let keys100 = multi.allKeys(of: 100);
             if keys100.count != 3 { return 12 }
             // All keys with value 100 should be present (1, 3, 5)

@@ -11,6 +11,6 @@ public struct Foo {
 
 @main
 func main() -> lang.i64 {
-    let _ = println(Foo.structStaticLet);
+     println(Foo.structStaticLet);
     0
 }

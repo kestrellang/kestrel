@@ -10,7 +10,7 @@ func main() -> lang.i64 {
     arr.append(.Some(1));
     arr.append(.None);
     arr.append(.Some(3));
-    let _ = println(arr.count);
-    let _ = println(arr.first().unwrap().unwrap());
+     println(arr.count);
+     println(arr.first().unwrap().unwrap());
     0
 }

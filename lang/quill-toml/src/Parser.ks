@@ -160,7 +160,7 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
         let val = parsed.1;
 
         if currentTable.isEmpty {
-            let _ = root.insert(key, val);
+             root.insert(key, val);
         } else {
             insertIntoTable(root, currentTable, key, val)
         }
@@ -396,7 +396,7 @@ func parseInlineTable(s: String, lineNum: Int64) -> Result[Value, TomlParseError
         let part = parts(unchecked: pi).trimmed().toOwned();
         if not part.isEmpty {
             let kv = try parseKeyValue(part, lineNum);
-            let _ = obj.insert(kv.0, kv.1);
+             obj.insert(kv.0, kv.1);
         }
         pi = pi + 1
     }
@@ -459,7 +459,7 @@ func splitTomlItems(s: String) -> Array[String] {
 func ensureTable(mutating root: Dictionary[String, Value], name: String) {
     match root(name) {
         .Some(_) => {},
-        .None => { let _ = root.insert(name, Value.Obj(Dictionary[String, Value]())); }
+        .None => {  root.insert(name, Value.Obj(Dictionary[String, Value]())); }
     }
 }
 
@@ -470,20 +470,20 @@ func insertIntoTable(mutating root: Dictionary[String, Value], table: String, ke
             match existing {
                 .Obj(obj) => {
                     var mutObj = obj;
-                    let _ = mutObj.insert(key, value);
-                    let _ = root.insert(table, Value.Obj(mutObj));
+                     mutObj.insert(key, value);
+                     root.insert(table, Value.Obj(mutObj));
                 },
                 _ => {
                     var newObj = Dictionary[String, Value]();
-                    let _ = newObj.insert(key, value);
-                    let _ = root.insert(table, Value.Obj(newObj));
+                     newObj.insert(key, value);
+                     root.insert(table, Value.Obj(newObj));
                 }
             }
         },
         .None => {
             var newObj = Dictionary[String, Value]();
-            let _ = newObj.insert(key, value);
-            let _ = root.insert(table, Value.Obj(newObj));
+             newObj.insert(key, value);
+             root.insert(table, Value.Obj(newObj));
         }
     }
 }

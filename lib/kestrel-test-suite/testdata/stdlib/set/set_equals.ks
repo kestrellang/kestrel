@@ -6,30 +6,30 @@ module Test
         @main
         func main() -> lang.i64 {
             var a = std.collections.Set[std.numeric.Int64]();
-            let _ = a.insert(1);
-            let _ = a.insert(2);
-            let _ = a.insert(3);
+             a.insert(1);
+             a.insert(2);
+             a.insert(3);
 
             // Same elements, different insertion order
             var b = std.collections.Set[std.numeric.Int64]();
-            let _ = b.insert(3);
-            let _ = b.insert(1);
-            let _ = b.insert(2);
+             b.insert(3);
+             b.insert(1);
+             b.insert(2);
 
             if a.isEqual(to: b) == false { return 1 }
 
             // Different sizes
             var c = std.collections.Set[std.numeric.Int64]();
-            let _ = c.insert(1);
-            let _ = c.insert(2);
+             c.insert(1);
+             c.insert(2);
 
             if a.isEqual(to: c) { return 2 }
 
             // Different elements, same size
             var d = std.collections.Set[std.numeric.Int64]();
-            let _ = d.insert(1);
-            let _ = d.insert(2);
-            let _ = d.insert(4);
+             d.insert(1);
+             d.insert(2);
+             d.insert(4);
 
             if a.isEqual(to: d) { return 3 }
 

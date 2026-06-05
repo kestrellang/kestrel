@@ -147,7 +147,7 @@ public struct Headers: Cloneable {
         while i < self.entries.count {
             let pair = self.entries(unchecked: i);
             if pair.0.equalsIgnoreAsciiCase(name) {
-                let _ = self.entries.remove(at: i);
+                 self.entries.remove(at: i);
             } else {
                 i = i + 1
             }

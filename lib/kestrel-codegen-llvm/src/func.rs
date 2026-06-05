@@ -17,10 +17,10 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::values::{AnyValue, BasicValueEnum, FunctionValue, PhiValue, PointerValue};
 
+use kestrel_mir::ValueId;
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
 use kestrel_mir::value::Ownership;
-use kestrel_mir::ValueId;
 
 use crate::abi::{self, PassMode, ReturnMode};
 use crate::context::CodegenCtx;
@@ -65,10 +65,15 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
         let ownership = self.body.values[id.index()].ownership;
         let ty = self.body.values[id.index()].ty;
         if ownership == Ownership::Guaranteed {
-            let repr = self.ctx.tc.repr(ty, &self.ctx.module.ty_arena, self.ctx.module);
+            let repr = self
+                .ctx
+                .tc
+                .repr(ty, &self.ctx.module.ty_arena, self.ctx.module);
             if let TypeRepr::Scalar(t) = repr {
                 let cx = self.ctx.cx;
-                return builder.build_load(t.llvm(cx), val.into_pointer_value(), "g").unwrap();
+                return builder
+                    .build_load(t.llvm(cx), val.into_pointer_value(), "g")
+                    .unwrap();
             }
         }
         val
@@ -152,7 +157,10 @@ pub fn compile_function<'ctx>(
 
     let mut param_idx = 0u32;
     let sret_ptr = if matches!(ret_mode, ReturnMode::Sret) {
-        let p = fn_value.get_nth_param(param_idx).unwrap().into_pointer_value();
+        let p = fn_value
+            .get_nth_param(param_idx)
+            .unwrap()
+            .into_pointer_value();
         param_idx += 1;
         Some(p)
     } else {

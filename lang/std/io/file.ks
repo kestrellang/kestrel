@@ -309,7 +309,7 @@ public struct File: Readable, Writable, not Copyable {
     /// flush and `close` explicitly via the libc bindings before drop.
     deinit {
         if self.fd >= 0 {
-            let _ = libc.close(self.fd);
+             libc.close(self.fd);
         }
     }
 }

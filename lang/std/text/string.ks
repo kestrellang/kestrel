@@ -24,7 +24,7 @@ func _memcpyBytes(dst dst: Pointer[UInt8], src src: Pointer[UInt8], n n: Int64) 
     if n <= 0 {
         return
     }
-    let _ = memcpy(dst.asRaw(), src.asRaw(), n);
+     memcpy(dst.asRaw(), src.asRaw(), n);
 }
 
 /// Byte-wise equality of two regions via libc `memcmp`. Caller ensures
@@ -279,7 +279,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
         let byteCount = Int64(intLiteral: length);
         if byteCount > 0 {
             let newPtr = _textAlloc(Layout.array[UInt8](byteCount));
-            let _ = memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteCount);
+             memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteCount);
             self.storage = CowBox(StringStorage(
                 ptr: newPtr,
                 len: byteCount,

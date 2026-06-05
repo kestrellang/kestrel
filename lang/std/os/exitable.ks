@@ -109,7 +109,7 @@ extend Result[T, E]: Exitable where T: Exitable, E: Formattable {
         match self {
             .Ok(value)  => value.report(),
             .Err(error) => {
-                let _ = eprintln(error);
+                 eprintln(error);
                 ExitCode.failure
             }
         }

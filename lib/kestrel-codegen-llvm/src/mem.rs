@@ -51,7 +51,11 @@ pub fn field_gep<'ctx>(
         return base;
     }
     let idx = cx.i64_type().const_int(offset, false);
-    unsafe { builder.build_in_bounds_gep(cx.i8_type(), base, &[idx], "fa").unwrap() }
+    unsafe {
+        builder
+            .build_in_bounds_gep(cx.i8_type(), base, &[idx], "fa")
+            .unwrap()
+    }
 }
 
 /// `base + idx` bytes as a plain `getelementptr i8` (NOT inbounds). For raw user
@@ -63,7 +67,11 @@ pub fn raw_gep<'ctx>(
     base: PointerValue<'ctx>,
     idx: IntValue<'ctx>,
 ) -> PointerValue<'ctx> {
-    unsafe { builder.build_gep(cx.i8_type(), base, &[idx], "ptroff").unwrap() }
+    unsafe {
+        builder
+            .build_gep(cx.i8_type(), base, &[idx], "ptroff")
+            .unwrap()
+    }
 }
 
 /// Reinterpret an integer address as an LLVM `ptr` (only `Op::PtrFromAddress`).
@@ -138,7 +146,14 @@ pub fn store_to_repr<'ctx>(
         },
         TypeRepr::Aggregate { size, .. } => {
             // `value` is the source address.
-            copy_aggregate(cx, builder, ptr_size, size, dest, value.into_pointer_value());
+            copy_aggregate(
+                cx,
+                builder,
+                ptr_size,
+                size,
+                dest,
+                value.into_pointer_value(),
+            );
         },
         TypeRepr::Zst => {},
     }

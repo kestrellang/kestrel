@@ -487,7 +487,7 @@ func parseObject(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     try cursor.expect(':');
     cursor.skipWhitespace();
     let firstVal = try parseValue(cursor);
-    let _ = obj.insert(firstKey, firstVal);
+     obj.insert(firstKey, firstVal);
 
     while true {
         cursor.skipWhitespace();
@@ -506,7 +506,7 @@ func parseObject(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
                     try cursor.expect(':');
                     cursor.skipWhitespace();
                     let val = try parseValue(cursor);
-                    let _ = obj.insert(key, val);
+                     obj.insert(key, val);
                 } else {
                     return .Err(JsonParseError("expected ',' or '}' in object", cursor.pos))
                 }

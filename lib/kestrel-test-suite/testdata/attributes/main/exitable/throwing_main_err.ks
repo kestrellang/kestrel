@@ -21,6 +21,6 @@ struct MyErr: Formattable {
 
 @main
 func main() -> () throws MyErr {
-    let _ = println("before");
+     println("before");
     throw MyErr()
 }

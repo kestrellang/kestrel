@@ -283,8 +283,9 @@ impl TypeResolver for WorldResolver<'_> {
                     TyKind::Never => "!",
                     _ => return Err(MemberError::NotFound),
                 };
-                match kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, lang_name)
-                {
+                match kestrel_name_res::extensions::resolve_lang_child(
+                    self.ctx, self.root, lang_name,
+                ) {
                     Some(e) => e,
                     None => return Err(MemberError::NotFound),
                 }
@@ -442,9 +443,9 @@ impl TypeResolver for WorldResolver<'_> {
                     .collect();
                 match arity_ok.first() {
                     Some(&first)
-                        if arity_ok.iter().all(|&c| {
-                            self.label_signature(c) == self.label_signature(first)
-                        }) =>
+                        if arity_ok
+                            .iter()
+                            .all(|&c| self.label_signature(c) == self.label_signature(first)) =>
                     {
                         first
                     },

@@ -47,8 +47,8 @@ module Test
             d2.pushBack(10);
             d2.pushBack(20);
             // Pop from front to move head forward
-            let _ = d2.popFront();
-            let _ = d2.popFront();
+             d2.popFront();
+             d2.popFront();
             // Now head is at index 2 (or similar), deque is empty.
 
             // pushFront wraps backward from the current head
@@ -65,11 +65,11 @@ module Test
             var d3 = std.collections.Deque[std.numeric.Int64](capacity: 4);
             // Push/pop cycle to advance head
             d3.pushBack(0);
-            let _ = d3.popFront();
+             d3.popFront();
             d3.pushBack(0);
-            let _ = d3.popFront();
+             d3.popFront();
             d3.pushBack(0);
-            let _ = d3.popFront();
+             d3.popFront();
             // Head is now near the end of the buffer
 
             d3.pushBack(1);
@@ -110,8 +110,8 @@ module Test
             var d6 = std.collections.Deque[std.numeric.Int64](capacity: 4);
             d6.pushBack(0);
             d6.pushBack(0);
-            let _ = d6.popFront();
-            let _ = d6.popFront();
+             d6.popFront();
+             d6.popFront();
             // Head is advanced; push 4 elements to fill and wrap
             d6.pushBack(1);
             d6.pushBack(2);

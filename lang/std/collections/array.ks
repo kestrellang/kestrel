@@ -353,7 +353,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
             if let .Some(rawPtr) = allocator.allocate(layout) {
                 let newPtr = rawPtr.cast[T]();
                 let stride = Int64(intLiteral: lang.sizeof[T]());
-                let _ = memcpy(newPtr.asRaw(), Pointer[T](raw: _arrayLiteralPointer).asRaw(), count * stride);
+                 memcpy(newPtr.asRaw(), Pointer[T](raw: _arrayLiteralPointer).asRaw(), count * stride);
                 self.storage = CowBox(ArrayStorage(ptr: newPtr, len: count, cap: count))
             } else {
                 fatalError("Array allocation failed")
@@ -1415,7 +1415,7 @@ extend Array[T] where T: Equatable {
     /// ```
     public mutating func remove(element: T) -> Bool {
         if let .Some(idx) = self.firstIndex(of: element) {
-            let _ = self.remove(at: idx);
+             self.remove(at: idx);
             true
         } else {
             false

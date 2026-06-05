@@ -212,7 +212,7 @@ public struct TcpStream: Readable, Writable, Cloneable {
         if self.conn.isUnique() {
             let fd = self.conn.getValue();
             if fd >= 0 {
-                let _ = libc.close(fd);
+                 libc.close(fd);
             }
         }
     }
@@ -316,7 +316,7 @@ extend TcpStream {
         libc.freeaddrinfo(resultPtr);
 
         if connResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
@@ -389,7 +389,7 @@ public struct TcpListener {
         let optPtr = Pointer(to: optval).cast[UInt8]();
         let optResult = libc.setsockopt(fd, libc.SOL_SOCKET(), libc.SO_REUSEADDR(), optPtr, 4);
         if optResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
@@ -398,13 +398,13 @@ public struct TcpListener {
 
         let bindResult = libc.bind(fd, addr.asPointer(), libc.SOCKADDR_IN_SIZE());
         if bindResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
         let listenResult = libc.listen(fd, 128);
         if listenResult < 0 {
-            let _ = libc.close(fd);
+             libc.close(fd);
             return .Err(IoError.last())
         }
 
@@ -434,7 +434,7 @@ public struct TcpListener {
         // Best-effort: a failure here doesn't make the connection unusable.
         var nodelay: Int32 = 1;
         let optPtr = Pointer(to: nodelay).cast[UInt8]();
-        let _ = libc.setsockopt(clientFd, libc.IPPROTO_TCP(), libc.TCP_NODELAY(), optPtr, 4);
+         libc.setsockopt(clientFd, libc.IPPROTO_TCP(), libc.TCP_NODELAY(), optPtr, 4);
         .Ok(TcpStream(clientFd))
     }
 
@@ -446,7 +446,7 @@ public struct TcpListener {
     /// Closes the listening fd if any.
     deinit {
         if self.fd >= 0 {
-            let _ = libc.close(self.fd);
+             libc.close(self.fd);
         }
     }
 }

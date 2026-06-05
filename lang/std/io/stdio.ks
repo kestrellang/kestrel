@@ -205,7 +205,7 @@ public func readLine() -> Result[String, IoError] {
     if count > 0 {
         let lastByte = bytes(unchecked: count - 1);
         if lastByte == 13 {
-            let _ = bytes.pop();
+             bytes.pop();
         }
     }
 
