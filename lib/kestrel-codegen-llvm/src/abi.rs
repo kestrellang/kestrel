@@ -37,10 +37,9 @@ pub fn param_pass_mode(convention: ParamConvention, repr: TypeRepr) -> PassMode 
     }
 }
 
-pub fn return_mode(repr: TypeRepr, is_main: bool) -> ReturnMode {
-    if is_main {
-        return ReturnMode::Direct(ScalarTy::I64);
-    }
+pub fn return_mode(repr: TypeRepr) -> ReturnMode {
+    // The `@main` entry point is an ordinary `i64`-returning function (the
+    // MIR-synthesized wrapper), so no entry-point special-casing is needed here.
     match repr {
         TypeRepr::Scalar(t) => ReturnMode::Direct(t),
         TypeRepr::Aggregate { .. } => ReturnMode::Sret,
@@ -61,7 +60,6 @@ fn finish_fn_type<'ctx>(
 
 pub fn build_signature<'ctx>(
     func: &MonoFunction,
-    is_main: bool,
     tc: &mut TypeCache,
     arena: &TyArena,
     module: &MonoModule,
@@ -71,7 +69,7 @@ pub fn build_signature<'ctx>(
     let mut params: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
 
     let ret_repr = tc.repr(func.ret, arena, module);
-    let ret_mode = return_mode(ret_repr, is_main);
+    let ret_mode = return_mode(ret_repr);
 
     if matches!(ret_mode, ReturnMode::Sret) {
         params.push(ptr_scalar.llvm(cx).into());

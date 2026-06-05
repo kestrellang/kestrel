@@ -20,3 +20,4 @@ Feature implementation plans organized by topic.
 | [Boolean Guard](boolean-guard.md) | In Progress | boolean-guard |
 | [Partial Ranges](partial-ranges.md) | Design | partial-ranges |
 | [Optional/Throwing Inits](optional-throwing-inits.md) | Design | optional-throwing-inits |
+| [Exitable `@main` Returns](exitable-main-return.md) | Implemented | exitable-main-return |

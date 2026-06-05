@@ -20,10 +20,12 @@
 //!
 //! ### E616 — `invalid_main_return_type` (Error, Correctness)
 //!
-//! A `@main` function must return `()` (Void) or an internal primitive integer
-//! (`lang.i8`/`i16`/`i32`/`i64`). The stdlib struct integers (`Int64`, …),
-//! floats, strings, tuples, etc. are rejected — the entry point speaks the raw
-//! C-ABI boundary.
+//! A `@main` function must return `()` (Void), `!` (Never), a `lang.iN`
+//! primitive (back-compat, #109), a unit-Ok `Result` (`main() throws E`), or any
+//! type conforming to the `Exitable` protocol (`ExitCode`, the stdlib `IntN` /
+//! `UIntN` structs, custom conformers). Floats, strings, non-unit `Result`, etc.
+//! are rejected. The compiler synthesizes the C entry point as a wrapper that
+//! calls `Exitable.report()` on the returned value.
 //!
 //! ### E617 — `multiple_main` (Error, Correctness)
 //!
@@ -43,7 +45,8 @@ use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{Attributes, DeclSpan, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_hir::builtin::Builtin;
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -164,6 +167,10 @@ fn main_return_type_ok(cx: &CompilationContext<'_>, entity: Entity) -> bool {
     };
     match ty {
         AstType::Unit(_) => true,
+        AstType::Never(_) => true,
+        // `main() throws E` desugars to `Result[(), E]`. Only the unit-Ok `Result`
+        // conforms to `Exitable` (v1), so accept `Result` only when its Ok is `()`.
+        AstType::Result { ok, .. } => matches!(ok.as_ref(), AstType::Unit(_)),
         AstType::Named { segments, .. } => {
             let context = cx.query.parent_of(entity).unwrap_or(cx.root);
             let segs: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
@@ -172,12 +179,33 @@ fn main_return_type_ok(cx: &CompilationContext<'_>, entity: Entity) -> bool {
                 context,
                 root: cx.root,
             }) {
-                TypeResolution::Found(resolved) => is_lang_primitive_int(cx, resolved),
+                // Keep the raw `lang.iN` primitives for back-compat (#109); accept
+                // any other type (incl. stdlib `IntN`/`ExitCode`) that conforms to
+                // `Exitable`.
+                TypeResolution::Found(resolved) => {
+                    is_lang_primitive_int(cx, resolved) || conforms_to_exitable(cx, resolved)
+                },
                 _ => true, // unresolved — let the resolution error handle it
             }
         },
-        _ => false, // tuple / function / optional / array / etc. — not a valid exit type
+        _ => false, // float / tuple / function / optional / array / etc.
     }
+}
+
+/// True iff the resolved type `entity` conforms to the builtin `Exitable` protocol.
+fn conforms_to_exitable(cx: &CompilationContext<'_>, entity: Entity) -> bool {
+    let Some(exitable) = cx.query.query(ResolveBuiltin {
+        builtin: Builtin::Exitable,
+        root: cx.root,
+    }) else {
+        return false;
+    };
+    cx.query
+        .query(ConformingProtocols {
+            entity,
+            root: cx.root,
+        })
+        .contains(&exitable)
 }
 
 /// True iff `resolved` is one of the `lang.iN` primitive integer entities
@@ -241,10 +269,12 @@ fn invalid_return_diag(cx: &CompilationContext<'_>, entity: Entity) -> AnalyzeDi
         message: format!("`@main` function '{name}' has an invalid return type"),
         labels: vec![DiagLabel {
             span: util::entity_span(cx.query, entity),
-            message: "`@main` must return `()` or a primitive integer (lang.i8/i16/i32/i64)".into(),
+            message: "`@main` must return `()`, `!`, or a type conforming to `Exitable`".into(),
             is_primary: true,
         }],
-        notes: vec!["the entry point returns the process exit code via the C ABI".into()],
+        notes: vec![
+            "`Exitable` types include `ExitCode`, the integer types, and a throwing `main`".into(),
+        ],
     }
 }
 

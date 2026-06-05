@@ -1,7 +1,6 @@
 use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::immediates::Offset32;
 use cranelift_codegen::ir::instructions::BlockArg;
-use cranelift_codegen::ir::{self, InstBuilder, MemFlags, TrapCode, Value};
+use cranelift_codegen::ir::{self, InstBuilder, TrapCode, Value};
 use cranelift_frontend::FunctionBuilder;
 
 use kestrel_mir::terminator::{SwitchCase, Terminator, TerminatorKind};
@@ -12,7 +11,6 @@ use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::inst::find_mono_enum;
 use crate::mem;
-use crate::ty::TypeRepr;
 
 fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
     vals.iter().map(|v| BlockArg::Value(*v)).collect()
@@ -112,29 +110,12 @@ fn compile_return(
         .ctx
         .tc
         .repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, fc.is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     match ret_mode {
         ReturnMode::Direct(_t) => {
             let val = fc.resolve_scalar(builder, value_id);
-            if fc.is_main {
-                let final_val = match ret_repr {
-                    TypeRepr::Scalar(st) if st == ir::types::I64 => val,
-                    TypeRepr::Scalar(st) if st.bytes() < 8 => {
-                        builder.ins().sextend(ir::types::I64, val)
-                    },
-                    TypeRepr::Aggregate { .. } => {
-                        builder
-                            .ins()
-                            .load(ir::types::I64, MemFlags::new(), val, Offset32::new(0))
-                    },
-                    TypeRepr::Zst => builder.ins().iconst(ir::types::I64, 0),
-                    _ => val,
-                };
-                builder.ins().return_(&[final_val]);
-            } else {
-                builder.ins().return_(&[val]);
-            }
+            builder.ins().return_(&[val]);
         },
         ReturnMode::Sret => {
             let sret_ptr = fc

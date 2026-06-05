@@ -288,7 +288,6 @@ impl<'m> CodegenCtx<'m> {
         } else if is_main {
             let sig = crate::abi::build_signature(
                 func,
-                true,
                 &mut self.tc,
                 &self.module.ty_arena,
                 self.module,
@@ -298,7 +297,6 @@ impl<'m> CodegenCtx<'m> {
         } else {
             let sig = crate::abi::build_signature(
                 func,
-                false,
                 &mut self.tc,
                 &self.module.ty_arena,
                 self.module,

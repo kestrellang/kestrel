@@ -30,10 +30,9 @@ pub fn param_pass_mode(convention: ParamConvention, repr: TypeRepr, _ptr_ty: ir:
     }
 }
 
-pub fn return_mode(repr: TypeRepr, is_main: bool) -> ReturnMode {
-    if is_main {
-        return ReturnMode::Direct(ir::types::I64);
-    }
+pub fn return_mode(repr: TypeRepr) -> ReturnMode {
+    // The `@main` entry point is an ordinary `i64`-returning function (the
+    // MIR-synthesized wrapper), so no entry-point special-casing is needed here.
     match repr {
         TypeRepr::Scalar(t) => ReturnMode::Direct(t),
         TypeRepr::Aggregate { .. } => ReturnMode::Sret,
@@ -43,7 +42,6 @@ pub fn return_mode(repr: TypeRepr, is_main: bool) -> ReturnMode {
 
 pub fn build_signature(
     func: &kestrel_mir::mono::MonoFunction,
-    is_main: bool,
     tc: &mut TypeCache,
     arena: &TyArena,
     module: &MonoModule,
@@ -53,7 +51,7 @@ pub fn build_signature(
     let mut sig = ir::Signature::new(call_conv);
 
     let ret_repr = tc.repr(func.ret, arena, module);
-    let ret_mode = return_mode(ret_repr, is_main);
+    let ret_mode = return_mode(ret_repr);
 
     if matches!(ret_mode, ReturnMode::Sret) {
         sig.params.push(AbiParam::new(ptr_ty));
