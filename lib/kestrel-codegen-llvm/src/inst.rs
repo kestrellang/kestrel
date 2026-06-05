@@ -1409,9 +1409,10 @@ fn compile_resolved_call<'ctx>(
                 if matches!(
                     call_arg.convention,
                     ParamConvention::Borrow | ParamConvention::MutBorrow
-                ) {
-                    call_args.push(val.into());
-                } else if arg_is_guaranteed {
+                ) || arg_is_guaranteed
+                {
+                    // A borrowed/mut-borrowed param, or an already-@guaranteed
+                    // arg, is passed by its existing pointer with no copy.
                     call_args.push(val.into());
                 } else {
                     let is_addr = val.is_pointer_value();
@@ -1715,10 +1716,10 @@ fn struct_field_offset(
     if let MirTy::Named { entity, type_args } = arena.get(container_ty) {
         let entity = *entity;
         let type_args = type_args.clone();
-        if let Some(s) = find_mono_struct(&entity, &type_args, module) {
-            if let Some(Layout::Struct(sl)) = &s.type_info.layout {
-                return sl.field_offsets[field_idx.index()];
-            }
+        if let Some(s) = find_mono_struct(&entity, &type_args, module)
+            && let Some(Layout::Struct(sl)) = &s.type_info.layout
+        {
+            return sl.field_offsets[field_idx.index()];
         }
     }
     0

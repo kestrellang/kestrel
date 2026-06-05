@@ -20,10 +20,10 @@ use crate::ty::{ScalarTy, int_bits_to_scalar};
 
 /// Emit `llvm.trap` followed by `unreachable` (a real trapping terminator).
 pub fn emit_trap<'ctx>(fc: &FuncCompiler<'_, 'ctx>, builder: &Builder<'ctx>) {
-    if let Some(intr) = Intrinsic::find("llvm.trap") {
-        if let Some(f) = intr.get_declaration(&fc.ctx.llmod, &[]) {
-            let _ = builder.build_call(f, &[], "");
-        }
+    if let Some(intr) = Intrinsic::find("llvm.trap")
+        && let Some(f) = intr.get_declaration(&fc.ctx.llmod, &[])
+    {
+        let _ = builder.build_call(f, &[], "");
     }
     let _ = builder.build_unreachable();
 }

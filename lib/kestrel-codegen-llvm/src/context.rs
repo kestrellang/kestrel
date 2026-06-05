@@ -113,13 +113,13 @@ impl<'ctx> CodegenCtx<'ctx> {
     pub fn finish(self) -> Result<crate::CompilationResult, CodegenError> {
         // Best-effort whole-module verify (per-function verify already ran during
         // definition; this catches inter-function/declaration issues).
-        if let Err(e) = self.llmod.verify() {
-            if std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok() {
-                eprintln!(
-                    "warning: LLVM module verification failed:\n{}",
-                    e.to_string()
-                );
-            }
+        if let Err(e) = self.llmod.verify()
+            && std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok()
+        {
+            eprintln!(
+                "warning: LLVM module verification failed:\n{}",
+                e.to_string()
+            );
         }
 
         // Run the standard LLVM middle-end optimization pipeline at the requested
@@ -267,11 +267,11 @@ impl<'ctx> CodegenCtx<'ctx> {
                 .extern_info
                 .as_ref()
                 .map(|e| e.symbol_name.clone());
-            if let Some(sym) = &ext_symbol {
-                if let Some(&existing) = extern_declared.get(sym) {
-                    self.func_ids[i] = Some(existing);
-                    continue;
-                }
+            if let Some(sym) = &ext_symbol
+                && let Some(&existing) = extern_declared.get(sym)
+            {
+                self.func_ids[i] = Some(existing);
+                continue;
             }
             let fn_value = self.declare_function(i)?;
             if let Some(sym) = ext_symbol {
@@ -402,10 +402,10 @@ impl<'ctx> CodegenCtx<'ctx> {
         let entry = self.cx.append_basic_block(fn_value, "entry");
         let builder = self.cx.create_builder();
         builder.position_at_end(entry);
-        if let Some(intr) = Intrinsic::find("llvm.trap") {
-            if let Some(f) = intr.get_declaration(&self.llmod, &[]) {
-                let _ = builder.build_call(f, &[], "");
-            }
+        if let Some(intr) = Intrinsic::find("llvm.trap")
+            && let Some(f) = intr.get_declaration(&self.llmod, &[])
+        {
+            let _ = builder.build_call(f, &[], "");
         }
         let _ = builder.build_unreachable();
     }

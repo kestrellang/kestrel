@@ -3,7 +3,7 @@
 //! Value model (the central invariant, typed-`ptr`):
 //!   - @owned scalar      -> the LLVM SSA value IS the scalar (i/f/`ptr` value)
 //!   - @guaranteed scalar -> the value is a `ptr` ADDRESS of the scalar
-//!                           (`resolve_scalar` loads through it)
+//!     (`resolve_scalar` loads through it)
 //!   - aggregate (any)    -> the value is a `ptr` ADDRESS of the memory
 //!   - ZST                -> a null-`ptr` placeholder
 //!
