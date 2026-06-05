@@ -1,76 +1,25 @@
 name: Create Issue Branch
 
-# Fires when an issue's Project Status moves to "In Progress" — that's
-# the explicit "I'm starting this" signal. Creates the feature/fix/etc.
-# branch off nightly and opens a draft PR.
+# Fires when the start-signal label (default `in-progress`) is added to an
+# issue — that's the explicit "I'm starting this" signal. Creates the
+# feature/fix/etc. branch off nightly and opens a draft PR.
 #
-# Bulk-imported issues stay in Backlog and never trigger this. Real
-# work-starting happens by dragging the card into In Progress.
+# Why a label and not a Project card move: GitHub Actions cannot be
+# triggered by Projects v2 events (`projects_v2_item` is an org/user webhook
+# event, not a workflow trigger). So the start signal is a label instead.
+# Add the `in-progress` label by hand, or wire a Project automation to apply
+# it when a card moves to In Progress, to kick this off.
+#
+# Override the label name with a `TRIGGER_LABEL` repository variable.
 
 on:
-  projects_v2_item:
-    types: [edited]
+  issues:
+    types: [labeled]
 
 jobs:
-  guard:
-    runs-on: ubuntu-latest
-    if: ${{ vars.PROJECT_ID != '' && github.event.projects_v2_item.content_type == 'Issue' }}
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-      issue_number: ${{ steps.check.outputs.issue_number }}
-      issue_node_id: ${{ steps.check.outputs.issue_node_id }}
-    steps:
-      - name: Check Status transition
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-          EVENT_PROJECT_ID: ${{ github.event.projects_v2_item.project_node_id }}
-          OUR_PROJECT_ID: ${{ vars.PROJECT_ID }}
-          STATUS_FIELD_ID: ${{ vars.PROJECT_STATUS_FIELD_ID }}
-          IN_PROGRESS_ID: ${{ vars.PROJECT_STATUS_IN_PROGRESS_ID }}
-          ITEM_ID: ${{ github.event.projects_v2_item.node_id }}
-          CONTENT_NODE_ID: ${{ github.event.projects_v2_item.content_node_id }}
-          # The event payload's `changes` block tells us what actually
-          # changed in this edit. We only care about Status moving TO
-          # In Progress — anything else, bail.
-          CHANGE_FIELD_ID: ${{ github.event.changes.field_value.field_node_id }}
-          CHANGE_TO_ID: ${{ github.event.changes.field_value.to.id }}
-        run: |
-          set -euo pipefail
-
-          # Only our project.
-          if [ "$EVENT_PROJECT_ID" != "$OUR_PROJECT_ID" ]; then
-            echo "Project mismatch ($EVENT_PROJECT_ID != $OUR_PROJECT_ID), skipping"
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Only Status field changes to In Progress.
-          if [ "$CHANGE_FIELD_ID" != "$STATUS_FIELD_ID" ] || [ "$CHANGE_TO_ID" != "$IN_PROGRESS_ID" ]; then
-            echo "Not a Status→In Progress transition, skipping"
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Resolve the issue's number from its node ID.
-          ISSUE_NUMBER=$(gh api graphql \
-            -f query='query($id: ID!) { node(id: $id) { ... on Issue { number } } }' \
-            -F id="$CONTENT_NODE_ID" \
-            --jq '.data.node.number')
-
-          if [ -z "$ISSUE_NUMBER" ] || [ "$ISSUE_NUMBER" = "null" ]; then
-            echo "Could not resolve issue number from $CONTENT_NODE_ID"
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "should_run=true" >> "$GITHUB_OUTPUT"
-          echo "issue_number=$ISSUE_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "issue_node_id=$CONTENT_NODE_ID" >> "$GITHUB_OUTPUT"
-
   create-branch:
-    needs: guard
-    if: ${{ needs.guard.outputs.should_run == 'true' }}
+    # Only when the label that was just added is our start signal.
+    if: ${{ github.event.label.name == (vars.TRIGGER_LABEL || 'in-progress') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -84,42 +33,11 @@ jobs:
           ref: nightly
           fetch-depth: 0
 
-      - name: Fetch issue details
-        id: issue
-        env:
-          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
-          ISSUE_NUMBER: ${{ needs.guard.outputs.issue_number }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          set -euo pipefail
-          DATA=$(gh api graphql \
-            -f query='query($owner: String!, $repo: String!, $n: Int!) { repository(owner: $owner, name: $repo) { issue(number: $n) { title body url createdAt author { login } labels(first: 30) { nodes { name } } } } }' \
-            -F owner="$REPO_OWNER" \
-            -F repo="$REPO_NAME" \
-            -F n="$ISSUE_NUMBER")
-          echo "$DATA" > /tmp/issue.json
-
-          TITLE=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["repository"]["issue"]["title"])' < /tmp/issue.json)
-          AUTHOR=$(python3 -c 'import json,sys;d=json.load(sys.stdin)["data"]["repository"]["issue"];print((d.get("author") or {}).get("login","unknown"))' < /tmp/issue.json)
-          CREATED=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["repository"]["issue"]["createdAt"])' < /tmp/issue.json)
-          URL=$(python3 -c 'import json,sys;print(json.load(sys.stdin)["data"]["repository"]["issue"]["url"])' < /tmp/issue.json)
-          LABELS=$(python3 -c 'import json,sys;print(",".join(n["name"] for n in json.load(sys.stdin)["data"]["repository"]["issue"]["labels"]["nodes"]))' < /tmp/issue.json)
-
-          {
-            echo "title<<EOF"
-            echo "$TITLE"
-            echo "EOF"
-            echo "author=$AUTHOR"
-            echo "created=$CREATED"
-            echo "url=$URL"
-            echo "labels=$LABELS"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Determine branch prefix
         id: prefix
         env:
-          LABELS: ${{ steps.issue.outputs.labels }}
+          # JSON array of this issue's label names, e.g. ["bug","in-progress"].
+          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
         run: |
           if echo "$LABELS" | grep -qw "bug"; then
             echo "prefix=fix" >> "$GITHUB_OUTPUT"
@@ -134,8 +52,8 @@ jobs:
       - name: Create branch name
         id: branch
         env:
-          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
-          ISSUE_NUMBER: ${{ needs.guard.outputs.issue_number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           PREFIX: ${{ steps.prefix.outputs.prefix }}
         run: |
           SANITIZED=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//' | cut -c1-50)
@@ -165,21 +83,21 @@ jobs:
         if: ${{ steps.existing.outputs.exists == 'false' }}
         env:
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
-          ISSUE_NUMBER: ${{ needs.guard.outputs.issue_number }}
-          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
-          ISSUE_AUTHOR: ${{ steps.issue.outputs.author }}
-          ISSUE_CREATED: ${{ steps.issue.outputs.created }}
-          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_CREATED: ${{ github.event.issue.created_at }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           git checkout -b "$BRANCH_NAME"
           mkdir -p .issues
 
-          # Fetch the body separately and write the file via python (no shell expansion of user input).
+          # Write the file via python so user-controlled title/body never
+          # reach the shell (no expansion / no injection).
           python3 - <<'PY'
-          import json, os, pathlib
+          import os, pathlib
           n = os.environ["ISSUE_NUMBER"]
-          with open("/tmp/issue.json") as f:
-              issue = json.load(f)["data"]["repository"]["issue"]
           path = pathlib.Path(".issues") / f"{n}.md"
           path.write_text(
               f"# Issue #{n}: {os.environ['ISSUE_TITLE']}\n\n"
@@ -187,7 +105,7 @@ jobs:
               f"**Created:** {os.environ['ISSUE_CREATED']}\n"
               f"**URL:** {os.environ['ISSUE_URL']}\n\n"
               f"## Description\n\n"
-              f"{issue.get('body') or ''}\n"
+              f"{os.environ.get('ISSUE_BODY') or ''}\n"
           )
           PY
 
@@ -199,8 +117,8 @@ jobs:
         if: ${{ steps.existing.outputs.exists == 'false' }}
         uses: actions/github-script@v7
         env:
-          ISSUE_TITLE: ${{ steps.issue.outputs.title }}
-          ISSUE_NUMBER: ${{ needs.guard.outputs.issue_number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
           BRANCH_NAME: ${{ steps.branch.outputs.name }}
           PREFIX: ${{ steps.prefix.outputs.prefix }}
         with:
