@@ -190,9 +190,10 @@ pub fn compile_inst(
                     // `match b { true => .., _ => .. }` compared the tag against
                     // garbage and always took the default. For a pure-discriminant
                     // enum `scalar_ty == disc_width`, so this is a no-op there.
-                    let loaded = builder
-                        .ins()
-                        .load(scalar_ty, MemFlags::new(), base, Offset32::new(0));
+                    let loaded =
+                        builder
+                            .ins()
+                            .load(scalar_ty, MemFlags::new(), base, Offset32::new(0));
                     if scalar_ty == disc_width {
                         loaded
                     } else if scalar_ty.bytes() > disc_width.bytes() {
