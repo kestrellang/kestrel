@@ -256,6 +256,7 @@ impl LiveTracker {
     }
 
     /// Whether `value` is still alive in the forwarded set.
+    #[allow(dead_code)]
     pub fn contains(&self, value: ValueId) -> bool {
         self.slots.iter().any(|s| s.alive && s.value == value)
     }
@@ -606,6 +607,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         kestrel_mir::ty_query::copy_behavior(&self.ctx.module.ty_arena, &self.ctx.module, ty, wc)
     }
 
+    #[allow(dead_code)]
     pub fn is_copy_type(&self, ty: TyId) -> bool {
         matches!(self.copy_behavior_of(ty), CopyBehavior::Bitwise)
     }
@@ -705,10 +707,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     init,
                     ..
                 } = entry
+                    && *l == local
                 {
-                    if *l == local {
-                        return Some(*init);
-                    }
+                    return Some(*init);
                 }
             }
         }
@@ -724,11 +725,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     init,
                     ..
                 } = entry
+                    && *l == local
                 {
-                    if *l == local {
-                        *init = new_init;
-                        return;
-                    }
+                    *init = new_init;
+                    return;
                 }
             }
         }
@@ -946,10 +946,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     flag,
                     ..
                 } = entry
+                    && *l == local
                 {
-                    if *l == local {
-                        return *flag;
-                    }
+                    return *flag;
                 }
             }
         }
@@ -1137,10 +1136,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn rebind_scope_values(&mut self, old_vals: &[ValueId], new_vals: &[ValueId]) {
         for scope in self.scope_stack.iter_mut() {
             for entry in scope.entries.iter_mut() {
-                if let ScopeEntry::Owned(v) = entry {
-                    if let Some(pos) = old_vals.iter().position(|&old| old == *v) {
-                        *v = new_vals[pos];
-                    }
+                if let ScopeEntry::Owned(v) = entry
+                    && let Some(pos) = old_vals.iter().position(|&old| old == *v)
+                {
+                    *v = new_vals[pos];
                 }
             }
         }
@@ -1217,10 +1216,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     init,
                     ..
                 } = entry
+                    && !out.iter().any(|(k, _)| k == l)
                 {
-                    if !out.iter().any(|(k, _)| k == l) {
-                        out.push((*l, *init));
-                    }
+                    out.push((*l, *init));
                 }
             }
         }
@@ -1282,16 +1280,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// rejects this first (E503); this fires only for shapes it can't see, so
     /// the build fails with a real error instead of an OSSA-verify ICE.
     fn emit_move_out_of_borrow_backstop(&mut self, ty: TyId) {
-        let span = self.current_span.clone().unwrap_or_else(|| Span::synthetic(0));
+        let span = self
+            .current_span
+            .clone()
+            .unwrap_or_else(|| Span::synthetic(0));
         let ty_str = kestrel_mir::display::ty_to_string(ty, &self.ctx.module);
         self.ctx.query.accumulate(
             Diagnostic::error()
                 .with_message(format!(
                     "cannot move non-copyable value of type `{ty_str}` out of a borrow"
                 ))
-                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
-                    "a non-copyable value cannot be moved out of a borrowed place",
-                )]),
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(
+                        "a non-copyable value cannot be moved out of a borrowed place",
+                    ),
+                ]),
         );
     }
 
@@ -1798,10 +1801,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .filter(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
             .map(|a| a.value)
             .collect();
-        if let Some(cv) = callee.value() {
-            if self.body.value(cv).ownership == Ownership::Guaranteed {
-                borrows.push(cv);
-            }
+        if let Some(cv) = callee.value()
+            && self.body.value(cv).ownership == Ownership::Guaranteed
+        {
+            borrows.push(cv);
         }
         let consuming: Vec<ValueId> = args
             .iter()
@@ -2073,15 +2076,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // stays tracked across any later control-flow sibling arg.
         if convention == ParamConvention::Consuming && self.scope_stack.len() == 1 {
             let expr = self.hir.exprs[expr_id].clone();
-            if let HirExpr::Local(hir_local, _) = &expr {
-                if !self.is_var_local(hir_local) && self.is_single_use(*hir_local) {
-                    let val = self.map_local(*hir_local);
-                    if self.body.value(val).ownership == Ownership::Owned {
-                        return CallArg {
-                            value: val,
-                            convention,
-                        };
-                    }
+            if let HirExpr::Local(hir_local, _) = &expr
+                && !self.is_var_local(hir_local)
+                && self.is_single_use(*hir_local)
+            {
+                let val = self.map_local(*hir_local);
+                if self.body.value(val).ownership == Ownership::Owned {
+                    return CallArg {
+                        value: val,
+                        convention,
+                    };
                 }
             }
         }

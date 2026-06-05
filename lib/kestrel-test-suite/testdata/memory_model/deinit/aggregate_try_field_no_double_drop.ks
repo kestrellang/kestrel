@@ -50,6 +50,7 @@ func build() -> Result[Trip, E] {
     ))
 }
 
+@main
 func main() -> lang.i64 {
     match build() {
         .Ok(t) => {

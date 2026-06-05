@@ -27,6 +27,7 @@ func test() {
     // Scope exit: deinit fires, calls report(), sets log = 77
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if log != 77 { return 1; }

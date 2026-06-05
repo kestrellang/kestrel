@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create RcBox
             let box1 = std.memory.RcBox[std.numeric.Int64](42);

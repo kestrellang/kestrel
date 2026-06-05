@@ -22,6 +22,7 @@ func makeLine(n: Int64) -> Optional[(String, Int64)] {
     .Some((s, n))
 }
 
+@main
 func main() -> lang.i64 {
     var i: Int64 = 0;
     var seen: Int64 = 0;

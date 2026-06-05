@@ -131,8 +131,11 @@ impl<'a> CompilerDriver<'a> {
     ///
     /// Fires `analyze_bodies`, `analyze_decls`, and `analyze_compilation` in
     /// sequence. Results are memoized per `(analyzer, entity)` in the query
-    /// cache.
-    pub fn analyze_all(&self) -> AnalyzeSummary {
+    /// cache. `is_executable` reports whether this compilation is producing a
+    /// binary; it gates the entry-point requirement (E618). Pass `true` for
+    /// `kestrel build` / execution tests, `false` for libraries, `kestrel
+    /// check`, the LSP, and diagnostics tests.
+    pub fn analyze_all(&self, is_executable: bool) -> AnalyzeSummary {
         let world = self.compiler.world();
         let root = self.compiler.root();
 
@@ -143,7 +146,11 @@ impl<'a> CompilerDriver<'a> {
         let ctx = world.query_context();
         let mut diags = kestrel_analyze::analyze_bodies(&ctx, root, &body_entities);
         diags.extend(kestrel_analyze::analyze_decls(&ctx, root, &decl_entities));
-        diags.extend(kestrel_analyze::analyze_compilation(&ctx, root));
+        diags.extend(kestrel_analyze::analyze_compilation(
+            &ctx,
+            root,
+            is_executable,
+        ));
 
         let mut summary = AnalyzeSummary::default();
         for d in &diags {
@@ -570,7 +577,7 @@ mod tests {
 
         let driver = CompilerDriver::new(&c);
         let _infer = driver.infer_all();
-        let summary = driver.analyze_all();
+        let summary = driver.analyze_all(false);
         eprintln!("{}", summary);
     }
 

@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let pair = ("hello", "world");
     if pair.0.isEqual(to: "hello") != true { return 1 }

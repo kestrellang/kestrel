@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test minBy - find element with minimum key
             var pairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();

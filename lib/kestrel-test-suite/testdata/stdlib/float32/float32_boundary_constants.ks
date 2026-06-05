@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // maxValue — 3.4028235e38
             let maxVal = std.numeric.Float32.maxValue;

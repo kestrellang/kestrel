@@ -33,6 +33,7 @@ public struct Bag: Cloneable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var bag = Bag();
     bag.items.append("hello");

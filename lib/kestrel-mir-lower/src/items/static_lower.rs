@@ -67,10 +67,10 @@ pub fn synthesize_static_inits(ctx: &mut LowerCtx) {
     inject_init_call_into_main(ctx, master);
 }
 
-/// Prepend `call __kestrel_init_statics()` to `main`'s entry block so global
-/// constants are initialized before any user code runs. `main` is the function
-/// codegen treats as the entry point — name `main` or `*.main` (mirrors
-/// codegen's `is_main_function`). No entry (a library) → nothing to inject.
+/// Prepend `call __kestrel_init_statics()` to the entry point's entry block so
+/// global constants are initialized before any user code runs. The entry point
+/// is the `@main`-marked function (mirrors codegen's `is_main_function`, which
+/// also keys off `is_main`). No entry (a library) → nothing to inject.
 fn inject_init_call_into_main(ctx: &mut LowerCtx, master_entity: Entity) {
     use kestrel_mir::callee::Callee;
     use kestrel_mir::inst::{InstKind, Instruction};
@@ -79,12 +79,7 @@ fn inject_init_call_into_main(ctx: &mut LowerCtx, master_entity: Entity) {
         .module
         .functions
         .iter()
-        .find(|(entity, f)| {
-            f.body.is_some() && {
-                let name = ctx.module.resolve_name(**entity);
-                name == "main" || name.ends_with(".main")
-            }
-        })
+        .find(|(_, f)| f.body.is_some() && f.is_main)
         .map(|(entity, _)| *entity);
 
     let Some(main_entity) = main_entity else {

@@ -53,7 +53,7 @@ pub async fn refresh(state: SharedState, client: Client) {
             // infer_all populates per-body diagnostics; analyze_all returns
             // its own diagnostic vector and also accumulates into the world.
             let _infer = driver.infer_all();
-            let analyze = driver.analyze_all();
+            let analyze = driver.analyze_all(false);
             let codespan_diags = compiler.diagnostics();
             let id_to_path: HashMap<usize, String> = compiler
                 .files()

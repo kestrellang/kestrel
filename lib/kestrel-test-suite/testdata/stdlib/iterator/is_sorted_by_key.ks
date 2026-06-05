@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // isSorted(byKey:) checks if elements are sorted by extracted key ascending
 

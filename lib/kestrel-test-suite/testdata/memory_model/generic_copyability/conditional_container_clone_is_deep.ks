@@ -16,6 +16,7 @@ module Test
 // the Array's COW storage without bumping its refcount, so mutating one copy
 // would corrupt the other (and double-free at teardown). This fails (1) if the
 // clone shim aliases instead of deep-copying.
+@main
 func main() -> lang.i64 {
     let opt: std.result.Optional[std.collections.Array[lang.i64]] = .Some([10, 20, 30]);
     let opt2 = opt;            // must clone (Optional[Array] is Cloneable)

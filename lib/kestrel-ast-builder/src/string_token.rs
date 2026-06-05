@@ -22,16 +22,6 @@ pub struct StringForm {
     pub body_end: usize,
 }
 
-impl StringForm {
-    /// Did the lexer terminate the string properly? `false` means the body
-    /// runs to end-of-token without a matching closer.
-    pub fn is_terminated(&self) -> bool {
-        let opener_len = self.pound_count + if self.is_multiline { 3 } else { 1 };
-        let closer_len = opener_len;
-        self.body_end + closer_len <= /* token length, computed by caller */ usize::MAX
-    }
-}
-
 /// Classify a string-literal token from its source text.
 ///
 /// `raw` is the full token slice including delimiters. Returns the form plus
@@ -186,7 +176,7 @@ pub fn process_multiline_body(
                 span_end: abs + line.len(),
             });
             // Best-effort: trim what whitespace it does have.
-            let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+            let trimmed = line.trim_start_matches([' ', '\t']);
             out.push_str(trimmed);
         }
     }
@@ -221,9 +211,8 @@ fn normalize_newlines(s: &str) -> String {
 }
 
 fn utf8_char_len(b: u8) -> usize {
-    if b < 0x80 {
-        1
-    } else if b < 0xC0 {
+    // < 0xC0 covers ASCII and stray continuation bytes (recovered as length 1).
+    if b < 0xC0 {
         1
     } else if b < 0xE0 {
         2

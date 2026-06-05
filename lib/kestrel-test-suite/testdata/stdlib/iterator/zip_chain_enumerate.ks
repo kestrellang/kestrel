@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             var arr1 = std.collections.Array[std.numeric.Int64]();
             arr1.append(1);

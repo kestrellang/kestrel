@@ -28,6 +28,7 @@ func test() {
     // Scope exit: c(3), b(2), a(1) in reverse declaration order => 321
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if deinit_order != 321 { return 1; }

@@ -25,6 +25,7 @@ extend Body {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let b: Body? = null;
     match b {

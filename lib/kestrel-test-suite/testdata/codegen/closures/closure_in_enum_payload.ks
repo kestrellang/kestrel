@@ -15,6 +15,7 @@ func apply_action(a: Action, x: std.numeric.Int64) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let action = Action.Transform(f: { (x) in x * 2 });
     if apply_action(action, 21) != 42 { return 1 }

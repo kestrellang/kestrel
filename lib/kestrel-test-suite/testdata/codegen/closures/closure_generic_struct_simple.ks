@@ -7,6 +7,7 @@ struct Provider[T] {
     let provide: () -> T
 }
 
+@main
 func main() -> lang.i64 {
     let p = Provider[std.numeric.Int64](provide: { 42 });
     if (p.provide)() != 42 { return 1 }

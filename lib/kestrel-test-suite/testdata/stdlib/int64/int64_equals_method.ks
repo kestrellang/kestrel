@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let a: std.numeric.Int64 = 42;
             let b: std.numeric.Int64 = 42;

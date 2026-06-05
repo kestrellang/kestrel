@@ -77,6 +77,7 @@ func gameLoop[A](mutating app: A, config cfg: Config) where A: InputManager, A: 
     app.finish(state, elapsed: timer.elapsed());
 }
 
+@main
 func main() {
     let cfg = Config.fromArgs();
     if cfg.headlessIters > 0 {

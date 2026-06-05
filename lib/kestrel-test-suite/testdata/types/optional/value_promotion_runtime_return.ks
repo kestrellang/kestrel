@@ -17,6 +17,7 @@ func explicitReturn(early: std.core.Bool) -> std.result.Optional[std.numeric.Int
     42
 }
 
+@main
 func main() -> lang.i64 {
     match tailReturn() {
         some 42 => {},

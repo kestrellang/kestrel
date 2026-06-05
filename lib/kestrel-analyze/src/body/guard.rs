@@ -73,13 +73,11 @@ impl BodyCheck for GuardDivergenceAnalyzer {
                 source: MatchSource::GuardLet,
                 ..
             } = expr
+                && let Some(else_arm) = arms.last()
+                && !expr_diverges(cx.hir, else_arm.body)
             {
-                if let Some(else_arm) = arms.last() {
-                    if !expr_diverges(cx.hir, else_arm.body) {
-                        let arm_span = util::expr_span(cx.hir, else_arm.body);
-                        diags.push(guard_diverge_diagnostic(arm_span));
-                    }
-                }
+                let arm_span = util::expr_span(cx.hir, else_arm.body);
+                diags.push(guard_diverge_diagnostic(arm_span));
             }
         }
 

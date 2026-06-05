@@ -19,6 +19,7 @@ func extract(c: Container) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var container = Container.Full(data: Data(value: 10));
     if extract(container) != 10 { return 1 }

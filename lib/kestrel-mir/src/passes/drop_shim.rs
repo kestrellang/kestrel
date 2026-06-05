@@ -226,13 +226,10 @@ fn generate_struct_shim(
     // the concrete type, and the expand pass removes/replaces DestroyValue.
     let field_count = struct_def.fields.len();
     let mut field_vals = Vec::with_capacity(field_count);
-    for (i, field_def) in struct_def.fields.iter().enumerate() {
-        let fi = FieldIdx::new(i);
-        let ownership = if fields.contains(&fi) {
-            Ownership::Owned
-        } else {
-            Ownership::Owned
-        };
+    for field_def in struct_def.fields.iter() {
+        // All destructured fields are forced @owned pre-mono (see comment above);
+        // the expand pass re-derives ownership from the concrete type post-mono.
+        let ownership = Ownership::Owned;
         field_vals.push(body.alloc_value(ValueDef {
             ty: field_def.ty,
             ownership,
@@ -252,10 +249,10 @@ fn generate_struct_shim(
         let fi = FieldIdx::new(i);
         let field_ty = struct_def.fields[i].ty;
         insts.push(Instruction::new(InstKind::DestroyValue { operand: *fv }));
-        if droppable_set.contains(&fi) {
-            if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
-                field_type_entities.push(*entity);
-            }
+        if droppable_set.contains(&fi)
+            && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty)
+        {
+            field_type_entities.push(*entity);
         }
     }
 
@@ -422,13 +419,10 @@ fn generate_enum_shim(
         let droppable_set: std::collections::HashSet<FieldIdx> =
             field_indices.iter().copied().collect();
         let mut payload_vals = Vec::with_capacity(payload_count);
-        for (i, pf) in case_def.payload_fields.iter().enumerate() {
-            let fi = FieldIdx::new(i);
-            let ownership = if field_indices.contains(&fi) {
-                Ownership::Owned
-            } else {
-                Ownership::Owned
-            };
+        for pf in case_def.payload_fields.iter() {
+            // All destructured payload fields are forced @owned pre-mono; the
+            // expand pass re-derives ownership from the concrete type post-mono.
+            let ownership = Ownership::Owned;
             payload_vals.push(body.alloc_value(ValueDef {
                 ty: pf.ty,
                 ownership,
@@ -448,10 +442,10 @@ fn generate_enum_shim(
             let fi = FieldIdx::new(i);
             let field_ty = case_def.payload_fields[i].ty;
             variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: *pv }));
-            if droppable_set.contains(&fi) {
-                if let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty) {
-                    field_type_entities.push(*entity);
-                }
+            if droppable_set.contains(&fi)
+                && let MirTy::Named { entity, .. } = module.ty_arena.get(field_ty)
+            {
+                field_type_entities.push(*entity);
             }
         }
 

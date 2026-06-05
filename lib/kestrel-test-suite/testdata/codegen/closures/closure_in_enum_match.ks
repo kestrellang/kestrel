@@ -8,6 +8,7 @@ enum MaybeTransform {
     case Nothing
 }
 
+@main
 func main() -> lang.i64 {
     let mt = MaybeTransform.Just(f: { (x) in x + 32 });
     let result = match mt {

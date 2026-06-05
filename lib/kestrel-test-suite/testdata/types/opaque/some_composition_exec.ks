@@ -29,6 +29,7 @@ func make() -> some Drawable and Printable {
     Widget()
 }
 
+@main
 func main() -> lang.i64 {
     let w = make();
     if w.draw() != 10 { return 1 }

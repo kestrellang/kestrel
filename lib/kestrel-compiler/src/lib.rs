@@ -656,16 +656,12 @@ mod tests {
         let child_kinds: Vec<_> = result.tree.children().map(|n| n.kind()).collect();
         // SourceFile children are module declaration + struct declaration nodes
         assert!(
-            child_kinds
-                .iter()
-                .any(|k| *k == SyntaxKind::ModuleDeclaration),
+            child_kinds.contains(&SyntaxKind::ModuleDeclaration),
             "expected ModuleDeclaration, got {:?}",
             child_kinds
         );
         assert!(
-            child_kinds
-                .iter()
-                .any(|k| *k == SyntaxKind::StructDeclaration),
+            child_kinds.contains(&SyntaxKind::StructDeclaration),
             "expected StructDeclaration, got {:?}",
             child_kinds
         );
@@ -887,7 +883,7 @@ mod tests {
             );
         }
         assert!(
-            c.files.get("t.ks").is_none(),
+            !c.files.contains_key("t.ks"),
             "path entry should be dropped"
         );
     }

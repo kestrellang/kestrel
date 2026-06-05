@@ -8,7 +8,8 @@ struct Factory {
     static func create() -> std.numeric.Int64 = 42
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(Factory.create());
     0
 }

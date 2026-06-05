@@ -33,7 +33,7 @@ pub fn check_mir_snapshot(
                 ));
             }
             rendered
-        }
+        },
         None => display_module(mir),
     };
 

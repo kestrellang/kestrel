@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test filterMap with explicit transform returning Optional
             let result: std.collections.Array[std.numeric.Int64] = [1, 2, 3, 4, 5].iter().filterMap(as: { (x) in if x % 2 == 0 { .Some(x * 10) } else { .None } }).collect();

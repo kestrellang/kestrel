@@ -106,8 +106,9 @@ impl<'m> CodegenCtx<'m> {
     }
 
     pub fn is_main_function(&self, func: &MonoFunction) -> bool {
-        let name = self.module.resolve_name(func.source);
-        name == "main" || name.ends_with(".main")
+        // The entry point is the `@main`-marked function (propagated from
+        // FunctionDef.is_main through monomorphization). Independent of name.
+        func.is_main
     }
 
     // -- Statics --
@@ -252,11 +253,11 @@ impl<'m> CodegenCtx<'m> {
         // collide, each mono function is a distinct compilation unit.
         let mut extern_declared: HashMap<String, FuncId> = HashMap::new();
         for (i, func) in self.module.functions.iter().enumerate() {
-            if let Some(ext) = &func.extern_info {
-                if let Some(&existing_id) = extern_declared.get(&ext.symbol_name) {
-                    self.func_ids[i] = Some(existing_id);
-                    continue;
-                }
+            if let Some(ext) = &func.extern_info
+                && let Some(&existing_id) = extern_declared.get(&ext.symbol_name)
+            {
+                self.func_ids[i] = Some(existing_id);
+                continue;
             }
             let func_id = self.declare_function(func, i)?;
             if let Some(ext) = &func.extern_info {
@@ -315,7 +316,7 @@ impl<'m> CodegenCtx<'m> {
             .declare_function(&name, linkage, &sig)
             .map_err(|e| CodegenError::FunctionDefinition {
                 name: name.clone(),
-                source: e,
+                source: Box::new(e),
             })?;
 
         Ok(func_id)

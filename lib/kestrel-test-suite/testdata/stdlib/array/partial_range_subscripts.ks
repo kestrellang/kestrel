@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let arr = [10, 20, 30, 40, 50];
 

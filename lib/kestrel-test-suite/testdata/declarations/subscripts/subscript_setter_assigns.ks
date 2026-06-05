@@ -20,6 +20,7 @@ func seed() -> lang.i64 { 10 }
 func newVal() -> lang.i64 { 42 }
 func zero() -> lang.i64 { 0 }
 
+@main
 func main() -> lang.i64 {
     var h = Holder(value: seed());
     if lang.i64_ne(h(zero()), seed()) { return 1 }

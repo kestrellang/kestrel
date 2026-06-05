@@ -23,10 +23,10 @@ impl OssaBodyCtx<'_, '_> {
         callee_expr: HirExprId,
         args: &[HirCallArg],
     ) -> ValueId {
-        if let Some(entity) = self.resolve_callee_entity_from_expr(callee_expr) {
-            if let Some(val) = intrinsic::try_intrinsic(self, expr_id, callee_expr, entity, args) {
-                return val;
-            }
+        if let Some(entity) = self.resolve_callee_entity_from_expr(callee_expr)
+            && let Some(val) = intrinsic::try_intrinsic(self, expr_id, callee_expr, entity, args)
+        {
+            return val;
         }
 
         if let Some(val) = self.try_enum_construct(expr_id, callee_expr, args) {
@@ -47,16 +47,13 @@ impl OssaBodyCtx<'_, '_> {
         let mut receiver_ty = self.resolve_expr_type(receiver_expr);
         let result_ty = self.resolve_expr_type(expr_id);
 
-        if self.body_context.is_protocol_extension() {
-            if let MirTy::Named { entity, type_args } =
+        if self.body_context.is_protocol_extension()
+            && let MirTy::Named { entity, type_args } =
                 self.ctx.module.ty_arena.get(receiver_ty).clone()
-            {
-                if type_args.is_empty()
-                    && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
-                {
-                    receiver_ty = crate::ty::build_self_type(self.ctx, entity);
-                }
-            }
+            && type_args.is_empty()
+            && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Protocol)
+        {
+            receiver_ty = crate::ty::build_self_type(self.ctx, entity);
         }
 
         let resolved_entity = self
@@ -86,22 +83,21 @@ impl OssaBodyCtx<'_, '_> {
                     .resolve_field_idx(se, method_name)
                     .map(|idx| (se, idx))
             });
-            if let Some((se, field_idx)) = field_info {
-                if let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx) {
-                    if matches!(
-                        self.ctx.module.ty_arena.get(field_ty),
-                        MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
-                    ) {
-                        let base_val = self.lower_expr_for_borrow(receiver_expr);
-                        let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
-                        let call_args = self.lower_call_args_default(args);
-                        let callee = match self.ctx.module.ty_arena.get(field_ty) {
-                            MirTy::FuncThin { .. } => Callee::Thin(field_val),
-                            _ => Callee::Thick(field_val),
-                        };
-                        return self.emit_call_returning(callee, call_args, result_ty);
-                    }
-                }
+            if let Some((se, field_idx)) = field_info
+                && let Some(field_ty) = self.ctx.resolve_field_ty(se, field_idx)
+                && matches!(
+                    self.ctx.module.ty_arena.get(field_ty),
+                    MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+                )
+            {
+                let base_val = self.lower_expr_for_borrow(receiver_expr);
+                let field_val = self.emit_struct_extract(base_val, field_idx, field_ty);
+                let call_args = self.lower_call_args_default(args);
+                let callee = match self.ctx.module.ty_arena.get(field_ty) {
+                    MirTy::FuncThin { .. } => Callee::Thin(field_val),
+                    _ => Callee::Thick(field_val),
+                };
+                return self.emit_call_returning(callee, call_args, result_ty);
             }
         }
 
@@ -256,24 +252,23 @@ impl OssaBodyCtx<'_, '_> {
                 if matches!(
                     receiver_convention,
                     ParamConvention::Borrow | ParamConvention::MutBorrow
-                ) {
-                    if let Some(base_addr) = self.try_field_addr_chain(receiver_expr) {
-                        let old_receiver = call_args[0].value;
-                        if self.body.value(old_receiver).borrow_source.is_some() {
-                            self.emit_end_borrow(old_receiver);
-                        }
-                        let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
-                        let borrow = if receiver_convention == ParamConvention::MutBorrow {
-                            self.emit_begin_mut_borrow_addr(faddr, field_ty)
-                        } else {
-                            self.emit_begin_borrow_addr(faddr, field_ty)
-                        };
-                        call_args[0] = CallArg {
-                            value: borrow,
-                            convention: receiver_convention,
-                        };
-                        return (field_ty, call_args);
+                ) && let Some(base_addr) = self.try_field_addr_chain(receiver_expr)
+                {
+                    let old_receiver = call_args[0].value;
+                    if self.body.value(old_receiver).borrow_source.is_some() {
+                        self.emit_end_borrow(old_receiver);
                     }
+                    let faddr = self.emit_field_addr(base_addr, receiver_ty, field_idx);
+                    let borrow = if receiver_convention == ParamConvention::MutBorrow {
+                        self.emit_begin_mut_borrow_addr(faddr, field_ty)
+                    } else {
+                        self.emit_begin_borrow_addr(faddr, field_ty)
+                    };
+                    call_args[0] = CallArg {
+                        value: borrow,
+                        convention: receiver_convention,
+                    };
+                    return (field_ty, call_args);
                 }
                 // Fallback (non-addressable base, e.g. `makeBag().items(i)`):
                 // extract the field value and use it as the receiver.
@@ -540,14 +535,8 @@ impl OssaBodyCtx<'_, '_> {
         result_ty: TyId,
     ) -> ValueId {
         let init_effect = self.ctx.world.get::<InitEffect>(entity).cloned();
-        if init_effect.is_some() {
-            return self.emit_failable_init_call(
-                entity,
-                type_args,
-                args,
-                result_ty,
-                init_effect.unwrap(),
-            );
+        if let Some(init_effect) = init_effect {
+            return self.emit_failable_init_call(entity, type_args, args, result_ty, init_effect);
         }
 
         let ptr_ty = self.ctx.module.ty_arena.pointer(result_ty);
@@ -786,7 +775,7 @@ impl OssaBodyCtx<'_, '_> {
             },
             _ => Vec::new(),
         };
-        let call_args = if convs.iter().any(|c| *c == ParamConvention::MutBorrow) {
+        let call_args = if convs.contains(&ParamConvention::MutBorrow) {
             let mapped: Vec<ParamConvention> = convs
                 .iter()
                 .map(|c| {
@@ -816,10 +805,10 @@ impl OssaBodyCtx<'_, '_> {
     /// not an OSSA operand of `Call`, so leaving it @owned and live is correct:
     /// it is dropped once at scope exit.
     fn lower_callee_value(&mut self, callee_expr: HirExprId) -> ValueId {
-        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr] {
-            if !self.is_var_local(hir_local) {
-                return self.map_local(*hir_local);
-            }
+        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr]
+            && !self.is_var_local(hir_local)
+        {
+            return self.map_local(*hir_local);
         }
         self.lower_expr(callee_expr)
     }

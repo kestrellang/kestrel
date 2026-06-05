@@ -390,7 +390,7 @@ fn render_signature(
         // label is implicit. Other cases render `label name`.
         match p.label.as_deref() {
             Some(l) if l == p.name => label.push_str(&p.name),
-            Some(l) if l == "_" => label.push_str(&p.name),
+            Some("_") => label.push_str(&p.name),
             Some(l) => {
                 label.push_str(l);
                 label.push(' ');
@@ -437,12 +437,12 @@ fn render_signature(
 /// known file path, like intrinsics).
 fn type_text(source: Option<&str>, ty: &AstType) -> String {
     let span = ast_type_span(ty);
-    if let Some(src) = source {
-        if let Some(slice) = src.get(span.start..span.end) {
-            // Collapse any embedded newlines / runs of whitespace so the
-            // signature stays a single line.
-            return collapse_ws(slice);
-        }
+    if let Some(src) = source
+        && let Some(slice) = src.get(span.start..span.end)
+    {
+        // Collapse any embedded newlines / runs of whitespace so the
+        // signature stays a single line.
+        return collapse_ws(slice);
     }
     "_".to_string()
 }

@@ -87,18 +87,18 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                             if tok.kind() == SyntaxKind::Mutating {
                                 pending_mut = true;
                             }
-                        } else if let Some(n) = child.as_node() {
-                            if is_type_node(n.kind()) {
-                                if let Some(ty) = ast_type_from_cst(n, file_id) {
-                                    params.push(ty);
-                                    conventions.push(if pending_mut {
-                                        kestrel_ast::ParamConvention::MutBorrow
-                                    } else {
-                                        kestrel_ast::ParamConvention::Consuming
-                                    });
-                                }
-                                pending_mut = false;
+                        } else if let Some(n) = child.as_node()
+                            && is_type_node(n.kind())
+                        {
+                            if let Some(ty) = ast_type_from_cst(n, file_id) {
+                                params.push(ty);
+                                conventions.push(if pending_mut {
+                                    kestrel_ast::ParamConvention::MutBorrow
+                                } else {
+                                    kestrel_ast::ParamConvention::Consuming
+                                });
                             }
+                            pending_mut = false;
                         }
                     }
                     (params, conventions)

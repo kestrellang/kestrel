@@ -104,11 +104,13 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// Current scope depth (for closure capture detection).
+    #[allow(dead_code)]
     pub fn scope_depth(&self) -> usize {
         self.scopes.len()
     }
 
     /// Scope depth at which a local was created.
+    #[allow(dead_code)]
     pub fn local_scope_depth(&self, id: LocalId) -> Option<usize> {
         self.local_depths.get(&id).copied()
     }

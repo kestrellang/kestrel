@@ -7,6 +7,7 @@ func identity[T](x: T) -> T {
     x
 }
 
+@main
 func main() -> lang.i64 {
     let a = identity[std.numeric.Int64](40);
     let b = identity[std.core.Bool](true);

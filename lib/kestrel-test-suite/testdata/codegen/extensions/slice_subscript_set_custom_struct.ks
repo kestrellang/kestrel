@@ -14,6 +14,7 @@ struct Point: Cloneable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var pts = Array[Point](repeating: Point(x: 0, y: 0), count: 3);
 

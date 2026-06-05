@@ -29,6 +29,7 @@ struct Bag: HasCount {
     mutating func setCount(to value: lang.i64) { self.n = value; }
 }
 
+@main
 func main() -> lang.i64 {
     var b = Bag(3);
     let before = b.doubleCount;  // 6

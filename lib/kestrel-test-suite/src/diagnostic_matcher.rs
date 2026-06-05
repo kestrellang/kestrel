@@ -63,10 +63,10 @@ pub fn from_codespan_diagnostics(
             .labels
             .iter()
             .find(|l| l.style == codespan_reporting::diagnostic::LabelStyle::Primary)
+            && !label.message.is_empty()
+            && label.message != diag.message
         {
-            if !label.message.is_empty() && label.message != diag.message {
-                message = format!("{}: {}", message, label.message);
-            }
+            message = format!("{}: {}", message, label.message);
         }
 
         result.push(TestDiagnostic {
@@ -175,7 +175,13 @@ pub fn check(
     diagnostics: &[TestDiagnostic],
     test_file_id: usize,
 ) -> Result<(), String> {
-    // Filter diagnostics to only those from the test file
+    // Match annotations against diagnostics from the test file only. A test
+    // annotates its own source; diagnostics that land in stdlib or an included
+    // file (and location-free synthetic-span cascades, which carry no test-file
+    // id) are not the test's concern and would otherwise show up as
+    // un-annotatable noise. Whole-program checks that must be tested anchor
+    // their label on a declaration in the test file (e.g. E618), so they keep
+    // the test file's id and are covered here.
     let test_diags: Vec<&TestDiagnostic> = diagnostics
         .iter()
         .filter(|d| d.file_id == test_file_id)
@@ -254,9 +260,9 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
                 return false;
             }
             // If a message is specified, check substring (case-insensitive)
-            message.as_ref().map_or(true, |msg| {
-                diag.message.to_lowercase().contains(&msg.to_lowercase())
-            })
+            message
+                .as_ref()
+                .is_none_or(|msg| diag.message.to_lowercase().contains(&msg.to_lowercase()))
         },
         AnnotationKind::ErrorCode { code } => {
             if diag.severity != TestSeverity::Error {
@@ -268,9 +274,9 @@ fn matches_annotation(ann: &Annotation, diag: &TestDiagnostic) -> bool {
             if diag.severity != TestSeverity::Warning {
                 return false;
             }
-            message.as_ref().map_or(true, |msg| {
-                diag.message.to_lowercase().contains(&msg.to_lowercase())
-            })
+            message
+                .as_ref()
+                .is_none_or(|msg| diag.message.to_lowercase().contains(&msg.to_lowercase()))
         },
     }
 }

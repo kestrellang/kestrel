@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let arr = std.collections.Array[std.numeric.Int64](repeating: 7, count: 5);
             if arr.count != 5 { return 1 }

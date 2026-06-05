@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test isSorted - ascending
             if [1, 2, 3, 4, 5].iter().isSorted() == false { return 1 }

@@ -27,6 +27,7 @@ func render(shape: some Drawable) -> std.numeric.Int64 {
     shape.draw()
 }
 
+@main
 func main() -> lang.i64 {
     if render(Circle()) != 10 { return 1 }
     if render(Square()) != 20 { return 2 }

@@ -68,9 +68,13 @@ members = [
     "lib/kestrel-codegen-cranelift",
     "lib/kestrel-codegen-llvm",
     "lib/kestrel-test-suite",
-    "external/triage",
 ]
-exclude = ["registry", "external/flock-registry"]
+# external/triage is local-only dev tooling (the whole external/ tree is
+# gitignored — see .gitignore). It builds standalone (own [workspace] +
+# literal package fields) and is installed via `cargo install --path
+# external/triage`, so it must NOT be a workspace member or CI checkouts
+# (which lack the dir) fail to load the manifest.
+exclude = ["registry", "external/flock-registry", "external/triage"]
 
 # Workspace-wide lint configuration
 # Individual crates inherit these with [lints] workspace = true

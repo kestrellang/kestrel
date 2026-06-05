@@ -63,6 +63,7 @@ func process(query: TagString) -> String {
     query.inner
 }
 
+@main
 func main() -> lang.i64 {
     let name = "Alice";
 

@@ -6,7 +6,8 @@ import std.io.stdio.println
 
 public func publicAnswer() -> std.numeric.Int64 = 99
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(publicAnswer());
     0
 }

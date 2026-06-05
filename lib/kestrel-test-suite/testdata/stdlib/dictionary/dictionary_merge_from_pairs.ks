@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // merge(from:) with another dictionary's iter
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64]();

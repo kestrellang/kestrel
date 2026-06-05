@@ -31,6 +31,7 @@ func optVar(n: std.numeric.Int64) -> std.result.Optional[std.numeric.Int64] {
     acc
 }
 
+@main
 func main() -> lang.i64 {
     match sumDigits(4) { .Ok(v) => { if v != 123 { return 1; } }, .Err(_) => return 2 };
     match optVar(41) { some 42 => {}, _ => return 3 };

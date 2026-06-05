@@ -13,6 +13,7 @@ enum Color {
     case Blue
 }
 
+@main
 func main() -> lang.i64 {
     var arr = Array[Color](repeating: Color.Red, count: 4);
 

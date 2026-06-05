@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // ---- Append String ----
     var b = std.text.StringBuilder();

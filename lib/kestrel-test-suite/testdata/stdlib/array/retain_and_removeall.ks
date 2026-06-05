@@ -9,6 +9,7 @@ module Test
             a
         }
 
+        @main
         func main() -> lang.i64 {
             // Test retain(where:)
             var arr = makeArray5();

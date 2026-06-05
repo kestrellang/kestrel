@@ -181,12 +181,12 @@ fn verify_against_fresh(
     }
     let driver = CompilerDriver::new(&fresh);
     let _ = driver.infer_all();
-    let _ = driver.analyze_all();
+    let _ = driver.analyze_all(false);
     let fresh_diags = fresh.diagnostics();
 
     let driver = CompilerDriver::new(&state.compiler);
     let _ = driver.infer_all();
-    let _ = driver.analyze_all();
+    let _ = driver.analyze_all(false);
     let live_diags = state.compiler.diagnostics();
 
     if live_diags.len() != fresh_diags.len() {
@@ -292,14 +292,14 @@ fn sync_user(
         match state.user_text.get(path) {
             Some(old_text) if old_text == new_text => {
                 // Unchanged — skip, keep existing entity + cache
-            }
+            },
             _ => {
                 // Changed content or new file
                 if state.user_text.contains_key(path) {
                     paths_to_unbuild.push(path.clone());
                 }
                 paths_to_build.push(path.clone());
-            }
+            },
         }
     }
 
@@ -437,25 +437,18 @@ mod tests {
         // When one file changes, other files' entities must survive.
         let handle = CompilerHandle::spawn();
         let stdlib = arc_map(&[]);
-        let user_v1 = arc_map(&[
-            ("/u/a.ks", "module A"),
-            ("/u/b.ks", "module B"),
-        ]);
+        let user_v1 = arc_map(&[("/u/a.ks", "module A"), ("/u/b.ks", "module B")]);
         let user_v2 = arc_map(&[
             ("/u/a.ks", "module A"),
             ("/u/b.ks", "module B\nstruct X {}"),
         ]);
 
         let (ea1, eb1): (Entity, Entity) = handle
-            .with_compiler(stdlib.clone(), user_v1, |_, b| {
-                (b["/u/a.ks"], b["/u/b.ks"])
-            })
+            .with_compiler(stdlib.clone(), user_v1, |_, b| (b["/u/a.ks"], b["/u/b.ks"]))
             .await
             .unwrap();
         let (ea2, eb2): (Entity, Entity) = handle
-            .with_compiler(stdlib, user_v2, |_, b| {
-                (b["/u/a.ks"], b["/u/b.ks"])
-            })
+            .with_compiler(stdlib, user_v2, |_, b| (b["/u/a.ks"], b["/u/b.ks"]))
             .await
             .unwrap();
         assert_eq!(ea1, ea2, "unchanged file A must keep its entity");
@@ -466,15 +459,9 @@ mod tests {
     async fn incremental_handles_added_and_removed_files() {
         let handle = CompilerHandle::spawn();
         let stdlib = arc_map(&[]);
-        let user_v1 = arc_map(&[
-            ("/u/a.ks", "module A"),
-            ("/u/b.ks", "module B"),
-        ]);
+        let user_v1 = arc_map(&[("/u/a.ks", "module A"), ("/u/b.ks", "module B")]);
         // Remove b.ks, add c.ks
-        let user_v2 = arc_map(&[
-            ("/u/a.ks", "module A"),
-            ("/u/c.ks", "module C"),
-        ]);
+        let user_v2 = arc_map(&[("/u/a.ks", "module A"), ("/u/c.ks", "module C")]);
 
         let ea1: Entity = handle
             .with_compiler(stdlib.clone(), user_v1, |_, b| b["/u/a.ks"])
@@ -549,7 +536,7 @@ mod tests {
             c.build(e);
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             c.diagnostics()
                 .iter()
                 .map(|d| d.message.clone())
@@ -565,7 +552,7 @@ mod tests {
             c.build(e);
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             c.diagnostics()
                 .iter()
                 .map(|d| d.message.clone())
@@ -618,7 +605,7 @@ mod tests {
             c.build(e);
             let d = CompilerDriver::new(&c);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             let mut msgs: Vec<String> = c.diagnostics().iter().map(|d| d.message.clone()).collect();
             msgs.sort();
             msgs
@@ -631,7 +618,7 @@ mod tests {
             sync_user(&mut state, &user_map, false);
             let d = CompilerDriver::new(&state.compiler);
             let _ = d.infer_all();
-            let _ = d.analyze_all();
+            let _ = d.analyze_all(false);
             let mut msgs: Vec<String> = state
                 .compiler
                 .diagnostics()
@@ -699,7 +686,7 @@ mod tests {
         sync_user(&mut state, &user_v2, false);
         let driver = CompilerDriver::new(&state.compiler);
         let _ = driver.infer_all();
-        let _ = driver.analyze_all();
+        let _ = driver.analyze_all(false);
         let mut worker_diags: Vec<String> = state
             .compiler
             .diagnostics()
@@ -715,7 +702,7 @@ mod tests {
         fresh.build(e);
         let driver = CompilerDriver::new(&fresh);
         let _ = driver.infer_all();
-        let _ = driver.analyze_all();
+        let _ = driver.analyze_all(false);
         let mut fresh_diags: Vec<String> = fresh
             .diagnostics()
             .iter()

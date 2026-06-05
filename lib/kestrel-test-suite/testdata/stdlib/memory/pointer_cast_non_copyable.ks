@@ -8,6 +8,7 @@ struct Res: not Copyable {
     var fd: lang.i64
 }
 
+@main
 func main() -> lang.i64 {
     // A `Pointer` to a non-Copyable type is legitimate: the pointer is
     // just a machine address. `cast` reinterprets the address; it never

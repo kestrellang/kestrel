@@ -15,6 +15,7 @@ func compute(m: std.numeric.Int64) -> std.numeric.Int64 {
     y + z
 }
 
+@main
 func main() -> lang.i64 {
     if compute(1) != 16 { return 1; }   // (1-1) + (20-4)
     if compute(5) != 22 { return 2; }   // (5-0) + (20-3)

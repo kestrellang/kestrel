@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test take - takes value out, leaving None
             var opt1: std.result.Optional[std.numeric.Int64] = .Some(42);

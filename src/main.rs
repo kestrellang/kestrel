@@ -207,7 +207,9 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     let (compiler, std_dir) = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
-    let analyze_summary = driver.analyze_all();
+    // `build` produces an executable, so analysis enforces the `@main`
+    // entry-point requirement (E618).
+    let analyze_summary = driver.analyze_all(true);
 
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
@@ -310,7 +312,8 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     let (compiler, _std_dir) = globals.load_compiler(&args.files)?;
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
-    driver.analyze_all();
+    // `dump` is not producing a binary — don't require a `@main`.
+    driver.analyze_all(false);
 
     match args.kind {
         DumpKind::Mir => {
@@ -337,12 +340,12 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
                         print!("{clif}");
                         println!();
                     }
-                }
+                },
                 Err(e) => {
                     driver.emit_diagnostics().ok();
                     eprintln!("error: {e}");
                     return Err(ExitCode::FAILURE);
-                }
+                },
             }
         },
         DumpKind::Diagnostics => {
@@ -445,7 +448,10 @@ fn print_mir(mir: &kestrel_mir::MirModule, filter: Option<&str>) {
 
 fn print_mono(mono: &kestrel_mir::mono::MonoModule, filter: Option<&str>) {
     match filter {
-        Some(f) => print!("{}", kestrel_mir::display::display_mono_module_filtered(mono, f)),
+        Some(f) => print!(
+            "{}",
+            kestrel_mir::display::display_mono_module_filtered(mono, f)
+        ),
         None => print!("{}", kestrel_mir::display::display_mono_module(mono)),
     }
 }
@@ -623,7 +629,9 @@ fn default_std_path() -> Result<PathBuf, StdLookupError> {
 
 /// Collect .c files from the stdlib directory that need to be compiled and linked.
 fn collect_stdlib_c_sources(std_dir: Option<&Path>) -> Vec<PathBuf> {
-    let Some(std_dir) = std_dir else { return vec![] };
+    let Some(std_dir) = std_dir else {
+        return vec![];
+    };
     let shim = std_dir.join("io/libc_shims.c");
     if shim.exists() { vec![shim] } else { vec![] }
 }

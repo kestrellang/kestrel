@@ -13,6 +13,7 @@ func unwrapOr(v: std.result.Optional[std.numeric.Int64], default: std.numeric.In
     }
 }
 
+@main
 func main() -> lang.i64 {
     if unwrapOr(42, 0) != 42 { return 1 }
     if unwrapOr(null, 7) != 7 { return 2 }

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Setup two sets: a = {1, 2, 3}, b = {2, 3, 4}
             var a = std.collections.Set[std.numeric.Int64]();

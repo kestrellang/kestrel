@@ -19,6 +19,7 @@ func choose(flag: std.core.Bool) -> (std.numeric.Int64) -> std.numeric.Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let f = choose(true);
     if f(21) != 42 { return 1 }

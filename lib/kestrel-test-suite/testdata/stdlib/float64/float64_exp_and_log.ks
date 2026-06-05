@@ -8,6 +8,7 @@ module Test
             diff < 0.000001
         }
 
+        @main
         func main() -> lang.i64 {
             // exp: e^0 = 1, e^1 = e
             let zero: std.numeric.Float64 = 0.0;

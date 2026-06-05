@@ -111,7 +111,11 @@ pub fn run_audit(module: &MonoModule) {
     // function whose mangled name contains one of the substrings. Lets the same
     // env-gated build hook serve as a targeted `dump mir -s expand` for tracing.
     if let Ok(dump) = std::env::var("KESTREL_AUDIT_DUMP") {
-        let needles: Vec<&str> = dump.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let needles: Vec<&str> = dump
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
         for func in &module.functions {
             let Some(body) = &func.body else { continue };
             if needles.iter().any(|n| func.name.contains(n)) {
@@ -267,18 +271,25 @@ fn classify(
     match kind {
         // Forwarding value extraction / move: @owned non-trivial result laundered
         // out of a @guaranteed (borrowed) operand — the missing-clone signature.
-        InstKind::StructExtract { result, operand, .. }
-        | InstKind::TupleExtract { result, operand, .. }
-        | InstKind::EnumPayload { result, operand, .. }
+        InstKind::StructExtract {
+            result, operand, ..
+        }
+        | InstKind::TupleExtract {
+            result, operand, ..
+        }
+        | InstKind::EnumPayload {
+            result, operand, ..
+        }
         | InstKind::MoveValue { result, operand } => {
             if owned(*result) && heap(*result) && guaranteed(*operand) {
                 return Some(DupKind::OwnedFromBorrow);
             }
             // A move whose source is still referenced elsewhere = live duplicate.
-            if let InstKind::MoveValue { operand, .. } = kind {
-                if heap(*operand) && uses.get(operand).copied().unwrap_or(0) > 1 {
-                    return Some(DupKind::UseAfterMove);
-                }
+            if let InstKind::MoveValue { operand, .. } = kind
+                && heap(*operand)
+                && uses.get(operand).copied().unwrap_or(0) > 1
+            {
+                return Some(DupKind::UseAfterMove);
             }
             None
         },
@@ -381,17 +392,23 @@ fn consume_sites(body: &OssaBody) -> HashMap<ValueId, Vec<String>> {
         let tloc = format!("bb{bi}:{}", block.insts.len());
         match &block.terminator.kind {
             TerminatorKind::Return(v) => push(&mut sites, *v, &tloc, "return"),
-            TerminatorKind::Jump { args, .. } => dedup_succ_args(&mut sites, &tloc, args.iter().copied()),
+            TerminatorKind::Jump { args, .. } => {
+                dedup_succ_args(&mut sites, &tloc, args.iter().copied())
+            },
             TerminatorKind::Branch {
-                then_args, else_args, ..
+                then_args,
+                else_args,
+                ..
             } => dedup_succ_args(
                 &mut sites,
                 &tloc,
                 then_args.iter().chain(else_args).copied(),
             ),
-            TerminatorKind::Switch { cases, .. } => {
-                dedup_succ_args(&mut sites, &tloc, cases.iter().flat_map(|a| a.args.iter().copied()))
-            },
+            TerminatorKind::Switch { cases, .. } => dedup_succ_args(
+                &mut sites,
+                &tloc,
+                cases.iter().flat_map(|a| a.args.iter().copied()),
+            ),
             TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {},
         }
     }
@@ -460,7 +477,12 @@ fn mono_needs_drop(module: &MonoModule, ty: TyId) -> bool {
                 .structs
                 .get(&key)
                 .map(|s| s.type_info.drop != DropBehavior::None)
-                .or_else(|| module.enums.get(&key).map(|e| e.type_info.drop != DropBehavior::None))
+                .or_else(|| {
+                    module
+                        .enums
+                        .get(&key)
+                        .map(|e| e.type_info.drop != DropBehavior::None)
+                })
                 .unwrap_or(false)
         },
         _ => false,
@@ -479,16 +501,34 @@ fn describe(module: &MonoModule, body: &OssaBody, kind: &InstKind) -> String {
         format!("%v{} {} {}", id.index(), own, ty_name(module, d.ty))
     };
     match kind {
-        InstKind::StructExtract { result, operand, field } => format!(
+        InstKind::StructExtract {
+            result,
+            operand,
+            field,
+        } => format!(
             "struct_extract {} <- {} .field{}",
-            v(*result), v(*operand), field.index()
+            v(*result),
+            v(*operand),
+            field.index()
         ),
-        InstKind::TupleExtract { result, operand, index } => {
+        InstKind::TupleExtract {
+            result,
+            operand,
+            index,
+        } => {
             format!("tuple_extract {} <- {} .{}", v(*result), v(*operand), index)
         },
-        InstKind::EnumPayload { result, operand, variant, field } => format!(
+        InstKind::EnumPayload {
+            result,
+            operand,
+            variant,
+            field,
+        } => format!(
             "enum_payload {} <- {} variant{}.field{}",
-            v(*result), v(*operand), variant.index(), field.index()
+            v(*result),
+            v(*operand),
+            variant.index(),
+            field.index()
         ),
         InstKind::MoveValue { result, operand } => {
             format!("move_value {} <- {}", v(*result), v(*operand))
@@ -499,9 +539,15 @@ fn describe(module: &MonoModule, body: &OssaBody, kind: &InstKind) -> String {
         InstKind::Load { result, address } => {
             format!("load {} <- *{}", v(*result), v(*address))
         },
-        InstKind::CopyAddr { result, address, ty } => format!(
+        InstKind::CopyAddr {
+            result,
+            address,
+            ty,
+        } => format!(
             "copy_addr {} <- *{} : {}",
-            v(*result), v(*address), ty_name(module, *ty)
+            v(*result),
+            v(*address),
+            ty_name(module, *ty)
         ),
         other => format!("{other:?}"),
     }

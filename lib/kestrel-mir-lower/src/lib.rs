@@ -79,23 +79,23 @@ mod tests {
 
         let mir = lower_module(c.world(), c.root());
 
-        let with_bodies = mir.functions.iter().filter(|f| f.body.is_some()).count();
+        let with_bodies = mir.functions.values().filter(|f| f.body.is_some()).count();
         let total = mir.functions.len();
         let total_blocks: usize = mir
             .functions
-            .iter()
+            .values()
             .filter_map(|f| f.body.as_ref())
             .map(|b| b.blocks.len())
             .sum();
         let total_values: usize = mir
             .functions
-            .iter()
+            .values()
             .filter_map(|f| f.body.as_ref())
             .map(|b| b.values.len())
             .sum();
         let total_insts: usize = mir
             .functions
-            .iter()
+            .values()
             .filter_map(|f| f.body.as_ref())
             .flat_map(|b| &b.blocks)
             .map(|b| b.insts.len())
@@ -122,7 +122,7 @@ mod tests {
         // Count call instructions
         let call_count: usize = mir
             .functions
-            .iter()
+            .values()
             .filter_map(|f| f.body.as_ref())
             .flat_map(|b| &b.blocks)
             .flat_map(|b| &b.insts)
@@ -137,7 +137,7 @@ mod tests {
         // Count Op instructions (from intrinsic lowering)
         let op_count: usize = mir
             .functions
-            .iter()
+            .values()
             .filter_map(|f| f.body.as_ref())
             .flat_map(|b| &b.blocks)
             .flat_map(|b| &b.insts)
@@ -167,7 +167,7 @@ mod tests {
         let mut total_errors = 0;
         let mut error_funcs = Vec::new();
 
-        for func in &mir.functions {
+        for func in mir.functions.values() {
             if let Some(body) = &func.body {
                 // Skip degenerate bodies (0 values or 0 blocks)
                 if body.values.is_empty() || body.blocks.is_empty() {
@@ -187,7 +187,7 @@ mod tests {
             }
         }
 
-        let bodies = mir.functions.iter().filter(|f| f.body.is_some()).count();
+        let bodies = mir.functions.values().filter(|f| f.body.is_some()).count();
         eprintln!(
             "Verifier: {} bodies checked, {} total errors",
             bodies, total_errors
@@ -203,7 +203,7 @@ mod tests {
         // Categorize errors
         let mut categories: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
-        for func in &mir.functions {
+        for func in mir.functions.values() {
             if let Some(body) = &func.body {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
@@ -262,7 +262,7 @@ mod tests {
         let mut funcs_only_consumed_twice = 0usize;
         let mut funcs_mixed = 0usize;
 
-        for func in &mir.functions {
+        for func in mir.functions.values() {
             if let Some(body) = &func.body {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
@@ -354,11 +354,11 @@ mod tests {
         eprintln!("  {funcs_mixed:>5} with both unconsumed + consumed-twice");
 
         // Dump examples of each major category
-        let mut type_mismatch_examples = 0;
-        let mut unconsumed_branch_examples = 0;
-        let mut unconsumed_arm_examples = 0;
-        let mut consumed_twice_examples = 0;
-        for func in &mir.functions {
+        let _type_mismatch_examples = 0;
+        let _unconsumed_branch_examples = 0;
+        let _unconsumed_arm_examples = 0;
+        let _consumed_twice_examples = 0;
+        for func in mir.functions.values() {
             if let Some(body) = &func.body {
                 if body.values.is_empty() || body.blocks.is_empty() {
                     continue;
@@ -368,7 +368,7 @@ mod tests {
                     continue;
                 }
 
-                let has_branch_unconsumed = errors.iter().any(|e| {
+                let _has_branch_unconsumed = errors.iter().any(|e| {
                     e.message.contains("live at block exit")
                         && matches!(
                             body.block(e.block).terminator.kind,
@@ -376,14 +376,14 @@ mod tests {
                                 | kestrel_mir::terminator::TerminatorKind::Switch { .. }
                         )
                 });
-                let has_arm_unconsumed = errors.iter().any(|e| {
+                let _has_arm_unconsumed = errors.iter().any(|e| {
                     e.message.contains("live at block exit")
                         && matches!(
                             body.block(e.block).terminator.kind,
                             kestrel_mir::terminator::TerminatorKind::Jump { .. }
                         )
                 });
-                let has_consumed_twice = errors
+                let _has_consumed_twice = errors
                     .iter()
                     .any(|e| e.message.contains("consumed more than once"));
 
@@ -450,14 +450,13 @@ mod tests {
 
         let clean_count = mir
             .functions
-            .iter()
+            .values()
             .filter(|f| {
-                let pass = f.body.as_ref().is_some_and(|b| {
+                f.body.as_ref().is_some_and(|b| {
                     !b.values.is_empty()
                         && !b.blocks.is_empty()
                         && kestrel_mir::verify::verify_ossa(b, &mir, &f.name, f.entity).is_empty()
-                });
-                pass
+                })
             })
             .count();
         eprintln!("{clean_count}/{bodies} functions pass verifier cleanly");
@@ -475,7 +474,7 @@ mod tests {
 
         let mut mir = lower_module(c.world(), c.root());
 
-        let bodies_before = mir.functions.iter().filter(|f| f.body.is_some()).count();
+        let bodies_before = mir.functions.values().filter(|f| f.body.is_some()).count();
         let funcs_before = mir.functions.len();
 
         let target = kestrel_mir::TargetConfig::host_64();
@@ -485,7 +484,7 @@ mod tests {
         let funcs_after = mir.functions.len();
         let shim_count = mir
             .functions
-            .iter()
+            .values()
             .filter(|f| {
                 matches!(
                     f.kind,
@@ -495,7 +494,7 @@ mod tests {
             .count();
         let thunk_count = mir
             .functions
-            .iter()
+            .values()
             .filter(|f| {
                 matches!(
                     f.kind,
@@ -505,12 +504,12 @@ mod tests {
             .count();
         let layouts_computed = mir
             .structs
-            .iter()
+            .values()
             .filter(|s| s.type_info.layout.is_some())
             .count()
             + mir
                 .enums
-                .iter()
+                .values()
                 .filter(|e| e.type_info.layout.is_some())
                 .count();
 

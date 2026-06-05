@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x: std.numeric.Int64 = 10;
     if x > 5 {

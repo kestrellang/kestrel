@@ -480,10 +480,10 @@ impl<'a> CollectionContext<'a> {
         // if the first param is a TypeParam not in the function's type_params list.
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
-        if let Some(first_param) = func.params.first() {
-            if let MirTy::TypeParam(e) = self.arena.get(first_param.ty) {
-                return !known_tps.contains(e);
-            }
+        if let Some(first_param) = func.params.first()
+            && let MirTy::TypeParam(e) = self.arena.get(first_param.ty)
+        {
+            return !known_tps.contains(e);
         }
         false
     }
@@ -642,14 +642,12 @@ pub fn build_subst(
                         continue;
                     }
                     for (pi, &wc_arg_entity) in protocol_type_args.iter().enumerate() {
-                        if let Some(&proto_expr) = wit.proto_type_args.get(pi) {
-                            if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
-                                if !subst.type_params.contains_key(ext_entity) {
-                                    if let Some(&cv) = subst.type_params.get(&wc_arg_entity) {
-                                        subst.type_params.insert(*ext_entity, cv);
-                                    }
-                                }
-                            }
+                        if let Some(&proto_expr) = wit.proto_type_args.get(pi)
+                            && let MirTy::TypeParam(ext_entity) = arena.get(proto_expr)
+                            && !subst.type_params.contains_key(ext_entity)
+                            && let Some(&cv) = subst.type_params.get(&wc_arg_entity)
+                        {
+                            subst.type_params.insert(*ext_entity, cv);
                         }
                     }
                     for (entity, ty) in &bindings {
@@ -683,12 +681,11 @@ pub fn detect_implicit_protocol(
     arena: &TyArena,
     protocols: &IndexMap<Entity, ProtocolDef>,
 ) -> Option<Entity> {
-    if let Some(first_param) = func.params.first() {
-        if let MirTy::TypeParam(entity) = arena.get(first_param.ty) {
-            if protocols.contains_key(entity) {
-                return Some(*entity);
-            }
-        }
+    if let Some(first_param) = func.params.first()
+        && let MirTy::TypeParam(entity) = arena.get(first_param.ty)
+        && protocols.contains_key(entity)
+    {
+        return Some(*entity);
     }
     // Closures inside protocol default methods inherit self_type but their
     // first param is env pointer, not Self. Scan their types for protocol
@@ -775,16 +772,16 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
             assoc_type,
         } => {
             let resolved_base = deep_resolve(arena, witnesses, base, depth + 1);
-            if !has_type_param(arena, resolved_base) {
-                if let Some(bound) = witness::resolve_associated_type(
+            if !has_type_param(arena, resolved_base)
+                && let Some(bound) = witness::resolve_associated_type(
                     arena,
                     witnesses,
                     protocol,
                     resolved_base,
                     assoc_type,
-                ) {
-                    return deep_resolve(arena, witnesses, bound, depth + 1);
-                }
+                )
+            {
+                return deep_resolve(arena, witnesses, bound, depth + 1);
             }
             if resolved_base != base {
                 arena.intern(MirTy::AssociatedProjection {
@@ -1001,6 +998,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1038,6 +1036,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1072,6 +1071,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], gen_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         // main() calls generic_fn[Int64]
@@ -1100,6 +1100,7 @@ mod tests {
                 vec![ValueDef::owned(unit)],
             )),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1145,6 +1146,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let thunk = FunctionDef {
@@ -1159,6 +1161,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1196,6 +1199,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         let result = collect_all(
@@ -1245,6 +1249,7 @@ mod tests {
             where_clause: None,
             body: Some(make_body(vec![], impl_ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
+            is_main: false,
         };
 
         // main() has a witness call
@@ -1274,6 +1279,7 @@ mod tests {
                 vec![ValueDef::owned(unit)],
             )),
             extern_info: None,
+            is_main: false,
         };
 
         let mut names = IndexMap::new();

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             var s = std.collections.Set[std.numeric.Int64]();
             let _ = s.insert(10);

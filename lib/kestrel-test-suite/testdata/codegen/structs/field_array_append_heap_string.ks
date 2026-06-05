@@ -37,6 +37,7 @@ func heapString() -> std.text.String {
     s
 }
 
+@main
 func main() -> lang.i64 {
     var bag = Bag();
     bag.items.append(heapString());

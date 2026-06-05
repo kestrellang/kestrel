@@ -5,6 +5,7 @@ module Test
 
 import std.text.(CharIndex, GraphemeIndex, LineIndex)
 
+@main
 func main() -> lang.i64 {
     // ---- GraphemeIndex.advance ----
 

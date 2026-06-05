@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let ok1: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(42);
             let ok2: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(42);

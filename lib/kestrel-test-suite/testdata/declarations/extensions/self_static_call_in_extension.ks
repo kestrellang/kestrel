@@ -22,6 +22,7 @@ extend Counter {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let c = Counter.one();
     c.n

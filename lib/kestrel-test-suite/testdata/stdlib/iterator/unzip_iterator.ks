@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test unzip on iterator of tuples
             var pairs = std.collections.Array[(std.numeric.Int64, std.numeric.Int64)]();

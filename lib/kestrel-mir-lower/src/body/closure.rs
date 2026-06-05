@@ -132,7 +132,7 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     self.ctx.module.ty_arena.pointer(cap_ty)
                 };
-                env_def.add_field(FieldDef::new(&format!("cap{i}"), field_ty));
+                env_def.add_field(FieldDef::new(format!("cap{i}"), field_ty));
             }
             let entity = env_def.entity;
             self.ctx.module.add_struct(env_def);

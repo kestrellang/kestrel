@@ -107,10 +107,10 @@ pub async fn handle(
 fn container_name(world: &World, entity: Entity) -> Option<String> {
     let mut cur = world.parent_of(entity);
     while let Some(e) = cur {
-        if let Some(name) = world.get::<Name>(e) {
-            if !name.0.is_empty() {
-                return Some(name.0.clone());
-            }
+        if let Some(name) = world.get::<Name>(e)
+            && !name.0.is_empty()
+        {
+            return Some(name.0.clone());
         }
         cur = world.parent_of(e);
     }

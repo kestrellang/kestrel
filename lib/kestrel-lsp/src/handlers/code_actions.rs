@@ -76,7 +76,7 @@ pub async fn handle(state: SharedState, params: CodeActionParams) -> Option<Code
     }
 }
 
-fn diag_code<'a>(diag: &'a Diagnostic) -> Option<&'a str> {
+fn diag_code(diag: &Diagnostic) -> Option<&str> {
     match diag.code.as_ref()? {
         NumberOrString::String(s) => Some(s.as_str()),
         NumberOrString::Number(_) => None,

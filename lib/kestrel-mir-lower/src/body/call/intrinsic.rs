@@ -1144,7 +1144,7 @@ pub(crate) fn try_intrinsic(
         "ptr_write" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
-            let ptr = bctx.lower_expr(args.get(0)?.value);
+            let ptr = bctx.lower_expr(args.first()?.value);
             // Consume the value — PtrWrite moves it into the destination address.
             let val = bctx.lower_expr_for_consuming(args.get(1)?.value);
             bctx.consume(val);
@@ -1174,12 +1174,12 @@ pub(crate) fn try_intrinsic(
             Some(bctx.emit_op1(entry.op, arg, result_ty))
         },
         2 => {
-            let lhs = bctx.lower_expr(args.get(0)?.value);
+            let lhs = bctx.lower_expr(args.first()?.value);
             let rhs = bctx.lower_expr(args.get(1)?.value);
             Some(bctx.emit_op2(entry.op, lhs, rhs, result_ty))
         },
         3 => {
-            let a = bctx.lower_expr(args.get(0)?.value);
+            let a = bctx.lower_expr(args.first()?.value);
             let b = bctx.lower_expr(args.get(1)?.value);
             let c = bctx.lower_expr(args.get(2)?.value);
             Some(bctx.emit_op3(entry.op, a, b, c, result_ty))

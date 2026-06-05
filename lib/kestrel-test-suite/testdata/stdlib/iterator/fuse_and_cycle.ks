@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- fuse() ----
             let fused: std.collections.Array[std.numeric.Int64] = [1, 2, 3].iter().fuse().collect();

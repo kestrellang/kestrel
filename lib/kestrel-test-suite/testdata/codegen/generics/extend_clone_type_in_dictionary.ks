@@ -43,6 +43,7 @@ extend Boxed {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var d = Dictionary[String, Boxed]();
     d.insert("key", Boxed.S("a-heap-string-value"));

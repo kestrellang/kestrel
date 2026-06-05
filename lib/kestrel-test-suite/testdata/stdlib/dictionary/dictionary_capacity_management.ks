@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // capacity property
             var dict = std.collections.Dictionary[std.numeric.Int64, std.numeric.Int64](capacity: 32);

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let r = std.core.Range[std.numeric.Int64](2, 8);
 

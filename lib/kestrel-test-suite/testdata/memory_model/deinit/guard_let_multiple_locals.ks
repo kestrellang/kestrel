@@ -37,6 +37,7 @@ func test_guard(fail_on fail_on: Int64) -> Int64 {
     return deinit_count;
 }
 
+@main
 func main() -> lang.i64 {
     // Fail on guard 3: a and b allocated, c fails
     // Guard else path deinits b then a (reverse order)

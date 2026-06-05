@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Construct Char from UInt32 code point (unchecked) and read it back
             let cp = 65;  // 'A' = U+0041 = 65

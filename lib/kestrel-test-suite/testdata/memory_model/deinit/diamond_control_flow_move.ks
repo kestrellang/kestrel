@@ -18,6 +18,7 @@ struct Resource: not Copyable {
 
 func consume(consuming r: Resource) {}
 
+@main
 func main() -> lang.i64 {
     let a = Resource(id: 1);
     let b = Resource(id: 2);

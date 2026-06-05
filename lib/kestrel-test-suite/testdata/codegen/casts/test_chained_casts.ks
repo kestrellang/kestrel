@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x: lang.i8 = 42;
     let y = lang.cast_i8_i32(x);

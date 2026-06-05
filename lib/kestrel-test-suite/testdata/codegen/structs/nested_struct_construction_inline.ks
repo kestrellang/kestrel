@@ -13,6 +13,7 @@ struct Rectangle {
     let size: Point
 }
 
+@main
 func main() -> lang.i64 {
     let rect = Rectangle(
         origin: Point(x: 5, y: 10),

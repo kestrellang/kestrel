@@ -8,6 +8,7 @@ module Test
             diff < 0.0000001
         }
 
+        @main
         func main() -> lang.i64 {
             // clamp: within range
             let val: std.numeric.Float64 = 0.5;

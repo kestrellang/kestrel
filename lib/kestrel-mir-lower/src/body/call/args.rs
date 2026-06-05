@@ -102,7 +102,13 @@ impl OssaBodyCtx<'_, '_> {
             // here, fall back to the legacy positional path rather than panic.
             Err(_) => {
                 let mut ca = self.lower_call_args(args, conventions, conv_offset);
-                self.expand_default_args(&mut ca, callee_entity, args.len(), conventions, conv_offset);
+                self.expand_default_args(
+                    &mut ca,
+                    callee_entity,
+                    args.len(),
+                    conventions,
+                    conv_offset,
+                );
                 return ca;
             },
         };

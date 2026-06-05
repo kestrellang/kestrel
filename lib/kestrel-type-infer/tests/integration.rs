@@ -150,14 +150,14 @@ fn infer_tuple() {
     // Find the tail expression type — should be a tuple
     let func = find_function(&ctx, root, "TestMod", "foo");
     let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
-    if let Some(tail) = hir.tail_expr {
-        if let Some(ty) = typed.expr_types.get(&tail) {
-            assert!(
-                matches!(ty, ResolvedTy::Tuple(_)),
-                "tail should be Tuple, got {:?}",
-                ty
-            );
-        }
+    if let Some(tail) = hir.tail_expr
+        && let Some(ty) = typed.expr_types.get(&tail)
+    {
+        assert!(
+            matches!(ty, ResolvedTy::Tuple(_)),
+            "tail should be Tuple, got {:?}",
+            ty
+        );
     }
 }
 
@@ -191,14 +191,14 @@ fn infer_return() {
     // Return expression should have type Never (diverges)
     let func = find_function(&ctx, root, "TestMod", "foo");
     let hir = ctx.query(LowerBody { entity: func, root }).unwrap();
-    if let Some(tail) = hir.tail_expr {
-        if let Some(ty) = typed.expr_types.get(&tail) {
-            assert!(
-                matches!(ty, ResolvedTy::Never),
-                "return should be Never, got {:?}",
-                ty
-            );
-        }
+    if let Some(tail) = hir.tail_expr
+        && let Some(ty) = typed.expr_types.get(&tail)
+    {
+        assert!(
+            matches!(ty, ResolvedTy::Never),
+            "return should be Never, got {:?}",
+            ty
+        );
     }
 }
 

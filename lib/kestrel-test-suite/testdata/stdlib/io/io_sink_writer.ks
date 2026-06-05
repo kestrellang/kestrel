@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create a Sink writer
             var sink = std.io.write.Sink();

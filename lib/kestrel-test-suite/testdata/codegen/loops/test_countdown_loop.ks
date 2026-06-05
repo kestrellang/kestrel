@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     var countdown: std.numeric.Int64 = 10;
     var result: std.numeric.Int64 = 0;

@@ -8,6 +8,7 @@ module Test
             diff < 0.0000001
         }
 
+        @main
         func main() -> lang.i64 {
             let pi = std.numeric.Float64.pi;
             let halfPi = pi.divide(2.0);

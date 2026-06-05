@@ -9,7 +9,8 @@ public struct Foo {
     public static var structStaticVar: std.numeric.Int64 = 1;
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(Foo.structStaticVar);
     Foo.structStaticVar = 2;
     let _ = println(Foo.structStaticVar);

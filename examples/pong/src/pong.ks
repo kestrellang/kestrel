@@ -407,6 +407,7 @@ func usleep(usec: UInt32) -> Int32
 // Main
 // ============================================
 
+@main
 func main() {
     var game = Game();
 

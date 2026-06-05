@@ -50,6 +50,7 @@ struct Bag: Cloneable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let bag = Bag.build();
     match bag.value(forName: "content-length") {

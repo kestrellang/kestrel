@@ -6,6 +6,7 @@
 module swoop.tls
 
 import std.io.error.(IoError)
+import std.memory.(RcBox)
 import http.wire.(stringToBytes)
 
 // ============================================================================
@@ -79,21 +80,46 @@ func SSL_CTRL_SET_TLSEXT_HOSTNAME() -> Int32 { 55 }
 /// ```
 /// var stream = try TlsStream.connect("example.com", 443);
 /// ```
-public struct TlsStream: Readable, Writable {
-    private var ssl: lang.ptr[lang.i8]
-    private var ctx: lang.ptr[lang.i8]
+// Plain, owns-nothing record of the OpenSSL resources for one connection.
+// It has no `deinit`, so being `Copyable` is sound — copying it just copies
+// three scalars and confers no ownership. Ownership (the one-time SSL/socket
+// teardown) lives in `TlsStream.deinit`, fired only by the last live handle.
+// It is held inside an `RcBox` purely as shared, reference-counted storage.
+struct SslHandles {
+    var ssl: lang.ptr[lang.i8]
+    var ctx: lang.ptr[lang.i8]
     var fd: Int32
+}
+
+public struct TlsStream: Readable, Writable, Cloneable {
+    // Shared, reference-counted handle to the live connection. Cloning a
+    // `TlsStream` (e.g. passing it by value through the request pipeline)
+    // bumps the refcount rather than bit-copying; the connection is torn
+    // down exactly once, by whichever handle drops last (`isUnique()`).
+    private var conn: RcBox[SslHandles]
 
     init(ssl: lang.ptr[lang.i8], ctx: lang.ptr[lang.i8], fd: Int32) {
-        self.ssl = ssl;
-        self.ctx = ctx;
-        self.fd = fd;
+        self.conn = RcBox(SslHandles(ssl: ssl, ctx: ctx, fd: fd));
+    }
+
+    // Adopts an already-bumped storage handle; used by `clone()`.
+    private init(conn conn: RcBox[SslHandles]) {
+        self.conn = conn;
+    }
+
+    // Shares the connection: bump the refcount, hand back a second handle.
+    // Explicitly clones the `conn` field (the compiler suppresses automatic
+    // clone-insertion inside a clone impl), so this is a refcount bump — not
+    // an aliasing bit-copy.
+    public func clone() -> TlsStream {
+        TlsStream(conn: self.conn.clone())
     }
 
     public mutating func read(into buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+        let ssl = self.conn.valuePtr().with { (c) in c.ssl };
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_read(
-            self.ssl,
+            ssl,
             lang.cast_ptr[_, lang.i8](buf.pointer.raw),
             count32.raw
         ));
@@ -104,9 +130,10 @@ public struct TlsStream: Readable, Writable {
     }
 
     public mutating func write(from buf: ArraySlice[UInt8]) -> Result[Int64, IoError] {
+        let ssl = self.conn.valuePtr().with { (c) in c.ssl };
         let count32 = if buf.count > 2147483647 { 2147483647 } else { Int32(from: buf.count) };
         let n = Int32(raw: libc_SSL_write(
-            self.ssl,
+            ssl,
             lang.cast_ptr[_, lang.i8](buf.pointer.raw),
             count32.raw
         ));
@@ -118,13 +145,19 @@ public struct TlsStream: Readable, Writable {
 
     public mutating func flush() -> Result[(), IoError] = .Ok(())
 
+    // Tear the connection down once, when the last shared handle drops.
+    // Non-final handles see `isUnique() == false` and skip teardown; the
+    // RcBox refcount falls to zero on this same drop, freeing the storage.
     deinit {
-        // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
-        let _ = libc_SSL_shutdown(self.ssl);
-        libc_SSL_free(self.ssl);
-        libc_SSL_CTX_free(self.ctx);
-        if self.fd >= 0 {
-            let _ = posix_close(self.fd.raw);
+        if self.conn.isUnique() {
+            let h = self.conn.getValue();
+            // SSL_free and SSL_CTX_free are no-ops on null in LibreSSL
+            let _ = libc_SSL_shutdown(h.ssl);
+            libc_SSL_free(h.ssl);
+            libc_SSL_CTX_free(h.ctx);
+            if h.fd >= 0 {
+                let _ = posix_close(h.fd.raw);
+            }
         }
     }
 }

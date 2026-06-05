@@ -16,12 +16,12 @@ Three things drive the workflow:
 
 | Branch | Purpose | Branches from | Merges to |
 |--------|---------|---------------|-----------|
-| `main` | Released versions only. Advanced to tagged release commits. | — | — |
-| `nightly` | Active development trunk. Always in a working state. | `main` | `beta` (at cut) |
+| `main` | Released versions only. Advanced by merging `beta` at release. | — | — |
+| `nightly` | Active development trunk. Always in a working state. | `main` | `beta` (via PR at cut) |
 | `feature/NNNN-slug` | New feature for an issue. | `nightly` | `nightly` |
 | `fix/NNNN-slug` | Bug fix for an issue. | `nightly` | `nightly` |
 | `refactor/NNNN-slug` | Refactor for an issue. | `nightly` | `nightly` |
-| `beta` | Single, permanent stabilization branch. `nightly` merges in at the start of each train. | `nightly` (via merge) | `main` (at tag) |
+| `beta` | Single, permanent stabilization branch. `nightly` merges in at the start of each train. | `nightly` (via PR) | `main` (via PR at release) |
 | `hotfix/NNNN-slug` | Patch for the most recent release. | tag `vX.Y.Z` | `main`, then forward to `nightly` and any active `beta` |
 
 `NNNN` is the zero-padded issue number; the slug is the lowercased title. `issue-branch.yml` creates these automatically when an issue opens.
@@ -34,10 +34,10 @@ Each version is a **3-week cycle**. There is only ever one stabilization branch 
 
 ```
 Week 1–2:  nightly is open. Issue PRs merge in.
-End of W2: merge nightly into beta. nightly stays open for 0.(X+1).
+End of W2: open the nightly -> beta PR and merge it. nightly stays open for 0.(X+1).
 Week 3:    bug-fix only on beta. Each fix cherry-picks back to nightly.
-End of W3: tag v0.X.0 from beta, fast-forward main. beta sits at the tag
-           until the next merge.
+End of W3: merge the beta -> main PR (this releases the cycle), then tag v0.X.0
+           to publish binaries. beta sits at the release until the next merge.
 ```
 
 `beta` is never deleted — it's the same branch, advancing version by version. The week-2 merge is a fast-forward when the previous release tag is already on `nightly`'s history. It becomes a real merge when stabilization or hotfix commits have advanced one branch without the other.
@@ -76,8 +76,8 @@ One Project for the whole language. Multiple views, single source of state.
 | **In Progress** | Branch exists, work happening. |
 | **In Review** | PR open against `nightly` or `beta`. |
 | **Nightly** | Merged to `nightly`, not yet promoted to `beta`. |
-| **Beta** | Included in `beta`, awaiting release tag. |
-| **Done** | Release tagged. Drops off active views. |
+| **Beta** | Included in `beta`, not yet released to `main`. |
+| **Done** | Released — the `beta` -> `main` PR merged. Drops off active views. |
 
 The Nightly/Beta split matters because of the train: "merged" ≠ "promoted" ≠ "shipped." Without those states, work disappears from view before it reaches the release branch.
 
@@ -106,10 +106,10 @@ Project automation handles the routine transitions:
 - Issue opened → Status = Backlog, label `triage`.
 - Branch created (via `issue-branch.yml`) → Status = In Progress.
 - PR marked Ready for Review → Status = In Review.
-- PR merged to `nightly` → Status = Nightly.
-- Week-2 merge from `nightly` to `beta` → all Nightly items in that Milestone → Beta.
-- PR merged to `beta` → Status = Beta.
-- Release tagged → all Beta items in that Milestone → Done.
+- PR merged to `nightly` → that PR's issues → Nightly.
+- `nightly` → `beta` PR merged → every card in Nightly → Beta.
+- `beta` → `main` PR merged → every card in Beta → Done (released).
+- Hotfix PR merged to `main` → that PR's issues → Done.
 
 Week-3 stabilization fixes skip Nightly at first: the PR lands on `beta`, moves to Beta, then the fix cherry-picks back to `nightly`.
 
@@ -117,16 +117,17 @@ Manual transitions: Backlog → Up Next (during triage), reverting on close-with
 
 ### GitHub Projects integration
 
-GitHub Projects has useful built-in workflows, but branch-aware status changes need GitHub Actions. The integration contract is:
+GitHub Projects has useful built-in workflows, but branch-aware status changes need GitHub Actions. All board writes go through one workflow (`project-status.yml`) and one script (`scripts/setup/set_status.py`), which exposes two selectors: `--by-closing-issues` (the issues a PR closes) and `--by-status` (a whole status column). The integration contract is:
 
 - `issue-branch.yml` creates the issue branch and draft PR, then sets Status = In Progress.
-- `pull_request.ready_for_review` sets Status = In Review.
-- `pull_request.closed` with `merged == true` sets Status from the PR base branch:
-  - base `nightly` → Nightly
-  - base `beta` → Beta
-  - base `main` from `hotfix/*` → no status change; the forward merge to `nightly`/`beta` carries the item.
-- The week-2 promotion workflow sets all current-milestone Nightly items to Beta after `nightly` merges into `beta`.
-- The release-tag workflow sets all current-milestone Beta items to Done.
+- `pull_request.ready_for_review` → the PR's closing issues → In Review.
+- `pull_request.closed` with `merged == true`, dispatched by the head→base pair:
+  - base `nightly` → the PR's closing issues → Nightly
+  - base `beta`, head `nightly` → every Nightly card → Beta (cycle promotion)
+  - base `beta`, other head → the PR's closing issues → Beta (week-3 stabilization fix)
+  - base `main`, head `beta` → every Beta card → Done (release)
+  - base `main`, other head → the PR's closing issues → Done (hotfix)
+- Promotion and forward-merge PRs close no issues, so the closing-issue selector is a natural no-op for them; the head branch is what flags a bulk promotion. Bulk moves aren't milestone-filtered — because each promotion sweeps the whole column, Nightly/Beta only ever hold the current cycle's cards.
 
 Use the Projects GraphQL API for custom field updates. The workflow needs a token that can read issues/PRs and update the Project, plus these repository variables or secrets:
 
@@ -140,7 +141,7 @@ Use the Projects GraphQL API for custom field updates. The workflow needs a toke
 | `PROJECT_STATUS_BETA_ID` | Option ID for Beta. |
 | `PROJECT_STATUS_DONE_ID` | Option ID for Done. |
 
-Do not rely on branch creation alone as the source of truth. Branches prove work started; PR base branches and release tags prove where the change actually landed.
+Do not rely on branch creation alone as the source of truth. Branches prove work started; the head and base branches of merged PRs prove where the change actually landed.
 
 ## Issue lifecycle
 
@@ -149,8 +150,8 @@ Do not rely on branch creation alone as the source of truth. Branches prove work
 3. **Work.** Push to the branch. Status moves to In Progress.
 4. **Review.** Mark PR Ready. Status moves to In Review.
 5. **Merge.** Normal work lands on `nightly` and moves to Nightly. Week-3 stabilization fixes land on `beta`, move to Beta, and cherry-pick back to `nightly`.
-6. **Promote to `beta`.** At the week-2 merge, Nightly items in the current Milestone move to Beta.
-7. **Release tag cut.** Beta items move to Done.
+6. **Promote to `beta`.** Merging the `nightly` → `beta` PR moves every Nightly card to Beta.
+7. **Release.** Merging the `beta` → `main` PR moves every Beta card to Done; then tag `vX.Y.0` to publish binaries.
 
 ## Triage cadence
 
@@ -251,16 +252,18 @@ The prefix matches the branch type and the issue's Type label.
 git fetch origin
 git checkout feature/0142-existential-parser
 
-# Advance beta from nightly (end of week 2)
-git checkout beta && git pull
-git merge --no-ff origin/nightly -m "merge nightly for 0.16 stabilization"
-git push origin beta
+# Advance beta from nightly (end of week 2): open the PR, then merge it on
+# GitHub with "Create a merge commit" to preserve the cycle boundary.
+gh workflow run promote-to-beta.yml -f milestone=0.16
+#   (equivalently: gh pr create --base beta --head nightly --title "Promote 0.16 to beta")
 
-# Tag a release (end of week 3)
+# Release (end of week 3): open and merge the beta -> main PR on GitHub.
+# The merge moves Beta cards to Done; the manual tag publishes binaries.
+gh pr create --base main --head beta --title "Release 0.16"
+#   ... merge it (fast-forward) on GitHub, then:
 git checkout main && git pull
-git merge --ff-only origin/beta
 git tag v0.16.0
-git push origin main v0.16.0
+git push origin v0.16.0
 
 # Cherry-pick a beta fix back to nightly
 git checkout nightly && git pull

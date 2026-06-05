@@ -15,6 +15,7 @@ import notes.handlers.(
     handleListFolders, handleCreateFolder, handleGetFolder, handleUpdateFolder, handleDeleteFolder
 )
 
+@main
 func main() {
     match initSchema("notes.db") {
         .Ok(_) => {},

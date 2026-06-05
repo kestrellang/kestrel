@@ -19,6 +19,7 @@ func extract[C](c: C) -> std.numeric.Int64 where C: Container {
     c.read()
 }
 
+@main
 func main() -> lang.i64 {
     let w = Wrapper[std.core.Bool](value: 42);
     if extract[Wrapper[std.core.Bool]](w) != 42 { return 1 }

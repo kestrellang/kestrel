@@ -16,6 +16,7 @@ func make_outer(v: std.numeric.Int64, e: std.numeric.Int64) -> Outer {
     Outer(inner: Inner(value: v), extra: e)
 }
 
+@main
 func main() -> lang.i64 {
     let o = make_outer(40, 2);
     if o.inner.value + o.extra != 42 { return 1 }

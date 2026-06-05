@@ -15,6 +15,7 @@ struct Resource: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let outer_r = Resource(id: 1);
 

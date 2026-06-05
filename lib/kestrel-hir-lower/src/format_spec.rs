@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn test_zero_pad() {
         let spec = parse_format_spec("08").unwrap();
-        assert_eq!(spec.zero_pad, true);
+        assert!(spec.zero_pad);
         assert_eq!(spec.fill, '0');
         assert_eq!(spec.alignment, Alignment::Right);
         assert_eq!(spec.width, Some(8));
@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn test_zero_pad_with_hex() {
         let spec = parse_format_spec("08x").unwrap();
-        assert_eq!(spec.zero_pad, true);
+        assert!(spec.zero_pad);
         assert_eq!(spec.fill, '0');
         assert_eq!(spec.alignment, Alignment::Right);
         assert_eq!(spec.width, Some(8));
@@ -397,12 +397,12 @@ mod tests {
     #[test]
     fn test_alternate_form() {
         let spec = parse_format_spec("#x").unwrap();
-        assert_eq!(spec.alternate, true);
+        assert!(spec.alternate);
         assert_eq!(spec.format_type, FormatType::Hex);
 
         let spec = parse_format_spec("#08x").unwrap();
-        assert_eq!(spec.alternate, true);
-        assert_eq!(spec.zero_pad, true);
+        assert!(spec.alternate);
+        assert!(spec.zero_pad);
         assert_eq!(spec.width, Some(8));
         assert_eq!(spec.format_type, FormatType::Hex);
     }
@@ -446,7 +446,7 @@ mod tests {
     fn test_full_hex_spec() {
         let spec = parse_format_spec("+#010x").unwrap();
         assert_eq!(spec.sign, SignMode::Always);
-        assert_eq!(spec.alternate, true);
+        assert!(spec.alternate);
         assert_eq!(spec.width, Some(10));
         assert_eq!(spec.format_type, FormatType::Hex);
     }

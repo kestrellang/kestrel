@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- repeated(count:) ----
             let s1: std.text.String = "ab";

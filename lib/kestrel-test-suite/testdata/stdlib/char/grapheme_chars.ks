@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Single-char grapheme: chars() returns array with one element
             let g1 = std.text.Grapheme(char: 'x');

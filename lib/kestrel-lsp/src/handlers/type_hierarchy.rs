@@ -149,10 +149,10 @@ pub async fn subtypes(
                         continue;
                     }
                     let protos = ctx.query(ConformingProtocols { entity, root });
-                    if protos.contains(&target) {
-                        if let Some(item) = entity_to_item(world, &sources, entity) {
-                            items.push(item);
-                        }
+                    if protos.contains(&target)
+                        && let Some(item) = entity_to_item(world, &sources, entity)
+                    {
+                        items.push(item);
                     }
                 }
                 // For protocol subtypes: protocols that inherit from target.
@@ -161,10 +161,10 @@ pub async fn subtypes(
                         continue;
                     }
                     let protos = ctx.query(ConformingProtocols { entity, root });
-                    if protos.contains(&target) {
-                        if let Some(item) = entity_to_item(world, &sources, entity) {
-                            items.push(item);
-                        }
+                    if protos.contains(&target)
+                        && let Some(item) = entity_to_item(world, &sources, entity)
+                    {
+                        items.push(item);
                     }
                 }
 
@@ -188,10 +188,9 @@ fn resolve_type_at(
     let file_cst = compiler.parse(file_entity).tree;
     if let Some((entity, _)) =
         crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+        && is_type_entity(world, entity)
     {
-        if is_type_entity(world, entity) {
-            return Some(entity);
-        }
+        return Some(entity);
     }
 
     // Expression-position: resolve Def to a type entity.
@@ -200,27 +199,25 @@ fn resolve_type_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                match &hir.exprs[expr_id] {
-                    HirExpr::Def(entity, _, _) if is_type_entity(world, *entity) => {
-                        return Some(*entity);
-                    },
-                    HirExpr::MethodCall { .. } | HirExpr::Field { .. } | HirExpr::Call { .. } => {
-                        let typed = ctx.query(InferBody {
-                            entity: body_entity,
-                            root,
-                        });
-                        if let Some(typed) = typed {
-                            if let Some(&resolved) = typed.resolutions.get(&expr_id) {
-                                if is_type_entity(world, resolved) {
-                                    return Some(resolved);
-                                }
-                            }
-                        }
-                    },
-                    _ => {},
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        {
+            match &hir.exprs[expr_id] {
+                HirExpr::Def(entity, _, _) if is_type_entity(world, *entity) => {
+                    return Some(*entity);
+                },
+                HirExpr::MethodCall { .. } | HirExpr::Field { .. } | HirExpr::Call { .. } => {
+                    let typed = ctx.query(InferBody {
+                        entity: body_entity,
+                        root,
+                    });
+                    if let Some(typed) = typed
+                        && let Some(&resolved) = typed.resolutions.get(&expr_id)
+                        && is_type_entity(world, resolved)
+                    {
+                        return Some(resolved);
+                    }
+                },
+                _ => {},
             }
         }
     }
@@ -249,7 +246,7 @@ fn entity_to_item(
     let name = world.get::<Name>(entity)?.0.clone();
     let kind = world
         .get::<NodeKind>(entity)
-        .and_then(|k| node_kind_to_symbol_kind(k))
+        .and_then(node_kind_to_symbol_kind)
         .unwrap_or(SymbolKind::STRUCT);
     let file = entity_file(world, entity)?;
     let file_path = world.get::<FilePath>(file)?.0.clone();

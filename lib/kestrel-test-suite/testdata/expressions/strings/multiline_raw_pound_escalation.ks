@@ -4,6 +4,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     // Pound escalation lets the body contain `"#`.
     let s = ##"""

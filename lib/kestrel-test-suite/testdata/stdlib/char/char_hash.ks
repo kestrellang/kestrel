@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let a: std.text.Char = 'a';
             let b: std.text.Char = 'b';

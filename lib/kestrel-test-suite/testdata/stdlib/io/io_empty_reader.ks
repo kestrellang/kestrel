@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Create an Empty reader
             var empty = std.io.read.Empty();

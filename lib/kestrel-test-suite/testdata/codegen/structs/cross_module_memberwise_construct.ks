@@ -23,6 +23,7 @@ public struct Point {
     public var y: lang.i64
 }
 
+@main
 func main() -> lang.i64 {
     let p = buildPoint(10, 20);
     // Field reads also walk `module.structs`, so these exercise both the

@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // init(from: Float64) — narrowing conversion
             let f64val: std.numeric.Float64 = 3.14;

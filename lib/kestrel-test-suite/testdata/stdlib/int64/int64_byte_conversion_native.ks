@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // toBytes / fromBytes round-trip (native byte order)
             let val: std.numeric.Int64 = 42;

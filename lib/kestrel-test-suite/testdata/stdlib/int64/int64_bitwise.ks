@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // bitwiseAnd: 0b1100 & 0b1010 = 0b1000 = 8
             let a: std.numeric.Int64 = 12;

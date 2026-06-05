@@ -25,6 +25,7 @@ extend Point {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let p = Point.at(x: 7, y: 3);
     let o = Point.origin();

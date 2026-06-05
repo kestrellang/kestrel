@@ -19,7 +19,7 @@ pub(crate) static LINK_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub use error::CodegenError;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CodegenOptions {
     pub opt_level: u8,
     pub libraries: Vec<String>,
@@ -27,19 +27,6 @@ pub struct CodegenOptions {
     pub frameworks: Vec<String>,
     pub c_sources: Vec<std::path::PathBuf>,
     pub emit_clif: bool,
-}
-
-impl Default for CodegenOptions {
-    fn default() -> Self {
-        Self {
-            opt_level: 0,
-            libraries: Vec::new(),
-            library_paths: Vec::new(),
-            frameworks: Vec::new(),
-            c_sources: Vec::new(),
-            emit_clif: false,
-        }
-    }
 }
 
 pub struct CompilationResult {

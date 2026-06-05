@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let ok: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Ok(10);
             let err: std.result.Result[std.numeric.Int64, std.numeric.Int64] = .Err(5);

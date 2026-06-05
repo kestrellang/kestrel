@@ -24,6 +24,7 @@ extend std.collections.Array[T] where T: std.iter.Iterable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     var outer = std.collections.Array[std.collections.Array[std.numeric.Int64]]();
     // T resolves to Array[Int64], so T.Item is Int64 and emptyBag() returns

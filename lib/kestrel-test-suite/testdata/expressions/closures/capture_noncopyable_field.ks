@@ -21,6 +21,7 @@ struct Box: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let b = Box(cap: 4);
     let inside = b.clamped(at: 2);

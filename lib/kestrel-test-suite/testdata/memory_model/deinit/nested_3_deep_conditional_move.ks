@@ -37,6 +37,7 @@ func test() {
     // c3 is false so r was NOT moved; deinit fires at scope exit
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if deinit_count != 1 { return 1; }

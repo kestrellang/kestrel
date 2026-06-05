@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Test partition(by:) - in-place, returns pivot index
             var arr = std.collections.Array[std.numeric.Int64]();

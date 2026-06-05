@@ -19,6 +19,7 @@ func get_value[T](x: T) -> std.numeric.Int64 where T: Valuable {
     x.value()
 }
 
+@main
 func main() -> lang.i64 {
     let b = Box(inner: 42);
     if get_value[Box](b) != 42 { return 1 }

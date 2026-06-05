@@ -31,6 +31,7 @@ extend B {
     public static func makeDefault() -> lang.i64 { 2 }
 }
 
+@main
 func main() -> lang.i64 {
     // Return non-zero iff either static method returns the wrong value.
     // Sum them and subtract the expected total (1 + 2 = 3); 0 on success.

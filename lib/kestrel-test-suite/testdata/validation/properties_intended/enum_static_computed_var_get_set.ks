@@ -15,7 +15,8 @@ enum Foo {
     }
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(Foo.computed);
     Foo.computed = 7;
     let _ = println(Foo.computed);

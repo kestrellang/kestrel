@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let someOpt: std.result.Optional[std.numeric.Int64] = .Some(10);
             let none: std.result.Optional[std.numeric.Int64] = .None;

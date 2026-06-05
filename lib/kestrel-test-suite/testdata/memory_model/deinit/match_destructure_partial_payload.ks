@@ -22,6 +22,7 @@ enum Container: not Copyable {
 
 func consume(consuming r: Resource) {}
 
+@main
 func main() -> lang.i64 {
     let c1 = Container.Full(value: Resource(id: 1));
     match c1 {

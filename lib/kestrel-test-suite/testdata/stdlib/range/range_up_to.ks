@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // Construction via prefix ..< operator
             let r = ..<10;

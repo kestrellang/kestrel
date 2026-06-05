@@ -108,7 +108,7 @@ pub async fn incoming(
                         continue;
                     };
                     let site_li = LineIndex::new(source.clone());
-                    let clipped = references::clip_to_identifier(&source, &site.span, site.kind);
+                    let clipped = references::clip_to_identifier(source, &site.span, site.kind);
                     let range = site_li.range_for(clipped.start, clipped.end);
                     by_caller.entry(body).or_default().push(range);
                 }
@@ -163,12 +163,10 @@ pub async fn outgoing(
                 let body_entity = resolve_callable_at(world, file_entity, offset, root)?;
 
                 let ctx = world.query_context();
-                let Some(hir) = ctx.query(LowerBody {
+                let hir = ctx.query(LowerBody {
                     entity: body_entity,
                     root,
-                }) else {
-                    return None;
-                };
+                })?;
                 let typed = ctx.query(InferBody {
                     entity: body_entity,
                     root,
@@ -246,31 +244,29 @@ fn resolve_callable_at(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                match &hir.exprs[expr_id] {
-                    HirExpr::Def(entity, _, _) => {
-                        if is_callable(world, *entity) {
-                            return Some(*entity);
-                        }
-                    },
-                    HirExpr::MethodCall { .. }
-                    | HirExpr::Call { .. }
-                    | HirExpr::ProtocolCall { .. } => {
-                        let typed = ctx.query(InferBody {
-                            entity: body_entity,
-                            root,
-                        });
-                        if let Some(typed) = typed {
-                            if let Some(&resolved) = typed.resolutions.get(&expr_id) {
-                                if is_callable(world, resolved) {
-                                    return Some(resolved);
-                                }
-                            }
-                        }
-                    },
-                    _ => {},
-                }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        {
+            match &hir.exprs[expr_id] {
+                HirExpr::Def(entity, _, _) => {
+                    if is_callable(world, *entity) {
+                        return Some(*entity);
+                    }
+                },
+                HirExpr::MethodCall { .. }
+                | HirExpr::Call { .. }
+                | HirExpr::ProtocolCall { .. } => {
+                    let typed = ctx.query(InferBody {
+                        entity: body_entity,
+                        root,
+                    });
+                    if let Some(typed) = typed
+                        && let Some(&resolved) = typed.resolutions.get(&expr_id)
+                        && is_callable(world, resolved)
+                    {
+                        return Some(resolved);
+                    }
+                },
+                _ => {},
             }
         }
     }
@@ -322,7 +318,7 @@ fn entity_to_item(
     let name = world.get::<Name>(entity)?.0.clone();
     let kind = world
         .get::<NodeKind>(entity)
-        .and_then(|k| node_kind_to_symbol_kind(k))
+        .and_then(node_kind_to_symbol_kind)
         .unwrap_or(SymbolKind::FUNCTION);
     let file = entity_file(world, entity)?;
     let file_path = world.get::<FilePath>(file)?.0.clone();

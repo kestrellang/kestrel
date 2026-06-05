@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // byteSwapped — identity for single-byte type
             let val: std.numeric.Int8 = 42;

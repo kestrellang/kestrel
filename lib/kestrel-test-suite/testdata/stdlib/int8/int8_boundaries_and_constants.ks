@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // minValue should be -128
             let minVal = std.numeric.Int8.minValue;

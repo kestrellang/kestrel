@@ -8,6 +8,7 @@ func readRefCount(box: std.memory.RcBox[std.numeric.Int64]) -> std.numeric.Int64
     box.refCount()
 }
 
+@main
 func main() -> lang.i64 {
     // --- 1. Assignment copies should clone (bump refcount) ---
     let a = std.memory.RcBox[std.numeric.Int64](42);

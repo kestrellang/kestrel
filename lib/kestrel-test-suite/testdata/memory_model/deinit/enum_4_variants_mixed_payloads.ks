@@ -45,6 +45,7 @@ func test_empty() {
     let d = Mixed.EmptyCase;
 }
 
+@main
 func main() -> lang.i64 {
     deinit_count = 0;
     test_heavy();

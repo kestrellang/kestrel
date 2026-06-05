@@ -102,10 +102,10 @@ fn discover_trials(filter: Option<&HashSet<String>>) -> Vec<Trial> {
         let rel_str = rel.to_string_lossy().replace('\\', "/");
         let name = format!("{HARNESS_NAME}::{rel_str}");
 
-        if let Some(set) = filter {
-            if !set.contains(&name) {
-                continue;
-            }
+        if let Some(set) = filter
+            && !set.contains(&name)
+        {
+            continue;
         }
 
         let test_path: PathBuf = path.to_path_buf();
@@ -160,6 +160,9 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
     } else {
         TestCompiler::new()
     };
+    // Execution tests build a binary, so they require a `@main` (E618). A
+    // diagnostics test can opt in with `// executable: true` to exercise it.
+    tc.set_executable(config.test_mode == TestMode::Execution || config.executable);
 
     for include_path in &config.include {
         let include_file = path.parent().unwrap().join(include_path);
@@ -181,7 +184,7 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
 
         TestMode::Mir => {
             tc.check_no_errors()?;
-            let mir = tc.mir().map_err(|e| Into::<Box<dyn std::error::Error>>::into(e))?;
+            let mir = tc.mir().map_err(Into::<Box<dyn std::error::Error>>::into)?;
             mir_snapshot::check_mir_snapshot(
                 path,
                 &mir,
@@ -192,9 +195,7 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
 
         TestMode::Execution => {
             tc.check_no_errors()?;
-            let result = tc
-                .run()
-                .map_err(|e| Into::<Box<dyn std::error::Error>>::into(e))?;
+            let result = tc.run().map_err(Into::<Box<dyn std::error::Error>>::into)?;
 
             let expected_exit = config.expect_exit.unwrap_or(0);
             if result.exit_code != expected_exit {
@@ -205,25 +206,25 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
                 .into());
             }
 
-            if let Some(expected) = &config.expect_stdout {
-                if result.stdout.trim() != expected.trim() {
-                    return Err(format!(
-                        "Stdout mismatch.\nExpected: {}\nActual:   {}",
-                        expected.trim(),
-                        result.stdout.trim()
-                    )
-                    .into());
-                }
+            if let Some(expected) = &config.expect_stdout
+                && result.stdout.trim() != expected.trim()
+            {
+                return Err(format!(
+                    "Stdout mismatch.\nExpected: {}\nActual:   {}",
+                    expected.trim(),
+                    result.stdout.trim()
+                )
+                .into());
             }
 
-            if let Some(needle) = &config.stdout_contains {
-                if !result.stdout.contains(needle.as_str()) {
-                    return Err(format!(
-                        "Expected stdout to contain '{}'\nActual: {}",
-                        needle, result.stdout
-                    )
-                    .into());
-                }
+            if let Some(needle) = &config.stdout_contains
+                && !result.stdout.contains(needle.as_str())
+            {
+                return Err(format!(
+                    "Expected stdout to contain '{}'\nActual: {}",
+                    needle, result.stdout
+                )
+                .into());
             }
         },
     }

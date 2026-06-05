@@ -28,6 +28,7 @@ func wrap(consuming r: Resource) -> Wrapper {
 
 func consume(consuming w: Wrapper) {}
 
+@main
 func main() -> lang.i64 {
     consume(wrap(Resource(id: 1)));
 

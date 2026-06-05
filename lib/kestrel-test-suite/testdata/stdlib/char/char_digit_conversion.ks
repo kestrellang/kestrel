@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- digitValue() ----
             let zero: std.text.Char = '0';

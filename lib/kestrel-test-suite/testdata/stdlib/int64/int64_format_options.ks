@@ -25,6 +25,7 @@ module Test
             opts
         }
 
+        @main
         func main() -> lang.i64 {
             let val: std.numeric.Int64 = 255;
 

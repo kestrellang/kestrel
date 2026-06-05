@@ -9,7 +9,8 @@ public struct Foo {
     public static let structStaticLet: std.numeric.Int64 = 10;
 }
 
-func main() -> std.numeric.Int64 {
+@main
+func main() -> lang.i64 {
     let _ = println(Foo.structStaticLet);
     0
 }

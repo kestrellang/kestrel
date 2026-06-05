@@ -317,12 +317,11 @@ pub fn resolve_witness_call(
         if let Some(&concrete_arg) = method_type_args.get(i) {
             // The witness's proto_type_args[i] is the expression that maps
             // this protocol type param to the witness context (e.g., TypeParam(T_ext)).
-            if let Some(&proto_expr) = witness.proto_type_args.get(i) {
-                if let MirTy::TypeParam(ext_entity) = arena.get(proto_expr) {
-                    if !subst.type_params.contains_key(ext_entity) {
-                        subst.type_params.insert(*ext_entity, concrete_arg);
-                    }
-                }
+            if let Some(&proto_expr) = witness.proto_type_args.get(i)
+                && let MirTy::TypeParam(ext_entity) = arena.get(proto_expr)
+                && !subst.type_params.contains_key(ext_entity)
+            {
+                subst.type_params.insert(*ext_entity, concrete_arg);
             }
             // Also map the protocol's own type param entity directly
             subst

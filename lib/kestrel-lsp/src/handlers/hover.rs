@@ -75,14 +75,12 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                                     | NodeKind::Extension
                             )
                         );
-                        if parent_is_type {
-                            if let Some(link) = entity_link(world, &sources, parent) {
-                                let name = world
-                                    .get::<Name>(parent)
-                                    .map(|n| n.0.clone())
-                                    .unwrap_or_else(|| "?".into());
-                                md.push_str(&format!("\n\nDefined in [{}]({})", name, link));
-                            }
+                        if parent_is_type && let Some(link) = entity_link(world, &sources, parent) {
+                            let name = world
+                                .get::<Name>(parent)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_else(|| "?".into());
+                            md.push_str(&format!("\n\nDefined in [{}]({})", name, link));
                         }
                     }
                     // Return type links: get the expression's inferred type.
@@ -92,17 +90,14 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                         if let Some(hir) = ctx.query(LowerBody {
                             entity: body_entity,
                             root,
-                        }) {
-                            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                                if let Some(typed) = ctx.query(InferBody {
-                                    entity: body_entity,
-                                    root,
-                                }) {
-                                    if let Some(ty) = typed.expr_types.get(&expr_id) {
-                                        append_type_links(&mut md, world, &sources, ty);
-                                    }
-                                }
-                            }
+                        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+                            && let Some(typed) = ctx.query(InferBody {
+                                entity: body_entity,
+                                root,
+                            })
+                            && let Some(ty) = typed.expr_types.get(&expr_id)
+                        {
+                            append_type_links(&mut md, world, &sources, ty);
                         }
                     }
                     return Some((md, range));
@@ -114,18 +109,17 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 let file_cst = compiler.parse(file_entity).tree;
                 if let Some((entity, span)) =
                     crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+                    && let Some(mut md) = render_entity(world, &sources, entity)
                 {
-                    if let Some(mut md) = render_entity(world, &sources, entity) {
-                        if let Some(link) = entity_link(world, &sources, entity) {
-                            let name = world
-                                .get::<Name>(entity)
-                                .map(|n| n.0.clone())
-                                .unwrap_or_else(|| "?".into());
-                            md.push_str(&format!("\n\n[{}]({})", name, link));
-                        }
-                        let range = line_index.range_for(span.start, span.end);
-                        return Some((md, range));
+                    if let Some(link) = entity_link(world, &sources, entity) {
+                        let name = world
+                            .get::<Name>(entity)
+                            .map(|n| n.0.clone())
+                            .unwrap_or_else(|| "?".into());
+                        md.push_str(&format!("\n\n[{}]({})", name, link));
                     }
+                    let range = line_index.range_for(span.start, span.end);
+                    return Some((md, range));
                 }
 
                 // Fall back to "inferred type of the expression at the cursor".
@@ -316,22 +310,20 @@ fn entity_hover_range(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                let span = semantic::hir_expr_span(&hir.exprs[expr_id]);
-                return line_index.range_for(span.start, span.end);
-            }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        {
+            let span = semantic::hir_expr_span(&hir.exprs[expr_id]);
+            return line_index.range_for(span.start, span.end);
         }
     }
-    if let Some(decl) = semantic::enclosing_decl_at(world, file_entity, offset) {
-        if let Some(cst) = world.get::<CstNode>(decl) {
-            if let Some(decl_span) = world.get::<DeclSpan>(decl) {
-                if let Some(name_span) = get_name_span(&cst.0, decl_span.0.file_id) {
-                    return line_index.range_for(name_span.start, name_span.end);
-                }
-                return line_index.range_for(decl_span.0.start, decl_span.0.end);
-            }
+    if let Some(decl) = semantic::enclosing_decl_at(world, file_entity, offset)
+        && let Some(cst) = world.get::<CstNode>(decl)
+        && let Some(decl_span) = world.get::<DeclSpan>(decl)
+    {
+        if let Some(name_span) = get_name_span(&cst.0, decl_span.0.file_id) {
+            return line_index.range_for(name_span.start, name_span.end);
         }
+        return line_index.range_for(decl_span.0.start, decl_span.0.end);
     }
     // Last resort: zero-length range at the cursor.
     let pos = line_index.offset_to_position(offset);
@@ -363,10 +355,9 @@ fn entity_at_cursor(
         if let Some(hir) = ctx.query(LowerBody {
             entity: body_entity,
             root,
-        }) {
-            if let Some(expr_id) = semantic::hir_expr_at(&hir, offset) {
-                return entity_from_expr(&hir, body_entity, expr_id, &ctx, root);
-            }
+        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        {
+            return entity_from_expr(&hir, body_entity, expr_id, &ctx, root);
         }
         // Inside a body but no expression at cursor — let the caller
         // fall through to local_at_binding / inferred-type paths.
@@ -504,14 +495,14 @@ fn collect_type_links(
 ) {
     match ty {
         ResolvedTy::Named { entity, args } => {
-            if !out.iter().any(|(e, _, _)| e == entity) {
-                if let Some(link) = entity_link(world, sources, *entity) {
-                    let name = world
-                        .get::<Name>(*entity)
-                        .map(|n| n.0.clone())
-                        .unwrap_or_else(|| "?".into());
-                    out.push((*entity, name, link));
-                }
+            if !out.iter().any(|(e, _, _)| e == entity)
+                && let Some(link) = entity_link(world, sources, *entity)
+            {
+                let name = world
+                    .get::<Name>(*entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_else(|| "?".into());
+                out.push((*entity, name, link));
             }
             for arg in args {
                 collect_type_links(world, sources, arg, out);
@@ -522,7 +513,7 @@ fn collect_type_links(
                 collect_type_links(world, sources, elem, out);
             }
         },
-        ResolvedTy::Function { params, ret } => {
+        ResolvedTy::Function { params, ret, .. } => {
             for p in params {
                 collect_type_links(world, sources, p, out);
             }

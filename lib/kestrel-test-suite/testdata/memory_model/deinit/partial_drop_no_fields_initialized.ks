@@ -27,6 +27,7 @@ struct TwoResources: not Copyable {
     }
 }
 
+@main
 func main() -> lang.i64 {
     // Fail before any field is initialized — deinit_count should stay 0
     let failed = TwoResources(fail_early: 1);

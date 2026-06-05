@@ -431,10 +431,10 @@ fn substitute_resolved_ty(
     match ty {
         ResolvedTy::Param { entity } => {
             for (i, tp) in type_params.iter().enumerate() {
-                if tp == entity {
-                    if let Some(arg) = args.get(i) {
-                        return arg.clone();
-                    }
+                if tp == entity
+                    && let Some(arg) = args.get(i)
+                {
+                    return arg.clone();
                 }
             }
             ty.clone()
@@ -649,10 +649,10 @@ mod tests {
                             }
                         }
                     }
-                    if *kind == NodeKind::Module {
-                        if let Some(found) = walk(world, child, target) {
-                            return Some(found);
-                        }
+                    if *kind == NodeKind::Module
+                        && let Some(found) = walk(world, child, target)
+                    {
+                        return Some(found);
                     }
                 }
             }

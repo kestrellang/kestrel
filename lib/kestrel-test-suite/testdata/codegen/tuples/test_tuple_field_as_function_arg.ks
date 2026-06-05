@@ -7,6 +7,7 @@ func add(a: Int64, b: Int64) -> Int64 {
     a + b
 }
 
+@main
 func main() -> lang.i64 {
     let pair = (20, 22);
     let result = add(pair.0, pair.1);

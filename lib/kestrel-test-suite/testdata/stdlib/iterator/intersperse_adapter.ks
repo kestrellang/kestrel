@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // ---- intersperse() ----
             let result: std.collections.Array[std.numeric.Int64] = [1, 2, 3].iter().intersperse(with: 0).collect();

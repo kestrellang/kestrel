@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             let maxVal = std.numeric.UInt32.maxValue;
             let minVal = std.numeric.UInt32.minValue;

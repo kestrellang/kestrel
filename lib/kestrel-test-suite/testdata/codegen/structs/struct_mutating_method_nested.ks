@@ -15,6 +15,7 @@ struct Outer {
     var inner: Inner
 }
 
+@main
 func main() -> lang.i64 {
     var o = Outer(inner: Inner(value: 0));
     // Call mutating method directly on var inner

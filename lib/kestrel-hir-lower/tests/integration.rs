@@ -269,7 +269,7 @@ fn lower_method_call() {
         HirExpr::MethodCall {
             method, receiver, ..
         } => {
-            assert_eq!(method, "toString");
+            assert_eq!(method.as_str(), Some("toString"));
             assert!(matches!(&hir.exprs[*receiver], HirExpr::Local(..)));
         },
         other => panic!("expected Call or MethodCall, got {:?}", other),
@@ -293,7 +293,7 @@ fn lower_return_statement() {
         )
     }) || hir
         .tail_expr
-        .map_or(false, |e| matches!(&hir.exprs[e], HirExpr::Return { .. }));
+        .is_some_and(|e| matches!(&hir.exprs[e], HirExpr::Return { .. }));
     assert!(has_return, "should contain a return expression");
 }
 

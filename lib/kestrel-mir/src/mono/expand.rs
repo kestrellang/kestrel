@@ -295,11 +295,7 @@ fn is_drop_self(
 /// True when destroying a value of `ty` requires running a destructor: a Named
 /// type with a registered drop shim, or a tuple with at least one element that
 /// itself needs dropping. Mirrors the type kinds the destroy arms handle.
-fn ty_needs_drop(
-    ty_arena: &crate::ty::TyArena,
-    shim_lookup: &DropShimLookup,
-    ty: TyId,
-) -> bool {
+fn ty_needs_drop(ty_arena: &crate::ty::TyArena, shim_lookup: &DropShimLookup, ty: TyId) -> bool {
     match ty_arena.get(ty) {
         MirTy::Named { entity, type_args } => {
             shim_lookup.contains_key(&(*entity, type_args.clone()))
@@ -372,7 +368,16 @@ fn emit_destroy_recursive(
                 span: span.clone(),
             });
             for (i, &e) in elems.iter().enumerate() {
-                emit_destroy_recursive(body, ty_arena, shim_lookup, skip_self, results[i], e, span, out);
+                emit_destroy_recursive(
+                    body,
+                    ty_arena,
+                    shim_lookup,
+                    skip_self,
+                    results[i],
+                    e,
+                    span,
+                    out,
+                );
             }
         },
         _ => {},
@@ -453,7 +458,17 @@ fn emit_clone_recursive(
                     index: i as u32,
                 }));
                 let cl = body.alloc_value(ValueDef::owned(elem_ty));
-                emit_clone_recursive(body, ty_arena, clone_lookup, skip_clone_nominal, elem, elem_ty, cl, span, out);
+                emit_clone_recursive(
+                    body,
+                    ty_arena,
+                    clone_lookup,
+                    skip_clone_nominal,
+                    elem,
+                    elem_ty,
+                    cl,
+                    span,
+                    out,
+                );
                 cloned.push(cl);
             }
             out.push(Instruction::new(InstKind::Tuple {
@@ -502,7 +517,10 @@ fn expand_function(
     let mut closure_captures: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
     for block in &body.blocks {
         for inst in &block.insts {
-            if let InstKind::ApplyPartial { result, captures, .. } = &inst.kind {
+            if let InstKind::ApplyPartial {
+                result, captures, ..
+            } = &inst.kind
+            {
                 closure_captures.insert(*result, captures.clone());
             }
         }
@@ -523,11 +541,12 @@ fn expand_function(
                     .filter_map(|(i, a)| closure_captures.get(a).map(|c| (i, c.clone())))
                     .collect();
                 for (i, caps) in arg_caps {
-                    if let Some(param) = body.blocks[target.index()].params.get(i) {
-                        if !closure_captures.contains_key(&param.value) {
-                            closure_captures.insert(param.value, caps);
-                            changed = true;
-                        }
+                    if let Some(param) = body.blocks[target.index()].params.get(i)
+                        && let std::collections::hash_map::Entry::Vacant(e) =
+                            closure_captures.entry(param.value)
+                    {
+                        e.insert(caps);
+                        changed = true;
                     }
                 }
             }
@@ -573,8 +592,9 @@ fn expand_function(
                     // `Pointer[T]` and expand to nothing regardless. Mirrors how a value
                     // is captured: `emit_value_use` clones `@owned` captures into the
                     // env but passes `@guaranteed` ones through as aliases.
-                    if let Some(captures) =
-                        closure_captures.get(&operand).or_else(|| closure_captures.get(&remapped))
+                    if let Some(captures) = closure_captures
+                        .get(&operand)
+                        .or_else(|| closure_captures.get(&remapped))
                     {
                         for cap in captures.clone() {
                             let cap = remap_value(cap, &value_remap);
@@ -583,8 +603,14 @@ fn expand_function(
                             }
                             let cap_ty = body.values[cap.index()].ty;
                             emit_destroy_recursive(
-                                body, ty_arena, shim_lookup, skip_self, cap, cap_ty,
-                                &inst.span, &mut new_insts,
+                                body,
+                                ty_arena,
+                                shim_lookup,
+                                skip_self,
+                                cap,
+                                cap_ty,
+                                &inst.span,
+                                &mut new_insts,
                             );
                         }
                         continue;
@@ -714,32 +740,32 @@ fn expand_function(
                     let mut expanded = false;
                     if let MirTy::Pointer(pointee) = ty_arena.get(addr_ty) {
                         let pointee = *pointee;
-                        if let MirTy::Named { entity, type_args } = ty_arena.get(pointee) {
-                            if !is_drop_self(skip_self, *entity, type_args) {
-                                let key = (*entity, type_args.clone());
-                                if let Some(&shim_id) = shim_lookup.get(&key) {
-                                    let tmp = body.alloc_value(ValueDef::owned(pointee));
-                                    new_insts.push(Instruction {
-                                        kind: InstKind::Take {
-                                            result: tmp,
-                                            address,
-                                            ty: pointee,
-                                        },
-                                        span: span.clone(),
-                                    });
-                                    new_insts.push(Instruction {
-                                        kind: InstKind::Call {
-                                            result: None,
-                                            callee: Callee::Resolved(shim_id),
-                                            args: vec![CallArg {
-                                                value: tmp,
-                                                convention: ParamConvention::Consuming,
-                                            }],
-                                        },
-                                        span: span.clone(),
-                                    });
-                                    expanded = true;
-                                }
+                        if let MirTy::Named { entity, type_args } = ty_arena.get(pointee)
+                            && !is_drop_self(skip_self, *entity, type_args)
+                        {
+                            let key = (*entity, type_args.clone());
+                            if let Some(&shim_id) = shim_lookup.get(&key) {
+                                let tmp = body.alloc_value(ValueDef::owned(pointee));
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Take {
+                                        result: tmp,
+                                        address,
+                                        ty: pointee,
+                                    },
+                                    span: span.clone(),
+                                });
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Call {
+                                        result: None,
+                                        callee: Callee::Resolved(shim_id),
+                                        args: vec![CallArg {
+                                            value: tmp,
+                                            convention: ParamConvention::Consuming,
+                                        }],
+                                    },
+                                    span: span.clone(),
+                                });
+                                expanded = true;
                             }
                         }
                     }
@@ -880,19 +906,19 @@ fn expand_function(
                     // The source is marked as moved so DestroyValue becomes a no-op.
                     // Keyed per-instantiation: only THIS monomorphization's copy
                     // behavior matters (see `not_copyable` construction).
-                    if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty) {
-                        if not_copyable.contains(&(*entity, type_args.clone())) {
-                            let target = remap_value(operand, &value_remap);
-                            if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
-                                eprintln!(
-                                    "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
-                                    func.name
-                                );
-                            }
-                            value_remap.insert(result, target);
-                            moved_values.insert(target);
-                            continue;
+                    if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty)
+                        && not_copyable.contains(&(*entity, type_args.clone()))
+                    {
+                        let target = remap_value(operand, &value_remap);
+                        if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
+                            eprintln!(
+                                "[expand] MOVE (not-Copyable): {result:?} = copy_value {operand:?} → alias to {target:?} in {}",
+                                func.name
+                            );
                         }
+                        value_remap.insert(result, target);
+                        moved_values.insert(target);
+                        continue;
                     }
 
                     // @guaranteed operands are ByRef pointers — CopyValue must be
@@ -1099,7 +1125,6 @@ mod tests {
     use crate::ty::{ParamConvention, TyArena};
     use crate::value::ValueDef;
     use crate::{BlockId, Immediate, ValueId};
-    use indexmap::IndexMap;
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
@@ -1137,6 +1162,7 @@ mod tests {
             ret,
             body,
             extern_info: None,
+            is_main: false,
         }
     }
 
@@ -1204,6 +1230,7 @@ mod tests {
                 where_clause: None,
                 body: None,
                 extern_info: None,
+                is_main: false,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);
@@ -1378,6 +1405,7 @@ mod tests {
                 where_clause: None,
                 body: None,
                 extern_info: None,
+                is_main: false,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);

@@ -19,6 +19,7 @@ func tag(s: String) -> Int64 {
     }
 }
 
+@main
 func main() -> lang.i64 {
     if tag("") != 1 { return 1 }
     if tag("café") != 2 { return 2 }

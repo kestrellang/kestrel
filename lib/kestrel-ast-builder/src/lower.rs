@@ -2221,6 +2221,9 @@ fn token_to_compound_assign_op(kind: SyntaxKind) -> Option<CompoundAssignOp> {
 }
 
 #[cfg(test)]
+// String-interpolation/closure helpers are defined after this module by design;
+// keep them co-located with the lowering code rather than hoisting above the tests.
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::build::build_declarations;

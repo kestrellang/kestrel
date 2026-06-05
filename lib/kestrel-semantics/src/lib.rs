@@ -9,7 +9,8 @@ use std::collections::HashSet;
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause, WhereConstraint,
+    Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause,
+    WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;

@@ -17,6 +17,7 @@ struct Counter {
     }
 }
 
+@main
 func main() -> lang.i64 {
     let z = Counter.zero();
     z.n

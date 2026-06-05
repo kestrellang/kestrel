@@ -3,6 +3,7 @@
 
 module Test
 
+        @main
         func main() -> lang.i64 {
             // init and basic properties
             let r = std.core.ClosedRange[std.numeric.Int64](2, 5);

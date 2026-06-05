@@ -37,6 +37,7 @@ func buildString() -> std.result.Optional[std.text.String] {
     s
 }
 
+@main
 func main() -> lang.i64 {
     match buildArray(3) {
         .Ok(arr) => {

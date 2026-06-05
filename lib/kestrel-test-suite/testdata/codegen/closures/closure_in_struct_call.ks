@@ -11,6 +11,7 @@ func run_calc(calc: Calculator, a: std.numeric.Int64, b: std.numeric.Int64) -> s
     (calc.compute)(a, b)
 }
 
+@main
 func main() -> lang.i64 {
     let adder = Calculator(compute: { (x, y) in x + y });
     if run_calc(adder, 20, 22) != 42 { return 1 }

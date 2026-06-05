@@ -15,6 +15,7 @@ func set_inner_value(mutating o: Outer, v: std.numeric.Int64) {
     o.inner.value = v;
 }
 
+@main
 func main() -> lang.i64 {
     var o = Outer(inner: Inner(value: 0));
     set_inner_value(o, 42);

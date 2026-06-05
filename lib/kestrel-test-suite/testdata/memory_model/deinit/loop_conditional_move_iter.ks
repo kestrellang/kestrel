@@ -17,6 +17,7 @@ struct Resource: not Copyable {
 
 func consume(consuming r: Resource) {}
 
+@main
 func main() -> lang.i64 {
     var i: Int64 = 0;
     while i < 6 {

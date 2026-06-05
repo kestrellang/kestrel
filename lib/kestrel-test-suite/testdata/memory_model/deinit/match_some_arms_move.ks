@@ -30,6 +30,7 @@ func test() {
     // choice=3, r NOT moved, deinited at scope exit
 }
 
+@main
 func main() -> lang.i64 {
     test();
     if deinit_count != 1 { return 1; }

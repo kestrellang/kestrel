@@ -3,6 +3,7 @@
 
 module Test
 
+@main
 func main() -> lang.i64 {
     let x: lang.f64 = 42.7;
     let result = lang.cast_f64_i64(x);

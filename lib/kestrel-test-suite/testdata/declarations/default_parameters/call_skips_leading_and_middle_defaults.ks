@@ -12,6 +12,7 @@ func adding(years y: lang.i64 = 0, months m: lang.i64 = 0, days d: lang.i64 = 0)
     lang.i64_add(lang.i64_add(lang.i64_mul(y, 10000), lang.i64_mul(m, 100)), d)
 }
 
+@main
 func main() -> lang.i64 {
     // skip the leading defaulted `years`
     if lang.i64_ne(adding(months: 1, days: 10), 110) { return 1; }
