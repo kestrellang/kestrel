@@ -297,6 +297,23 @@ impl OssaBodyCtx<'_, '_> {
                         .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                         .collect();
 
+                    // The @owned test copy (and any earlier boolean-test copies
+                    // accumulated through nested splits) are scope-owned but not
+                    // match slots — they exist only for the branch condition. Like
+                    // the general-switch discriminant and the string-chain test
+                    // intermediates below, they must be destroyed in each successor;
+                    // otherwise they reach the leaf live with no consumer and no
+                    // merge edge, failing OSSA verify ("@owned value live at block
+                    // exit but never consumed"). The scrutinee itself stays a slot,
+                    // so the `tracker` filter never destroys it here.
+                    let tracker_set: std::collections::HashSet<ValueId> =
+                        self.tracker.values().into_iter().collect();
+                    let extra_vals: Vec<ValueId> = current_live
+                        .iter()
+                        .filter(|v| !tracker_set.contains(v))
+                        .copied()
+                        .collect();
+
                     let (true_block, true_params) = self.new_block_with_params(&local_descs);
                     let (false_block, false_params) = self.new_block_with_params(&local_descs);
                     self.emit_branch(
@@ -309,6 +326,7 @@ impl OssaBodyCtx<'_, '_> {
 
                     self.switch_to(true_block);
                     self.rebind_scope_values(&current_live, &true_params);
+                    self.destroy_extra_test_values(&extra_vals, &current_live, &true_params);
                     let rebound = rebound_value(scrutinee, &current_live, &true_params);
                     self.emit_decision_tree_threaded(
                         &cases[0].1,
@@ -321,6 +339,7 @@ impl OssaBodyCtx<'_, '_> {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(false_block);
                     self.rebind_scope_values(&current_live, &false_params);
+                    self.destroy_extra_test_values(&extra_vals, &current_live, &false_params);
                     let rebound = rebound_value(scrutinee, &current_live, &false_params);
                     self.emit_decision_tree_threaded(
                         &cases[1].1,
@@ -488,11 +507,7 @@ impl OssaBodyCtx<'_, '_> {
                     self.switch_to(*block_id);
                     self.rebind_scope_values(&switch_live, params);
                     // Destroy values that aren't in the tracker (e.g., discriminant)
-                    for &extra in &extra_vals {
-                        if let Some(pos) = switch_live.iter().position(|&v| v == extra) {
-                            self.emit_destroy_value(params[pos]);
-                        }
-                    }
+                    self.destroy_extra_test_values(&extra_vals, &switch_live, params);
                     let rebound = rebound_value(scrutinee, &switch_live, params);
                     self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, arms, exits);
                 }
@@ -501,11 +516,7 @@ impl OssaBodyCtx<'_, '_> {
                     self.restore_scope(&branch_snapshot);
                     self.switch_to(def_block);
                     self.rebind_scope_values(&switch_live, &def_params);
-                    for &extra in &extra_vals {
-                        if let Some(pos) = switch_live.iter().position(|&v| v == extra) {
-                            self.emit_destroy_value(def_params[pos]);
-                        }
-                    }
+                    self.destroy_extra_test_values(&extra_vals, &switch_live, &def_params);
                     let rebound = rebound_value(scrutinee, &switch_live, &def_params);
                     self.emit_decision_tree_threaded(def_tree, rebound, scrutinee_ty, arms, exits);
                 }
@@ -607,6 +618,24 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
         self.pop_scope();
+    }
+
+    /// Destroy the per-branch test intermediates (the switch discriminant, a
+    /// boolean-split copy, or string-test temporaries) threaded into a
+    /// successor block. These are scope-owned values that aren't match slots:
+    /// they exist only to compute the branch condition and have no edge to the
+    /// merge, so each successor must consume its rebound copy. Skipping this
+    /// leaves them live at the leaf with no consumer, which OSSA verify rejects
+    /// as "@owned value live at block exit but never consumed".
+    ///
+    /// `extra` lists the pre-rebind values to drop; `old`/`new` is the
+    /// successor's block-param rebinding (as passed to `rebind_scope_values`).
+    fn destroy_extra_test_values(&mut self, extra: &[ValueId], old: &[ValueId], new: &[ValueId]) {
+        for &v in extra {
+            if let Some(pos) = old.iter().position(|&o| o == v) {
+                self.emit_destroy_value(new[pos]);
+            }
+        }
     }
 }
 
