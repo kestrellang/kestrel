@@ -10,7 +10,7 @@ module jessup.toolchain
 import jessup.error.(JessupError)
 import jessup.config.(jessupHome, binDir, toolchainsDir, ensureDirectories, readConfig, writeConfig, JessupConfig)
 import jessup.platform.(Platform, detectPlatform)
-import jessup.github.(Release, fetchRelease, fetchJessupRelease, fetchVsixRelease)
+import jessup.github.(Release, fetchRelease, fetchJessupRelease)
 
 // ============================================================================
 // INSTALL
@@ -181,11 +181,10 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     installedMsg.append(toolchainName);
     let _ = println(installedMsg);
 
-    // Install the VS Code / Cursor extension if an editor is available.
-    installEditorExtension(channel: channel, platform: platform);
-
-    // Install Claude Code / Codex plugins if the CLIs are available.
-    installAgentPlugins();
+    // Editor and agent integrations are opt-in. Rather than silently mutating
+    // the user's editor or agent config, print the install commands so they
+    // can run whichever they want.
+    printIntegrationHints();
 
     .Ok(toolchainName)
 }
@@ -647,98 +646,28 @@ public func selfUpdate() -> Result[(), JessupError] {
 }
 
 // ============================================================================
-// EDITOR EXTENSION
+// INTEGRATION HINTS
 // ============================================================================
 
-/// Attempts to install the Kestrel VS Code extension (.vsix) into any
-/// detected editor (VS Code, Cursor, or codium). Silently skips if no
-/// supported editor CLI is found or the VSIX isn't available.
-public func installEditorExtension(channel channel: String, platform platform: Platform) {
-    // Detect which editor CLIs are available.
-    var editors = Array[String]();
-    if spawn("which code > /dev/null 2>&1") == 0 {
-        editors.append("code")
-    }
-    if spawn("which cursor > /dev/null 2>&1") == 0 {
-        editors.append("cursor")
-    }
-    if spawn("which codium > /dev/null 2>&1") == 0 {
-        editors.append("codium")
-    }
-    if editors.count == 0 {
-        return
-    }
-
-    // Fetch the VSIX download URL from the same release.
-    var vsixUrl = "";
-    match fetchVsixRelease(channel: channel, platform: platform) {
-        .Err(_) => return,
-        .Ok(url) => vsixUrl = url
-    }
-
-    // Download the VSIX to a temp file.
-    let tmpVsix = "/tmp/jessup-kestrel-extension.vsix";
-    var dlCmd = String();
-    dlCmd.append("curl -sL ");
-    match getenv("GITHUB_TOKEN") {
-        .Some(vsixToken) => {
-            if vsixToken.byteCount > 0 {
-                dlCmd.append("-H 'Authorization: Bearer ");
-                dlCmd.append(vsixToken);
-                dlCmd.append("' -H 'Accept: application/octet-stream' ");
-            }
-        },
-        .None => {}
-    }
-    dlCmd.append("-o ");
-    dlCmd.append(tmpVsix);
-    dlCmd.append(" ");
-    dlCmd.append(vsixUrl);
-    if spawn(dlCmd) != 0 {
-        return
-    }
-
-    // Install into each detected editor.
-    var i: Int64 = 0;
-    while i < editors.count {
-        let editor = editors(unchecked: i);
-        var installMsg = String();
-        installMsg.append("Installing Kestrel extension for ");
-        installMsg.append(editor);
-        installMsg.append("...");
-        let _ = println(installMsg);
-
-        var installCmd = String();
-        installCmd.append(editor);
-        installCmd.append(" --install-extension ");
-        installCmd.append(tmpVsix);
-        installCmd.append(" --force 2>/dev/null");
-        let _ = spawn(installCmd);
-        i = i + 1
-    }
-
-    // Clean up.
-    var rmVsix = String();
-    rmVsix.append("rm -f ");
-    rmVsix.append(tmpVsix);
-    let _ = spawn(rmVsix);
-}
-
-// ============================================================================
-// AGENT PLUGINS
-// ============================================================================
-
-/// Installs the Kestrel plugin for Claude Code and Codex if either CLI
-/// is detected. Silently skips if neither is available.
-func installAgentPlugins() {
-    if spawn("which claude > /dev/null 2>&1") == 0 {
-        let _ = println("Installing Kestrel plugin for Claude Code...");
-        let _ = spawn("claude plugin add kestrellang/kestrel-plugin 2>/dev/null");
-    }
-    if spawn("which codex > /dev/null 2>&1") == 0 {
-        let _ = println("Installing Kestrel plugin for Codex...");
-        let _ = spawn("codex plugin add kestrellang/kestrel-plugin 2>/dev/null");
-    }
+/// Prints the commands for the optional editor extension and AI-agent plugins.
+/// We deliberately do NOT install these automatically: a toolchain install
+/// shouldn't silently mutate the user's editor or agent config. The user runs
+/// whichever lines they want.
+func printIntegrationHints() {
+    let _ = println("");
+    let _ = println("Optional integrations (run the ones you want):");
+    let _ = println("");
+    let _ = println("  Editor extension (VS Code / Cursor): download the .vsix for your");
+    let _ = println("  platform from https://github.com/kestrellang/kestrel-vscode/releases/latest");
+    let _ = println("  then run: code --install-extension <file>.vsix");
+    let _ = println("");
+    let _ = println("  Claude Code plugin (Kestrel guidance + kestrel-lsp):");
+    let _ = println("    claude plugin marketplace add kestrellang/kestrel-plugin");
+    let _ = println("    claude plugin install kestrel-plugin@kestrel");
+    let _ = println("");
+    let _ = println("  Codex plugin:");
+    let _ = println("    codex plugin marketplace add kestrellang/kestrel-plugin");
+    let _ = println("    codex plugin add kestrel-plugin@kestrel");
 }
 
 // ============================================================================
