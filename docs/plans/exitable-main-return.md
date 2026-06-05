@@ -15,13 +15,23 @@
 >
 > **Update (0.17 — conformance specialization).** The last two limitations were
 > lifted (see `conformance-specialization.md`): `()` and `!` now **conform** to
-> `Exitable` via synthetic `lang.()`/`lang.!` entities, the `Result` conformance
-> is now the **generic** `extend Result[T, E]: Exitable where T: Exitable` (the
-> overlap ICE is fixed by most-specific-wins), and E616 recurses through `Result`
-> on its Ok type. So `main() -> T throws E` works for any `Exitable` `T`
-> (`-> Int64 throws E`, `-> ExitCode throws E`, …), not just unit. The `@main`
-> wrapper still structurally special-cases a *direct* `-> ()` / `-> !` return
-> (`Tuple([])` → exit 0, `Never` → unreachable).
+> `Exitable` via synthetic `lang.()`/`lang.!` entities, and the `Result`
+> conformance is now the **generic** `extend Result[T, E]: Exitable where T:
+> Exitable, E: Formattable` (the overlap ICE is fixed by most-specific-wins). So
+> `main() -> T throws E` works for any `Exitable` `T` (`-> Int64 throws E`,
+> `-> ExitCode throws E`, …), not just unit. The `@main` wrapper still
+> structurally special-cases a *direct* `-> ()` / `-> !` return (`Tuple([])` →
+> exit 0, `Never` → unreachable).
+>
+> **Update (0.17 — bound-aware conformance).** E616 no longer special-cases
+> `Result` at all. It asks one question — "does the return type *genuinely*
+> conform to `Exitable`?" — via `kestrel_type_infer::type_satisfies`, a
+> bound-aware check that **evaluates** the conditional conformance's `where`
+> clause. So `Result[NotExitable, E]` is rejected cleanly (E616) instead of being
+> accepted-then-ICEing at mono on the `report()` witness. The same check is wired
+> into the solver's `solve_conforms`, so the bug class is fixed generally (e.g.
+> `f[T: Exitable](someNonExitableResult)` is now a clean `does not conform` error,
+> not a mono ICE). See `conformance.rs` in `kestrel-type-infer`.
 
 ## Summary
 

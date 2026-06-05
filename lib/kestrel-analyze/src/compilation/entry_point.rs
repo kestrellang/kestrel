@@ -47,7 +47,7 @@ use kestrel_hecs::Entity;
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::lower_ast_type;
-use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -195,13 +195,14 @@ fn exitable_return_type(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
         // no stdlib (cf. `synthesize_main_wrapper`'s `Tuple`/`Never` branches).
         HirTy::Tuple(elems, _) if elems.is_empty() => true,
         HirTy::Never(_) => true,
-        // Raw `lang.iN` (back-compat) or any type conforming to `Exitable` —
-        // stdlib `IntN`/`ExitCode`, `Result` (via its generic conformance), or a
-        // user conformer.
+        // Raw `lang.iN` (back-compat) or any type that genuinely conforms to
+        // `Exitable` — stdlib `IntN`/`ExitCode`, a user conformer, or a
+        // `Result[T, E]` whose `T` itself conforms (the conditional conformance
+        // is evaluated, not assumed).
         HirTy::Struct { entity, .. }
         | HirTy::Enum { entity, .. }
         | HirTy::Protocol { entity, .. } => {
-            is_lang_primitive_int(cx, *entity) || conforms_to_exitable(cx, *entity)
+            is_lang_primitive_int(cx, *entity) || conforms_to_exitable(cx, ty)
         },
         // Unresolved type — defer to the resolution error rather than double-report.
         HirTy::Error(_) => true,
@@ -209,20 +210,20 @@ fn exitable_return_type(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
     }
 }
 
-/// True iff the resolved type `entity` conforms to the builtin `Exitable` protocol.
-fn conforms_to_exitable(cx: &CompilationContext<'_>, entity: Entity) -> bool {
+/// True iff `ty` genuinely conforms to the builtin `Exitable` protocol —
+/// evaluating conditional conformance `where` clauses via the shared
+/// `type_satisfies` check, so a `Result[T, E]` is accepted only when `T: Exitable`
+/// (and `E: Formattable`). `Result` is therefore NOT special-cased here. Returns
+/// false when `Exitable` is unresolvable (no stdlib); such programs only ever
+/// reach the structural `()`/`!`/`lang.iN` arms above.
+fn conforms_to_exitable(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
     let Some(exitable) = cx.query.query(ResolveBuiltin {
         builtin: Builtin::Exitable,
         root: cx.root,
-    }) else {Can
+    }) else {
         return false;
     };
-    cx.query
-        .query(ConformingProtocols {
-            entity,
-            root: cx.root,
-        })
-        .contains(&exitable)
+    kestrel_type_infer::type_satisfies(cx.query, ty, exitable, cx.root)
 }
 
 /// True iff `resolved` is one of the `lang.iN` primitive integer entities
