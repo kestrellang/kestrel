@@ -16,7 +16,7 @@ use crate::error::CodegenError;
 use crate::func::FuncCompiler;
 use crate::inst::find_mono_enum;
 use crate::mem;
-use crate::ty::{ScalarTy, TypeRepr, int_bits_to_scalar};
+use crate::ty::{ScalarTy, int_bits_to_scalar};
 
 /// Emit `llvm.trap` followed by `unreachable` (a real trapping terminator).
 pub fn emit_trap<'ctx>(fc: &FuncCompiler<'_, 'ctx>, builder: &Builder<'ctx>) {
@@ -135,34 +135,18 @@ fn compile_return<'ctx>(
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
     let ret_repr = fc.ctx.tc.repr(fc.func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, fc.is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     match ret_mode {
         ReturnMode::Direct(scalar) => {
             let val = fc.resolve_scalar(builder, value_id);
-            if fc.is_main {
-                let i64_ty = cx.i64_type();
-                let final_val: BasicValueEnum = match ret_repr {
-                    TypeRepr::Aggregate { .. } => {
-                        builder.build_load(i64_ty, val.into_pointer_value(), "mainret").unwrap()
-                    },
-                    TypeRepr::Scalar(s) if s.is_int() && s.bytes() < 8 && val.is_int_value() => builder
-                        .build_int_s_extend(val.into_int_value(), i64_ty, "ext")
-                        .unwrap()
-                        .into(),
-                    // I64 / Ptr / Zst, or a dead-block Never/ZST placeholder whose
-                    // value doesn't match `ret_repr`: coerce to i64 (ptrtoint a
-                    // placeholder `ptr`, zext/trunc an int).
-                    _ => coerce(builder, i64_ty.into(), val),
-                };
-                builder.build_return(Some(&final_val)).unwrap();
-            } else {
-                // Coerce to the declared scalar: handles a dead/unreachable block
-                // whose Never/ZST return placeholder (`ptr null`) doesn't match the
-                // function's scalar return type.
-                let final_val = coerce(builder, scalar.llvm(cx), val);
-                builder.build_return(Some(&final_val)).unwrap();
-            }
+            // Coerce to the declared scalar: handles a dead/unreachable block
+            // whose Never/ZST return placeholder (`ptr null`) doesn't match the
+            // function's scalar return type. The `@main` entry point is an
+            // ordinary `i64`-returning function (the MIR-synthesized wrapper),
+            // so it needs no special-casing here.
+            let final_val = coerce(builder, scalar.llvm(cx), val);
+            builder.build_return(Some(&final_val)).unwrap();
         },
         ReturnMode::Sret => {
             let sret_ptr = fc.sret_ptr.expect("sret_ptr must be set for Sret return mode");

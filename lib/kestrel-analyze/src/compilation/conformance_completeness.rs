@@ -297,12 +297,44 @@ fn check_protocol_requirements(
                 // only satisfies the requirement if labels + arity line up).
                 let proto_call = cx.query.get::<Callable>(child);
                 let candidates = provided.methods.get(name.as_str());
-                let sig_match = candidates.and_then(|cands| {
-                    cands
+                // Every impl overload matching the requirement's shape (arity +
+                // labels). Usually 0 or 1; >1 when a type conforms to the SAME
+                // parameterized protocol more than once — both `produce()` match
+                // arity+labels, but only one matches this instantiation's return
+                // type. Prefer the return-type match; fall back to first so a
+                // genuine single-conformance return-type typo still surfaces as
+                // E458 (not a downgraded E454 "missing method").
+                let sig_candidates: Vec<Entity> = candidates
+                    .map(|cands| {
+                        cands
+                            .iter()
+                            .copied()
+                            .filter(|&c| {
+                                signatures_match(proto_call, cx.query.get::<Callable>(c))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let sig_match = if sig_candidates.len() > 1
+                    && !matches!(child_kind, Some(NodeKind::Initializer))
+                {
+                    sig_candidates
                         .iter()
                         .copied()
-                        .find(|&c| signatures_match(proto_call, cx.query.get::<Callable>(c)))
-                });
+                        .find(|&c| {
+                            method_return_type_matches(
+                                cx,
+                                child,
+                                c,
+                                type_entity,
+                                member.declaring_protocol,
+                                proto_param_subs,
+                            )
+                        })
+                        .or_else(|| sig_candidates.first().copied())
+                } else {
+                    sig_candidates.first().copied()
+                };
 
                 let mut matched_impl: Option<Entity> = None;
                 if let Some(impl_method) = sig_match {
@@ -866,17 +898,22 @@ fn check_init_effect(
     }
 }
 
-fn check_method_return_type(
+/// True if `impl_method`'s return type satisfies `proto_method`'s requirement
+/// under this conformance's protocol-param substitutions.
+///
+/// Shared by the E458 check and by impl-candidate selection: a type that
+/// conforms to the SAME parameterized protocol more than once (e.g.
+/// `Producer[Int64]` + `Producer[Int32]`) contributes several `produce()`
+/// methods that match the requirement by arity+labels, but only one matches
+/// THIS instantiation's substituted return type.
+fn method_return_type_matches(
     cx: &CompilationContext<'_>,
     proto_method: Entity,
     impl_method: Entity,
     type_entity: Entity,
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
-    method_name: &str,
-    proto_name: &str,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
+) -> bool {
     let expected = cx.query.query(LowerCallableReturnType {
         entity: proto_method,
         root: cx.root,
@@ -913,23 +950,45 @@ fn check_method_return_type(
             .push((proto_param, ResolvedTy::Param { entity: impl_param }));
     }
 
-    if !compare_hir_types(cx.query, cx.root, &expected, &actual, &env).is_equal_or_unknown() {
-        let impl_span = util::entity_span(cx.query, impl_method);
-        diags.push(AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[4].id,
-            severity: DESCRIPTORS[4].default_severity,
-            message: format!(
-                "method '{}' has wrong return type for protocol '{}'",
-                method_name, proto_name,
-            ),
-            labels: vec![DiagLabel {
-                span: impl_span,
-                message: "wrong return type".into(),
-                is_primary: true,
-            }],
-            notes: vec![],
-        });
+    compare_hir_types(cx.query, cx.root, &expected, &actual, &env).is_equal_or_unknown()
+}
+
+fn check_method_return_type(
+    cx: &CompilationContext<'_>,
+    proto_method: Entity,
+    impl_method: Entity,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
+    method_name: &str,
+    proto_name: &str,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    if method_return_type_matches(
+        cx,
+        proto_method,
+        impl_method,
+        type_entity,
+        protocol,
+        proto_param_subs,
+    ) {
+        return;
     }
+    let impl_span = util::entity_span(cx.query, impl_method);
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[4].id,
+        severity: DESCRIPTORS[4].default_severity,
+        message: format!(
+            "method '{}' has wrong return type for protocol '{}'",
+            method_name, proto_name,
+        ),
+        labels: vec![DiagLabel {
+            span: impl_span,
+            message: "wrong return type".into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
 }
 
 fn type_compare_env_for_conformance(

@@ -160,8 +160,14 @@ impl<'ctx> CodegenCtx<'ctx> {
     }
 
     pub fn is_main_function(&self, func: &MonoFunction) -> bool {
-        let name = self.module.resolve_name(func.source);
-        name == "main" || name.ends_with(".main")
+        // The entry point is the function flagged `is_main` — the MIR-synthesized
+        // `@main` wrapper (`__kestrel_main`) carries the flag through
+        // monomorphization (FunctionDef.is_main). A name-based check is wrong
+        // here: the Exitable refactor demotes the user `@main` (which keeps its
+        // `*.main` name) to an ordinary function, so matching on the name would
+        // export the demoted function instead of the wrapper. Independent of
+        // name; mirrors the Cranelift backend.
+        func.is_main
     }
 
     // -- Statics --
@@ -280,10 +286,10 @@ impl<'ctx> CodegenCtx<'ctx> {
             let sig = abi::build_extern_signature(func, &mut self.tc, &module.ty_arena, module, cx);
             (sig, Linkage::External, ext.symbol_name.clone())
         } else if is_main {
-            let sig = abi::build_signature(func, true, &mut self.tc, &module.ty_arena, module, cx);
+            let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
             (sig, Linkage::External, "main".to_string())
         } else {
-            let sig = abi::build_signature(func, false, &mut self.tc, &module.ty_arena, module, cx);
+            let sig = abi::build_signature(func, &mut self.tc, &module.ty_arena, module, cx);
             // Mono suffix guarantees a unique LLVM symbol within the module.
             (sig, Linkage::Internal, format!("{}.mono{}", func.name, idx))
         };

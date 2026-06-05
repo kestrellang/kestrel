@@ -209,7 +209,12 @@ pub fn find_witness_with_method(
         .unwrap_or(0);
     let expected_proto_args = &method_type_args[..method_type_args.len().min(proto_param_count)];
 
-    // Pass 1: exact protocol match with protocol type arg filtering
+    // Pass 1: exact protocol match with protocol type arg filtering. Collect
+    // ALL structurally-matching witnesses, then pick the most specific — so a
+    // specialized `extend X[Concrete]: P` overrides a generic `extend X[T]: P`
+    // for a concrete `X[Concrete]` self type (instead of first-match-wins, which
+    // could route through the generic body and ICE on its inner witness call).
+    let mut candidates: Vec<(usize, HashMap<Entity, TyId>)> = Vec::new();
     for (i, witness) in witnesses.iter().enumerate() {
         if witness.protocol != protocol {
             continue;
@@ -217,12 +222,17 @@ pub fn find_witness_with_method(
         if !witness_proto_args_match(arena, witness, expected_proto_args) {
             continue;
         }
-        let mut bindings = HashMap::new();
-        if match_pattern(arena, witness.implementing_type, self_type, &mut bindings)
-            && witness.methods.iter().any(|m| m.key == *method)
-        {
-            return Ok((i, bindings));
+        if !witness.methods.iter().any(|m| m.key == *method) {
+            continue;
         }
+        let mut bindings = HashMap::new();
+        if match_pattern(arena, witness.implementing_type, self_type, &mut bindings) {
+            candidates.push((i, bindings));
+        }
+    }
+    if !candidates.is_empty() {
+        let best = select_most_specific(arena, witnesses, &candidates);
+        return Ok(candidates.swap_remove(best));
     }
 
     // Pass 2: descendant protocol (inheritance) — no proto arg filter
@@ -250,6 +260,45 @@ pub fn find_witness_with_method(
         source_entity: Entity::from_raw(0),
         span: None,
     })
+}
+
+/// Among several witnesses that all structurally match the self type, return
+/// the position (into `candidates`) of the most specific one. Greedy over the
+/// specificity partial order ([`witness_more_specific`]): a unique global
+/// minimum (e.g. the chain `X[i64,i64]` ⊏ `X[T,i64]` ⊏ `X[T,U]`) is found
+/// regardless of candidate order. Genuinely incomparable overlaps (no global
+/// minimum) are not yet diagnosed as ambiguous — a deterministic candidate is
+/// chosen; declaration-time overlap-coherence checking is the follow-up.
+fn select_most_specific(
+    arena: &TyArena,
+    witnesses: &[WitnessDef],
+    candidates: &[(usize, HashMap<Entity, TyId>)],
+) -> usize {
+    let mut best = 0usize;
+    for pos in 1..candidates.len() {
+        if witness_more_specific(
+            arena,
+            &witnesses[candidates[pos].0],
+            &witnesses[candidates[best].0],
+        ) {
+            best = pos;
+        }
+    }
+    best
+}
+
+/// True iff witness `a` is *strictly* more specific than `b`: `a`'s implementing
+/// type is an instance of `b`'s pattern (so `b` subsumes `a`) but not the
+/// reverse. `match_pattern(pattern, concrete)` treats the pattern's TypeParams
+/// as wildcards, so `b`'s `T` matches `a`'s concrete structure but `a`'s
+/// concrete `()`/`i64` does not match back onto `b`'s `T`. E.g. `Result[(), E]`
+/// is more specific than `Result[T, E]`, and `Wrap[i64]` than `Wrap[T]`.
+fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> bool {
+    let mut ab = HashMap::new();
+    let a_is_instance_of_b = match_pattern(arena, b.implementing_type, a.implementing_type, &mut ab);
+    let mut ba = HashMap::new();
+    let b_is_instance_of_a = match_pattern(arena, a.implementing_type, b.implementing_type, &mut ba);
+    a_is_instance_of_b && !b_is_instance_of_a
 }
 
 /// Check whether a witness's protocol type args match the expected concrete

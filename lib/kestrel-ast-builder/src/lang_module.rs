@@ -40,6 +40,12 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     seed_scalar(world, lang, "f64");
     seed_scalar(world, lang, "str");
     seed_ptr(world, lang);
+    // Structural singletons. `()` and `!` have no nominal entity of their own,
+    // so seed synthetic ones (named "()" / "!") to make them extension targets.
+    // MIR lowering maps these entities back to `MirTy::Tuple([])` / `MirTy::Never`
+    // (see `try_lang_primitive`), so witnesses/uses agree on the structural repr.
+    seed_scalar(world, lang, "()");
+    seed_scalar(world, lang, "!");
 
     // Intrinsic functions
     seed_integer_ops(world, lang);

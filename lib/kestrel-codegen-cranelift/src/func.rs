@@ -20,7 +20,6 @@ pub struct FuncCompiler<'a, 'm> {
     pub body: &'m OssaBody,
     pub block_map: Vec<ir::Block>,
     pub value_map: HashMap<ValueId, Value>,
-    pub is_main: bool,
     pub sret_ptr: Option<Value>,
 }
 
@@ -120,7 +119,6 @@ pub fn compile_function(
         None => return Ok(()),
     };
 
-    let is_main = ctx.is_main_function(func);
     let call_conv = ctx.isa.default_call_conv();
 
     let sig = if func.extern_info.is_some() {
@@ -134,7 +132,6 @@ pub fn compile_function(
     } else {
         crate::abi::build_signature(
             func,
-            is_main,
             &mut ctx.tc,
             &ctx.module.ty_arena,
             ctx.module,
@@ -185,7 +182,7 @@ pub fn compile_function(
     builder.switch_to_block(entry);
 
     let ret_repr = ctx.tc.repr(func.ret, &ctx.module.ty_arena, ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let block_params_entry = builder.block_params(entry).to_vec();
     let mut param_idx = 0;
@@ -229,7 +226,6 @@ pub fn compile_function(
         body,
         block_map,
         value_map,
-        is_main,
         sret_ptr,
     };
 

@@ -1290,8 +1290,7 @@ fn compile_resolved_call(
         .ctx
         .tc
         .repr(target_func.ret, &fc.ctx.module.ty_arena, fc.ctx.module);
-    let is_main = fc.ctx.is_main_function(target_func);
-    let ret_mode = abi::return_mode(ret_repr, is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let mut call_args: Vec<Value> = Vec::new();
 
@@ -1427,7 +1426,7 @@ fn compile_thin_call(
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, false);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let call_conv = fc.ctx.isa.default_call_conv();
     let mut sig = ir::Signature::new(call_conv);
@@ -1555,7 +1554,7 @@ fn compile_thick_call(
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, arena, fc.ctx.module);
-    let ret_mode = abi::return_mode(ret_repr, false);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let call_conv = fc.ctx.isa.default_call_conv();
     let mut sig = ir::Signature::new(call_conv);

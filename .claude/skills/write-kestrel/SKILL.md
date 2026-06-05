@@ -142,7 +142,7 @@ hand-written body that returns `self`.)
 ## Enums
 
 ```kestrel
-enum Direction { case North; case South; case East; case West }
+enum Direction { case North case South case East case West }  // inline cases: NO `;` separator
 let d: Direction = .North;
 
 enum Shape {
@@ -152,7 +152,7 @@ enum Shape {
 }
 let s = Shape.Circle(radius: 5.0);
 
-enum Option[T] { case Some(T); case None }    // positional
+enum Option[T] { case Some(T) case None }    // positional (cases separated by whitespace, not `;`)
 let opt = Option.Some(42);
 
 indirect enum Tree[T] {                        // recursive
@@ -452,6 +452,8 @@ struct Connection: not Copyable { deinit { self.close(); } }         // RAII
 - Outside stdlib: do NOT `import std.*` — public stdlib types are auto-imported.
 - `as`, `get`, `set`, `protocol` are keywords — can't be param names/labels.
 - Subscripts use `dict(key)` not `dict[key]` — brackets are for type parameters only.
+- Enum cases are separated by **whitespace/newlines, not `;`** — `enum D { case A case B }` parses, `enum D { case A; case B }` is a parse error. (Statement semicolons inside bodies are still required.)
+- Protocol requirements take **no trailing `;`** — `func matches(other: Self) -> Bool`, not `... -> Bool;`.
 - `let _ = expr;` needs a semicolon when it's the only statement in a void body.
 - Structs with `String`/`Array`/`Dictionary` fields need explicit `Cloneable` conformance.
 - Inside a hand-written `clone()`, `self` is a **bitwise copy** — deep-clone heap fields explicitly; `clone() { self }` aliases them → double-free. (See *Writing `clone()`*.)

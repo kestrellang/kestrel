@@ -11,6 +11,7 @@
 
 pub mod captures;
 pub mod compare;
+pub mod conformance;
 pub mod constraint;
 pub mod ctx;
 pub mod entailment;
@@ -37,6 +38,7 @@ use resolve::WorldResolver;
 use result::TypedBody;
 
 pub use captures::ClosureCaptures;
+pub use conformance::{extension_bounds_hold, type_satisfies};
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;

@@ -1116,8 +1116,7 @@ fn compile_resolved_call<'ctx>(
     })?;
 
     let ret_repr = fc.ctx.tc.repr(target_func.ret, &module.ty_arena, module);
-    let is_main = fc.ctx.is_main_function(target_func);
-    let ret_mode = abi::return_mode(ret_repr, is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let mut call_args: Vec<BasicMetadataValueEnum> = Vec::new();
 
@@ -1216,7 +1215,7 @@ fn compile_thin_call<'ctx>(
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, &module.ty_arena, module);
-    let ret_mode = abi::return_mode(ret_repr, false);
+    let ret_mode = abi::return_mode(ret_repr);
 
     // Build the indirect-call function type.
     let mut params: Vec<BasicMetadataTypeEnum> = Vec::new();
@@ -1320,7 +1319,7 @@ fn compile_thick_call<'ctx>(
     };
 
     let ret_repr = fc.ctx.tc.repr(ret_ty, &module.ty_arena, module);
-    let ret_mode = abi::return_mode(ret_repr, false);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let mut params: Vec<BasicMetadataTypeEnum> = Vec::new();
     if matches!(ret_mode, ReturnMode::Sret) {

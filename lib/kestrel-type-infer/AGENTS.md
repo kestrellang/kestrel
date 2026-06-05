@@ -40,3 +40,23 @@ When 2+ candidates pass label filtering, type disambiguation also runs through t
 It is a **pure function, deliberately not a query**: its input includes the call site's argument labels (ephemeral, high-cardinality), so memoization would never hit; the cacheable part (resolving the `Callable`) is already query-backed via the entity.
 
 (Memberwise struct init — see above — is a *separate* positional zip over fields and does not go through the binder; fields have no skippable defaults.)
+
+## Structural / intrinsic types extend via synthetic `lang` entities
+
+`()`, `!`, and `lang.*` intrinsics are extendable (`extend (): P`,
+`extend lang.i64 { }`). They have no nominal entity of their own (or it's an
+`Intrinsic` Struct), so the Entity-keyed conformance/member pipeline routes them
+through synthetic `lang` entities: `lang.()` / `lang.!` (seeded in
+`kestrel-ast-builder/src/lang_module.rs`) and the existing `lang.iN`.
+
+**Invariant:** any conformance/member lookup keyed on a type's entity must first
+map a structural/intrinsic type to its synthetic entity, or it silently fails
+(`E100 () !: P`, `no member`, or downstream `Callee::Witness not resolved`). In
+this crate the two sites are `resolve.rs::conforms_to` and
+`resolve.rs::resolve_member`: when `TyKind::entity()` is `None`, match
+`TyKind::Tuple([])` → `"()"` / `TyKind::Never` → `"!"` and resolve via
+`kestrel_name_res::extensions::resolve_lang_child(ctx, root, name)`. The same
+mapping lives in name-res `ExtensionTargetEntity` (`AstType::Unit`/`Never`) and
+mir-lower `try_lang_primitive` (entity → `Tuple([])` / `Never` / `I64`) — **all
+sites must agree**, so when you add a new Entity-keyed conformance/member path,
+add the mapping too.

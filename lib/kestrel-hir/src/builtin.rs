@@ -250,6 +250,11 @@ pub enum Builtin {
     FormatOptions,
     FormattableProtocol,
     FormattableFormatIntoMethod,
+
+    // ===== Exitable / @main return =====
+    Exitable,
+    ExitableReport,
+    ExitCode,
 }
 
 impl Builtin {
@@ -444,6 +449,12 @@ impl Builtin {
             Self::FormatOptions => "FormatOptions",
             Self::FormattableProtocol => "FormattableProtocol",
             Self::FormattableFormatIntoMethod => "FormattableFormatInto",
+
+            // Exitable — `Exitable`/`ExitCode` resolve by source name; the method
+            // by its `@builtin` attribute name.
+            Self::Exitable => "Exitable",
+            Self::ExitableReport => "ExitableReport",
+            Self::ExitCode => "ExitCode",
         }
     }
 
@@ -635,6 +646,11 @@ impl Builtin {
             "FormattableProtocol" => Some(Self::FormattableProtocol),
             "FormattableFormatInto" => Some(Self::FormattableFormatIntoMethod),
 
+            // Exitable / @main return
+            "Exitable" => Some(Self::Exitable),
+            "ExitableReport" => Some(Self::ExitableReport),
+            "ExitCode" => Some(Self::ExitCode),
+
             _ => None,
         }
     }
@@ -810,6 +826,11 @@ impl Builtin {
             | Self::DefaultStringInterpolationBuild => BuiltinKind::Function,
             Self::FormattableProtocol => BuiltinKind::protocol(),
             Self::FormattableFormatIntoMethod => BuiltinKind::ProtocolMethod,
+
+            // Exitable: non-marker protocol with a required `report()` method.
+            Self::Exitable => BuiltinKind::protocol(),
+            Self::ExitableReport => BuiltinKind::ProtocolMethod,
+            Self::ExitCode => BuiltinKind::Struct,
 
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,

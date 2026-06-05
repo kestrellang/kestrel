@@ -38,7 +38,6 @@ pub struct FuncCompiler<'a, 'ctx> {
     pub block_map: Vec<BasicBlock<'ctx>>,
     pub block_phis: Vec<Vec<PhiValue<'ctx>>>,
     pub value_map: HashMap<ValueId, BasicValueEnum<'ctx>>,
-    pub is_main: bool,
     /// sret destination address, set when the return mode is `Sret`.
     pub sret_ptr: Option<PointerValue<'ctx>>,
 }
@@ -110,7 +109,6 @@ pub fn compile_function<'ctx>(
         None => return Ok(()),
     };
 
-    let is_main = ctx.is_main_function(func);
     let cx = ctx.cx;
     let ptr_scalar = ctx.tc.ptr_scalar;
 
@@ -150,7 +148,7 @@ pub fn compile_function<'ctx>(
     // Map function parameters in the entry block.
     builder.position_at_end(entry);
     let ret_repr = ctx.tc.repr(func.ret, &module.ty_arena, module);
-    let ret_mode = abi::return_mode(ret_repr, is_main);
+    let ret_mode = abi::return_mode(ret_repr);
 
     let mut param_idx = 0u32;
     let sret_ptr = if matches!(ret_mode, ReturnMode::Sret) {
@@ -187,7 +185,6 @@ pub fn compile_function<'ctx>(
         block_map,
         block_phis,
         value_map,
-        is_main,
         sret_ptr,
     };
 

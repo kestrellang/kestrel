@@ -20,10 +20,12 @@
 //!
 //! ### E616 — `invalid_main_return_type` (Error, Correctness)
 //!
-//! A `@main` function must return `()` (Void) or an internal primitive integer
-//! (`lang.i8`/`i16`/`i32`/`i64`). The stdlib struct integers (`Int64`, …),
-//! floats, strings, tuples, etc. are rejected — the entry point speaks the raw
-//! C-ABI boundary.
+//! A `@main` function must return `()` (Void), `!` (Never), a `lang.iN`
+//! primitive (back-compat, #109), a unit-Ok `Result` (`main() throws E`), or any
+//! type conforming to the `Exitable` protocol (`ExitCode`, the stdlib `IntN` /
+//! `UIntN` structs, custom conformers). Floats, strings, non-unit `Result`, etc.
+//! are rejected. The compiler synthesizes the C entry point as a wrapper that
+//! calls `Exitable.report()` on the returned value.
 //!
 //! ### E617 — `multiple_main` (Error, Correctness)
 //!
@@ -40,10 +42,12 @@ use crate::context::CompilationContext;
 use crate::diagnostic::*;
 use crate::traits::{CompilationCheck, Describe};
 use crate::util;
-use kestrel_ast::AstType;
 use kestrel_ast_builder::{Attributes, DeclSpan, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_hir::builtin::Builtin;
+use kestrel_hir::ty::HirTy;
+use kestrel_hir_lower::lower_ast_type;
+use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -162,22 +166,64 @@ fn main_return_type_ok(cx: &CompilationContext<'_>, entity: Entity) -> bool {
     let Some(TypeAnnotation(ty)) = cx.query.get::<TypeAnnotation>(entity) else {
         return true; // no `-> T` ⇒ Void
     };
+    // Classify the resolved HIR type, not the raw AST type, so the conformance
+    // check sees the actual (possibly intrinsic / structural / sugar) type.
+    let ret = lower_ast_type(cx.query, entity, cx.root, ty);
+    exitable_return_type(cx, &ret)
+}
+
+/// Whether `ty` is a valid `@main` return type.
+///
+/// Accepts exactly what the `@main` wrapper can lower
+/// (`kestrel-mir-lower::synthesize_main_wrapper`): `()` (`Tuple([])` → exit 0),
+/// `!` (`Never` → unreachable), and raw `lang.iN` (sign-extend; #109 back-compat)
+/// are handled STRUCTURALLY — no `Exitable` conformance — so they're valid even
+/// with no stdlib (the `Exitable` protocol lives in `std.os`). Everything else
+/// must conform to `Exitable`.
+///
+/// `main() -> T throws E` is `Result[T, E]`, which conforms via its generic
+/// conformance; whether `T` satisfies that conformance's `where T: Exitable`
+/// bound is the conformance system's concern, not this check's — so `Result` is
+/// NOT special-cased here.
+///
+/// INVARIANT: the accepted set must track `synthesize_main_wrapper`'s branches —
+/// a type accepted here that the wrapper can't lower is an ICE; a type the
+/// wrapper handles but this rejects is a spurious E616.
+fn exitable_return_type(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
     match ty {
-        AstType::Unit(_) => true,
-        AstType::Named { segments, .. } => {
-            let context = cx.query.parent_of(entity).unwrap_or(cx.root);
-            let segs: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-            match cx.query.query(ResolveTypePath {
-                segments: segs,
-                context,
-                root: cx.root,
-            }) {
-                TypeResolution::Found(resolved) => is_lang_primitive_int(cx, resolved),
-                _ => true, // unresolved — let the resolution error handle it
-            }
+        // Wrapper-structural: no `Exitable` conformance needed, so valid even with
+        // no stdlib (cf. `synthesize_main_wrapper`'s `Tuple`/`Never` branches).
+        HirTy::Tuple(elems, _) if elems.is_empty() => true,
+        HirTy::Never(_) => true,
+        // Raw `lang.iN` (back-compat) or any type that genuinely conforms to
+        // `Exitable` — stdlib `IntN`/`ExitCode`, a user conformer, or a
+        // `Result[T, E]` whose `T` itself conforms (the conditional conformance
+        // is evaluated, not assumed).
+        HirTy::Struct { entity, .. }
+        | HirTy::Enum { entity, .. }
+        | HirTy::Protocol { entity, .. } => {
+            is_lang_primitive_int(cx, *entity) || conforms_to_exitable(cx, ty)
         },
-        _ => false, // tuple / function / optional / array / etc. — not a valid exit type
+        // Unresolved type — defer to the resolution error rather than double-report.
+        HirTy::Error(_) => true,
+        _ => false, // non-empty tuple / function / type-param / inferred / etc.
     }
+}
+
+/// True iff `ty` genuinely conforms to the builtin `Exitable` protocol —
+/// evaluating conditional conformance `where` clauses via the shared
+/// `type_satisfies` check, so a `Result[T, E]` is accepted only when `T: Exitable`
+/// (and `E: Formattable`). `Result` is therefore NOT special-cased here. Returns
+/// false when `Exitable` is unresolvable (no stdlib); such programs only ever
+/// reach the structural `()`/`!`/`lang.iN` arms above.
+fn conforms_to_exitable(cx: &CompilationContext<'_>, ty: &HirTy) -> bool {
+    let Some(exitable) = cx.query.query(ResolveBuiltin {
+        builtin: Builtin::Exitable,
+        root: cx.root,
+    }) else {
+        return false;
+    };
+    kestrel_type_infer::type_satisfies(cx.query, ty, exitable, cx.root)
 }
 
 /// True iff `resolved` is one of the `lang.iN` primitive integer entities
@@ -241,10 +287,12 @@ fn invalid_return_diag(cx: &CompilationContext<'_>, entity: Entity) -> AnalyzeDi
         message: format!("`@main` function '{name}' has an invalid return type"),
         labels: vec![DiagLabel {
             span: util::entity_span(cx.query, entity),
-            message: "`@main` must return `()` or a primitive integer (lang.i8/i16/i32/i64)".into(),
+            message: "`@main` must return `()`, `!`, or a type conforming to `Exitable`".into(),
             is_primary: true,
         }],
-        notes: vec!["the entry point returns the process exit code via the C ABI".into()],
+        notes: vec![
+            "`Exitable` types include `ExitCode`, the integer types, and a throwing `main`".into(),
+        ],
     }
 }
 

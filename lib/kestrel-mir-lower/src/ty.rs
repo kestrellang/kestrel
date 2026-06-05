@@ -328,6 +328,9 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
         "f32" => Some(ctx.module.ty_arena.f32()),
         "f64" => Some(ctx.module.ty_arena.f64()),
         "str" => Some(ctx.module.ty_arena.str_ty()),
+        // Synthetic structural singletons (see `seed_lang_module`).
+        "()" => Some(ctx.module.ty_arena.unit()),
+        "!" => Some(ctx.module.ty_arena.never()),
         "ptr" => {
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.pointer(inner))

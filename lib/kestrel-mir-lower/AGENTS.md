@@ -109,3 +109,34 @@ re-walk the body to recompute captures here, and `HirExpr::Closure` has **no**
 `captures` field anymore. MIR applies copyability: a projected place is a
 by-value capture only when Copyable + read-only; non-Copyable or written places
 fall back to whole-local capture.
+
+## Witness lowering — one witness per source, primitive-aware impl-type
+
+`lower_witnesses_for_type` (`items/witness_lower.rs`) emits **one `WitnessDef`
+per conformance source** (the type itself, or each `extend` declaration). Sources
+come from `ConformingProtocolInstantiations` (`(protocol, source, args)`), whose
+dedup key includes the source's implementing-type args — that's what keeps
+overlapping specializations distinct (`extend Box[T]: P` vs
+`extend Box[lang.i64]: P`); without it they collapse and the mono selector sees
+one candidate.
+
+- **Specialized extension** — `source` is an `Extension` whose target has ≥1
+  concrete (non-`HirTy::Param`) arg (via `LowerExtensionTargetTypeArgs`): the
+  witness `implementing_type` is the CONCRETE `named(entity, [args])`; its
+  method-binding type-args are those CONCRETE args, **not** `TypeParam(T)` (a
+  concrete implementing type yields no `match_pattern` bindings to substitute at
+  mono; mono truncates type-args to the impl fn's param count); methods bind
+  **source-first** (`children_of(source)` then merged `TypeMembersByName`
+  fallback) so the specialized impl wins. The mono selector
+  (`mono/witness.rs::select_most_specific`) then prefers it over generic `Box[T]: P`.
+- **Generic source** (direct conformance or `extend Box[T]: P`) — unchanged:
+  generic `impl_ty`, merged binding. `prefer_source = false` reproduces the
+  original behavior byte-for-byte.
+
+**Invariant:** build the type's `impl_ty` via `lower_named_type` (primitive-aware),
+NOT `ty_arena.named`. Intrinsic `lang.*` and the synthetic `()`/`!` entities map
+to their structural `MirTy` (`I64` / `Tuple([])` / `Never`) via
+`try_lang_primitive`, so an `extend lang.i64: P` / `extend (): P` witness's
+`implementing_type` matches the primitive self at call sites. A `Named{lang.i64}`
+witness never matches the `I64` self → `Callee::Witness not resolved`. See the
+type-infer AGENTS.md note for the parallel conformance/member-lookup mapping.

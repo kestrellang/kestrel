@@ -1495,7 +1495,18 @@ fn solve_conforms(
                     TySlot::Resolved(k) => k.clone(),
                     _ => unreachable!(),
                 };
-                ctx.resolver.conforms_to(&kind, protocol)
+                // Declared AND — for a conditional conformance — its `where`
+                // clauses hold for the concrete args. The second check turns a
+                // concrete bound violation (e.g. `Result[NotExitable, E]:
+                // Exitable`, which the unconditional `conforms_to` accepts) into a
+                // clean `DoesNotConform` rather than a mono `report()` witness ICE.
+                // Conservative: `type_satisfies` permits abstract/generic
+                // positions, so this never rejects a body whose bound holds
+                // abstractly — only concrete violations.
+                ctx.resolver.conforms_to(&kind, protocol) && {
+                    let hir = reify_tv(ctx, resolved);
+                    crate::conformance::type_satisfies(ctx.query_ctx, &hir, protocol, ctx.root)
+                }
             };
             if conforms {
                 SolveResult::Solved
@@ -1507,6 +1518,46 @@ fn solve_conforms(
             }
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
+    }
+}
+
+/// Reify a fully-resolved `TyVar` into a `HirTy` for the bound-aware conformance
+/// check (`crate::conformance::type_satisfies`). Only the cases that check
+/// inspects (nominal / `()` / `!` / type-param) are reified faithfully; anything
+/// else maps to `HirTy::Error`, which `type_satisfies` permits. Unresolved slots
+/// likewise map to `Error` (permit) — this only runs on otherwise-resolved types.
+fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy {
+    let resolved = ctx.resolve(tv);
+    match ctx.slot(resolved) {
+        TySlot::Resolved(kind) => reify_kind(ctx, &kind.clone()),
+        _ => kestrel_hir::ty::HirTy::Error(Span::synthetic(0)),
+    }
+}
+
+fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
+    use kestrel_hir::ty::HirTy;
+    let span = Span::synthetic(0);
+    let reify_args = |args: &[TyVar]| args.iter().map(|&a| reify_tv(ctx, a)).collect();
+    match kind {
+        TyKind::Struct { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: reify_args(args),
+            span,
+        },
+        TyKind::Enum { entity, args } => HirTy::Enum {
+            entity: *entity,
+            args: reify_args(args),
+            span,
+        },
+        TyKind::Protocol { entity, args } => HirTy::Protocol {
+            entity: *entity,
+            args: reify_args(args),
+            span,
+        },
+        TyKind::Tuple(elems) => HirTy::Tuple(reify_args(elems), span),
+        TyKind::Never => HirTy::Never(span),
+        TyKind::Param { entity } => HirTy::Param(*entity, span),
+        _ => HirTy::Error(span),
     }
 }
 
@@ -2900,6 +2951,20 @@ fn solve_member(
                     .unwrap_or_else(|| ctx.param(ext_param));
                 subs.push((param, tv));
                 tv
+            } else if recv_entity
+                .map(|r| receiver_conformance_count(ctx, r, self_entity) >= 2)
+                .unwrap_or(false)
+            {
+                // The receiver conforms to this protocol multiple times with
+                // different args (`S: Producer[Int64]` + `S: Producer[Int32]`).
+                // Pinning the proto param to the first conformance mis-dispatches
+                // every call; leave it a fresh var so the call's expected return
+                // type (unified at `ctx.equal(result, ret_tv)`) — or an
+                // argument's type — selects the instantiation. The resolved type
+                // is recorded via `record_type_args` for witness dispatch.
+                let tv = ctx.fresh();
+                subs.push((param, tv));
+                tv
             } else if let Some(tv) = resolve_proto_param_via_conformance(
                 ctx,
                 recv_entity,
@@ -3451,75 +3516,21 @@ fn extension_type_args_compatible(
 
 /// Check if an extension's where clause constraints are satisfied by the receiver type.
 /// For `extend Box[T] where T: Equatable`, verifies that the receiver's T arg conforms.
+///
+/// Reifies the receiver and delegates to the single bound-aware evaluator
+/// (`crate::conformance::extension_bounds_hold`) so member-resolution extension
+/// selection and `type_satisfies` share one implementation. The previous inline
+/// version mapped where-clause params via the *target type's* `TypeParams`
+/// instead of the *extension's own* target args — so the param entities didn't
+/// match and every bound was silently skipped. Delegation fixes that (the
+/// substitution now comes from `LowerExtensionTargetTypeArgs`).
 fn extension_where_clauses_satisfied(
     ctx: &InferCtx<'_>,
     extension: Entity,
     recv_kind: &TyKind,
 ) -> bool {
-    use crate::resolve::WhereClause;
-
-    // Resolve where clauses in the extension's own scope. Scope walking from
-    // the extension entity sees its own type params and enclosing scope.
-    let clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
-        entity: extension,
-        root: ctx.root,
-    });
-    if clauses.is_empty() {
-        return true;
-    }
-
-    let Some(target_entity) = recv_kind.entity() else {
-        return true;
-    };
-    let recv_args = recv_kind.args().to_vec();
-
-    // Build map: type param entity → receiver TyVar
-    let type_params: Vec<Entity> = ctx
-        .query_ctx
-        .get::<TypeParams>(target_entity)
-        .map(|tp| tp.0.clone())
-        .unwrap_or_default();
-    let param_to_recv: Vec<(Entity, crate::ty::TyVar)> = type_params
-        .iter()
-        .zip(recv_args.iter())
-        .map(|(&param, &tv)| (param, tv))
-        .collect();
-
-    // Get the extension's target entity for Self comparison
-    let ext_target = ctx
-        .query_ctx
-        .query(kestrel_name_res::ExtensionTargetEntity {
-            extension,
-            root: ctx.root,
-        });
-
-    for clause in &clauses {
-        if let WhereClause::Bound {
-            param, protocol, ..
-        } = clause
-        {
-            // Case 1: `Self: Protocol` — param is the extension target entity
-            if ext_target == Some(*param) {
-                // Check if the receiver type conforms to the protocol
-                if !ctx.resolver.conforms_to(recv_kind, *protocol) {
-                    return false;
-                }
-                continue;
-            }
-
-            // Case 2: `T: Protocol` — param is a type parameter
-            if let Some(&(_, recv_tv)) = param_to_recv.iter().find(|(p, _)| p == param) {
-                let resolved = ctx.resolve(recv_tv);
-                if let crate::ty::TySlot::Resolved(kind) = ctx.slot(resolved)
-                    && !ctx.resolver.conforms_to(kind, *protocol)
-                {
-                    return false;
-                }
-            }
-        }
-    }
-
-    true
+    let recv = reify_kind(ctx, recv_kind);
+    crate::conformance::extension_bounds_hold(ctx.query_ctx, extension, &recv, ctx.root)
 }
 
 // ===== Literal defaults =====
@@ -3953,6 +3964,61 @@ fn resolve_proto_param_via_conformance(
         }
     }
     None
+}
+
+/// Count `recv`'s positive conformances to `protocol` (direct + extensions).
+///
+/// Used to detect the ambiguous same-protocol multi-conformance case
+/// (`S: Producer[Int64]` + `S: Producer[Int32]`): when ≥2, the protocol's type
+/// param must be left to unification rather than pinned to the first
+/// conformance by `resolve_proto_param_via_conformance`.
+fn receiver_conformance_count(
+    ctx: &InferCtx<'_>,
+    recv: kestrel_hecs::Entity,
+    protocol: kestrel_hecs::Entity,
+) -> usize {
+    use kestrel_ast_builder::{ConformanceItem, Conformances};
+    if ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Struct)
+        && ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Enum)
+    {
+        return 0;
+    }
+    let mut sources: Vec<kestrel_hecs::Entity> = vec![recv];
+    sources.extend(
+        ctx.query_ctx
+            .query(kestrel_name_res::ExtensionsFor {
+                target: recv,
+                root: ctx.root,
+            })
+            .iter()
+            .copied(),
+    );
+    let mut count = 0;
+    for source in sources {
+        let Some(confs) = ctx.query_ctx.get::<Conformances>(source) else {
+            continue;
+        };
+        for item in &confs.0 {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                continue;
+            };
+            let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
+                continue;
+            };
+            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            if let kestrel_name_res::TypeResolution::Found(resolved) =
+                ctx.query_ctx.query(kestrel_name_res::ResolveTypePath {
+                    segments: seg_names,
+                    context: source,
+                    root: ctx.root,
+                })
+                && resolved == protocol
+            {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// Helper: get the TyKind of a TyVar (or return the TyVar as-is if unresolved).
