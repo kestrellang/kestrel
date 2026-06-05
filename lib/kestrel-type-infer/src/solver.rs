@@ -2951,6 +2951,20 @@ fn solve_member(
                     .unwrap_or_else(|| ctx.param(ext_param));
                 subs.push((param, tv));
                 tv
+            } else if recv_entity
+                .map(|r| receiver_conformance_count(ctx, r, self_entity) >= 2)
+                .unwrap_or(false)
+            {
+                // The receiver conforms to this protocol multiple times with
+                // different args (`S: Producer[Int64]` + `S: Producer[Int32]`).
+                // Pinning the proto param to the first conformance mis-dispatches
+                // every call; leave it a fresh var so the call's expected return
+                // type (unified at `ctx.equal(result, ret_tv)`) — or an
+                // argument's type — selects the instantiation. The resolved type
+                // is recorded via `record_type_args` for witness dispatch.
+                let tv = ctx.fresh();
+                subs.push((param, tv));
+                tv
             } else if let Some(tv) = resolve_proto_param_via_conformance(
                 ctx,
                 recv_entity,
@@ -3950,6 +3964,61 @@ fn resolve_proto_param_via_conformance(
         }
     }
     None
+}
+
+/// Count `recv`'s positive conformances to `protocol` (direct + extensions).
+///
+/// Used to detect the ambiguous same-protocol multi-conformance case
+/// (`S: Producer[Int64]` + `S: Producer[Int32]`): when ≥2, the protocol's type
+/// param must be left to unification rather than pinned to the first
+/// conformance by `resolve_proto_param_via_conformance`.
+fn receiver_conformance_count(
+    ctx: &InferCtx<'_>,
+    recv: kestrel_hecs::Entity,
+    protocol: kestrel_hecs::Entity,
+) -> usize {
+    use kestrel_ast_builder::{ConformanceItem, Conformances};
+    if ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Struct)
+        && ctx.query_ctx.get::<NodeKind>(recv) != Some(&NodeKind::Enum)
+    {
+        return 0;
+    }
+    let mut sources: Vec<kestrel_hecs::Entity> = vec![recv];
+    sources.extend(
+        ctx.query_ctx
+            .query(kestrel_name_res::ExtensionsFor {
+                target: recv,
+                root: ctx.root,
+            })
+            .iter()
+            .copied(),
+    );
+    let mut count = 0;
+    for source in sources {
+        let Some(confs) = ctx.query_ctx.get::<Conformances>(source) else {
+            continue;
+        };
+        for item in &confs.0 {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                continue;
+            };
+            let kestrel_ast_builder::AstType::Named { segments, .. } = ast_ty else {
+                continue;
+            };
+            let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            if let kestrel_name_res::TypeResolution::Found(resolved) =
+                ctx.query_ctx.query(kestrel_name_res::ResolveTypePath {
+                    segments: seg_names,
+                    context: source,
+                    root: ctx.root,
+                })
+                && resolved == protocol
+            {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// Helper: get the TyKind of a TyVar (or return the TyVar as-is if unresolved).

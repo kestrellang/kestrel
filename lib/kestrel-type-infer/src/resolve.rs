@@ -425,15 +425,30 @@ impl TypeResolver for WorldResolver<'_> {
 
         let member = match matches.len() {
             0 => {
-                // No label match — fall back to single candidate ONLY if its arity
-                // accepts the call. If arity is wrong too, treat as NotFound so the
-                // diagnostic is "no member" rather than a misleading "wrong arity".
-                if instance_candidates.len() == 1
-                    && self.matches_arity(instance_candidates[0], arg_labels.len())
-                {
-                    instance_candidates[0]
-                } else {
-                    return Err(MemberError::NotFound);
+                // No label match — recover a representative candidate so the
+                // downstream arg-binding emits a precise "wrong argument label"
+                // diagnostic instead of a vague "no member". Safe when exactly
+                // one candidate is arity-compatible, OR when several share ONE
+                // label signature: a type conforming to the same parameterized
+                // protocol more than once contributes `conv(x: Int64)` +
+                // `conv(x: Int32)` — the same requirement, expecting the same
+                // labels, so any one of them yields the same label diagnostic.
+                // Genuinely distinct overloads (different label signatures) stay
+                // NotFound — there's no single label to suggest.
+                let arity_ok: Vec<Entity> = instance_candidates
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.matches_arity(c, arg_labels.len()))
+                    .collect();
+                match arity_ok.first() {
+                    Some(&first)
+                        if arity_ok.iter().all(|&c| {
+                            self.label_signature(c) == self.label_signature(first)
+                        }) =>
+                    {
+                        first
+                    },
+                    _ => return Err(MemberError::NotFound),
                 }
             },
             1 => matches[0],

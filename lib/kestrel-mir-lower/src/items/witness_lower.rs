@@ -83,7 +83,17 @@ fn lower_witnesses_for_type(
             } else {
                 None
             };
-        let prefer_source = concrete_args.is_some();
+        // Prefer the source extension's own method impls when EITHER the
+        // implementing type is specialized (`extend Box[lang.i64]`) OR the
+        // PROTOCOL args are concrete (`extend S: Producer[Int64]`). The latter
+        // keeps each witness of a type that conforms to the same parameterized
+        // protocol more than once bound to its own instantiation's method —
+        // otherwise both collapse to the first `produce` found via the merged
+        // type-member discovery (which matches on params, not return type).
+        let proto_args_concrete = proto_type_args
+            .iter()
+            .any(|t| !matches!(ctx.module.ty_arena.get(*t), MirTy::TypeParam(_)));
+        let prefer_source = concrete_args.is_some() || proto_args_concrete;
         let witness_impl_ty = match &concrete_args {
             Some(args) => ctx.module.ty_arena.named(type_entity, args.clone()),
             None => impl_ty,
