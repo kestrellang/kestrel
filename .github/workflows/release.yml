@@ -26,14 +26,25 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
+        # Idempotent: a re-pushed/moved tag must republish, not fail. `gh release
+        # create` errors if the release already exists, so on re-runs we update
+        # the existing release and clobber its assets with the freshly-built ones.
         run: |
-          gh release create "$TAG_NAME" \
-            --title "Kestrel $TAG_NAME" \
-            --generate-notes \
-            --latest \
-            artifacts/kestrel-*.tar.gz \
-            artifacts/jessup-*.tar.gz
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --title "Kestrel $TAG_NAME" --latest
+            gh release upload "$TAG_NAME" \
+              artifacts/kestrel-*.tar.gz \
+              artifacts/jessup-*.tar.gz \
+              --clobber
+          else
+            gh release create "$TAG_NAME" \
+              --title "Kestrel $TAG_NAME" \
+              --generate-notes \
+              --latest \
+              artifacts/kestrel-*.tar.gz \
+              artifacts/jessup-*.tar.gz
+          fi
