@@ -152,7 +152,7 @@ func handleInit() -> lang.i32 {
     let dirName = lastPathComponent(cwd);
 
     var content = String();
-    content.append("[package]\nname = \""); content.append(dirName); content.append("\"\nversion = \"0.1.0\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
+    content.append("[package]\nname = \""); content.append(dirName); content.append("\"\nversion = \"0.1.0\"\norg = \"\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
 
     match writeFileString(manifestPath, content) {
         .Ok(_) => { let _ = println("Created flock.toml"); },
@@ -210,15 +210,21 @@ func handlePublish() -> lang.i32 {
     let name = manifest.package.name;
     let version = manifest.package.version.toString();
 
-    // Resolve org from FLOCK_ORG env var
+    // Resolve org. The package's own [package] org in flock.toml is the default
+    // (version-controlled identity); FLOCK_ORG overrides it for forks / CI / one-offs.
     var org = "";
+    let manifestOrg = manifest.package.org;
+    match manifestOrg {
+        .Some(o) => org = o,
+        .None => {}
+    }
     match getenv("FLOCK_ORG") {
         .Some(o) => org = o,
-        .None => {
-            let _ = eprintln("FLOCK_ORG environment variable not set");
-            let _ = eprintln("Usage: FLOCK_ORG=myorg flock publish");
-            return 1
-        }
+        .None => {}
+    }
+    if org.byteCount == 0 {
+        let _ = eprintln("No org specified. Add `org = \"myorg\"` under [package] in flock.toml, or set FLOCK_ORG.");
+        return 1
     }
 
     // Read token from ~/.kestrel/credentials
