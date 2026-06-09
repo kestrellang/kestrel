@@ -133,6 +133,29 @@ impl TestCompiler {
             }
         }
 
+        // MIR-stage diagnostics (escape check E494-E496, ref-across-merge
+        // E497): the MIR pipeline never ran for diagnostics tests before, so
+        // these were invisible. Run lowering only when the front end is clean
+        // (error-recovery HIR would ICE-spam) and append only CODED
+        // diagnostics — uncoded verify errors are ICEs, not an annotatable
+        // surface (and lower_to_mir suppresses them as cascade noise anyway).
+        let front_end_clean = !result.iter().any(|d| d.severity == TestSeverity::Error);
+        if front_end_clean {
+            let before = self.compiler.diagnostics();
+            let _ = self.compiler.lower_to_mir();
+            let new: Vec<_> = self
+                .compiler
+                .diagnostics()
+                .into_iter()
+                .filter(|d| !before.contains(d))
+                .collect();
+            result.extend(
+                from_codespan_diagnostics(&new, &sources)
+                    .into_iter()
+                    .filter(|d| d.code.is_some()),
+            );
+        }
+
         result
     }
 
