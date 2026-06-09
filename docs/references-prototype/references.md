@@ -29,6 +29,14 @@ MIR/expand code is actively churning.
 - [`references-tests.md`](references-tests.md) — the Stage-1 test matrix: the
   `.ks` programs that pin each behavior and deliberately provoke each silent-UAF
   path, plus how a UAF actually surfaces under the test harness.
+- [`references-gaps.md`](references-gaps.md) — third audit (2026-06-09):
+  anchor re-verification, contradictions between these docs, and holes none of
+  them cover — the provenance gap that blocks the flagship collection-accessor
+  use case, the undefined deref semantics, the function-value `ret_borrow` ABI
+  hole, generic-argument storage leaks, the missing LLVM-backend plumbing
+  stages, and the missing negative-rule enforcement inventory. **Read alongside
+  this doc** — it revises the Stage-1 estimate to ~16-22 wk and proposes a
+  cheaper "Stage 0.5" cut.
 
 ---
 
@@ -325,7 +333,10 @@ assertion, leaving **#1 as the dominant remaining risk**.
   drops → silent UAF / double-free, no diagnostic. **Guard removal must be
   conditional on the per-function bit.**
 - **`&mutating`-may-alias × Check 5 — do not allow a `&mutating` *return* in
-  v1.** A returned mut-ref keeps the source frozen-for-mutation across the call
+  v1.** *(Superseded 2026-06-09: ban lifted in favor of a mutable-root rule —
+  see [`references-gaps.md`](references-gaps.md) §10.4. The freeze this trap
+  protects is already given up by the may-alias decision.)* A returned
+  mut-ref keeps the source frozen-for-mutation across the call
   boundary, which `assert_readable` / Check 5 (`verify.rs:373`) cannot enforce
   past `Return` (per-block, no fixpoint). The aliasing decision is sound *within
   a block* (the only intra-block hazard is read-while-mut-borrowed, which Check 5

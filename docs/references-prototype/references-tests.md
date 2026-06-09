@@ -321,7 +321,7 @@ Each negative test below is tied to a specific verifier anchor. The critical inv
 
 ## Essential Files for Stage 1 Implementation
 
-- `/Users/dino/Documents/Projects/kestrel/docs/future/references.md` — full feasibility analysis and MVP cut
+- `/Users/dino/Documents/Projects/kestrel/docs/references-prototype/references.md` — full feasibility analysis and MVP cut
 - `/Users/dino/Documents/Projects/kestrel/lib/kestrel-mir/src/verify.rs` — OSSA verifier; `try_consume` (line ~321), `assert_readable`/Check 5 (line ~373), `Return` handling (line ~988), Check 4 block-arg forwarding (line ~1012)
 - `/Users/dino/Documents/Projects/kestrel/lib/kestrel-mir/src/value.rs` — `ValueDef.ownership`, `ValueDef.borrow_source` (lines 14-16)
 - `/Users/dino/Documents/Projects/kestrel/lib/kestrel-mir/src/inst.rs` — `BeginBorrow`/`EndBorrow`/`BeginMutBorrow`/`EndMutBorrow`/`*Addr` instruction set
