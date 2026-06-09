@@ -1016,6 +1016,9 @@ fn collect_named_type_from_ty(
         MirTy::Pointer(inner) => {
             collect_named_type_from_ty(arena, *inner, out, structs, enums);
         },
+        MirTy::Ref { pointee, .. } => {
+            collect_named_type_from_ty(arena, *pointee, out, structs, enums);
+        },
         MirTy::Tuple(elems) => {
             for &elem in elems {
                 collect_named_type_from_ty(arena, elem, out, structs, enums);

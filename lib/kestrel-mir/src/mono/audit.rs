@@ -563,6 +563,11 @@ fn ty_name(module: &MonoModule, ty: TyId) -> String {
             format!("{}[{}]", name(entity), args.join(", "))
         },
         MirTy::Pointer(inner) => format!("Pointer[{}]", ty_name(module, *inner)),
+        MirTy::Ref { pointee, mutating } => format!(
+            "{}{}",
+            if *mutating { "&mutating " } else { "&" },
+            ty_name(module, *pointee)
+        ),
         MirTy::Tuple(elems) if elems.is_empty() => "()".into(),
         MirTy::Tuple(elems) => {
             let parts: Vec<String> = elems.iter().map(|&e| ty_name(module, e)).collect();

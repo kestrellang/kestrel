@@ -808,6 +808,10 @@ fn deep_resolve(arena: &mut TyArena, witnesses: &[WitnessDef], ty: TyId, depth: 
             let r = deep_resolve(arena, witnesses, inner, depth + 1);
             if r != inner { arena.pointer(r) } else { ty }
         },
+        MirTy::Ref { pointee, mutating } => {
+            let r = deep_resolve(arena, witnesses, pointee, depth + 1);
+            if r != pointee { arena.ref_ty(r, mutating) } else { ty }
+        },
         MirTy::Tuple(elems) => {
             let new: Vec<TyId> = elems
                 .iter()
@@ -852,6 +856,7 @@ fn references_type_param(arena: &TyArena, ty: TyId, entity: Entity) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(e) => *e == entity,
         MirTy::Pointer(inner) => references_type_param(arena, *inner, entity),
+        MirTy::Ref { pointee, .. } => references_type_param(arena, *pointee, entity),
         MirTy::Tuple(elems) => elems
             .iter()
             .any(|&e| references_type_param(arena, e, entity)),
@@ -874,6 +879,7 @@ pub fn has_type_param(arena: &TyArena, ty: TyId) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(_) | MirTy::Error => true,
         MirTy::Pointer(inner) => has_type_param(arena, *inner),
+        MirTy::Ref { pointee, .. } => has_type_param(arena, *pointee),
         MirTy::Tuple(elems) => elems.iter().any(|&e| has_type_param(arena, e)),
         MirTy::Named { type_args, .. } => type_args.iter().any(|&a| has_type_param(arena, a)),
         MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {

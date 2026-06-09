@@ -433,6 +433,11 @@ fn describe_mono_ty(module: &MonoModule, ty: TyId) -> String {
             }
         },
         MirTy::Pointer(inner) => format!("Pointer[{}]", describe_mono_ty(module, *inner)),
+        MirTy::Ref { pointee, mutating } => format!(
+            "{}{}",
+            if *mutating { "&mutating " } else { "&" },
+            describe_mono_ty(module, *pointee)
+        ),
         MirTy::TypeParam(e) => format!("TypeParam({})", name_of(e)),
         MirTy::AssociatedProjection {
             base,

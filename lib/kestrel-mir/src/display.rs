@@ -197,6 +197,11 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             format!("Pointer[{}]", fmt_ty(*inner, arena, module))
         },
 
+        MirTy::Ref { pointee, mutating } => {
+            let prefix = if *mutating { "&mutating " } else { "&" };
+            format!("{prefix}{}", fmt_ty(*pointee, arena, module))
+        },
+
         MirTy::Tuple(elems) => {
             if elems.is_empty() {
                 "()".into()
