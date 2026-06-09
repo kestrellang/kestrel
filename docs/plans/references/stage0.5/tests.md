@@ -11,9 +11,9 @@ decisions — treat it as behaviors to pin, do not copy its spellings.)
 | Test | Pins |
 |---|---|
 | `pointer_to_roundtrip` | `Pointer(to: x).read() == x` |
-| `pointer_mutating_write` | `Pointer(mutating: x).write(v)` then `x == v` |
+| `pointer_write_through` | `var x` then `Pointer(to: x).write(v)` then `x == v` — the sole init is write-capable (§10.2 revised, no `mutating:` twin) |
 | `pointer_to_noncopyable` | `Pointer(to: x)` where `x: not Copyable` — address capture borrows without moving; exact deinit count |
-| `pointer_mutating_alias` | `Pointer(mutating: x)` captured while `x` is also passed to a `mutating` param — may-alias holds, last write wins |
+| `pointer_alias_with_mutating_param` | `Pointer(to: x)` captured while `x` is also passed to a `mutating` param — may-alias holds, last write wins |
 
 No `&`-param or sugar-equivalence executions exist: parameter behavior is
 already pinned by the existing `mutating`-param suites, and this stage does
@@ -30,8 +30,9 @@ One file per `errors.md` row:
   `field_ref_rejected`, `tuple_ref_rejected`, `generic_arg_ref_rejected`,
   `function_type_return_ref_rejected`, `nested_ref_rejected`,
   `expression_amp_rejected`.
-- Existing E200-class: `pointer_mutating_immutable_arg` (a `let` passed to
-  `Pointer(mutating:)`).
+
+No place-mutability diagnostics to test: `Pointer(to:)` accepts any place
+(`errors.md`).
 
 ## Notes
 

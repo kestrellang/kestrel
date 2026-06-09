@@ -26,8 +26,11 @@ spelling of `mutating`; one way to say each thing. `&T` is
    parameters (permanent), returns, bindings, fields, tuples, generic args,
    function types (`errors.md`). One type-position walk; stage 1 carves
    only the return position out of it.
-3. `Pointer(to: x)` / `Pointer(mutating: x)` inits — address capture from a
-   borrowed place (`withUnsafePointer` without the closure).
+3. The `Pointer(to: x)` init — address capture from a borrowed place
+   (`withUnsafePointer` without the closure). The **sole** capture init:
+   `Pointer[T]` is uniformly write-capable, so a `mutating:` twin would be
+   two spellings of the same capture with only an advisory mutability check
+   attached (`references-gaps.md` §10.2, revised).
 
 ## Non-goals (stage1+)
 

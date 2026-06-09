@@ -11,7 +11,7 @@ what implementation needs; the *why* stays in the research docs.
 
 | | requirements | syntax | errors | semantics | tests | compiler-arch |
 |---|---|---|---|---|---|---|
-| **stage0.5** — ref params + pointer capture | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **stage0.5** — pointer capture + reserved ref syntax | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1** — returnable refs | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1.5** — ergonomics | ✅ | 🚧 | ⬜ | ⬜ | ⬜ | ⬜ |
 | **stage2** — storable refs | ✅ scope only | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |

@@ -483,7 +483,8 @@ Continuing the numbering from `references-syntax.md` §8:
    access, or evaporate-at-first-use?~~ **Decided 2026-06-09: transparent
    place (a), no (c) detour — §10.5.**
 9. **The Pointer⇄reference bridge** (§3.1): fully decided —
-   `Pointer(to:)` / `Pointer(mutating:)` inits and `.value` /
+   the `Pointer(to:)` init (sole capture init — the `mutating:` twin was
+   dropped 2026-06-09, §10.2) and `.value` /
    `.mutatingValue` accessors, unsafe by doc-comment contract, public from
    day one (§10.2); pointer-derived refs may escape returns under the
    inherited-contract model (§10.3); the `&mutating` return ban is lifted in
@@ -532,7 +533,7 @@ reverse is an error (that direction is a const-cast and exists only via the
 
 ### 10.2 The Pointer bridge is public from day one
 
-`Pointer(to:)` / `Pointer(mutating:)` / `.value` / `.mutatingValue` ship
+`Pointer(to:)` / `.value` / `.mutatingValue` ship
 public, not `lang`-gated. Rationale: `Pointer.read/write/offset` are already
 public and equally dangerous; Kestrel's safety boundary is "did you touch
 `Pointer`", not "are you the stdlib". Consequences:
@@ -541,16 +542,21 @@ public and equally dangerous; Kestrel's safety boundary is "did you touch
   from day one, so the checked/unchecked line must be crisp in diagnostics
   and docs ("this reference originates from a `Pointer`; the compiler does
   not verify its lifetime").
-- All four members must carry full `# Safety` doc sections (the stdlib
+- All three members must carry full `# Safety` doc sections (the stdlib
   doc-comment formula already defines the section), including the const-cast
   footgun (`Pointer(to: shared).mutatingValue`).
-- Since Kestrel has a single write-capable `Pointer[T]` (no
-  `UnsafeMutablePointer` split), the `to:`/`mutating:` init pair is
-  intent-documentation plus a call-site place-mutability check, not a
-  capability split. With §10.1's coercion, `init(to: &T)` alone would
-  technically suffice; `init(mutating:)` is kept so that write-intent
-  requires a mutable place and the const-cast stays an explicit opt-in
-  rather than the default path.
+- **Revised 2026-06-09 (with §10.6): `init(to:)` is the sole capture init —
+  no `mutating:` twin.** Since Kestrel has a single write-capable
+  `Pointer[T]` (no `UnsafeMutablePointer` split), the `to:`/`mutating:`
+  pair was never a capability split — only intent-documentation plus an
+  advisory call-site place-mutability check, i.e. two spellings of the same
+  capture. A borrow param accepts any place (`var` or `let`; under §10.6
+  conventions not even §10.1's coercion is involved), and the
+  write-through-an-immutable-place footgun is documented on the init and
+  `write` `# Safety` — the same const-cast class as
+  `Pointer(to: shared).mutatingValue`, which existed regardless of the
+  second init. Dropping it also dissolves the `mutating`-as-argument-label
+  parser wrinkle the conventions-only decl would have needed.
 
 ### 10.3 Pointer-derived references: "borrows the pointer", inherits its contract
 
@@ -666,7 +672,7 @@ the Stage-0.5 draft below (§11), which had the type-form as canonical and
 
 Consequence: `&T` / `&mutating T` is **return-position syntax** (Stage 1).
 Stage 0.5 shrinks to front-end plumbing + reject-everywhere diagnostics +
-the §10.2 capture inits. Where §§10.1-10.5 say "`&mutating` param", read
+the §10.2 capture init. Where §§10.1-10.5 say "`&mutating` param", read
 "`mutating` param" — same convention, decided spelling.
 
 ---
@@ -690,8 +696,9 @@ normalize and no second spelling to keep in sync:
 - The negative rules for ref types in **every** position, parameters
   included (one type-position walk + diagnostics) — cheap now, load-bearing
   forever; Stage 1 carves out the return position only.
-- `Pointer(to:)` / `Pointer(mutating:)` — borrow param + an address-capture
-  intrinsic (`withUnsafePointer` without the closure).
+- `Pointer(to:)` — borrow param + an address-capture intrinsic
+  (`withUnsafePointer` without the closure); the sole capture init
+  (§10.2 revised — no `mutating:` twin).
 
 ### Stage 1 — returnable references (~14-20 wk after 0.5)
 

@@ -7,11 +7,14 @@ LLVM backend landing). Anchor re-verification as of 2026-06-09:
 
 ## Corrections to the plumbing checklist
 
-1. **`TyKind::Ref` flows out of calls only.** Params were normalized away in
-   stage 0.5; Ref/MutRef appear in return positions
-   (`LowerCallableReturnType`, `MemberResolution.return_type`) and as
-   expression types of ref-returning calls. No `T → &T` argument coercion
-   exists anywhere.
+1. **`TyKind::Ref` flows out of calls only.** Param position rejects ref
+   types outright (stage 0.5, `references-gaps.md` §10.6 — conventions are
+   the only parameter spelling), so param types never carry Ref; Ref/MutRef
+   appear in return positions (`LowerCallableReturnType`,
+   `MemberResolution.return_type`) and as expression types of ref-returning
+   calls. No `T → &T` argument coercion exists anywhere — a ref-typed
+   argument meeting a borrow/`mutating` param is the place machinery
+   re-borrowing (Q8(a)), not a coercion.
 2. **Coercion arms** (absent from the checklist): `MutRef{T} → Ref{T}` and
    the `Ref{T} → T` copy-out (Q8(a)) in `solve_coerce` (solver.rs:1295);
    copy-out rides the existing CopyValue→clone mono-expand machinery.

@@ -5,11 +5,12 @@
 - `func first() -> &Element;` · `func cell(at i: Int) -> &mutating Cell;`
 - Provenance is **inferred, single-source**: the unique reference-eligible
   parameter root (overwhelmingly `self`). No annotation syntax.
-  - Two eligible sources (`func pick(a: &T, b: &T) -> &T`) → clean rejection.
-    Reserve a `from:`-style annotation slot for later; do not build it.
+  - Two eligible sources (`func pick(a: T, b: T) -> &T` — both borrow
+    params are eligible roots) → clean rejection. Reserve a `from:`-style
+    annotation slot for later; do not build it.
   - A `consuming` receiver cannot return a ref of `self` (error).
   - `-> &mutating T` requires a **mutable root**: a `mutating` receiver, a
-    `&mutating` param, or `.mutatingValue` (`references-gaps.md` §10.4).
+    `mutating` param, or `.mutatingValue` (`references-gaps.md` §10.4).
 - Receivers: `borrowing` (default) and `mutating` receivers may yield `&T`;
   a `mutating` receiver may yield `&mutating T`.
 

@@ -31,7 +31,7 @@ become *positive* execution tests below). Highest value:
 | `binding_decay_copies` | `let x = arr.first(); arr.set(0, …);` → `x` unchanged (decay is a copy, not a view) |
 | `binding_decay_clones_cloneable` | decay of a `&String` element retains/clones — no aliasing, no double-free (the `string_literal_return_no_alias` class) |
 | `return_mut_ref_write_through` | `arr.at(0).increment()` mutates the element in place — mutating method *through* the ref |
-| `mut_ref_pass_through` | returned `&mutating` passed onward to `func bump(x: &mutating Int64)`, original observed changed |
+| `mut_ref_pass_through` | returned `&mutating` passed onward to `func bump(mutating x: Int64)`, original observed changed |
 | `operator_through_ref` | `arr.first() == 42` — Equatable dispatch peels the ref |
 | `interpolation_through_ref` | `"\(arr.first())"` — interpolation receiver see-through |
 | `subscript_through_ref` | paren-call on a ref-typed receiver |
@@ -40,7 +40,7 @@ become *positive* execution tests below). Highest value:
 | `consuming_method_copies_out` | consuming method on a ref receiver consumes a *copy*; original still alive |
 | `scalar_ret_borrow_not_loaded` | the `resolve_scalar` miscompile pin; write-through observation distinguishes pointer-out from value-out |
 | `array_first_accessor` | PointerDerived propagation through `Array.first()` |
-| `mut_to_shared_coercion` | §10.1 — a `.mutatingValue`-rooted ref passed to a `&T` param |
+| `mut_to_shared_coercion` | §10.1 — a `.mutatingValue`-rooted ref passed to a borrow param |
 | `intra_block_consume_while_borrowed` | existing `try_consume` gate, inherited free |
 
 ## Harness

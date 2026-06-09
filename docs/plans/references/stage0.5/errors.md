@@ -14,7 +14,10 @@ conventions before implementation; placeholders below.
 | E-REF-07 | ref type as a function-type **return** (`() -> &T`) | not supported yet |
 | E-REF-08 | nested reference (`&&T`, `&mutating &T`) | "a reference cannot reference a reference" |
 | E-REF-09 | `&` in expression position | parse recovery + "borrow expressions are not written; the signature decides" |
-| (existing) | immutable argument to `Pointer(mutating:)` or a `mutating` param | reuse the E200-class place-mutability diagnostics — same check as `mutating` params today |
+
+No new place-mutability diagnostics: `Pointer(to:)` is a plain borrow and
+accepts any place (`references-gaps.md` §10.2, revised — no `mutating:`
+init), and `mutating`-param checks (E200-class) are pre-existing.
 
 Notes:
 

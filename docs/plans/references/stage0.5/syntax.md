@@ -37,22 +37,20 @@ Unchanged and convention-blind — `f(x)` whether the param is borrow,
 `mutating`, or `consuming`; the signature decides. LSP inlay-hint surfaces
 the convention (shipped Design-B infra).
 
-## Pointer bridge (this stage: inits only)
+## Pointer bridge (this stage: one init)
 
 ```kestrel
-init(to value: T)                  // address of the borrowed place
-init(mutating mutating value: T)   // mutating convention + label `mutating`
+init(to value: T)   // address of the borrowed place
 ```
 
-Two labels, not an overload — `(name, labels)` duplicate detection cannot
-distinguish by convention. Both produce the same write-capable `Pointer[T]`;
-the `mutating:` form exists so write intent requires a mutable place and the
-const-cast stays opt-in (`references-gaps.md` §10.2).
-
-The second decl needs one parser allowance: the keyword `mutating` accepted
-as an argument **label** (unambiguous — the label slot is always followed by
-`name :`). The call-site spelling `Pointer(mutating: x)` is the decided
-surface (§10.2), so prefer the allowance; fallback is a different label.
+One init, no `to:`/`mutating:` pair (`references-gaps.md` §10.2, revised):
+`Pointer[T]` is uniformly write-capable, so a `mutating:` twin would have
+been two spellings of the same capture carrying only an advisory
+place-mutability check. A borrow param accepts any place — `var` or `let`;
+writing through a pointer captured from an immutable place is the
+documented const-cast footgun (`# Safety` on the init and on `write`).
+Dropping the twin also removes the need for `mutating` as an argument
+label.
 
 ## Grammar notes
 
