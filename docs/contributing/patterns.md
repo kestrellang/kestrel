@@ -30,7 +30,7 @@ pub struct LowerBody {
 }
 
 impl QueryFn for LowerBody {
-    type Output = HirBody;
+    type Output = Option<HirBody>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
         // Read components and call sub-queries — never mutate the world.

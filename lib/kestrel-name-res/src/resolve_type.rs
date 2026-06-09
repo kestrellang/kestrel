@@ -12,7 +12,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::resolve_name::{NameResolution, ResolveName};
+use crate::resolve_name::{find_assoc_type, NameResolution, ResolveName};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== TypeResolution =====
@@ -266,7 +266,7 @@ fn try_resolve_self_via_extension_target(
     for segment in &segments[1..] {
         // Check if resolved is a protocol — look for associated types
         if ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
-            && let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment)
+            && let Some(assoc) = find_assoc_type(ctx, resolved, segment)
         {
             resolved = assoc;
             continue;
@@ -598,17 +598,6 @@ fn is_type_param_name(ctx: &QueryContext<'_>, entity: Entity, name: &str) -> boo
     } else {
         false
     }
-}
-
-/// Find an associated type (TypeAlias child) in a protocol by name.
-fn find_assoc_type(ctx: &QueryContext<'_>, protocol: Entity, name: &str) -> Option<Entity> {
-    ctx.children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
-        })
-        .copied()
 }
 
 /// Find an associated type in a protocol's inherited (parent) protocols.

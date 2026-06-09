@@ -14,12 +14,12 @@
 //! type extensions, then conformed-protocol extensions. Callers using
 //! insert-overwrite semantics get "type declaration wins."
 
-use kestrel_ast_builder::{Callable, Gettable, Name, NodeKind, Subscript as SubscriptMarker};
+use kestrel_ast_builder::{Callable, Gettable, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::conformances::ConformingProtocols;
 use crate::extensions::ExtensionsFor;
-use crate::visibility::IsVisibleFrom;
+use crate::helpers::filter_members_by_name;
 
 /// A member discovered via type traversal, with provenance info.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -101,17 +101,7 @@ impl QueryFn for TypeMembersByName {
             type_entity: self.type_entity,
             root: self.root,
         });
-        all.into_iter()
-            .filter(|m| {
-                if !member_name_matches(ctx, m.entity, &self.name) {
-                    return false;
-                }
-                ctx.query(IsVisibleFrom {
-                    target: m.entity,
-                    context: self.context,
-                })
-            })
-            .collect()
+        filter_members_by_name(ctx, all, &self.name, self.context, |m| m.entity)
     }
 }
 
@@ -193,27 +183,13 @@ fn is_member(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     )
 }
 
-/// Match an entity against a query name. Mirrors `protocol_members::member_name_matches`:
-/// literal Name component, plus `"init"` and `"subscript"` sentinels for
-/// nameless callables.
-fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
-    if let Some(n) = ctx.get::<Name>(entity) {
-        return n.0 == query;
-    }
-    match query {
-        "init" => ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer),
-        "subscript" => ctx.get::<SubscriptMarker>(entity).is_some(),
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use kestrel_ast::{AstType, PathSegment};
     use kestrel_ast_builder::{
-        AstParam, ConformanceItem, Conformances, ExtensionTarget, NodeKind, TypeAnnotation, Typed,
-        Vis,
+        AstParam, ConformanceItem, Conformances, ExtensionTarget, Name, NodeKind, TypeAnnotation,
+        Typed, Vis,
     };
     use kestrel_hecs::World;
     use kestrel_span::Span;

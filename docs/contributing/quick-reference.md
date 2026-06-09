@@ -160,8 +160,8 @@ Given a body entity, these queries give you the data an analyzer typically needs
 
 | Query | Output |
 |-------|--------|
-| `LowerBody { entity, root }` | `HirBody` — desugared body with scoped names resolved. |
-| `InferBody { entity, root }` | `TypedBody` — types, resolved members, promotions. |
+| `LowerBody { entity, root }` | `Option<HirBody>` — desugared body with scoped names resolved. |
+| `InferBody { entity, root }` | `Option<TypedBody>` — types, resolved members, promotions. |
 | `WhereClausesOf { entity, root }` | Resolved where-clause constraints in scope. |
 | `Analyze { analyzer, entity, root }` | Diagnostics from one analyzer on one entity. |
 

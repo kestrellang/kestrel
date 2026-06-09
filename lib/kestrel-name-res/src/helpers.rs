@@ -3,8 +3,10 @@
 //! These are used by multiple query implementations. All functions
 //! take a `QueryContext` and record dependencies automatically.
 
-use kestrel_ast_builder::{Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, Subscript as SubscriptMarker};
 use kestrel_hecs::{Entity, QueryContext};
+
+use crate::visibility::IsVisibleFrom;
 
 /// Walk parent_of chain to find the nearest ancestor with NodeKind::Module.
 /// Returns None if no module ancestor exists (e.g. entity is the root).
@@ -58,6 +60,47 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
             None => return false,
         }
     }
+}
+
+/// Does `entity` answer to the query name?
+///
+/// Matches the entity's `Name` component literally, OR — for nameless
+/// callables — recognizes the keyword sentinels `"init"` (→ Initializer
+/// NodeKind) and `"subscript"` (→ Subscript marker). Both sentinels are
+/// reserved keywords, so they can't collide with a user-declared method
+/// name.
+pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
+    if let Some(n) = ctx.get::<Name>(entity) {
+        return n.0 == query;
+    }
+    match query {
+        "init" => ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer),
+        "subscript" => ctx.get::<SubscriptMarker>(entity).is_some(),
+        _ => false,
+    }
+}
+
+/// Filter discovered members down to those answering to `name` (including
+/// the init/subscript sentinels) that are visible from `context`. Shared by
+/// `TypeMembersByName` and `ProtocolMembersByName`; `entity_of` projects the
+/// member entity out of each provenance-carrying member record.
+pub(crate) fn filter_members_by_name<M>(
+    ctx: &QueryContext<'_>,
+    members: Vec<M>,
+    name: &str,
+    context: Entity,
+    entity_of: impl Fn(&M) -> Entity,
+) -> Vec<M> {
+    members
+        .into_iter()
+        .filter(|m| {
+            let target = entity_of(m);
+            if !member_name_matches(ctx, target, name) {
+                return false;
+            }
+            ctx.query(IsVisibleFrom { target, context })
+        })
+        .collect()
 }
 
 #[cfg(test)]

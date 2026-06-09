@@ -121,11 +121,11 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 | `kestrel-hir` | Body HIR (`HirExpr`, `HirPat`, `HirStmt`, `HirBody`). |
 | `kestrel-hir-lower` | `LowerBody`, `LowerCallableTypes` queries — AST bodies → HIR bodies. |
 | `kestrel-type-infer` | Constraint-based inference; `InferBody` query, `Constraint` / `InferError` enums, `TypeResolver`. |
-| `kestrel-semantics` | Higher-level semantic queries (conformance, witness resolution). Used by infer/analyze. |
+| `kestrel-semantics` | Higher-level semantic queries: conformance resolution and polarity, protocol refinement, builtin-protocol identification, copy semantics. Used by infer/analyze. (Witness resolution lives in `kestrel-mir-lower`/codegen.) |
 | `kestrel-analyze` | Analyzer framework + every concrete analyzer. |
 | `kestrel-pattern-matching` | Exhaustiveness checking. |
 | `kestrel-mir` | OSSA MIR types: `MirModule`, `FunctionDef`, `OssaBody`, `ValueId`, `Instruction`, `BasicBlock`, `Terminator`. SSA, not place-based (no `Place`/`Rvalue`/`Statement`). Also owns the MIR pass pipeline, monomorphization, type layout, and symbol mangling. |
-| `kestrel-mir-lower` | `LowerMir` query — entities + typed bodies → MIR. |
+| `kestrel-mir-lower` | Entities + typed bodies → MIR via plain functions (entry: `lower_module`), not a query; its only query is `IsProtocolMethod`. |
 | `kestrel-codegen` | Tiny backend-agnostic crate: target configuration (`TargetConfig`). Layout and mangling now live in `kestrel-mir`. |
 | `kestrel-codegen-cranelift` | Cranelift backend: lowers the already-monomorphized OSSA MIR → machine code and links. |
 | `kestrel-compiler` | Low-level compiler / query engine. Owns the `World`. |

@@ -13,14 +13,12 @@
 //! first" behavior — the direct declaration is inserted first and then
 //! overwritten by a later entry only if one exists.
 
-use kestrel_ast_builder::{
-    Callable, Gettable, Name, NodeKind, QualifiedTarget, Subscript as SubscriptMarker,
-};
+use kestrel_ast_builder::{Callable, Gettable, NodeKind, QualifiedTarget};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::conformances::ConformingProtocols;
 use crate::extensions::ExtensionsFor;
-use crate::visibility::IsVisibleFrom;
+use crate::helpers::filter_members_by_name;
 
 /// A member discovered via protocol traversal, with provenance info.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -107,35 +105,7 @@ impl QueryFn for ProtocolMembersByName {
             protocol: self.protocol,
             root: self.root,
         });
-        all.into_iter()
-            .filter(|m| {
-                if !member_name_matches(ctx, m.entity, &self.name) {
-                    return false;
-                }
-                ctx.query(IsVisibleFrom {
-                    target: m.entity,
-                    context: self.context,
-                })
-            })
-            .collect()
-    }
-}
-
-/// Does `entity` answer to the query name?
-///
-/// Matches the entity's `Name` component literally, OR — for nameless
-/// callables — recognizes the keyword sentinels `"init"` (→ Initializer
-/// NodeKind) and `"subscript"` (→ Subscript marker). Both sentinels are
-/// reserved keywords, so they can't collide with a user-declared method
-/// name.
-fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
-    if let Some(n) = ctx.get::<Name>(entity) {
-        return n.0 == query;
-    }
-    match query {
-        "init" => ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer),
-        "subscript" => ctx.get::<SubscriptMarker>(entity).is_some(),
-        _ => false,
+        filter_members_by_name(ctx, all, &self.name, self.context, |m| m.entity)
     }
 }
 

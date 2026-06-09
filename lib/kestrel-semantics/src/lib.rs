@@ -473,6 +473,11 @@ pub struct NominalCopySemantics {
     pub root: Entity,
 }
 
+// WARNING: side-channel state invisible to the query framework's dependency
+// tracker — memoized results that consulted it are not invalidated when it
+// changes. It exists only because the framework panics on re-entrant queries
+// (recursive types). Any future recursive query needs the same treatment, or
+// a framework-level cycle-recovery mechanism.
 thread_local! {
     static COMPUTING_COPY_SEMANTICS: RefCell<Vec<(Entity, Entity)>> = const { RefCell::new(Vec::new()) };
 }
@@ -512,50 +517,6 @@ fn query_nominal_semantics(ctx: &QueryContext<'_>, entity: Entity, root: Entity)
         CopySemantics::Copyable
     } else {
         ctx.query(NominalCopySemantics { entity, root }).semantics
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct NominalTypeConformsToProtocol {
-    pub entity: Entity,
-    pub protocol: Entity,
-    pub root: Entity,
-}
-
-impl QueryFn for NominalTypeConformsToProtocol {
-    type Output = bool;
-
-    fn execute(&self, ctx: &QueryContext<'_>) -> bool {
-        if ctx.query(IsBuiltinProtocol {
-            protocol: self.protocol,
-            builtin: Builtin::Copyable,
-            root: self.root,
-        }) {
-            return query_nominal_semantics(ctx, self.entity, self.root)
-                != CopySemantics::NotCopyable;
-        }
-
-        if ctx.query(IsBuiltinProtocol {
-            protocol: self.protocol,
-            builtin: Builtin::Cloneable,
-            root: self.root,
-        }) {
-            return query_nominal_semantics(ctx, self.entity, self.root)
-                == CopySemantics::Cloneable;
-        }
-
-        ctx.query(ExplicitlyConformsToProtocol {
-            entity: self.entity,
-            protocol: self.protocol,
-            root: self.root,
-        })
-    }
-
-    fn describe(&self) -> String {
-        format!(
-            "NominalTypeConformsToProtocol({:?}, {:?})",
-            self.entity, self.protocol
-        )
     }
 }
 
@@ -768,7 +729,9 @@ fn nominal_copy_semantics_impl(
     // protocol path did not resolve to the builtin (for example, fixtures or
     // modules that did not import std.core.Copyable). Match the last segment by
     // name so the semantic copy classifier still agrees with the parser-level
-    // negative conformance.
+    // negative conformance. This string match exists ONLY for stdlib-less test
+    // fixtures where the builtin entity isn't registered; the ResolveBuiltin
+    // entity path above is the source of truth — don't extend this pattern.
     if let Some(conf) = ctx.get::<Conformances>(entity)
         && conf.0.iter().any(|item| {
             matches!(
