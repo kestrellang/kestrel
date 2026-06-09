@@ -13,6 +13,9 @@ use crate::common::skip_trivia;
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 /// Prefix unary operators: `-`, `+`, `!` (bitwise-not), `not` (logical-not).
+/// `&` parses here only so it can be rejected with a real diagnostic at HIR
+/// lowering (borrow expressions are not written in Kestrel); binary
+/// bitwise-`&` is unaffected — this parser only runs in operand position.
 pub(super) fn unary_op_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, (Token, Span), ParserExtra<'tokens>> + Clone {
     skip_trivia()
@@ -23,7 +26,8 @@ pub(super) fn unary_op_parser<'tokens>()
                 .or(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
                 .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
                 .or(just(Token::DotDotLess).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::DotDotEquals).map_with(|tok, e| (tok, to_kestrel_span(e.span())))),
+                .or(just(Token::DotDotEquals).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+                .or(just(Token::Ampersand).map_with(|tok, e| (tok, to_kestrel_span(e.span())))),
         )
         .boxed()
 }

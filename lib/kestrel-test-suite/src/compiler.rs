@@ -91,12 +91,18 @@ impl TestCompiler {
         // Ensure inference has run (triggers lex/parse/infer diagnostics)
         self.infer();
 
+        // Run analyzers BEFORE snapshotting codespan diagnostics: analyzers
+        // may force lowering queries (e.g. the stage-0.5 ref rejection on a
+        // field no body touches) whose accumulated codespan diagnostics
+        // would otherwise be dropped.
+        let analyze_summary = self.analyze();
+
         let mut result = Vec::new();
 
         // Collect sources for byte-offset-to-line resolution
         let sources = self.source_map();
 
-        // Codespan diagnostics (lex + parse + infer)
+        // Codespan diagnostics (lex + parse + infer + analyzer-forced lowering)
         let codespan_diags = self.compiler.diagnostics();
         result.extend(from_codespan_diagnostics(&codespan_diags, &sources));
 
@@ -107,7 +113,6 @@ impl TestCompiler {
         //     analyzer both independently emit "cannot find type 'X' in this scope"
         //     for the same unresolved annotation; the codespan version appends a
         //     label suffix (": not found (failed at 'X')"), so prefix-match catches it.
-        let analyze_summary = self.analyze();
         let analyzer_diags: Vec<_> = analyze_summary
             .diagnostics
             .iter()

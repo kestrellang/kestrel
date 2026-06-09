@@ -335,6 +335,12 @@ pub enum SyntaxKind {
     /// downstream consumers still pattern-match cleanly; the `Missing` parent
     /// is what flags the absence.
     Missing,
+
+    // New kinds are appended here (NOT grouped with their family above):
+    // rowan green trees store kinds as raw u16 discriminants, so inserting
+    // mid-enum would shift every later kind and corrupt cached trees.
+    TyRef,    // &T - shared reference type (parsed, rejected until stage 1)
+    TyMutRef, // &mutating T - mutable reference type
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
@@ -725,6 +731,8 @@ impl Language for KestrelLanguage {
         const TY_OPTIONAL: u16 = SyntaxKind::TyOptional as u16;
         const ERROR: u16 = SyntaxKind::Error as u16;
         const MISSING: u16 = SyntaxKind::Missing as u16;
+        const TY_REF: u16 = SyntaxKind::TyRef as u16;
+        const TY_MUT_REF: u16 = SyntaxKind::TyMutRef as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
@@ -984,6 +992,8 @@ impl Language for KestrelLanguage {
             BLOCK_COMMENT => SyntaxKind::BlockComment,
             ERROR => SyntaxKind::Error,
             MISSING => SyntaxKind::Missing,
+            TY_REF => SyntaxKind::TyRef,
+            TY_MUT_REF => SyntaxKind::TyMutRef,
             _ => SyntaxKind::Error,
         }
     }

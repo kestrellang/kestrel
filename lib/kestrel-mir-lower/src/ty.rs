@@ -155,6 +155,12 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
         HirTy::Never(_) => ctx.module.ty_arena.never(),
         HirTy::Infer(_) => ctx.module.ty_arena.error(),
         HirTy::Error(_) => ctx.module.ty_arena.error(),
+        // Stage-0.5 invariant: refs are rejected (rewritten to Error) at HIR
+        // lowering and must never reach MIR — MirTy has no Ref.
+        HirTy::Ref { .. } => {
+            debug_assert!(false, "HirTy::Ref survived HIR lowering");
+            ctx.module.ty_arena.error()
+        },
     }
 }
 

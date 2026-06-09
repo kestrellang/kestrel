@@ -159,6 +159,23 @@ Current allocations:
 - E451: `circular_constraint` (compilation/constraint_cycles.rs)
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
 - E461: `unknown_attribute` (compilation/unknown_attribute.rs)
+- E480–E489: reference-type rejections (stage 0.5 of references; `&T` /
+  `&mutating T` parse everywhere, accepted nowhere). NOT analyzer
+  descriptors — emitted from HIR lowering via codespan `with_code`
+  (kestrel-hir-lower `ty.rs::reject_ref_types` + `desugar.rs` for E488);
+  the test matcher passes codespan codes through. E480 is PERMANENT
+  (params never take ref types — conventions are the only spelling,
+  references-gaps.md §10.6); E481 is carved out (made legal) in stage 1.
+  - E480: ref type in parameter position (incl. function-type params, closure params)
+  - E481: ref type in return position
+  - E482: ref type in a `var`/`let` annotation
+  - E483: ref type in a struct/enum field (incl. enum case payload)
+  - E484: ref type in a tuple element
+  - E485: ref type as a generic type argument
+  - E486: ref type as a function-type return
+  - E487: nested reference (`&&T`, `&mutating &T`)
+  - E488: `&` in expression position (desugar.rs, `UnaryOp::Borrow`)
+  - E489: ref type in any other position (alias RHS, where-clause, bound)
 - E500: `use_after_move` (body/move_tracking.rs)
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)

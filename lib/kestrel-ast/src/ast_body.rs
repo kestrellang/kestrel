@@ -379,6 +379,9 @@ pub enum UnaryOp {
     Pos,
     RangeUpTo,
     RangeThrough,
+    /// Prefix `&` — parsed for recovery only; always rejected at HIR
+    /// lowering (borrow expressions are not written; the signature decides).
+    Borrow,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

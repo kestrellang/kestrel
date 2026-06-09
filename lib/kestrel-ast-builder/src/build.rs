@@ -1062,6 +1062,12 @@ mod tests {
                 let b: Vec<_> = bounds.iter().map(type_name).collect();
                 format!("some {}", b.join(" + "))
             },
+            AstType::Ref {
+                inner, mutating, ..
+            } => {
+                let kw = if *mutating { "&mutating " } else { "&" };
+                format!("{kw}{}", type_name(inner))
+            },
         }
     }
 }

@@ -373,7 +373,7 @@ pub(crate) fn ty_parser<'tokens>()
             .boxed();
 
         // Parse base type, then zero or more type operators
-        base_ty
+        let postfixed = base_ty
             .then(type_operator.repeated().collect::<Vec<_>>())
             .map(|(base, operators)| {
                 // Apply operators left-to-right
@@ -393,6 +393,34 @@ pub(crate) fn ty_parser<'tokens>()
                     }
                 }
                 result
+            })
+            .boxed();
+
+        // Reference prefix: &T / &mutating T. Binds looser than the postfix
+        // operators (`&T?` parses as `&(T?)`) and repeats so `&&T` parses
+        // (`&&` lexes as two Ampersands — no compound token). Every ref
+        // position is rejected at HIR lowering this stage; parsing anyway
+        // buys real diagnostics + LSP recovery.
+        let ref_prefix = skip_trivia()
+            .ignore_then(just(Token::Ampersand).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())))
+                    .or_not(),
+            );
+
+        ref_prefix
+            .repeated()
+            .collect::<Vec<_>>()
+            .then(postfixed)
+            .map(|(prefixes, base)| {
+                prefixes.into_iter().rev().fold(base, |inner, (amp, mutating)| {
+                    TyVariant::Ref {
+                        amp,
+                        mutating,
+                        inner: Box::new(inner),
+                    }
+                })
             })
             .boxed()
     })
@@ -465,6 +493,13 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Some(some_span, bounds) => {
             emit_some_type(sink, some_span.clone(), bounds);
         },
+        TyVariant::Ref {
+            amp,
+            mutating,
+            inner,
+        } => {
+            emit_ref_type(sink, amp.clone(), mutating.clone(), inner);
+        },
     }
 }
 
@@ -499,6 +534,13 @@ pub enum TyVariant {
     Result(Box<TyVariant>, Span, Box<TyVariant>), // (success_type, throws_span, error_type)
     /// Opaque type: some P, some P and Q
     Some(Span, Vec<TyVariant>), // (some_span, bound types)
+    /// Reference type: &T or &mutating T. Parsed in every type position but
+    /// accepted in none (stage 0.5) — rejection happens at HIR lowering.
+    Ref {
+        amp: Span,
+        mutating: Option<Span>,
+        inner: Box<TyVariant>,
+    },
 }
 
 /// Emit events for an inferred type: _
@@ -654,6 +696,32 @@ pub(crate) fn emit_array_type(
     sink.add_token(SyntaxKind::RBracket, rbracket);
 
     sink.finish_node(); // Finish TyArray
+    sink.finish_node(); // Finish Ty
+}
+
+/// Emit events for a reference type: &T or &mutating T.
+/// The node is atomic — the `mutating` token lives INSIDE TyRef/TyMutRef,
+/// never as a sibling in a TyList, so the AST builder's positional
+/// `mutating`-scan over function-type param lists cannot see it.
+pub(crate) fn emit_ref_type(
+    sink: &mut EventSink,
+    amp: Span,
+    mutating: Option<Span>,
+    inner: &TyVariant,
+) {
+    sink.start_node(SyntaxKind::Ty);
+    let kind = if mutating.is_some() {
+        SyntaxKind::TyMutRef
+    } else {
+        SyntaxKind::TyRef
+    };
+    sink.start_node(kind);
+    sink.add_token(SyntaxKind::Ampersand, amp);
+    if let Some(mut_span) = mutating {
+        sink.add_token(SyntaxKind::Mutating, mut_span);
+    }
+    emit_ty_variant(sink, inner);
+    sink.finish_node(); // Finish TyRef/TyMutRef
     sink.finish_node(); // Finish Ty
 }
 

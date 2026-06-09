@@ -2081,6 +2081,12 @@ pub(crate) fn lower_hir_ty_with_subs(
             tv
         },
         HirTy::Error(span) => ctx.report_error(InferError::FromHir { span: span.clone() }),
+        // Stage-0.5 invariant: refs are rejected (rewritten to Error) at HIR
+        // lowering and must never reach type inference.
+        HirTy::Ref { span, .. } => {
+            debug_assert!(false, "HirTy::Ref survived HIR lowering");
+            ctx.report_error(InferError::FromHir { span: span.clone() })
+        },
     }
 }
 
@@ -2165,7 +2171,8 @@ fn hir_ty_span(ty: &HirTy) -> Span {
         | HirTy::Opaque { span, .. }
         | HirTy::Never(span)
         | HirTy::Infer(span)
-        | HirTy::Error(span) => span.clone(),
+        | HirTy::Error(span)
+        | HirTy::Ref { span, .. } => span.clone(),
     }
 }
 

@@ -150,8 +150,19 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
 
     /// @name To Value
     /// Takes the address of `value`. Equivalent to `&value` in C — the
-    /// caller must ensure `value` outlives any use of the resulting
-    /// pointer.
+    /// borrowed place itself is captured; no copy is made.
+    ///
+    /// # Safety
+    ///
+    /// The pointer does not keep `value` alive: the caller must ensure the
+    /// place outlives every use of the resulting pointer, or any read is
+    /// undefined behavior.
+    ///
+    /// This is the sole capture init and it accepts any place — `var` or
+    /// `let` — yielding the same write-capable `Pointer[T]`. Writing
+    /// through a pointer captured from an immutable place is the C
+    /// const-cast footgun: it compiles, and it is on the caller to know the
+    /// storage is actually mutable.
     public init(to value: T) {
         self._raw = lang.ptr_to(value)
     }
@@ -205,6 +216,14 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
 
     /// Writes `value` through the pointer. Same safety preconditions as
     /// `pointee.set`.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be non-null and the storage valid for writes of
+    /// `T`. The previous pointee is overwritten without running its
+    /// `deinit`. If the pointer was captured with `Pointer(to:)` from a
+    /// `let` place, writing is the documented const-cast footgun — the
+    /// compiler does not stop it.
     public func write(consuming value: T) {
         lang.ptr_write(self._raw, value)
     }

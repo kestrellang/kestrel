@@ -78,4 +78,12 @@ pub enum AstType {
     Inferred(Span),
     /// Opaque type, e.g. `some P`, `some P and Q`
     Some { bounds: Vec<AstType>, span: Span },
+    /// Reference type, e.g. `&T` or `&mutating T`. Parses in every type
+    /// position but is accepted in none (stage 0.5) — every occurrence is
+    /// rejected at HIR lowering, so no `Ref` survives past it.
+    Ref {
+        inner: Box<AstType>,
+        mutating: bool,
+        span: Span,
+    },
 }

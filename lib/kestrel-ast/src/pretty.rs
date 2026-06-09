@@ -680,6 +680,12 @@ fn format_type(ty: &AstType) -> String {
             let b: Vec<_> = bounds.iter().map(format_type).collect();
             format!("some {}", b.join(" and "))
         },
+        AstType::Ref {
+            inner, mutating, ..
+        } => {
+            let kw = if *mutating { "&mutating " } else { "&" };
+            format!("{kw}{}", format_type(inner))
+        },
     }
 }
 
@@ -691,6 +697,7 @@ fn format_unary_op(op: &UnaryOp) -> &'static str {
         UnaryOp::Pos => "+",
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
+        UnaryOp::Borrow => "&",
     }
 }
 

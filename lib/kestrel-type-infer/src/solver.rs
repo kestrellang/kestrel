@@ -4263,7 +4263,13 @@ fn lower_hir_ty_sub(
         HirTy::Opaque { .. } => ctx.fresh(),
         HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
-        HirTy::Error(_) => {
+        // Stage-0.5 invariant: refs are rejected (rewritten to Error) at HIR
+        // lowering and must never reach type inference — TyKind has no Ref.
+        HirTy::Error(_) | HirTy::Ref { .. } => {
+            debug_assert!(
+                !matches!(ty, HirTy::Ref { .. }),
+                "HirTy::Ref survived HIR lowering"
+            );
             let idx = ctx.types.len() as u32;
             ctx.types.push(TySlot::Resolved(TyKind::Error));
             TyVar(idx)

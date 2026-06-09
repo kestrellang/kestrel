@@ -214,6 +214,12 @@ fn normalize_hir_type(
         },
         HirTy::Never(_) => ResolvedTy::Never,
         HirTy::Infer(_) | HirTy::Error(_) => ResolvedTy::Error,
+        // Stage-0.5 invariant: refs are rejected (rewritten to Error) at HIR
+        // lowering and must never reach type inference.
+        HirTy::Ref { .. } => {
+            debug_assert!(false, "HirTy::Ref survived HIR lowering");
+            ResolvedTy::Error
+        },
     }
 }
 

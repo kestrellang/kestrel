@@ -139,6 +139,23 @@ impl LowerCtx<'_> {
             return self.lower_expr(body, operand);
         }
 
+        // Prefix `&` parses (for recovery) but is never a valid expression:
+        // borrowing is decided by the callee's signature, not the call site.
+        if *op == UnaryOp::Borrow {
+            self.lower_expr(body, operand); // still lower for downstream diags
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E488")
+                    .with_message("borrow expressions are not written; the signature decides")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec![
+                        "a parameter `x: T` already borrows; `mutating x: T` mutably borrows"
+                            .to_string(),
+                    ]),
+            );
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        }
+
         let lowered_operand = self.lower_expr(body, operand);
 
         if let Some((proto, method)) = lookup_unary_op(op)
@@ -1329,6 +1346,7 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::Pos => "+",
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
+        UnaryOp::Borrow => "&",
     }
 }
 
