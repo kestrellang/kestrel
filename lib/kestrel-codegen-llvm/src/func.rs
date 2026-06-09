@@ -64,6 +64,15 @@ impl<'a, 'ctx> FuncCompiler<'a, 'ctx> {
         let val = self.get_value(id);
         let ownership = self.body.values[id.index()].ownership;
         let ty = self.body.values[id.index()].ty;
+        // Ref is signature-only — never a ValueDef.ty (twin of the Cranelift
+        // assert): a Ref here would deref one level too many below.
+        debug_assert!(
+            !matches!(
+                self.ctx.module.ty_arena.get(ty),
+                kestrel_mir::MirTy::Ref { .. }
+            ),
+            "MirTy::Ref appeared as a value type in codegen"
+        );
         if ownership == Ownership::Guaranteed {
             let repr = self
                 .ctx

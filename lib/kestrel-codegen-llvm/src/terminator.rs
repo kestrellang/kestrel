@@ -140,6 +140,14 @@ fn compile_return<'ctx>(
 ) -> Result<(), CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
+    // ret_borrow: return the raw POINTER (a true `ptr`) — `resolve_scalar`
+    // would load a scalar pointee through it (the
+    // scalar_ret_borrow_not_loaded miscompile). Twin of the Cranelift branch.
+    if fc.func.ret_borrow {
+        let val = fc.get_value(value_id);
+        builder.build_return(Some(&val)).unwrap();
+        return Ok(());
+    }
     let ret_repr = fc
         .ctx
         .tc
