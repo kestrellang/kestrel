@@ -56,8 +56,8 @@ use kestrel_hir::Builtin;
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_name_res::{EntityBuiltin, ResolveBuiltin};
 use kestrel_semantics::{
-    CopySemanticsReason, NominalCopySemantics, ProtocolAllowsNegativeConformance, ProtocolRefines,
-    ResolvedConformances,
+    CopySemanticsReason, NominalCopySemantics, ProtocolRefines, ResolvedConformances,
+    protocol_allows_negative_conformance,
 };
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -316,9 +316,7 @@ fn check_negative_requires_builtin(
         let Some(protocol) = item.protocol() else {
             continue;
         };
-        let allows = cx
-            .query
-            .query(ProtocolAllowsNegativeConformance { protocol });
+        let allows = protocol_allows_negative_conformance(cx.query, protocol);
         if allows {
             continue;
         }

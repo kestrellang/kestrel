@@ -147,33 +147,22 @@ impl QueryFn for ProtocolRefines {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct ProtocolAllowsNegativeConformance {
-    pub protocol: Entity,
-}
+/// Whether `: not P` is permitted on `protocol` — true only for builtin
+/// language-feature protocols with implicit conformance (e.g. Copyable).
+/// A plain function, not a query: the body is one `EntityBuiltin` lookup,
+/// cheaper to recompute than a memo slot.
+pub fn protocol_allows_negative_conformance(ctx: &QueryContext<'_>, protocol: Entity) -> bool {
+    let Some(builtin) = ctx.query(EntityBuiltin { entity: protocol }) else {
+        return false;
+    };
 
-impl QueryFn for ProtocolAllowsNegativeConformance {
-    type Output = bool;
-
-    fn execute(&self, ctx: &QueryContext<'_>) -> bool {
-        let Some(builtin) = ctx.query(EntityBuiltin {
-            entity: self.protocol,
-        }) else {
-            return false;
-        };
-
-        matches!(
-            builtin.kind(),
-            BuiltinKind::Protocol {
-                implicit_conformance: true,
-                ..
-            }
-        )
-    }
-
-    fn describe(&self) -> String {
-        format!("ProtocolAllowsNegativeConformance({:?})", self.protocol)
-    }
+    matches!(
+        builtin.kind(),
+        BuiltinKind::Protocol {
+            implicit_conformance: true,
+            ..
+        }
+    )
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -203,14 +192,18 @@ impl QueryFn for ExplicitlyNegatesProtocol {
     }
 }
 
+/// Does `entity` declare conformance to `protocol` by any route — direct
+/// declaration, `extend entity: protocol`, or protocol refinement (membership
+/// in `ConformingProtocols`)? "Declares" as opposed to *satisfies*: conditional
+/// `where`-gated conformance is the bound-aware `type_satisfies` check.
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct ExplicitlyConformsToProtocol {
+pub struct DeclaresConformanceTo {
     pub entity: Entity,
     pub protocol: Entity,
     pub root: Entity,
 }
 
-impl QueryFn for ExplicitlyConformsToProtocol {
+impl QueryFn for DeclaresConformanceTo {
     type Output = bool;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
@@ -223,7 +216,7 @@ impl QueryFn for ExplicitlyConformsToProtocol {
 
     fn describe(&self) -> String {
         format!(
-            "ExplicitlyConformsToProtocol({:?}, {:?})",
+            "DeclaresConformanceTo({:?}, {:?})",
             self.entity, self.protocol
         )
     }
@@ -672,7 +665,7 @@ pub fn hir_type_conforms_to_protocol(
         | HirTy::Enum { entity, .. }
         | HirTy::Protocol { entity, .. }
         | HirTy::AliasUse { entity, .. }
-        | HirTy::SelfType(entity, _) => ctx.query(ExplicitlyConformsToProtocol {
+        | HirTy::SelfType(entity, _) => ctx.query(DeclaresConformanceTo {
             entity: *entity,
             protocol,
             root,
@@ -757,7 +750,7 @@ fn nominal_copy_semantics_impl(
     }
 
     if let Some(cloneable) = cloneable
-        && ctx.query(ExplicitlyConformsToProtocol {
+        && ctx.query(DeclaresConformanceTo {
             entity,
             protocol: cloneable,
             root,
