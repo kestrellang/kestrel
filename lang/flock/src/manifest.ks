@@ -22,6 +22,9 @@ public struct PackageInfo: Cloneable {
     public var repository: Optional[String]
     public var website: Optional[String]
     public var documentation: Optional[String]
+    /// Organization / namespace this package publishes under, forming the
+    /// `org/name` scope. Used by `flock publish`; `FLOCK_ORG` overrides it.
+    public var org: Optional[String]
     /// Source directory relative to the package root. Defaults to "src".
     public var source: String
 
@@ -34,6 +37,7 @@ public struct PackageInfo: Cloneable {
         self.repository = .None;
         self.website = .None;
         self.documentation = .None;
+        self.org = .None;
         self.source = source;
     }
 
@@ -44,6 +48,7 @@ public struct PackageInfo: Cloneable {
         info.repository = cloneOptionalString(self.repository);
         info.website = cloneOptionalString(self.website);
         info.documentation = cloneOptionalString(self.documentation);
+        info.org = cloneOptionalString(self.org);
         info
     }
 }
@@ -264,11 +269,24 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
                 .None => {}
             }
 
+            // Extract org (optional) — the publish namespace
+            var org: Optional[String] = .None;
+            match pkg.value(forKey: "org") {
+                .Some(val) => {
+                    match val.asString() {
+                        .Some(s) => org = .Some(s),
+                        .None => {}
+                    }
+                },
+                .None => {}
+            }
+
             packageInfo.author = author;
             packageInfo.license = license;
             packageInfo.repository = repository;
             packageInfo.website = website;
             packageInfo.documentation = docs;
+            packageInfo.org = org;
 
             // Extract [dependencies] section
             var deps = Array[Dependency]();
