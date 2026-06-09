@@ -318,6 +318,21 @@ pub fn mir_verify_error_to_diagnostic(
 ) -> Diagnostic<usize> {
     let span = resolve_span(error.span.as_ref(), error.entity, world);
 
+    // Coded errors (escape check E494-E496) are user diagnostics, not ICEs.
+    if let Some(diag) = &error.diag {
+        let mut labels = vec![Label::primary(span.file_id, span.range())];
+        if let Some((sec_span, sec_msg)) = &diag.secondary {
+            labels.push(
+                Label::secondary(sec_span.file_id, sec_span.range()).with_message(sec_msg),
+            );
+        }
+        return Diagnostic::error()
+            .with_code(diag.code)
+            .with_message(&error.message)
+            .with_labels(labels)
+            .with_notes(diag.notes.clone());
+    }
+
     let location = match error.inst {
         Some(i) => format!(" at bb{}[{}]", error.block.index(), i),
         None => format!(" at bb{}", error.block.index()),

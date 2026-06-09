@@ -231,9 +231,14 @@ impl Compiler {
                     self.world(),
                 ));
             }
-            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
-                format!("OSSA verification failed with {} error(s)", errors.len()),
-            ));
+            // Coded errors are ordinary user diagnostics (escape check); only
+            // uncoded ones are internal verify failures.
+            let msg = if errors.iter().all(|e| e.diag.is_some()) {
+                format!("compilation failed with {} error(s)", errors.len())
+            } else {
+                format!("OSSA verification failed with {} error(s)", errors.len())
+            };
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(msg));
         }
         Ok(mir)
     }

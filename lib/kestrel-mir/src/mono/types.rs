@@ -86,6 +86,11 @@ pub struct MonoFunction {
     /// True for the `@main` entry point (propagated from `FunctionDef.is_main`).
     /// Consumed by the codegen backend to select the entry and export C `main`.
     pub is_main: bool,
+    /// True when `ret` is a `MirTy::Ref` (`-> &T`): the function returns the
+    /// raw pointer (`ret_borrow` ABI). Derived once at creation via
+    /// `item::function::ret_convention`; codegen reads the bit, never
+    /// re-matches the type.
+    pub ret_borrow: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -269,6 +274,7 @@ mod tests {
             body: None,
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         };
         let id = module.add_function(func);
         assert_eq!(id.index(), 0);

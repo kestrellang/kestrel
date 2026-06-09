@@ -36,6 +36,19 @@ pub struct VerifyError {
     pub func_name: String,
     /// Entity of the function being verified (for DeclSpan fallback).
     pub entity: Entity,
+    /// `Some` marks a user-facing diagnostic (escape-check errors, E49x);
+    /// `None` is an internal compiler error (ownership invariant violation).
+    /// `kestrel-compiler` renders them as `error[E49x]` vs `bug` accordingly.
+    pub diag: Option<UserDiag>,
+}
+
+/// User-facing payload for coded `VerifyError`s.
+#[derive(Debug, Clone)]
+pub struct UserDiag {
+    pub code: &'static str,
+    /// Secondary label: span + message (e.g. the rooting local's definition).
+    pub secondary: Option<(Span, String)>,
+    pub notes: Vec<String>,
 }
 
 /// Verify that `body` satisfies OSSA ownership rules.
@@ -110,6 +123,7 @@ fn check_value_uniqueness(
                         .and_then(|vd| vd.span.clone()),
                     func_name: func_name.to_string(),
                     entity,
+                    diag: None,
                 });
             } else {
                 definitions.insert(param.value, block_id);
@@ -130,6 +144,7 @@ fn check_value_uniqueness(
                         span: inst.span.clone(),
                         func_name: func_name.to_string(),
                         entity,
+                        diag: None,
                     });
                 } else {
                     definitions.insert(result, block_id);
@@ -181,6 +196,7 @@ fn check_operands_defined(
                         span: inst.span.clone(),
                         func_name: func_name.to_string(),
                         entity,
+                        diag: None,
                     });
                 }
             }
@@ -196,6 +212,7 @@ fn check_operands_defined(
                     span: block.terminator.span.clone(),
                     func_name: func_name.to_string(),
                     entity,
+                    diag: None,
                 });
             }
         }
@@ -240,6 +257,11 @@ struct BlockVerifier<'a> {
     block_id: BlockId,
     func_name: &'a str,
     entity: Entity,
+    /// Whether this function returns a borrowed reference (`-> &T`). The
+    /// returned @guaranteed value is exempt from Check 4 (it deliberately
+    /// outlives the block), and a @guaranteed return in a NON-ret_borrow
+    /// function is an ICE (the copy guards must have copied it to @owned).
+    ret_borrow: bool,
 
     /// Tracks @owned values: Live or Consumed.
     owned: FxHashMap<ValueId, ValueState>,
@@ -261,12 +283,19 @@ impl<'a> BlockVerifier<'a> {
         func_name: &'a str,
         entity: Entity,
     ) -> Self {
+        let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
+            matches!(
+                crate::item::function::ret_convention(&module.ty_arena, f.ret),
+                crate::item::function::RetConvention::RefBorrow { .. }
+            )
+        });
         Self {
             body,
             _module: module,
             block_id,
             func_name,
             entity,
+            ret_borrow,
             owned: FxHashMap::default(),
             borrows: FxHashMap::default(),
             addrs: FxHashMap::default(),
@@ -309,6 +338,7 @@ impl<'a> BlockVerifier<'a> {
             span,
             func_name: self.func_name.to_string(),
             entity: self.entity,
+            diag: None,
         });
     }
 
@@ -986,7 +1016,31 @@ impl<'a> BlockVerifier<'a> {
         // For Return, the returned value counts as consumed.
         if let TerminatorKind::Return(v) = term {
             self.assert_live(*v, None);
-            if self.body.value(*v).ownership == Ownership::Owned {
+            let ownership = self.body.value(*v).ownership;
+            // Return-convention hardening: a ret_borrow function must return
+            // the borrow itself; everything else must return @owned (the copy
+            // guards copy @guaranteed tails). A violation here is a lowering
+            // bug — before this check it was a silent miscompile.
+            match (self.ret_borrow, ownership) {
+                (true, Ownership::Owned) => {
+                    self.err_val(
+                        None,
+                        *v,
+                        format!("ret_borrow function returns @owned value {v:?}"),
+                    );
+                },
+                (false, Ownership::Guaranteed) => {
+                    self.err_val(
+                        None,
+                        *v,
+                        format!(
+                            "function returns @guaranteed value {v:?} without the ret_borrow convention"
+                        ),
+                    );
+                },
+                _ => {},
+            }
+            if ownership == Ownership::Owned {
                 self.try_consume(*v, None);
             }
         }
@@ -1009,11 +1063,19 @@ impl<'a> BlockVerifier<'a> {
         }
 
         // Check 4: every borrow must be ended or forwarded as @guaranteed block arg.
-        let forwarded_borrows: FxHashSet<ValueId> = forwarded
+        let mut forwarded_borrows: FxHashSet<ValueId> = forwarded
             .iter()
             .copied()
             .filter(|v| self.body.value(*v).ownership == Ownership::Guaranteed)
             .collect();
+        // ret_borrow carve-out: the one returned borrow deliberately outlives
+        // the block — it is the function's result.
+        if self.ret_borrow
+            && let TerminatorKind::Return(v) = term
+            && self.body.value(*v).ownership == Ownership::Guaranteed
+        {
+            forwarded_borrows.insert(*v);
+        }
         let open_borrows: Vec<ValueId> = self
             .borrows
             .keys()
@@ -1048,6 +1110,152 @@ fn verify_block(
     let verifier = BlockVerifier::new(body, module, block_id, func_name, entity);
     let block_errors = verifier.verify();
     errors.extend(block_errors);
+}
+
+// ---------------------------------------------------------------------------
+// Escape check (references stage 1)
+// ---------------------------------------------------------------------------
+
+/// The root rule for `-> &T` / `-> &mutating T` functions: every returned
+/// borrow's `root_provenance` must be `Param` (a *mutable* one for
+/// `&mutating`), `Static`, or `PointerDerived` — `Local` is the escape error.
+/// Roots were stamped at value creation and copied through projections, so
+/// this is a per-Return field read, never a walk.
+///
+/// Errors carry `diag: Some(..)` — they are user diagnostics (E494-E496),
+/// not ICEs.
+pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
+    use crate::item::function::{RetConvention, ret_convention};
+    use crate::value::RootProvenance;
+
+    let mut errors = Vec::new();
+    for func in module.functions.values() {
+        let Some(body) = &func.body else { continue };
+        if body.values.is_empty() || body.blocks.is_empty() {
+            continue;
+        }
+        let RetConvention::RefBorrow { mutating } = ret_convention(&module.ty_arena, func.ret)
+        else {
+            continue;
+        };
+
+        for (block_idx, block) in body.blocks.iter().enumerate() {
+            let TerminatorKind::Return(v) = &block.terminator.kind else {
+                continue;
+            };
+            let vd = body.value(*v);
+            if vd.ownership != Ownership::Guaranteed {
+                // verify_terminator's hardening reports this as an ICE.
+                continue;
+            }
+            let mut push = |code: &'static str,
+                            message: String,
+                            secondary: Option<(Span, String)>,
+                            notes: Vec<String>| {
+                errors.push(VerifyError {
+                    block: BlockId::new(block_idx),
+                    inst: None,
+                    message,
+                    span: block.terminator.span.clone().or_else(|| vd.span.clone()),
+                    func_name: func.name.clone(),
+                    entity: func.entity,
+                    diag: Some(UserDiag {
+                        code,
+                        secondary,
+                        notes,
+                    }),
+                });
+            };
+
+            let mut root = vd.root;
+            if root.is_derived_placeholder() {
+                // Hand-built bodies may bypass alloc_value; treat as a local
+                // with no known definition.
+                root = RootProvenance::Local(*v);
+            }
+            match root {
+                RootProvenance::Local(local) => {
+                    let name = body
+                        .value_names
+                        .get(&local)
+                        .map(|n| format!(" `{n}`"))
+                        .unwrap_or_default();
+                    let secondary = body
+                        .values
+                        .get(local.index())
+                        .and_then(|d| d.span.clone())
+                        .map(|s| (s, format!("the borrowed local{name} is defined here")));
+                    push(
+                        "E494",
+                        format!(
+                            "cannot return this reference: it borrows local{name}, which does \
+                             not outlive the call"
+                        ),
+                        secondary,
+                        vec![
+                            "only parameter-rooted or `Pointer`-derived references can be \
+                             returned"
+                                .into(),
+                            "Pointer-derived references are not verified by the compiler".into(),
+                        ],
+                    );
+                },
+                RootProvenance::Param(idx) => {
+                    let convention = func.params.get(idx as usize).map(|p| p.convention);
+                    if convention == Some(ParamConvention::Consuming) {
+                        let pname = func
+                            .params
+                            .get(idx as usize)
+                            .map(|p| format!(" `{}`", p.name))
+                            .unwrap_or_default();
+                        push(
+                            "E496",
+                            format!(
+                                "cannot return a reference rooted at consuming parameter{pname}: \
+                                 it is destroyed when the call returns"
+                            ),
+                            None,
+                            vec![],
+                        );
+                    } else if mutating && convention != Some(ParamConvention::MutBorrow) {
+                        push(
+                            "E495",
+                            "returning `&mutating` requires a mutable root: a `mutating` \
+                             receiver or parameter, or `Pointer.mutatingValue`"
+                                .into(),
+                            None,
+                            vec![],
+                        );
+                    }
+                },
+                RootProvenance::Static => {
+                    if mutating {
+                        push(
+                            "E495",
+                            "returning `&mutating` requires a mutable root; a static is not a \
+                             mutable root"
+                                .into(),
+                            None,
+                            vec![],
+                        );
+                    }
+                },
+                RootProvenance::PointerDerived { mutable } => {
+                    if mutating && !mutable {
+                        push(
+                            "E495",
+                            "returning `&mutating` requires a mutable root: use \
+                             `Pointer.mutatingValue`, not `.value`"
+                                .into(),
+                            None,
+                            vec![],
+                        );
+                    }
+                },
+            }
+        }
+    }
+    errors
 }
 
 // ---------------------------------------------------------------------------
@@ -2110,5 +2318,210 @@ mod tests {
 
         let errors = run_verify(b);
         assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    // -----------------------------------------------------------------------
+    // Escape check (references stage 1): the root rule for ret_borrow fns
+    // -----------------------------------------------------------------------
+
+    use crate::MirTy;
+    use crate::item::function::FunctionDef;
+    use crate::value::RootProvenance;
+
+    /// Finish `b` into a module holding one FunctionDef with the given return
+    /// type and param conventions (param N's ValueId is entry value N).
+    fn finish_fn(
+        b: OssaBuilder,
+        ret: TyId,
+        conventions: &[(ParamConvention, TyId)],
+    ) -> (MirModule, Entity) {
+        let (body, mut module) = b.finish();
+        let entity = Entity::from_raw(900);
+        let mut def = FunctionDef::new(entity, "escape_test", ret);
+        for (i, &(conv, ty)) in conventions.iter().enumerate() {
+            def.params.push(crate::item::function::ParamDef::new(
+                format!("p{i}"),
+                ValueId::new(i),
+                ty,
+                conv,
+            ));
+        }
+        def.body = Some(body);
+        module.add_function(def);
+        (module, entity)
+    }
+
+    fn escape_codes(module: &MirModule) -> Vec<&'static str> {
+        check_escapes(module)
+            .iter()
+            .map(|e| e.diag.as_ref().expect("escape errors are coded").code)
+            .collect()
+    }
+
+    #[test]
+    fn escape_param_root_ok() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
+        b.emit_return(p);
+        let (module, _) = finish_fn(b, ref_ty, &[(ParamConvention::Borrow, i64_ty)]);
+        assert!(escape_codes(&module).is_empty());
+    }
+
+    #[test]
+    fn escape_local_root_rejected() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let local = b.emit_literal(Immediate::i64(7));
+        let borrow = b.emit_begin_borrow(local);
+        b.emit_return(borrow);
+        let (module, _) = finish_fn(b, ref_ty, &[]);
+        assert_eq!(escape_codes(&module), vec!["E494"]);
+    }
+
+    #[test]
+    fn escape_consuming_param_rejected() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let p = b.new_param_value(i64_ty, Ownership::Owned);
+        let borrow = b.emit_begin_borrow(p);
+        b.emit_return(borrow);
+        let (module, _) = finish_fn(b, ref_ty, &[(ParamConvention::Consuming, i64_ty)]);
+        assert_eq!(escape_codes(&module), vec!["E496"]);
+    }
+
+    #[test]
+    fn escape_mutating_needs_mutable_root() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let mut_ref = b.ty(MirTy::Ref { pointee: i64_ty, mutating: true });
+        let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
+        b.emit_return(p);
+        // Shared Borrow param rooting a `-> &mutating` return: const-cast guard.
+        let (module, _) = finish_fn(b, mut_ref, &[(ParamConvention::Borrow, i64_ty)]);
+        assert_eq!(escape_codes(&module), vec!["E495"]);
+    }
+
+    #[test]
+    fn escape_mut_param_root_ok_for_mutating() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let mut_ref = b.ty(MirTy::Ref { pointee: i64_ty, mutating: true });
+        let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
+        b.emit_return(p);
+        let (module, _) = finish_fn(b, mut_ref, &[(ParamConvention::MutBorrow, i64_ty)]);
+        assert!(escape_codes(&module).is_empty());
+    }
+
+    #[test]
+    fn escape_static_root_matrix() {
+        // Shared ref of a Static root: ok. `&mutating` of it: E495.
+        for (mutating, expect) in [(false, vec![]), (true, vec!["E495"])] {
+            let mut b = OssaBuilder::new("t");
+            let i64_ty = b.i64();
+            let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating });
+            let local = b.emit_literal(Immediate::i64(7));
+            let borrow = b.emit_begin_borrow(local);
+            b.set_root(borrow, RootProvenance::Static);
+            b.emit_return(borrow);
+            let (module, _) = finish_fn(b, ref_ty, &[]);
+            assert_eq!(escape_codes(&module), expect, "mutating={mutating}");
+        }
+    }
+
+    #[test]
+    fn escape_pointer_derived_matrix() {
+        // (root mutability, ret mutating) → expected codes.
+        let cases = [
+            (false, false, vec![]),
+            (true, false, vec![]), // mut root may decay to a shared ret
+            (false, true, vec!["E495"]),
+            (true, true, vec![]),
+        ];
+        for (mutable, mutating, expect) in cases {
+            let mut b = OssaBuilder::new("t");
+            let i64_ty = b.i64();
+            let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating });
+            let local = b.emit_literal(Immediate::i64(7));
+            let borrow = b.emit_begin_borrow(local);
+            b.set_root(borrow, RootProvenance::PointerDerived { mutable });
+            b.emit_return(borrow);
+            let (module, _) = finish_fn(b, ref_ty, &[]);
+            assert_eq!(
+                escape_codes(&module),
+                expect,
+                "mutable={mutable} mutating={mutating}"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_root_inherited_through_projection_chain() {
+        // Borrow of a borrow of a param still roots at the param.
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
+        let b1 = b.emit_begin_borrow(p);
+        let b2 = b.emit_begin_borrow(b1);
+        b.emit_return(b2);
+        let (module, _) = finish_fn(b, ref_ty, &[(ParamConvention::Borrow, i64_ty)]);
+        assert!(escape_codes(&module).is_empty());
+    }
+
+    // Return-convention hardening (verify_terminator): ICE-class, uncoded.
+
+    #[test]
+    fn guaranteed_return_without_ret_borrow_is_error() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
+        b.emit_return(p);
+        // Function returns i64 by value but the body returns a borrow.
+        let (module, entity) = finish_fn(b, i64_ty, &[(ParamConvention::Borrow, i64_ty)]);
+        let func = module.functions.get(&entity).unwrap();
+        let errors = verify_ossa(func.body.as_ref().unwrap(), &module, "t", entity);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("without the ret_borrow convention")),
+            "got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn owned_return_in_ret_borrow_fn_is_error() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let v = b.emit_literal(Immediate::i64(7));
+        b.emit_return(v);
+        let (module, entity) = finish_fn(b, ref_ty, &[]);
+        let func = module.functions.get(&entity).unwrap();
+        let errors = verify_ossa(func.body.as_ref().unwrap(), &module, "t", entity);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("returns @owned value")),
+            "got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn ret_borrow_return_passes_check4() {
+        // The returned borrow is exempt from "still active at block exit".
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
+        let borrow = b.emit_begin_borrow(p);
+        b.emit_return(borrow);
+        let (module, entity) = finish_fn(b, ref_ty, &[(ParamConvention::Borrow, i64_ty)]);
+        let func = module.functions.get(&entity).unwrap();
+        let errors = verify_ossa(func.body.as_ref().unwrap(), &module, "t", entity);
+        assert!(errors.is_empty(), "got: {errors:?}");
     }
 }

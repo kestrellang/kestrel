@@ -164,6 +164,12 @@ pub fn monomorphize(
             receiver,
         );
 
+        // ret_borrow is derivable from the mono ret type alone — the Ref
+        // wrapper survives substitution (its pointee is what changes).
+        let ret_borrow = matches!(
+            crate::item::function::ret_convention(&mono_module.ty_arena, body_result.ret),
+            crate::item::function::RetConvention::RefBorrow { .. }
+        );
         mono_module.add_function(MonoFunction {
             name: mangled_name,
             source: key.func_entity,
@@ -174,6 +180,7 @@ pub fn monomorphize(
             body: body_result.body.clone(),
             extern_info: body_result.extern_info.clone(),
             is_main: body_result.is_main,
+            ret_borrow,
         });
     }
 

@@ -1164,6 +1164,7 @@ mod tests {
             body,
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         }
     }
 

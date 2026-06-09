@@ -616,6 +616,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
         module.structs.insert(
             (entity(2), vec![]),
@@ -714,6 +715,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -759,6 +761,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -799,6 +802,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -840,6 +844,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -892,6 +897,7 @@ mod tests {
                 symbol_name: "malloc".into(),
             }),
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -912,6 +918,7 @@ mod tests {
             body: None,
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -950,6 +957,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);

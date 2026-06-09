@@ -224,3 +224,24 @@ impl FunctionDef {
         }
     }
 }
+
+/// How a function returns its result: by value, or as a borrowed reference
+/// (`-> &T` / `-> &mutating T`, the `ret_borrow` ABI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetConvention {
+    Value,
+    RefBorrow { mutating: bool },
+}
+
+/// The single MIR-side derivation of a function's return convention — the
+/// in-band carrier is the resolved return type itself. Consumers (escape
+/// check, lowering gates, `MonoFunction.ret_borrow`, codegen) call this or
+/// read the stored bit; nobody re-matches `MirTy::Ref` ad hoc.
+pub fn ret_convention(arena: &crate::ty::TyArena, ret: TyId) -> RetConvention {
+    match arena.get(ret) {
+        crate::ty::MirTy::Ref { mutating, .. } => RetConvention::RefBorrow {
+            mutating: *mutating,
+        },
+        _ => RetConvention::Value,
+    }
+}
