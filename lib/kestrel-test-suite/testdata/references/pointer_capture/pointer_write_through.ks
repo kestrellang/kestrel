@@ -1,5 +1,6 @@
 // test: execution
 // stdlib: true
+// backends: cranelift,llvm
 
 // Stage 0.5 Pointer bridge: the sole capture init is write-capable —
 // `Pointer(to: x).write(v)` mutates the original `var` place (no

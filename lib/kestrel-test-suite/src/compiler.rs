@@ -144,10 +144,15 @@ impl TestCompiler {
             .map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
-    /// Compile, link, and run. Returns the run result.
+    /// Compile, link, and run on the env-default backend.
     pub fn run(&self) -> Result<RunResult, String> {
+        self.run_on(runner::Backend::default_from_env())
+    }
+
+    /// Compile, link, and run on a specific backend (`// backends:` trials).
+    pub fn run_on(&self, backend: runner::Backend) -> Result<RunResult, String> {
         self.infer();
-        runner::compile_and_run(&self.compiler)
+        runner::compile_and_run(&self.compiler, backend)
     }
 
     /// Access the underlying compiler.

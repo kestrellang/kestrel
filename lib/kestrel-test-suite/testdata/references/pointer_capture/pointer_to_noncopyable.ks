@@ -1,5 +1,6 @@
 // test: execution
 // stdlib: true
+// backends: cranelift,llvm
 
 // Stage 0.5 Pointer bridge: `Pointer(to: x)` where `x` is `not Copyable`
 // BORROWS the place — it must not move or copy the value. Detector

@@ -25,6 +25,7 @@ use walkdir::WalkDir;
 use kestrel_test_suite::TestCompiler;
 use kestrel_test_suite::annotation::{self, TestMode};
 use kestrel_test_suite::mir_snapshot;
+use kestrel_test_suite::runner::Backend;
 
 // Matches datatest-stable's looser bound — we `format!` the error into a
 // `String` before returning it to the libtest thread, so Send/Sync on the
@@ -100,24 +101,45 @@ fn discover_trials(filter: Option<&HashSet<String>>) -> Vec<Trial> {
         // Normalize to forward slashes so names are stable across platforms
         // and round-trip with triage's stored names.
         let rel_str = rel.to_string_lossy().replace('\\', "/");
-        let name = format!("{HARNESS_NAME}::{rel_str}");
 
-        if let Some(set) = filter
-            && !set.contains(&name)
-        {
-            continue;
+        // `// backends:` pins one trial per listed backend; unannotated tests
+        // get one trial on the env-default backend. The first backend keeps
+        // the plain name; extras are tagged `foo__llvm.ks` — the name must
+        // end in `.ks` with no extra dots so triage's raw↔identity name
+        // round-trip keeps the trial.
+        let backends = fs::read_to_string(path)
+            .map(|src| annotation::parse_test_config(&src).backends)
+            .unwrap_or_default();
+        let backends = if backends.is_empty() {
+            vec![Backend::default_from_env()]
+        } else {
+            backends
+        };
+        for (i, &backend) in backends.iter().enumerate() {
+            let name = if i == 0 {
+                format!("{HARNESS_NAME}::{rel_str}")
+            } else {
+                let stem = rel_str.strip_suffix(".ks").unwrap_or(&rel_str);
+                format!("{HARNESS_NAME}::{stem}__{}.ks", backend.tag())
+            };
+
+            if let Some(set) = filter
+                && !set.contains(&name)
+            {
+                continue;
+            }
+
+            let test_path: PathBuf = path.to_path_buf();
+            trials.push(Trial::test(name, move || {
+                run_ks_test(&test_path, backend).map_err(|e| format!("{:?}", e).into())
+            }));
         }
-
-        let test_path: PathBuf = path.to_path_buf();
-        trials.push(Trial::test(name, move || {
-            run_ks_test(&test_path).map_err(|e| format!("{:?}", e).into())
-        }));
     }
     trials.sort_by(|a, b| a.name().cmp(b.name()));
     trials
 }
 
-fn run_ks_test(path: &Path) -> TestResult {
+fn run_ks_test(path: &Path, backend: Backend) -> TestResult {
     let source = std::fs::read_to_string(path)?;
     let config = annotation::parse_test_config(&source);
 
@@ -136,7 +158,7 @@ fn run_ks_test(path: &Path) -> TestResult {
     // more in batched mode — a single panic must not take down the whole batch.
     let path_owned = path.to_owned();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_ks_test_inner(&path_owned, &source, &config)
+        run_ks_test_inner(&path_owned, &source, &config, backend)
     }));
 
     match result {
@@ -154,7 +176,12 @@ fn run_ks_test(path: &Path) -> TestResult {
     }
 }
 
-fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig) -> TestResult {
+fn run_ks_test_inner(
+    path: &Path,
+    source: &str,
+    config: &annotation::TestConfig,
+    backend: Backend,
+) -> TestResult {
     let mut tc = if config.stdlib {
         TestCompiler::with_stdlib()
     } else {
@@ -195,7 +222,9 @@ fn run_ks_test_inner(path: &Path, source: &str, config: &annotation::TestConfig)
 
         TestMode::Execution => {
             tc.check_no_errors()?;
-            let result = tc.run().map_err(Into::<Box<dyn std::error::Error>>::into)?;
+            let result = tc
+                .run_on(backend)
+                .map_err(Into::<Box<dyn std::error::Error>>::into)?;
 
             let expected_exit = config.expect_exit.unwrap_or(0);
             if result.exit_code != expected_exit {

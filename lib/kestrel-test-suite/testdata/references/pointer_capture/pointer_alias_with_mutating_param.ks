@@ -1,5 +1,6 @@
 // test: execution
 // stdlib: true
+// backends: cranelift,llvm
 
 // Stage 0.5 may-alias pin (the standing no-exclusivity decision): a
 // `Pointer(to: x)` capture stays valid while `x` is simultaneously passed

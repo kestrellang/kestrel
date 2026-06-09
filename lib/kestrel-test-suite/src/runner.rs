@@ -1,8 +1,10 @@
 //! Compile, link, and execute Kestrel programs for end-to-end testing.
 //!
-//! Backend is selected via the `KESTREL_BACKEND` env var (`llvm` selects the
-//! LLVM backend; anything else uses the default Cranelift backend) — see
-//! `compile_and_run`. This lets the same suite validate both backends.
+//! Backend selection: a test pins its backends with a `// backends:` header
+//! (each listed backend becomes its own trial); unannotated tests follow the
+//! `KESTREL_BACKEND` env var (`llvm` selects the LLVM backend; anything else
+//! uses the default Cranelift backend). This lets the same suite validate
+//! both backends, and lets ABI-sensitive tests demand both unconditionally.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -10,6 +12,43 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use kestrel_compiler::Compiler;
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Which codegen backend a trial compiles with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Cranelift,
+    Llvm,
+}
+
+impl Backend {
+    /// Suite-wide default for tests without a `// backends:` header.
+    pub fn default_from_env() -> Self {
+        if std::env::var("KESTREL_BACKEND").as_deref() == Ok("llvm") {
+            Backend::Llvm
+        } else {
+            Backend::Cranelift
+        }
+    }
+
+    /// Header-value spelling (`// backends: cranelift,llvm`).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "cranelift" => Some(Backend::Cranelift),
+            "llvm" => Some(Backend::Llvm),
+            _ => None,
+        }
+    }
+
+    /// Trial-name tag for non-primary backends (`foo__llvm.ks`). Must stay
+    /// dot-free and the full trial name must keep its `.ks` suffix, or
+    /// triage's raw↔identity name round-trip drops the trial.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Backend::Cranelift => "cranelift",
+            Backend::Llvm => "llvm",
+        }
+    }
+}
 
 /// Result of running a compiled Kestrel program.
 #[derive(Debug, Clone)]
@@ -23,7 +62,7 @@ pub struct RunResult {
 ///
 /// Returns Err if compilation or linking fails.
 /// The temporary directory is cleaned up after execution.
-pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
+pub fn compile_and_run(compiler: &Compiler, backend: Backend) -> Result<RunResult, String> {
     // Skip execution if env var is set (for CI speed)
     if std::env::var("KESTREL_SKIP_CODEGEN").is_ok() {
         return Ok(RunResult {
@@ -38,10 +77,7 @@ pub fn compile_and_run(compiler: &Compiler) -> Result<RunResult, String> {
 
     let exe_path = temp_dir.join(if cfg!(windows) { "test.exe" } else { "test" });
 
-    // Backend selection: KESTREL_BACKEND=llvm runs the LLVM backend (default is
-    // Cranelift), so the same suite can validate both backends.
-    let use_llvm = std::env::var("KESTREL_BACKEND").as_deref() == Ok("llvm");
-    let link_result = if use_llvm {
+    let link_result = if backend == Backend::Llvm {
         let options = kestrel_codegen_llvm::CodegenOptions {
             c_sources: stdlib_c_sources(),
             ..Default::default()

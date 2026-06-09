@@ -1,5 +1,6 @@
 // test: execution
 // stdlib: true
+// backends: cranelift,llvm
 
 // Stage 0.5 Pointer bridge: `Pointer(to: x)` captures the address of the
 // borrowed place, and `read()` round-trips the value (docs/plans/references/
