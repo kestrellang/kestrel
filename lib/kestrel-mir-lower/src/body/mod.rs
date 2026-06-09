@@ -17,7 +17,7 @@ use kestrel_mir::body::OssaBody;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind, Instruction};
 use kestrel_mir::terminator::{SwitchArm, Terminator, TerminatorKind};
-use kestrel_mir::value::{Ownership, ValueDef};
+use kestrel_mir::value::{Ownership, RootProvenance, ValueDef};
 use kestrel_mir::{
     BlockId, CopyBehavior, FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId,
     VariantIdx,
@@ -407,7 +407,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 )
             })
             .unwrap_or(false);
-        for (i, (hir_id, _local)) in locals.iter().enumerate() {
+        for (i, (hir_id, local)) in locals.iter().enumerate() {
             if i >= params_len {
                 break;
             }
@@ -416,12 +416,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .get(i)
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            match convention {
+            // All params stamp Param(i) — Consuming included, so a borrow of
+            // a consuming param carries it to the escape check (E496 there).
+            let root = RootProvenance::Param(i as u32);
+            let val = match convention {
                 ParamConvention::MutBorrow => {
                     let val = self.body.alloc_value(ValueDef {
                         ty,
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
+                        root,
                         span: None,
                     });
                     self.local_map.insert(*hir_id, LocalBinding::Var(val));
@@ -433,23 +437,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                             _ => BodyContext::Initializer { self_addr: val },
                         };
                     }
+                    val
                 },
                 ParamConvention::Borrow => {
                     let val = self.body.alloc_value(ValueDef {
                         ty,
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
+                        root,
                         span: None,
                     });
                     self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
+                    val
                 },
                 ParamConvention::Consuming => {
                     let ownership = self.ownership_for(ty);
                     let val = self.alloc_value(ty, ownership);
+                    self.body.values[val.index()].root = root;
                     self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
                     self.track_owned(val);
+                    val
                 },
-            }
+            };
+            self.body.value_names.insert(val, local.name.clone());
         }
         self.body.param_count = params_len;
 
@@ -1632,9 +1642,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
         let i64_ty = self.ctx.module.ty_arena.i64();
         let result = self.alloc_value(i64_ty, Ownership::Owned);
+        // Globals outlive every call — borrows rooted here may escape returns.
+        self.stamp_root(result, RootProvenance::Static);
         self.push_inst(InstKind::GlobalRef { result, entity });
         self.track_owned(result);
         result
+    }
+
+    /// Override a value's provenance root after allocation. Used where the
+    /// root is known better than the alloc-time default: globals (`Static`)
+    /// and the `ptr_ref`/`ptr_mut_ref` intrinsics (`PointerDerived`).
+    pub fn stamp_root(&mut self, value: ValueId, root: RootProvenance) {
+        self.body.values[value.index()].root = root;
     }
 
     pub fn emit_uninit(&mut self, ty: TyId) -> ValueId {

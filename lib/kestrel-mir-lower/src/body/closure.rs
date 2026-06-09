@@ -32,7 +32,7 @@ use kestrel_mir::body::OssaBody;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir::item::struct_def::{FieldDef, StructDef};
-use kestrel_mir::value::{Ownership, ValueDef};
+use kestrel_mir::value::{Ownership, RootProvenance, ValueDef};
 use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::captures::{CaptureKind, CapturedPlace};
 
@@ -188,7 +188,8 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Env param is the first ValueId (index 0) in the closure body
-        let env_val = closure_body.alloc_value(ValueDef::owned(env_ty));
+        let env_val =
+            closure_body.alloc_value(ValueDef::owned(env_ty).with_root(RootProvenance::Param(0)));
         func_def.params.push(ParamDef::new(
             "env",
             env_val,
@@ -219,8 +220,10 @@ impl OssaBodyCtx<'_, '_> {
                         ty,
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
+                        root: RootProvenance::Param((i + 1) as u32),
                         span: None,
                     });
+                    closure_body.value_names.insert(val, name.clone());
                     func_def
                         .params
                         .push(ParamDef::new(name, val, ty, ParamConvention::MutBorrow));
@@ -229,7 +232,9 @@ impl OssaBodyCtx<'_, '_> {
                 _ => {
                     // Consuming (default) / Borrow: keep the @owned SSA binding
                     // (unchanged from pre-#106 behavior).
-                    let val = closure_body.alloc_value(ValueDef::owned(ty));
+                    let val = closure_body
+                        .alloc_value(ValueDef::owned(ty).with_root(RootProvenance::Param((i + 1) as u32)));
+                    closure_body.value_names.insert(val, name.clone());
                     func_def
                         .params
                         .push(ParamDef::new(name, val, ty, ParamConvention::Consuming));

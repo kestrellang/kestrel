@@ -19,23 +19,29 @@ impl OssaBodyCtx<'_, '_> {
         match &stmt {
             HirStmt::Let { local, value, .. } => {
                 let is_var = self.hir.locals[*local].is_mut;
+                let name = self.hir.locals[*local].name.clone();
                 if let Some(init_expr) = value {
                     let init_val = self.lower_expr(*init_expr);
                     if is_var {
                         let ty = self.resolve_local_type(*local);
                         let addr = self.emit_uninit(ty);
                         self.emit_store_init(addr, init_val);
+                        self.body.value_names.insert(addr, name);
                         self.local_map
                             .insert(*local, super::LocalBinding::Var(addr));
                         let flag = self.maybe_alloc_var_flag(ty);
                         self.track_var(addr, ty, Some(*local), flag);
                     } else {
+                        // Diagnostics-only: escape errors name the binding the
+                        // returned borrow roots at ("borrows local `x`").
+                        self.body.value_names.insert(init_val, name);
                         self.local_map
                             .insert(*local, super::LocalBinding::Ssa(init_val));
                     }
                 } else if is_var {
                     let ty = self.resolve_local_type(*local);
                     let addr = self.emit_uninit(ty);
+                    self.body.value_names.insert(addr, name);
                     self.local_map
                         .insert(*local, super::LocalBinding::Var(addr));
                     let flag = self.maybe_alloc_var_flag(ty);

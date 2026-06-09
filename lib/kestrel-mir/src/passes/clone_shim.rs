@@ -12,7 +12,7 @@ use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::TyArena;
 use crate::ty::{MirTy, ParamConvention};
 use crate::ty_query::find_cloneable_protocol;
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{FieldIdx, MirModule, TyId, ValueId, VariantIdx};
 
 /// Synthesize `__clone$T` functions for all structs/enums that aren't `not Copyable`.
@@ -318,6 +318,7 @@ fn generate_struct_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        root: RootProvenance::derived(),
         span: None,
     });
     body.param_count = 1;
@@ -416,6 +417,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        root: RootProvenance::derived(),
         span: None,
     });
     body.param_count = 1;
@@ -459,6 +461,7 @@ fn generate_enum_clone_shim(
             ty: self_ty,
             ownership: Ownership::Guaranteed,
             borrow_source: None,
+            root: RootProvenance::derived(),
             span: None,
         });
         let variant_disc = body.alloc_value(ValueDef::owned(i32_ty));
@@ -525,6 +528,7 @@ fn generate_enum_clone_shim(
         ty: self_ty,
         ownership: Ownership::Guaranteed,
         borrow_source: None,
+        root: RootProvenance::derived(),
         span: None,
     });
     let wildcard_disc = body.alloc_value(ValueDef::owned(i32_ty));

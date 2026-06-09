@@ -9,7 +9,7 @@ use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::terminator::{Terminator, TerminatorKind};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{Immediate, MirModule, TyId};
 
 /// Scan for ApplyPartial references and generate thunk wrappers.
@@ -125,6 +125,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                     ty: param.ty,
                     ownership: Ownership::Guaranteed,
                     borrow_source: None,
+                    root: RootProvenance::derived(),
                     span: None,
                 });
                 body.block_mut(entry).params.push(BlockParam {
@@ -150,6 +151,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: param.ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             body.block_mut(entry).params.push(BlockParam {
@@ -204,6 +206,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: ret_ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             insts.push(Instruction::new(InstKind::Call {
@@ -247,7 +250,7 @@ mod tests {
     use super::*;
     use crate::block::BlockParam;
     use crate::body::OssaBody;
-    use crate::value::ValueDef;
+    use crate::value::{RootProvenance, ValueDef};
 
     /// Build a minimal function with an OSSA body (just returns unit).
     fn add_stub_function(
@@ -268,6 +271,7 @@ mod tests {
                 ty: *pty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             body.block_mut(entry).params.push(BlockParam {

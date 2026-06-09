@@ -1101,6 +1101,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         }
     }
 
