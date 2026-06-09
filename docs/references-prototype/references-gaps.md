@@ -650,6 +650,16 @@ decay, match-scrutinee dissolution) and the implementation anchors live in
 `docs/plans/references/stage1/semantics.md`; that file is the single source
 of truth for the rules.
 
+**Amendment (2026-06-09): borrow-convention argument positions are place
+contexts.** A `&T`/`&mutating T` passed where the param convention is
+borrow (or `mutating`, which requires `&mutating T`) passes the referent
+place directly — no copy, NotCopyable pointees legal — symmetric with
+receiver see-through. Copy-out applies only to genuinely owning positions:
+`consuming` params/receivers, assignment RHS, `return` of `T`, `match`
+scrutinees. Cost: the `&T → T` copy-out coercion arm becomes
+convention-aware (one extra solver thread; small bump over the original
+costing). Rules and the no-clone test pins live in the stage-1 plan files.
+
 ### 10.6 No reference types in parameter position — conventions are the only spelling
 
 Decided 2026-06-09: `x: &T` and `x: &mutating T` are **disallowed,

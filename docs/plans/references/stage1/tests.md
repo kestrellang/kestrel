@@ -40,8 +40,30 @@ become *positive* execution tests below). Highest value:
 | `consuming_method_copies_out` | consuming method on a ref receiver consumes a *copy*; original still alive |
 | `scalar_ret_borrow_not_loaded` | the `resolve_scalar` miscompile pin; write-through observation distinguishes pointer-out from value-out |
 | `array_first_accessor` | PointerDerived propagation through `Array.first()` |
-| `mut_to_shared_coercion` | §10.1 — a `.mutatingValue`-rooted ref passed to a borrow param |
+| `mut_to_shared_coercion` | §10.1 — a `.mutatingValue`-rooted ref passed to a borrow param; place pass-through, no copy (borrow-args decision, `semantics.md`) |
 | `intra_block_consume_while_borrowed` | existing `try_consume` gate, inherited free |
+
+### No-clone pins (added 2026-06-09, borrow-args = place contexts)
+
+The rows above pin everywhere a copy *must* happen; these pin where one
+must **not**. Without them every borrowed-self/borrow-arg test passes
+identically under a silently-inserted clone — the CopyValue→clone
+mono-expand machinery is this codebase's most precedented failure mode.
+The NotCopyable variants are the strongest pins: a misclassification as
+value context fails at *compile time* via the copy guards, not as a
+silent perf regression.
+
+| Test | Pins |
+|---|---|
+| `borrowed_self_through_ref_no_clone` | Cloneable pointee with instrumented `clone()` (counter via Pointer cell); borrowed-self method called through `&T`; clone-count == 0 + exact deinit count |
+| `borrowed_self_through_ref_notcopyable` | NotCopyable pointee; borrowed-self method through a ref **compiles** + exact deinit count |
+| `borrow_param_ref_no_clone` | ref passed to a borrow-convention free-function param; clone-count == 0 |
+| `borrow_param_ref_notcopyable` | NotCopyable pointee ref passed to a borrow param; compiles + exact deinit count |
+| `mut_ref_write_through_no_clone` | Cloneable heap pointee mutated through `&mutating`; clone-count == 0 + exact deinit — kills the clone-mutate-writeback impostor that `mut_ref_pass_through` cannot distinguish |
+
+Instrumented `clone()` note: the counting clone must payload-clone
+properly — never `clone() { self }` (the known heap-payload aliasing
+footgun).
 
 ## Harness
 

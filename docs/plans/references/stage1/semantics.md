@@ -68,14 +68,25 @@ there is no way to compare, capture, or name a reference itself in stage 1.
     shared-ref class in `classify_mutability` — see `errors.md`).
   - `consuming` method: **not** a place context — falls through to copy-out
     below (read the place, consume the copy). No new error needed.
+- **Borrow-convention argument position** *(decided 2026-06-09 — borrow
+  args are place contexts, not value contexts)*: a `&T` / `&mutating T`
+  expression passed where the param convention is borrow (`x: T`) passes
+  the referent place directly as the `@guaranteed` argument — no copy, no
+  clone; NotCopyable pointees are legal. (`&mutating T` first coerces via
+  §10.1 — bit-copy, free.) A `mutating x: T` argument position likewise
+  passes the place and requires `&mutating T`; a shared `&T` there is
+  E-REF-20 (already in its trigger list). Receiver position and argument
+  position are thus symmetric: `box.peek().count()` and
+  `count(box.peek())` both borrow in place.
 - **Write-through:** mutating a `&mutating T` place writes the referent —
   `arr.at(i).increment()` mutates the element. Whole-place assignment
   (`arr.at(i) = v`) additionally needs call-as-place grammar → stage 1.5.
 
 ### Value contexts (copy-out)
 
-Using a ref where an owned `T` is expected — argument to a `T` param,
-`consuming` receiver, assignment RHS, `return` of `T`, `match` scrutinee —
+Using a ref where an owned `T` is expected — argument to a `consuming`
+param, `consuming` receiver, assignment RHS, `return` of `T`, `match`
+scrutinee —
 **reads the place**: Copyable copies, Cloneable clones (identical to how
 borrowed-param reads behave today via CopyValue→clone in mono expand),
 NotCopyable is rejected by the existing copy guards (wording extended to
@@ -121,7 +132,14 @@ The cost basis for the decision: ~2-4 wk, concentrated at 4 sites:
    `&mutating T → &T` (§10.1, needed by (c) too) and `&T → T` copy-out.
    Copy-out rides the existing CopyValue→clone mono-expand machinery:
    Copyable copies, Cloneable clones (matches borrowed-param reads today),
-   NotCopyable rejected by the existing copy guards.
+   NotCopyable rejected by the existing copy guards. The copy-out arm must
+   be **convention-aware** (borrow-args decision above): it must *not*
+   fire when the expected position is a borrow- or mutating-convention
+   parameter — those route the existing borrow argument path
+   (`prepare_call_arg_for_expr`), passing the place. This is the one new
+   solver thread beyond the original costing (small bump): the param
+   convention must be consulted at the call-constraint site; #106 put
+   conventions in the type system, so the information is available there.
 4. **One mutability classifier.** `classify_mutability`
    (kestrel-analyze/src/body/access_mode.rs:249) feeds E203-E206 and already
    has the precedent carve-out (#106: a `MutBorrow`-conventioned closure

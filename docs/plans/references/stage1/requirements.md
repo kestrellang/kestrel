@@ -20,9 +20,10 @@ collection access real.
    accessors (`Array.first/at`, Dict internals).
 5. `&mutating T → &T` coercion (one-way, `solve_coerce` arm).
 6. **Transparent place** (Q8 = (a), `semantics.md`): the `solve_member`
-   receiver peel, the `&T → T` copy-out coercion arm, the ref-aware
-   `classify_mutability` extension (E-REF-20), and the
-   `codegen_byref_scalar_deref` bug fix it depends on.
+   receiver peel, the **convention-aware** `&T → T` copy-out coercion arm
+   (borrow-convention argument positions are place contexts — no copy;
+   decided 2026-06-09), the ref-aware `classify_mutability` extension
+   (E-REF-20), and the `codegen_byref_scalar_deref` bug fix it depends on.
 7. Stage-1 negative rules (`errors.md`): no cross-merge ref *places*, no
    function-value / `throws` / generic-arg leakage. (Named bindings and
    `match` scrutinees are no longer errors — they decay; `semantics.md`.)
