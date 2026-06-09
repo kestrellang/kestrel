@@ -4,7 +4,7 @@ use crate::body::OssaBody;
 use crate::inst::InstKind;
 use crate::mono::types::MonoModule;
 use crate::value::Ownership;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Eliminate redundant CopyValue+DestroyValue pairs on monomorphized bodies,
 /// before mono expand turns them into clone/drop calls. When the operand's
@@ -55,18 +55,18 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
     }
 
     // Build use map: for each ValueId, instruction indices where it's an operand.
-    let mut uses: HashMap<ValueId, Vec<usize>> = HashMap::new();
+    let mut uses: FxHashMap<ValueId, Vec<usize>> = FxHashMap::default();
     for (i, inst) in insts.iter().enumerate() {
         for op in inst.kind.operands() {
             uses.entry(op).or_default().push(i);
         }
     }
-    let terminator_uses: HashSet<ValueId> = block.terminator.kind.operands().into_iter().collect();
+    let terminator_uses: FxHashSet<ValueId> = block.terminator.kind.operands().into_iter().collect();
 
     // Forward scan: track active borrows at each instruction index.
-    let mut frozen: HashMap<ValueId, u32> = HashMap::new();
-    let mut borrow_source_map: HashMap<ValueId, ValueId> = HashMap::new();
-    let mut frozen_at: Vec<HashSet<ValueId>> = Vec::with_capacity(insts.len());
+    let mut frozen: FxHashMap<ValueId, u32> = FxHashMap::default();
+    let mut borrow_source_map: FxHashMap<ValueId, ValueId> = FxHashMap::default();
+    let mut frozen_at: Vec<FxHashSet<ValueId>> = Vec::with_capacity(insts.len());
 
     for inst in insts {
         frozen_at.push(frozen.keys().filter(|k| frozen[k] > 0).copied().collect());
@@ -89,9 +89,9 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
     }
 
     // Find CopyValue+DestroyValue pairs to eliminate.
-    let mut replace_with_move: HashSet<usize> = HashSet::new();
-    let mut delete_indices: HashSet<usize> = HashSet::new();
-    let mut claimed: HashSet<ValueId> = HashSet::new();
+    let mut replace_with_move: FxHashSet<usize> = FxHashSet::default();
+    let mut delete_indices: FxHashSet<usize> = FxHashSet::default();
+    let mut claimed: FxHashSet<ValueId> = FxHashSet::default();
 
     for (i, inst) in insts.iter().enumerate() {
         let InstKind::CopyValue { result, operand } = &inst.kind else {

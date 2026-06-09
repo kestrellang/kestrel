@@ -6,7 +6,9 @@
 //! over the CFG — no fixpoint needed because the block-parameter live-in
 //! contract guarantees each block can be verified in isolation.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
@@ -54,7 +56,7 @@ pub fn verify_ossa(
     check_operands_defined(body, func_name, entity, &mut errors);
 
     // Forward BFS walk from the entry block.
-    let mut visited = HashSet::new();
+    let mut visited = FxHashSet::default();
     let mut queue = VecDeque::new();
     queue.push_back(body.entry);
 
@@ -87,7 +89,7 @@ fn check_value_uniqueness(
     errors: &mut Vec<VerifyError>,
 ) {
     // Map from ValueId -> (block that defined it).
-    let mut definitions: HashMap<ValueId, BlockId> = HashMap::new();
+    let mut definitions: FxHashMap<ValueId, BlockId> = FxHashMap::default();
 
     for (block_idx, block) in body.blocks.iter().enumerate() {
         let block_id = BlockId::new(block_idx);
@@ -148,7 +150,7 @@ fn check_operands_defined(
     errors: &mut Vec<VerifyError>,
 ) {
     // Collect all definitions: function params + block params + instruction results.
-    let mut definitions: HashSet<ValueId> = HashSet::new();
+    let mut definitions: FxHashSet<ValueId> = FxHashSet::default();
     for i in 0..body.param_count {
         definitions.insert(ValueId::new(i));
     }
@@ -228,7 +230,7 @@ enum AddrKind {
     SubField {
         #[allow(dead_code)]
         ty: TyId,
-        fields: HashMap<FieldIdx, InitState>,
+        fields: FxHashMap<FieldIdx, InitState>,
     },
 }
 
@@ -240,13 +242,13 @@ struct BlockVerifier<'a> {
     entity: Entity,
 
     /// Tracks @owned values: Live or Consumed.
-    owned: HashMap<ValueId, ValueState>,
+    owned: FxHashMap<ValueId, ValueState>,
     /// Active borrows keyed by the @guaranteed result value.
-    borrows: HashMap<ValueId, BorrowInfo>,
+    borrows: FxHashMap<ValueId, BorrowInfo>,
     /// Address init states.
-    addrs: HashMap<ValueId, AddrKind>,
+    addrs: FxHashMap<ValueId, AddrKind>,
     /// Maps a FieldAddr result -> (base_addr, field_idx).
-    field_addr_map: HashMap<ValueId, (ValueId, FieldIdx)>,
+    field_addr_map: FxHashMap<ValueId, (ValueId, FieldIdx)>,
 
     errors: Vec<VerifyError>,
 }
@@ -265,10 +267,10 @@ impl<'a> BlockVerifier<'a> {
             block_id,
             func_name,
             entity,
-            owned: HashMap::new(),
-            borrows: HashMap::new(),
-            addrs: HashMap::new(),
-            field_addr_map: HashMap::new(),
+            owned: FxHashMap::default(),
+            borrows: FxHashMap::default(),
+            addrs: FxHashMap::default(),
+            field_addr_map: FxHashMap::default(),
             errors: Vec::new(),
         }
     }
@@ -880,7 +882,7 @@ impl<'a> BlockVerifier<'a> {
                 // Look up how many fields this type has.
                 let field_count = self.struct_field_count(*ty);
                 if let Some(count) = field_count {
-                    let mut fields = HashMap::new();
+                    let mut fields = FxHashMap::default();
                     for i in 0..count {
                         fields.insert(FieldIdx::new(i), InitState::Uninit);
                     }
@@ -910,7 +912,7 @@ impl<'a> BlockVerifier<'a> {
         let term = &block.terminator.kind;
 
         // Collect all values forwarded as block args by the terminator.
-        let mut forwarded: HashSet<ValueId> = HashSet::new();
+        let mut forwarded: FxHashSet<ValueId> = FxHashSet::default();
         for (target, args) in term.successor_args() {
             let target_block = self.body.block(target);
 
@@ -1007,7 +1009,7 @@ impl<'a> BlockVerifier<'a> {
         }
 
         // Check 4: every borrow must be ended or forwarded as @guaranteed block arg.
-        let forwarded_borrows: HashSet<ValueId> = forwarded
+        let forwarded_borrows: FxHashSet<ValueId> = forwarded
             .iter()
             .copied()
             .filter(|v| self.body.value(*v).ownership == Ownership::Guaranteed)
