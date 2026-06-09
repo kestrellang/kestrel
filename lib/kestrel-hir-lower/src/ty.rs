@@ -801,6 +801,47 @@ impl QueryFn for LowerCallableReturnType {
     }
 }
 
+/// A callable's reference-return convention (`-> &T` / `-> &mutating T`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RefReturn {
+    pub mutating: bool,
+}
+
+/// Query: does this callable return a reference (the `ret_borrow` ABI)?
+///
+/// THE single front-end derivation of the return convention (the MIR twin is
+/// `kestrel_mir::item::function::ret_convention`). Consumers — the solver's
+/// ref-returning-function-as-value check, analyze's mutability classifier and
+/// ambiguous-root rule, MIR signature lowering — ask this query; nobody
+/// re-matches `HirTy::Ref` ad hoc. CONTRACT: this (keyed by the resolved
+/// callee entity) is the ground truth for "is this call a place"; an
+/// expression's recorded `&T` type is a sufficient-but-not-necessary signal
+/// (solver ordering can pin a call-result var to the pointee type first).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct CallableRefReturn {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for CallableRefReturn {
+    type Output = Option<RefReturn>;
+
+    fn describe(&self) -> String {
+        format!("CallableRefReturn(entity={:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<RefReturn> {
+        let ret = ctx.query(LowerCallableReturnType {
+            entity: self.entity,
+            root: self.root,
+        });
+        match ret {
+            HirTy::Ref { mutating, .. } => Some(RefReturn { mutating }),
+            _ => None,
+        }
+    }
+}
+
 /// Query: lower a declaration entity's Callable param types to HirTy.
 ///
 /// Reads the `Callable` component and lowers each param's type annotation.

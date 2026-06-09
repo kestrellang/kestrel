@@ -357,6 +357,14 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
+    /// Allocate a TyVar bound to a reference type (`&T` / `&mutating T`).
+    pub fn ref_ty(&mut self, pointee: TyVar, mutating: bool) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types
+            .push(TySlot::Resolved(TyKind::Ref { pointee, mutating }));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar for abstract `Self` inside `extend P` / `protocol P`.
     /// Behaves like `protocol_ty(P, vec![])` for associated-type / conformance
     /// lookups but is distinguished at output so MIR sees `MirTy::SelfType`.

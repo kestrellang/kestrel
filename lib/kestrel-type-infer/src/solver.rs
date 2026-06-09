@@ -313,6 +313,7 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
             TySlot::Resolved(TyKind::Function { params, ret, .. }) => {
                 params.iter().any(|&param| walk(ctx, param, seen)) || walk(ctx, *ret, seen)
             },
+            TySlot::Resolved(TyKind::Ref { pointee, .. }) => walk(ctx, *pointee, seen),
             TySlot::Resolved(TyKind::AssocProjection { base, .. }) => walk(ctx, *base, seen),
             TySlot::Resolved(TyKind::Opaque {
                 bounds,
@@ -1618,6 +1619,10 @@ fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool, d
         TyKind::Tuple(elems) => elems
             .iter()
             .all(|&e| type_conforms_copyable(ctx, e, want_cloneable, depth + 1)),
+        // A ref in copy position decays to its pointee — judge the pointee.
+        TyKind::Ref { pointee, .. } => {
+            type_conforms_copyable(ctx, pointee, want_cloneable, depth + 1)
+        },
         // Mirror `hir_type_copy_semantics`: protocol existentials / `some P` /
         // functions are Copyable; an abstract associated projection is not
         // known-copyable.
@@ -2458,7 +2463,15 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
         };
 
         // Get the concrete arg type
-        let arg_resolved = ctx.resolve(arg.ty);
+        let mut arg_resolved = ctx.resolve(arg.ty);
+        // Transparent place: a ref-typed argument disambiguates as its
+        // POINTEE — borrow params receive the place, consuming params the
+        // decayed copy, so `f(box.peek())` matches `f(x: T)` overloads.
+        if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Ref { pointee, .. }) =
+            &ctx.types[arg_resolved.0 as usize]
+        {
+            arg_resolved = ctx.resolve(*pointee);
+        }
         let arg_kind = match &ctx.types[arg_resolved.0 as usize] {
             crate::ty::TySlot::Resolved(k) => k,
             _ => return false, // not concrete — shouldn't happen (caller checks)
@@ -3824,6 +3837,11 @@ pub fn kind_to_tyvar_sub(
                 index: *index,
             }));
             TyVar(idx)
+        },
+        TyKind::Ref { pointee, mutating } => {
+            let pointee_tv =
+                kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *pointee), self_entity, recv_tv);
+            ctx.ref_ty(pointee_tv, *mutating)
         },
         TyKind::Never => ctx.never(),
         TyKind::Error => {

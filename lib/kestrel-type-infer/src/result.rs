@@ -124,6 +124,15 @@ pub enum ResolvedTy {
         origin_args: Vec<ResolvedTy>,
         index: u32,
     },
+    /// Second-class reference `&T` / `&mutating T` — a ret_borrow call
+    /// result's expression type. MIR lowering PEELS it (a ref-typed value
+    /// registers as a @guaranteed pointee value), so consumers must not key
+    /// place-ness on this alone: the callee's `CallableRefReturn` is ground
+    /// truth (solver ordering can pin a result var to the pointee first).
+    Ref {
+        pointee: Box<ResolvedTy>,
+        mutating: bool,
+    },
     Never,
     Error,
 }
@@ -217,6 +226,10 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .map(|&tv| resolve_to_concrete(ctx, tv))
                 .collect(),
             index: *index,
+        },
+        TyKind::Ref { pointee, mutating } => ResolvedTy::Ref {
+            pointee: Box::new(resolve_to_concrete(ctx, *pointee)),
+            mutating: *mutating,
         },
         TyKind::Never => ResolvedTy::Never,
         TyKind::Error => ResolvedTy::Error,
@@ -350,6 +363,10 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", assoc));
             format!("{}.{}", base_str, assoc_name)
+        },
+        TyKind::Ref { pointee, mutating } => {
+            let prefix = if *mutating { "&mutating " } else { "&" };
+            format!("{prefix}{}", describe_tyvar(ctx, *pointee))
         },
         TyKind::Tuple(elems) => {
             if elems.is_empty() {
