@@ -63,6 +63,11 @@ struct SavedState {
     /// it must be swapped out for the closure's separate arena (otherwise a
     /// stale forwarding entry resolves into the wrong arena: out-of-bounds).
     value_forwarding: HashMap<ValueId, ValueId>,
+    /// ret_borrow is per-body: a closure can never ret_borrow (E491), so it
+    /// lowers with `false` and the parent's flag is restored after.
+    ret_borrow: bool,
+    /// Per-body value ids — same swap rationale as `value_forwarding`.
+    ref_results: std::collections::HashSet<ValueId>,
 }
 
 impl OssaBodyCtx<'_, '_> {
@@ -261,6 +266,8 @@ impl OssaBodyCtx<'_, '_> {
             temp_counter: self.temp_counter,
             body_context: std::mem::replace(&mut self.body_context, super::BodyContext::Normal),
             value_forwarding: mem::take(&mut self.value_forwarding),
+            ret_borrow: mem::replace(&mut self.ret_borrow, false),
+            ref_results: mem::take(&mut self.ref_results),
         };
         self.current_block = Some(entry_block);
         self.temp_counter = 0;
@@ -348,6 +355,8 @@ impl OssaBodyCtx<'_, '_> {
         self.temp_counter = saved.temp_counter;
         self.body_context = saved.body_context;
         self.value_forwarding = saved.value_forwarding;
+        self.ret_borrow = saved.ret_borrow;
+        self.ref_results = saved.ref_results;
 
         // Attach body and register function
         func_def.body = Some(completed_body);

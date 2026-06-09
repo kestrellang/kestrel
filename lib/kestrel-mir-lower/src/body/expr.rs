@@ -257,16 +257,7 @@ impl OssaBodyCtx<'_, '_> {
                 } else {
                     self.emit_literal(Immediate::unit())
                 };
-                // @guaranteed values can't be returned — copy to @owned first
-                let ret_val = if self.body.value(ret_val).ownership
-                    == kestrel_mir::value::Ownership::Guaranteed
-                {
-                    let owned = self.emit_copy_value(ret_val);
-                    self.emit_end_borrow(ret_val);
-                    owned
-                } else {
-                    ret_val
-                };
+                let ret_val = self.prepare_return_value(ret_val);
                 let ret_val = if is_failure_return {
                     self.emit_init_partial_drops(ret_val)
                 } else {

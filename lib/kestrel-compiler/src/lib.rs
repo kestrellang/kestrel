@@ -225,7 +225,12 @@ impl Compiler {
         let errors = kestrel_mir::passes::run_pipeline(&mut mir, &target, &mut next_entity);
         if !errors.is_empty() {
             let ctx = self.world().query_context();
-            for error in &errors {
+            // Cascade suppression: a coded user error (escape check) makes the
+            // module invalid, and the ownership ICEs that follow from lowering
+            // an invalid ret_borrow body are noise — report only the coded
+            // ones. Uncoded errors alone are real ICEs and surface as such.
+            let has_coded = errors.iter().any(|e| e.diag.is_some());
+            for error in errors.iter().filter(|e| !has_coded || e.diag.is_some()) {
                 ctx.accumulate(diagnostic::mir_verify_error_to_diagnostic(
                     error,
                     self.world(),

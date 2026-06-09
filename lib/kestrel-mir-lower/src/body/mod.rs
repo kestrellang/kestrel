@@ -320,6 +320,16 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// Single source of truth: every cross-block rename funnels through
     /// `rebind_scope_values`, which records the mapping here.
     pub(crate) value_forwarding: HashMap<ValueId, ValueId>,
+    /// Whether this body returns a borrowed reference (`-> &T`, the
+    /// ret_borrow ABI). Gates `prepare_return_value` and the
+    /// `set_terminator` carve-out. Saved/restored across closure bodies
+    /// (closures can never ret_borrow — E491 rejects the function type).
+    pub(crate) ret_borrow: bool,
+    /// @guaranteed results of ret_borrow calls in this body. A ref is
+    /// intra-block in stage 1: force-ending one at a non-Return terminator
+    /// is the E497 "ref across a control-flow merge" error, not a silent
+    /// EndBorrow. Per-body value ids — saved/restored across closures.
+    pub(crate) ref_results: std::collections::HashSet<ValueId>,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -355,6 +365,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             local_use_counts: HashMap::new(),
             init_field_flags: Vec::new(),
             value_forwarding: HashMap::new(),
+            ret_borrow: false,
+            ref_results: std::collections::HashSet::new(),
         }
     }
 
@@ -395,6 +407,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .get(&self.func_entity)
             .map(|f| f.params.iter().map(|p| p.convention).collect())
             .unwrap_or_default();
+        self.ret_borrow = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .is_some_and(|f| {
+                matches!(
+                    kestrel_mir::item::function::ret_convention(&self.ctx.module.ty_arena, f.ret),
+                    kestrel_mir::item::function::RetConvention::RefBorrow { .. }
+                )
+            });
         let is_init_body = self
             .ctx
             .module
@@ -486,14 +509,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 let tail_span = expr_span(&self.hir, tail);
                 let value = self.lower_expr_for_return(tail);
                 if !self.is_terminated() {
-                    // @guaranteed values can't be returned — copy to @owned first
-                    let value = if self.body.value(value).ownership == Ownership::Guaranteed {
-                        let owned = self.emit_copy_value(value);
-                        self.emit_end_borrow(value);
-                        owned
-                    } else {
-                        value
-                    };
+                    let value = self.prepare_return_value(value);
 
                     self.drain_deferred_borrows();
                     let prev = self.current_span.replace(tail_span);
@@ -1353,6 +1369,35 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.push_inst(InstKind::EndBorrow { operand });
     }
 
+    /// The function-exit ownership gate, shared by the block-tail and
+    /// explicit-`return` paths. Non-ret_borrow functions must return @owned —
+    /// a @guaranteed tail is copied out (the historical copy guard, verbatim).
+    /// A ret_borrow function returns the borrow itself: @guaranteed passes
+    /// through; an @owned result is borrowed in place — its provenance root
+    /// decides escape legality downstream (an owned temporary roots `Local`
+    /// and is rejected by E494; verify's Return hardening backstops both
+    /// directions). The returned borrow is untracked: it deliberately
+    /// outlives the body (Check 4's ret_borrow carve-out forwards it).
+    pub fn prepare_return_value(&mut self, value: ValueId) -> ValueId {
+        let guaranteed = self.body.value(value).ownership == Ownership::Guaranteed;
+        if self.ret_borrow {
+            let v = if guaranteed {
+                value
+            } else {
+                self.emit_begin_borrow(value)
+            };
+            self.deferred_end_borrows.retain(|&x| x != v);
+            self.untrack_borrow(v);
+            return v;
+        }
+        if guaranteed {
+            let owned = self.emit_copy_value(value);
+            self.emit_end_borrow(value);
+            return owned;
+        }
+        value
+    }
+
     pub fn drain_deferred_borrows(&mut self) {
         let borrows: Vec<ValueId> = self.deferred_end_borrows.drain(..).collect();
         for v in borrows {
@@ -1811,9 +1856,55 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             Callee::Thick(v) => Callee::Thick(self.resolve_value(v)),
             other => other,
         };
+        // ret_borrow callee? Only Direct callees can be: function values
+        // (Thin/Thick) are rejected by E491 and witness ref-returns are out
+        // of stage 1's scope. `result_ty` is already the PEELED pointee
+        // (ResolvedTy lowering peels Ref), so the convention must come from
+        // the callee's signature, not the result type.
+        let ret_ref_mutating: Option<bool> = match &callee {
+            Callee::Direct { func, .. } => {
+                self.ctx.module.functions.get(func).and_then(|f| {
+                    match kestrel_mir::item::function::ret_convention(
+                        &self.ctx.module.ty_arena,
+                        f.ret,
+                    ) {
+                        kestrel_mir::item::function::RetConvention::RefBorrow { mutating } => {
+                            Some(mutating)
+                        },
+                        kestrel_mir::item::function::RetConvention::Value => None,
+                    }
+                })
+            },
+            _ => None,
+        };
         let result = result_ty.map(|ty| {
-            let ownership = self.ownership_for(ty);
-            self.alloc_value(ty, ownership)
+            if let Some(mutating) = ret_ref_mutating {
+                // Register the returned ref @guaranteed against the borrow it
+                // travels from: the receiver / unique borrow-convention arg
+                // (the E493 decl rule makes it unique; for methods that is
+                // args[0]). With no borrowable arg the callee's root must be
+                // Static/PointerDerived — inherit the pointer's contract.
+                let source = args
+                    .iter()
+                    .find(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
+                    .map(|a| a.value);
+                match source {
+                    Some(src) => self.alloc_guaranteed(ty, src),
+                    None => self.body.alloc_value(
+                        ValueDef {
+                            ty,
+                            ownership: Ownership::Guaranteed,
+                            borrow_source: None,
+                            root: RootProvenance::PointerDerived { mutable: mutating },
+                            span: None,
+                        }
+                        .with_span(self.current_span.clone()),
+                    ),
+                }
+            } else {
+                let ownership = self.ownership_for(ty);
+                self.alloc_value(ty, ownership)
+            }
         });
         let mut borrows: Vec<ValueId> = args
             .iter()
@@ -1838,9 +1929,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         for v in consuming {
             self.consume(v);
         }
-        for borrow_val in borrows {
-            self.emit_end_borrow(borrow_val);
+        if ret_ref_mutating.is_none() {
+            for borrow_val in borrows {
+                self.emit_end_borrow(borrow_val);
+            }
         }
+        // else: the arg borrows stay scope-tracked — every potential root
+        // must outlive the returned ref (cheap under may-alias); the scope
+        // machinery ends them at scope exit or the next terminator.
         self.drain_deferred_borrows();
         if let (Some(ty), Some(r)) = (result_ty, result) {
             if matches!(self.ctx.module.ty_arena.get(ty), MirTy::Never) {
@@ -1848,7 +1944,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 self.set_terminator(TerminatorKind::Panic("noreturn".to_string()));
                 return Some(r);
             }
-            self.track_owned(r);
+            if ret_ref_mutating.is_some() {
+                self.track_borrow(r);
+                self.ref_results.insert(r);
+            } else {
+                self.track_owned(r);
+            }
         }
         result
     }
@@ -1888,7 +1989,27 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .entries
                 .retain(|e| !matches!(e, ScopeEntry::Borrow(_)));
         }
+        // ret_borrow carve-out: the one returned borrow IS the function's
+        // result — it outlives the body (belt-and-suspenders with
+        // prepare_return_value's untrack; covers Returns routed elsewhere).
+        let returned = match &kind {
+            TerminatorKind::Return(v) if self.ret_borrow => Some(*v),
+            _ => None,
+        };
+        let ends_block_inside_fn = !matches!(
+            kind,
+            TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable
+        );
         for v in all_borrows {
+            if Some(v) == returned {
+                continue;
+            }
+            // A ret_borrow call result crossing a Jump/Branch/Switch would
+            // dangle past the merge — stage 1 keeps refs intra-block (E497).
+            // Still EndBorrow for IR sanity; the error aborts compilation.
+            if ends_block_inside_fn && self.ref_results.contains(&v) {
+                self.emit_ref_across_merge_error(v);
+            }
             self.push_inst(InstKind::EndBorrow { operand: v });
         }
         let term = Terminator {
@@ -1898,6 +2019,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(block_id) = self.current_block {
             self.body.block_mut(block_id).terminator = term;
         }
+    }
+
+    /// E497: a reference (ret_borrow call result) used as a place across a
+    /// control-flow merge. Deliberate v1 limitation — suggest hoisting.
+    fn emit_ref_across_merge_error(&mut self, v: ValueId) {
+        let span = self
+            .body
+            .value(v)
+            .span
+            .clone()
+            .or_else(|| self.current_span.clone())
+            .unwrap_or_else(|| Span::synthetic(0));
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_code("E497")
+                .with_message(
+                    "a reference cannot stay live across a control-flow merge in this version",
+                )
+                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                    "this reference would cross an `if`/`match`/loop boundary",
+                )])
+                .with_notes(vec![
+                    "bind the value first (`let x = ...;`) or hoist the branching expression \
+                     into its own binding"
+                        .into(),
+                ]),
+        );
     }
 
     pub fn emit_ret(&mut self, value: ValueId) {
