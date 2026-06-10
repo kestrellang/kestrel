@@ -1974,10 +1974,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let ret_pointer_derived = ret_ref_mutating.is_some()
             && match &callee {
                 Callee::Direct { func, .. } => {
-                    self.ctx.query.query(crate::context::RetRefPointerDerived {
-                        entity: *func,
-                        root: self.ctx.root,
-                    })
+                    self.ctx
+                        .query
+                        .query(kestrel_type_infer::RetRefPointerDerived {
+                            entity: *func,
+                            root: self.ctx.root,
+                        })
                 },
                 _ => false,
             };

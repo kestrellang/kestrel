@@ -53,6 +53,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
+    r.add_body_check(body::dangle_ref::DangleRefAnalyzer);
 
     // Wave 6: Pattern checks
     r.add_body_check(body::refutable_pattern::RefutablePatternAnalyzer);

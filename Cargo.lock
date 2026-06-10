@@ -802,6 +802,7 @@ dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
  "kestrel-copy-fold",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",

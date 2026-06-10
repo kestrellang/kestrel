@@ -221,6 +221,7 @@ Current allocations:
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)
 - E503: `move_out_of_borrow` (body/move_tracking.rs) — moving a non-Copyable value bound from a borrowed scrutinee; backstopped in MIR lowering by `emit_copy_value` (kestrel-mir-lower `body/mod.rs`), which emits the same code E503 for shapes the front-end can't see (e.g. binding decay of a ref to a NotCopyable pointee)
+- E504: `dangling_pointer_ref` (body/dangle_ref.rs) — WARNING: ref-returning body returns `Pointer(to: <same-fn local>).value`/`.mutatingValue` (traced through single-assignment `let` pointers); the storage dies at return. Claims nothing beyond that shape (references-gaps.md §10.3). Wrapper recognition shares `kestrel_type_infer::RetRefPointerDerived` (moved there from mir-lower so both can reach it)
 - E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
 - E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build
