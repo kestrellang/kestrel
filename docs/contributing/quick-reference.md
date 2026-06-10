@@ -160,10 +160,10 @@ Given a body entity, these queries give you the data an analyzer typically needs
 
 | Query | Output |
 |-------|--------|
-| `LowerBody { entity, root }` | `Option<HirBody>` — desugared body with scoped names resolved. |
-| `InferBody { entity, root }` | `Option<TypedBody>` — types, resolved members, promotions. |
+| `LowerBody { entity, root }` | `Option<Arc<HirBody>>` — desugared body with scoped names resolved. |
+| `InferBody { entity, root }` | `Option<Arc<TypedBody>>` — types, resolved members, promotions. |
 | `WhereClausesOf { entity, root }` | Resolved where-clause constraints in scope. |
-| `Analyze { analyzer, entity, root }` | Diagnostics from one analyzer on one entity. |
+| `Analyze { analyzer, entity, root }` | Diagnostics from one analyzer on one entity. `analyzer` is an `AnalyzerId` enum variant (`lib/kestrel-analyze/src/traits.rs`), not a string. |
 
 See each crate's `docs/architecture.md` for the full query list.
 

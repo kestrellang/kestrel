@@ -18,6 +18,7 @@
 //! preserves the historical behavior for non-place receivers).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, NodeKind, Static};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
@@ -129,24 +130,26 @@ pub struct ClosureCaptures {
 }
 
 impl QueryFn for ClosureCaptures {
-    type Output = ClosureCaptureMap;
+    // Arc-wrapped: memo cache hits clone the Output, so share one allocation
+    // instead of deep-copying the per-body capture map.
+    type Output = Arc<ClosureCaptureMap>;
 
     fn describe(&self) -> String {
         format!("ClosureCaptures(entity={:?})", self.entity)
     }
 
-    fn execute(&self, query_ctx: &QueryContext<'_>) -> ClosureCaptureMap {
+    fn execute(&self, query_ctx: &QueryContext<'_>) -> Arc<ClosureCaptureMap> {
         let Some(hir) = query_ctx.query(LowerBody {
             entity: self.entity,
             root: self.root,
         }) else {
-            return ClosureCaptureMap::default();
+            return Arc::new(ClosureCaptureMap::default());
         };
         let Some(typed) = query_ctx.query(InferBody {
             entity: self.entity,
             root: self.root,
         }) else {
-            return ClosureCaptureMap::default();
+            return Arc::new(ClosureCaptureMap::default());
         };
 
         let mut map = HashMap::new();
@@ -156,7 +159,7 @@ impl QueryFn for ClosureCaptures {
                 map.insert(expr_id, places);
             }
         }
-        ClosureCaptureMap { map }
+        Arc::new(ClosureCaptureMap { map })
     }
 }
 

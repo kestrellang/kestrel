@@ -30,7 +30,9 @@ pub struct LowerBody {
 }
 
 impl QueryFn for LowerBody {
-    type Output = Option<HirBody>;
+    // Arc-wrapped: memo cache hits clone the Output, so large results
+    // share one allocation instead of deep-copying.
+    type Output = Option<Arc<HirBody>>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Self::Output {
         // Read components and call sub-queries — never mutate the world.
@@ -51,6 +53,7 @@ Rules of thumb:
 3. **Prefer calling sub-queries to re-reading components.** `ctx.query(OtherQuery { … })` is memoized and participates in change tracking; open-coding the work defeats the cache.
 4. **`root` is always passed through.** It's the compilation root entity; most queries need it to find registries.
 5. **Fail soft.** If a required component is missing, return `None` / `vec![]` / `Ty::Error` — don't panic. Upstream passes emit diagnostics; downstream queries handle Error types gracefully.
+6. **Arc-wrap large outputs.** Memo cache hits clone the `Output`, so big, widely re-queried results (`HirBody`, `TypedBody`, `Scope`) go behind `Arc` — a hit then clones the handle, not the data. Precedent: `ScopeFor`, `LowerBody`, `InferBody`.
 
 ## Adding a component
 

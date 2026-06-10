@@ -25,6 +25,7 @@ pub mod unify;
 pub mod where_clauses;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, EnclosingContainer, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
@@ -63,13 +64,15 @@ pub struct InferBody {
 }
 
 impl QueryFn for InferBody {
-    type Output = Option<TypedBody>;
+    // Arc-wrapped: TypedBody is large and widely re-queried; memo cache hits
+    // clone the Output, so share one allocation instead of deep-copying.
+    type Output = Option<Arc<TypedBody>>;
 
     fn describe(&self) -> String {
         format!("InferBody(entity={:?})", self.entity)
     }
 
-    fn execute(&self, query_ctx: &QueryContext<'_>) -> Option<TypedBody> {
+    fn execute(&self, query_ctx: &QueryContext<'_>) -> Option<Arc<TypedBody>> {
         // Get the HIR body
         let hir = query_ctx.query(LowerBody {
             entity: self.entity,
@@ -115,7 +118,7 @@ impl QueryFn for InferBody {
         }
 
         // Build output
-        Some(result::build_result(&infer_ctx))
+        Some(Arc::new(result::build_result(&infer_ctx)))
     }
 }
 

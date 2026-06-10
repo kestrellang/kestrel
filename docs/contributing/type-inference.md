@@ -9,7 +9,7 @@ Source ─▶ … ─▶ HIR Lower (HirBody) ─▶ Type Infer (TypedBody) ─�
                                        ^^^ this crate
 ```
 
-Inference is a memoized query: `InferBody { entity, root }`. You get a `TypedBody` with:
+Inference is a memoized query: `InferBody { entity, root }`, returning `Option<Arc<TypedBody>>` (Arc-shared so cache hits don't deep-copy). The `TypedBody` has:
 
 - Resolved types for every `HirExprId` / `HirPatId`.
 - Resolved member resolutions (which entity a method / field / subscript call landed on).

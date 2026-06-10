@@ -14,12 +14,13 @@
 //! type extensions, then conformed-protocol extensions. Callers using
 //! insert-overwrite semantics get "type declaration wins."
 
+use std::sync::Arc;
+
 use kestrel_ast_builder::{Callable, Gettable, NodeKind};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::conformances::ConformingProtocols;
-use crate::extensions::ExtensionsFor;
 use crate::helpers::filter_members_by_name;
+use crate::traversal::{MemberMap, collect_members_transitive};
 
 /// A member discovered via type traversal, with provenance info.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -45,6 +46,10 @@ pub enum TypeMemberSource {
 
 // ===== TypeMembers =====
 
+/// Name-indexed map of every member discoverable on a type. See
+/// `MemberMap` for the order/precedence guarantees.
+pub type TypeMemberMap = MemberMap<TypeMember>;
+
 /// Query: every member discoverable on a type.
 ///
 /// Walks (in order):
@@ -63,14 +68,37 @@ pub struct TypeMembers {
 }
 
 impl QueryFn for TypeMembers {
-    type Output = Vec<TypeMember>;
+    type Output = Arc<TypeMemberMap>;
 
     fn describe(&self) -> String {
         format!("TypeMembers({:?})", self.type_entity)
     }
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<TypeMember> {
-        collect_type_members(ctx, self.type_entity, self.root)
+    fn execute(&self, ctx: &QueryContext<'_>) -> Arc<TypeMemberMap> {
+        // Types never inherit a protocol's *direct* children — only
+        // protocol-extension members surface on conforming types.
+        let members = collect_members_transitive(
+            ctx,
+            self.type_entity,
+            self.root,
+            false,
+            is_member,
+            |entity, via_protocol, extension| TypeMember {
+                entity,
+                source: match (via_protocol, extension) {
+                    (None, None) => TypeMemberSource::Direct,
+                    (None, Some(ext)) => TypeMemberSource::Extension(ext),
+                    (Some(protocol), Some(extension)) => TypeMemberSource::ProtocolExtension {
+                        protocol,
+                        extension,
+                    },
+                    (Some(_), None) => {
+                        unreachable!("parent direct children disabled for TypeMembers")
+                    },
+                },
+            },
+        );
+        Arc::new(TypeMemberMap::build(ctx, members, |m| m.entity))
     }
 }
 
@@ -97,76 +125,18 @@ impl QueryFn for TypeMembersByName {
     }
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Vec<TypeMember> {
-        let all = ctx.query(TypeMembers {
+        let map = ctx.query(TypeMembers {
             type_entity: self.type_entity,
             root: self.root,
         });
-        filter_members_by_name(ctx, all, &self.name, self.context, |m| m.entity)
+        // Bucket lookup replaces the full scan; the visibility check stays
+        // here because it's per-`context` and can't be baked into the map.
+        let bucket: Vec<TypeMember> = map.named(&self.name).cloned().collect();
+        filter_members_by_name(ctx, bucket, &self.name, self.context, |m| m.entity)
     }
 }
 
 // ===== Internal =====
-
-fn collect_type_members(
-    ctx: &QueryContext<'_>,
-    type_entity: Entity,
-    root: Entity,
-) -> Vec<TypeMember> {
-    let mut out = Vec::new();
-
-    // 1. Direct children of the type.
-    for &child in ctx.children_of(type_entity) {
-        if is_member(ctx, child) {
-            out.push(TypeMember {
-                entity: child,
-                source: TypeMemberSource::Direct,
-            });
-        }
-    }
-
-    // 2. Extensions targeting the type.
-    let type_extensions = ctx.query(ExtensionsFor {
-        target: type_entity,
-        root,
-    });
-    for ext in &type_extensions {
-        for &child in ctx.children_of(*ext) {
-            if is_member(ctx, child) {
-                out.push(TypeMember {
-                    entity: child,
-                    source: TypeMemberSource::Extension(*ext),
-                });
-            }
-        }
-    }
-
-    // 3. Extensions targeting protocols the type conforms to.
-    let conformed = ctx.query(ConformingProtocols {
-        entity: type_entity,
-        root,
-    });
-    for &proto in &conformed {
-        let proto_extensions = ctx.query(ExtensionsFor {
-            target: proto,
-            root,
-        });
-        for ext in &proto_extensions {
-            for &child in ctx.children_of(*ext) {
-                if is_member(ctx, child) {
-                    out.push(TypeMember {
-                        entity: child,
-                        source: TypeMemberSource::ProtocolExtension {
-                            protocol: proto,
-                            extension: *ext,
-                        },
-                    });
-                }
-            }
-        }
-    }
-
-    out
-}
 
 /// A "member" is anything a type can be queried for: methods (Callable),
 /// fields/properties (Gettable), type aliases (including qualified forms

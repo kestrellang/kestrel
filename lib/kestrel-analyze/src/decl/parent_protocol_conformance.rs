@@ -130,10 +130,11 @@ fn parent_requirements_satisfied(
     let provided = collect_provided_members(cx, type_entity);
     let mut saw_method_requirement = false;
 
-    for member in cx.query.query(ProtocolMembers {
+    let members = cx.query.query(ProtocolMembers {
         protocol: parent_protocol,
         root: cx.root,
-    }) {
+    });
+    for member in members.iter() {
         if member.extension.is_some() {
             continue;
         }

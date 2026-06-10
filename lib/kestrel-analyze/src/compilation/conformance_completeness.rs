@@ -266,7 +266,7 @@ fn check_protocol_requirements(
         .map(|member| member.entity)
         .collect();
 
-    for member in &members {
+    for member in members.iter() {
         if member.extension.is_some() {
             continue;
         }
@@ -1479,7 +1479,7 @@ fn collect_provided_members_for_conformance(
     // rebuild them for every extension on the same protocol.
     let mut subs_cache: HashMap<Entity, HashMap<Entity, ResolvedTy>> = HashMap::new();
 
-    for member in candidates {
+    for member in candidates.iter() {
         if let TypeMemberSource::ProtocolExtension {
             protocol,
             extension,

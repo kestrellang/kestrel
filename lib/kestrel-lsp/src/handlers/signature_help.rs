@@ -97,7 +97,7 @@ pub fn signature_help_at(
     //    include leading trivia and don't line up exactly with HIR spans, so
     //    we don't try to match end-to-end.)
     let ctx = world.query_context();
-    let hir: HirBody = ctx.query(LowerBody {
+    let hir = ctx.query(LowerBody {
         entity: body_entity,
         root,
     })?;
@@ -108,7 +108,7 @@ pub fn signature_help_at(
         entity: body_entity,
         root,
     });
-    let candidates = resolve_callees(world, &hir, typed.as_ref(), expr_id, body_entity, root)?;
+    let candidates = resolve_callees(world, &hir, typed.as_deref(), expr_id, body_entity, root)?;
     if candidates.is_empty() {
         return None;
     }

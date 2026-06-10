@@ -63,22 +63,35 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
     }
 }
 
-/// Does `entity` answer to the query name?
+/// The name `entity` answers to in member lookups, or `None` for members
+/// that can't be addressed by name.
 ///
-/// Matches the entity's `Name` component literally, OR — for nameless
-/// callables — recognizes the keyword sentinels `"init"` (→ Initializer
-/// NodeKind) and `"subscript"` (→ Subscript marker). Both sentinels are
-/// reserved keywords, so they can't collide with a user-declared method
-/// name.
-pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
+/// The entity's `Name` component wins; nameless callables fall back to the
+/// keyword sentinels `"init"` (Initializer NodeKind) and `"subscript"`
+/// (Subscript marker). Both sentinels are reserved keywords, so they can't
+/// collide with a user-declared member name. Single source of truth for
+/// member-name matching — `member_name_matches` and the build-time
+/// `MemberMap` name index both derive from it.
+pub(crate) fn member_lookup_name<'a>(
+    ctx: &'a QueryContext<'_>,
+    entity: Entity,
+) -> Option<&'a str> {
     if let Some(n) = ctx.get::<Name>(entity) {
-        return n.0 == query;
+        return Some(n.0.as_str());
     }
-    match query {
-        "init" => ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer),
-        "subscript" => ctx.get::<SubscriptMarker>(entity).is_some(),
-        _ => false,
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer) {
+        return Some("init");
     }
+    if ctx.get::<SubscriptMarker>(entity).is_some() {
+        return Some("subscript");
+    }
+    None
+}
+
+/// Does `entity` answer to the query name? See `member_lookup_name` for
+/// the matching rule (literal `Name` or init/subscript keyword sentinel).
+pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
+    member_lookup_name(ctx, entity) == Some(query)
 }
 
 /// Search extensions of `target` for visible members named `member_name`,

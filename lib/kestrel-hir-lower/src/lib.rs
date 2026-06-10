@@ -18,6 +18,8 @@ pub(crate) mod pat;
 mod stmt;
 pub mod ty;
 
+use std::sync::Arc;
+
 use kestrel_ast_builder::{Body, Callable};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
@@ -44,9 +46,11 @@ pub struct LowerBody {
 }
 
 impl QueryFn for LowerBody {
-    type Output = Option<HirBody>;
+    // Arc-wrapped: HirBody is large and widely re-queried; memo cache hits
+    // clone the Output, so share one allocation instead of deep-copying.
+    type Output = Option<Arc<HirBody>>;
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Option<HirBody> {
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<Arc<HirBody>> {
         // Read the AST body component
         let body_component = ctx.get::<Body>(self.entity)?;
         let ast_body = &body_component.0;
@@ -128,7 +132,7 @@ impl QueryFn for LowerBody {
             lower.wrap_init_success_value(Span::synthetic(0))
         };
 
-        Some(HirBody {
+        Some(Arc::new(HirBody {
             exprs: lower.exprs,
             pats: lower.pats,
             stmts: lower.stmts,
@@ -138,7 +142,7 @@ impl QueryFn for LowerBody {
             tail_expr,
             guard_stmts: lower.guard_stmts,
             while_conditions: lower.while_conditions,
-        })
+        }))
     }
 }
 
