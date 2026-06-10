@@ -559,6 +559,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             value,
             span,
         } => {
+            // A `&mutating T`-returning target types as the pointee
+            // (bind_call_result decay) so the value Coerce is `T -> T`.
+            ctx.assign_target_exprs.insert(*target);
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
             ctx.coerce(value_tv, target_tv, *value, span.clone());

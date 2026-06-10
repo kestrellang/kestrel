@@ -243,7 +243,12 @@ impl LowerCtx<'_> {
         // Detected shapes are syntactic; deeper validity (mutability of the
         // resolved binding) is checked later by the assignment analyzer once
         // the desugared `addAssign` is treated as a write to its receiver.
-        if !ast_is_place_expr(body, lhs) {
+        // Call-shaped LHS is admitted TENTATIVELY: a call returning
+        // `&mutating T` (`arr.mutableAt(index: i) += v`) is a writable place,
+        // but only the typed layer can tell it apart from a temporary — the
+        // assignment analyzer rejects the non-ref ones.
+        let call_shaped = matches!(&body.exprs[lhs], AstExpr::Call { .. });
+        if !ast_is_place_expr(body, lhs) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_message("left-hand side of compound assignment is not assignable")

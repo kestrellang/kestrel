@@ -23,7 +23,14 @@ impl OssaBodyCtx<'_, '_> {
         then_body: &HirBlock,
         else_body: Option<&HirBlock>,
     ) -> ValueId {
+        let mark = self.ref_watermark();
         let cond_val = self.lower_expr(condition);
+        // The condition is a complete expression: any ref (single-use) born
+        // inside it and still tracked was fully used — end it now, or the
+        // branch terminator reports a false E497
+        // (`if arr.at(index: i).tag != 0`). Refs born BEFORE the condition
+        // are pending uses of an enclosing expression — leave them.
+        self.end_stale_refs_since(mark);
         let result_ty = self.resolve_expr_type(expr_id);
         let result_ownership = self.ownership_for(result_ty);
 

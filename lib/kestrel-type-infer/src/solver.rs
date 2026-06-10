@@ -2466,6 +2466,7 @@ fn bind_call_result(
         );
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
+            || ctx.assign_target_exprs.contains(&expr)
             || pinned_non_ref
         {
             ctx.equal(result, pointee, span);

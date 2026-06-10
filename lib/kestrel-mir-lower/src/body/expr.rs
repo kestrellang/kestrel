@@ -16,6 +16,7 @@ use kestrel_ast_builder::{Callable, NodeKind, Settable};
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
+use kestrel_mir::op::Op;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
@@ -172,7 +173,16 @@ impl OssaBodyCtx<'_, '_> {
                 }
                 let base_val = self.lower_expr_for_borrow(*base);
                 let result_ty = self.resolve_expr_type(expr_id);
-                self.emit_tuple_extract(base_val, *index, result_ty)
+                let result = self.emit_tuple_extract(base_val, *index, result_ty);
+                // Single-use ref: element copy-out ends the ref (see the
+                // stored-field twin in lower_field).
+                if self.ref_results.contains(&base_val)
+                    && self.body.value(result).ownership
+                        == kestrel_mir::value::Ownership::Owned
+                {
+                    self.emit_end_borrow(base_val);
+                }
+                result
             },
 
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
@@ -449,7 +459,18 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         let base_val = self.lower_expr_for_borrow(base);
-        self.emit_struct_extract(base_val, field_idx, result_ty)
+        let result = self.emit_struct_extract(base_val, field_idx, result_ty);
+        // Stage-1 single-use ref: a Copyable field COPY-OUT through a ref
+        // (`arr.at(index: i).tag`) is the ref's one use — end its borrow
+        // here, or it leaks into the next terminator (false E497 inside an
+        // `if` condition). A non-Copyable field instead keeps a @guaranteed
+        // view alive; ending that view (call-arg machinery) ends the ref.
+        if self.ref_results.contains(&base_val)
+            && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
+        {
+            self.emit_end_borrow(base_val);
+        }
+        result
     }
 
     // ================================================================
@@ -626,6 +647,22 @@ impl OssaBodyCtx<'_, '_> {
 
         // Simple stored assignment
         let rhs = self.lower_expr(value);
+
+        // Store through a `&mutating T` place (`arr.mutableAt(index: i) = v`,
+        // `cell.mutatingValue = v`): the target lowers to a @guaranteed ref
+        // result; PtrTo on a @guaranteed value yields the place's address
+        // (both backends), and StoreAssign drops the old pointee. The store
+        // is the ref's single use, so its borrow ends here.
+        if self.assign_target_is_mut_ref(target) {
+            let ref_val = self.lower_expr(target);
+            let pointee = self.body.value(ref_val).ty;
+            let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+            let addr = self.emit_op1(Op::PtrTo(pointee), ref_val, ptr_ty);
+            self.emit_store_assign(addr, rhs);
+            self.emit_end_borrow(ref_val);
+            return self.emit_literal(Immediate::unit());
+        }
+
         let target_expr = self.hir.exprs[target].clone();
         match target_expr {
             HirExpr::Local(hir_local, _) => {
@@ -737,6 +774,39 @@ impl OssaBodyCtx<'_, '_> {
             _ => {},
         }
         self.emit_literal(Immediate::unit())
+    }
+
+    /// Does this assignment target lower to a `&mutating T` place — a call,
+    /// method call, or computed getter whose resolved callee is ref-returning
+    /// with `mutating: true`? (Shared `&T` targets never reach lowering; the
+    /// assignment analyzer rejects them with E208.)
+    fn assign_target_is_mut_ref(&self, target: HirExprId) -> bool {
+        let callee_entity = match &self.hir.exprs[target] {
+            HirExpr::Field { .. } | HirExpr::MethodCall { .. } => self
+                .typed
+                .as_ref()
+                .and_then(|t| t.resolutions.get(&target))
+                .copied(),
+            HirExpr::Call { callee, .. } => match &self.hir.exprs[*callee] {
+                HirExpr::Def(entity, _, _) => Some(*entity),
+                _ => self
+                    .typed
+                    .as_ref()
+                    .and_then(|t| t.resolutions.get(callee))
+                    .copied(),
+            },
+            _ => None,
+        };
+        let Some(entity) = callee_entity else {
+            return false;
+        };
+        self.ctx
+            .query
+            .query(kestrel_hir_lower::CallableRefReturn {
+                entity,
+                root: self.ctx.root,
+            })
+            .is_some_and(|r| r.mutating)
     }
 
     // ----------------------------------------------------------------

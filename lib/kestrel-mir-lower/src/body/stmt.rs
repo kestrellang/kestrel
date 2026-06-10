@@ -80,6 +80,14 @@ impl OssaBodyCtx<'_, '_> {
             },
         }
 
+        // Statement boundary: a single-use ref still tracked here was fully
+        // used inside the statement — end it before it can leak into a later
+        // terminator as a false E497. No watermark: nothing pending can span
+        // a statement boundary.
+        if !self.is_terminated() {
+            self.end_stale_refs_since(0);
+        }
+
         self.current_span = prev_span;
     }
 }

@@ -42,6 +42,22 @@
 //!   - Message: "not a valid assignment target"
 //!
 //! **Notes:** (none)
+//!
+//! ### E208 — `assign_through_shared_ref` (Error, Correctness)
+//!
+//! **Message:** "cannot assign through a shared reference"
+//!
+//! Fired when the assignment target is a `&T`-returning call or getter
+//! (`arr.at(index: i) = v`, `cell.value = v`). `&mutating T` places are
+//! writable; `&T` places are read-only. The compound-assignment twin
+//! (`arr.at(index: i) += v`) is E207 from the access-mode analyzer (the
+//! desugared `addAssign` receiver is a mutating use of a shared ref).
+//!
+//! **Labels:**
+//! - Primary: the assignment target
+//!   - Message: "this is a '&T' place; only '&mutating T' places can be written"
+//!
+//! **Notes:** (none)
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -66,6 +82,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
         id: "E202",
         name: "assign_to_expression",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    DiagnosticDescriptor {
+        id: "E208",
+        name: "assign_through_shared_ref",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -97,6 +119,53 @@ impl BodyCheck for AssignmentAnalyzer {
                 continue;
             };
             check_target(cx, *target, is_initializer, &mut diags);
+        }
+
+        // Compound assignment (`lhs += rhs`) desugars to a Sugar-wrapped
+        // ProtocolCall, not an Assign. The desugar's syntactic place check
+        // admits call-shaped LHS tentatively (a call may return
+        // `&mutating T`); the typed rejection of the rest lives here.
+        // Non-call receiver shapes (locals, fields) are validated by the
+        // access-mode analyzer's mutating-receiver checks.
+        for (_id, expr) in cx.hir.exprs.iter() {
+            let HirExpr::Sugar {
+                kind: SugarKind::CompoundAssign,
+                inner,
+                ..
+            } = expr
+            else {
+                continue;
+            };
+            let HirExpr::ProtocolCall { receiver, .. } = &cx.hir.exprs[*inner] else {
+                continue;
+            };
+            if !matches!(
+                &cx.hir.exprs[*receiver],
+                HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+            ) {
+                continue;
+            }
+            match util::ref_place(cx, *receiver) {
+                // `&mutating T` call result — a writable place.
+                Some(true) => {},
+                // `&T` — the access-mode analyzer reports E207 on the
+                // mutating `addAssign` receiver; don't double-report.
+                Some(false) => {},
+                // Plain call result: a temporary, not a place.
+                None => {
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[2].id,
+                        severity: DESCRIPTORS[2].default_severity,
+                        message: "left-hand side of compound assignment is not assignable".into(),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, *receiver),
+                            message: "this call does not return a '&mutating' reference".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![],
+                    });
+                },
+            }
         }
 
         diags
@@ -132,6 +201,18 @@ fn check_target(
         // Field access: check Settable component on the resolved entity.
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
+            // Ref-returning getter (`cell.mutatingValue = v`): the place's
+            // writability comes from the REFERENCE type, not the binding —
+            // skip the Settable/base-mutability checks. `&T` is read-only.
+            match util::ref_place(cx, target) {
+                Some(true) => return,
+                Some(false) => {
+                    push_assign_through_shared_ref(cx, target, &mut *diags);
+                    return;
+                },
+                None => {},
+            }
+
             // Check if base is `self` in an initializer
             let is_self_in_init = is_initializer && is_self_local(cx, *base);
             if is_self_in_init {
@@ -249,6 +330,16 @@ fn check_target(
         // is Settable (has a `set { }` block) and the receiver chain is
         // mutable. Non-subscript calls fall through to E202.
         HirExpr::Call { callee, .. } => {
+            // `&mutating T`-returning call (`arr.mutableAt(index: i) = v`):
+            // the result is a writable place; `&T` is read-only.
+            match util::ref_place(cx, target) {
+                Some(true) => return,
+                Some(false) => {
+                    push_assign_through_shared_ref(cx, target, &mut *diags);
+                    return;
+                },
+                None => {},
+            }
             let Some(&sub_entity) = cx.typed.resolutions.get(&target) else {
                 push_assign_to_expression(cx, target, &mut *diags);
                 return;
@@ -292,6 +383,15 @@ fn check_target(
         // and inference resolves the target to the subscript entity on
         // the field's type. Same logic as the Call arm above.
         HirExpr::MethodCall { receiver, .. } => {
+            // `&mutating T`-returning method call — writable place (see Call).
+            match util::ref_place(cx, target) {
+                Some(true) => return,
+                Some(false) => {
+                    push_assign_through_shared_ref(cx, target, &mut *diags);
+                    return;
+                },
+                None => {},
+            }
             let Some(&sub_entity) = cx.typed.resolutions.get(&target) else {
                 push_assign_to_expression(cx, target, &mut *diags);
                 return;
@@ -349,6 +449,25 @@ fn push_assign_to_expression(
         labels: vec![DiagLabel {
             span: util::expr_span(cx.hir, target),
             message: "not a valid assignment target".into(),
+            is_primary: true,
+        }],
+        notes: vec![],
+    });
+}
+
+/// E208: the target is a `&T` place — readable through, never writable.
+fn push_assign_through_shared_ref(
+    cx: &BodyContext<'_>,
+    target: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    diags.push(AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[3].id,
+        severity: DESCRIPTORS[3].default_severity,
+        message: "cannot assign through a shared reference".into(),
+        labels: vec![DiagLabel {
+            span: util::expr_span(cx.hir, target),
+            message: "this is a '&T' place; only '&mutating T' places can be written".into(),
             is_primary: true,
         }],
         notes: vec![],

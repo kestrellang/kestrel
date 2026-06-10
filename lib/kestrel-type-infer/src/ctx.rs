@@ -63,6 +63,14 @@ pub struct InferCtx<'a> {
     /// would defeat the coerce-side decay arm).
     pub(crate) binding_init_exprs: HashSet<HirExprId>,
 
+    /// HirExprIds that are an `Assign`'s TARGET. A `&mutating T`-returning
+    /// target (`arr.mutableAt(index: i) = v`) types as the POINTEE so the
+    /// value's Coerce just works — order-independently (the value side may
+    /// literal-link the target var before the member resolves). Place-ness
+    /// for the analyzer and MIR comes from the resolved callee's
+    /// `CallableRefReturn`, not from this expression's recorded type.
+    pub(crate) assign_target_exprs: HashSet<HirExprId>,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -241,6 +249,7 @@ impl<'a> InferCtx<'a> {
             error_details: Vec::new(),
             errored_coerce_exprs: HashSet::new(),
             scrutinee_exprs: HashSet::new(),
+            assign_target_exprs: HashSet::new(),
             direct_callee_exprs: HashSet::new(),
             binding_init_exprs: HashSet::new(),
             poison_protocol_call_recv_on_failure: HashSet::new(),

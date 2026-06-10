@@ -1414,6 +1414,38 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// End still-tracked refs (ret_borrow call results) allocated at or
+    /// after `mark`. Refs are single-use: at an expression boundary (a
+    /// lowered `if` condition, the end of a statement) a ref born inside
+    /// that expression and still scope-tracked has been fully used — its
+    /// copy-out just didn't flow through a path that ends it (e.g. a
+    /// @guaranteed field projection consumed downstream). Ending it here
+    /// keeps it out of the next terminator, where it would be a false E497.
+    /// The watermark spares refs born EARLIER that are legitimately pending
+    /// (`add(h.peek(), if c { .. })` — the peek ref must survive to the
+    /// `add` call so the arm terminator correctly reports E497).
+    pub fn end_stale_refs_since(&mut self, mark: usize) {
+        let stale: Vec<ValueId> = self
+            .scope_stack
+            .iter()
+            .flat_map(|s| s.entries.iter())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) if v.index() >= mark && self.ref_results.contains(v) => {
+                    Some(*v)
+                },
+                _ => None,
+            })
+            .collect();
+        for v in stale {
+            self.emit_end_borrow(v);
+        }
+    }
+
+    /// Next value index — the watermark for `end_stale_refs_since`.
+    pub fn ref_watermark(&self) -> usize {
+        self.body.values.len()
+    }
+
     pub fn emit_begin_mut_borrow(&mut self, operand: ValueId) -> ValueId {
         let ty = self.body.value(operand).ty;
         let result = self.alloc_guaranteed(ty, operand);

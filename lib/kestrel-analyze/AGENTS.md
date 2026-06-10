@@ -196,6 +196,14 @@ Current allocations:
   single classifier (also consulted by body/assignment.rs); it must run
   BEFORE the syntactic walk — the receiver check accepts temporaries, so a
   shared-ref receiver would otherwise silently pass.
+- E208: `assign_through_shared_ref` (body/assignment.rs) — plain assignment
+  through a `&T`-returning call/getter (`arr.at(index: i) = v`,
+  `cell.value = v`). The compound form (`+=`) is E207 instead (the
+  desugared `addAssign` receiver is a mutating use). Division of labor:
+  assignment.rs admits `&mutating`-returning targets and rejects plain-value
+  call targets with E202 ("left-hand side of compound assignment is not
+  assignable" for the Sugar walk); access_mode owns all `&T` mutating-USE
+  errors.
 - E500: `use_after_move` (body/move_tracking.rs)
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)
