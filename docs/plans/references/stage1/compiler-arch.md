@@ -35,7 +35,14 @@ LLVM backend landing). Anchor re-verification as of 2026-06-09:
 - Return-site check in `verify.rs` (the Return arm is currently a no-op for
   `@guaranteed` — verify.rs:984-990): when `ret_borrow`, assert the root per
   the root rule, plus the mutable-root predicate for MutRef.
-- The `.value` / `.mutatingValue` intrinsics stamp `PointerDerived`.
+- The `lang.ptr_ref` / `lang.ptr_mut_ref` intrinsics stamp `PointerDerived`
+  — the intrinsic, not the `Pointer` nominal, is the trust point. The stamp
+  crosses exactly one call seam: a *thin intrinsic wrapper* (every
+  return-position expression is a direct intrinsic call — mir-lower's
+  `RetRefPointerDerived` query, as built) re-stamps its call-site result
+  `PointerDerived`; all other ref-returning calls root at their borrow
+  source. One seam suffices: a wrapper-of-the-wrapper roots at its own
+  borrowable arg, which is the verified discipline callers should see.
 
 ## The dangerous surgery (only after the checker)
 

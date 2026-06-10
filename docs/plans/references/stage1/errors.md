@@ -1,6 +1,21 @@
 # Stage 1 — Errors
 
-Codes TBD (extend the stage-0.5 block). The first four are the safety core.
+Codes allocated 2026-06-09 (extending the stage-0.5 E480–E489 block; full
+registry in `lib/kestrel-analyze/AGENTS.md`):
+
+| plan name | code | home |
+|---|---|---|
+| E-REF-10 local escape | **E494** | MIR `verify::check_escapes` (coded `VerifyError`) |
+| E-REF-11 mutable root | **E495** | MIR `verify::check_escapes` |
+| E-REF-12 ambiguous source (decl half) | **E493** | analyze `decl/ref_return.rs` — free fns with ≥2 non-consuming params; METHODS root at the receiver (so `at(index:) -> &T` is legal). The expression half needs no hook: arms decay to owned copies, the merged value roots Local → E494 |
+| E-REF-13 consuming self | **E496** | MIR `verify::check_escapes` |
+| E-REF-15 ref across merge | **E497** | mir-lower `set_terminator` |
+| E-REF-16 fn-as-value | **E491** | type-infer |
+| E-REF-17 effect sugar | **E490** | hir-lower |
+| E-REF-19 generic-arg leak | **E492** | type-infer |
+| E-REF-20 mutating through `&` | **E207** | analyze `access_mode.rs` (E203–E206 family; `util::ref_place` is the single classifier, consulted FIRST — the receiver check accepts temporaries, so a shared-ref receiver would otherwise silently pass) |
+
+The first four are the safety core.
 
 | # | Trigger | Notes |
 |---|---|---|

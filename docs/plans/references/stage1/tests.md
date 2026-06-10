@@ -1,5 +1,13 @@
 # Stage 1 — Tests
 
+**WRITTEN 2026-06-09**: the full matrix lives at
+`lib/kestrel-test-suite/testdata/references/{escape,ret_borrow,no_clone}/`,
+skip-gated per milestone. Naming realities vs the rows below: the accessors
+are `at(index:)` / `mutableAt(index:)` (maintainer decision), array mutation
+is `arr(0) = v` (no `set` — reserved keyword), and String length is
+`byteCount`. `intra_block_consume_while_borrowed` is blocked on a coded
+surface for the try_consume ICE (reason in the file).
+
 Q8 is decided (transparent place — `semantics.md`), so both halves are now
 writable. The `references-prototype/references-tests.md` matrix uses
 pre-decision syntax (`&x` at call sites, `*r` deref — neither exists in the

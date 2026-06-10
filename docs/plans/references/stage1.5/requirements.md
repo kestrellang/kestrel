@@ -5,7 +5,10 @@ are independently shippable; do not bundle.
 
 1. **Call-as-place**: `arr.at(i) = v` writing through a mut-ref accessor,
    reconciled with the existing subscript-setter lowering into one path
-   (`references-gaps.md` §10.4).
+   (`references-gaps.md` §10.4). Includes compound assignment through a
+   ref-returning call (`arr.mutableAt(index: i) += v`) — stage 1's
+   syntactic place check rejects call-shaped LHS before types exist, so
+   both need the same typed place carve-out.
 2. **Named ref bindings**: `let r = &expr;` with the visible-`&` cue
    (`references-syntax.md` §2 Option C), block-local.
 3. **Dangle lint**: same-function `Pointer(to: local)` returned as a ref
