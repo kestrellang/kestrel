@@ -59,7 +59,15 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
+        // Arm-value decay copies in `capture_arm_exit` diagnose at the
+        // branch's value expression (a tail-less block's value is unit —
+        // never a ref/NotCopyable — so the enclosing span is fine there).
+        let prev_span = self.current_span.clone();
+        if let Some(tail) = then_body.tail_expr {
+            self.current_span = Some(super::value_expr_span(&self.hir, tail));
+        }
         let then_exit = self.capture_arm_exit(then_val);
+        self.current_span = prev_span;
         self.pop_scope();
 
         // -- Else arm --
@@ -69,7 +77,13 @@ impl OssaBodyCtx<'_, '_> {
         self.push_scope();
         let else_exit = if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
-            self.capture_arm_exit(else_val)
+            let prev_span = self.current_span.clone();
+            if let Some(tail) = else_body.tail_expr {
+                self.current_span = Some(super::value_expr_span(&self.hir, tail));
+            }
+            let exit = self.capture_arm_exit(else_val);
+            self.current_span = prev_span;
+            exit
         } else {
             let unit = self.emit_literal(Immediate::unit());
             self.capture_arm_exit(unit)

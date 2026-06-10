@@ -447,6 +447,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // errors point at the mismatched expression, not the if keyword
                 let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
                 ctx.equal(then_tv, result_tv, then_span);
+                mark_arm_value_block(ctx, hir, then_body);
                 // Guard desugars to `if cond {} else { body }` where the
                 // else block is required to diverge. Don't equate its value
                 // type with the empty then branch — the guard divergence
@@ -455,6 +456,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
                     ctx.equal(else_tv, result_tv, else_span);
+                    mark_arm_value_block(ctx, hir, else_block);
                 }
                 result_tv
             } else {
@@ -505,6 +507,15 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 let body_tv = gen_expr(ctx, hir, arm.body);
                 let body_span = expr_span(hir, arm.body);
                 ctx.equal(body_tv, result_tv, body_span);
+                // Arm-value decay applies only where the arm value is the
+                // user's expression. GuardLet is CPS-desugared — its pattern
+                // arm is the CONTINUATION, and marking it would decay a legal
+                // ref return at the tail of a `-> &T` function containing a
+                // `guard let`. The remaining sources have synthetic arm
+                // values (unit/Never/ControlFlow).
+                if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
+                    mark_arm_value(ctx, hir, arm.body);
+                }
             }
             result_tv
         },
@@ -2132,6 +2143,33 @@ fn is_guard_if(hir: &HirBody, expr_id: HirExprId) -> bool {
     hir.guard_stmts.iter().any(
         |&stmt_id| matches!(&hir.stmts[stmt_id], HirStmt::Expr { expr, .. } if *expr == expr_id),
     )
+}
+
+/// Record an `if`/`match` arm VALUE in `arm_value_exprs` (stage-1.5 arm-value
+/// decay: refs cannot cross merges, so arm values always decay to owned).
+/// Recurses through `Block` wrappers to the tail expression — the set is
+/// keyed by the CALL's expr id and `bind_call_result` only consults it for
+/// resolved call results, so marking a non-call tail is inert; nested
+/// `if`/`match` arms are marked by their own generation.
+fn mark_arm_value(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) {
+    match &hir.exprs[id] {
+        HirExpr::Block { body, .. } => {
+            if let Some(tail) = body.tail_expr {
+                mark_arm_value(ctx, hir, tail);
+            }
+        },
+        _ => {
+            kestrel_debug::ktrace!("arm-decay", "mark arm value {id:?} owner={:?}", ctx.owner);
+            ctx.arm_value_exprs.insert(id);
+        },
+    }
+}
+
+/// `mark_arm_value` for an `if` branch, which holds its `HirBlock` directly.
+fn mark_arm_value_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock) {
+    if let Some(tail) = block.tail_expr {
+        mark_arm_value(ctx, hir, tail);
+    }
 }
 
 /// Get the span of a block's value expression (tail expr or last statement expr).

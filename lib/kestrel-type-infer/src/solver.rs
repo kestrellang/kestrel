@@ -2446,6 +2446,9 @@ fn binding_plan_for(
 /// Bind a call's result var to the signature return type, ref-aware:
 /// - a match-SCRUTINEE call decays: a scrutinee is a value context, so the
 ///   result binds to the POINTEE and patterns never see a ref;
+/// - an if/match ARM-VALUE call decays: refs cannot cross merges, so arm
+///   values always produce owned values (the merge `Equal`s stay untouched
+///   and only ever see owned types);
 /// - a result already pinned to a non-ref (an early Coerce ran before the
 ///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
 ///   instead of erroring.
@@ -2460,6 +2463,17 @@ fn bind_call_result(
     span: Span,
 ) {
     let rr = ctx.resolve(ret_tv);
+    if matches!(ctx.slot(rr), TySlot::Resolved(TyKind::Ref { .. })) {
+        kestrel_debug::ktrace!(
+            "arm-decay",
+            "bind_call_result REF expr {expr:?} owner={:?} arm_set={} scrut={} bind={} assign={}",
+            ctx.owner,
+            ctx.arm_value_exprs.contains(&expr),
+            ctx.scrutinee_exprs.contains(&expr),
+            ctx.binding_init_exprs.contains(&expr),
+            ctx.assign_target_exprs.contains(&expr),
+        );
+    }
     if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(rr) {
         let pointee = *pointee;
         let pinned_non_ref = matches!(
@@ -2469,6 +2483,7 @@ fn bind_call_result(
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
             || ctx.assign_target_exprs.contains(&expr)
+            || ctx.arm_value_exprs.contains(&expr)
             || pinned_non_ref
         {
             ctx.equal(result, pointee, span);

@@ -1232,7 +1232,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         // A merge param can't carry a borrow — materialize an @owned result.
         let result = if self.body.value(result).ownership == Ownership::Guaranteed {
-            self.emit_copy_value(result)
+            let owned = self.emit_copy_value(result);
+            // Arm-value decay: when the arm value is a tracked ref (ret_borrow
+            // call result), the copy-out above was its single use — end its
+            // borrow before the jump to the merge, or `set_terminator`'s sweep
+            // reports a false E497. Mirrors binding decay in `lower_stmt`.
+            if self.ref_results.contains(&result) {
+                self.emit_end_borrow(result);
+            }
+            owned
         } else {
             result
         };
@@ -2507,6 +2515,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.emit_literal(Immediate::unit())
         }
     }
+}
+
+/// Span of the value-producing expression: descends through `Block` wrappers
+/// to the tail expression, so an arm `=> { ...; expr }` diagnoses at `expr`.
+/// Used to point arm-value decay diagnostics (E503 on a NotCopyable copy-out
+/// in `capture_arm_exit`) at the arm value, not the enclosing statement.
+pub(crate) fn value_expr_span(hir: &HirBody, id: HirExprId) -> Span {
+    let mut id = id;
+    while let kestrel_hir::body::HirExpr::Block { body, .. } = &hir.exprs[id] {
+        match body.tail_expr {
+            Some(tail) => id = tail,
+            None => break,
+        }
+    }
+    expr_span(hir, id)
 }
 
 /// Extract span from an HirExpr.

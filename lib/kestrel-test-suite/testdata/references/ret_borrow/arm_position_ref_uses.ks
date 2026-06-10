@@ -7,8 +7,8 @@
 // Pins the arm-position watch-item from the stage-1 sign-off: every use
 // here is a place context (operator receiver, binding decay, borrow-conv
 // argument, loop condition) whose ref dies before the jump to the merge.
-// NOTE: a ref as the raw arm VALUE (`1 => b.peek(),`) is still a type
-// error — arm merges unify with Equal, not Coerce (stage-1.5 follow-up).
+// NOTE: a ref as the raw arm VALUE (`1 => b.peek(),`) decays to an owned
+// value since stage 1.5 — pinned by the arm_value_decay_* siblings.
 module Test
 
 import std.numeric.(Int64)

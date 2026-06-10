@@ -71,6 +71,15 @@ pub struct InferCtx<'a> {
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
 
+    /// HirExprIds in `if`/`match` ARM-VALUE position. Arm values ALWAYS
+    /// decay to owned (refs cannot cross merges): a ref-returning call here
+    /// binds its result to the POINTEE in `bind_call_result`, so the arm
+    /// merge `Equal`s only ever see owned types — order-independently, like
+    /// the other value-context sets. The merge constraints stay `Equal`, so
+    /// bidirectional back-flow (annotation → arms, literal defaulting) is
+    /// untouched.
+    pub(crate) arm_value_exprs: HashSet<HirExprId>,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -250,6 +259,7 @@ impl<'a> InferCtx<'a> {
             errored_coerce_exprs: HashSet::new(),
             scrutinee_exprs: HashSet::new(),
             assign_target_exprs: HashSet::new(),
+            arm_value_exprs: HashSet::new(),
             direct_callee_exprs: HashSet::new(),
             binding_init_exprs: HashSet::new(),
             poison_protocol_call_recv_on_failure: HashSet::new(),

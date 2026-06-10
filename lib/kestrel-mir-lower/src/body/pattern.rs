@@ -651,7 +651,13 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_bindings(bindings, scrutinee, scrutinee_ty);
         if let Some(arm) = arms.get(arm_index) {
             let body_val = self.lower_expr(arm.body);
-            if let Some(exit) = self.capture_arm_exit(body_val) {
+            // Arm-value decay copies in `capture_arm_exit` diagnose at the
+            // arm's value expression, not the enclosing statement.
+            let arm_span = super::value_expr_span(&self.hir, arm.body);
+            let prev_span = self.current_span.replace(arm_span);
+            let exit = self.capture_arm_exit(body_val);
+            self.current_span = prev_span;
+            if let Some(exit) = exit {
                 exits.push(exit);
             }
         }
