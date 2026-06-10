@@ -19,5 +19,12 @@ are independently shippable; do not bundle.
 4. **Shared-read projection sugar** over `Pointer.with` / Design-B closures
    — covers the `Optional[&T]`-shaped lookup APIs stage 1 cannot express
    (`references-gaps.md` §5.3).
+5. **Arm-value decay**: a ref as a raw `if`/`match` arm VALUE
+   (`match c { 1 => b.peek(), _ => 0 }`) is a type error today — arm
+   merges unify with Equal, not Coerce, so the `&T → T` decay arm never
+   runs (same family as array-literal elements, stage-1 risk #7). The
+   errors.md E-REF-12 note assumed arms decay to owned copies; uses
+   *inside* arms (operator/binding/arg/condition) already work and are
+   pinned by `ret_borrow/arm_position_ref_uses.ks`.
 
 Entry: stage 1 shipped + concrete demand. ~4-6 wk total.
