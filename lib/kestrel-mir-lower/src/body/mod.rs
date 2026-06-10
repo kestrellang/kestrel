@@ -1103,10 +1103,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .rev()
             .flat_map(|scope| scope.entries.iter().rev().cloned())
             .collect();
-        // End borrows first — they may reference values we're about to destroy.
+        // End borrows first — they may reference values we're about to
+        // destroy. `emit_end_borrow` also removes the scope entry, so the
+        // terminator that follows every destroy site doesn't end the same
+        // borrow a second time. References are deliberately left tracked:
+        // `set_terminator` owns their endgame (the E497 check on inside-fn
+        // jumps and the ret_borrow return carve-out).
         for entry in &entries {
-            if let ScopeEntry::Borrow(v) = entry {
-                self.push_inst(InstKind::EndBorrow { operand: *v });
+            if let ScopeEntry::Borrow(v) = entry
+                && !self.ref_results.contains(v)
+            {
+                self.emit_end_borrow(*v);
             }
         }
         for entry in &entries {
