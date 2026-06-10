@@ -566,3 +566,58 @@ pub fn spawn_setter(
     }
     set_documentation(world, setter, setter_clause);
 }
+
+/// Spawn a `NodeKind::RefAccessor` child entity under a Field or Subscript
+/// for a `ref { … }` / `mutating ref { … }` place-accessor clause.
+///
+/// Mirrors `spawn_setter` (discovered by NodeKind via `children_of(parent)`,
+/// access control flows through the parent), with one difference: the
+/// accessor has a RETURN type — the SYNTHESIZED `&T` / `&mutating T`
+/// wrapping the parent's declared type. The user writes `-> T`; a ref type
+/// never appears in source (declared `-> &T` subscripts stay E481). The
+/// `MutatingAccessor` marker distinguishes the two kinds.
+pub fn spawn_ref_accessor(
+    world: &mut World,
+    parent: Entity,
+    clause: &SyntaxNode,
+    clause_body: &SyntaxNode,
+    params: Vec<AstParam>,
+    receiver: Option<ReceiverKind>,
+    mutating: bool,
+    file_entity: Entity,
+    file_id: usize,
+    is_static: bool,
+) {
+    let acc = world.spawn();
+    world.set(acc, NodeKind::RefAccessor);
+    world.set(acc, FileId(file_entity));
+    world.set(acc, DeclSpan(get_decl_span(clause, file_id)));
+    world.set(acc, CstNode(clause.clone()));
+    world.set_parent(acc, parent);
+    // RefAccessor → Subscript/Field → Container (same hop-skip as Setter).
+    if let Some(container) = world.parent_of(parent) {
+        world.set(acc, EnclosingContainer(container));
+    }
+    world.set(acc, Callable { params, receiver });
+    world.set(acc, Body(lower::lower_body(clause_body, file_id)));
+    world.set(acc, Valued(clause_body.clone()));
+    if mutating {
+        world.set(acc, MutatingAccessor);
+    }
+    // Synthesized ref return around the parent's declared type. Spanned at
+    // the clause so any ref-placement diagnostic lands on the accessor.
+    if let Some(parent_ty) = world.get::<TypeAnnotation>(parent).map(|t| t.0.clone()) {
+        world.set(
+            acc,
+            TypeAnnotation(AstType::Ref {
+                inner: Box::new(parent_ty),
+                mutating,
+                span: get_decl_span(clause, file_id),
+            }),
+        );
+    }
+    if is_static {
+        world.set(acc, Static);
+    }
+    set_documentation(world, acc, clause);
+}

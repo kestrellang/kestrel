@@ -1,6 +1,8 @@
 //! Lowering context — central state during HIR → MIR lowering.
 
-use kestrel_ast_builder::{Callable, EnclosingContainer, Intrinsic, Name, NodeKind, Subscript};
+use kestrel_ast_builder::{
+    Callable, EnclosingContainer, Intrinsic, MutatingAccessor, Name, NodeKind, Subscript,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
 use kestrel_hir::body::{HirExpr, HirExprId};
 use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
@@ -133,6 +135,15 @@ impl<'w> LowerCtx<'w> {
             .iter()
             .copied()
             .find(|&e| self.world.get::<NodeKind>(e) == Some(&NodeKind::Setter))
+    }
+
+    /// Find a `NodeKind::RefAccessor` child of a Field or Subscript entity
+    /// (`mutating` selects the `mutating ref` vs the shared `ref` accessor).
+    pub fn find_ref_accessor_child(&self, parent: Entity, mutating: bool) -> Option<Entity> {
+        self.world.children_of(parent).iter().copied().find(|&e| {
+            self.world.get::<NodeKind>(e) == Some(&NodeKind::RefAccessor)
+                && self.world.get::<MutatingAccessor>(e).is_some() == mutating
+        })
     }
 
     /// Consume the context and return the built MIR module.

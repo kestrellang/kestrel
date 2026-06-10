@@ -8,8 +8,8 @@
 
 use kestrel_ast_builder::{
     AstParam, AstType, Callable, Computed, CstNode, ExtensionTarget, FieldMutability, IsIndirect,
-    Name, NodeKind, ReceiverKind, Static, TypeAnnotation, TypeParams, Vis, WhereClause,
-    WhereConstraint,
+    MutatingAccessor, Name, NodeKind, ReceiverKind, Static, TypeAnnotation, TypeParams, Vis,
+    WhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxKind;
@@ -307,15 +307,35 @@ fn push_return_type(s: &mut String, world: &World, entity: Entity) {
 }
 
 fn push_accessors(s: &mut String, world: &World, entity: Entity) {
-    let has_setter = world
-        .children_of(entity)
-        .iter()
-        .any(|&c| matches!(world.get::<NodeKind>(c), Some(NodeKind::Setter)));
-    if has_setter {
-        s.push_str(" { get set }");
-    } else {
-        s.push_str(" { get }");
+    let mut has_setter = false;
+    let mut has_ref = false;
+    let mut has_mutating_ref = false;
+    for &c in world.children_of(entity) {
+        match world.get::<NodeKind>(c) {
+            Some(NodeKind::Setter) => has_setter = true,
+            Some(NodeKind::RefAccessor) => {
+                if world.get::<MutatingAccessor>(c).is_some() {
+                    has_mutating_ref = true;
+                } else {
+                    has_ref = true;
+                }
+            },
+            _ => {},
+        }
     }
+    // Canonical provider order: a `ref` accessor replaces the `get` seat
+    // (at most one read + one write provider per member).
+    let mut parts: Vec<&str> = Vec::new();
+    parts.push(if has_ref { "ref" } else { "get" });
+    if has_setter {
+        parts.push("set");
+    }
+    if has_mutating_ref {
+        parts.push("mutating ref");
+    }
+    s.push_str(" { ");
+    s.push_str(&parts.join(" "));
+    s.push_str(" }");
 }
 
 fn type_params_str(world: &World, entity: Entity) -> String {

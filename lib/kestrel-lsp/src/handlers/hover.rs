@@ -430,6 +430,7 @@ fn is_renderable(kind: &NodeKind) -> bool {
         NodeKind::Function
             | NodeKind::Initializer
             | NodeKind::Setter
+            | NodeKind::RefAccessor
             | NodeKind::Subscript
             | NodeKind::Field
             | NodeKind::Struct

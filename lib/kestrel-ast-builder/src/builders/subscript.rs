@@ -114,6 +114,45 @@ pub fn build_subscript(
                     is_static,
                 );
             }
+            // Place accessors (stage 1.5): `ref { … }` is the read provider,
+            // `mutating ref { … }` the write provider (→ Settable, so
+            // assignment checks accept it). Each spawns a RefAccessor child
+            // whose params are the index params — no `newValue`.
+            for (clause_kind, mutating) in [
+                (SyntaxKind::RefClause, false),
+                (SyntaxKind::MutatingRefClause, true),
+            ] {
+                if let Some(clause) = find_child(&acc, clause_kind)
+                    && let Some(clause_body) = find_child(&clause, SyntaxKind::CodeBlock)
+                {
+                    if mutating {
+                        world.set(entity, Settable);
+                    }
+                    let accessor_params = world
+                        .get::<Callable>(entity)
+                        .map(|c| c.params.clone())
+                        .unwrap_or_default();
+                    let accessor_receiver = if is_static || !parent_is_type {
+                        None
+                    } else if mutating {
+                        Some(ReceiverKind::Mutating)
+                    } else {
+                        Some(ReceiverKind::Borrowing)
+                    };
+                    spawn_ref_accessor(
+                        world,
+                        entity,
+                        &clause,
+                        &clause_body,
+                        accessor_params,
+                        accessor_receiver,
+                        mutating,
+                        file_entity,
+                        file_id,
+                        is_static,
+                    );
+                }
+            }
         } else if let Some(code_block) = find_child(&body, SyntaxKind::CodeBlock) {
             // Shorthand getter-only form: subscript(...) -> T { expr }
             world.set(entity, Body(lower::lower_body(&code_block, file_id)));

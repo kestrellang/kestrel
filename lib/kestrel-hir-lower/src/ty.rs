@@ -9,8 +9,8 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, NodeKind, Settable, TypeAnnotation,
-    TypeParams,
+    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, MutatingAccessor, NodeKind, Settable,
+    TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
@@ -795,11 +795,15 @@ impl QueryFn for LowerTypeAnnotation {
         // stage 1.5). Subscripts stay rejected for the same reason;
         // init/deinit never return. The pointee subtree is still walked
         // (E487 nesting, E480 fn-type params, ...).
+        // Stage 1.5: RefAccessor entities carry the SYNTHESIZED `&T` /
+        // `&mutating T` return built by `spawn_ref_accessor` — always legal
+        // (the user-facing rule is unchanged: a ref type never appears in a
+        // subscript/property SOURCE signature).
         let is_computed_getter = matches!(nk, Some(NodeKind::Field))
             && ctx.get::<Computed>(self.entity).is_some()
             && ctx.get::<Gettable>(self.entity).is_some()
             && ctx.get::<Settable>(self.entity).is_none();
-        if (matches!(nk, Some(NodeKind::Function)) || is_computed_getter)
+        if (matches!(nk, Some(NodeKind::Function | NodeKind::RefAccessor)) || is_computed_getter)
             && let HirTy::Ref {
                 inner,
                 mutating,
@@ -902,6 +906,52 @@ impl QueryFn for CallableRefReturn {
             HirTy::Ref { mutating, .. } => Some(RefReturn { mutating }),
             _ => None,
         }
+    }
+}
+
+/// A subscript's / computed property's place-accessor children (stage 1.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlaceAccessorInfo {
+    /// The `ref { … }` child (read provider), if declared.
+    pub ref_accessor: Option<Entity>,
+    /// The `mutating ref { … }` child (write/RMW provider), if declared.
+    pub mutating_ref_accessor: Option<Entity>,
+}
+
+/// Query: the place-accessor children of a Subscript/Field member.
+///
+/// THE single discovery source for provider routing — type inference (read
+/// provider types the member expr `&T`), analyze (mutability classification,
+/// decl checks), and mir-lower (per-operation callee routing) all ask this
+/// query; nobody walks `children_of` for `NodeKind::RefAccessor` ad hoc.
+/// Returns None when the member has no ref accessors (the get/set world).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct PlaceAccessors {
+    pub entity: Entity,
+}
+
+impl QueryFn for PlaceAccessors {
+    type Output = Option<PlaceAccessorInfo>;
+
+    fn describe(&self) -> String {
+        format!("PlaceAccessors(entity={:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<PlaceAccessorInfo> {
+        let mut info = PlaceAccessorInfo {
+            ref_accessor: None,
+            mutating_ref_accessor: None,
+        };
+        for &child in ctx.children_of(self.entity) {
+            if matches!(ctx.get::<NodeKind>(child), Some(NodeKind::RefAccessor)) {
+                if ctx.get::<MutatingAccessor>(child).is_some() {
+                    info.mutating_ref_accessor = Some(child);
+                } else {
+                    info.ref_accessor = Some(child);
+                }
+            }
+        }
+        (info.ref_accessor.is_some() || info.mutating_ref_accessor.is_some()).then_some(info)
     }
 }
 

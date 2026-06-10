@@ -27,7 +27,7 @@ use kestrel_span::Span;
 
 pub use ty::{
     CallableRefReturn, LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs,
-    LowerTypeAnnotation, RefReturn, lower_ast_type,
+    LowerTypeAnnotation, PlaceAccessorInfo, PlaceAccessors, RefReturn, lower_ast_type,
 };
 
 use ctx::LowerCtx;
