@@ -20,6 +20,7 @@ pub mod context;
 pub mod decl;
 pub mod diagnostic;
 pub mod registry;
+pub mod staticness;
 pub mod traits;
 pub mod util;
 
@@ -68,6 +69,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
+    r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
     r.add_decl_check(decl::duplicate_deinit::DuplicateDeinitAnalyzer);

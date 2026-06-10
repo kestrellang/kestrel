@@ -119,7 +119,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     // the closure can outlive the borrow.
     DiagnosticDescriptor {
         id: "E212",
-        name: "ref_binding_captured",
+        name: "non_static_capture",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -163,29 +163,46 @@ impl BodyCheck for ClosureAnalyzer {
             capture_roots.dedup();
             let captures = &capture_roots;
 
-            // E212: a ref binding cannot be captured — the env would store
-            // the reference and the closure can outlive the borrow.
+            // E212: a non-Static value cannot be captured — the env would
+            // store its reference(s) and the closure can outlive the borrow.
+            // Ref bindings keep their original wording; other non-Static
+            // roots (2a: `not Static`-typed values) get the general one.
+            // TODO(static-2c): relax to "capture makes the closure
+            // non-Static" once function types carry the Static bit.
             for &root in captures {
-                if matches!(
-                    cx.typed.local_types.get(&root),
-                    Some(ResolvedTy::Ref { .. })
-                ) {
-                    let name = cx.hir.locals[root].name.clone();
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[7].id,
-                        severity: DESCRIPTORS[7].default_severity,
-                        message: format!("closure cannot capture ref binding '{name}'"),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, expr_id),
-                            message: "captured here".into(),
-                            is_primary: true,
-                        }],
-                        notes: vec![
-                            "bind the value first (`let x = ...;`) and capture that"
-                                .to_string(),
-                        ],
-                    });
+                let Some(ty) = cx.typed.local_types.get(&root) else {
+                    continue;
+                };
+                let is_ref = matches!(ty, ResolvedTy::Ref { .. });
+                if !is_ref && crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root)
+                {
+                    continue;
                 }
+                let name = cx.hir.locals[root].name.clone();
+                let (message, note) = if is_ref {
+                    (
+                        format!("closure cannot capture ref binding '{name}'"),
+                        "bind the value first (`let x = ...;`) and capture that".to_string(),
+                    )
+                } else {
+                    (
+                        format!("closure cannot capture non-Static binding '{name}'"),
+                        "the closure environment may outlive this scope; only Static \
+                         (reference-free) values can be captured"
+                            .to_string(),
+                    )
+                };
+                diags.push(AnalyzeDiagnostic {
+                    descriptor_id: DESCRIPTORS[7].id,
+                    severity: DESCRIPTORS[7].default_severity,
+                    message,
+                    labels: vec![DiagLabel {
+                        span: util::expr_span(cx.hir, expr_id),
+                        message: "captured here".into(),
+                        is_primary: true,
+                    }],
+                    notes: vec![note],
+                });
             }
 
             // Check closure arity and types against expected function type.

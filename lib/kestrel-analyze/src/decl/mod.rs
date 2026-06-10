@@ -26,6 +26,7 @@ pub mod place_accessor;
 pub mod ref_return;
 pub mod recursive_enum;
 pub mod static_context;
+pub mod static_value_type;
 pub mod subscript;
 pub mod type_alias_validation;
 pub mod visibility;
