@@ -37,7 +37,7 @@ use std::collections::HashSet;
 use crate::compilation::cycle_util::{Cycle, CycleDetector};
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{ConformanceItem, Conformances, NodeKind};
@@ -54,8 +54,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ProtocolCycleAnalyzer;
 
 impl Describe for ProtocolCycleAnalyzer {
-    fn id(&self) -> &'static str {
-        "protocol_cycles"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ProtocolCycles
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

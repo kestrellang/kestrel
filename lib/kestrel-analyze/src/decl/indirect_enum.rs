@@ -10,7 +10,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{IsIndirect, NodeKind};
 
@@ -24,8 +24,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct IndirectEnumAnalyzer;
 
 impl Describe for IndirectEnumAnalyzer {
-    fn id(&self) -> &'static str {
-        "indirect_enum"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::IndirectEnum
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

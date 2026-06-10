@@ -430,7 +430,7 @@ machinery.
 - `implicit_conformance: true` already exists (`builtin.rs:647`);
   `inject_implicit_copyable_bounds` and `TypeParamCopyRequirement` are confirmed
   in `where_clauses.rs`. Add `Builtin::Static` with the same flag →
-  `ProtocolAllowsNegativeConformance` and the whole negative-conformance path
+  `protocol_allows_negative_conformance` and the whole negative-conformance path
   turn on for free.
 - `inject_implicit_static_bounds` / `TypeParamStaticRequirement` are direct clones
   of the Copyable templates.

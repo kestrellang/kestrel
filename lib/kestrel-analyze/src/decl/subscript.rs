@@ -33,7 +33,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Body, Callable, NodeKind, Valued};
 
@@ -55,8 +55,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct SubscriptAnalyzer;
 
 impl Describe for SubscriptAnalyzer {
-    fn id(&self) -> &'static str {
-        "subscript"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Subscript
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

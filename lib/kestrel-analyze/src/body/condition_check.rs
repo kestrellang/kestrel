@@ -18,7 +18,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Intrinsic, Name, NodeKind};
 use kestrel_hir::Builtin;
@@ -36,8 +36,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ConditionCheckAnalyzer;
 
 impl Describe for ConditionCheckAnalyzer {
-    fn id(&self) -> &'static str {
-        "condition_check"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ConditionCheck
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

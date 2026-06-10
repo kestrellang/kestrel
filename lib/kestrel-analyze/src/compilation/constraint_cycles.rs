@@ -41,7 +41,7 @@ use std::collections::{HashMap, HashSet};
 use crate::compilation::cycle_util::{Cycle, CycleDetector};
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeParams, WhereClause, WhereConstraint};
@@ -58,8 +58,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ConstraintCycleAnalyzer;
 
 impl Describe for ConstraintCycleAnalyzer {
-    fn id(&self) -> &'static str {
-        "constraint_cycles"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ConstraintCycles
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

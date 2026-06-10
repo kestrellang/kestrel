@@ -61,13 +61,13 @@ fn find_function(
     find_child(ctx, module, NodeKind::Function, func_name)
 }
 
-/// Lower a function's body and return the HirBody.
+/// Lower a function's body and return the HirBody (Arc-shared query output).
 fn lower_func(
     ctx: &kestrel_hecs::QueryContext<'_>,
     root: Entity,
     module_name: &str,
     func_name: &str,
-) -> HirBody {
+) -> std::sync::Arc<HirBody> {
     let func = find_function(ctx, root, module_name, func_name);
     ctx.query(LowerBody { entity: func, root })
         .unwrap_or_else(|| panic!("LowerBody returned None for {}.{}", module_name, func_name))

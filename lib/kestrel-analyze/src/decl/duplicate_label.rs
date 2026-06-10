@@ -20,7 +20,7 @@ use std::collections::HashSet;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind};
 
@@ -34,8 +34,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct DuplicateLabelAnalyzer;
 
 impl Describe for DuplicateLabelAnalyzer {
-    fn id(&self) -> &'static str {
-        "duplicate_enum_label"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DuplicateEnumLabel
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -50,11 +50,7 @@ impl DeclCheck for DuplicateLabelAnalyzer {
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
 
-        for &child in cx.query.children_of(cx.entity) {
-            if !matches!(cx.query.get::<NodeKind>(child), Some(NodeKind::EnumCase)) {
-                continue;
-            }
-
+        for child in util::children_of_kind(cx.query, cx.entity, NodeKind::EnumCase) {
             let Some(callable) = cx.query.get::<Callable>(child) else {
                 continue;
             };

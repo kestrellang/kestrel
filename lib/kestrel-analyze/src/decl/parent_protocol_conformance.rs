@@ -26,7 +26,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::ast_type::AstType;
 use kestrel_ast_builder::{
@@ -46,8 +46,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ParentProtocolConformanceAnalyzer;
 
 impl Describe for ParentProtocolConformanceAnalyzer {
-    fn id(&self) -> &'static str {
-        "parent_protocol_conformance"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ParentProtocolConformance
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -130,10 +130,11 @@ fn parent_requirements_satisfied(
     let provided = collect_provided_members(cx, type_entity);
     let mut saw_method_requirement = false;
 
-    for member in cx.query.query(ProtocolMembers {
+    let members = cx.query.query(ProtocolMembers {
         protocol: parent_protocol,
         root: cx.root,
-    }) {
+    });
+    for member in members.iter() {
         if member.extension.is_some() {
             continue;
         }

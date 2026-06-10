@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{Callable, ConformanceItem, Conformances, Name, NodeKind, WhereClause};
@@ -44,8 +44,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ExtensionConflictAnalyzer;
 
 impl Describe for ExtensionConflictAnalyzer {
-    fn id(&self) -> &'static str {
-        "extension_conflict"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ExtensionConflict
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

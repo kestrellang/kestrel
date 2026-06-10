@@ -25,6 +25,7 @@ pub mod unify;
 pub mod where_clauses;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, EnclosingContainer, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
@@ -63,13 +64,15 @@ pub struct InferBody {
 }
 
 impl QueryFn for InferBody {
-    type Output = Option<TypedBody>;
+    // Arc-wrapped: TypedBody is large and widely re-queried; memo cache hits
+    // clone the Output, so share one allocation instead of deep-copying.
+    type Output = Option<Arc<TypedBody>>;
 
     fn describe(&self) -> String {
         format!("InferBody(entity={:?})", self.entity)
     }
 
-    fn execute(&self, query_ctx: &QueryContext<'_>) -> Option<TypedBody> {
+    fn execute(&self, query_ctx: &QueryContext<'_>) -> Option<Arc<TypedBody>> {
         // Get the HIR body
         let hir = query_ctx.query(LowerBody {
             entity: self.entity,
@@ -115,7 +118,7 @@ impl QueryFn for InferBody {
         }
 
         // Build output
-        Some(result::build_result(&infer_ctx))
+        Some(Arc::new(result::build_result(&infer_ctx)))
     }
 }
 
@@ -140,68 +143,7 @@ fn create_param_types(
         let self_tv = if let Some(parent) = accessor_enclosing_container(query_ctx, entity) {
             let parent_kind = query_ctx.get::<NodeKind>(parent);
             if parent_kind == Some(&NodeKind::Extension) {
-                // Resolve extension target to the actual type
-                match query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                    extension: parent,
-                    root: ctx.root,
-                }) {
-                    Some(target) => {
-                        // Get explicit type args from the extension target (e.g., [lang.i64] in extend Box[lang.i64])
-                        let ext_type_args = query_ctx.query(LowerExtensionTargetTypeArgs {
-                            extension: parent,
-                            root: ctx.root,
-                        });
-
-                        // Build args: use concrete type args where provided, fresh TyVars elsewhere
-                        let type_params: Vec<Entity> = query_ctx
-                            .get::<TypeParams>(target)
-                            .map(|tp| tp.0.clone())
-                            .unwrap_or_default();
-
-                        let args: Vec<ty::TyVar> = if let Some(ref hir_args) = ext_type_args {
-                            if !hir_args.is_empty() {
-                                // Extension has explicit type args — use them
-                                type_params
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, &param_entity)| {
-                                        if let Some(hir_ty) = hir_args.get(i) {
-                                            generate::lower_hir_ty(ctx, hir_ty)
-                                        } else {
-                                            ctx.param(param_entity)
-                                        }
-                                    })
-                                    .collect()
-                            } else {
-                                fresh_type_args(ctx, query_ctx, target)
-                            }
-                        } else {
-                            fresh_type_args(ctx, query_ctx, target)
-                        };
-
-                        // For protocol extensions, `self` is the abstract Self
-                        // of the protocol — not the protocol entity itself. Use
-                        // `SelfType(P)` so it round-trips through inference output
-                        // as `ResolvedTy::SelfType` → `MirTy::SelfType` and gets
-                        // substituted per-concrete-receiver at monomorphization.
-                        // Other kinds (Struct/Enum) emit the concrete target.
-                        let target_kind = query_ctx.get::<NodeKind>(target).cloned();
-                        let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
-                            ctx.self_type_ty(target)
-                        } else {
-                            ctx.named(target, args.clone())
-                        };
-
-                        // Emit extension where clause constraints so the solver
-                        // knows about bounds like Item: Addable, Item.Output = Item
-                        emit_container_where_clauses(
-                            ctx, query_ctx, parent, target, &args, self_tv,
-                        );
-
-                        self_tv
-                    },
-                    None => ctx.fresh(),
-                }
+                create_extension_self_type(ctx, query_ctx, parent)
             } else {
                 let fresh_args = fresh_type_args(ctx, query_ctx, parent);
                 let self_tv = ctx.named(parent, fresh_args.clone());
@@ -253,6 +195,67 @@ fn create_param_types(
     param_tvs
 }
 
+/// Build the `self` TyVar for a method declared inside an `extend` block:
+/// resolve the extension target, bind its type params (explicit args where
+/// given, Param TyVars elsewhere), and emit the extension's where clauses.
+fn create_extension_self_type(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    parent: Entity,
+) -> ty::TyVar {
+    // Resolve extension target to the actual type
+    let Some(target) = query_ctx.query(kestrel_name_res::ExtensionTargetEntity {
+        extension: parent,
+        root: ctx.root,
+    }) else {
+        return ctx.fresh();
+    };
+
+    // Get explicit type args from the extension target (e.g., [lang.i64] in extend Box[lang.i64])
+    let ext_type_args = query_ctx.query(LowerExtensionTargetTypeArgs {
+        extension: parent,
+        root: ctx.root,
+    });
+
+    // Build args: use concrete type args where provided, fresh TyVars elsewhere
+    let type_params: Vec<Entity> = query_ctx
+        .get::<TypeParams>(target)
+        .map(|tp| tp.0.clone())
+        .unwrap_or_default();
+
+    let args: Vec<ty::TyVar> = match &ext_type_args {
+        // Extension has explicit type args — use them
+        Some(hir_args) if !hir_args.is_empty() => type_params
+            .iter()
+            .enumerate()
+            .map(|(i, &param_entity)| match hir_args.get(i) {
+                Some(hir_ty) => generate::lower_hir_ty(ctx, hir_ty),
+                None => ctx.param(param_entity),
+            })
+            .collect(),
+        _ => fresh_type_args(ctx, query_ctx, target),
+    };
+
+    // For protocol extensions, `self` is the abstract Self
+    // of the protocol — not the protocol entity itself. Use
+    // `SelfType(P)` so it round-trips through inference output
+    // as `ResolvedTy::SelfType` → `MirTy::SelfType` and gets
+    // substituted per-concrete-receiver at monomorphization.
+    // Other kinds (Struct/Enum) emit the concrete target.
+    let target_kind = query_ctx.get::<NodeKind>(target).cloned();
+    let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
+        ctx.self_type_ty(target)
+    } else {
+        ctx.named(target, args.clone())
+    };
+
+    // Emit extension where clause constraints so the solver
+    // knows about bounds like Item: Addable, Item.Output = Item
+    emit_container_where_clauses(ctx, query_ctx, parent, target, &args, self_tv);
+
+    self_tv
+}
+
 /// Emit where clause constraints for the method entity's own type parameters.
 /// Handles bounds (`I: Iterable`), associated type equalities (`I.Item = E`),
 /// and direct type param equalities (`V = Array[E]`).
@@ -295,80 +298,145 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
 
     let span = Span::synthetic(0);
 
+    // NOTE: the solver does not re-order constraints, so each helper must emit
+    // in clause iteration order — exactly as the inline match arms did.
     for clause in clauses {
         match clause {
             resolve::WhereClause::Bound {
                 param,
                 protocol,
                 protocol_type_args,
-            } => {
-                // Skip the implicit (and explicit) `Copyable` / `Cloneable`
-                // bound — a call-site obligation, not a body-inference fact.
-                // `Pointer[T].read()` is declared `where T: Copyable` over the
-                // type's `T: not Copyable` param; emitting `Conforms(T,
-                // Copyable)` here makes the abstract param fail conformance and
-                // poisons the body. See the matching skip in
-                // `emit_container_where_clauses`.
-                if solver::copyable_builtin_kind(ctx, protocol).is_some() {
-                    continue;
-                }
-                // Find or create a TyVar for this param
-                let tv = ctx.param(param);
-                ctx.conforms(tv, protocol, span.clone());
-                // Cache protocol args for solve_associated to use when projecting
-                // through `extend ConcreteType: Proto[FreeParams]` bindings.
-                let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
-                for &tp in type_params.iter().chain(parent_type_params.iter()) {
-                    subs.push((tp, ctx.param(tp)));
-                }
-                let arg_tvs: Vec<ty::TyVar> = protocol_type_args
-                    .iter()
-                    .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
-                    .collect();
-                if !arg_tvs.is_empty() {
-                    ctx.record_witness_args(tv, protocol, arg_tvs);
-                }
-            },
+            } => emit_method_bound_constraint(
+                ctx,
+                param,
+                protocol,
+                &protocol_type_args,
+                &type_params,
+                &parent_type_params,
+                &span,
+            ),
             resolve::WhereClause::TypeEquality {
                 param,
                 assoc_name,
                 rhs,
-            } => {
-                let subject_tv = ctx.param(param);
-                let assoc_result = ctx.fresh();
-                ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
-
-                // Build subs for type params
-                let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
-                for &tp in type_params.iter().chain(parent_type_params.iter()) {
-                    subs.push((tp, ctx.param(tp)));
-                }
-                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
-                ctx.equal(assoc_result, rhs_tv, span.clone());
-
-                if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
-                    ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
-                }
-            },
+            } => emit_method_type_equality_constraint(
+                ctx,
+                param,
+                &assoc_name,
+                &rhs,
+                &type_params,
+                &parent_type_params,
+                &span,
+            ),
             resolve::WhereClause::DirectEquality { param, rhs } => {
-                let param_tv = ctx.param(param);
-                // Build subs for type params
-                let mut subs: Vec<(Entity, ty::TyVar)> = Vec::new();
-                for &tp in type_params.iter().chain(parent_type_params.iter()) {
-                    subs.push((tp, ctx.param(tp)));
-                }
-                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &subs);
-                // Redirect the param to the RHS type
-                ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
-                // For TypeAlias entities (associated types like Item), also register
-                // in where_clause_assoc_subs so lower_hir_ty_sub can find it
-                if query_ctx.get::<kestrel_ast_builder::NodeKind>(param)
-                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
-                {
-                    ctx.where_clause_assoc_subs.push((param, rhs_tv));
-                }
+                emit_method_direct_equality_constraint(
+                    ctx,
+                    query_ctx,
+                    param,
+                    &rhs,
+                    &type_params,
+                    &parent_type_params,
+                );
             },
         }
+    }
+}
+
+/// Build the type-param-entity → Param-TyVar substitution map shared by all
+/// method where-clause kinds (method's own params plus the parent type's).
+fn method_where_clause_subs(
+    ctx: &mut InferCtx<'_>,
+    type_params: &[Entity],
+    parent_type_params: &[Entity],
+) -> Vec<(Entity, ty::TyVar)> {
+    type_params
+        .iter()
+        .chain(parent_type_params.iter())
+        .map(|&tp| (tp, ctx.param(tp)))
+        .collect()
+}
+
+/// Emit a `param: Protocol[...]` bound clause: Conforms constraint plus cached
+/// witness args for protocols with explicit type args.
+fn emit_method_bound_constraint(
+    ctx: &mut InferCtx<'_>,
+    param: Entity,
+    protocol: Entity,
+    protocol_type_args: &[kestrel_hir::ty::HirTy],
+    type_params: &[Entity],
+    parent_type_params: &[Entity],
+    span: &Span,
+) {
+    // Skip the implicit (and explicit) `Copyable` / `Cloneable`
+    // bound — a call-site obligation, not a body-inference fact.
+    // `Pointer[T].read()` is declared `where T: Copyable` over the
+    // type's `T: not Copyable` param; emitting `Conforms(T,
+    // Copyable)` here makes the abstract param fail conformance and
+    // poisons the body. See the matching skip in
+    // `emit_container_where_clauses`.
+    if solver::copyable_builtin_kind(ctx, protocol).is_some() {
+        return;
+    }
+    // Find or create a TyVar for this param
+    let tv = ctx.param(param);
+    ctx.conforms(tv, protocol, span.clone());
+    // Cache protocol args for solve_associated to use when projecting
+    // through `extend ConcreteType: Proto[FreeParams]` bindings.
+    let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
+    let arg_tvs: Vec<ty::TyVar> = protocol_type_args
+        .iter()
+        .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
+        .collect();
+    if !arg_tvs.is_empty() {
+        ctx.record_witness_args(tv, protocol, arg_tvs);
+    }
+}
+
+/// Emit a `param.Assoc = RHS` clause: Associated projection constraint plus an
+/// equality binding it to the lowered RHS.
+fn emit_method_type_equality_constraint(
+    ctx: &mut InferCtx<'_>,
+    param: Entity,
+    assoc_name: &str,
+    rhs: &kestrel_hir::ty::HirTy,
+    type_params: &[Entity],
+    parent_type_params: &[Entity],
+    span: &Span,
+) {
+    let subject_tv = ctx.param(param);
+    let assoc_result = ctx.fresh();
+    ctx.associated(subject_tv, assoc_name, assoc_result, span.clone());
+
+    let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
+    let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
+    ctx.equal(assoc_result, rhs_tv, span.clone());
+
+    if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, assoc_name) {
+        ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
+    }
+}
+
+/// Emit a `param = RHS` clause: redirect the param's TyVar slot straight to
+/// the lowered RHS (no solver constraint needed).
+fn emit_method_direct_equality_constraint(
+    ctx: &mut InferCtx<'_>,
+    query_ctx: &QueryContext<'_>,
+    param: Entity,
+    rhs: &kestrel_hir::ty::HirTy,
+    type_params: &[Entity],
+    parent_type_params: &[Entity],
+) {
+    let param_tv = ctx.param(param);
+    let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
+    let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
+    // Redirect the param to the RHS type
+    ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
+    // For TypeAlias entities (associated types like Item), also register
+    // in where_clause_assoc_subs so lower_hir_ty_sub can find it
+    if query_ctx.get::<kestrel_ast_builder::NodeKind>(param)
+        == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+    {
+        ctx.where_clause_assoc_subs.push((param, rhs_tv));
     }
 }
 

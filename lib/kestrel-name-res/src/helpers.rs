@@ -3,8 +3,11 @@
 //! These are used by multiple query implementations. All functions
 //! take a `QueryContext` and record dependencies automatically.
 
-use kestrel_ast_builder::{Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, Subscript as SubscriptMarker};
 use kestrel_hecs::{Entity, QueryContext};
+
+use crate::extensions::ExtensionsFor;
+use crate::visibility::{IsVisibleFrom, VisibleChildrenByName};
 
 /// Walk parent_of chain to find the nearest ancestor with NodeKind::Module.
 /// Returns None if no module ancestor exists (e.g. entity is the root).
@@ -58,6 +61,91 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
             None => return false,
         }
     }
+}
+
+/// The name `entity` answers to in member lookups, or `None` for members
+/// that can't be addressed by name.
+///
+/// The entity's `Name` component wins; nameless callables fall back to the
+/// keyword sentinels `"init"` (Initializer NodeKind) and `"subscript"`
+/// (Subscript marker). Both sentinels are reserved keywords, so they can't
+/// collide with a user-declared member name. Single source of truth for
+/// member-name matching — `member_name_matches` and the build-time
+/// `MemberMap` name index both derive from it.
+pub(crate) fn member_lookup_name<'a>(
+    ctx: &'a QueryContext<'_>,
+    entity: Entity,
+) -> Option<&'a str> {
+    if let Some(n) = ctx.get::<Name>(entity) {
+        return Some(n.0.as_str());
+    }
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer) {
+        return Some("init");
+    }
+    if ctx.get::<SubscriptMarker>(entity).is_some() {
+        return Some("subscript");
+    }
+    None
+}
+
+/// Does `entity` answer to the query name? See `member_lookup_name` for
+/// the matching rule (literal `Name` or init/subscript keyword sentinel).
+pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
+    member_lookup_name(ctx, entity) == Some(query)
+}
+
+/// Search extensions of `target` for visible members named `member_name`,
+/// keeping only those that pass `filter`. Returns the matches from the
+/// first extension that has any (extensions are not merged across), or
+/// empty if none do. Shared by value-path resolution for extension static
+/// methods and associated-type static members.
+pub(crate) fn find_in_extensions(
+    ctx: &QueryContext<'_>,
+    target: Entity,
+    member_name: &str,
+    context: Entity,
+    root: Entity,
+    filter: impl Fn(&QueryContext<'_>, Entity) -> bool,
+) -> Vec<Entity> {
+    let extensions = ctx.query(ExtensionsFor { target, root });
+    for &ext in &extensions {
+        let matches: Vec<Entity> = ctx
+            .query(VisibleChildrenByName {
+                parent: ext,
+                name: member_name.to_string(),
+                context,
+            })
+            .into_iter()
+            .filter(|&e| filter(ctx, e))
+            .collect();
+        if !matches.is_empty() {
+            return matches;
+        }
+    }
+    Vec::new()
+}
+
+/// Filter discovered members down to those answering to `name` (including
+/// the init/subscript sentinels) that are visible from `context`. Shared by
+/// `TypeMembersByName` and `ProtocolMembersByName`; `entity_of` projects the
+/// member entity out of each provenance-carrying member record.
+pub(crate) fn filter_members_by_name<M>(
+    ctx: &QueryContext<'_>,
+    members: Vec<M>,
+    name: &str,
+    context: Entity,
+    entity_of: impl Fn(&M) -> Entity,
+) -> Vec<M> {
+    members
+        .into_iter()
+        .filter(|m| {
+            let target = entity_of(m);
+            if !member_name_matches(ctx, target, name) {
+                return false;
+            }
+            ctx.query(IsVisibleFrom { target, context })
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -31,7 +31,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
@@ -99,8 +99,8 @@ fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
 pub struct ExhaustivenessAnalyzer;
 
 impl Describe for ExhaustivenessAnalyzer {
-    fn id(&self) -> &'static str {
-        "exhaustiveness"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Exhaustiveness
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

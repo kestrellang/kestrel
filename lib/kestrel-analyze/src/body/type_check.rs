@@ -19,7 +19,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use kestrel_ast_builder::Vis;
 use kestrel_type_infer::error::InferError;
 
@@ -33,8 +33,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct TypeCheckAnalyzer;
 
 impl Describe for TypeCheckAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_check"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeCheck
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

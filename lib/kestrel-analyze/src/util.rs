@@ -4,7 +4,7 @@
 //! When writing a new analyzer, use these instead of creating local versions.
 //! If you need a new utility, add it here and update AGENTS.md.
 
-use kestrel_ast_builder::{DeclSpan, Name, Valued};
+use kestrel_ast_builder::{DeclSpan, Name, NodeKind, Valued};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
@@ -156,6 +156,34 @@ pub fn pat_span(hir: &HirBody, id: HirPatId) -> Span {
         | HirPat::At { span, .. }
         | HirPat::Error { span, .. } => span.clone(),
     }
+}
+
+// ===== Child walks =====
+
+/// Direct children of `parent` with the given `NodeKind`, in declaration order.
+pub fn children_of_kind(ctx: &QueryContext<'_>, parent: Entity, kind: NodeKind) -> Vec<Entity> {
+    ctx.children_of(parent)
+        .iter()
+        .filter(|&&child| ctx.get::<NodeKind>(child) == Some(&kind))
+        .copied()
+        .collect()
+}
+
+/// Direct children of `parent` with the given `NodeKind` and a `Name` equal to
+/// `name`, in declaration order (multiple matches possible — overloads).
+/// Entities without a `Name` component never match; callers that need the
+/// `entity_name` "<anonymous>" fallback or `init`/`subscript` sentinel names
+/// must filter `children_of_kind` themselves.
+pub fn children_named_of_kind(
+    ctx: &QueryContext<'_>,
+    parent: Entity,
+    name: &str,
+    kind: NodeKind,
+) -> Vec<Entity> {
+    children_of_kind(ctx, parent, kind)
+        .into_iter()
+        .filter(|&child| ctx.get::<Name>(child).is_some_and(|n| n.0 == name))
+        .collect()
 }
 
 // ===== Entity info =====

@@ -21,7 +21,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::NodeKind;
 use kestrel_hir::builtin::BuiltinKind;
@@ -37,8 +37,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct BuiltinMarkerProtocolAnalyzer;
 
 impl Describe for BuiltinMarkerProtocolAnalyzer {
-    fn id(&self) -> &'static str {
-        "builtin_marker_protocol"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::BuiltinMarkerProtocol
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

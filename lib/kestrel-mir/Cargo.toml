@@ -7,6 +7,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+kestrel-copy-fold = { path = "../kestrel-copy-fold" }
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-debug = { path = "../kestrel-debug" }

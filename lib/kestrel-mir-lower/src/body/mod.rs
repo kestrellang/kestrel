@@ -7,6 +7,7 @@ pub mod pattern;
 pub mod stmt;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use kestrel_ast_builder::InitEffect;
 use kestrel_hecs::Entity;
@@ -42,7 +43,8 @@ pub(crate) struct LoopInfo {
 
 pub(crate) enum HirRef<'a> {
     Borrowed(&'a HirBody),
-    Owned(HirBody),
+    // Arc, not a deep copy: queries hand out shared HirBody allocations.
+    Owned(Arc<HirBody>),
 }
 
 impl std::ops::Deref for HirRef<'_> {
@@ -57,7 +59,8 @@ impl std::ops::Deref for HirRef<'_> {
 
 pub(crate) enum TypedRef<'a> {
     Borrowed(&'a TypedBody),
-    Owned(TypedBody),
+    // Arc, not a deep copy: queries hand out shared TypedBody allocations.
+    Owned(Arc<TypedBody>),
 }
 
 impl std::ops::Deref for TypedRef<'_> {
@@ -295,8 +298,8 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     local_use_counts: HashMap<HirLocalId, usize>,
     /// Place-based closure capture plan for this body, keyed by closure
     /// `HirExprId`. Computed once (post-inference) and consumed by
-    /// `lower_closure_expr`.
-    pub(crate) captures: ClosureCaptureMap,
+    /// `lower_closure_expr`. Arc-shared with the query memo cache.
+    pub(crate) captures: Arc<ClosureCaptureMap>,
     /// Inside a closure body: the env value loaded for each captured *place*
     /// (e.g. `self.cap`). Consulted when lowering reads/borrows so projected
     /// captures read the env value instead of projecting from a (non-captured)
@@ -337,7 +340,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         ctx: &'a mut LowerCtx<'w>,
         hir: &'a HirBody,
         typed: Option<&'a TypedBody>,
-        captures: ClosureCaptureMap,
+        captures: Arc<ClosureCaptureMap>,
         func_entity: Entity,
         in_protocol_extension: bool,
     ) -> Self {
@@ -2587,7 +2590,7 @@ pub(crate) fn lower_function_body(ctx: &mut LowerCtx, hir_entity: Entity, func_e
     let mut bctx = OssaBodyCtx::new(
         ctx,
         &hir,
-        typed.as_ref(),
+        typed.as_deref(),
         captures,
         func_entity,
         in_protocol_extension,

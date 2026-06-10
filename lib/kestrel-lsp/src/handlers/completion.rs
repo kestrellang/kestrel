@@ -302,7 +302,7 @@ fn push_members_for_type(
             protocol: entity,
             root,
         });
-        for member in members {
+        for member in members.iter() {
             push_member_entity(world, member.entity, out, seen);
         }
     }
