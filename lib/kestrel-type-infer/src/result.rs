@@ -422,6 +422,11 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 .get::<kestrel_ast_builder::Name>(*protocol)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", protocol));
+            // Static failures get a "because" detail — deep in generic
+            // instantiation chains the bare `T !: Static` is miserable.
+            if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
+                return format!("{} !: {} ({})", ty_name, proto_name, why);
+            }
             format!("{} !: {}", ty_name, proto_name)
         },
         InferError::NoMember {
@@ -580,5 +585,63 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
+    }
+}
+
+/// "Because" detail for a failed `Static` bound (references 2a): names the
+/// declaration, the offending stored member, or the offending type argument.
+/// `None` for non-Static protocols or shapes with nothing specific to say.
+fn describe_static_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    use kestrel_semantics::{NominalStaticness, Staticness, StaticnessReason};
+
+    if !crate::solver::is_static_builtin(ctx, protocol) {
+        return None;
+    }
+    let resolved = ctx.resolve(ty);
+    let TySlot::Resolved(kind) = ctx.slot(resolved) else {
+        return None;
+    };
+    match kind.clone() {
+        TyKind::Ref { .. } => Some("a reference is never Static".into()),
+        TyKind::Param { .. } => {
+            Some("the type parameter is relaxed with 'not Static', so it may hold references".into())
+        },
+        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+            let info = ctx.query_ctx.query(NominalStaticness {
+                entity,
+                root: ctx.root,
+            });
+            match info.reason {
+                StaticnessReason::DeclaredNotStatic => Some("declared 'not Static'".into()),
+                StaticnessReason::NonStaticChild(child) => {
+                    let word = match ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(child) {
+                        Some(kestrel_ast_builder::NodeKind::EnumCase) => "case",
+                        _ => "field",
+                    };
+                    let name = ctx
+                        .query_ctx
+                        .get::<kestrel_ast_builder::Name>(child)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| "<unnamed>".into());
+                    Some(format!("{} '{}' is non-Static", word, name))
+                },
+                StaticnessReason::Default => {
+                    // Conditional base: the failure came from a gating arg —
+                    // re-fold to name the first offender.
+                    let Staticness::ConditionalOn(positions) = info.staticness else {
+                        return None;
+                    };
+                    let bad = positions
+                        .iter()
+                        .filter_map(|&i| args.get(i))
+                        .find(|&&arg| !crate::solver::solver_ty_is_static(ctx, arg, 0))?;
+                    Some(format!(
+                        "type argument '{}' is non-Static",
+                        describe_tyvar(ctx, *bad)
+                    ))
+                },
+            }
+        },
+        _ => None,
     }
 }

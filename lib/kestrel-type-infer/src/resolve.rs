@@ -20,8 +20,8 @@ use kestrel_name_res::{
     TypeResolution, expand_protocol_closure_in_place,
 };
 use kestrel_semantics::{
-    CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics,
-    TypeParamCopyRequirement,
+    CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics, NominalStaticness,
+    StaticRequirement, Staticness, TypeParamCopyRequirement, TypeParamStaticRequirement,
 };
 use kestrel_span::Span;
 
@@ -510,6 +510,41 @@ impl TypeResolver for WorldResolver<'_> {
             root: self.root,
         }) {
             return self.copy_semantics_of(ty) == CopySemantics::Cloneable;
+        }
+        // Static is likewise structural, never declared. DELIBERATELY
+        // permissive (arg-independent — this resolver answer must never
+        // block member routing): only a `NotStatic` base, an unrelaxed-less
+        // param, or a bare ref reject; conditional bases pass and the
+        // precise per-instantiation answer is the solver's
+        // `solver_ty_is_static` / `type_satisfies`.
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Static,
+            root: self.root,
+        }) {
+            return match ty {
+                TyKind::Ref { .. } => false,
+                TyKind::Struct { entity, .. }
+                | TyKind::Enum { entity, .. }
+                | TyKind::SelfType { entity } => !matches!(
+                    self.ctx
+                        .query(NominalStaticness {
+                            entity: *entity,
+                            root: self.root,
+                        })
+                        .staticness,
+                    Staticness::NotStatic
+                ),
+                TyKind::Param { entity } => {
+                    let context = self.ctx.parent_of(*entity).unwrap_or(*entity);
+                    self.ctx.query(TypeParamStaticRequirement {
+                        param: *entity,
+                        context,
+                        root: self.root,
+                    }) == StaticRequirement::RequiresStatic
+                },
+                _ => true,
+            };
         }
         match ty {
             TyKind::Struct { entity, .. }

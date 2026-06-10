@@ -1838,7 +1838,14 @@ fn emit_copyable_wellformedness(
         builtin: Builtin::Cloneable,
         root: ctx.root,
     });
-    if copyable.is_none() && cloneable.is_none() {
+    // Static rides the same formation-site wellformedness: an annotation
+    // like `-> Wrap[NS]` must check the (implicit or explicit) Static
+    // bounds against the formed args, like the Copyable wf check.
+    let static_proto = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root: ctx.root,
+    });
+    if copyable.is_none() && cloneable.is_none() && static_proto.is_none() {
         return;
     }
     // Positional map from the type's declared params to the formed args.
@@ -1860,7 +1867,8 @@ fn emit_copyable_wellformedness(
         else {
             continue;
         };
-        if Some(protocol) != copyable && Some(protocol) != cloneable {
+        if Some(protocol) != copyable && Some(protocol) != cloneable && Some(protocol) != static_proto
+        {
             continue;
         }
         let Some(pos) = params.iter().position(|p| *p == param) else {

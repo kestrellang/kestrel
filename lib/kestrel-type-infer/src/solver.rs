@@ -23,7 +23,9 @@ use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, TypeParamCopyRequirement,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness,
+    StaticLayer, StaticRequirement, Staticness, TypeParamCopyRequirement,
+    TypeParamStaticRequirement, instance_is_static,
 };
 use kestrel_span::Span;
 
@@ -1706,8 +1708,16 @@ fn solve_conforms(
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
         // Transparent place: a ref conforms as its POINTEE — protocol
         // dispatch through `&T` (for-in's Iterable bound, operator
-        // protocols) borrows the place.
+        // protocols) borrows the place. EXCEPT Static: a ref is the one
+        // thing that is never Static, and judging the pointee would let
+        // `&T` slip through containment bounds.
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            if is_static_builtin(ctx, protocol) {
+                if poison_ty_on_failure {
+                    ctx.poison(ty);
+                }
+                return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+            }
             let pointee = *pointee;
             SolveResult::Deferred(Constraint::Conforms {
                 ty: pointee,
@@ -1720,7 +1730,11 @@ fn solve_conforms(
             // Per-instantiation Copyable/Cloneable: evaluate conditional
             // `extend X: Copyable where T: Copyable` against the resolved type
             // args, so `Box[Int]` is Copyable while `Box[File]` is move-only.
-            let conforms = if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
+            // Static first: structural (never declared), so the declared-
+            // conformance path below can't answer it.
+            let conforms = if is_static_builtin(ctx, protocol) {
+                solver_ty_is_static(ctx, resolved, 0)
+            } else if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
                 type_conforms_copyable(ctx, resolved, want_cloneable)
             } else {
                 let kind = match ctx.slot(resolved) {
@@ -1932,6 +1946,90 @@ fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool) -
         CopySemantics::NotCopyable => false,
         CopySemantics::Cloneable => true,
         CopySemantics::Copyable => !want_cloneable,
+    }
+}
+
+/// Is `protocol` the `Static` builtin (references 2a)?
+pub(crate) fn is_static_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root: ctx.root,
+    }) == Some(protocol)
+}
+
+/// `StaticLayer` over `TyVar` — the solver's hooks into the per-instantiation
+/// staticness rule (`kestrel_semantics::instance_is_static`, the single
+/// source of truth across semantics / solver / analyze). Depth bookkeeping
+/// mirrors `SolverCopyLayer`.
+struct SolverStaticLayer<'a, 'i> {
+    ctx: &'a InferCtx<'i>,
+    depth: u32,
+}
+
+impl StaticLayer for SolverStaticLayer<'_, '_> {
+    type Ty = TyVar;
+
+    fn nominal_staticness(&self, entity: Entity) -> Staticness {
+        self.ctx
+            .query_ctx
+            .query(NominalStaticness {
+                entity,
+                root: self.ctx.root,
+            })
+            .staticness
+    }
+
+    fn member_is_static(&self, &tv: &TyVar) -> bool {
+        solver_ty_is_static(self.ctx, tv, self.depth + 1)
+    }
+}
+
+/// Per-instantiation staticness for the solver: structural contains-ref over
+/// resolved type vars. Never-block arms (unresolved / Error / depth guard)
+/// answer `true` — in 2a nothing unresolved can become non-Static, and a
+/// missed rejection is a mono-stage gap, not a miscompile (Static has no
+/// runtime semantics). The universal fast path: `Staticness::Static` bases
+/// return without touching args.
+pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
+    if depth > 64 {
+        return true; // recursion guard — never block
+    }
+    let resolved = ctx.resolve(tv);
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => return true, // unresolved: never block
+    };
+    match kind {
+        // The axiom: a reference is never Static.
+        TyKind::Ref { .. } => false,
+        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &args)
+        },
+        // Empty args: a conditional base is unprovable here (mirrors the
+        // copy layer's empty-args rule).
+        TyKind::SelfType { entity } => {
+            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &[])
+        },
+        TyKind::Param { entity } => {
+            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
+            ctx.query_ctx.query(TypeParamStaticRequirement {
+                param: entity,
+                context,
+                root: ctx.root,
+            }) == StaticRequirement::RequiresStatic
+        },
+        TyKind::Tuple(elems) => elems.iter().all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
+        // Function types are Static in 2a. TODO(static-2c): the capture-
+        // derived Static bit on function types.
+        // Protocol / opaque / alias / assoc-projection / Never / Error:
+        // conservative never-block leaves — refs can't reach them in 2a.
+        TyKind::Error
+        | TyKind::Protocol { .. }
+        | TyKind::Opaque { .. }
+        | TyKind::Function { .. }
+        | TyKind::Never
+        | TyKind::TypeAlias { .. }
+        | TyKind::AssocProjection { .. } => true,
     }
 }
 

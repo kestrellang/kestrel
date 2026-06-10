@@ -43,6 +43,19 @@ use crate::where_clauses::WhereClausesOf;
 /// `TypeResolver::conforms_to`. See the module docs for the conservative
 /// rejection rule.
 pub fn type_satisfies(ctx: &QueryContext<'_>, ty: &HirTy, protocol: Entity, root: Entity) -> bool {
+    // Static is structural, never declared — the ConformingProtocols walk
+    // below can't answer it. The HIR staticness walk shares this function's
+    // conservative contract exactly (abstract positions permit).
+    if ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root,
+    }) == Some(protocol)
+    {
+        // No asking-site context exists here; `root` is fine — the
+        // requirement query always consults the param's own declaring
+        // parent first (same scoping the solver's Param arm uses).
+        return kestrel_semantics::hir_type_is_static(ctx, ty, root, root);
+    }
     match ty {
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
