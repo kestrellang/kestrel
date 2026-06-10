@@ -333,6 +333,21 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// is the E497 "ref across a control-flow merge" error, not a silent
     /// EndBorrow. Per-body value ids — saved/restored across closures.
     pub(crate) ref_results: std::collections::HashSet<ValueId>,
+    /// Named ref bindings (`let r = &expr;`, stage 1.5 item 2): the
+    /// binding's @guaranteed value → its HIR local. Members are ALSO in
+    /// `ref_results`; this map marks them MULTI-USE — value-context reads
+    /// copy WITHOUT ending the borrow (`end_ref_if_single_use`), statement
+    /// sweeps spare them, and lexical scope exit / terminators own their
+    /// end. Saved/restored across closures.
+    pub(crate) ref_binding_vals: HashMap<ValueId, HirLocalId>,
+    /// Remaining HIR reads per ref-binding local — decremented once per
+    /// read expr (`note_binding_read`). A binding live at an inside-fn
+    /// terminator with remaining > 0 is the E497 binding error (bindings
+    /// never cross blocks); remaining == 0 ends silently.
+    pub(crate) ref_binding_remaining: HashMap<HirLocalId, usize>,
+    /// Read exprs already counted against `ref_binding_remaining` — a
+    /// re-lowered expr (desugar duplication) must not double-decrement.
+    ref_binding_reads: std::collections::HashSet<kestrel_hir::body::HirExprId>,
     /// Stage 1.5 get→op→set writebacks pending after the owning call.
     /// Pushed by `try_lower_accessor_place_mut`'s fallback (the receiver of
     /// a mutating operation is a get/set member: the element was copied out
@@ -398,6 +413,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             value_forwarding: HashMap::new(),
             ret_borrow: false,
             ref_results: std::collections::HashSet::new(),
+            ref_binding_vals: HashMap::new(),
+            ref_binding_remaining: HashMap::new(),
+            ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
         }
     }
@@ -648,6 +666,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// meaning this reference is the only use and the value can be moved.
     fn is_single_use(&self, hir_id: HirLocalId) -> bool {
         self.local_use_counts.get(&hir_id).copied().unwrap_or(0) == 1
+    }
+
+    /// Total HIR read count for a local (0 if never read). Seeds a ref
+    /// binding's remaining-use budget.
+    pub(crate) fn local_use_count(&self, hir_id: HirLocalId) -> usize {
+        self.local_use_counts.get(&hir_id).copied().unwrap_or(0)
     }
 
     pub fn map_local(&mut self, hir_id: HirLocalId) -> ValueId {
@@ -1266,8 +1290,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // call result), the copy-out above was its single use — end its
             // borrow before the jump to the merge, or `set_terminator`'s sweep
             // reports a false E497. Mirrors binding decay in `lower_stmt`.
+            // (A named binding's borrow is multi-use — left for the
+            // terminator policy.)
             if self.ref_results.contains(&result) {
-                self.emit_end_borrow(result);
+                self.end_ref_if_single_use(result);
             }
             owned
         } else {
@@ -1478,7 +1504,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .iter()
             .flat_map(|s| s.entries.iter())
             .filter_map(|e| match e {
-                ScopeEntry::Borrow(v) if v.index() >= mark && self.ref_results.contains(v) => {
+                // Named bindings are multi-use — they survive statement/
+                // condition sweeps and end at scope exit or a terminator.
+                ScopeEntry::Borrow(v)
+                    if v.index() >= mark
+                        && self.ref_results.contains(v)
+                        && !self.ref_binding_vals.contains_key(v) =>
+                {
                     Some(*v)
                 },
                 _ => None,
@@ -2051,11 +2083,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // single use — refs aren't nameable, so once the dependent
                 // borrow ends the ref is dead. End it here so it never
                 // reaches a later terminator (a stale ref at a Branch would
-                // be an E497 false positive).
+                // be an E497 false positive). Named bindings ARE nameable —
+                // their borrow outlives any one call.
                 if let Some(src) = src
                     && self.ref_results.contains(&src)
                 {
-                    self.emit_end_borrow(src);
+                    self.end_ref_if_single_use(src);
                 }
             }
         }
@@ -2132,8 +2165,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // A ret_borrow call result crossing a Jump/Branch/Switch would
             // dangle past the merge — stage 1 keeps refs intra-block (E497).
             // Still EndBorrow for IR sanity; the error aborts compilation.
-            if ends_block_inside_fn && self.ref_results.contains(&v) {
-                self.emit_ref_across_merge_error(v);
+            // A NAMED binding ends silently here when fully used (its
+            // remaining-use count is 0); with uses left it is the binding
+            // E497 — bindings never cross blocks.
+            if ends_block_inside_fn {
+                if let Some(&local) = self.ref_binding_vals.get(&v) {
+                    if self.ref_binding_remaining.get(&local).copied().unwrap_or(0) > 0 {
+                        self.emit_binding_across_merge_error(v, local);
+                    }
+                } else if self.ref_results.contains(&v) {
+                    self.emit_ref_across_merge_error(v);
+                }
             }
             self.push_inst(InstKind::EndBorrow { operand: v });
         }
@@ -2365,11 +2407,99 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn decay_if_ref(&mut self, value: ValueId) -> ValueId {
         if self.ref_results.contains(&value) {
             let owned = self.emit_copy_value(value);
-            self.emit_end_borrow(value);
+            self.end_ref_if_single_use(value);
             owned
         } else {
             value
         }
+    }
+
+    /// End a ref after a value-use ONLY when it is single-use. Stage-1
+    /// expression refs are unnameable — their copy-out is their one use,
+    /// so the borrow ends with it. A NAMED binding's value is multi-use:
+    /// the borrow stays live until lexical scope exit / the next
+    /// terminator. Every "the ref's single use — end it" site funnels here.
+    pub fn end_ref_if_single_use(&mut self, v: ValueId) {
+        if !self.ref_binding_vals.contains_key(&v) {
+            self.emit_end_borrow(v);
+        }
+    }
+
+    /// Count a read of a ref-binding local (once per HIR expr — desugar
+    /// re-lowering must not double-decrement). Drives the terminator
+    /// policy: remaining > 0 at an inside-fn terminator = E497.
+    pub fn note_binding_read(&mut self, local: HirLocalId, expr_id: HirExprId) {
+        if let Some(remaining) = self.ref_binding_remaining.get_mut(&local)
+            && self.ref_binding_reads.insert(expr_id)
+        {
+            *remaining = remaining.saturating_sub(1);
+        }
+    }
+
+    /// Lower a `let r = &expr;` initializer to the binding's @guaranteed
+    /// value (stage 1.5 item 2). `&expr` is "evaluate `expr` as a place and
+    /// borrow it" — exactly a borrow-convention argument, so the whole
+    /// place matrix is delegated to `prepare_call_arg_for_expr`:
+    /// var slots → `BeginBorrowAddr`/`BeginMutBorrowAddr` (writes through
+    /// the var stay visible — may-alias), accessor-backed members → the
+    /// `mutating ref` child (MutBorrow), SSA locals / @guaranteed values →
+    /// in-place borrow (no spurious clone), ref-returning calls →
+    /// pass-through. Rvalue borrows are rejected by analyze (E499) but
+    /// lower soundly (scope exit ends the borrow before the temp dies).
+    ///
+    /// A `&mutating` of a get/set-only member falls to the WRITEBACK path,
+    /// whose statement-boundary write-back would strand later stores —
+    /// analyze rejects that shape (no `mutating ref` provider).
+    pub fn lower_borrow_init(&mut self, inner: HirExprId, mutating: bool) -> ValueId {
+        // Reads through `lower_expr_for_borrow` bypass the Local arm's
+        // counter — count a binding read (re-borrow `&r`) here.
+        if let HirExpr::Local(l, _) = &self.hir.exprs[inner]
+            && !self.is_var_local(l)
+        {
+            let l = *l;
+            self.note_binding_read(l, inner);
+        }
+        let convention = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
+        let v = self.prepare_call_arg_for_expr(inner, convention).value;
+        // Re-borrow of an existing NAMED binding: the new binding needs its
+        // own lifetime — two locals must never share one borrow value.
+        if self.ref_binding_vals.contains_key(&v) {
+            return self.emit_begin_borrow(v);
+        }
+        v
+    }
+
+    /// E497, binding wording: a named ref binding still has uses after an
+    /// inside-fn terminator — bindings never cross blocks (no @guaranteed
+    /// block params in this version).
+    fn emit_binding_across_merge_error(&mut self, v: ValueId, local: HirLocalId) {
+        let name = self.hir.locals[local].name.clone();
+        let span = self
+            .body
+            .value(v)
+            .span
+            .clone()
+            .or_else(|| Some(self.hir.locals[local].span.clone()))
+            .unwrap_or_else(|| Span::synthetic(0));
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_code("E497")
+                .with_message(format!(
+                    "ref binding '{name}' cannot stay live across a control-flow merge"
+                ))
+                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
+                    "this binding is still used after an `if`/`match`/loop boundary",
+                )])
+                .with_notes(vec![
+                    "a binding's last use must come before the branch; re-borrow inside \
+                     the branch or bind the value (`let x = ...;`) instead"
+                        .into(),
+                ]),
+        );
     }
 
     /// Transfer a value for use — conservative: always copies @owned.
@@ -2697,8 +2827,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     let copy = self.emit_copy_value(value);
                     // Copy-out was a ref's single use — end it (stage-1
                     // refs are unnameable, nothing can use it again).
+                    // Named bindings stay live for later reads.
                     if self.ref_results.contains(&value) {
-                        self.emit_end_borrow(value);
+                        self.end_ref_if_single_use(value);
                     }
                     CallArg {
                         value: copy,

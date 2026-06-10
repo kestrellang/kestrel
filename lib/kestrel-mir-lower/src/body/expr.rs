@@ -117,11 +117,11 @@ impl OssaBodyCtx<'_, '_> {
         match expr {
             HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
 
-            // TODO(A3): named-ref-binding place lowering (lower_borrow_init —
-            // BeginBorrowAddr on var slots, pass-through for ref-typed
-            // inners). Until then the Borrow is transparent: the inner value
-            // flows and the let path treats it like any initializer.
-            HirExpr::Borrow { inner, .. } => self.lower_expr(*inner),
+            // Normally intercepted by the let-statement path (the only legal
+            // position); kept routable for error-recovery shapes.
+            HirExpr::Borrow {
+                inner, mutating, ..
+            } => self.lower_borrow_init(*inner, *mutating),
 
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(hir_local) {
@@ -155,6 +155,9 @@ impl OssaBodyCtx<'_, '_> {
                     }
                 } else {
                     let val = self.map_local(*hir_local);
+                    // Ref bindings: count the read (drives the terminator
+                    // policy — remaining uses at a merge = binding E497).
+                    self.note_binding_read(*hir_local, expr_id);
                     self.emit_value_use(val)
                 }
             },
@@ -190,8 +193,9 @@ impl OssaBodyCtx<'_, '_> {
                 let result_ty = self.resolve_expr_type(expr_id);
                 let result = self.emit_tuple_extract(base_val, *index, result_ty);
                 // Single-use ref: element copy-out ends the ref (see the
-                // stored-field twin in lower_field).
+                // stored-field twin in lower_field). Named bindings stay live.
                 if self.ref_results.contains(&base_val)
+                    && !self.ref_binding_vals.contains_key(&base_val)
                     && self.body.value(result).ownership
                         == kestrel_mir::value::Ownership::Owned
                 {
@@ -488,7 +492,9 @@ impl OssaBodyCtx<'_, '_> {
         // here, or it leaks into the next terminator (false E497 inside an
         // `if` condition). A non-Copyable field instead keeps a @guaranteed
         // view alive; ending that view (call-arg machinery) ends the ref.
+        // Named bindings stay live for later reads (`r.field` twice).
         if self.ref_results.contains(&base_val)
+            && !self.ref_binding_vals.contains_key(&base_val)
             && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
         {
             self.emit_end_borrow(base_val);
@@ -682,7 +688,9 @@ impl OssaBodyCtx<'_, '_> {
             let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
             let addr = self.emit_op1(Op::PtrTo(pointee), ref_val, ptr_ty);
             self.emit_store_assign(addr, rhs);
-            self.emit_end_borrow(ref_val);
+            // A named `&mutating` binding stays live for later uses; an
+            // expression ref's store-through was its single use.
+            self.end_ref_if_single_use(ref_val);
             return self.emit_literal(Immediate::unit());
         }
 
@@ -805,6 +813,20 @@ impl OssaBodyCtx<'_, '_> {
     /// assignment analyzer rejects them with E208.)
     fn assign_target_is_mut_ref(&self, target: HirExprId) -> bool {
         let callee_entity = match &self.hir.exprs[target] {
+            // Named `&mutating` binding: `r = v` is store-through (the
+            // ratified item-2 semantics — there is no rebind spelling).
+            HirExpr::Local(local, _) => {
+                return self
+                    .typed
+                    .as_ref()
+                    .and_then(|t| t.local_types.get(local))
+                    .is_some_and(|ty| {
+                        matches!(
+                            ty,
+                            kestrel_type_infer::result::ResolvedTy::Ref { mutating: true, .. }
+                        )
+                    });
+            },
             HirExpr::Field { .. } | HirExpr::MethodCall { .. } => self
                 .typed
                 .as_ref()

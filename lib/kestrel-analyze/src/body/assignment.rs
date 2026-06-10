@@ -188,6 +188,19 @@ fn check_target(
     match &cx.hir.exprs[target] {
         // Local variable: check is_mut
         HirExpr::Local(local_id, _) => {
+            // Named ref binding (stage 1.5 item 2): writability comes from
+            // the REFERENCE type, not the binding's mutability — `r = v` on
+            // a `&mutating` binding is store-through (there is no rebind
+            // spelling); on a shared `&` binding it is the E208 family.
+            // Mirrors the Field arm's ref_place consult.
+            match util::ref_place(cx, target) {
+                Some(true) => return,
+                Some(false) => {
+                    push_assign_through_shared_ref(cx, target, &mut *diags);
+                    return;
+                },
+                None => {},
+            }
             let local = &cx.hir.locals[*local_id];
             if !local.is_mut && !util::is_mut_borrow_param(cx, *local_id) {
                 diags.push(AnalyzeDiagnostic {

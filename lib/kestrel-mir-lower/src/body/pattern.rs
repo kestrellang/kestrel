@@ -78,10 +78,13 @@ impl OssaBodyCtx<'_, '_> {
         // Stage-1 scrutinee decay: a match scrutinee is a VALUE context — a
         // ref-typed scrutinee (ret_borrow call result) is copied out and its
         // borrow ends here, BEFORE the decision tree's branch terminators
-        // (a live ref at the first Branch would be a false E497).
+        // (a live ref at the first Branch would be a false E497). A named
+        // binding scrutinee copies too but its borrow stays — and it had
+        // better be the binding's LAST use, or the branch terminator
+        // reports the binding E497 (bindings never cross blocks).
         if self.ref_results.contains(&val) {
             let owned = self.emit_copy_value(val);
-            self.emit_end_borrow(val);
+            self.end_ref_if_single_use(val);
             return owned;
         }
         val

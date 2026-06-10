@@ -20,15 +20,34 @@ impl OssaBodyCtx<'_, '_> {
             HirStmt::Let { local, value, .. } => {
                 let is_var = self.hir.locals[*local].is_mut;
                 let name = self.hir.locals[*local].name.clone();
-                if let Some(init_expr) = value {
+                // Named ref binding (`let r = &expr;`): the binding HOLDS the
+                // place — register the @guaranteed value as multi-use
+                // (ref_binding_vals) with its read budget; no decay copy. The
+                // statement-boundary sweep below exempts it.
+                if let Some(init_expr) = value
+                    && let kestrel_hir::body::HirExpr::Borrow {
+                        inner, mutating, ..
+                    } = &self.hir.exprs[*init_expr]
+                {
+                    let (inner, mutating) = (*inner, *mutating);
+                    let v = self.lower_borrow_init(inner, mutating);
+                    self.ref_results.insert(v);
+                    self.ref_binding_vals.insert(v, *local);
+                    let uses = self.local_use_count(*local);
+                    self.ref_binding_remaining.insert(*local, uses);
+                    self.body.value_names.insert(v, name);
+                    self.local_map.insert(*local, super::LocalBinding::Ssa(v));
+                } else if let Some(init_expr) = value {
                     let init_val = self.lower_expr(*init_expr);
                     // Stage-1 binding decay: a ref-typed initializer
                     // (ret_borrow call result) is COPIED out — the binding
                     // owns a value, never the place — and the copy is the
-                    // ref's single use, so its borrow ends here.
+                    // ref's single use, so its borrow ends here. (A read of
+                    // a NAMED binding copies too, but its borrow stays —
+                    // `end_ref_if_single_use`.)
                     let init_val = if self.ref_results.contains(&init_val) {
                         let owned = self.emit_copy_value(init_val);
-                        self.emit_end_borrow(init_val);
+                        self.end_ref_if_single_use(init_val);
                         owned
                     } else {
                         init_val
