@@ -14,14 +14,24 @@ what implementation needs; the *why* stays in the research docs.
 | **stage0.5** — pointer capture + reserved ref syntax | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1** — returnable refs | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1.5** — ergonomics | ✅ | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE |
-| **stage2** — storable refs | ✅ scope only | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| **stage3** — Static bound | ✅ scope only | ✅ | ⬜ | ⬜ | ⬜ | ✅ sketch |
+| **stage2** — second-class composition (2a ✅ SHIPPED 2026-06-11) | ✅ | 2a ✅ | 2a ✅ | 2a ✅ | 2a ✅ | 2a ✅ |
+| **stage3** — DISSOLVED into stage2 (Static→2a, witness refs→2d; closure-return carve remains) | ✅ scope only | ✅ | ⬜ | ⬜ | ⬜ | ✅ sketch |
 
 ✅ defined now · 🚧 partially defined (open sections marked inline) ·
 ⬜ blank — needs exploration (stub states the blocker)
 
 ## Implementation status
 
+- **stage2a — SHIPPED 2026-06-11** (feature/115 branch): the `Static`
+  containment bound. `@builtin(.Static)` marker protocol; structural
+  staticness kernel (`kestrel-semantics/src/staticness.rs`, single
+  source of truth; solver/analyze mirrors via `StaticLayer`); implicit
+  `T: Static` on every generic param (relax: `where T: not Static` =
+  need-not; `not Static` owners relax wholesale); `Pointer[T]` Static
+  regardless of T (gained `T: not Static`); DoesNotConform "because"
+  details; E505 statics/globals check; E212 widened to non-Static
+  captures. Zero-breakage gate: full suite green with the bound live,
+  compile-time flat. Details: `stage2/requirements.md`.
 - **stage0.5 — SHIPPED** (79c48ca0): refs parse everywhere, rejected
   everywhere (E480–E489), `Pointer(to:)` pinned.
 - **stage1.5 COMPLETE 2026-06-10** (feature/115 branch). Beyond items
@@ -125,11 +135,25 @@ what implementation needs; the *why* stays in the research docs.
    change needed or made (the type-aware fallback-tier option stays
    unbuilt). ~~Item 2 blocks on ratification~~ — RATIFIED + SHIPPED
    2026-06-10 (see implementation status). Stage 1.5 has no blanks left.
-3. **Stage-2 commitment**: the standing default is *don't build*
-   (`references-gaps.md` §11); its files stay blank unless users hit the
-   stage-1.5 ceiling.
+3. ~~**Stage-2 commitment**: the standing default is *don't build*~~
+   **REDEFINED 2026-06-10** (maintainer-ratified): stage 2 is no longer
+   §8's storable-refs/lifetime design (that is rejected *permanently*,
+   not deferred). New scope = **second-class composition** toward the
+   goal API (`arr(i) -> &T`, `arr(checked: i) -> Optional[&T]`, dict
+   equivalents, ref-capturing closures, ref-yielding + ref-STORING
+   iterators): 2a `Static` bound (moved from stage 3, lands FIRST as
+   containment; need-not-be-Static spelling + ConditionalStaticParams
+   are core) → 2b refs in enums/tuples/structs (second-class struct
+   values ratified IN) → 2c ref-capturing closures (two-tier Rc carve)
+   → 2d ref-bearing protocols/witnesses + for-in (old stage 3 pulled
+   in). Prerequisites: type-aware fallback-tier resolution, Dict split
+   storage, cross-block ref flow ("1.75"). Full decision + tradeoff
+   record: `stage2/requirements.md`.
 
 ## Gating order
 
-stage0.5 → stage1 → stage1.5 (on demand). stage2 only if re-litigated;
-stage3 only after stage2.
+stage0.5 ✅ → stage1 ✅ → stage1.5 ✅ → pre-2 work (resolution
+fallback-tier fix, Dict split storage, cross-block refs) → stage2
+(2a Static → 2b aggregates → 2c closures → 2d witnesses/iterators).
+Stage 3 is dissolved; only the closure-return root-rule carve remains
+as a possible follow-on.
