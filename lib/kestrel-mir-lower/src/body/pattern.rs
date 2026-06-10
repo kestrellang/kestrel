@@ -74,7 +74,17 @@ impl OssaBodyCtx<'_, '_> {
                 return self.emit_move_value(val);
             }
         }
-        self.lower_expr(scrutinee_expr)
+        let val = self.lower_expr(scrutinee_expr);
+        // Stage-1 scrutinee decay: a match scrutinee is a VALUE context — a
+        // ref-typed scrutinee (ret_borrow call result) is copied out and its
+        // borrow ends here, BEFORE the decision tree's branch terminators
+        // (a live ref at the first Branch would be a false E497).
+        if self.ref_results.contains(&val) {
+            let owned = self.emit_copy_value(val);
+            self.emit_end_borrow(val);
+            return owned;
+        }
+        val
     }
 
     pub fn lower_match(

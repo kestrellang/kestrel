@@ -507,7 +507,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if !self.is_terminated() {
             if let Some(tail) = self.hir.tail_expr {
                 let tail_span = expr_span(&self.hir, tail);
-                let value = self.lower_expr_for_return(tail);
+                // ret_borrow returns a PLACE: lower for borrow so projections
+                // stay @guaranteed and carry their provenance root — the
+                // owned-copy path would re-root at a fresh Local and always
+                // escape-fail (E494 instead of the precise E496 etc.).
+                let value = if self.ret_borrow {
+                    self.lower_expr_for_ref_return(tail)
+                } else {
+                    self.lower_expr_for_return(tail)
+                };
                 if !self.is_terminated() {
                     let value = self.prepare_return_value(value);
 
@@ -1861,22 +1869,38 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // of stage 1's scope. `result_ty` is already the PEELED pointee
         // (ResolvedTy lowering peels Ref), so the convention must come from
         // the callee's signature, not the result type.
+        // THE single ret-convention source is the entity-keyed front-end
+        // query (`CallableRefReturn`), NOT the callee's lowered FunctionDef:
+        // `module.functions` fills incrementally as declarations lower, so a
+        // FunctionDef lookup misses callees whose defining file lowers later
+        // (array.ks lowers before pointer.ks — `Pointer.value` would fall
+        // back to a value-convention result and break the returned ref).
         let ret_ref_mutating: Option<bool> = match &callee {
-            Callee::Direct { func, .. } => {
-                self.ctx.module.functions.get(func).and_then(|f| {
-                    match kestrel_mir::item::function::ret_convention(
-                        &self.ctx.module.ty_arena,
-                        f.ret,
-                    ) {
-                        kestrel_mir::item::function::RetConvention::RefBorrow { mutating } => {
-                            Some(mutating)
-                        },
-                        kestrel_mir::item::function::RetConvention::Value => None,
-                    }
+            Callee::Direct { func, .. } => self
+                .ctx
+                .query
+                .query(kestrel_hir_lower::CallableRefReturn {
+                    entity: *func,
+                    root: self.ctx.root,
                 })
-            },
+                .map(|r| r.mutating),
             _ => None,
         };
+        // PointerDerived originates at the `ptr_ref`/`ptr_mut_ref` intrinsics:
+        // a callee that is a thin intrinsic wrapper (Pointer.value /
+        // .mutatingValue) returns a view inheriting the raw pointer's
+        // contract, not its receiver temp's lifetime — re-rooting it at the
+        // receiver would make `Array.at` a false E494.
+        let ret_pointer_derived = ret_ref_mutating.is_some()
+            && match &callee {
+                Callee::Direct { func, .. } => {
+                    self.ctx.query.query(crate::context::RetRefPointerDerived {
+                        entity: *func,
+                        root: self.ctx.root,
+                    })
+                },
+                _ => false,
+            };
         let result = result_ty.map(|ty| {
             if let Some(mutating) = ret_ref_mutating {
                 // Register the returned ref @guaranteed against the borrow it
@@ -1889,7 +1913,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     .find(|a| self.body.value(a.value).ownership == Ownership::Guaranteed)
                     .map(|a| a.value);
                 match source {
-                    Some(src) => self.alloc_guaranteed(ty, src),
+                    Some(src) => {
+                        let v = self.alloc_guaranteed(ty, src);
+                        if ret_pointer_derived {
+                            self.stamp_root(v, RootProvenance::PointerDerived {
+                                mutable: mutating,
+                            });
+                        }
+                        v
+                    },
                     None => self.body.alloc_value(
                         ValueDef {
                             ty,
@@ -1931,7 +1963,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         if ret_ref_mutating.is_none() {
             for borrow_val in borrows {
+                let src = self.body.value(borrow_val).borrow_source;
                 self.emit_end_borrow(borrow_val);
+                // A sub-borrow of a ref (receiver/arg prep) was that ref's
+                // single use — refs aren't nameable, so once the dependent
+                // borrow ends the ref is dead. End it here so it never
+                // reaches a later terminator (a stale ref at a Branch would
+                // be an E497 false positive).
+                if let Some(src) = src
+                    && self.ref_results.contains(&src)
+                {
+                    self.emit_end_borrow(src);
+                }
             }
         }
         // else: the arg borrows stay scope-tracked — every potential root
@@ -2139,6 +2182,57 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Resolve an expression to a value suitable for borrowing — returns the
     /// original value without copying. For non-local expressions, falls back
     /// to lower_expr (which may copy).
+    /// Lower a ret_borrow function's return expression as a PLACE
+    /// projection: stored-field chains extract @guaranteed views (keeping
+    /// the provenance root for the escape check) instead of copying the
+    /// field out — `lower_expr`'s Copyable-field snapshot would re-root at
+    /// a fresh Local and turn every `&self.field` return into E494.
+    /// Used ONLY at ret_borrow return sites; everything else falls back to
+    /// the ordinary paths.
+    pub fn lower_expr_for_ref_return(&mut self, expr_id: HirExprId) -> ValueId {
+        let expr = self.hir.exprs[expr_id].clone();
+        if let HirExpr::Field { base, name, .. } = &expr {
+            let resolved = self
+                .typed
+                .as_ref()
+                .and_then(|t| t.resolutions.get(&expr_id))
+                .copied();
+            let plain_stored = resolved.is_none_or(|e| {
+                self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_none()
+                    && self.ctx.world.get::<kestrel_ast_builder::Static>(e).is_none()
+            });
+            let base_ty = self.resolve_expr_type(*base);
+            let field_idx = match self.ctx.module.ty_arena.get(base_ty) {
+                MirTy::Named { entity, .. } => {
+                    let entity = *entity;
+                    self.ctx.resolve_field_idx(entity, name.as_str_or_empty())
+                },
+                _ => None,
+            };
+            if plain_stored && let Some(field_idx) = field_idx {
+                let result_ty = self.resolve_expr_type(expr_id);
+                if let Some(base_addr) = self.try_field_addr_chain(*base) {
+                    let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    return self.emit_begin_borrow_addr(field_addr, result_ty);
+                }
+                let base_val = self.lower_expr_for_ref_return(*base);
+                let base_ref = if self.body.value(base_val).ownership == Ownership::Owned {
+                    self.emit_begin_borrow(base_val)
+                } else {
+                    base_val
+                };
+                let result = self.alloc_guaranteed(result_ty, base_ref);
+                self.push_inst(InstKind::StructExtract {
+                    result,
+                    operand: base_ref,
+                    field: field_idx,
+                });
+                return result;
+            }
+        }
+        self.lower_expr_for_borrow(expr_id)
+    }
+
     pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
         // A captured projected place reads its env value directly.
         if let Some(v) = self.captured_place_value(expr_id) {
@@ -2297,6 +2391,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     CallArg { value, convention }
                 } else {
                     let copy = self.emit_copy_value(value);
+                    // Copy-out was a ref's single use — end it (stage-1
+                    // refs are unnameable, nothing can use it again).
+                    if self.ref_results.contains(&value) {
+                        self.emit_end_borrow(value);
+                    }
                     CallArg {
                         value: copy,
                         convention,

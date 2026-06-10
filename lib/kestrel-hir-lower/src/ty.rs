@@ -9,7 +9,8 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams,
+    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, NodeKind, Settable, TypeAnnotation,
+    TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
@@ -750,11 +751,73 @@ impl QueryFn for LowerTypeAnnotation {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<HirTy> {
         let type_ann = ctx.get::<TypeAnnotation>(self.entity)?;
+        let nk = ctx.get::<NodeKind>(self.entity);
+
+        // E490: `throws` desugars the return to `Result` sugar — a ref can
+        // never ride an effect wrapper (the ret_borrow ABI is not
+        // expressible in an enum payload). Two shapes: `Result{ok: Ref}`
+        // (init effect) and `Ref{inner: Result}` (`-> &T throws E` — the
+        // `&` prefix binds looser than the throws tail, wrapping the
+        // sugar). Checked on the AST so the wording names the sugar, not a
+        // generic nested-arg error. An explicit `&Result[T, E]` annotation
+        // spells the generic by NAME and is untouched.
+        let throws_ref = match &type_ann.0 {
+            AstType::Result { ok, span, .. } if matches!(ok.as_ref(), AstType::Ref { .. }) => {
+                Some(span)
+            },
+            AstType::Ref { inner, span, .. }
+                if matches!(inner.as_ref(), AstType::Result { .. }) =>
+            {
+                Some(span)
+            },
+            _ => None,
+        };
+        if matches!(nk, Some(NodeKind::Function))
+            && let Some(span) = throws_ref
+        {
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E490")
+                    .with_message("a throwing function cannot return a reference")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())
+                        .with_message("`throws` wraps the return in `Result` — a reference \
+                                       cannot live in an enum payload")]),
+            );
+            return Some(HirTy::Error(span.clone()));
+        }
+
         let lowered = lower_ast_type(ctx, self.entity, self.root, &type_ann.0);
+
+        // E481 carve-out (stage 1): a ref RETURN is legal for functions and
+        // computed-property GETTERS (the Pointer-bridge `var value: &T`
+        // shape — Field + Computed + Gettable, NOT Settable: a settable
+        // property pairs with a setter, which is the call-as-place world of
+        // stage 1.5). Subscripts stay rejected for the same reason;
+        // init/deinit never return. The pointee subtree is still walked
+        // (E487 nesting, E480 fn-type params, ...).
+        let is_computed_getter = matches!(nk, Some(NodeKind::Field))
+            && ctx.get::<Computed>(self.entity).is_some()
+            && ctx.get::<Gettable>(self.entity).is_some()
+            && ctx.get::<Settable>(self.entity).is_none();
+        if (matches!(nk, Some(NodeKind::Function)) || is_computed_getter)
+            && let HirTy::Ref {
+                inner,
+                mutating,
+                span,
+            } = lowered
+        {
+            let inner = reject_ref_types(ctx, *inner, RefPosition::Other);
+            return Some(HirTy::Ref {
+                inner: Box::new(inner),
+                mutating,
+                span,
+            });
+        }
+
         // A TypeAnnotation on a callable is its return annotation; on a
         // field/enum-case it is the stored type. Classify the ref rejection
-        // accordingly (stage 1 will carve out only the Return position).
-        let pos = match ctx.get::<NodeKind>(self.entity) {
+        // accordingly (stage 1 carved out only the Return position, above).
+        let pos = match nk {
             Some(
                 NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
             ) => RefPosition::Return,

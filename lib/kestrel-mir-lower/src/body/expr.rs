@@ -253,7 +253,13 @@ impl OssaBodyCtx<'_, '_> {
                 let is_failure_return =
                     !self.init_field_flags.is_empty() && self.is_init_failure_return(value);
                 let ret_val = if let Some(v) = value {
-                    self.lower_expr_for_return(*v)
+                    if self.ret_borrow {
+                        // ret_borrow returns a place — borrow path keeps the
+                        // provenance root (see the tail-expr twin in mod.rs).
+                        self.lower_expr_for_ref_return(*v)
+                    } else {
+                        self.lower_expr_for_return(*v)
+                    }
                 } else {
                     self.emit_literal(Immediate::unit())
                 };
