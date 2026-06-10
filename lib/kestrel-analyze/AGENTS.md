@@ -225,6 +225,10 @@ Current allocations:
 - E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build
 - E618: `missing_main` (compilation/entry_point.rs) — executable build with no `@main`; gated on `CompilationContext::is_executable` (set by the driver's `analyze_all(is_executable)`), so it fires only for `kestrel build` / execution tests, never for libraries / `kestrel check` / LSP / diagnostics tests
+- E619: `duplicate_read_provider` (decl/place_accessor.rs) — `get` + `ref` on one subscript/computed property (stage-1.5 place accessors)
+- E620: `duplicate_write_provider` (decl/place_accessor.rs) — `set` + `mutating ref` on one member
+- E621: `ref_accessor_in_protocol` (decl/place_accessor.rs) — ref accessors are concrete-inherent-only; rejected in protocols and protocol extensions
+- E622: `accessor_missing_read_provider` (decl/place_accessor.rs) — write provider with no `get`/`ref` (set-only / mutating-ref-only accessor blocks)
 - E700: `invalid_escape_sequence` (body/string_escape.rs)
 - E701: `ascii_escape_out_of_range` (body/string_escape.rs)
 - E702: `invalid_unicode_escape` (body/string_escape.rs)
