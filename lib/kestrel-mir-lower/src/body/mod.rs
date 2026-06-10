@@ -2791,6 +2791,7 @@ pub(crate) fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         kestrel_hir::body::HirExpr::Literal { span, .. }
         | kestrel_hir::body::HirExpr::Local(_, span)
         | kestrel_hir::body::HirExpr::Tuple { span, .. }
+        | kestrel_hir::body::HirExpr::Borrow { span, .. }
         | kestrel_hir::body::HirExpr::Field { span, .. }
         | kestrel_hir::body::HirExpr::TupleIndex { span, .. }
         | kestrel_hir::body::HirExpr::Def(_, _, span)

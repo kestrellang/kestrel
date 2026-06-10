@@ -117,6 +117,12 @@ impl OssaBodyCtx<'_, '_> {
         match expr {
             HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
 
+            // TODO(A3): named-ref-binding place lowering (lower_borrow_init —
+            // BeginBorrowAddr on var slots, pass-through for ref-typed
+            // inners). Until then the Borrow is transparent: the inner value
+            // flows and the let path treats it like any initializer.
+            HirExpr::Borrow { inner, .. } => self.lower_expr(*inner),
+
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);

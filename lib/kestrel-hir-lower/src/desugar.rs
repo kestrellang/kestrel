@@ -147,11 +147,15 @@ impl LowerCtx<'_> {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E488")
-                    .with_message("borrow expressions are not written; the signature decides")
+                    .with_message(
+                        "a borrow expression is only allowed as a `let` initializer",
+                    )
                     .with_labels(vec![Label::primary(span.file_id, span.range())])
                     .with_notes(vec![
-                        "a parameter `x: T` already borrows; `mutating x: T` mutably borrows"
+                        "arguments borrow by signature: a parameter `x: T` already borrows, \
+                         `mutating x: T` mutably borrows"
                             .to_string(),
+                        "to hold this borrow, name it first: `let r = &…;`".to_string(),
                     ]),
             );
             return self.alloc_expr(HirExpr::Error { span: span.clone() });

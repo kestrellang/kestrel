@@ -371,6 +371,11 @@ fn analyze_expr(
             }
         },
 
+        // `&inner` reads the borrowed place.
+        HirExpr::Borrow { inner, .. } => {
+            state = analyze_expr(cx, *inner, state, false, vctx);
+        },
+
         // Assignment: check for self.field assignments
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(cx, *value, state, false, vctx);

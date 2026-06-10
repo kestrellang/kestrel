@@ -615,6 +615,14 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    pub fn borrow_pointee(&mut self, inner: TyVar, pointee: TyVar, span: Span) {
+        self.constraints.push(Constraint::BorrowPointee {
+            inner,
+            pointee,
+            span,
+        });
+    }
+
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
         self.constraints.push(Constraint::Conforms {
             ty,

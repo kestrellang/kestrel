@@ -29,6 +29,20 @@ pub enum Constraint {
         span: Span,
     },
 
+    /// `&inner → Ref { pointee }` — a borrow expression's pointee
+    /// (stage 1.5 named ref bindings). The Borrow expr's own TyVar is
+    /// allocated as a structurally-resolved `Ref { pointee }` at
+    /// generation time (order-independence: later reads of the binding
+    /// always see a resolved Ref slot); this constraint fills the
+    /// pointee once `inner` resolves — a ref inner re-borrows (pointee
+    /// ≡ inner's pointee), a value inner borrows the place (pointee ≡
+    /// inner). Mutability legality is analyze's job, not typing's.
+    BorrowPointee {
+        inner: TyVar,
+        pointee: TyVar,
+        span: Span,
+    },
+
     /// `ty : Protocol` — protocol conformance.
     /// Deferred until ty is concrete.
     Conforms {

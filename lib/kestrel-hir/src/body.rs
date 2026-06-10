@@ -209,6 +209,16 @@ pub enum HirExpr {
         span: Span,
     },
 
+    /// `&expr` / `&mutating expr` — a borrow of a place (stage 1.5 named
+    /// ref bindings). Only constructed by the `let`-initializer carve in
+    /// hir-lower; everywhere else prefix `&` is rejected (E488). Types as
+    /// `&T` / `&mutating T` of the inner place's value type.
+    Borrow {
+        inner: HirExprId,
+        mutating: bool,
+        span: Span,
+    },
+
     // === Access (member name resolved by type inference) ===
     Field {
         base: HirExprId,

@@ -359,6 +359,7 @@ fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
         | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }
@@ -555,6 +556,15 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 let err = mismatch_error(ctx, to, from, span);
                 ctx.errored_coerce_exprs.insert(expr);
                 report_and_poison(ctx, err, from, to);
+                continue;
+            },
+            Constraint::BorrowPointee { pointee, .. } => {
+                // Unsolved = `inner` never resolved; its own diagnosis (or
+                // the generic could-not-infer) covers it. Poison the pointee
+                // so the enclosing Ref doesn't cascade a second error.
+                if matches!(ctx.slot(ctx.resolve(pointee)), TySlot::Unresolved { .. }) {
+                    ctx.poison(pointee);
+                }
                 continue;
             },
             Constraint::Conforms {
@@ -766,6 +776,11 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             }
             r
         },
+        Constraint::BorrowPointee {
+            inner,
+            pointee,
+            span,
+        } => solve_borrow_pointee(ctx, inner, pointee, span),
         Constraint::Conforms {
             ty,
             protocol,
@@ -1385,6 +1400,42 @@ fn try_literal_mismatch(
             span,
         },
     })
+}
+
+/// `&inner` pointee resolution — see `Constraint::BorrowPointee`. The
+/// Borrow expr's own var is already a resolved `Ref { pointee }`; this
+/// fills the pointee: a ref inner re-borrows (same pointee), a value
+/// inner borrows the place directly. Mutability legality (`&mutating` of
+/// a shared ref / immutable place) is analyze's job, not typing's.
+fn solve_borrow_pointee(
+    ctx: &mut InferCtx<'_>,
+    inner: TyVar,
+    pointee: TyVar,
+    span: Span,
+) -> SolveResult {
+    let ir = ctx.resolve(inner);
+    let target = match ctx.slot(ir) {
+        // Re-borrow: `&r` where r is already `&T` — borrow the same place.
+        TySlot::Resolved(TyKind::Ref { pointee: p, .. }) => *p,
+        // Concrete value type: borrow the place itself.
+        TySlot::Resolved(_) => ir,
+        // A literal can never become a ref — pin the pointee now so
+        // literal defaulting can settle it (mirrors solve_coerce's arm).
+        TySlot::Unresolved { literal: Some(_) } => ir,
+        // Unresolved (e.g. a pending ref-returning accessor call): WAIT —
+        // eagerly unifying would pin the call's in-flight `&T` binding.
+        _ => {
+            return SolveResult::Deferred(Constraint::BorrowPointee {
+                inner,
+                pointee,
+                span,
+            });
+        },
+    };
+    match unify::unify(ctx, pointee, target) {
+        Ok(()) => SolveResult::Solved,
+        Err(_) => SolveResult::Error(mismatch_error(ctx, pointee, target, span)),
+    }
 }
 
 fn solve_coerce(

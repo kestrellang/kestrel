@@ -147,6 +147,7 @@ pub fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
         | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }
