@@ -2468,7 +2468,7 @@ fn bind_call_result(
             "arm-decay",
             "bind_call_result REF expr {expr:?} owner={:?} arm_set={} scrut={} bind={} assign={}",
             ctx.owner,
-            ctx.arm_value_exprs.contains(&expr),
+            ctx.always_decay_exprs.contains(&expr),
             ctx.scrutinee_exprs.contains(&expr),
             ctx.binding_init_exprs.contains(&expr),
             ctx.assign_target_exprs.contains(&expr),
@@ -2483,7 +2483,7 @@ fn bind_call_result(
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
             || ctx.assign_target_exprs.contains(&expr)
-            || ctx.arm_value_exprs.contains(&expr)
+            || ctx.always_decay_exprs.contains(&expr)
             || pinned_non_ref
         {
             ctx.equal(result, pointee, span);
@@ -3461,7 +3461,6 @@ fn solve_member(
     } else {
         ret_tv
     };
-
     bind_call_result(ctx, result, ret_tv, expr, span.clone());
 
     SolveResult::Solved

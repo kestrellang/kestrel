@@ -71,14 +71,15 @@ pub struct InferCtx<'a> {
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
 
-    /// HirExprIds in `if`/`match` ARM-VALUE position. Arm values ALWAYS
-    /// decay to owned (refs cannot cross merges): a ref-returning call here
-    /// binds its result to the POINTEE in `bind_call_result`, so the arm
-    /// merge `Equal`s only ever see owned types — order-independently, like
-    /// the other value-context sets. The merge constraints stay `Equal`, so
-    /// bidirectional back-flow (annotation → arms, literal defaulting) is
-    /// untouched.
-    pub(crate) arm_value_exprs: HashSet<HirExprId>,
+    /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
+    /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
+    /// (aggregates own their elements). A ref-returning call here binds its
+    /// result to the POINTEE in `bind_call_result`, so the arm-merge /
+    /// element `Equal`s only ever see owned types — order-independently,
+    /// like the other value-context sets. The constraints stay `Equal`, so
+    /// bidirectional back-flow (annotation → arms/elements, literal
+    /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
+    pub(crate) always_decay_exprs: HashSet<HirExprId>,
 
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
@@ -259,7 +260,7 @@ impl<'a> InferCtx<'a> {
             errored_coerce_exprs: HashSet::new(),
             scrutinee_exprs: HashSet::new(),
             assign_target_exprs: HashSet::new(),
-            arm_value_exprs: HashSet::new(),
+            always_decay_exprs: HashSet::new(),
             direct_callee_exprs: HashSet::new(),
             binding_init_exprs: HashSet::new(),
             poison_protocol_call_recv_on_failure: HashSet::new(),

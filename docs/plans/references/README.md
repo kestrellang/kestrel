@@ -48,7 +48,10 @@ what implementation needs; the *why* stays in the research docs.
     decays to owned (4th value-context set in `bind_call_result`; the
     docs' "reuse Constraint::Decay" wording was stale — stage 1 shipped
     expr-id SETS, not a constraint). Return-position match in a `-> &T`
-    fn shifts E497 → E494, pinned.
+    fn shifts E497 → E494, pinned. The literal-element follow-up also
+    landed: array/tuple/dict elements decay (set renamed
+    `always_decay_exprs`), which emptied E492's inference surface
+    (validation kept as backstop).
   - **Known carry-over gap**: a `&mutating` return from a direct FIELD
     projection (`mutating func m() -> &mutating T { self.v }`) still
     E494s — stage 1 verifies only param-rooted/Pointer-derived mutable

@@ -611,6 +611,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Order (elem_tv, e_tv) so diagnostics read "expected <target>
                 // got <element>" rather than the reverse.
                 ctx.equal(elem_tv, e_tv, e_span);
+                // Literal elements always decay refs to owned (stage 1.5).
+                mark_arm_value(ctx, hir, e);
             }
             arr_tv
         },
@@ -655,12 +657,23 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ) {
                     ctx.equal(val_tv, v, value_span);
                 }
+                // Literal entries always decay refs to owned (stage 1.5).
+                mark_arm_value(ctx, hir, entry.key);
+                mark_arm_value(ctx, hir, entry.value);
             }
             dict_tv
         },
 
         HirExpr::Tuple { elements, span: _ } => {
-            let elem_tvs: Vec<TyVar> = elements.iter().map(|&e| gen_expr(ctx, hir, e)).collect();
+            let elem_tvs: Vec<TyVar> = elements
+                .iter()
+                .map(|&e| {
+                    let tv = gen_expr(ctx, hir, e);
+                    // Tuple elements always decay refs to owned (stage 1.5).
+                    mark_arm_value(ctx, hir, e);
+                    tv
+                })
+                .collect();
             ctx.tuple(elem_tvs)
         },
 
@@ -2145,8 +2158,9 @@ fn is_guard_if(hir: &HirBody, expr_id: HirExprId) -> bool {
     )
 }
 
-/// Record an `if`/`match` arm VALUE in `arm_value_exprs` (stage-1.5 arm-value
-/// decay: refs cannot cross merges, so arm values always decay to owned).
+/// Record an ALWAYS-DECAY value position in `always_decay_exprs` (stage
+/// 1.5): `if`/`match` arm values (refs cannot cross merges) and
+/// array/tuple/dict literal elements (aggregates own their elements).
 /// Recurses through `Block` wrappers to the tail expression — the set is
 /// keyed by the CALL's expr id and `bind_call_result` only consults it for
 /// resolved call results, so marking a non-call tail is inert; nested
@@ -2160,7 +2174,7 @@ fn mark_arm_value(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) {
         },
         _ => {
             kestrel_debug::ktrace!("arm-decay", "mark arm value {id:?} owner={:?}", ctx.owner);
-            ctx.arm_value_exprs.insert(id);
+            ctx.always_decay_exprs.insert(id);
         },
     }
 }

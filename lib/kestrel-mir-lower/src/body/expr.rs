@@ -154,7 +154,15 @@ impl OssaBodyCtx<'_, '_> {
             },
 
             HirExpr::Tuple { elements, .. } => {
-                let elems: Vec<ValueId> = elements.iter().map(|&e| self.lower_expr(e)).collect();
+                let elems: Vec<ValueId> = elements
+                    .iter()
+                    .map(|&e| {
+                        let v = self.lower_expr(e);
+                        // Stage 1.5: a ref element decays to an owned copy
+                        // (the tuple owns its elements).
+                        self.decay_if_ref(v)
+                    })
+                    .collect();
                 let ty = self.resolve_expr_type(expr_id);
                 self.emit_tuple(ty, elems)
             },

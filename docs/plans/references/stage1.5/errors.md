@@ -1,5 +1,12 @@
 # Stage 1.5 — Errors
 
+> **E492 note (2026-06-10)**: with literal-element decay landed, E492's
+> inference-side surface is empty — literal elements decay, consuming
+> positions copy out, borrow-convention generic args see through refs
+> (§10.5 amendment), and ref-returning callees are E491. The validation
+> remains as a backstop; annotation-position rejections are the
+> stage-0.5 E480–E489 walks.
+
 Codes ALLOCATED 2026-06-10 (table in `lib/kestrel-analyze/AGENTS.md`):
 the accessor decl rules took **E619–E622** in the E6xx decl block where
 the subscript decl errors (E607/E608) already live.

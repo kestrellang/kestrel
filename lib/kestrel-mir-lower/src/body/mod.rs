@@ -2355,6 +2355,21 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // Value transfer: the OSSA copy/move decision
     // ================================================================
 
+    /// Stage-1.5 decay shape for ALWAYS-DECAY value positions (literal
+    /// elements): a tracked ref result is copied out — the position owns a
+    /// value, never the place — and the copy is the ref's single use, so
+    /// its borrow ends here. Mirrors binding decay in `lower_stmt` and the
+    /// arm decay in `capture_arm_exit`. Non-ref values pass through.
+    pub fn decay_if_ref(&mut self, value: ValueId) -> ValueId {
+        if self.ref_results.contains(&value) {
+            let owned = self.emit_copy_value(value);
+            self.emit_end_borrow(value);
+            owned
+        } else {
+            value
+        }
+    }
+
     /// Transfer a value for use — conservative: always copies @owned.
     /// The copy_optimize pass will eliminate unnecessary copies later.
     /// Transfer a value for use — copies @owned values.

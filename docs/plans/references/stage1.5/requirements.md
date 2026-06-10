@@ -43,8 +43,18 @@ are independently shippable; do not bundle.
    borrow (no false E497), with arm-value spans threaded for the E503
    copy-guard. Arms ALWAYS decay to owned — all-refs included; a
    match/if in return position of a `-> &T` fn errs as E494 (was E497),
-   pinned. Array/tuple literal elements: follow-up commit (interacts
-   with #127 and ExpressibleByArrayLiteral).
+   pinned. **Literal elements LANDED in the follow-up commit
+   (2026-06-10)**: array/tuple/dict elements mark the same set (renamed
+   `always_decay_exprs`) and the literal lowerings run the binding-decay
+   copy (`decay_if_ref`). Two consequences: E492's INFERENCE surface
+   dissolved (`[h.peek()]` now legally infers `Array[Int64]`; borrow-
+   convention generic args see through refs per the §10.5 amendment, so
+   no expressible program leaks a ref into an inferred type argument —
+   that diagnostics pin was removed; the E492 validation stays as a
+   backstop), and a PRE-EXISTING per-literal clone of Cloneable elements
+   at Array-literal construction surfaced (storage-init cost, unrelated
+   to refs — the decay pin measures the DELTA over a plain element).
+   #127 untouched.
 
 ## Dictionary deferral (DECIDED 2026-06-09)
 
