@@ -237,6 +237,15 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("convention mismatch: {}", detail),
             "mutating closure not allowed here".into(),
         ),
+        InferError::RefFunctionAsValue { .. } => (
+            "a reference-returning function cannot be used as a value".into(),
+            "call it instead; its return convention is not expressible in a function type"
+                .into(),
+        ),
+        InferError::RefInTypeArgument { .. } => (
+            "a reference cannot be a generic type argument".into(),
+            "bind the value first (`let x = ...`) to store an owned copy".into(),
+        ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }
 }

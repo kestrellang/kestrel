@@ -45,6 +45,24 @@ pub struct InferCtx<'a> {
     /// `Point(x: "a", y: "b")` — emit once, not per field).
     pub(crate) errored_coerce_exprs: HashSet<HirExprId>,
 
+    /// HirExprIds used as `match` scrutinees. A scrutinee is a VALUE context
+    /// (stage-1 transparent place): a ref-returning call here binds its
+    /// result var to the POINTEE (decay) in `bind_call_result`, so patterns
+    /// never see a ref. Patterns stay wired directly to the scrutinee var.
+    pub(crate) scrutinee_exprs: HashSet<HirExprId>,
+
+    /// HirExprIds that are a `Call`'s direct callee. A direct callee Def
+    /// legitimately carries `TyKind::Function { ret: Ref }` — exempted from
+    /// the E491 function-as-value check in `validate_ref_placement`.
+    pub(crate) direct_callee_exprs: HashSet<HirExprId>,
+
+    /// HirExprIds that initialize a `let`/`var` binding. Bindings are VALUE
+    /// contexts (decay): a ref-returning call here binds its result to the
+    /// POINTEE in `bind_call_result` — order-independently (the binding's
+    /// Coerce may unify local ≡ result before the member resolves, which
+    /// would defeat the coerce-side decay arm).
+    pub(crate) binding_init_exprs: HashSet<HirExprId>,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -222,6 +240,9 @@ impl<'a> InferCtx<'a> {
             errors: Vec::new(),
             error_details: Vec::new(),
             errored_coerce_exprs: HashSet::new(),
+            scrutinee_exprs: HashSet::new(),
+            direct_callee_exprs: HashSet::new(),
+            binding_init_exprs: HashSet::new(),
             poison_protocol_call_recv_on_failure: HashSet::new(),
             resolutions: HashMap::new(),
             field_subscripts: HashMap::new(),

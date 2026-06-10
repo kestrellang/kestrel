@@ -294,6 +294,26 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     Label::primary(file_id, range)
                         .with_message("mutating closure not allowed here"),
                 ]),
+            InferError::RefFunctionAsValue { .. } => Diagnostic::error()
+                .with_code("E491")
+                .with_message("a reference-returning function cannot be used as a value")
+                .with_labels(vec![Label::primary(file_id, range).with_message(
+                    "call it instead — `-> &T` is a return convention, not part of a \
+                     function type",
+                )])
+                .with_notes(vec![
+                    "capturing or storing it would erase the ret_borrow calling convention"
+                        .into(),
+                ]),
+            InferError::RefInTypeArgument { .. } => Diagnostic::error()
+                .with_code("E492")
+                .with_message("a reference cannot be a generic type argument")
+                .with_labels(vec![Label::primary(file_id, range).with_message(
+                    "this would store the reference; references are second-class",
+                )])
+                .with_notes(vec![
+                    "bind the value first (`let x = ...;`) to store an owned copy".into(),
+                ]),
         }
     }
 }

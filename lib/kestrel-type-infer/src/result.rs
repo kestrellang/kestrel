@@ -571,6 +571,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             describe_tyvar(ctx, *receiver)
         ),
         InferError::CircularOpaqueReturn { .. } => "circular opaque return type".into(),
+        InferError::RefFunctionAsValue { .. } => {
+            "a reference-returning function is not a value".into()
+        },
+        InferError::RefInTypeArgument { .. } => {
+            "a reference cannot be a generic type argument".into()
+        },
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
