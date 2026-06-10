@@ -1,6 +1,6 @@
 // test: execution
 // stdlib: true
-// skip: array-literal lowering deinits the moved-from element temp for a `not Copyable` element (spurious deinit at construction; the stored element will deinit AGAIN when the array drops). Found 2026-06-10 while pinning assignment-through-ref; independent of references.
+// skip: #127 — array-literal lowering deinits the moved-from element temp for a `not Copyable` element (spurious deinit at construction; the stored element will deinit AGAIN when the array drops). Unskip when fixing #127.
 
 // A `not Copyable` element MOVES into an array literal: exactly zero
 // deinits may fire during construction, and exactly one when the array
