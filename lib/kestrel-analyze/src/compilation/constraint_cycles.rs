@@ -231,6 +231,9 @@ fn collect_param_refs(
                 collect_param_refs(cx, b, context, param_set, out);
             }
         },
+        AstType::Ref { inner, .. } => {
+            collect_param_refs(cx, inner, context, param_set, out);
+        },
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }
 }

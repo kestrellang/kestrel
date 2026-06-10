@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use kestrel_hecs::Entity;
 
@@ -9,15 +9,21 @@ use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::terminator::{Terminator, TerminatorKind};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{Immediate, MirModule, TyId};
 
 /// Scan for ApplyPartial references and generate thunk wrappers.
 pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
     let mut targets: Vec<Entity> = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
+    // Targets that already have a thunk from a previous run — collected in
+    // the same scan so we don't rescan all functions per target below.
+    let mut has_thunk: FxHashSet<Entity> = FxHashSet::default();
 
     for func in module.functions.values() {
+        if let FunctionKind::Thunk { original } = &func.kind {
+            has_thunk.insert(*original);
+        }
         let Some(body) = &func.body else { continue };
         for block in &body.blocks {
             for inst in &block.insts {
@@ -33,12 +39,13 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         }
     }
 
+    // Map of target -> freshly created thunk, applied in ONE rewrite pass at
+    // the end. Rewriting inside the per-target loop rescans every instruction
+    // in the module per target — quadratic on whole-program builds.
+    let mut thunk_for: FxHashMap<Entity, Entity> = FxHashMap::default();
+
     for target in &targets {
-        let already_has_thunk = module
-            .functions
-            .values()
-            .any(|f| matches!(&f.kind, FunctionKind::Thunk { original } if *original == *target));
-        if already_has_thunk {
+        if has_thunk.contains(target) {
             continue;
         }
 
@@ -118,6 +125,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                     ty: param.ty,
                     ownership: Ownership::Guaranteed,
                     borrow_source: None,
+                    root: RootProvenance::derived(),
                     span: None,
                 });
                 body.block_mut(entry).params.push(BlockParam {
@@ -143,6 +151,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: param.ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             body.block_mut(entry).params.push(BlockParam {
@@ -197,6 +206,7 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 ty: ret_ty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             insts.push(Instruction::new(InstKind::Call {
@@ -210,20 +220,25 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
 
         thunk_def.body = Some(body);
         module.add_function(thunk_def);
+        thunk_for.insert(*target, thunk_entity);
+    }
 
-        // Rewrite ApplyPartial references to use the thunk entity
-        for func in module.functions.values_mut() {
-            let Some(body) = &mut func.body else { continue };
-            for block in &mut body.blocks {
-                for inst in &mut block.insts {
-                    if let InstKind::ApplyPartial {
-                        callee: Callee::Direct { func: f, .. },
-                        ..
-                    } = &mut inst.kind
-                        && *f == *target
-                    {
-                        *f = thunk_entity;
-                    }
+    if thunk_for.is_empty() {
+        return;
+    }
+
+    // Rewrite all ApplyPartial references to their thunk entities in one pass.
+    for func in module.functions.values_mut() {
+        let Some(body) = &mut func.body else { continue };
+        for block in &mut body.blocks {
+            for inst in &mut block.insts {
+                if let InstKind::ApplyPartial {
+                    callee: Callee::Direct { func: f, .. },
+                    ..
+                } = &mut inst.kind
+                    && let Some(thunk) = thunk_for.get(f)
+                {
+                    *f = *thunk;
                 }
             }
         }
@@ -235,7 +250,7 @@ mod tests {
     use super::*;
     use crate::block::BlockParam;
     use crate::body::OssaBody;
-    use crate::value::ValueDef;
+    use crate::value::{RootProvenance, ValueDef};
 
     /// Build a minimal function with an OSSA body (just returns unit).
     fn add_stub_function(
@@ -256,6 +271,7 @@ mod tests {
                 ty: *pty,
                 ownership: Ownership::Owned,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             });
             body.block_mut(entry).params.push(BlockParam {

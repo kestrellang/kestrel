@@ -139,6 +139,23 @@ impl LowerCtx<'_> {
             return self.lower_expr(body, operand);
         }
 
+        // Prefix `&` parses (for recovery) but is never a valid expression:
+        // borrowing is decided by the callee's signature, not the call site.
+        if *op == UnaryOp::Borrow {
+            self.lower_expr(body, operand); // still lower for downstream diags
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E488")
+                    .with_message("borrow expressions are not written; the signature decides")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec![
+                        "a parameter `x: T` already borrows; `mutating x: T` mutably borrows"
+                            .to_string(),
+                    ]),
+            );
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        }
+
         let lowered_operand = self.lower_expr(body, operand);
 
         if let Some((proto, method)) = lookup_unary_op(op)
@@ -226,7 +243,12 @@ impl LowerCtx<'_> {
         // Detected shapes are syntactic; deeper validity (mutability of the
         // resolved binding) is checked later by the assignment analyzer once
         // the desugared `addAssign` is treated as a write to its receiver.
-        if !ast_is_place_expr(body, lhs) {
+        // Call-shaped LHS is admitted TENTATIVELY: a call returning
+        // `&mutating T` (`arr.mutableAt(index: i) += v`) is a writable place,
+        // but only the typed layer can tell it apart from a temporary — the
+        // assignment analyzer rejects the non-ref ones.
+        let call_shaped = matches!(&body.exprs[lhs], AstExpr::Call { .. });
+        if !ast_is_place_expr(body, lhs) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_message("left-hand side of compound assignment is not assignable")
@@ -456,11 +478,13 @@ impl LowerCtx<'_> {
     }
 
     /// Multi-condition while-let — `while let .Some(x) = a, let .Some(y) = b
-    /// { … }` and friends. Falls back to the `loop { if !cond { break }; body }`
-    /// shape because the binding scope spans multiple match expressions, which
-    /// can't be expressed as a single arm body. The dataflow may emit
-    /// false-positive E501s for non-Copyable bindings in this shape; in
-    /// practice the chained shape isn't used in stdlib code.
+    /// { … }` and friends. Lowers to `loop { match a { .Some(x) => match b {
+    /// .Some(y) => { body }, _ => break }, _ => break } }` via the shared
+    /// condition chain, so every `let` binding stays in scope in the body under
+    /// OSSA (success = one iteration of the body, fail = break out of the loop).
+    /// The old `loop { if !cond { break }; body }` shape routed the patterns
+    /// through the boolean-AND `lower_if_conditions` path, which dropped the
+    /// bindings and tripped OSSA verification (issue #126's while-let twin).
     fn desugar_while_let_chain(
         &mut self,
         body: &AstBody,
@@ -469,56 +493,43 @@ impl LowerCtx<'_> {
         while_body: &AstBlock,
         span: &Span,
     ) -> HirExprId {
-        self.push_scope();
-        let cond = self.lower_if_conditions(body, conditions, MatchSource::WhileLet, span);
+        // Success: run the body for one iteration (inside the pattern scopes so
+        // the bindings are visible, with the loop label in scope for
+        // break/continue). Fail: break out of the loop.
+        let mut on_success = |this: &mut Self| {
+            this.push_loop(label);
+            let lowered_body = this.lower_block(body, while_body);
+            this.pop_loop();
+            this.alloc_expr(HirExpr::Block {
+                body: lowered_body,
+                span: span.clone(),
+            })
+        };
+        let mut on_fail = |this: &mut Self| {
+            this.alloc_expr(HirExpr::Break {
+                label: label.map(|l| l.to_string()),
+                span: span.clone(),
+            })
+        };
+        let match_expr = self.lower_condition_chain(
+            body,
+            conditions,
+            MatchSource::WhileLet,
+            span,
+            &mut on_success,
+            &mut on_fail,
+        );
 
-        let break_expr = self.alloc_expr(HirExpr::Break {
-            label: label.map(|l| l.to_string()),
+        let match_stmt = self.alloc_stmt(HirStmt::Expr {
+            expr: match_expr,
             span: span.clone(),
         });
-
-        let negated =
-            if let Some(protocol) = self.resolve_builtin(Builtin::LogicalNotOperatorProtocol) {
-                self.alloc_expr(HirExpr::ProtocolCall {
-                    receiver: cond,
-                    protocol,
-                    method: HirName::name("logicalNot"),
-                    type_args: None,
-                    args: Vec::new(),
-                    span: span.clone(),
-                })
-            } else {
-                cond
-            };
-
-        let if_break = self.alloc_expr(HirExpr::If {
-            condition: negated,
-            then_body: HirBlock {
-                stmts: Vec::new(),
-                tail_expr: Some(break_expr),
-            },
-            else_body: None,
-            span: span.clone(),
-        });
-
-        let if_break_stmt = self.alloc_stmt(HirStmt::Expr {
-            expr: if_break,
-            span: span.clone(),
-        });
-
-        self.push_loop(label);
-        let lowered_body = self.lower_block(body, while_body);
-        self.pop_loop();
-        self.pop_scope();
-
-        let mut loop_stmts = vec![if_break_stmt];
-        loop_stmts.extend(lowered_body.stmts);
 
         self.alloc_expr(HirExpr::Loop {
             label: label.map(|l| l.to_string()),
             body: HirBlock {
-                stmts: loop_stmts,
-                tail_expr: lowered_body.tail_expr,
+                stmts: vec![match_stmt],
+                tail_expr: None,
             },
             span: span.clone(),
         })
@@ -1340,6 +1351,7 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::Pos => "+",
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
+        UnaryOp::Borrow => "&",
     }
 }
 

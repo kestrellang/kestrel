@@ -1143,6 +1143,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         }
     }
 
@@ -1163,6 +1164,7 @@ mod tests {
             body,
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         }
     }
 
@@ -1351,6 +1353,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         };
         module.add_function(make_mono_func(
             "test",

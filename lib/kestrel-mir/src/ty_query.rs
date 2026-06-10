@@ -31,6 +31,10 @@ pub fn copy_behavior(
         // `needs_drop` arm below — Bitwise + droppable would double-free the env.
         // NEXT VERSION: closures become Rc-boxed reference types; copy → retain.
         | MirTy::FuncThick { .. }
+        // Ref never appears as a value type (signature-only; results register
+        // as @guaranteed pointee values), so copy/drop on it is vacuous — a
+        // pointer-scalar bit-copy keeps any defensive path harmless.
+        | MirTy::Ref { .. }
         | MirTy::Error => CopyBehavior::Bitwise,
 
         MirTy::Tuple(elems) => {
@@ -249,6 +253,8 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         // drop. Must match the Bitwise arm in `copy_behavior`. NEXT VERSION:
         // Rc-boxed closures need drop → release.
         | MirTy::FuncThick { .. }
+        // Ref: signature-only borrow view — never owns, never drops.
+        | MirTy::Ref { .. }
         | MirTy::Error => false,
 
         MirTy::Tuple(elems) => {

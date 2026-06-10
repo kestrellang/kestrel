@@ -1,5 +1,6 @@
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+
+use rustc_hash::FxHashMap;
 
 use crate::entity::Entity;
 
@@ -31,14 +32,14 @@ trait AnyColumn: Any {
 /// in the `dense` vec, giving O(1) lookup. The dense vec enables
 /// cache-friendly iteration over all entities with this component.
 struct TypedColumn<T> {
-    entity_to_index: HashMap<Entity, usize>,
+    entity_to_index: FxHashMap<Entity, usize>,
     dense: Vec<(Entity, T)>,
 }
 
 impl<T: Component> TypedColumn<T> {
     fn new() -> Self {
         Self {
-            entity_to_index: HashMap::new(),
+            entity_to_index: FxHashMap::default(),
             dense: Vec::new(),
         }
     }
@@ -125,13 +126,13 @@ impl<T: Component> AnyColumn for TypedColumn<T> {
 /// Each component type T gets its own dense column, giving type-safe
 /// access and cache-friendly iteration.
 pub struct ComponentStore {
-    columns: HashMap<TypeId, Box<dyn AnyColumn>>,
+    columns: FxHashMap<TypeId, Box<dyn AnyColumn>>,
 }
 
 impl ComponentStore {
     pub fn new() -> Self {
         Self {
-            columns: HashMap::new(),
+            columns: FxHashMap::default(),
         }
     }
 

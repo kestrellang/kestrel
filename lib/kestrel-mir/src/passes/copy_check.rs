@@ -66,6 +66,7 @@ fn check_body(
                 span: inst.span.clone(),
                 func_name: func.name.clone(),
                 entity: func.entity,
+                diag: None,
             });
         }
     }

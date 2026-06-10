@@ -9,7 +9,8 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, DeclSpan, ExtensionTarget, NodeKind, TypeAnnotation, TypeParams,
+    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, NodeKind, Settable, TypeAnnotation,
+    TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::ty::HirTy;
@@ -158,6 +159,19 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                 bounds: hir_bounds,
                 span: span.clone(),
             }
+        },
+
+        // Lowered structurally so the pointee still gets name resolution
+        // (and its diagnostics); the Ref itself is rejected and rewritten to
+        // Error by `reject_ref_types` at every lowering-query boundary.
+        AstType::Ref {
+            inner,
+            mutating,
+            span,
+        } => HirTy::Ref {
+            inner: Box::new(lower_ast_type(ctx, owner, root, inner)),
+            mutating: *mutating,
+            span: span.clone(),
         },
     }
 }
@@ -400,8 +414,155 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         | HirTy::Error(s)
         | HirTy::Infer(s)
         | HirTy::Never(s)
-        | HirTy::Opaque { span: s, .. } => *s = span.clone(),
+        | HirTy::Opaque { span: s, .. }
+        | HirTy::Ref { span: s, .. } => *s = span.clone(),
     }
+}
+
+// ===== Reference-type rejection (stage 0.5) =====
+
+/// The type position a reference type occurs in — reported if the type
+/// handed to `reject_ref_types` is itself a `Ref`. Callers pass the
+/// outermost position; the walk sets nested positions (tuple element,
+/// generic arg, function-type param/return) structurally as it descends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefPosition {
+    /// Parameter position — the one PERMANENT rejection (references-gaps.md
+    /// §10.6): conventions are the only parameter spelling, forever.
+    Param,
+    /// Return position — carved out (made legal) in stage 1.
+    Return,
+    /// `var`/`let` annotation.
+    Binding,
+    /// Struct/enum field (incl. enum case payload).
+    Field,
+    /// Tuple element (set by the walk).
+    TupleElement,
+    /// Generic type argument (`Array[&T]`; set by the walk).
+    GenericArg,
+    /// Function-type return (`() -> &T`; set by the walk).
+    FunctionReturn,
+    /// Anything else (alias RHS, where-clause, protocol bound, ...).
+    Other,
+}
+
+impl RefPosition {
+    fn code_and_message(self) -> (&'static str, &'static str) {
+        match self {
+            // Permanent rule — worded as "are not", never "not yet".
+            RefPosition::Param => (
+                "E480",
+                "parameters are not reference-typed; spell the convention instead — `x: T` borrows, `mutating x: T` mutably borrows",
+            ),
+            RefPosition::Return => ("E481", "reference return types are not supported yet"),
+            RefPosition::Binding => ("E482", "references cannot be stored in bindings"),
+            RefPosition::Field => ("E483", "references cannot be stored in fields"),
+            RefPosition::TupleElement => ("E484", "references cannot be stored in tuples"),
+            RefPosition::GenericArg => ("E485", "references cannot be used as type arguments"),
+            RefPosition::FunctionReturn => (
+                "E486",
+                "reference returns are not supported in function types yet",
+            ),
+            RefPosition::Other => ("E489", "reference types cannot be used here"),
+        }
+    }
+}
+
+/// THE type-position walk (stage 0.5): rejects every `HirTy::Ref` with a
+/// position-specific diagnostic and rewrites it to `HirTy::Error`, so no
+/// `Ref` survives past HIR lowering. Called at every lowering-query
+/// boundary. Stage 1 carves out only `RefPosition::Return`.
+pub fn reject_ref_types(ctx: &QueryContext<'_>, ty: HirTy, pos: RefPosition) -> HirTy {
+    match ty {
+        HirTy::Ref { inner, span, .. } => {
+            let (code, message) = if matches!(*inner, HirTy::Ref { .. }) {
+                // `&&T` / `&mutating &T`: one diagnostic for the whole
+                // cluster — fixing the nesting then surfaces the positional
+                // error, if any (E-REF-08).
+                ("E487", "a reference cannot reference a reference")
+            } else {
+                pos.code_and_message()
+            };
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code(code)
+                    .with_message(message)
+                    .with_labels(vec![Label::primary(span.file_id, span.range())]),
+            );
+            // Peel any nested refs without further positional noise, then
+            // keep walking the pointee so deeper refs still get diagnosed.
+            let mut core = *inner;
+            while let HirTy::Ref { inner, .. } = core {
+                core = *inner;
+            }
+            reject_ref_types(ctx, core, RefPosition::Other);
+            HirTy::Error(span)
+        },
+        HirTy::Struct { entity, args, span } => HirTy::Struct {
+            entity,
+            args: reject_ref_args(ctx, args),
+            span,
+        },
+        HirTy::Enum { entity, args, span } => HirTy::Enum {
+            entity,
+            args: reject_ref_args(ctx, args),
+            span,
+        },
+        HirTy::Protocol { entity, args, span } => HirTy::Protocol {
+            entity,
+            args: reject_ref_args(ctx, args),
+            span,
+        },
+        HirTy::AliasUse { entity, args, span } => HirTy::AliasUse {
+            entity,
+            args: reject_ref_args(ctx, args),
+            span,
+        },
+        HirTy::Tuple(elems, span) => HirTy::Tuple(
+            elems
+                .into_iter()
+                .map(|e| reject_ref_types(ctx, e, RefPosition::TupleElement))
+                .collect(),
+            span,
+        ),
+        HirTy::Function {
+            params,
+            param_conventions,
+            ret,
+            span,
+        } => HirTy::Function {
+            params: params
+                .into_iter()
+                .map(|p| reject_ref_types(ctx, p, RefPosition::Param))
+                .collect(),
+            param_conventions,
+            ret: Box::new(reject_ref_types(ctx, *ret, RefPosition::FunctionReturn)),
+            span,
+        },
+        HirTy::AssocProjection { base, assoc, span } => HirTy::AssocProjection {
+            base: Box::new(reject_ref_types(ctx, *base, RefPosition::Other)),
+            assoc,
+            span,
+        },
+        HirTy::Opaque { bounds, span } => HirTy::Opaque {
+            bounds: bounds
+                .into_iter()
+                .map(|b| reject_ref_types(ctx, b, RefPosition::Other))
+                .collect(),
+            span,
+        },
+        leaf @ (HirTy::Param(..)
+        | HirTy::SelfType(..)
+        | HirTy::Never(_)
+        | HirTy::Infer(_)
+        | HirTy::Error(_)) => leaf,
+    }
+}
+
+fn reject_ref_args(ctx: &QueryContext<'_>, args: Vec<HirTy>) -> Vec<HirTy> {
+    args.into_iter()
+        .map(|a| reject_ref_types(ctx, a, RefPosition::GenericArg))
+        .collect()
 }
 
 /// Validate that the number of type arguments matches the entity's TypeParams.
@@ -555,8 +716,17 @@ fn resolve_std_type(
 
 impl LowerCtx<'_> {
     /// Lower an AST type to an HIR type. Delegates to the standalone function.
+    /// In-body types here are overwhelmingly expression type arguments
+    /// (`make[T]()`), so refs default to the generic-arg rejection; binding
+    /// annotations and closure params use `lower_type_in` instead.
     pub fn lower_type(&mut self, ty: &AstType) -> HirTy {
-        lower_ast_type(self.ctx, self.owner, self.root, ty)
+        self.lower_type_in(ty, RefPosition::GenericArg)
+    }
+
+    /// Lower an AST type, classifying a top-level `&T` by `pos`.
+    pub fn lower_type_in(&mut self, ty: &AstType, pos: RefPosition) -> HirTy {
+        let lowered = lower_ast_type(self.ctx, self.owner, self.root, ty);
+        reject_ref_types(self.ctx, lowered, pos)
     }
 }
 
@@ -581,7 +751,81 @@ impl QueryFn for LowerTypeAnnotation {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<HirTy> {
         let type_ann = ctx.get::<TypeAnnotation>(self.entity)?;
-        Some(lower_ast_type(ctx, self.entity, self.root, &type_ann.0))
+        let nk = ctx.get::<NodeKind>(self.entity);
+
+        // E490: `throws` desugars the return to `Result` sugar — a ref can
+        // never ride an effect wrapper (the ret_borrow ABI is not
+        // expressible in an enum payload). Two shapes: `Result{ok: Ref}`
+        // (init effect) and `Ref{inner: Result}` (`-> &T throws E` — the
+        // `&` prefix binds looser than the throws tail, wrapping the
+        // sugar). Checked on the AST so the wording names the sugar, not a
+        // generic nested-arg error. An explicit `&Result[T, E]` annotation
+        // spells the generic by NAME and is untouched.
+        let throws_ref = match &type_ann.0 {
+            AstType::Result { ok, span, .. } if matches!(ok.as_ref(), AstType::Ref { .. }) => {
+                Some(span)
+            },
+            AstType::Ref { inner, span, .. }
+                if matches!(inner.as_ref(), AstType::Result { .. }) =>
+            {
+                Some(span)
+            },
+            _ => None,
+        };
+        if matches!(nk, Some(NodeKind::Function))
+            && let Some(span) = throws_ref
+        {
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E490")
+                    .with_message("a throwing function cannot return a reference")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())
+                        .with_message("`throws` wraps the return in `Result` — a reference \
+                                       cannot live in an enum payload")]),
+            );
+            return Some(HirTy::Error(span.clone()));
+        }
+
+        let lowered = lower_ast_type(ctx, self.entity, self.root, &type_ann.0);
+
+        // E481 carve-out (stage 1): a ref RETURN is legal for functions and
+        // computed-property GETTERS (the Pointer-bridge `var value: &T`
+        // shape — Field + Computed + Gettable, NOT Settable: a settable
+        // property pairs with a setter, which is the call-as-place world of
+        // stage 1.5). Subscripts stay rejected for the same reason;
+        // init/deinit never return. The pointee subtree is still walked
+        // (E487 nesting, E480 fn-type params, ...).
+        let is_computed_getter = matches!(nk, Some(NodeKind::Field))
+            && ctx.get::<Computed>(self.entity).is_some()
+            && ctx.get::<Gettable>(self.entity).is_some()
+            && ctx.get::<Settable>(self.entity).is_none();
+        if (matches!(nk, Some(NodeKind::Function)) || is_computed_getter)
+            && let HirTy::Ref {
+                inner,
+                mutating,
+                span,
+            } = lowered
+        {
+            let inner = reject_ref_types(ctx, *inner, RefPosition::Other);
+            return Some(HirTy::Ref {
+                inner: Box::new(inner),
+                mutating,
+                span,
+            });
+        }
+
+        // A TypeAnnotation on a callable is its return annotation; on a
+        // field/enum-case it is the stored type. Classify the ref rejection
+        // accordingly (stage 1 carved out only the Return position, above).
+        let pos = match nk {
+            Some(
+                NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
+            ) => RefPosition::Return,
+            Some(NodeKind::Field | NodeKind::EnumCase) => RefPosition::Field,
+            Some(NodeKind::TypeParameter) => RefPosition::GenericArg,
+            _ => RefPosition::Other,
+        };
+        Some(reject_ref_types(ctx, lowered, pos))
     }
 }
 
@@ -620,6 +864,47 @@ impl QueryFn for LowerCallableReturnType {
     }
 }
 
+/// A callable's reference-return convention (`-> &T` / `-> &mutating T`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RefReturn {
+    pub mutating: bool,
+}
+
+/// Query: does this callable return a reference (the `ret_borrow` ABI)?
+///
+/// THE single front-end derivation of the return convention (the MIR twin is
+/// `kestrel_mir::item::function::ret_convention`). Consumers — the solver's
+/// ref-returning-function-as-value check, analyze's mutability classifier and
+/// ambiguous-root rule, MIR signature lowering — ask this query; nobody
+/// re-matches `HirTy::Ref` ad hoc. CONTRACT: this (keyed by the resolved
+/// callee entity) is the ground truth for "is this call a place"; an
+/// expression's recorded `&T` type is a sufficient-but-not-necessary signal
+/// (solver ordering can pin a call-result var to the pointee type first).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct CallableRefReturn {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for CallableRefReturn {
+    type Output = Option<RefReturn>;
+
+    fn describe(&self) -> String {
+        format!("CallableRefReturn(entity={:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<RefReturn> {
+        let ret = ctx.query(LowerCallableReturnType {
+            entity: self.entity,
+            root: self.root,
+        });
+        match ret {
+            HirTy::Ref { mutating, .. } => Some(RefReturn { mutating }),
+            _ => None,
+        }
+    }
+}
+
 /// Query: lower a declaration entity's Callable param types to HirTy.
 ///
 /// Reads the `Callable` component and lowers each param's type annotation.
@@ -640,8 +925,10 @@ impl QueryFn for LowerCallableTypes {
                 .params
                 .iter()
                 .map(|p| {
-                    p.ty.as_ref()
-                        .map(|ast_ty| lower_ast_type(ctx, self.entity, self.root, ast_ty))
+                    p.ty.as_ref().map(|ast_ty| {
+                        let lowered = lower_ast_type(ctx, self.entity, self.root, ast_ty);
+                        reject_ref_types(ctx, lowered, RefPosition::Param)
+                    })
                 })
                 .collect(),
         )
@@ -702,7 +989,8 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             .enumerate()
             .map(|(i, ast_ty)| {
                 if i < limit {
-                    lower_ast_type(ctx, context, self.root, ast_ty)
+                    let lowered = lower_ast_type(ctx, context, self.root, ast_ty);
+                    reject_ref_types(ctx, lowered, RefPosition::GenericArg)
                 } else {
                     HirTy::Error(ast_type_span(ast_ty))
                 }
@@ -724,7 +1012,8 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Unit(span)
         | AstType::Never(span)
         | AstType::Inferred(span)
-        | AstType::Some { span, .. } => span.clone(),
+        | AstType::Some { span, .. }
+        | AstType::Ref { span, .. } => span.clone(),
     }
 }
 

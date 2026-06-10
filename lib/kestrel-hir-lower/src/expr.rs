@@ -1159,87 +1159,37 @@ impl LowerCtx<'_> {
         else_body: Option<&ElseBody>,
         span: &Span,
     ) -> HirExprId {
-        // If the condition is a single `if let`, desugar directly to a Match
-        // so that pattern bindings stay in the same arm as the then-body.
-        // The bool-returning match + if-branch strategy breaks OSSA dominance
-        // because bindings created inside the match don't dominate the if's
-        // then-block.
-        if conditions.len() == 1
-            && matches!(&conditions[0], IfCondition::Let { .. })
-            && let IfCondition::Let { pattern, value } = &conditions[0]
-        {
-            self.push_scope();
-            let lowered_value = self.lower_expr(body, *value);
-            let lowered_pat = self.lower_pat(body, *pattern);
-            let then_block = self.lower_block(body, then_body);
-            self.pop_scope();
-
-            let else_block = else_body.map(|eb| match eb {
-                ElseBody::Block(block) => self.lower_block(body, block),
-                ElseBody::ElseIf(expr_id) => {
-                    let lowered = self.lower_expr(body, *expr_id);
-                    HirBlock {
-                        stmts: Vec::new(),
-                        tail_expr: Some(lowered),
-                    }
+        // If any condition is an `if let`, desugar through the shared condition
+        // chain so pattern bindings stay in scope in the then-body (success =
+        // then, fail = else). A single binding nests to one Match; chained
+        // conditions nest deeper. The bool-returning match + if-branch strategy
+        // breaks OSSA dominance because bindings created inside the match don't
+        // dominate the if's then-block (issue #126's if-let twin), so binding
+        // conditions must never go through `lower_if_conditions`.
+        if conditions.iter().any(|c| matches!(c, IfCondition::Let { .. })) {
+            let mut on_success = |this: &mut Self| {
+                let then_block = this.lower_block(body, then_body);
+                this.hir_block_to_expr(then_block, span)
+            };
+            let mut on_fail = |this: &mut Self| match else_body {
+                None => this.alloc_expr(HirExpr::Tuple {
+                    elements: Vec::new(),
+                    span: span.clone(),
+                }),
+                Some(ElseBody::Block(block)) => {
+                    let eb = this.lower_block(body, block);
+                    this.hir_block_to_expr(eb, span)
                 },
-            });
-            let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
-
-            let then_tail = then_block.tail_expr.unwrap_or_else(|| {
-                self.alloc_expr(HirExpr::Tuple {
-                    elements: Vec::new(),
-                    span: span.clone(),
-                })
-            });
-            let then_arm_body = if then_block.stmts.is_empty() {
-                then_tail
-            } else {
-                self.alloc_expr(HirExpr::Block {
-                    body: then_block,
-                    span: span.clone(),
-                })
+                Some(ElseBody::ElseIf(expr_id)) => this.lower_expr(body, *expr_id),
             };
-
-            let else_arm_body = if let Some(eb) = else_block {
-                let tail = eb.tail_expr.unwrap_or_else(|| {
-                    self.alloc_expr(HirExpr::Tuple {
-                        elements: Vec::new(),
-                        span: span.clone(),
-                    })
-                });
-                if eb.stmts.is_empty() {
-                    tail
-                } else {
-                    self.alloc_expr(HirExpr::Block {
-                        body: eb,
-                        span: span.clone(),
-                    })
-                }
-            } else {
-                self.alloc_expr(HirExpr::Tuple {
-                    elements: Vec::new(),
-                    span: span.clone(),
-                })
-            };
-
-            return self.alloc_expr(HirExpr::Match {
-                scrutinee: lowered_value,
-                arms: vec![
-                    HirMatchArm {
-                        pattern: lowered_pat,
-                        guard: None,
-                        body: then_arm_body,
-                    },
-                    HirMatchArm {
-                        pattern: wildcard,
-                        guard: None,
-                        body: else_arm_body,
-                    },
-                ],
-                source: MatchSource::IfLet,
-                span: span.clone(),
-            });
+            return self.lower_condition_chain(
+                body,
+                conditions,
+                MatchSource::IfLet,
+                span,
+                &mut on_success,
+                &mut on_fail,
+            );
         }
 
         // Regular if expression (no pattern binding)
@@ -1368,7 +1318,10 @@ impl LowerCtx<'_> {
                 // and the body lowers the param as a by-reference place.
                 let param_is_mut = is_mut || p.is_mut;
                 let local = self.define_local(&name, param_is_mut, span.clone());
-                let ty = p.ty.as_ref().map(|t| self.lower_type(t));
+                let ty = p
+                    .ty
+                    .as_ref()
+                    .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));
 
                 let pattern = if needs_desugar {
                     // Lower the pattern (creates locals for bindings)
@@ -1482,11 +1435,16 @@ impl LowerCtx<'_> {
         use kestrel_ast::ast_body::{AstStmt, IfCondition};
 
         for (i, &stmt_id) in stmts.iter().enumerate() {
+            // Any guard binding at least one `let` must CPS-transform so the
+            // bindings flow into the continuation. A guard with several
+            // comma-chained conditions (e.g. `guard let a = .., let b = ..`)
+            // nests one match/if per condition — the boolean-AND fallback in
+            // `lower_if_conditions` would evaluate each pattern only for its
+            // truth value and drop the bindings, breaking OSSA.
             let is_guard_let = matches!(
                 &body.stmts[stmt_id],
                 AstStmt::Guard { conditions, .. }
-                    if conditions.len() == 1
-                    && matches!(&conditions[0], IfCondition::Let { .. })
+                    if conditions.iter().any(|c| matches!(c, IfCondition::Let { .. }))
             );
             if !is_guard_let {
                 continue;
@@ -1500,9 +1458,6 @@ impl LowerCtx<'_> {
             else {
                 unreachable!();
             };
-            let IfCondition::Let { pattern, value } = &conditions[0] else {
-                unreachable!();
-            };
 
             // Lower preceding statements normally
             let prev: Vec<HirStmtId> = stmts[..i]
@@ -1510,11 +1465,11 @@ impl LowerCtx<'_> {
                 .map(|&id| self.lower_stmt(body, id))
                 .collect();
 
-            // CPS: wrap remaining stmts + tail as the pattern arm body
-            let match_expr = self.lower_guard_let_cps(
+            // CPS: wrap remaining stmts + tail as the innermost continuation,
+            // nesting one condition per level.
+            let match_expr = self.lower_guard_cps(
                 body,
-                *pattern,
-                *value,
+                conditions,
                 else_body,
                 &stmts[i + 1..],
                 tail_expr,
@@ -1536,61 +1491,133 @@ impl LowerCtx<'_> {
         }
     }
 
-    /// CPS-desugar `guard let <pattern> = <value> else { <else_body> }`:
+    /// Lower a chain of if-conditions into nested matches/ifs that thread every
+    /// `let` binding into the success continuation under OSSA. This is the
+    /// single source of truth shared by `guard`, `if let`, and `while let`.
+    ///
+    /// Each `let p = v` becomes a two-arm match (`p` → deeper chain, `_` →
+    /// fail); each boolean `e` becomes `if e { deeper } else { fail }`. Chained
+    /// `let`s nest, so a later condition's value expression and the success
+    /// continuation both see the earlier bindings:
+    ///
     /// ```text
-    /// match value {
-    ///     pattern => { <remaining stmts + tail> }
-    ///     _       => { <else_body> }
-    /// }
+    /// let p = v, e   ⇒   match v { p => if e { <success> } else { <fail> }
+    ///                                _ => <fail> }
     /// ```
-    fn lower_guard_let_cps(
+    ///
+    /// `on_success` is materialized at the innermost level, inside all the
+    /// pattern scopes, so it sees every binding. `on_fail` is rebuilt per level
+    /// *outside* the scopes (bindings are undefined there) — every caller's fail
+    /// is safe to duplicate: guard/while diverge, and if-let's else runs on only
+    /// one path. `source` tags the generated `let` matches
+    /// (GuardLet/IfLet/WhileLet) for the divergence + exhaustiveness analyzers.
+    ///
+    /// Do NOT route binding conditions through the boolean-AND
+    /// `lower_if_conditions` path: it lowers each pattern to a throwaway
+    /// `match { p => true, _ => false }` and drops the binding, leaving the
+    /// continuation referencing locals that were never threaded in (OSSA
+    /// "used but never defined" — issue #126 and its if-let/while-let twins).
+    pub(crate) fn lower_condition_chain(
         &mut self,
         body: &AstBody,
-        pattern: PatId,
-        value: ExprId,
+        conditions: &[IfCondition],
+        source: MatchSource,
+        span: &Span,
+        on_success: &mut dyn FnMut(&mut Self) -> HirExprId,
+        on_fail: &mut dyn FnMut(&mut Self) -> HirExprId,
+    ) -> HirExprId {
+        // No conditions left: materialize the success continuation. It runs
+        // inside the scopes opened by the enclosing `let` conditions, so their
+        // bindings are visible.
+        let Some((first, rest)) = conditions.split_first() else {
+            return on_success(self);
+        };
+
+        match first {
+            IfCondition::Let { pattern, value } => {
+                let scrutinee = self.lower_expr(body, *value);
+
+                // Bindings are visible in the success continuation (deeper
+                // conditions + the body), not in the fail branch. Scope the
+                // pattern + continuation so the bindings don't leak into fail.
+                self.push_scope();
+                let pat = self.lower_pat(body, *pattern);
+                let success =
+                    self.lower_condition_chain(body, rest, source, span, on_success, on_fail);
+                self.pop_scope();
+
+                let fail = on_fail(self);
+                let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
+
+                self.alloc_expr(HirExpr::Match {
+                    scrutinee,
+                    arms: vec![
+                        HirMatchArm {
+                            pattern: pat,
+                            guard: None,
+                            body: success,
+                        },
+                        HirMatchArm {
+                            pattern: wildcard,
+                            guard: None,
+                            body: fail,
+                        },
+                    ],
+                    source,
+                    span: span.clone(),
+                })
+            },
+            IfCondition::Expr(expr_id) => {
+                let condition = self.lower_expr(body, *expr_id);
+                let success =
+                    self.lower_condition_chain(body, rest, source, span, on_success, on_fail);
+                let fail = on_fail(self);
+
+                self.alloc_expr(HirExpr::If {
+                    condition,
+                    then_body: HirBlock {
+                        stmts: Vec::new(),
+                        tail_expr: Some(success),
+                    },
+                    else_body: Some(HirBlock {
+                        stmts: Vec::new(),
+                        tail_expr: Some(fail),
+                    }),
+                    span: span.clone(),
+                })
+            },
+        }
+    }
+
+    /// CPS-desugar a `guard <c0>, <c1>, … else { <else_body> }` that binds at
+    /// least one `let`: success = the remaining statements + tail (so bindings
+    /// stay in scope under OSSA), fail = the diverging else body. Divergence is
+    /// checked on every `GuardLet` match's else arm by the analyzer.
+    fn lower_guard_cps(
+        &mut self,
+        body: &AstBody,
+        conditions: &[IfCondition],
         else_body: &AstBlock,
         remaining_stmts: &[StmtId],
         tail_expr: Option<ExprId>,
         span: &Span,
     ) -> HirExprId {
-        let scrutinee = self.lower_expr(body, value);
-
-        // The pattern bindings are visible only in the continuation (the rest
-        // of the enclosing block), not in the else block. Scope the pattern +
-        // continuation so the bindings don't leak into the else body — mirrors
-        // the if-let lowering in `lower_if`.
-        self.push_scope();
-        let pat = self.lower_pat(body, pattern);
-
-        // Continuation: remaining stmts + tail (recurses for chained guards)
-        let continuation = self.lower_block_stmts(body, remaining_stmts, tail_expr);
-        let cont_body = self.hir_block_to_expr(continuation, span);
-        self.pop_scope();
-
-        // Else body (must diverge) — lowered outside the pattern's scope so the
-        // bindings are undefined here.
-        let else_block = self.lower_block(body, else_body);
-        let else_arm_body = self.hir_block_to_expr(else_block, span);
-
-        let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
-
-        self.alloc_expr(HirExpr::Match {
-            scrutinee,
-            arms: vec![
-                HirMatchArm {
-                    pattern: pat,
-                    guard: None,
-                    body: cont_body,
-                },
-                HirMatchArm {
-                    pattern: wildcard,
-                    guard: None,
-                    body: else_arm_body,
-                },
-            ],
-            source: MatchSource::GuardLet,
-            span: span.clone(),
-        })
+        let mut on_success = |this: &mut Self| {
+            let cont = this.lower_block_stmts(body, remaining_stmts, tail_expr);
+            this.hir_block_to_expr(cont, span)
+        };
+        let mut on_fail = |this: &mut Self| {
+            let else_block = this.lower_block(body, else_body);
+            this.hir_block_to_expr(else_block, span)
+        };
+        self.lower_condition_chain(
+            body,
+            conditions,
+            MatchSource::GuardLet,
+            span,
+            &mut on_success,
+            &mut on_fail,
+        )
     }
 
     /// Convert an HirBlock into a single HirExprId.

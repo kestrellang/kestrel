@@ -10,7 +10,7 @@ use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::MirTy;
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{BlockId, FieldIdx, MirModule, Op, TyId, ValueId, VariantIdx};
 
 /// Builder for constructing OSSA bodies programmatically.
@@ -99,6 +99,28 @@ impl OssaBuilder {
 
     pub fn new_guaranteed_value(&mut self, ty: TyId, source: ValueId) -> ValueId {
         self.body.alloc_value(ValueDef::guaranteed(ty, source))
+    }
+
+    /// Allocate an entry parameter value: stamps `Param(idx)` provenance and
+    /// bumps `param_count`, mirroring the real lowering's param loop.
+    pub fn new_param_value(&mut self, ty: TyId, ownership: Ownership) -> ValueId {
+        let idx = self.body.param_count as u32;
+        // Params have no in-body borrow source; they arrive borrowed.
+        let def = ValueDef {
+            ty,
+            ownership,
+            borrow_source: None,
+            root: RootProvenance::Param(idx),
+            span: None,
+        };
+        let val = self.body.alloc_value(def);
+        self.body.param_count += 1;
+        val
+    }
+
+    /// Override a value's provenance root (tests for the escape checker).
+    pub fn set_root(&mut self, value: ValueId, root: RootProvenance) {
+        self.body.values[value.index()].root = root;
     }
 
     /// Allocate a value with ownership derived from type.
@@ -303,6 +325,8 @@ impl OssaBuilder {
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
         let i64_ty = self.i64();
         let result = self.new_value(i64_ty, Ownership::Owned);
+        // Parity with lowering: globals are Static-rooted (escape-legal).
+        self.set_root(result, RootProvenance::Static);
         self.emit(InstKind::GlobalRef { result, entity });
         result
     }

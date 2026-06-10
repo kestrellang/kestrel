@@ -12,3 +12,4 @@ kestrel-span = { path = "../kestrel-span" }
 kestrel-debug = { path = "../kestrel-debug" }
 indexmap = { workspace = true }
 smallvec = { workspace = true }
+rustc-hash = { workspace = true }

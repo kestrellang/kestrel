@@ -433,6 +433,11 @@ fn describe_mono_ty(module: &MonoModule, ty: TyId) -> String {
             }
         },
         MirTy::Pointer(inner) => format!("Pointer[{}]", describe_mono_ty(module, *inner)),
+        MirTy::Ref { pointee, mutating } => format!(
+            "{}{}",
+            if *mutating { "&mutating " } else { "&" },
+            describe_mono_ty(module, *pointee)
+        ),
         MirTy::TypeParam(e) => format!("TypeParam({})", name_of(e)),
         MirTy::AssociatedProjection {
             base,
@@ -585,6 +590,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         }
     }
 
@@ -610,6 +616,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
         module.structs.insert(
             (entity(2), vec![]),
@@ -708,6 +715,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -741,6 +749,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         };
         module.add_function(MonoFunction {
             name: "bad".into(),
@@ -752,6 +761,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -780,6 +790,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         };
         module.add_function(MonoFunction {
             name: "bad".into(),
@@ -791,6 +802,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -820,6 +832,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         };
         module.add_function(MonoFunction {
             name: "bad".into(),
@@ -831,6 +844,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -883,6 +897,7 @@ mod tests {
                 symbol_name: "malloc".into(),
             }),
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -903,6 +918,7 @@ mod tests {
             body: None,
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);
@@ -929,6 +945,7 @@ mod tests {
             blocks: vec![block],
             entry: BlockId::new(0),
             param_count: 0,
+            value_names: Default::default(),
         };
         module.add_function(MonoFunction {
             name: "bad".into(),
@@ -940,6 +957,7 @@ mod tests {
             body: Some(body),
             extern_info: None,
             is_main: false,
+            ret_borrow: false,
         });
 
         let result = verify_mono(&module);

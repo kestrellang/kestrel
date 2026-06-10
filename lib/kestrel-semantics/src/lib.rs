@@ -650,9 +650,13 @@ pub fn hir_type_copy_semantics(
                 CopySemantics::Copyable
             }
         },
-        HirTy::Function { .. } | HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) => {
-            CopySemantics::Copyable
-        },
+        // Ref is rejected (rewritten to Error) at HIR lowering and should
+        // never reach here; treat it exactly like Error if it does.
+        HirTy::Function { .. }
+        | HirTy::Never(_)
+        | HirTy::Infer(_)
+        | HirTy::Error(_)
+        | HirTy::Ref { .. } => CopySemantics::Copyable,
         HirTy::AliasUse { entity, .. } => query_nominal_semantics(ctx, *entity, root),
         HirTy::Param(entity, _) => {
             match ctx.query(TypeParamCopyRequirement {
@@ -728,7 +732,8 @@ pub fn hir_type_conforms_to_protocol(
         | HirTy::Never(_)
         | HirTy::Infer(_)
         | HirTy::AssocProjection { .. }
-        | HirTy::Error(_) => false,
+        | HirTy::Error(_)
+        | HirTy::Ref { .. } => false,
     }
 }
 
@@ -941,7 +946,8 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Unit(span)
         | AstType::Never(span)
         | AstType::Inferred(span)
-        | AstType::Some { span, .. } => span.clone(),
+        | AstType::Some { span, .. }
+        | AstType::Ref { span, .. } => span.clone(),
     }
 }
 
@@ -962,5 +968,6 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
         AstType::Some { .. } => "some".into(),
+        AstType::Ref { .. } => "reference".into(),
     }
 }

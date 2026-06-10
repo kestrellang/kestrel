@@ -74,7 +74,17 @@ impl OssaBodyCtx<'_, '_> {
                 return self.emit_move_value(val);
             }
         }
-        self.lower_expr(scrutinee_expr)
+        let val = self.lower_expr(scrutinee_expr);
+        // Stage-1 scrutinee decay: a match scrutinee is a VALUE context — a
+        // ref-typed scrutinee (ret_borrow call result) is copied out and its
+        // borrow ends here, BEFORE the decision tree's branch terminators
+        // (a live ref at the first Branch would be a false E497).
+        if self.ref_results.contains(&val) {
+            let owned = self.emit_copy_value(val);
+            self.emit_end_borrow(val);
+            return owned;
+        }
+        val
     }
 
     pub fn lower_match(
@@ -555,16 +565,40 @@ impl OssaBodyCtx<'_, '_> {
                 // Bind non-consumingly (borrow views) so the guard can read the
                 // pattern variables without consuming the scrutinee — a failing
                 // guard must leave it intact for the remaining patterns.
+                // Snapshot at the guard's entry depth (before `push_scope`) so the
+                // failure branch can restore to exactly this depth. Restoring the
+                // post-`push_scope` snapshot instead would leave the stack one
+                // frame too shallow (the restore is a no-op once the success
+                // branch has popped), which then drops a live outer frame and
+                // leaks the match's threaded slots at the merge (issue #121).
+                let entry_snapshot = self.snapshot_scope();
                 self.push_scope();
                 self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
                 let guard_val = self.lower_expr(guard_expr);
-                let guard_snapshot = self.snapshot_scope();
                 let guard_live: Vec<ValueId> =
                     self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                 let guard_descs: Vec<(TyId, Ownership)> = guard_live
                     .iter()
                     .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
                     .collect();
+
+                // The guard expression's @owned temporaries (boxed literals, the
+                // boolean result, etc.) are scope-owned but not match slots: the
+                // branch only *reads* the condition, and neither the arm body nor
+                // the remaining patterns consume them. Like the switch
+                // discriminant and boolean-split copies above, they must be
+                // destroyed in each successor or they reach the leaf live with no
+                // consumer (OSSA "@owned value live at block exit but never
+                // consumed" — issue #121). The scrutinee stays a tracked slot, so
+                // the filter never drops it.
+                let tracker_set: std::collections::HashSet<ValueId> =
+                    self.tracker.values().into_iter().collect();
+                let extra_vals: Vec<ValueId> = guard_live
+                    .iter()
+                    .filter(|v| !tracker_set.contains(v))
+                    .copied()
+                    .collect();
+
                 let (success_block, success_params) = self.new_block_with_params(&guard_descs);
                 let (failure_block, failure_params) = self.new_block_with_params(&guard_descs);
                 self.emit_branch(
@@ -578,16 +612,20 @@ impl OssaBodyCtx<'_, '_> {
                 // Success: commit the arm — move-out bindings, body, capture exit.
                 self.switch_to(success_block);
                 self.rebind_scope_values(&guard_live, &success_params);
+                self.destroy_extra_test_values(&extra_vals, &guard_live, &success_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                 self.pop_scope();
                 self.emit_success_leaf(*arm_index, bindings, rebound, scrutinee_ty, arms, exits);
 
                 // Failure: scrutinee untouched — continue matching other patterns.
-                self.restore_scope(&guard_snapshot);
+                // `restore_scope` to the entry snapshot pops the guard frame and
+                // returns to the entry depth in one step (no trailing `pop_scope`,
+                // which would over-pop and corrupt the merge's slot accounting).
+                self.restore_scope(&entry_snapshot);
                 self.switch_to(failure_block);
                 self.rebind_scope_values(&guard_live, &failure_params);
+                self.destroy_extra_test_values(&extra_vals, &guard_live, &failure_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
-                self.pop_scope();
                 self.emit_decision_tree_threaded(failure, rebound, scrutinee_ty, arms, exits);
             },
 

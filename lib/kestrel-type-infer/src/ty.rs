@@ -87,6 +87,13 @@ pub enum TyKind {
         index: u32,
     },
 
+    /// Second-class reference `&T` / `&mutating T` (stage 1). Legal ONLY as
+    /// a return type and, transiently, as a call result's expression type —
+    /// member dispatch peels it (transparent place), value contexts decay to
+    /// the pointee, and `validate_ref_placement` rejects everything else
+    /// (nested in args E492, function types E491).
+    Ref { pointee: TyVar, mutating: bool },
+
     /// Error poison — only created after a diagnostic is emitted.
     /// Unifies with anything silently, preventing cascading errors.
     Error,

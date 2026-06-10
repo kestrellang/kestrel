@@ -155,6 +155,16 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
         HirTy::Never(_) => ctx.module.ty_arena.never(),
         HirTy::Infer(_) => ctx.module.ty_arena.error(),
         HirTy::Error(_) => ctx.module.ty_arena.error(),
+        // The SIGNATURE seam: a ref survives HIR lowering only in return
+        // position (the E481 carve-out), and `FunctionDef.ret` must carry
+        // `MirTy::Ref` — it is what `ret_convention` derives ret_borrow from.
+        // Expression types peel instead (see `lower_resolved_ty`).
+        HirTy::Ref {
+            inner, mutating, ..
+        } => {
+            let pointee = lower_type(ctx, inner);
+            ctx.module.ty_arena.ref_ty(pointee, *mutating)
+        },
     }
 }
 
@@ -167,6 +177,11 @@ thread_local! {
 /// Lower a ResolvedTy (from type inference) to an interned TyId.
 pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
     match ty {
+        // The EXPRESSION seam: a ref-typed expression value registers as an
+        // ordinary @guaranteed value of the POINTEE type ("a borrowed param
+        // that travels") — `ValueDef.ty` never carries `MirTy::Ref`. The
+        // signature seam (`lower_type` on `HirTy::Ref`) keeps the Ref.
+        ResolvedTy::Ref { pointee, .. } => lower_resolved_ty(ctx, pointee),
         ResolvedTy::Named { entity, args } => {
             let mir_args: Vec<TyId> = args.iter().map(|a| lower_resolved_ty(ctx, a)).collect();
             lower_named_type(ctx, *entity, mir_args)

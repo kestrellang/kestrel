@@ -285,6 +285,13 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     if globals.verbose {
         eprintln!("  Built successfully: {}", output_path.display());
     }
+
+    // Skip the Compiler's teardown: dropping its memo tables takes ~4% of a
+    // whole-program build, and the process exits immediately after. The
+    // driver only borrows the compiler, so drop it first to release the
+    // borrow. Leak is intentional — the OS reclaims everything on exit.
+    drop(driver);
+    std::mem::forget(compiler);
     Ok(())
 }
 

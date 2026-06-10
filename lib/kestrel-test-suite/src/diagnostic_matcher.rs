@@ -19,7 +19,8 @@ pub enum TestSeverity {
 pub struct TestDiagnostic {
     pub severity: TestSeverity,
     pub message: String,
-    /// Analyzer descriptor ID (e.g. "E441"), if from an analyzer.
+    /// Diagnostic code (e.g. "E441") — an analyzer descriptor ID, or the
+    /// `with_code` of a codespan diagnostic (e.g. the E48x ref rejections).
     pub code: Option<String>,
     /// 1-based line number.
     pub line: usize,
@@ -72,7 +73,10 @@ pub fn from_codespan_diagnostics(
         result.push(TestDiagnostic {
             severity,
             message,
-            code: None,
+            // Codespan diagnostics may carry a code too (e.g. the E48x
+            // reference rejections emitted from HIR lowering) — pass it
+            // through so `// ERROR(E480)` annotations can match.
+            code: diag.code.clone(),
             line,
             file_id,
         });

@@ -2,7 +2,7 @@
 
 **Status**: Design draft — maintainer decisions required
 **Scope**: Stage 1 only (in-function refs + parameter-rooted return refs + inferred lifetimes). Stage 2/3 surfaces noted only where a Stage-1 choice would paint them into a corner.
-**Companion**: `docs/future/references.md` (feasibility — read first for the MVP cut, the traps, and the verified code anchors)
+**Companion**: `docs/references-prototype/references.md` (feasibility — read first for the MVP cut, the traps, and the verified code anchors)
 
 This doc decides the **surface syntax and semantics** of `&T` / `&mutating T` — the calls only the maintainer can make. Each section gives 2–3 concrete options with tradeoffs and a marked **RECOMMENDATION**.
 
@@ -127,7 +127,7 @@ extend Matrix {
 ### RECOMMENDATION ✅ — **Option A (implicit, single-source) for v1; reserve an Option-B annotation slot for the multi-source case.**
 
 - v1: a returned `&T` infers its provenance as **the unique reference-eligible parameter root** (overwhelmingly `self`). The receiver convention **constrains but does not alone fix** provenance: `borrowing`/`mutating` receivers may yield `&T`-of-self; `consuming` receivers may not (hard error).
-- **`&mutating` returns are not allowed in v1** (defer per Trap §7); a `mutating` receiver may still return a shared `&T`.
+- **`&mutating` returns are not allowed in v1** (defer per Trap §7); a `mutating` receiver may still return a shared `&T`. *(Superseded 2026-06-09: ban lifted — `references-gaps.md` §10.4; a `&mutating` return must root at a mutable source.)*
 - Multi-source returns (`-> &T` with two `&T` params) are a **clean rejection** in v1 with a diagnostic that says "ambiguous borrow source; v1 supports returning a borrow of a single parameter." This holds the line where Swift/Mojo independently landed (refuse to infer multi-source return provenance) without paying for annotation syntax until it's needed. When the annotation is added later, spell it to reuse the receiver/param vocabulary (e.g. a `from:` clause) rather than importing `@lifetime`.
 
 ---
@@ -293,7 +293,7 @@ The genuinely undecided calls, each blocking a concrete implementation choice:
 
 4. **Multi-source return provenance — reject (v1) vs annotate (now).** §3 recommends rejecting `func pick(a: &T, b: &T) -> &T` in v1. **Decision: is the clean rejection acceptable, or do we need the annotation (`from:`-style) in the first release?** Swift and Mojo both *require* the annotation; this is the one place the "inferred lifetimes" goal collides with reality.
 
-5. **`&mutating` return — confirm the v1 prohibition.** Feasibility Trap §7 says no `&mutating` returns in v1 (the per-block verifier can't enforce the cross-return freeze). A mutable accessor (`func cell(at:) -> &mutating Cell`) is a *very* common ask. **Decision: confirm `&mutating` returns are deferred, accepting that mutable accessors must instead take a `&mutating` out-param or use the Design-B `modify { }` closure pattern in the interim.**
+5. **`&mutating` return — confirm the v1 prohibition.** Feasibility Trap §7 says no `&mutating` returns in v1 (the per-block verifier can't enforce the cross-return freeze). A mutable accessor (`func cell(at:) -> &mutating Cell`) is a *very* common ask. **Decision: confirm `&mutating` returns are deferred, accepting that mutable accessors must instead take a `&mutating` out-param or use the Design-B `modify { }` closure pattern in the interim.** *(Answered 2026-06-09: prohibition rejected by the maintainer — `&mutating` returns are allowed, gated by the mutable-root rule. See `references-gaps.md` §10.4.)*
 
 6. **Call-site visibility — fully invisible (recommended) vs an optional opt-in marker.** §6 recommends no call-site marker, matching `mutating` params. **Decision: do we want an *optional* explicit `&` at call sites for readability (`f(&x)` accepted but not required), or strictly no marker?** An optional marker is a middle path but reintroduces the expression-`&` parse concern and a "which style?" lint question.
 
@@ -303,4 +303,4 @@ The genuinely undecided calls, each blocking a concrete implementation choice:
 
 *Recommendations summary (all marked ✅ above): `&T` / `&mutating T` type syntax (§1); params infer the borrow, no call-site marker (§2, §6); returned `&T` infers single-parameter provenance, no `&mutating` returns in v1 (§3); convention-lives-on-the-type with `mutating` param as sugar and `consuming` staying by-value (§4); named-place sources only, place-mutability not exclusivity (§5). The four load-bearing open questions for the maintainer are #1 (named bindings), #2 (sugar vs coequal), #4 (multi-source returns), and #5 (`&mutating` returns).*
 
-Source files referenced (absolute paths): `/Users/dino/Documents/Projects/kestrel/docs/future/references.md`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-parser/src/ty/mod.rs`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-parser/src/common/parsers.rs`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-ast-builder/src/ast_type.rs`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-lexer/src/lib.rs`. Design-B precedent grounded in user memory `mutating_closure_params_feature.md` and `kestrel_mutating_callsite.md`.
+Source files referenced (absolute paths): `/Users/dino/Documents/Projects/kestrel/docs/references-prototype/references.md`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-parser/src/ty/mod.rs`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-parser/src/common/parsers.rs`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-ast-builder/src/ast_type.rs`, `/Users/dino/Documents/Projects/kestrel/lib/kestrel-lexer/src/lib.rs`. Design-B precedent grounded in user memory `mutating_closure_params_feature.md` and `kestrel_mutating_callsite.md`.
