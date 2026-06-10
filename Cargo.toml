@@ -44,6 +44,7 @@ walkdir = "2"
 [workspace]
 members = [
     "lib/kestrel-hecs",
+    "lib/kestrel-copy-fold",
     "lib/kestrel-span",
     "lib/kestrel-lexer",
     "lib/kestrel-syntax-tree",

@@ -14,9 +14,11 @@ pub use types::{
 pub use verify::{MonoVerifyError, MonoVerifyResult};
 pub use witness::MonoError;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
+use kestrel_copy_fold::{CopyLayer, CopySemantics, instance_semantics};
 use kestrel_hecs::Entity;
 
 use crate::body::OssaBody;
@@ -816,8 +818,9 @@ fn resolve_types_and_layouts(
 /// Copyable iff every gating arg (the positions in
 /// `StructDef::conditionally_copyable`) is itself Copyable — so `Result[Int64,
 /// Error]` becomes `Bitwise` while `Result[Array[Int64], E]` stays `None`.
-/// Mirrors `ty_query::instantiated_copy_behavior` but over already-mono types
-/// (args are concrete, so no `where_clause`).
+/// The fold is the shared decision tree (`kestrel_copy_fold::instance_semantics`
+/// via `MonoCopyLayer`) over already-mono types (args are concrete, so member
+/// lookups hit the mono maps instead of threading a `where_clause`).
 ///
 /// Inert for types with no gating positions. A fixed point handles nesting
 /// (`Result[Optional[Int], E]`): each round refines types whose gating children
@@ -830,38 +833,30 @@ fn refine_mono_copy_behavior(
     mono_enums: &mut IndexMap<MonoTypeKey, MonoEnum>,
 ) {
     loop {
+        let layer = MonoCopyLayer {
+            arena,
+            structs,
+            enums,
+            mono_structs,
+            mono_enums,
+        };
         // (key, is_struct, new copy) — collected read-only, applied after.
         let mut updates: Vec<(MonoTypeKey, bool, CopyBehavior)> = Vec::new();
         for (key, ms) in mono_structs.iter() {
-            let gating = &structs[&ms.source].conditionally_copyable;
-            if gating.is_empty() {
+            // Cheap filter: only conditional containers can change.
+            if structs[&ms.source].conditionally_copyable.is_empty() {
                 continue;
             }
-            let want = conditional_copy(
-                arena,
-                ms.source,
-                gating,
-                &ms.type_args,
-                mono_structs,
-                mono_enums,
-            );
+            let want = instance_semantics(&layer, ms.source, &ms.type_args);
             if want != ms.type_info.copy {
                 updates.push((key.clone(), true, want));
             }
         }
         for (key, me) in mono_enums.iter() {
-            let gating = &enums[&me.source].conditionally_copyable;
-            if gating.is_empty() {
+            if enums[&me.source].conditionally_copyable.is_empty() {
                 continue;
             }
-            let want = conditional_copy(
-                arena,
-                me.source,
-                gating,
-                &me.type_args,
-                mono_structs,
-                mono_enums,
-            );
+            let want = instance_semantics(&layer, me.source, &me.type_args);
             if want != me.type_info.copy {
                 updates.push((key.clone(), false, want));
             }
@@ -881,39 +876,73 @@ fn refine_mono_copy_behavior(
     }
 }
 
-/// Copyability of a conditional container, mirroring `ty_query`: any gating arg
-/// `None` → `None`; all `Bitwise` → `Bitwise`; all Copyable with ≥1 `Clone` →
-/// `Clone(entity)` (copyable element-wise via the container's clone shim).
-fn conditional_copy(
-    arena: &TyArena,
-    entity: Entity,
-    gating: &[usize],
-    type_args: &[TyId],
-    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
-    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
-) -> CopyBehavior {
-    let mut saw_clone = false;
-    for &pos in gating {
-        let Some(&arg) = type_args.get(pos) else {
-            return CopyBehavior::None;
-        };
-        match concrete_copy(arena, arg, mono_structs, mono_enums) {
-            CopyBehavior::Bitwise => {},
-            CopyBehavior::Clone(_) => saw_clone = true,
-            CopyBehavior::None => return CopyBehavior::None,
-        }
+/// `CopyLayer` over already-monomorphized `TyId`s — the mono refine pass's
+/// hooks into the shared decision tree (`kestrel_copy_fold::instance_semantics`,
+/// the single source of truth for per-instantiation copy semantics across
+/// semantics / solver / analyze / MIR). Layer-specific plumbing: base + gating
+/// come from the *generic* defs, member lookups hit the mono maps (no
+/// `where_clause` — args are concrete).
+struct MonoCopyLayer<'a> {
+    arena: &'a TyArena,
+    structs: &'a IndexMap<Entity, StructDef>,
+    enums: &'a IndexMap<Entity, EnumDef>,
+    mono_structs: &'a IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &'a IndexMap<MonoTypeKey, MonoEnum>,
+}
+
+impl CopyLayer for MonoCopyLayer<'_> {
+    type Ty = TyId;
+    type Sem = CopyBehavior;
+
+    fn base_semantics(&self, entity: Entity) -> CopyBehavior {
+        // Generic def `type_info.copy`; `None` by the ConditionalCopyableParams
+        // invariant whenever gating is non-empty (the only case the refine
+        // loop reaches), so the kernel always falls through to the gating fold
+        // — exactly the former `conditional_copy` behavior.
+        let copy = self
+            .structs
+            .get(&entity)
+            .map(|s| s.type_info.copy.clone())
+            .or_else(|| self.enums.get(&entity).map(|e| e.type_info.copy.clone()))
+            .unwrap_or(CopyBehavior::Bitwise);
+        // Checked form of the invariant above: a pass that flips a conditional
+        // container's base away from None would silently skip the gating fold.
+        debug_assert!(
+            self.gating_positions(entity).is_empty() || matches!(copy, CopyBehavior::None),
+            "conditional container's generic def must keep CopyBehavior::None"
+        );
+        copy
     }
-    if saw_clone {
-        CopyBehavior::Clone(entity)
-    } else {
-        CopyBehavior::Bitwise
+
+    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+        Cow::Borrowed(
+            self.structs
+                .get(&entity)
+                .map(|s| s.conditionally_copyable.as_slice())
+                .or_else(|| self.enums.get(&entity).map(|e| e.conditionally_copyable.as_slice()))
+                .unwrap_or(&[]),
+        )
+    }
+
+    fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
+        // Stays per-layer: mono-map lookups, no where_clause.
+        concrete_copy(self.arena, ty, self.mono_structs, self.mono_enums)
+    }
+
+    fn sem_from_class(&self, entity: Entity, class: CopySemantics) -> CopyBehavior {
+        match class {
+            CopySemantics::Copyable => CopyBehavior::Bitwise,
+            // Container entity payload — matches `ty_query`'s `MirCopyLayer`.
+            CopySemantics::Cloneable => CopyBehavior::Clone(entity),
+            CopySemantics::NotCopyable => CopyBehavior::None,
+        }
     }
 }
 
 /// Copy behavior of an already-monomorphized concrete type. Named types are
 /// looked up in the mono maps (their `copy` is correct, or being refined this
-/// round); primitives/pointers/functions are bit-copyable; a tuple is Bitwise
-/// iff every element is.
+/// round); primitives/pointers/functions are bit-copyable; tuples use the
+/// canonical fold (move-only dominates, else Clone if any element clones).
 fn concrete_copy(
     arena: &TyArena,
     ty: TyId,
@@ -929,16 +958,21 @@ fn concrete_copy(
                 .or_else(|| mono_enums.get(&key).map(|e| e.type_info.copy.clone()))
                 .unwrap_or(CopyBehavior::Bitwise)
         },
+        // Canonical fold (copy-drift #4 resolved 2026-06-10): matches
+        // ty_query's tuple rule — move-only element dominates, else first
+        // Clone element decides (payload inert), else Bitwise. Previously any
+        // non-Bitwise element classified the tuple move-only here, making the
+        // two MIR passes disagree.
         MirTy::Tuple(elems) => {
+            let mut first_clone = None;
             for &e in elems {
-                if !matches!(
-                    concrete_copy(arena, e, mono_structs, mono_enums),
-                    CopyBehavior::Bitwise
-                ) {
-                    return CopyBehavior::None;
+                match concrete_copy(arena, e, mono_structs, mono_enums) {
+                    CopyBehavior::None => return CopyBehavior::None,
+                    b @ CopyBehavior::Clone(_) if first_clone.is_none() => first_clone = Some(b),
+                    _ => {},
                 }
             }
-            CopyBehavior::Bitwise
+            first_clone.unwrap_or(CopyBehavior::Bitwise)
         },
         _ => CopyBehavior::Bitwise,
     }

@@ -36,7 +36,6 @@ Source Text -> Tokens -> CST -> AST Build -> Name Res -> HIR Lower -> Semantics 
 |----------|-------------|
 | `protocol_allows_negative_conformance` | Whether `: not P` is permitted on a protocol — true only for builtin language-feature protocols with implicit conformance (e.g. `Copyable`). A plain function, not a query: the body is one `EntityBuiltin` lookup, cheaper to recompute than a memo slot |
 | `hir_type_copy_semantics` | Copy semantics of any `HirTy`: folds tuples, routes params through `TypeParamCopyRequirement`, and nominal instances through per-instantiation folding (see below) |
-| `hir_type_conforms_to_protocol` | Protocol check for a `HirTy`: routes `Copyable`/`Cloneable` through copy semantics, everything else through `DeclaresConformanceTo` (nominals) or where-clause bounds (params) |
 
 ## Conformance: Three Tiers
 
@@ -61,7 +60,7 @@ hir_type_copy_semantics       instance-level fold over the gating args:
                               else any Cloneable -> Cloneable, else Copyable
 ```
 
-`ConditionalCopyableParams` is the single source of truth for gating positions: this crate, the inference solver (`nominal_conforms_copyable`), and MIR `copy_behavior` must all agree on each instantiation. Only stored fields and enum payloads contribute to the child scan; computed properties never do.
+`ConditionalCopyableParams` is the single source of truth for gating positions, and the fold over them is `kestrel_copy_fold::instance_semantics` — one decision tree shared by this crate (`HirCopyLayer`), the inference solver (`SolverCopyLayer`), move tracking (`MoveCopyLayer`), and MIR (`MirCopyLayer`/`MonoCopyLayer`), so all layers agree on each instantiation. `CopySemantics`/`CopyRequirement` are defined in `kestrel-copy-fold` and re-exported here. Only stored fields and enum payloads contribute to the child scan; computed properties never do.
 
 ## Key Design Decisions
 

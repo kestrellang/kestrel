@@ -54,6 +54,7 @@ Rules of thumb:
 4. **`root` is always passed through.** It's the compilation root entity; most queries need it to find registries.
 5. **Fail soft.** If a required component is missing, return `None` / `vec![]` / `Ty::Error` — don't panic. Upstream passes emit diagnostics; downstream queries handle Error types gracefully.
 6. **Arc-wrap large outputs.** Memo cache hits clone the `Output`, so big, widely re-queried results (`HirBody`, `TypedBody`, `Scope`) go behind `Arc` — a hit then clones the handle, not the data. Precedent: `ScopeFor`, `LowerBody`, `InferBody`.
+7. **A query earns its memo slot via key reuse or incremental-firewall value, not by existing.** A plain `fn(ctx, …)` keeps dependency tracking; a trivial lookup is cheaper recomputed than memoized. Precedent: `protocol_allows_negative_conformance` (kestrel-semantics) is a function, not a query.
 
 ## Adding a component
 

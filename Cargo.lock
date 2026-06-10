@@ -801,6 +801,7 @@ version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-copy-fold",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
@@ -908,6 +909,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-copy-fold"
+version = "0.17.0"
+dependencies = [
+ "kestrel-hecs",
+]
+
+[[package]]
 name = "kestrel-debug"
 version = "0.17.0"
 
@@ -999,6 +1007,7 @@ name = "kestrel-mir"
 version = "0.17.0"
 dependencies = [
  "indexmap",
+ "kestrel-copy-fold",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-span",
@@ -1081,6 +1090,7 @@ version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-copy-fold",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",
@@ -1131,6 +1141,7 @@ dependencies = [
  "codespan-reporting",
  "kestrel-ast",
  "kestrel-ast-builder",
+ "kestrel-copy-fold",
  "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
