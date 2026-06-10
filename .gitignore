@@ -28,6 +28,11 @@ examples/weather/weather
 # Cloudflare Wrangler local state
 .wrangler/
 
+# SQLite databases (e.g. kestrel-wall's wall.db) — runtime state, never commit
+*.db
+*.db-shm
+*.db-wal
+
 .triage
 
 **/flock.lock
