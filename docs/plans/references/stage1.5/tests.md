@@ -1,8 +1,13 @@
 # Stage 1.5 — Tests
 
-> **Status 2026-06-10**: the accessor + arm-decay waves below are
-> LANDED (suite green incl. __llvm trials); the named-binding /
-> `&`-pattern wave remains blocked on item 2 ratification.
+> **Status 2026-06-10**: ALL waves LANDED (stage complete, suite green
+> incl. __llvm trials). Named bindings: `references/bindings/`
+> (aliasing/store-through/across-statements/accessor-element/no-clone
+> pins + E209/E210/E212/E494/E497/E499 rejections). `&` patterns:
+> `references/patterns/` (in-place NotCopyable payload, `&mutating`
+> write-through, guard + clone-count pin, E210/E211 rejections).
+> Dangle lint: `references/escape/dangle_lint_*`. Tests honor the
+> block-local rule: ref work straight-line, asserts after the last use.
 
 Accessor matrix is writable now (semantics/errors defined). Named-binding
 and `&`-pattern waves follow item 2's semantics ratification. All

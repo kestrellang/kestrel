@@ -1,5 +1,15 @@
 # Stage 1.5 — Requirements
 
+> **STAGE COMPLETE 2026-06-10.** All five items are resolved: 1, 2, 3, 5
+> IMPLEMENTED; 4 DISSOLVED (interim shipped). The one deliberate scope
+> line: named bindings and `&` pattern bindings are **block-local** —
+> a binding's last use must precede any `if`/`match`/loop boundary
+> (E497, binding wording). `if` CONDITIONS work (they lower before the
+> branch); uses inside arms or past merges are rejected. Verify Check 4
+> already accepts @guaranteed block-arg forwarding, so cross-block
+> bindings are a well-scoped follow-up (`add_guaranteed_block_param` in
+> kestrel-mir builder.rs is the unimplemented seam), not a redesign.
+
 Ergonomics follow-ons, scheduled **on demand** after stage 1 ships. Items
 are independently shippable; do not bundle.
 
@@ -17,13 +27,29 @@ are independently shippable; do not bundle.
    via writeback (COW copy path); `arr(at: i) += v` is the in-place
    fast path. `Array.at`/`mutableAt` removed; references tests migrated
    to `arr(at: i)`.
-2. **Named ref bindings**: `let r = &expr;` with the visible-`&` cue
-   (`references-syntax.md` §2 Option C), block-local. Fine semantics
-   proposed in `syntax.md` (store-through, no rebind, copy-on-rebind);
-   not ratified. Unlocks **`&` pattern bindings** (decided spelling,
-   `syntax.md`) and with them in-place enum-payload access.
-3. **Dangle lint**: same-function `Pointer(to: local)` returned as a ref
-   (`references-gaps.md` §10.3).
+2. **Named ref bindings — RATIFIED + IMPLEMENTED 2026-06-10**:
+   `let r = &expr;` with the visible-`&` cue. Ratified semantics:
+   `let`-only (no `var r = &x` → E209, no rebinding); `r = v` is
+   STORE-THROUGH, legal only on `&mutating` bindings (shared → E208
+   family); `let s = r` decays to a copy; `let s = &r` re-borrows;
+   block-local (the stage-complete note above). `&expr` borrows ANY
+   place expression — ref-returning calls/accessors, locals, fields,
+   accessor elements (`&arr(at: i)`) — via the borrow-conv place
+   machinery; writes-while-borrowed are the decided may-alias behavior
+   (visible through the binding). Rvalue → E499; `&mutating` of a
+   non-mutable place → E210; closure capture → E212; `let r: &T`
+   annotations stay E482 (inference-only, future relaxation).
+   **`&` pattern bindings SHIPPED with it**: `.Occupied(_, &v, _)`
+   borrows the payload IN PLACE (place-mode matches pin the scrutinee
+   place as a threaded raw address; tests and leaves read through
+   intra-block views; `&mutating v` writes through; plain bindings in
+   place-mode force their copy). `&` binders are match-arm-only (E211
+   elsewhere); `&mutating v` needs a mutable scrutinee place (E210).
+3. **Dangle lint — IMPLEMENTED 2026-06-10**: E504 (WARNING,
+   body/dangle_ref.rs) on the provably-silly shape — a returned ref
+   fabricated from `Pointer(to: <same-fn local>)`, traced through
+   single-assignment `let` pointers; params/heap chains/`var` pointers
+   stay silent (`references-gaps.md` §10.3 — claims nothing more).
 4. **Shared-read projection sugar — DISSOLVED (ratified 2026-06-10),
    interim SHIPPED**: no new projection construct. The interim
    `Dictionary.modify(key) { (mutating v) in … } -> R?` landed

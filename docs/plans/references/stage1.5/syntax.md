@@ -1,17 +1,22 @@
 # Stage 1.5 — Syntax
 
-> **Status 2026-06-10**: the place-accessor syntax below is IMPLEMENTED
-> (items 1+5). One implementation nuance: `get`/`set` are RESERVED lexer
-> tokens (pre-existing), while `ref` is genuinely CONTEXTUAL — the parser
+> **Status 2026-06-10**: ALL syntax below is IMPLEMENTED (stage
+> complete). Place accessors: `get`/`set` are RESERVED lexer tokens
+> (pre-existing), while `ref` is genuinely CONTEXTUAL — the parser
 > threads the source text through chumsky state and matches the
 > identifier text in clause-head position only, so `ref` remains a legal
 > identifier everywhere. A clause head must be followed by `{`; the one
 > accepted grammar cost is a shorthand getter whose entire body is a
 > trailing-closure call on a function literally named `ref` with a
-> block-shaped closure body — parenthesize it. Named ref bindings and
-> `&` patterns below remain FUTURE (item 2).
+> block-shaped closure body — parenthesize it. Named ref bindings:
+> prefix `&`/`&mutating` parse as unary ops (UnaryOp::Borrow /
+> BorrowMutating) and are legal exactly in `let`-initializer position
+> (E488 elsewhere, E209 on `var`/destructure). `&`/`&mutating name`
+> binder patterns parse everywhere a binding pattern does
+> (SyntaxKind::RefBindingPattern) and are legal exactly in match-arm
+> position (E211 elsewhere).
 
-## Named ref bindings (decided direction)
+## Named ref bindings (RATIFIED + IMPLEMENTED 2026-06-10)
 
 `let r = &ring.peek();` — the visible `&` lands exactly on the construct
 that can outlive its referent (`references-syntax.md` §2 Option C).
@@ -19,8 +24,8 @@ Prefix-`&` exists **only** in `let`/`var`-initializer position, so the
 `a & b` bitwise-AND ambiguity is confined to that one restricted spot.
 Bindings are block-local (no cross-merge — E-REF-15 still applies).
 
-Fine semantics (PROPOSED, not ratified — the Swift `inout`-binding pitch
-shape, which is the natural extension of transparent place):
+Fine semantics (RATIFIED 2026-06-10 as proposed — the Swift
+`inout`-binding pitch shape, the natural extension of transparent place):
 - Bindings are `let`-only; **no `var r = &x`, no rebinding**.
 - The binding *names the place*: `r = v` is **store-through** (legal only
   for `&mutating` bindings); there is no rebind spelling to confuse it
@@ -102,7 +107,7 @@ public var first: T {
   handles whose mutability lives in the type. Two forms with genuinely
   different semantics — not two spellings of one thing.
 
-## `&` patterns — DECIDED 2026-06-10
+## `&` patterns — DECIDED + IMPLEMENTED 2026-06-10
 
 Ref pattern bindings are spelled with the sigil, not a keyword:
 

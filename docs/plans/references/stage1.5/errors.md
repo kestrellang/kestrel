@@ -38,16 +38,28 @@ the subscript decl errors (E607/E608) already live.
   form is the only spelling — pinned in
   `rejected_syntax/return_ref_rejected.ks`).
 
-## `&` patterns
+## Named ref bindings + `&` patterns (IMPLEMENTED — codes allocated)
 
-- `&mutating v` against a non-mutable scrutinee place — same predicate
-  family as E495 (mutable root).
-- `&` binding in a match whose scrutinee is an rvalue that cannot be
-  pinned for the match's duration — expected to be representable as a
-  match-scoped temp, so likely NO error; confirm during semantics work.
-
-## Named ref bindings (open — follows `semantics.md`)
-
-Known candidates: binding a ref past its referent's scope; `&` of a
-temporary in a let-initializer; store-through (`r = v`) on a shared-`&`
-binding (E208 family); rebinding spelling rejected (no `var r = &x`).
+- **E209 `ref_binding_requires_let`** (hir-lower stmt.rs) — `&`
+  initializer on `var` or a destructuring pattern; recovery drops the
+  `&`.
+- **E210 `mutable_borrow_of_immutable`** (access_mode.rs
+  `check_borrow_init` + the match arm) — `&mutating expr` of a let
+  local/field, a shared-`&` reach, or a get/set-only member (no
+  `mutating ref` accessor to lend a place); also `&mutating v` patterns
+  on a non-mutable scrutinee place.
+- **E211 `ref_pattern_position`** (hir-lower pat.rs) — `&` binder
+  outside match-arm position (let/for destructures, if/while-let,
+  params); degrades to a plain binding.
+- **E212 `ref_binding_captured`** (closure.rs) — closure captures a ref
+  binding.
+- **E499 `borrow_of_temporary`** (access_mode.rs) — `let r = &<rvalue>`.
+- **E504 `dangling_pointer_ref`** (WARNING, dangle_ref.rs) — item 3's
+  lint; see requirements.
+- **E497 second wording** (mir-lower) — a binding still used after an
+  inside-fn terminator: "ref binding 'r' cannot stay live across a
+  control-flow merge"; re-borrow inside the branch or bind the value.
+- Match-scoped temp pinning means an rvalue SCRUTINEE is legal in
+  place-mode matches (no error) — only `&mutating` needs real mutable
+  storage (E210).
+- `let r: &T = …` annotations stay E482 (inference-only this stage).

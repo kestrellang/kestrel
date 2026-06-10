@@ -116,18 +116,34 @@ projection runs: safety by construction. Manual offsets are not an
 option for enums (`RcBox.valuePtr` hand-computes its header offset only
 because the stdlib BUILT that layout; enum layout is compiler-owned).
 
-## Named ref bindings — implementation notes
+## Named ref bindings — SHIPPED shape (2026-06-10)
 
-- **`end_stale_refs_since`** (`kestrel-mir-lower/src/body/mod.rs:1438-1453`)
-  sweeps scope entries for `ScopeEntry::Borrow(v)` with
-  `v.index() >= mark && ref_results.contains(v)` and force-ends them.
-  Call sites: statement boundary (`stmt.rs:88`, mark 0) and if-condition
-  boundary (`control.rs:33`, watermarked). Carve-out shape: a
-  binding-owned exclusion set (ValueId → binding) consulted in the
-  sweep's filter; bound refs instead end at lexical scope exit like any
-  scoped borrow.
+- **Multi-use registry**: `ref_binding_vals: HashMap<ValueId, LocalId>`
+  (+ `ref_binding_remaining` use budgets, decremented once per read
+  expr). Members are ALSO in `ref_results`; the registry marks them
+  multi-use. Every "single use — end it" decay site funnels through
+  `end_ref_if_single_use`; `end_stale_refs_since` excludes them;
+  `set_terminator` ends them silently at zero remaining uses or emits
+  the binding-worded E497.
+- **`lower_borrow_init`** delegates the place matrix wholesale to
+  `prepare_call_arg_for_expr` (var slots → BorrowAddr — writes stay
+  visible, may-alias; accessor elements → the `mutating ref` child;
+  in-place borrows without spurious clones; ref-call pass-through);
+  re-borrows of an existing binding get a fresh sub-borrow.
+- **Place-mode matches**: the scrutinee place's raw address (`PtrTo` of
+  the place view — an OWNED pointer scalar) threads through the
+  decision tree's existing block-param machinery; tests/leaves read
+  through intra-block `BeginBorrowAddr` views; `&v` leaf bindings are
+  REAL nested borrows (`emit_begin_borrow(proj)`) so they're
+  scope-tracked — arm-internal control flow hits the binding E497
+  policy instead of an untracked-value verify error. No verifier
+  changes; `new_block_with_params` never sees a Guaranteed desc.
 - `add_guaranteed_block_param` is still only a panic-string aspiration
-  (`builder.rs:95,125`) — needed only if bindings ever cross blocks;
-  they don't (block-local rule).
-- Where the dangle lint runs (body analyzer vs. verify pass) — still
-  unexplored (item 3).
+  (`kestrel-mir/src/builder.rs:147`) — the seam for CROSS-BLOCK
+  bindings if ever wanted; verify Check 4 already accepts @guaranteed
+  block-arg forwarding.
+- **Dangle lint home**: analyze body check (`body/dangle_ref.rs`), NOT
+  verify — it shares `RetRefPointerDerived` (moved mir-lower →
+  kestrel-type-infer so analyze can reach it; hir-lower can't host it,
+  the impl needs `InferBody`). Gotcha: init-call resolutions key on the
+  CALL expr, not the callee expr.

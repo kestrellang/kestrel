@@ -13,7 +13,7 @@ what implementation needs; the *why* stays in the research docs.
 |---|---|---|---|---|---|---|
 | **stage0.5** — pointer capture + reserved ref syntax | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1** — returnable refs | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **stage1.5** — ergonomics | ✅ | ✅ items 1+5 | ✅ items 1+5 | ✅ items 1+5 | ✅ items 1+5 | ✅ items 1+5 |
+| **stage1.5** — ergonomics | ✅ | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE |
 | **stage2** — storable refs | ✅ scope only | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | **stage3** — Static bound | ✅ scope only | ✅ | ⬜ | ⬜ | ⬜ | ✅ sketch |
 
@@ -24,6 +24,34 @@ what implementation needs; the *why* stays in the research docs.
 
 - **stage0.5 — SHIPPED** (79c48ca0): refs parse everywhere, rejected
   everywhere (E480–E489), `Pointer(to:)` pinned.
+- **stage1.5 COMPLETE 2026-06-10** (feature/115 branch). Beyond items
+  1+5 below, the same day shipped:
+  - **Item 2 — named ref bindings** (ratified semantics): `let r = &expr;`
+    holds any place across STATEMENTS — multiple reads through one
+    borrow, `let s = r` decays to a copy, `let s = &r` re-borrows,
+    `r = v` store-through on `&mutating` bindings, var-slot aliasing
+    (writes visible — may-alias). BLOCK-LOCAL: last use must precede
+    control flow (binding-worded E497; `if` conditions fine); the
+    cross-block follow-up seam is `add_guaranteed_block_param` (verify
+    Check 4 already accepts forwarded @guaranteed block args). Decl/use
+    rules: E209 (let-only), E210 (`&mutating` needs a mutable place),
+    E212 (no closure capture), E499 (no rvalue borrows), E482 kept for
+    annotations.
+  - **`&` pattern bindings**: `.Occupied(_, &v, _)` projects the enum
+    payload IN PLACE (place-mode matches thread the pinned place's raw
+    address through the decision tree; intra-block views; NotCopyable
+    payloads readable without copies; `&mutating v` writes through).
+    Match-arm-only (E211); mutable scrutinee place for `&mutating`
+    (E210).
+  - **Item 3 — dangle lint**: E504 WARNING on
+    `return Pointer(to: <same-fn local>).value` shapes
+    (analyze body/dangle_ref.rs; `RetRefPointerDerived` moved
+    mir-lower → kestrel-type-infer to share the wrapper recognition).
+  - **Item 4 — DISSOLVED, interim shipped**:
+    `Dictionary.modify(key) { (mutating v) in … } -> R?` (bucket
+    writeback under the hood; upgrades to in-place silently once
+    `Optional[&T]` + bindings make `if let r = &dict.find(key)`
+    expressible).
 - **stage1.5 items 1 + 5 — IMPLEMENTED 2026-06-10** (feature/115 branch):
   - **Place accessors**: `ref { … }` / `mutating ref { … }` clauses on
     subscripts and computed properties. `ref` is CONTEXTUAL (parser state
@@ -95,8 +123,8 @@ what implementation needs; the *why* stays in the research docs.
    status above). The subscript-resolution question was settled by
    DECISION, not code: the labeled `at:` place form — no resolution
    change needed or made (the type-aware fallback-tier option stays
-   unbuilt). Item 2 still blocks on ratifying the named-binding fine
-   semantics (store-through, no rebind — proposed in stage1.5/syntax.md).
+   unbuilt). ~~Item 2 blocks on ratification~~ — RATIFIED + SHIPPED
+   2026-06-10 (see implementation status). Stage 1.5 has no blanks left.
 3. **Stage-2 commitment**: the standing default is *don't build*
    (`references-gaps.md` §11); its files stay blank unless users hit the
    stage-1.5 ceiling.

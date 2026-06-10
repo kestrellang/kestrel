@@ -62,29 +62,43 @@ decl-time errors (`errors.md`).
   Accessor-routed assignment MUST preserve this order so
   `arr.mutableAt(index: i) = v` and `arr(i) = v` are one rule.
 
-## Match scrutinee place rule (prerequisite for `&` patterns)
+## Match scrutinee place rule — IMPLEMENTED 2026-06-10
 
-For `&v` to project in place, the match must evaluate its scrutinee as a
-**place**, not decay it to a copy — otherwise the binding borrows from a
-temporary and in-place payload access is lost. Rule: **a match containing
-any `&` binding pattern evaluates its scrutinee as a place** (a ref expr
-stays a ref; a field/local is borrowed; an rvalue gets a match-scoped
-temp). Matches without `&` bindings keep today's decay semantics
-untouched — stage-1 behavior is frozen except where the new syntax
-explicitly opts in. `&mutating v` additionally requires the scrutinee
-place to be a mutable root (same predicate as E495).
+A match containing any `&` binding pattern evaluates its scrutinee as a
+**place**: the place is evaluated once via the borrow-conv machinery
+(var slot / binding pass-through / accessor element; an rvalue's owned
+temp IS the match-scoped pin) and its raw address — an owned pointer
+scalar — threads through the decision tree's block params. Every test
+and leaf reads through an intra-block `BeginBorrowAddr` view; `&v`
+binds the payload projection in place (a real nested borrow, so it is
+scope-tracked and block-local like every named binding); plain bindings
+in place-mode force their copy. Matches without `&` bindings keep the
+decay lowering byte-identical. `&mutating v` requires the scrutinee
+place to be a mutable root (E210, the E495 predicate family) and stores
+write the payload in place.
 
-## Named ref bindings — semantics still open
+## Named ref bindings — IMPLEMENTED 2026-06-10 (ratified semantics)
 
-- **Statement-boundary survival**: `end_stale_refs_since`
-  (`kestrel-mir-lower/src/body/mod.rs:1438`) force-ends single-use refs
-  at statement boundaries (`stmt.rs:88`) and if-condition boundaries
-  (`control.rs:33`, watermarked). Named bindings are precisely the refs
-  that must SURVIVE those sweeps — carve-out shape in
-  `compiler-arch.md`.
-- Store-through (`r = v`), no-rebind, `let s = r` decays — proposed
-  shape in `syntax.md`, not ratified.
+- **Statement-boundary survival**: bindings are registered multi-use
+  (`ref_binding_vals`) — `end_stale_refs_since` spares them; every
+  "the ref's single use — end it" decay site funnels through
+  `end_ref_if_single_use`, which copies WITHOUT ending a binding's
+  borrow. Lexical scope exit / the next terminator own the end.
+- **Block-local enforcement**: a binding live at an inside-fn
+  terminator ends silently when fully used (remaining-use counter,
+  decremented once per read expr) and is the binding-worded E497 when
+  uses remain. `if` conditions work (they lower pre-branch).
+- Store-through (`r = v` via the shipped mut-ref assign path, RHS
+  first, no trailing EndBorrow), no-rebind, `let s = r` decays —
+  ratified and shipped.
 - Interaction with `diamond_conditional_move_let_drop_timing`
   (still-open bug — a conditionally-consumed `let r = &x` inherits it).
-- Cross-block: bindings stay block-local (E-REF-15); if that is ever
-  relaxed, `add_guaranteed_block_param` stops being a panic string.
+- Cross-block: bindings stay block-local; if that is ever relaxed,
+  `add_guaranteed_block_param` stops being a panic string — verify
+  Check 4 already accepts @guaranteed block-arg forwarding.
+- **Accepted E498 blind spot**: a place-mode match (or store-through)
+  whose address came from a single-use expression ref ends that ref at
+  pin time (`PtrTo` then EndBorrow) — a later consume of the
+  underlying storage inside an arm isn't chained to the address.
+  Stage-2 dangle territory; the storage itself is pinned for the
+  match's duration, so the common shapes stay sound under may-alias.
