@@ -209,6 +209,12 @@ Current allocations:
   single classifier (also consulted by body/assignment.rs); it must run
   BEFORE the syntactic walk — the receiver check accepts temporaries, so a
   shared-ref receiver would otherwise silently pass.
+- E209: `ref_binding_requires_let` — hir-lower codespan code (stmt.rs): a `&`/`&mutating` initializer on `var` or a destructuring pattern (named ref bindings are simple `let`s only; recovery drops the `&`)
+- E210: `mutable_borrow_of_immutable` (body/access_mode.rs `check_borrow_init`) — `&mutating expr` of a non-mutable place: let local/field, shared-`&` reach, or a get/set-only member (no `mutating ref` accessor to lend a place)
+- E211: `ref_pattern_position` — hir-lower codespan code (pat.rs): `&`/`&mutating` binder pattern outside its supported position (match-arm support = stage 1.5 item 2 place-mode lowering)
+- E212: `ref_binding_captured` (body/closure.rs) — closure captures a named ref binding (env would store the reference; closure can outlive the borrow)
+- E499: `borrow_of_temporary` (body/access_mode.rs `check_borrow_init`) — `let r = &<rvalue>`; a borrow names an existing place
+- E497 has a SECOND wording (mir-lower `emit_binding_across_merge_error`): a named ref binding still used after an inside-fn terminator — bindings are block-local (no @guaranteed block params; verify Check 4 would accept forwarding, unimplemented)
 - E208: `assign_through_shared_ref` (body/assignment.rs) — plain assignment
   through a `&T`-returning call/getter (`arr.at(index: i) = v`,
   `cell.value = v`). The compound form (`+=`) is E207 instead (the

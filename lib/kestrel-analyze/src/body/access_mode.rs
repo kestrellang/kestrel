@@ -53,6 +53,22 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // Stage-1.5 named ref bindings: `&mutating expr` of a place that
+    // isn't mutable (let local/field, shared ref, get/set-only member).
+    DiagnosticDescriptor {
+        id: "E210",
+        name: "mutable_borrow_of_immutable",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // Stage-1.5 named ref bindings: `&expr` of an rvalue — there is no
+    // place to borrow.
+    DiagnosticDescriptor {
+        id: "E499",
+        name: "borrow_of_temporary",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct AccessModeAnalyzer;
@@ -113,11 +129,102 @@ impl BodyCheck for AccessModeAnalyzer {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },
+                HirExpr::Borrow {
+                    inner,
+                    mutating,
+                    span,
+                } => {
+                    check_borrow_init(cx, *inner, *mutating, span, &mut diags);
+                },
                 _ => {},
             }
         }
 
         diags
+    }
+}
+
+/// Borrow-initializer legality (`let r = &expr;`, stage 1.5 item 2): a
+/// borrow needs a PLACE (E499 otherwise); a `&mutating` borrow needs a
+/// MUTABLE place (E210 otherwise). Mutability is `classify_mutability` —
+/// the same predicate every access-mode check uses.
+fn check_borrow_init(
+    cx: &BodyContext<'_>,
+    inner: HirExprId,
+    mutating: bool,
+    span: &kestrel_span::Span,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let push = |diags: &mut Vec<AnalyzeDiagnostic>, d: usize, message: String, note: String| {
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[d].id,
+            severity: DESCRIPTORS[d].default_severity,
+            message,
+            labels: vec![DiagLabel {
+                span: span.clone(),
+                message: "borrow initializer".into(),
+                is_primary: true,
+            }],
+            notes: vec![note],
+        });
+    };
+    const E210: usize = 5;
+    const E499: usize = 6;
+
+    // A get/set-only member has no mutable place to lend — the writeback
+    // temp the lowering would borrow strands every later store made
+    // through the binding.
+    if mutating
+        && let Some(&member) = cx.typed.resolutions.get(&inner)
+        && matches!(
+            cx.query.get::<NodeKind>(member),
+            Some(NodeKind::Subscript | NodeKind::Field)
+        )
+        && util::accessor_place_mut_base(cx, inner).is_some()
+        && !cx
+            .query
+            .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+            .is_some_and(|info| info.mutating_ref_accessor.is_some())
+    {
+        push(
+            diags,
+            E210,
+            "cannot take a `&mutating` borrow of a get/set member".to_string(),
+            "writes through this member go get→set; a borrowable place needs a \
+             `mutating ref` accessor"
+                .to_string(),
+        );
+        return;
+    }
+
+    match classify_mutability(cx, inner) {
+        MutClass::Temporary => push(
+            diags,
+            E499,
+            "cannot borrow a temporary value".to_string(),
+            "a borrow names an existing place; bind the value first (`let x = ...;`) \
+             and borrow that"
+                .to_string(),
+        ),
+        MutClass::SharedRef if mutating => push(
+            diags,
+            E210,
+            "cannot take a `&mutating` borrow through a shared reference".to_string(),
+            "the place is reached through `&T`, which permits reads only".to_string(),
+        ),
+        MutClass::ImmutableLocal(name) if mutating => push(
+            diags,
+            E210,
+            format!("cannot take a `&mutating` borrow of immutable variable '{name}'"),
+            "declare the variable with `var`, or take a shared `&` borrow".to_string(),
+        ),
+        MutClass::ImmutableField(name) if mutating => push(
+            diags,
+            E210,
+            format!("cannot take a `&mutating` borrow of immutable field '{name}'"),
+            "the field is declared with `let`".to_string(),
+        ),
+        _ => {},
     }
 }
 

@@ -114,6 +114,15 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // Stage-1.5 named ref bindings: a closure cannot capture a ref
+    // binding — the env would store the reference (E483 territory) and
+    // the closure can outlive the borrow.
+    DiagnosticDescriptor {
+        id: "E212",
+        name: "ref_binding_captured",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct ClosureAnalyzer;
@@ -153,6 +162,31 @@ impl BodyCheck for ClosureAnalyzer {
             capture_roots.sort_by_key(|l| l.raw());
             capture_roots.dedup();
             let captures = &capture_roots;
+
+            // E212: a ref binding cannot be captured — the env would store
+            // the reference and the closure can outlive the borrow.
+            for &root in captures {
+                if matches!(
+                    cx.typed.local_types.get(&root),
+                    Some(ResolvedTy::Ref { .. })
+                ) {
+                    let name = cx.hir.locals[root].name.clone();
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[7].id,
+                        severity: DESCRIPTORS[7].default_severity,
+                        message: format!("closure cannot capture ref binding '{name}'"),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, expr_id),
+                            message: "captured here".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![
+                            "bind the value first (`let x = ...;`) and capture that"
+                                .to_string(),
+                        ],
+                    });
+                }
+            }
 
             // Check closure arity and types against expected function type.
             if let Some(ty) = cx.typed.expr_types.get(&expr_id) {
