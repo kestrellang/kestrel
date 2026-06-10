@@ -333,6 +333,34 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// is the E497 "ref across a control-flow merge" error, not a silent
     /// EndBorrow. Per-body value ids — saved/restored across closures.
     pub(crate) ref_results: std::collections::HashSet<ValueId>,
+    /// Stage 1.5 get→op→set writebacks pending after the owning call.
+    /// Pushed by `try_lower_accessor_place_mut`'s fallback (the receiver of
+    /// a mutating operation is a get/set member: the element was copied out
+    /// through `get` into a temp slot); drained WATERMARK-SCOPED by the call
+    /// emitters right after their call, so a nested call in a sibling
+    /// argument can't steal an outer writeback. A statement-boundary
+    /// drain(0) is the safety net — a dropped writeback is a lost write.
+    pub(crate) pending_writebacks: Vec<PendingWriteback>,
+}
+
+/// One deferred get→op→set writeback (see `pending_writebacks`).
+pub(crate) struct PendingWriteback {
+    /// The member's setter child (concrete) — witness-dispatched when the
+    /// member is a protocol-extension subscript (e.g. Slice's).
+    setter: Entity,
+    /// Receiver type — witness `self_type` / direct-callee prepend.
+    receiver_ty: TyId,
+    /// Raw method type args (un-prepended).
+    type_args: Vec<TyId>,
+    /// The receiver PLACE, evaluated once (@guaranteed mut place). The get
+    /// call used a sub-borrow of it; the setter consumes it as its MutBorrow
+    /// receiver.
+    recv_place: ValueId,
+    /// Index values, lowered once; re-borrowed per call.
+    index_vals: Vec<ValueId>,
+    /// Temp slot holding the element during the mutating operation.
+    slot_addr: ValueId,
+    elem_ty: TyId,
 }
 
 impl<'a, 'w> OssaBodyCtx<'a, 'w> {
@@ -370,6 +398,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             value_forwarding: HashMap::new(),
             ret_borrow: false,
             ref_results: std::collections::HashSet::new(),
+            pending_writebacks: Vec::new(),
         }
     }
 
@@ -2354,6 +2383,16 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     convention,
                 };
             }
+            // Stage 1.5 accessor place: an accessor-backed member in mutable
+            // position (`x(i) += v` receiver, `x(i).mutate()`) fabricates its
+            // place through the `mutating ref` accessor. The @guaranteed ref
+            // result IS the by-reference address (see prepare_call_arg's
+            // MutBorrow pass-through); scope machinery ends its borrow at the
+            // statement boundary, exactly like the shipped
+            // `arr.mutableAt(index: i) += 1` shape.
+            if let Some(arg) = self.try_lower_accessor_place_mut(expr_id) {
+                return arg;
+            }
             // SSA owned receiver (e.g. a `consuming` func's `self`): borrow the
             // value in place via lower_expr_for_borrow. lower_expr would emit
             // copy_value here, stranding the mutation on the throwaway copy while
@@ -2403,6 +2442,203 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         let val = self.lower_expr(expr_id);
         self.prepare_call_arg(val, convention)
+    }
+
+    /// Stage 1.5 accessor place (the `mutating ref` half of the provider
+    /// rule): when an accessor-backed member expression (`x(i)`, `x.first`)
+    /// sits in MUTABLE position — compound-assign receiver, mutating-method
+    /// receiver — fabricate its place by calling the member's `mutating ref`
+    /// accessor. Receiver and index args are lowered ONCE; the @guaranteed
+    /// ref result is passed through as the by-reference MutBorrow argument
+    /// (see prepare_call_arg). Returns None when the member has no
+    /// `mutating ref` accessor (get/set members keep today's behavior until
+    /// the writeback fallback lands).
+    fn try_lower_accessor_place_mut(&mut self, expr_id: HirExprId) -> Option<CallArg> {
+        let expr = self.hir.exprs[expr_id].clone();
+        let (receiver_expr, index_args): (HirExprId, Vec<kestrel_hir::body::HirCallArg>) =
+            match &expr {
+                HirExpr::Call { callee, args, .. } => (*callee, args.clone()),
+                HirExpr::Field { base, .. } => (*base, Vec::new()),
+                _ => return None,
+            };
+        let member = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+            .copied()?;
+        if !matches!(
+            self.ctx.world.get::<kestrel_ast_builder::NodeKind>(member),
+            Some(kestrel_ast_builder::NodeKind::Subscript | kestrel_ast_builder::NodeKind::Field)
+        ) {
+            return None;
+        }
+        let is_static = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Static>(member)
+            .is_some();
+        let pointee_ty = self.resolve_expr_type(expr_id);
+
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(member, true) {
+            self.ctx.register_name(accessor);
+            let mut call_args: Vec<CallArg> = Vec::new();
+            let type_args = if is_static {
+                let self_type = self.type_from_type_ref(receiver_expr);
+                self.prepend_receiver_type_args(self_type, vec![])
+            } else {
+                let receiver_ty = self.resolve_expr_type(receiver_expr);
+                let ta = self.resolve_type_args(expr_id);
+                call_args
+                    .push(self.prepare_call_arg_for_expr(receiver_expr, ParamConvention::MutBorrow));
+                self.prepend_receiver_type_args(receiver_ty, ta)
+            };
+            for a in &index_args {
+                let v = self.lower_expr(a.value);
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            let callee = Callee::direct_with_args(accessor, type_args, None);
+            let ref_val = self.emit_call_returning(callee, call_args, pointee_ty);
+            return Some(CallArg {
+                value: ref_val,
+                convention: ParamConvention::MutBorrow,
+            });
+        }
+
+        // get→op→set WRITEBACK fallback: computed accessors can't fabricate
+        // addresses, so the element is copied out through `get` into a temp
+        // slot, the mutating operation runs on the slot, and the owning call
+        // emitter writes the slot back through `set`. Statics keep today's
+        // rejection (not carved by the analyzer either).
+        if is_static {
+            return None;
+        }
+        let setter = self.ctx.find_setter_child(member)?;
+        // NotCopyable elements can't ride a copy-out — backstop the analyzer
+        // (mirrors emit_move_out_of_borrow_backstop's accumulate pattern).
+        if self.is_non_copyable(pointee_ty) {
+            let span = self
+                .current_span
+                .clone()
+                .unwrap_or_else(|| kestrel_span::Span::synthetic(0));
+            let ty_str = kestrel_mir::display::ty_to_string(pointee_ty, &self.ctx.module);
+            self.ctx.query.accumulate(
+                kestrel_reporting::Diagnostic::error()
+                    .with_code("E503")
+                    .with_message(format!(
+                        "cannot mutate a non-copyable `{ty_str}` element through get/set \
+                         accessors: the writeback copies the element out"
+                    ))
+                    .with_labels(vec![kestrel_reporting::Label::primary(
+                        span.file_id,
+                        span.range(),
+                    )
+                    .with_message("this mutation needs an in-place element reference")])
+                    .with_notes(vec![
+                        "add a `mutating ref` accessor to mutate elements in place".into(),
+                    ]),
+            );
+            return None;
+        }
+        self.ctx.register_name(setter);
+
+        let receiver_ty = self.resolve_expr_type(receiver_expr);
+        let type_args = self.resolve_type_args(expr_id);
+        // Receiver place evaluated ONCE; the get call below uses a
+        // sub-borrow so the place survives the call (emit_call_inner ends
+        // arg borrows after non-ret_borrow calls), and the setter consumes
+        // the place itself as its MutBorrow receiver at drain time.
+        let recv_place = self
+            .prepare_call_arg_for_expr(receiver_expr, ParamConvention::MutBorrow)
+            .value;
+        let index_vals: Vec<ValueId> = index_args
+            .iter()
+            .map(|a| self.lower_expr(a.value))
+            .collect();
+
+        // GET: copy the element out.
+        let mut get_args: Vec<CallArg> = vec![CallArg {
+            value: self.emit_begin_borrow(recv_place),
+            convention: ParamConvention::Borrow,
+        }];
+        for &v in &index_vals {
+            get_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+        }
+        // Read through the member's READ provider: the `ref` accessor child
+        // when present (a ref+set cross-mix leaves the parent bodyless;
+        // emit_store_init below copies out of the @guaranteed ref result),
+        // else the getter on the member itself.
+        let read_callee = self
+            .ctx
+            .find_ref_accessor_child(member, false)
+            .unwrap_or(member);
+        let got = if let Some(protocol) = self.ctx.is_protocol_method(read_callee) {
+            self.ctx.register_name(protocol);
+            let key = self.ctx.witness_method_key(read_callee);
+            let callee = Callee::Witness {
+                protocol,
+                method: key,
+                self_type: receiver_ty,
+                method_type_args: type_args.clone(),
+            };
+            self.emit_call_returning(callee, get_args, pointee_ty)
+        } else {
+            self.ctx.register_name(read_callee);
+            let ta = self.prepend_receiver_type_args(receiver_ty, type_args.clone());
+            let callee = Callee::direct_with_args(read_callee, ta, None);
+            self.emit_call_returning(callee, get_args, pointee_ty)
+        };
+
+        // Slot: the mutating operation runs on the slot's address.
+        let slot_addr = self.emit_uninit(pointee_ty);
+        self.emit_store_init(slot_addr, got);
+        let slot_borrow = self.emit_begin_mut_borrow_addr(slot_addr, pointee_ty);
+        self.pending_writebacks.push(PendingWriteback {
+            setter,
+            receiver_ty,
+            type_args,
+            recv_place,
+            index_vals,
+            slot_addr,
+            elem_ty: pointee_ty,
+        });
+        Some(CallArg {
+            value: slot_borrow,
+            convention: ParamConvention::MutBorrow,
+        })
+    }
+
+    /// Drain writebacks pushed at or above `watermark`: take the mutated
+    /// element back out of its slot and call the member's setter. Invoked by
+    /// the call emitters right after their call (watermark recorded before
+    /// their arg prep), plus a drain(0) safety net at statement boundaries.
+    pub(crate) fn drain_writebacks(&mut self, watermark: usize) {
+        while self.pending_writebacks.len() > watermark {
+            let wb = self.pending_writebacks.pop().expect("len checked");
+            let new_val = self.emit_take(wb.slot_addr, wb.elem_ty);
+            let mut args: Vec<CallArg> = vec![CallArg {
+                value: wb.recv_place,
+                convention: ParamConvention::MutBorrow,
+            }];
+            for &v in &wb.index_vals {
+                args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            args.push(self.prepare_call_arg(new_val, ParamConvention::Borrow));
+            if let Some(protocol) = self.ctx.is_protocol_method(wb.setter) {
+                self.ctx.register_name(protocol);
+                let key = self.ctx.witness_setter_key(wb.setter);
+                let callee = Callee::Witness {
+                    protocol,
+                    method: key,
+                    self_type: wb.receiver_ty,
+                    method_type_args: wb.type_args,
+                };
+                self.emit_call_void(callee, args);
+            } else {
+                let ta = self.prepend_receiver_type_args(wb.receiver_ty, wb.type_args);
+                let callee = Callee::direct_with_args(wb.setter, ta, None);
+                self.emit_call_void(callee, args);
+            }
+        }
     }
 
     /// Prepare a value for a call argument with a given convention.

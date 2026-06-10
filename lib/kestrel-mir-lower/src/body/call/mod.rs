@@ -155,6 +155,9 @@ impl OssaBodyCtx<'_, '_> {
             (convs, None)
         };
 
+        // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
+        // `x(i).mutate()`) drain right after the call — watermark-scoped.
+        let wb_mark = self.pending_writebacks.len();
         let mut call_args = if is_static {
             self.lower_call_args_bound(args, resolved, &conventions, 0)
         } else {
@@ -207,7 +210,9 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn rewrite_field_subscript(
@@ -338,6 +343,10 @@ impl OssaBodyCtx<'_, '_> {
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
+        // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
+        // `x(i) += v`) drain right after the call — watermark-scoped so a
+        // nested call in a sibling arg can't steal them.
+        let wb_mark = self.pending_writebacks.len();
         let recv_conv = conventions
             .first()
             .copied()
@@ -359,7 +368,9 @@ impl OssaBodyCtx<'_, '_> {
             method_type_args,
         };
 
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn emit_resolved_call(
@@ -483,6 +494,9 @@ impl OssaBodyCtx<'_, '_> {
             (convs, callee)
         };
 
+        // Writebacks pushed by THIS call's arg prep drain right after the
+        // call — watermark-scoped.
+        let wb_mark = self.pending_writebacks.len();
         let conv_offset = if has_receiver { 1 } else { 0 };
         let mut call_args = self.lower_call_args_bound(args, entity, &conventions, conv_offset);
         if has_receiver {
@@ -495,7 +509,9 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn try_enum_construct(

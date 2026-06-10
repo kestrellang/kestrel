@@ -145,6 +145,12 @@ impl BodyCheck for AssignmentAnalyzer {
             ) {
                 continue;
             }
+            // Stage 1.5: a member with a `mutating ref` accessor is a
+            // writable place projection — base mutability is enforced by
+            // the access-mode analyzer's mutating-receiver check.
+            if util::accessor_place_mut_base(cx, *receiver).is_some() {
+                continue;
+            }
             match util::ref_place(cx, *receiver) {
                 // `&mutating T` call result — a writable place.
                 Some(true) => {},

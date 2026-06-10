@@ -289,7 +289,15 @@ fn shared_ref_diag(span: kestrel_span::Span, message: &str) -> AnalyzeDiagnostic
 
 /// Classify an expression's mutability for access mode checking.
 fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
-    // Stage-1 refs FIRST, before the syntactic walk: a `&mutating T` call
+    // Stage-1.5 accessor places FIRST: a member with a `mutating ref`
+    // accessor is a place PROJECTION — classify the base (`x(i) += 1`
+    // requires `x` mutable). Must precede the ref_place consult below:
+    // a ref-provider member's READ types `&T`, which would wrongly
+    // classify the projection as SharedRef.
+    if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
+        return classify_mutability(cx, base);
+    }
+    // Stage-1 refs next, before the syntactic walk: a `&mutating T` call
     // result is a mutable place (it would fall to Temporary below and
     // wrongly trip E205), and a shared `&T` must not fall to Temporary —
     // the receiver check ACCEPTS temporaries, so without this consult a

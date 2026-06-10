@@ -85,6 +85,11 @@ impl OssaBodyCtx<'_, '_> {
         // terminator as a false E497. No watermark: nothing pending can span
         // a statement boundary.
         if !self.is_terminated() {
+            // Safety net for get→op→set writebacks whose owning call emitter
+            // didn't drain them (exotic nesting): a dropped writeback is a
+            // LOST WRITE, and writing back at the statement end is still
+            // correctly ordered relative to later statements.
+            self.drain_writebacks(0);
             self.end_stale_refs_since(0);
         }
 
