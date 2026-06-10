@@ -267,6 +267,12 @@ struct BlockVerifier<'a> {
     owned: FxHashMap<ValueId, ValueState>,
     /// Active borrows keyed by the @guaranteed result value.
     borrows: FxHashMap<ValueId, BorrowInfo>,
+    /// Live references: @guaranteed call results (only ref-returning calls
+    /// produce them) keyed by result, holding the immediate borrow source.
+    /// Used to attribute consume-while-borrowed to user code: a blocking
+    /// borrow that a live ref chains through was kept alive *by* the ref,
+    /// so the conflict is the user's (E498), not a lowering bug (ICE).
+    refs: FxHashMap<ValueId, ValueId>,
     /// Address init states.
     addrs: FxHashMap<ValueId, AddrKind>,
     /// Maps a FieldAddr result -> (base_addr, field_idx).
@@ -298,6 +304,7 @@ impl<'a> BlockVerifier<'a> {
             ret_borrow,
             owned: FxHashMap::default(),
             borrows: FxHashMap::default(),
+            refs: FxHashMap::default(),
             addrs: FxHashMap::default(),
             field_addr_map: FxHashMap::default(),
             errors: Vec::new(),
@@ -365,14 +372,24 @@ impl<'a> BlockVerifier<'a> {
                     .map(|(borrow_val, _)| *borrow_val)
                     .collect();
                 if !blocking.is_empty() {
-                    self.err_val(
-                        inst,
-                        v,
-                        format!(
-                            "cannot consume {:?}: active borrow(s) {:?} depend on it",
-                            v, blocking,
-                        ),
-                    );
+                    // Attribution: lowering ends plain scope borrows before a
+                    // consume, so a blocking borrow at a consume site is only
+                    // reachable from user code when a live reference (`&T`)
+                    // chains to the consumed value and kept the borrow alive.
+                    // That case is the user's error (E498); anything else is
+                    // a lowering bug and stays an ICE.
+                    if let Some(ref_val) = self.live_ref_rooted_at(v) {
+                        self.err_consume_while_ref_live(v, inst, ref_val);
+                    } else {
+                        self.err_val(
+                            inst,
+                            v,
+                            format!(
+                                "cannot consume {:?}: active borrow(s) {:?} depend on it",
+                                v, blocking,
+                            ),
+                        );
+                    }
                 }
                 self.owned.insert(v, ValueState::Consumed);
                 true
@@ -387,6 +404,63 @@ impl<'a> BlockVerifier<'a> {
                 true
             },
         }
+    }
+
+    /// Find a live reference (@guaranteed call result) whose borrow-source
+    /// chain reaches `v`. Walks `borrows` from the ref's immediate source;
+    /// the chain is acyclic (each borrow's source precedes it), but the walk
+    /// is bounded anyway as a hand-built-MIR guard.
+    fn live_ref_rooted_at(&self, v: ValueId) -> Option<ValueId> {
+        self.refs.iter().find_map(|(&ref_val, &src)| {
+            let mut cur = src;
+            for _ in 0..=self.borrows.len() {
+                if cur == v {
+                    return Some(ref_val);
+                }
+                match self.borrows.get(&cur) {
+                    Some(info) => cur = info.source,
+                    None => break,
+                }
+            }
+            None
+        })
+    }
+
+    /// E498: user-attributable consume-while-borrowed — the value is consumed
+    /// (moved/destroyed) while a reference into it is still live.
+    fn err_consume_while_ref_live(&mut self, v: ValueId, inst: Option<u32>, ref_val: ValueId) {
+        let name = self
+            .body
+            .value_names
+            .get(&v)
+            .map(|n| format!("`{n}`"))
+            .unwrap_or_else(|| "this value".to_string());
+        let span = self
+            .inst_span(inst)
+            .or_else(|| self.body.value(v).span.clone());
+        let secondary = self
+            .body
+            .value(ref_val)
+            .span
+            .clone()
+            .map(|s| (s, "the reference is created here and is still live".into()));
+        self.errors.push(VerifyError {
+            block: self.block_id,
+            inst,
+            message: format!("cannot consume {name} while a reference into it is live"),
+            span,
+            func_name: self.func_name.to_string(),
+            entity: self.entity,
+            diag: Some(UserDiag {
+                code: "E498",
+                secondary,
+                notes: vec![
+                    "a reference reads its value's storage in place; consuming the value here \
+                     would leave the reference dangling"
+                        .into(),
+                ],
+            }),
+        });
     }
 
     /// Assert a value is live (not consumed). Used for reads.
@@ -630,6 +704,7 @@ impl<'a> BlockVerifier<'a> {
             },
             InstKind::EndBorrow { operand } => {
                 self.borrows.remove(operand);
+                self.refs.remove(operand);
             },
             InstKind::BeginMutBorrow { result, operand } => {
                 self.assert_live(*operand, idx);
@@ -644,6 +719,7 @@ impl<'a> BlockVerifier<'a> {
             },
             InstKind::EndMutBorrow { operand } => {
                 self.borrows.remove(operand);
+                self.refs.remove(operand);
             },
 
             // -- Memory access --
@@ -876,6 +952,14 @@ impl<'a> BlockVerifier<'a> {
                     let is_never = matches!(self._module.ty_arena.get(ty), crate::ty::MirTy::Never);
                     if self.body.value(*r).ownership == Ownership::Owned && !is_never {
                         self.define_owned(*r);
+                    }
+                    // A @guaranteed call result is a reference (only
+                    // ret_borrow callees produce them); track it for
+                    // consume-while-borrowed attribution (E498).
+                    if self.body.value(*r).ownership == Ownership::Guaranteed
+                        && let Some(src) = self.body.value(*r).borrow_source
+                    {
+                        self.refs.insert(*r, src);
                     }
                 }
             },
@@ -1909,6 +1993,113 @@ mod tests {
             errors.iter().any(|e| e.message.contains("active borrow")),
             "expected consume-during-mut-borrow error, got: {:?}",
             errors,
+        );
+    }
+
+    /// Push a ref-returning call: a Call inst whose @guaranteed result has
+    /// `borrow_source = source` (mirrors mir-lower's ret_borrow registration).
+    fn emit_ref_call(b: &mut OssaBuilder, ty: TyId, source: ValueId) -> ValueId {
+        let callee = b.fresh_entity();
+        let result = b.new_guaranteed_value(ty, source);
+        let cur = b.current_block();
+        b.body_mut()
+            .block_mut(cur)
+            .insts
+            .push(crate::inst::Instruction::new(InstKind::Call {
+                result: Some(result),
+                callee: crate::callee::Callee::direct(callee),
+                args: vec![crate::inst::CallArg {
+                    value: source,
+                    convention: ParamConvention::Borrow,
+                }],
+            }));
+        result
+    }
+
+    #[test]
+    fn consume_while_ref_live_is_coded_e498() {
+        let mut b = OssaBuilder::new("test");
+        let (owned_ty, _) = make_owned_type(&mut b);
+
+        let entry = b.current_block();
+        let x = b.new_value(owned_ty, Ownership::Owned);
+        {
+            let body = b.body_mut();
+            body.block_mut(entry).params.push(crate::block::BlockParam {
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
+            });
+        }
+
+        let borrow = b.emit_begin_borrow(x);
+        let ref_val = emit_ref_call(&mut b, owned_ty, borrow);
+        // Consume the owner while the ref (chained x <- borrow <- ref) lives.
+        let moved = b.emit_move_value(x);
+        b.emit_end_borrow(ref_val);
+        b.emit_end_borrow(borrow);
+        b.emit_destroy_value(moved);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        let codes: Vec<_> = errors
+            .iter()
+            .filter_map(|e| e.diag.as_ref().map(|d| d.code))
+            .collect();
+        assert_eq!(codes, vec!["E498"], "got: {errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("while a reference into it is live")),
+            "got: {errors:?}",
+        );
+    }
+
+    #[test]
+    fn consume_during_unrelated_ref_stays_ice() {
+        // A live ref rooted at a DIFFERENT value must not user-code the
+        // conflict: consuming x while only a plain borrow of x blocks it is
+        // a lowering bug (uncoded ICE), even though some ref exists.
+        let mut b = OssaBuilder::new("test");
+        let (owned_ty, _) = make_owned_type(&mut b);
+
+        let entry = b.current_block();
+        let x = b.new_value(owned_ty, Ownership::Owned);
+        let y = b.new_value(owned_ty, Ownership::Owned);
+        {
+            let body = b.body_mut();
+            for v in [x, y] {
+                body.block_mut(entry).params.push(crate::block::BlockParam {
+                    value: v,
+                    ty: owned_ty,
+                    ownership: Ownership::Owned,
+                });
+            }
+        }
+
+        let borrow_x = b.emit_begin_borrow(x);
+        let borrow_y = b.emit_begin_borrow(y);
+        let ref_y = emit_ref_call(&mut b, owned_ty, borrow_y);
+        let moved = b.emit_move_value(x);
+        b.emit_end_borrow(ref_y);
+        b.emit_end_borrow(borrow_y);
+        b.emit_end_borrow(borrow_x);
+        b.emit_destroy_value(moved);
+        b.emit_destroy_value(y);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.diag.is_none() && e.message.contains("active borrow")),
+            "expected an uncoded consume-during-borrow ICE, got: {errors:?}",
+        );
+        assert!(
+            errors.iter().all(|e| e.diag.is_none()),
+            "no error should be coded here, got: {errors:?}",
         );
     }
 

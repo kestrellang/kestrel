@@ -1321,6 +1321,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let ty_str = kestrel_mir::display::ty_to_string(ty, &self.ctx.module);
         self.ctx.query.accumulate(
             Diagnostic::error()
+                .with_code("E503")
                 .with_message(format!(
                     "cannot move non-copyable value of type `{ty_str}` out of a borrow"
                 ))
