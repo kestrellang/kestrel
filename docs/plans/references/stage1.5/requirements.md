@@ -3,12 +3,15 @@
 Ergonomics follow-ons, scheduled **on demand** after stage 1 ships. Items
 are independently shippable; do not bundle.
 
-1. **Call-as-place**: `arr.at(i) = v` writing through a mut-ref accessor,
-   reconciled with the existing subscript-setter lowering into one path
-   (`references-gaps.md` §10.4). Includes compound assignment through a
-   ref-returning call (`arr.mutableAt(index: i) += v`) — stage 1's
-   syntactic place check rejects call-shaped LHS before types exist, so
-   both need the same typed place carve-out.
+1. **Call-as-place**: ~~assignment through a mut-ref accessor~~ **SHIPPED
+   EARLY (2026-06-10)**: both `arr.mutableAt(index: i) = v` (PtrTo on the
+   @guaranteed ref result + StoreAssign) and
+   `arr.mutableAt(index: i) += v` (desugar admits call-shaped LHS;
+   assignment analyzer validates — E202 for plain-value calls, E207/E208
+   for `&T`) work through any `&mutating T`-returning call or getter.
+   REMAINING here: value-subscript writeback (`arr(0) += 1` — read-modify-
+   write through the getter/setter pair) and its reconciliation with the
+   subscript-setter lowering (`references-gaps.md` §10.4).
 2. **Named ref bindings**: `let r = &expr;` with the visible-`&` cue
    (`references-syntax.md` §2 Option C), block-local.
 3. **Dangle lint**: same-function `Pointer(to: local)` returned as a ref

@@ -36,10 +36,11 @@ what implementation needs; the *why* stays in the research docs.
     direct intrinsic call — the `RetRefPointerDerived` query) stamps its
     call-site result `PointerDerived`; every other ref-returning call roots
     at its borrow source, which is the verified discipline.
-  - Compound assignment through a ref-returning call
-    (`arr.mutableAt(index: i) += v`) is rejected by the pre-ref syntactic
-    place check — same surface as call-as-place, moved to stage 1.5.
-    Stage-1 write-through is mutating methods through the ref.
+  - ~~Compound assignment through a ref-returning call rejected~~ SHIPPED
+    2026-06-10: `arr.mutableAt(index: i) = v` and `+= v` both write through
+    any `&mutating T`-returning call/getter (E202/E207/E208 reject the
+    non-place and shared-ref forms). Value-subscript writeback
+    (`arr(0) += 1`) remains stage 1.5.
   - Dict ref accessors deferred to 1.5+ (maintainer decision; Bucket
     enum-payload layout has no stable-address path).
 
