@@ -26,7 +26,7 @@ pub mod util;
 pub use context::{BodyContext, CompilationContext, DeclContext};
 pub use diagnostic::{AnalyzeDiagnostic, Category, DiagLabel, DiagnosticDescriptor, Severity};
 pub use registry::{AnalyzerRegistry, AnalyzerRegistryRef};
-pub use traits::{BodyCheck, CompilationCheck, DeclCheck, Describe};
+pub use traits::{AnalyzerId, BodyCheck, CompilationCheck, DeclCheck, Describe};
 
 use kestrel_ast_builder::NodeKind;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
@@ -115,7 +115,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 /// analyzer queries.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Analyze {
-    pub analyzer: String,
+    pub analyzer: AnalyzerId,
     pub entity: Entity,
     pub root: Entity,
 }
@@ -129,7 +129,7 @@ impl QueryFn for Analyze {
         };
 
         // Try body check first
-        if let Some(analyzer) = registry.0.find_body_check(&self.analyzer) {
+        if let Some(analyzer) = registry.0.find_body_check(self.analyzer) {
             // Body checks need HIR + typed body
             let Some(hir) = ctx.query(LowerBody {
                 entity: self.entity,
@@ -155,7 +155,7 @@ impl QueryFn for Analyze {
         }
 
         // Try decl check
-        if let Some(analyzer) = registry.0.find_decl_check(&self.analyzer) {
+        if let Some(analyzer) = registry.0.find_decl_check(self.analyzer) {
             let Some(kind) = ctx.get::<NodeKind>(self.entity) else {
                 return vec![];
             };
@@ -172,11 +172,16 @@ impl QueryFn for Analyze {
             return analyzer.check(&cx);
         }
 
-        vec![]
+        // Compilation checks run via `analyze_compilation`, never this query;
+        // anything else here means the registry is missing an analyzer.
+        panic!(
+            "Analyze dispatched with {:?}, which is not a registered body or decl check",
+            self.analyzer
+        );
     }
 
     fn describe(&self) -> String {
-        format!("Analyze({}, {:?})", self.analyzer, self.entity)
+        format!("Analyze({}, {:?})", self.analyzer.as_str(), self.entity)
     }
 }
 
@@ -193,13 +198,13 @@ pub fn analyze_bodies(
         return vec![];
     };
 
-    let body_ids: Vec<&str> = registry.0.body_checks.iter().map(|a| a.id()).collect();
+    let body_ids: Vec<AnalyzerId> = registry.0.body_checks.iter().map(|a| a.id()).collect();
     let mut all_diags = Vec::new();
 
     for &entity in body_entities {
-        for &analyzer_id in &body_ids {
+        for &analyzer in &body_ids {
             let diags = ctx.query(Analyze {
-                analyzer: analyzer_id.to_string(),
+                analyzer,
                 entity,
                 root,
             });
@@ -225,13 +230,13 @@ pub fn analyze_decls(
         return vec![];
     };
 
-    let decl_ids: Vec<&str> = registry.0.decl_checks.iter().map(|a| a.id()).collect();
+    let decl_ids: Vec<AnalyzerId> = registry.0.decl_checks.iter().map(|a| a.id()).collect();
     let mut all_diags = Vec::new();
 
     for &entity in decl_entities {
-        for &analyzer_id in &decl_ids {
+        for &analyzer in &decl_ids {
             let diags = ctx.query(Analyze {
-                analyzer: analyzer_id.to_string(),
+                analyzer,
                 entity,
                 root,
             });

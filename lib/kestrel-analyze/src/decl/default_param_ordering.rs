@@ -14,7 +14,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, DefaultReferencesParam, NodeKind};
 
@@ -36,8 +36,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct DefaultParamOrderingAnalyzer;
 
 impl Describe for DefaultParamOrderingAnalyzer {
-    fn id(&self) -> &'static str {
-        "default_param_ordering"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DefaultParamOrdering
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

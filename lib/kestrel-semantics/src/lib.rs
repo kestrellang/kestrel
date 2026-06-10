@@ -5,7 +5,7 @@
 //! lowering do not each reinterpret raw conformance syntax differently.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
@@ -403,13 +403,24 @@ impl QueryFn for ConditionalCopyableParams {
             entity: self.entity,
             root: self.root,
         });
+        // Memoize per-protocol refinement: both the conformance scan and the
+        // where-clause scan below can probe the same protocol; RefCell keeps
+        // the closure `Fn` so it can be shared by reference between them.
+        let refines_cache: RefCell<HashMap<Entity, bool>> = RefCell::new(HashMap::new());
         let refines_copyable = |proto: Entity| {
-            proto == copyable
-                || ctx.query(ProtocolRefines {
-                    protocol: proto,
-                    base: copyable,
-                    root: self.root,
-                })
+            if proto == copyable {
+                return true;
+            }
+            if let Some(&hit) = refines_cache.borrow().get(&proto) {
+                return hit;
+            }
+            let refines = ctx.query(ProtocolRefines {
+                protocol: proto,
+                base: copyable,
+                root: self.root,
+            });
+            refines_cache.borrow_mut().insert(proto, refines);
+            refines
         };
         let Some(ext) = insts
             .iter()

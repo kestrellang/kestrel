@@ -17,7 +17,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Attributes, Body, Callable, Intrinsic, NodeKind, TypeParams};
 use kestrel_hir::builtin::Builtin;
@@ -61,8 +61,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ExternFfiSafeAnalyzer;
 
 impl Describe for ExternFfiSafeAnalyzer {
-    fn id(&self) -> &'static str {
-        "extern_ffi_safe"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ExternFfiSafe
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

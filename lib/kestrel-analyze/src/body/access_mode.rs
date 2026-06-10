@@ -15,7 +15,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind, ReceiverKind, Settable};
 use kestrel_hir::body::*;
@@ -50,8 +50,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct AccessModeAnalyzer;
 
 impl Describe for AccessModeAnalyzer {
-    fn id(&self) -> &'static str {
-        "access_mode"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::AccessMode
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -284,15 +284,7 @@ fn find_protocol_method(
     protocol: kestrel_hecs::Entity,
     method_name: &str,
 ) -> Option<kestrel_hecs::Entity> {
-    cx.query
-        .children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
-                && cx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == method_name)
-        })
+    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
+        .first()
         .copied()
 }

@@ -56,7 +56,7 @@ use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -83,8 +83,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct MoveTrackingAnalyzer;
 
 impl Describe for MoveTrackingAnalyzer {
-    fn id(&self) -> &'static str {
-        "move_tracking"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::MoveTracking
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -1103,16 +1103,8 @@ fn find_protocol_method(
     protocol: Entity,
     method_name: &str,
 ) -> Option<Entity> {
-    cx.query
-        .children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
-                && cx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == method_name)
-        })
+    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
+        .first()
         .copied()
 }
 

@@ -70,7 +70,7 @@ pub struct <Name>Analyzer;
 
 ```rust
 impl Describe for <Name>Analyzer {
-    fn id(&self) -> &'static str { "<analyzer_id>" }
+    fn id(&self) -> AnalyzerId { AnalyzerId::<Name> }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] { DESCRIPTORS }
 }
 
@@ -87,7 +87,10 @@ Analysis-specific logic (e.g., divergence checking, control flow analysis) lives
 
 ### 6. Registration
 
-Add the analyzer to `default_analyzers()` in `lib.rs`:
+Add a variant to `AnalyzerId` in `traits.rs` (plus its `as_str` arm), then add
+the analyzer to `default_analyzers()` in `lib.rs`. The `Analyze` query panics
+on IDs that aren't registered as body or decl checks, so both steps are
+required:
 ```rust
 pub fn default_analyzers() -> AnalyzerRegistry {
     let mut r = AnalyzerRegistry::new();
@@ -113,6 +116,13 @@ Use these utilities in all analyzers. **Do not create local span extraction or e
 | Function | Input | Returns | Description |
 |----------|-------|---------|-------------|
 | `util::entity_name(ctx, entity)` | `&QueryContext, Entity` | `String` | Name from `Name` component, or `"<anonymous>"` |
+
+### Child Walks
+
+| Function | Input | Returns | Description |
+|----------|-------|---------|-------------|
+| `util::children_of_kind(ctx, parent, kind)` | `&QueryContext, Entity, NodeKind` | `Vec<Entity>` | Direct children with the given `NodeKind`, in declaration order |
+| `util::children_named_of_kind(ctx, parent, name, kind)` | `&QueryContext, Entity, &str, NodeKind` | `Vec<Entity>` | Direct children matching both `NodeKind` and `Name` (multiple for overloads); nameless entities never match — `init`/`subscript` sentinel or `"<anonymous>"` matching needs `children_of_kind` + a custom filter |
 
 ## Diagnostic ID Allocation
 

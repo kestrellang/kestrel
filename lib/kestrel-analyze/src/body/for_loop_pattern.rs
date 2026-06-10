@@ -21,7 +21,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
@@ -36,8 +36,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ForLoopPatternAnalyzer;
 
 impl Describe for ForLoopPatternAnalyzer {
-    fn id(&self) -> &'static str {
-        "for_loop_pattern"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ForLoopPattern
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

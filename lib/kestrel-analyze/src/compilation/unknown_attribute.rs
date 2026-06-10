@@ -21,7 +21,7 @@
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast_builder::Attributes;
 use kestrel_hecs::Entity;
 
@@ -51,8 +51,8 @@ const KNOWN_ATTRIBUTES: &[&str] = &[
 pub struct UnknownAttributeAnalyzer;
 
 impl Describe for UnknownAttributeAnalyzer {
-    fn id(&self) -> &'static str {
-        "unknown_attribute"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::UnknownAttribute
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

@@ -45,7 +45,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{NodeKind, Settable, Static};
 use kestrel_hir::body::*;
@@ -74,8 +74,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct AssignmentAnalyzer;
 
 impl Describe for AssignmentAnalyzer {
-    fn id(&self) -> &'static str {
-        "assignment"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Assignment
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

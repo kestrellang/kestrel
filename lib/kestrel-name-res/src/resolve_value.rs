@@ -9,7 +9,7 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::conformances::ConformingProtocols;
-use crate::extensions::ExtensionsFor;
+use crate::helpers::find_in_extensions;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
 use crate::visibility::VisibleChildrenByName;
@@ -276,40 +276,16 @@ fn walk_path_from(
     for (i, segment) in segments[1..].iter().enumerate() {
         let is_last = i == segments.len() - 2;
 
-        // Check if current is a type alias → resolve through
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
-            && let Some(resolved) = resolve_type_alias_target(ctx, current, context, root)
-        {
-            current = resolved;
-        }
+        // Resolve through type aliases so the lookups below see the target.
+        current = resolve_through_type_alias(ctx, current, context, root);
 
-        // If current is a TypeParameter, look up the segment in its protocol
-        // bounds' associated types. Handles `T.Item`, `T.Next`, etc.
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter)
-            && let Some(found) =
-                crate::resolve_type::resolve_type_param_assoc(ctx, current, segment, context, root)
-        {
+        // Associated types reachable from a type parameter or an abstract
+        // associated type (`T.Item`, `T.Iter.Item`).
+        if let Some(found) = lookup_assoc_type_segment(ctx, current, segment, context, root) {
             if is_last {
                 // Associated type referenced as a value (e.g. `T.Item` as
                 // the receiver of a method call). Handled downstream as a
                 // type reference that dispatches on the associated type.
-                return ValueResolution::AssociatedType {
-                    entity: found,
-                    container: Some(current),
-                };
-            }
-            current = found;
-            continue;
-        }
-
-        // If current is an abstract associated type (TypeAlias inside a
-        // protocol) with its own protocol bounds, walk through to a nested
-        // associated type. Handles `T.Iter.Item`, `T.Next.Next`, etc.
-        if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
-            && let Some(found) =
-                crate::resolve_type::resolve_assoc_type_nested(ctx, current, segment, context, root)
-        {
-            if is_last {
                 return ValueResolution::AssociatedType {
                     entity: found,
                     container: Some(current),
@@ -340,65 +316,12 @@ fn walk_path_from(
         }
 
         // No direct children — try extension static methods (only for last segment)
-        if is_last && ctx.has::<Typed>(current) {
-            let extensions = ctx.query(ExtensionsFor {
-                target: current,
-                root,
-            });
-            for &ext in &extensions {
-                let ext_children = ctx.query(VisibleChildrenByName {
-                    parent: ext,
-                    name: segment.clone(),
-                    context,
-                });
-                // Filter to static methods only
-                let static_methods: Vec<Entity> = ext_children
-                    .into_iter()
-                    .filter(|&e| {
-                        ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
-                            && (ctx.has::<Static>(e)
-                                || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
-                    })
-                    .collect();
-                if !static_methods.is_empty() {
-                    return classify_value_results(ctx, static_methods);
-                }
-            }
-
-            // Static methods declared on extensions of protocols `current`
-            // conforms to. Mirrors how instance-method dispatch already walks
-            // conforming protocols (see `try_resolve_through_protocol` in
-            // kestrel-type-infer). Without this, `A.staticMethod()` fails
-            // when `staticMethod` lives in `extend SomeProtocol { ... }` and
-            // `A: SomeProtocol`.
-            let protocols = ctx.query(ConformingProtocols {
-                entity: current,
-                root,
-            });
-            for &proto in &protocols {
-                let proto_extensions = ctx.query(ExtensionsFor {
-                    target: proto,
-                    root,
-                });
-                for &ext in &proto_extensions {
-                    let ext_children = ctx.query(VisibleChildrenByName {
-                        parent: ext,
-                        name: segment.clone(),
-                        context,
-                    });
-                    let static_methods: Vec<Entity> = ext_children
-                        .into_iter()
-                        .filter(|&e| {
-                            ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
-                                && (ctx.has::<Static>(e)
-                                    || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
-                        })
-                        .collect();
-                    if !static_methods.is_empty() {
-                        return classify_value_results(ctx, static_methods);
-                    }
-                }
-            }
+        if is_last
+            && ctx.has::<Typed>(current)
+            && let Some(result) =
+                resolve_extension_static_method(ctx, current, segment, context, root)
+        {
+            return result;
         }
 
         // For associated types (abstract TypeAlias), search protocol bounds
@@ -419,23 +342,10 @@ fn walk_path_from(
             continue;
         }
 
-        // Check for enum case or field/getter used as intermediate value
-        // (e.g. MyEnum.caseA where caseA has no children to walk into)
-        let segment_index = i + 1; // index in original segments
-        match ctx.get::<NodeKind>(current) {
-            Some(&NodeKind::EnumCase) => {
-                return ValueResolution::EnumCaseValue {
-                    entity: current,
-                    resolved_index: segment_index - 1,
-                };
-            },
-            Some(&NodeKind::Field) if ctx.has::<Gettable>(current) => {
-                return ValueResolution::FieldValue {
-                    entity: current,
-                    resolved_index: segment_index - 1,
-                };
-            },
-            _ => {},
+        // Check for enum case or field/getter used as intermediate value;
+        // `i` is the index of the last successfully resolved segment.
+        if let Some(result) = resolve_intermediate_value(ctx, current, i) {
+            return result;
         }
 
         return ValueResolution::NotFound(segment.clone());
@@ -443,6 +353,106 @@ fn walk_path_from(
 
     // Reached the end with a non-terminal entity
     ValueResolution::Def(current)
+}
+
+/// Resolve through a type alias so member lookups see the aliased type.
+/// Non-aliases (and aliases whose target can't be resolved, e.g. abstract
+/// associated types) pass through unchanged.
+fn resolve_through_type_alias(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    context: Entity,
+    root: Entity,
+) -> Entity {
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::TypeAlias)
+        && let Some(resolved) = resolve_type_alias_target(ctx, entity, context, root)
+    {
+        return resolved;
+    }
+    entity
+}
+
+/// Look up `segment` as an associated type reachable from `current`: through
+/// a type parameter's protocol bounds (`T.Item`, `T.Next`) or nested through
+/// an abstract associated type — a TypeAlias inside a protocol with its own
+/// bounds (`T.Iter.Item`, `T.Next.Next`). The cases are disjoint on NodeKind.
+fn lookup_assoc_type_segment(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    segment: &str,
+    context: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    match ctx.get::<NodeKind>(current) {
+        Some(&NodeKind::TypeParameter) => {
+            crate::resolve_type::resolve_type_param_assoc(ctx, current, segment, context, root)
+        },
+        Some(&NodeKind::TypeAlias) => {
+            crate::resolve_type::resolve_assoc_type_nested(ctx, current, segment, context, root)
+        },
+        _ => None,
+    }
+}
+
+/// Is `e` a static callable — explicitly `static`, or a receiver-less function?
+fn is_static_method(ctx: &QueryContext<'_>, e: Entity) -> bool {
+    ctx.get::<NodeKind>(e) == Some(&NodeKind::Function)
+        && (ctx.has::<Static>(e) || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
+}
+
+/// Static methods from extensions of `current`, then from extensions of
+/// protocols it conforms to. The protocol walk mirrors how instance-method
+/// dispatch already walks conforming protocols (see
+/// `try_resolve_through_protocol` in kestrel-type-infer); without it,
+/// `A.staticMethod()` fails when `staticMethod` lives in
+/// `extend SomeProtocol { ... }` and `A: SomeProtocol`.
+fn resolve_extension_static_method(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    segment: &str,
+    context: Entity,
+    root: Entity,
+) -> Option<ValueResolution> {
+    let methods = find_in_extensions(ctx, current, segment, context, root, is_static_method);
+    if !methods.is_empty() {
+        return Some(classify_value_results(ctx, methods));
+    }
+
+    let protocols = ctx.query(ConformingProtocols {
+        entity: current,
+        root,
+    });
+    for &proto in &protocols {
+        let methods = find_in_extensions(ctx, proto, segment, context, root, is_static_method);
+        if !methods.is_empty() {
+            return Some(classify_value_results(ctx, methods));
+        }
+    }
+    None
+}
+
+/// Enum case or gettable field used as an intermediate value (e.g.
+/// `MyEnum.caseA.method()` where `caseA` has no children to walk into):
+/// stop the walk and report how far we got; the remaining segments are
+/// resolved against the value's type downstream.
+fn resolve_intermediate_value(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    resolved_index: usize,
+) -> Option<ValueResolution> {
+    match ctx.get::<NodeKind>(current) {
+        Some(&NodeKind::EnumCase) => Some(ValueResolution::EnumCaseValue {
+            entity: current,
+            resolved_index,
+        }),
+        Some(&NodeKind::Field) if ctx.has::<Gettable>(current) => {
+            Some(ValueResolution::FieldValue {
+                entity: current,
+                resolved_index,
+            })
+        },
+        _ => None,
+    }
 }
 
 /// Classify resolved entities as Def or Overloaded.
@@ -561,20 +571,10 @@ fn resolve_assoc_type_static_member(
             return Some(children[0]);
         }
 
-        // Also check extensions of the protocol
-        let extensions = ctx.query(ExtensionsFor {
-            target: *proto,
-            root,
-        });
-        for &ext in &extensions {
-            let ext_children = ctx.query(VisibleChildrenByName {
-                parent: ext,
-                name: member_name.to_string(),
-                context,
-            });
-            if !ext_children.is_empty() {
-                return Some(ext_children[0]);
-            }
+        // Also check extensions of the protocol (any member kind)
+        let ext_members = find_in_extensions(ctx, *proto, member_name, context, root, |_, _| true);
+        if !ext_members.is_empty() {
+            return Some(ext_members[0]);
         }
     }
 

@@ -40,7 +40,7 @@
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Attributes, DeclSpan, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
@@ -80,8 +80,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct EntryPointAnalyzer;
 
 impl Describe for EntryPointAnalyzer {
-    fn id(&self) -> &'static str {
-        "entry_point"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::EntryPoint
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

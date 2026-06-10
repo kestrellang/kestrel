@@ -61,7 +61,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{Callable, NodeKind, TypeAnnotation, Vis};
@@ -97,8 +97,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct VisibilityAnalyzer;
 
 impl Describe for VisibilityAnalyzer {
-    fn id(&self) -> &'static str {
-        "visibility"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Visibility
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

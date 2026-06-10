@@ -16,7 +16,7 @@
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
@@ -32,8 +32,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct TypeAnnotationResolutionAnalyzer;
 
 impl Describe for TypeAnnotationResolutionAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_annotation_resolution"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeAnnotationResolution
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

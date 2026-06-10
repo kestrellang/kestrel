@@ -48,7 +48,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Computed, FieldMutability, NodeKind, Static, TypeParams};
 
@@ -82,8 +82,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct FieldAnalyzer;
 
 impl Describe for FieldAnalyzer {
-    fn id(&self) -> &'static str {
-        "field"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Field
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

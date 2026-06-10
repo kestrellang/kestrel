@@ -49,7 +49,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::NodeKind;
 use kestrel_hir::Builtin;
@@ -90,8 +90,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ConformanceRulesAnalyzer;
 
 impl Describe for ConformanceRulesAnalyzer {
-    fn id(&self) -> &'static str {
-        "conformance_rules"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ConformanceRules
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

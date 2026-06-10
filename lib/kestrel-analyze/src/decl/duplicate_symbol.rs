@@ -41,7 +41,7 @@ use std::collections::HashMap;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{CstNode, Name, NodeKind};
 use kestrel_span::Span;
@@ -64,8 +64,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct DuplicateSymbolAnalyzer;
 
 impl Describe for DuplicateSymbolAnalyzer {
-    fn id(&self) -> &'static str {
-        "duplicate_symbol"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DuplicateSymbol
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

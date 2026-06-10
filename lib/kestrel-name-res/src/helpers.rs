@@ -6,7 +6,8 @@
 use kestrel_ast_builder::{Name, NodeKind, Subscript as SubscriptMarker};
 use kestrel_hecs::{Entity, QueryContext};
 
-use crate::visibility::IsVisibleFrom;
+use crate::extensions::ExtensionsFor;
+use crate::visibility::{IsVisibleFrom, VisibleChildrenByName};
 
 /// Walk parent_of chain to find the nearest ancestor with NodeKind::Module.
 /// Returns None if no module ancestor exists (e.g. entity is the root).
@@ -78,6 +79,37 @@ pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query:
         "subscript" => ctx.get::<SubscriptMarker>(entity).is_some(),
         _ => false,
     }
+}
+
+/// Search extensions of `target` for visible members named `member_name`,
+/// keeping only those that pass `filter`. Returns the matches from the
+/// first extension that has any (extensions are not merged across), or
+/// empty if none do. Shared by value-path resolution for extension static
+/// methods and associated-type static members.
+pub(crate) fn find_in_extensions(
+    ctx: &QueryContext<'_>,
+    target: Entity,
+    member_name: &str,
+    context: Entity,
+    root: Entity,
+    filter: impl Fn(&QueryContext<'_>, Entity) -> bool,
+) -> Vec<Entity> {
+    let extensions = ctx.query(ExtensionsFor { target, root });
+    for &ext in &extensions {
+        let matches: Vec<Entity> = ctx
+            .query(VisibleChildrenByName {
+                parent: ext,
+                name: member_name.to_string(),
+                context,
+            })
+            .into_iter()
+            .filter(|&e| filter(ctx, e))
+            .collect();
+        if !matches.is_empty() {
+            return matches;
+        }
+    }
+    Vec::new()
 }
 
 /// Filter discovered members down to those answering to `name` (including

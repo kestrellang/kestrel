@@ -26,7 +26,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::ast_type::AstType;
 use kestrel_ast_builder::{
@@ -46,8 +46,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ParentProtocolConformanceAnalyzer;
 
 impl Describe for ParentProtocolConformanceAnalyzer {
-    fn id(&self) -> &'static str {
-        "parent_protocol_conformance"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ParentProtocolConformance
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
