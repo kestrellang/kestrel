@@ -43,6 +43,12 @@ what implementation needs; the *why* stays in the research docs.
     (`arr(0) += 1`) remains stage 1.5.
   - Dict ref accessors deferred to 1.5+ (maintainer decision; Bucket
     enum-payload layout has no stable-address path).
+  - The two formerly-uncoded guards are now coded diagnostics (2026-06-10),
+    and the references suite has zero skips: copy-out of a NotCopyable
+    pointee = **E503** (the MIR-lowering backstop of the front-end move
+    checker's code), consume-while-borrowed = **E498** (verify `try_consume`,
+    coded only when a live ref chains to the consumed value — an
+    unattributable conflict stays an ICE).
 
 ## What blocks the blanks
 

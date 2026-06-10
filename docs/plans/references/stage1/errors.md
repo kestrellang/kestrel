@@ -14,6 +14,7 @@ registry in `lib/kestrel-analyze/AGENTS.md`):
 | E-REF-17 effect sugar | **E490** | hir-lower |
 | E-REF-19 generic-arg leak | **E492** | type-infer |
 | E-REF-20 mutating through `&` | **E207** | analyze `access_mode.rs` (E203–E206 family; `util::ref_place` is the single classifier, consulted FIRST — the receiver check accepts temporaries, so a shared-ref receiver would otherwise silently pass) |
+| consume-while-borrowed (tests.md `intra_block_consume_while_borrowed`) | **E498** | MIR `verify::try_consume` — coded ONLY when a live ref (@guaranteed call result) chains to the consumed value (the ref kept the blocking borrow alive); an unattributable conflict stays an uncoded ICE, i.e. a lowering bug |
 
 The first four are the safety core.
 
@@ -36,7 +37,9 @@ Two Q8(a) wording extensions that are **not** new codes:
 - The existing copy-guard / NotCopyable diagnostics fire on copy-out of a
   ref with a non-copyable, non-cloneable pointee (`let x = r;`,
   `consume(r)`, `match r`); their wording should name the reference, not
-  just the type.
+  just the type. The MIR-lowering backstop (`emit_move_out_of_borrow_backstop`)
+  carries **E503** — the front-end move checker's move-out-of-borrow code —
+  so the user sees one code for the concept regardless of which layer fires.
 - E205 ("temporary passed to mutating parameter") must *not* fire for a
   `&mutating T`-typed call result — that is precisely the case E-REF-20's
   classifier arm makes Mutable.
