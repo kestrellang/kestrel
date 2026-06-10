@@ -24,12 +24,14 @@ are independently shippable; do not bundle.
    `syntax.md`) and with them in-place enum-payload access.
 3. **Dangle lint**: same-function `Pointer(to: local)` returned as a ref
    (`references-gaps.md` §10.3).
-4. **Shared-read projection sugar** over `Pointer.with` / Design-B
-   closures — covers the `Optional[&T]`-shaped lookup APIs stage 1
-   cannot express (`references-gaps.md` §5.3). Leaning (not ratified):
-   dissolve into "ship `dict.modify(key:)` closure interim now, revisit
-   as a conditional ref binding (`if let r = &dict.find(key)`) once
-   item 2 + `Optional[&T]` exist" — items 2 and 4 converge there.
+4. **Shared-read projection sugar — DISSOLVED (ratified 2026-06-10),
+   interim SHIPPED**: no new projection construct. The interim
+   `Dictionary.modify(key) { (mutating v) in … } -> R?` landed
+   (bucket read → mutate → write-back under the hood; one probe, COW
+   only on hit; upgrades silently to in-place access later — no API
+   change). The conditional-lookup shape revisits as
+   `if let r = &dict.find(key)` once item 2's bindings meet
+   `Optional[&T]` — items 2 and 4 converge there.
 5. **Arm-value decay — IMPLEMENTED 2026-06-10** (arms; literal elements
    remain the follow-up): `match c { 1 => b.peek(), _ => 0 }` decays to
    owned. Mechanism CORRECTION: stage 1 never shipped a
