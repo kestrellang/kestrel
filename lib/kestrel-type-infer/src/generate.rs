@@ -890,9 +890,20 @@ fn gen_pat(
             // No constraint — matches anything
         },
 
-        HirPat::Binding { local, .. } => {
-            // Bind local to the scrutinee type
-            ctx.local_types.insert(*local, scrutinee_tv);
+        HirPat::Binding { local, by_ref, .. } => {
+            match by_ref {
+                // `&v` / `&mutating v`: the binding is a named ref to the
+                // matched place — same downstream behavior as a `let r = &…`
+                // binding (resolved-Ref local type, value reads decay).
+                Some(mutating) => {
+                    let ref_tv = ctx.ref_ty(scrutinee_tv, *mutating);
+                    ctx.local_types.insert(*local, ref_tv);
+                },
+                // Bind local to the scrutinee type
+                None => {
+                    ctx.local_types.insert(*local, scrutinee_tv);
+                },
+            }
         },
 
         HirPat::Literal { value, span, .. } => {

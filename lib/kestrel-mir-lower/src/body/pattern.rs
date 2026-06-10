@@ -13,7 +13,7 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
 use kestrel_mir::{
-    FieldIdx, Immediate, MirTy, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
+    FieldIdx, Immediate, MirTy, Op, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
 };
 use kestrel_pattern_matching::constructor::Constructor;
 use kestrel_pattern_matching::decision_tree::{Binding, DecisionTree, PathElement};
@@ -90,6 +90,81 @@ impl OssaBodyCtx<'_, '_> {
         val
     }
 
+    /// Does any arm pattern contain a `&`/`&mutating` binder? Returns the
+    /// place-mode request: `None` = value mode (today's lowering, byte
+    /// identical), `Some(mutating)` = place mode, mutable place iff any
+    /// binder is `&mutating`.
+    fn arms_ref_binding_mode(&self, arms: &[HirMatchArm]) -> Option<bool> {
+        fn walk(hir: &kestrel_hir::body::HirBody, id: kestrel_hir::body::HirPatId) -> Option<bool> {
+            use kestrel_hir::body::HirPat;
+            match &hir.pats[id] {
+                HirPat::Binding { by_ref, .. } => *by_ref,
+                HirPat::At { subpattern, .. } => walk(hir, *subpattern),
+                HirPat::Tuple { prefix, suffix, .. } => prefix
+                    .iter()
+                    .chain(suffix)
+                    .filter_map(|&p| walk(hir, p))
+                    .max(),
+                HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => {
+                    args.iter().filter_map(|a| walk(hir, a.pattern)).max()
+                },
+                HirPat::Struct { fields, .. } => fields
+                    .iter()
+                    .filter_map(|f| f.pattern.and_then(|p| walk(hir, p)))
+                    .max(),
+                HirPat::Array { prefix, suffix, .. } => prefix
+                    .iter()
+                    .chain(suffix)
+                    .filter_map(|&p| walk(hir, p))
+                    .max(),
+                HirPat::Or { alternatives, .. } => {
+                    alternatives.iter().filter_map(|&p| walk(hir, p)).max()
+                },
+                _ => None,
+            }
+        }
+        arms.iter().filter_map(|a| walk(&self.hir, a.pattern)).max()
+    }
+
+    /// Place-mode scrutinee: evaluate the scrutinee as a PLACE and pin its
+    /// raw address. The address is an OWNED pointer scalar, so it threads
+    /// through the decision tree's block params with the existing machinery
+    /// (no @guaranteed block args needed); each test/leaf materializes an
+    /// intra-block view via `BeginBorrowAddr`. An rvalue scrutinee's owned
+    /// temp stays scope-tracked — it IS the match-scoped pin, destroyed at
+    /// the merge.
+    fn lower_match_scrutinee_place(
+        &mut self,
+        scrutinee_expr: HirExprId,
+        mutating: bool,
+    ) -> ValueId {
+        // A binding scrutinee read bypasses the Local arm's counter.
+        if let HirExpr::Local(l, _) = &self.hir.exprs[scrutinee_expr]
+            && !self.is_var_local(l)
+        {
+            let l = *l;
+            self.note_binding_read(l, scrutinee_expr);
+        }
+        let convention = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
+        let view = self
+            .prepare_call_arg_for_expr(scrutinee_expr, convention)
+            .value;
+        let pointee = self.body.value(view).ty;
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
+        let addr = self.emit_op1(Op::PtrTo(pointee), view, ptr_ty);
+        // The view's job is done — the address stays valid while the
+        // underlying storage lives (var slot / pinned temp / borrowed
+        // receiver). Named bindings keep their own lifecycle.
+        if !self.ref_binding_vals.contains_key(&view) {
+            self.emit_end_borrow(view);
+        }
+        addr
+    }
+
     pub fn lower_match(
         &mut self,
         expr_id: HirExprId,
@@ -108,9 +183,20 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         let result_ty = self.resolve_expr_type(expr_id);
-        let scrutinee_resolved_ty = self.resolve_expr_resolved_ty(scrutinee_expr);
+        // A ref-binding scrutinee (`match r`) matches its POINTEE — the
+        // decision tree's constructors come from the pointee type.
+        let scrutinee_resolved_ty = match self.resolve_expr_resolved_ty(scrutinee_expr) {
+            ResolvedTy::Ref { pointee, .. } => *pointee,
+            other => other,
+        };
 
-        let scrutinee_val = self.lower_match_scrutinee(scrutinee_expr);
+        // Place mode (any `&` binder in the arms): the scrutinee is pinned
+        // as an address; value mode keeps today's lowering byte-identical.
+        let place_mode = self.arms_ref_binding_mode(arms);
+        let scrutinee_val = match place_mode {
+            Some(mutating) => self.lower_match_scrutinee_place(scrutinee_expr, mutating),
+            None => self.lower_match_scrutinee(scrutinee_expr),
+        };
         let scrutinee_ty = self.resolve_expr_type(scrutinee_expr);
 
         let saved_tracker = self.tracker.clone();
@@ -133,7 +219,14 @@ impl OssaBodyCtx<'_, '_> {
         // Walk the tree, collecting each reaching arm's exit (block, result,
         // per-slot liveness) instead of jumping to a pre-built merge block.
         let mut exits: Vec<super::ArmExit> = Vec::new();
-        self.emit_decision_tree_threaded(&tree, scrutinee_val, scrutinee_ty, arms, &mut exits);
+        self.emit_decision_tree_threaded(
+            &tree,
+            scrutinee_val,
+            scrutinee_ty,
+            place_mode.is_some(),
+            arms,
+            &mut exits,
+        );
 
         // A slot is live at the merge only if it survived on every reaching edge.
         let mut merge_mask = vec![true; n];
@@ -250,11 +343,17 @@ impl OssaBodyCtx<'_, '_> {
     /// through every branch/switch as block parameters. Each reaching arm's
     /// exit (block, result, per-slot liveness) is pushed to `exits` rather than
     /// jumped to a merge block — `lower_match` builds the merge afterward.
+    /// `place` = place mode: `scrutinee` is the pinned ADDRESS of the
+    /// scrutinee place (an owned pointer scalar that threads through block
+    /// params); every read materializes an intra-block view via
+    /// `BeginBorrowAddr`. Value mode (`false`) is byte-identical to the
+    /// pre-place lowering.
     fn emit_decision_tree_threaded(
         &mut self,
         tree: &DecisionTree,
         scrutinee: ValueId,
         scrutinee_ty: TyId,
+        place: bool,
         arms: &[HirMatchArm],
         exits: &mut Vec<super::ArmExit>,
     ) {
@@ -275,6 +374,7 @@ impl OssaBodyCtx<'_, '_> {
                             def_tree,
                             scrutinee,
                             scrutinee_ty,
+                            place,
                             arms,
                             exits,
                         );
@@ -289,6 +389,7 @@ impl OssaBodyCtx<'_, '_> {
                         &cases[0].1,
                         scrutinee,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -300,8 +401,19 @@ impl OssaBodyCtx<'_, '_> {
                     && matches!(&cases[0].0, Constructor::True)
                     && matches!(&cases[1].0, Constructor::False)
                 {
-                    // Bool is Copyable — extract-copy is fine here.
-                    let (test_val, _) = self.apply_access_path(scrutinee, scrutinee_ty, path);
+                    // Bool is Copyable — extract-copy is fine here. Place
+                    // mode reads through an intra-block view of the pinned
+                    // address; the owned copy joins the extra test values
+                    // destroyed per successor.
+                    let test_val = if place {
+                        let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
+                        let owned = self.emit_copy_value(proj);
+                        self.emit_end_borrow(view);
+                        owned
+                    } else {
+                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
+                    };
                     let branch_snapshot = self.snapshot_scope();
                     let current_live: Vec<ValueId> =
                         self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
@@ -345,6 +457,7 @@ impl OssaBodyCtx<'_, '_> {
                         &cases[0].1,
                         rebound,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -358,6 +471,7 @@ impl OssaBodyCtx<'_, '_> {
                         &cases[1].1,
                         rebound,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -369,8 +483,17 @@ impl OssaBodyCtx<'_, '_> {
                     .iter()
                     .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
                 {
-                    // String is Copyable — extract-copy is fine here.
-                    let (test_val, _) = self.apply_access_path(scrutinee, scrutinee_ty, path);
+                    // String is Copyable — extract-copy is fine here (place
+                    // mode: through an intra-block view, see the bool path).
+                    let test_val = if place {
+                        let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, path);
+                        let owned = self.emit_copy_value(proj);
+                        self.emit_end_borrow(view);
+                        owned
+                    } else {
+                        self.apply_access_path(scrutinee, scrutinee_ty, path).0
+                    };
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
                     let mut current_scrutinee = scrutinee;
                     // Snapshot before the chain so each iteration starts clean.
@@ -421,6 +544,7 @@ impl OssaBodyCtx<'_, '_> {
                             subtree,
                             rebound,
                             scrutinee_ty,
+                            place,
                             arms,
                             exits,
                         );
@@ -436,6 +560,7 @@ impl OssaBodyCtx<'_, '_> {
                             def_tree,
                             current_scrutinee,
                             scrutinee_ty,
+                            place,
                             arms,
                             exits,
                         );
@@ -448,7 +573,17 @@ impl OssaBodyCtx<'_, '_> {
                 // General switch — read the discriminant via a borrow so a
                 // non-Copyable scrutinee/payload is never illegally copied just
                 // to be inspected. The borrow is closed right after the read.
-                let (disc_operand, borrow_to_end) = if path.is_empty() {
+                // Place mode: the read goes through an intra-block view of
+                // the pinned address.
+                let (disc_operand, borrow_to_end) = if place {
+                    let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                    let operand = if path.is_empty() {
+                        view
+                    } else {
+                        self.apply_access_path(view, scrutinee_ty, path).0
+                    };
+                    (operand, Some(view))
+                } else if path.is_empty() {
                     (scrutinee, None)
                 } else if self.body.value(scrutinee).ownership == Ownership::Guaranteed {
                     (
@@ -522,7 +657,7 @@ impl OssaBodyCtx<'_, '_> {
                     // Destroy values that aren't in the tracker (e.g., discriminant)
                     self.destroy_extra_test_values(&extra_vals, &switch_live, params);
                     let rebound = rebound_value(scrutinee, &switch_live, params);
-                    self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, arms, exits);
+                    self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, place, arms, exits);
                 }
 
                 if let (Some(def_tree), Some((def_block, def_params))) = (default, default_block) {
@@ -531,7 +666,7 @@ impl OssaBodyCtx<'_, '_> {
                     self.rebind_scope_values(&switch_live, &def_params);
                     self.destroy_extra_test_values(&extra_vals, &switch_live, &def_params);
                     let rebound = rebound_value(scrutinee, &switch_live, &def_params);
-                    self.emit_decision_tree_threaded(def_tree, rebound, scrutinee_ty, arms, exits);
+                    self.emit_decision_tree_threaded(def_tree, rebound, scrutinee_ty, place, arms, exits);
                 }
             },
 
@@ -539,7 +674,15 @@ impl OssaBodyCtx<'_, '_> {
                 arm_index,
                 bindings,
             } => {
-                self.emit_success_leaf(*arm_index, bindings, scrutinee, scrutinee_ty, arms, exits);
+                self.emit_success_leaf(
+                    *arm_index,
+                    bindings,
+                    scrutinee,
+                    scrutinee_ty,
+                    place,
+                    arms,
+                    exits,
+                );
             },
 
             DecisionTree::Guard {
@@ -559,6 +702,7 @@ impl OssaBodyCtx<'_, '_> {
                         bindings,
                         scrutinee,
                         scrutinee_ty,
+                        place,
                         arms,
                         exits,
                     );
@@ -576,7 +720,19 @@ impl OssaBodyCtx<'_, '_> {
                 // leaks the match's threaded slots at the merge (issue #121).
                 let entry_snapshot = self.snapshot_scope();
                 self.push_scope();
-                self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
+                if place {
+                    // Place mode: guard reads go through a scope-tracked view
+                    // of the pinned address; `set_terminator` ends it before
+                    // the branch (same contract as the owned-borrow path).
+                    let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+                    for binding in bindings {
+                        let (proj, _) = self.apply_access_path(view, scrutinee_ty, &binding.path);
+                        self.local_map
+                            .insert(binding.local_id, super::LocalBinding::Ssa(proj));
+                    }
+                } else {
+                    self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
+                }
                 let guard_val = self.lower_expr(guard_expr);
                 let guard_live: Vec<ValueId> =
                     self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
@@ -618,7 +774,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.destroy_extra_test_values(&extra_vals, &guard_live, &success_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                 self.pop_scope();
-                self.emit_success_leaf(*arm_index, bindings, rebound, scrutinee_ty, arms, exits);
+                self.emit_success_leaf(*arm_index, bindings, rebound, scrutinee_ty, place, arms, exits);
 
                 // Failure: scrutinee untouched — continue matching other patterns.
                 // `restore_scope` to the entry snapshot pops the guard frame and
@@ -629,7 +785,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.rebind_scope_values(&guard_live, &failure_params);
                 self.destroy_extra_test_values(&extra_vals, &guard_live, &failure_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
-                self.emit_decision_tree_threaded(failure, rebound, scrutinee_ty, arms, exits);
+                self.emit_decision_tree_threaded(failure, rebound, scrutinee_ty, place, arms, exits);
             },
 
             DecisionTree::Failure => {
@@ -647,11 +803,16 @@ impl OssaBodyCtx<'_, '_> {
         bindings: &[Binding],
         scrutinee: ValueId,
         scrutinee_ty: TyId,
+        place: bool,
         arms: &[HirMatchArm],
         exits: &mut Vec<super::ArmExit>,
     ) {
         self.push_scope();
-        self.emit_bindings(bindings, scrutinee, scrutinee_ty);
+        if place {
+            self.emit_bindings_place(bindings, scrutinee, scrutinee_ty);
+        } else {
+            self.emit_bindings(bindings, scrutinee, scrutinee_ty);
+        }
         if let Some(arm) = arms.get(arm_index) {
             let body_val = self.lower_expr(arm.body);
             // Arm-value decay copies in `capture_arm_exit` diagnose at the
@@ -725,6 +886,50 @@ impl OssaBodyCtx<'_, '_> {
         } else {
             for binding in bindings {
                 self.bind_path_copy(scrutinee, scrutinee_ty, &binding.path, binding.local_id);
+            }
+        }
+    }
+
+    /// Place-mode arm bindings: materialize a view of the pinned scrutinee
+    /// address, then per binding either take the projection IN PLACE (`&v` —
+    /// a real nested borrow, so it is scope-tracked: arm-internal control
+    /// flow hits the binding E497 policy, and the borrow ends at arm scope
+    /// exit) or force an owned copy (plain bindings own their value; a
+    /// NotCopyable copy is the E503 backstop — use `&` for those). The view
+    /// ends with the arm's scope.
+    fn emit_bindings_place(
+        &mut self,
+        bindings: &[Binding],
+        scrutinee_addr: ValueId,
+        scrutinee_ty: TyId,
+    ) {
+        let needs_mut = bindings.iter().any(|b| b.by_ref == Some(true));
+        let view = if needs_mut {
+            self.emit_begin_mut_borrow_addr(scrutinee_addr, scrutinee_ty)
+        } else {
+            self.emit_begin_borrow_addr(scrutinee_addr, scrutinee_ty)
+        };
+        for binding in bindings {
+            let (proj, _) = self.apply_access_path(view, scrutinee_ty, &binding.path);
+            match binding.by_ref {
+                Some(_) => {
+                    let bound = self.emit_begin_borrow(proj);
+                    self.ref_results.insert(bound);
+                    self.ref_binding_vals.insert(bound, binding.local_id);
+                    let uses = self.local_use_count(binding.local_id);
+                    self.ref_binding_remaining.insert(binding.local_id, uses);
+                    self.body.value_names.insert(bound, binding.name.clone());
+                    self.local_map
+                        .insert(binding.local_id, super::LocalBinding::Ssa(bound));
+                },
+                None => {
+                    // Force the copy: place-mode plain bindings OWN their
+                    // value (the direct-view binding is the legacy
+                    // borrowed-scrutinee behavior).
+                    let owned = self.emit_copy_value(proj);
+                    self.local_map
+                        .insert(binding.local_id, super::LocalBinding::Ssa(owned));
+                },
             }
         }
     }

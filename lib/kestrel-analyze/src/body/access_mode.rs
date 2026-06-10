@@ -136,6 +136,37 @@ impl BodyCheck for AccessModeAnalyzer {
                 } => {
                     check_borrow_init(cx, *inner, *mutating, span, &mut diags);
                 },
+                HirExpr::Match {
+                    scrutinee,
+                    arms,
+                    span,
+                    ..
+                } => {
+                    // `&mutating v` patterns need a MUTABLE scrutinee place
+                    // (E495's predicate family) — writes through the binding
+                    // must land in real storage, not a match-scoped temp.
+                    if arms
+                        .iter()
+                        .any(|arm| pat_has_mutating_ref_binder(cx, arm.pattern))
+                        && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
+                    {
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[5].id,
+                            severity: DESCRIPTORS[5].default_severity,
+                            message: "`&mutating` pattern bindings need a mutable scrutinee place"
+                                .to_string(),
+                            labels: vec![DiagLabel {
+                                span: span.clone(),
+                                message: "scrutinee is not a mutable place".into(),
+                                is_primary: true,
+                            }],
+                            notes: vec![
+                                "match on a `var`, a `&mutating` reach, or a mutable element place"
+                                    .to_string(),
+                            ],
+                        });
+                    }
+                },
                 _ => {},
             }
         }
@@ -442,6 +473,29 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         HirExpr::TupleIndex { base, .. } => classify_mutability(cx, *base),
         // Everything else is a temporary (call results, literals, if-exprs, etc.)
         _ => MutClass::Temporary,
+    }
+}
+
+/// Does this pattern (recursively) contain a `&mutating name` binder?
+fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::HirPatId) -> bool {
+    use kestrel_hir::body::HirPat;
+    match &cx.hir.pats[pat] {
+        HirPat::Binding { by_ref, .. } => *by_ref == Some(true),
+        HirPat::At { subpattern, .. } => pat_has_mutating_ref_binder(cx, *subpattern),
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => prefix
+            .iter()
+            .chain(suffix)
+            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
+            .iter()
+            .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
+        HirPat::Struct { fields, .. } => fields
+            .iter()
+            .any(|f| f.pattern.is_some_and(|p| pat_has_mutating_ref_binder(cx, p))),
+        HirPat::Or { alternatives, .. } => alternatives
+            .iter()
+            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
+        _ => false,
     }
 }
 

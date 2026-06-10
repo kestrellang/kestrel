@@ -773,6 +773,7 @@ impl LowerCtx<'_> {
         let value_local = self.define_local("$try_value", false, span.clone());
         let value_binding = self.alloc_pat(HirPat::Binding {
             local: value_local,
+            by_ref: None,
             span: span.clone(),
         });
         let continue_pat = self.alloc_pat(HirPat::ImplicitVariant {
@@ -790,6 +791,7 @@ impl LowerCtx<'_> {
         let early_local = self.define_local("$try_early", false, span.clone());
         let early_binding = self.alloc_pat(HirPat::Binding {
             local: early_local,
+            by_ref: None,
             span: span.clone(),
         });
         let break_pat = self.alloc_pat(HirPat::ImplicitVariant {

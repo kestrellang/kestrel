@@ -363,6 +363,10 @@ pub enum HirPat {
     /// Binding resolved to a local slot
     Binding {
         local: LocalId,
+        /// `&`/`&mutating` binder (stage 1.5 `&` patterns): `None` = plain
+        /// owned binding, `Some(false)` = `&name` (borrows the payload in
+        /// place), `Some(true)` = `&mutating name`.
+        by_ref: Option<bool>,
         span: Span,
     },
     Tuple {
