@@ -22,6 +22,7 @@ pub mod indirect_enum;
 pub mod parent_protocol_conformance;
 pub mod protocol_field_conformance;
 pub mod protocol_method;
+pub mod ref_return;
 pub mod recursive_enum;
 pub mod static_context;
 pub mod subscript;

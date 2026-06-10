@@ -80,7 +80,7 @@ fn walk_entity(
         // struct no body touches). Force the (memoized) lowering query —
         // only when a ref is actually present, so no other annotation
         // gains a new lowering trigger.
-        if contains_ref(&ann.0) {
+        if crate::util::ast_contains_ref(&ann.0) {
             let _ = cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
                 entity,
                 root: cx.root,
@@ -175,27 +175,5 @@ fn check_ast_type(
         },
         // Unit, Never, Inferred — no type references to check
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
-    }
-}
-
-/// Does this annotation contain a reference type anywhere? Gates the forced
-/// lowering above to ref-bearing annotations only.
-fn contains_ref(ty: &AstType) -> bool {
-    match ty {
-        AstType::Ref { .. } => true,
-        AstType::Named { segments, .. } => segments
-            .iter()
-            .any(|s| s.type_args.iter().any(contains_ref)),
-        AstType::Tuple(elems, _) => elems.iter().any(contains_ref),
-        AstType::Function {
-            params,
-            return_type,
-            ..
-        } => params.iter().any(contains_ref) || contains_ref(return_type),
-        AstType::Array(inner, _) | AstType::Optional(inner, _) => contains_ref(inner),
-        AstType::Dictionary(k, v, _) => contains_ref(k) || contains_ref(v),
-        AstType::Result { ok, err, .. } => contains_ref(ok) || contains_ref(err),
-        AstType::Some { bounds, .. } => bounds.iter().any(contains_ref),
-        AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => false,
     }
 }

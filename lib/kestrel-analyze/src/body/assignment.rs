@@ -368,6 +368,12 @@ fn is_self_local(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
 /// chains: the path is mutable only if the root local is `var` AND every
 /// intermediate field along the chain is settable.
 fn is_mutable_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
+    // Stage-1 refs: `&mutating T` is a mutable place; a shared `&T` is not
+    // (the assignment-side surface of E207's const-cast guard — the
+    // fact itself is classified once, in `util::ref_place`).
+    if let Some(mutating) = util::ref_place(cx, expr_id) {
+        return mutating;
+    }
     match &cx.hir.exprs[expr_id] {
         HirExpr::Local(local_id, _) => {
             cx.hir.locals[*local_id].is_mut || util::is_mut_borrow_param(cx, *local_id)

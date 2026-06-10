@@ -176,6 +176,26 @@ Current allocations:
   - E487: nested reference (`&&T`, `&mutating &T`)
   - E488: `&` in expression position (desugar.rs, `UnaryOp::Borrow`)
   - E489: ref type in any other position (alias RHS, where-clause, bound)
+- E490–E497: stage-1 reference rules (returnable refs). Mixed homes — E490
+  is a hir-lower codespan code; E491/E492 are solver `InferError`s; E493 is
+  an analyzer descriptor; E494–E497 are coded MIR diagnostics
+  (`VerifyError.diag` from the escape checker / `set_terminator`, rendered
+  by kestrel-compiler; surfaced to diagnostics tests by the harness's
+  MIR-stage pass).
+  - E490: ref inside effect sugar (`-> &T throws E` → `Result[&T, E]`) — hir-lower
+  - E491: ref-returning function used as a value / captured / stored — type-infer
+  - E492: ref leaked into a generic type argument via inference — type-infer
+  - E493: `ambiguous_borrow_source` (decl/ref_return.rs) — free fn with ≥2
+    non-consuming params returning a ref; methods root at the receiver
+  - E494: returned ref roots at a local — escape error (mir verify::check_escapes)
+  - E495: `-> &mutating` without a mutable root (mir verify::check_escapes)
+  - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes)
+  - E497: ref live across a control-flow merge (mir-lower set_terminator)
+- E207: `mutating_through_shared_ref` (body/access_mode.rs) — E-REF-20, the
+  const-cast guard; lives in the E203–E206 family. `util::ref_place` is the
+  single classifier (also consulted by body/assignment.rs); it must run
+  BEFORE the syntactic walk — the receiver check accepts temporaries, so a
+  shared-ref receiver would otherwise silently pass.
 - E500: `use_after_move` (body/move_tracking.rs)
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)

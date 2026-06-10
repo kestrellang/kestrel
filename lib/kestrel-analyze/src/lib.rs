@@ -74,6 +74,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::duplicate_label::DuplicateLabelAnalyzer);
     r.add_decl_check(decl::field::FieldAnalyzer);
     r.add_decl_check(decl::subscript::SubscriptAnalyzer);
+    r.add_decl_check(decl::ref_return::RefReturnAnalyzer);
     r.add_decl_check(decl::extern_ffi_safe::ExternFfiSafeAnalyzer);
     r.add_decl_check(decl::default_param_ordering::DefaultParamOrderingAnalyzer);
     r.add_decl_check(decl::cloneable_field::CloneableFieldAnalyzer);
