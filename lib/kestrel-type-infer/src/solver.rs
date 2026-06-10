@@ -3440,6 +3440,28 @@ fn solve_member(
         &subs,
     );
 
+    // Stage 1.5 read-provider typing: when a subscript/computed property
+    // declares a `ref { … }` accessor, READS of the member produce `&T` —
+    // wrap the declared type so all stage-1 decay machinery (binding/
+    // scrutinee/assign-target/arm decay, E492 validation, E497) applies
+    // unchanged. The wrap is read-only: RMW receivers are never typed
+    // `&mutating T` — analyze and mir-lower route writes and RMW by ENTITY
+    // (the PlaceAccessors query), not by this expression type.
+    let ret_tv = if matches!(
+        resolution.kind,
+        crate::resolve::MemberKind::Subscript | crate::resolve::MemberKind::ComputedProperty { .. }
+    ) && ctx
+        .query_ctx
+        .query(kestrel_hir_lower::PlaceAccessors {
+            entity: resolution.entity,
+        })
+        .is_some_and(|info| info.ref_accessor.is_some())
+    {
+        ctx.ref_ty(ret_tv, false)
+    } else {
+        ret_tv
+    };
+
     bind_call_result(ctx, result, ret_tv, expr, span.clone());
 
     SolveResult::Solved

@@ -69,6 +69,20 @@ impl OssaBodyCtx<'_, '_> {
                 .emit_lowering_gap(expr_id, format!("could not resolve method `{method_name}`"));
         };
 
+        // Stage 1.5 read-provider routing (method-call-shaped subscript
+        // reads, incl. field-subscripts): a subscript with a `ref { … }`
+        // accessor serves READS through the accessor child.
+        let resolved = if matches!(
+            self.ctx.world.get::<NodeKind>(resolved),
+            Some(NodeKind::Subscript)
+        ) {
+            self.ctx
+                .find_ref_accessor_child(resolved, false)
+                .unwrap_or(resolved)
+        } else {
+            resolved
+        };
+
         // Field-stored thick/thin function: lower as field access + indirect call.
         // `self.predicate(arg)` where `predicate` is a struct field of function type.
         let entity_kind = self.ctx.world.get::<NodeKind>(resolved).cloned();
@@ -380,6 +394,22 @@ impl OssaBodyCtx<'_, '_> {
             }
         } else {
             return self.lower_indirect_call(expr_id, callee_expr, args);
+        };
+
+        // Stage 1.5 read-provider routing: a subscript with a `ref { … }`
+        // accessor serves READS through the accessor child (the parent may
+        // be bodyless for pure-ref subscripts). Write/RMW operations never
+        // reach this path — they route in the setter-assign / accessor-place
+        // lowerings.
+        let entity = if matches!(
+            self.ctx.world.get::<NodeKind>(entity),
+            Some(NodeKind::Subscript)
+        ) {
+            self.ctx
+                .find_ref_accessor_child(entity, false)
+                .unwrap_or(entity)
+        } else {
+            entity
         };
 
         self.ctx.register_name(entity);

@@ -14,6 +14,7 @@
 
 use kestrel_ast_builder::{Callable, NodeKind, Settable};
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
+use kestrel_mir::TyId;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
 use kestrel_mir::op::Op;
@@ -372,7 +373,15 @@ impl OssaBodyCtx<'_, '_> {
 
         // Computed property → getter call
         if is_callable {
-            let getter_entity = resolved.unwrap();
+            // Stage 1.5 read-provider routing: a computed property with a
+            // `ref { … }` accessor serves READS through the accessor child
+            // (the parent may be bodyless for pure-ref members). The result
+            // registers @guaranteed + ref_results via the child's
+            // CallableRefReturn — nothing else changes.
+            let getter_entity = self
+                .ctx
+                .find_ref_accessor_child(resolved.unwrap(), false)
+                .unwrap_or_else(|| resolved.unwrap());
             self.ctx.register_name(getter_entity);
             let result_ty = self.resolve_expr_type(expr_id);
 
@@ -813,6 +822,30 @@ impl OssaBodyCtx<'_, '_> {
     // Setter dispatch
     // ----------------------------------------------------------------
 
+    /// Call a `mutating ref` accessor and store `rhs` through the returned
+    /// place — PtrTo + StoreAssign + EndBorrow, the shipped `&mutating`-call
+    /// assign shape (`lower_assign`). `call_args` = receiver + index args,
+    /// already prepared; `pointee_ty` is the member's declared type (what
+    /// the assign target expr resolves to). The call result registers in
+    /// `ref_results` via the accessor's CallableRefReturn; the store is the
+    /// ref's single use, so its borrow ends here.
+    fn emit_ref_accessor_store(
+        &mut self,
+        accessor: kestrel_hecs::Entity,
+        type_args: Vec<TyId>,
+        call_args: Vec<CallArg>,
+        pointee_ty: TyId,
+        rhs: ValueId,
+    ) -> ValueId {
+        let callee = Callee::direct_with_args(accessor, type_args, None);
+        let ref_val = self.emit_call_returning(callee, call_args, pointee_ty);
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
+        let addr = self.emit_op1(Op::PtrTo(pointee_ty), ref_val, ptr_ty);
+        self.emit_store_assign(addr, rhs);
+        self.emit_end_borrow(ref_val);
+        self.emit_literal(Immediate::unit())
+    }
+
     /// If the assignment target is a computed property or subscript with a
     /// setter, emit a setter call and return unit. Otherwise return None
     /// so the caller falls through to stored assignment.
@@ -826,7 +859,7 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::Field { base, name, .. } => {
                 self.try_lower_field_setter(target_id, value_id, base, name.as_str_or_empty())
             },
-            HirExpr::Def(entity, _, _) => self.try_lower_def_setter(value_id, entity),
+            HirExpr::Def(entity, _, _) => self.try_lower_def_setter(target_id, value_id, entity),
             HirExpr::Call { callee, args, .. } => {
                 self.try_lower_call_setter(target_id, value_id, callee, &args)
             },
@@ -907,6 +940,31 @@ impl OssaBodyCtx<'_, '_> {
             return Some(self.emit_literal(Immediate::unit()));
         }
 
+        // Stage 1.5: a `mutating ref` accessor is the write provider when
+        // declared — RHS lowered FIRST (pinned evaluation order), then the
+        // place ref is fabricated and stored through.
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(resolved, true) {
+            self.ctx.register_name(accessor);
+            let is_static = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Static>(resolved)
+                .is_some();
+            let rhs = self.lower_expr(value_id);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            let mut call_args: Vec<CallArg> = Vec::new();
+            let type_args = if is_static {
+                let self_type = self.type_from_type_ref(base);
+                self.prepend_receiver_type_args(self_type, vec![])
+            } else {
+                let receiver_ty = self.resolve_expr_type(base);
+                let ta = self.resolve_type_args(target_id);
+                call_args.push(self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow));
+                self.prepend_receiver_type_args(receiver_ty, ta)
+            };
+            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+        }
+
         // Concrete computed property setter
         let setter = self.ctx.find_setter_child(resolved)?;
         self.ctx.register_name(setter);
@@ -953,9 +1011,17 @@ impl OssaBodyCtx<'_, '_> {
     /// Arm 2: `globalComputedProp = v`
     fn try_lower_def_setter(
         &mut self,
+        target_id: HirExprId,
         value_id: HirExprId,
         entity: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
+        // Stage 1.5: `mutating ref` write provider (global member — no receiver).
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(entity, true) {
+            self.ctx.register_name(accessor);
+            let rhs = self.lower_expr(value_id);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            return Some(self.emit_ref_accessor_store(accessor, vec![], vec![], pointee_ty, rhs));
+        }
         let setter = self.ctx.find_setter_child(entity)?;
         self.ctx.register_name(setter);
         let rhs = self.lower_expr(value_id);
@@ -980,6 +1046,37 @@ impl OssaBodyCtx<'_, '_> {
             .copied()?;
         if self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Subscript) {
             return None;
+        }
+
+        // Stage 1.5: a `mutating ref` accessor is the write provider when
+        // declared — RHS lowered FIRST (pinned evaluation order: the test
+        // wave pins `x(i) = expr-that-mutates-x`), then receiver + index
+        // args, then the place ref is fabricated and stored through.
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(resolved, true) {
+            self.ctx.register_name(accessor);
+            let is_static = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Static>(resolved)
+                .is_some();
+            let rhs = self.lower_expr(value_id);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            let mut call_args: Vec<CallArg> = Vec::new();
+            let type_args = if is_static {
+                let self_type = self.type_from_type_ref(callee_expr);
+                self.prepend_receiver_type_args(self_type, vec![])
+            } else {
+                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let ta = self.resolve_type_args(target_id);
+                call_args
+                    .push(self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow));
+                self.prepend_receiver_type_args(receiver_ty, ta)
+            };
+            for a in args {
+                let v = self.lower_expr(a.value);
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
         }
 
         let setter = self.ctx.find_setter_child(resolved)?;
@@ -1083,8 +1180,12 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
 
-        let setter = self.ctx.find_setter_child(resolved)?;
-        self.ctx.register_name(setter);
+        let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
+        let setter = if mutating_ref.is_none() {
+            Some(self.ctx.find_setter_child(resolved)?)
+        } else {
+            None
+        };
 
         // Resolve field type and extract through it
         let recv_entity = receiver_entity?;
@@ -1132,6 +1233,19 @@ impl OssaBodyCtx<'_, '_> {
         for v in subscript_args {
             call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
         }
+
+        // Stage 1.5: `mutating ref` write provider — fabricate the element
+        // place through the accessor (receiver = the field place) and store
+        // through it. RHS was lowered before the place fabrication above.
+        if let Some(accessor) = mutating_ref {
+            self.ctx.register_name(accessor);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            let type_args = self.prepend_receiver_type_args(field_ty, type_args);
+            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+        }
+
+        let setter = setter.expect("setter present when no mutating ref accessor");
+        self.ctx.register_name(setter);
         call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
 
         if let Some(protocol) = self.ctx.is_protocol_method(setter) {
