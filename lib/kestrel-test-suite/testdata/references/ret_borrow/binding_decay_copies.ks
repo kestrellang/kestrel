@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.at(index:) (S4)
 
 // Binding decay is a COPY, not a view: mutating the array after the
 // binding must not change the bound value.

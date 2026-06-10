@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: false
-// skip: stage1 — needs ref returns (S1) + MIR diagnostics in harness (T3)
 
 // E-REF-10, the silent-UAF class: a returned reference whose provenance
 // root is a function LOCAL must be rejected — the local dies at return.

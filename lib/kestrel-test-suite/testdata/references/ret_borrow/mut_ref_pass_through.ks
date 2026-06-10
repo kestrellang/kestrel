@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.mutableAt(index:) (S4)
 
 // A returned `&mutating` passed onward to a `mutating`-convention param:
 // the callee's write reaches the original element.

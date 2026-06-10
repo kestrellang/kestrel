@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: true
-// skip: stage1 — needs stage-1 front-end (S1)
 
 // E-REF-19: a ref must never leak into a generic type argument through
 // INFERENCE (annotations are already rejected by the stage-0.5 walk).

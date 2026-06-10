@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs ref returns end-to-end (S1+M6)
 
 // for-in is receiver see-through: iterating a `&Array[T]` borrows the
 // array in place (iter() is borrowed-self).

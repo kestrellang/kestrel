@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: false
-// skip: stage1 — needs ref returns (S1) + the E493 decl analyzer (F4)
 
 // E-REF-12: provenance is inferred single-source — a ref-returning
 // signature with TWO reference-eligible roots (here both borrow params)
