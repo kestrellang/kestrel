@@ -34,7 +34,29 @@ impl LowerCtx<'_> {
         match pat {
             AstPat::Wildcard { span } => self.alloc_pat(HirPat::Wildcard { span: span.clone() }),
 
-            AstPat::Binding { is_mut, name, span } => {
+            AstPat::Binding {
+                is_mut,
+                name,
+                by_ref,
+                span,
+            } => {
+                // `&`/`&mutating` binder patterns are stage-1.5 item 2;
+                // until the place-mode match lowering lands they are
+                // rejected everywhere and degrade to a plain binding so
+                // downstream diagnostics stay useful.
+                if by_ref.is_some() {
+                    self.ctx.accumulate(
+                        kestrel_reporting::Diagnostic::error()
+                            .with_code("E211")
+                            .with_message(
+                                "`&` pattern bindings are not supported in this position",
+                            )
+                            .with_labels(vec![
+                                kestrel_reporting::Label::primary(span.file_id, span.range())
+                                    .with_message("`&` binder pattern"),
+                            ]),
+                    );
+                }
                 let local = self.define_local(name, *is_mut || force_mut, span.clone());
                 self.alloc_pat(HirPat::Binding {
                     local,

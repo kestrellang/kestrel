@@ -779,7 +779,9 @@ pub fn expr_parser<'tokens>()
         let condition_unary = unary_op
             .clone()
             .then(condition_postfix.clone())
-            .map(|((tok, span), operand)| ExprVariant::Unary(tok, span, Box::new(operand)));
+            .map(|((tok, span, mutating), operand)| {
+                ExprVariant::Unary(tok, span, mutating, Box::new(operand))
+            });
 
         let condition_non_assignment = condition_unary.or(condition_postfix.clone());
 
@@ -1202,9 +1204,11 @@ pub fn expr_parser<'tokens>()
             .collect::<Vec<_>>()
             .then(postfix.clone())
             .map(|(ops, operand)| {
-                ops.into_iter().rev().fold(operand, |acc, (tok, span)| {
-                    ExprVariant::Unary(tok, span, Box::new(acc))
-                })
+                ops.into_iter()
+                    .rev()
+                    .fold(operand, |acc, (tok, span, mutating)| {
+                        ExprVariant::Unary(tok, span, mutating, Box::new(acc))
+                    })
             });
 
         // Try expression: try expr (high precedence - binds to postfix)

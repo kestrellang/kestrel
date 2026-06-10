@@ -243,6 +243,7 @@ mod tests {
         let pat = pats.alloc(AstPat::Binding {
             is_mut: false,
             name: "x".into(),
+            by_ref: None,
             span: Span::synthetic(0),
         });
 
@@ -426,6 +427,7 @@ mod tests {
         let pat = pats.alloc(AstPat::Binding {
             is_mut: true,
             name: "x".into(),
+            by_ref: None,
             span: Span::synthetic(0),
         });
         let let_stmt = stmts.alloc(AstStmt::Let {

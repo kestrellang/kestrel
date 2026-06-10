@@ -139,9 +139,10 @@ impl LowerCtx<'_> {
             return self.lower_expr(body, operand);
         }
 
-        // Prefix `&` parses (for recovery) but is never a valid expression:
-        // borrowing is decided by the callee's signature, not the call site.
-        if *op == UnaryOp::Borrow {
+        // Prefix `&`/`&mutating` parse but are not free-standing expressions:
+        // a borrow expression is legal only as a `let` initializer (named ref
+        // binding — that path intercepts before this desugar).
+        if matches!(op, UnaryOp::Borrow | UnaryOp::BorrowMutating) {
             self.lower_expr(body, operand); // still lower for downstream diags
             self.ctx.accumulate(
                 Diagnostic::error()
@@ -1352,6 +1353,7 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
         UnaryOp::Borrow => "&",
+        UnaryOp::BorrowMutating => "&mutating",
     }
 }
 

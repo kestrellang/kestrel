@@ -343,6 +343,7 @@ pub enum SyntaxKind {
     TyMutRef, // &mutating T - mutable reference type
     RefClause, // ref { ... } place accessor (stage 1.5)
     MutatingRefClause, // mutating ref { ... } place accessor (stage 1.5)
+    RefBindingPattern, // &name / &mutating name binder pattern (stage 1.5 item 2)
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
@@ -737,6 +738,7 @@ impl Language for KestrelLanguage {
         const TY_MUT_REF: u16 = SyntaxKind::TyMutRef as u16;
         const REF_CLAUSE: u16 = SyntaxKind::RefClause as u16;
         const MUTATING_REF_CLAUSE: u16 = SyntaxKind::MutatingRefClause as u16;
+        const REF_BINDING_PATTERN: u16 = SyntaxKind::RefBindingPattern as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
@@ -1000,6 +1002,7 @@ impl Language for KestrelLanguage {
             TY_MUT_REF => SyntaxKind::TyMutRef,
             REF_CLAUSE => SyntaxKind::RefClause,
             MUTATING_REF_CLAUSE => SyntaxKind::MutatingRefClause,
+            REF_BINDING_PATTERN => SyntaxKind::RefBindingPattern,
             _ => SyntaxKind::Error,
         }
     }
