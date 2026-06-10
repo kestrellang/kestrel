@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Pointer.value (S3)
 
 // A `match` scrutinee is a VALUE context: the ref decays (copy-out) before
 // the match machinery, so arms see an owned value — a ref never enters

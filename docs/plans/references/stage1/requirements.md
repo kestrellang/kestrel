@@ -17,7 +17,12 @@ collection access real.
    copy-guard gates, the `set_terminator` carve-out, codegen in **both**
    backends.
 4. `Pointer.value` / `.mutatingValue` (public, `# Safety` docs) → stdlib
-   accessors (`Array.first/at`, Dict internals).
+   accessors: `Array.at(index:)` / `Array.mutableAt(index:)` (maintainer
+   naming, 2026-06-09 — `first()`/`at()` were unimplementable: `first() ->
+   T?` exists on Slice and ref-ness can't overload). **Dict DEFERRED to
+   1.5+**: values live inside `enum Bucket.Occupied` payloads — no
+   stable-address path without restructuring to parallel arrays; `(&V)?`
+   returns are E490-banned anyway.
 5. `&mutating T → &T` coercion (one-way, `solve_coerce` arm).
 6. **Transparent place** (Q8 = (a), `semantics.md`): the `solve_member`
    receiver peel, the **convention-aware** `&T → T` copy-out coercion arm

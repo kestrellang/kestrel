@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.mutableAt(index:) (S4)
 
 // Kills the clone-mutate-writeback impostor: mut_ref_pass_through cannot
 // distinguish a true write-through from "clone, mutate the clone, write it

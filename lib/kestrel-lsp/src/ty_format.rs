@@ -33,6 +33,10 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             out.push_str(&name_of(world, *entity).unwrap_or_else(|| "?".into()));
         },
         ResolvedTy::SelfType { .. } => out.push_str("Self"),
+        ResolvedTy::Ref { pointee, mutating } => {
+            out.push_str(if *mutating { "&mutating " } else { "&" });
+            write_ty(world, pointee, out);
+        },
         ResolvedTy::Tuple(elems) => {
             out.push('(');
             for (i, e) in elems.iter().enumerate() {

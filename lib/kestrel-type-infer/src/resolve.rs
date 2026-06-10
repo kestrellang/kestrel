@@ -2047,9 +2047,12 @@ impl WorldResolver<'_> {
             // Tuple elements aren't resolvable here; Function/Never/Error and
             // reducible aliases never block a Copyable bound. Permissive — the
             // MIR layer is element-aware for the cases that matter.
+            // Ref: never a stored value (decay copies the POINTEE; the copy
+            // guards judge that copy) — permissive like the others.
             TyKind::Tuple(_)
             | TyKind::Function { .. }
             | TyKind::TypeAlias { .. }
+            | TyKind::Ref { .. }
             | TyKind::Never
             | TyKind::Error => CopySemantics::Copyable,
         }

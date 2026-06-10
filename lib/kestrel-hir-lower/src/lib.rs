@@ -26,8 +26,8 @@ use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
 use kestrel_span::Span;
 
 pub use ty::{
-    LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs, LowerTypeAnnotation,
-    lower_ast_type,
+    CallableRefReturn, LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs,
+    LowerTypeAnnotation, RefReturn, lower_ast_type,
 };
 
 use ctx::LowerCtx;

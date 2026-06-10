@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs ref returns end-to-end (S1+M6)
 
 // Paren-subscript on a ref-typed receiver: `h.view()(1)` peels the ref
 // returned by the accessor and subscripts the borrowed Array in place.

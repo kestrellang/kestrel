@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Pointer.value (S3)
 
 // NotCopyable pointee through a borrow-convention argument: compiles
 // (misclassification as value context would fail the copy guards at

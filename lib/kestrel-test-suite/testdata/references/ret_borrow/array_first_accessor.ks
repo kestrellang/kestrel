@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.at(index:) (S4)
 
 // PointerDerived propagation end-to-end: Array.at fabricates the ref from
 // its storage pointer internally (`.value`, root PointerDerived), while

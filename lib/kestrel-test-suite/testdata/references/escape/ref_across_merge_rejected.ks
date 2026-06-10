@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: false
-// skip: stage1 — needs ref returns (S1) + MIR diagnostics in harness (T3)
 
 // E-REF-15: a reference used as a PLACE cannot stay live across a block
 // merge — here the ref-typed first argument is held open while the

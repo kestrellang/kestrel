@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: false
-// skip: stage1 — needs ref returns (S1) + MIR diagnostics in harness (T3)
 
 // E-REF-13: a `consuming` receiver cannot root a returned reference —
 // `self` is destroyed when the call returns, so the ref would dangle.

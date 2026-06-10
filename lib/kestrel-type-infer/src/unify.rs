@@ -260,6 +260,25 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             unify(ctx, *ra, *rb)
         },
 
+        // References: equal mutability + unify pointees. The one-way
+        // `&mutating T → &T` coercion lives in `solve_coerce`, NOT here —
+        // unify is symmetric, so admitting it would also admit `& → &mutating`.
+        (
+            TyKind::Ref {
+                pointee: pa,
+                mutating: ma,
+            },
+            TyKind::Ref {
+                pointee: pb,
+                mutating: mb,
+            },
+        ) => {
+            if ma != mb {
+                return Err(UnifyError::Mismatch);
+            }
+            unify(ctx, *pa, *pb)
+        },
+
         // Type params: must be the same entity
         (TyKind::Param { entity: a }, TyKind::Param { entity: b }) => {
             if a == b {
@@ -398,6 +417,7 @@ fn occurs_check(ctx: &InferCtx<'_>, tv: TyVar, target: TyVar) -> Result<(), Unif
             }
             occurs_check(ctx, tv, *ret)
         },
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => occurs_check(ctx, tv, *pointee),
         TySlot::Resolved(TyKind::AssocProjection { base, .. }) => occurs_check(ctx, tv, *base),
         TySlot::Resolved(TyKind::Opaque {
             bounds,

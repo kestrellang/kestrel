@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.mutableAt(index:) (S4)
 
 // Write-through: a mutating method called THROUGH `&mutating` mutates the
 // element in place — no copy, no write-back.

@@ -122,6 +122,17 @@ fn param_ty(name: &str) -> AstType {
     }
 }
 
+/// `&T` / `&mutating T` return type (stage 1 — Return is the carved-out
+/// position, so a seeded ref-returning intrinsic lowers like any user
+/// `-> &T` signature).
+fn ref_of(inner: AstType, mutating: bool) -> AstType {
+    AstType::Ref {
+        inner: Box::new(inner),
+        mutating,
+        span: Span::synthetic(0),
+    }
+}
+
 /// `lang.ptr[T]` type reference.
 fn ptr_of(inner: AstType) -> AstType {
     AstType::Named {
@@ -486,6 +497,25 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         "ptr_mut_borrow",
         &[("ptr", ptr_t.clone())],
         t.clone(),
+    );
+    // Stage-1 reference bridge (`Pointer.value` / `.mutatingValue`): borrow
+    // views of the pointee with root_provenance = PointerDerived — the
+    // escape-checker root that may legally escape returns ("inherits the
+    // pointer's contract"). Distinct from ptr_read/ptr_mut_borrow, whose
+    // value-typed signatures with/withMut/COW modify depend on.
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_ref",
+        &[("ptr", ptr_t.clone())],
+        ref_of(t.clone(), false),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_mut_ref",
+        &[("ptr", ptr_t.clone())],
+        ref_of(t.clone(), true),
     );
     seed_generic_fn(
         world,

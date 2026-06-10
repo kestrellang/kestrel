@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs ref returns end-to-end (S1+M6)
 
 // A `consuming` method is NOT a place context: called through a ref it
 // reads the place (clone) and consumes the COPY — the original stays

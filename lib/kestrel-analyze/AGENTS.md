@@ -186,10 +186,41 @@ Current allocations:
   - E487: nested reference (`&&T`, `&mutating &T`)
   - E488: `&` in expression position (desugar.rs, `UnaryOp::Borrow`)
   - E489: ref type in any other position (alias RHS, where-clause, bound)
+- E490–E498: stage-1 reference rules (returnable refs). Mixed homes — E490
+  is a hir-lower codespan code; E491/E492 are solver `InferError`s; E493 is
+  an analyzer descriptor; E494–E498 are coded MIR diagnostics
+  (`VerifyError.diag` from the escape checker / `set_terminator` /
+  `try_consume`, rendered by kestrel-compiler; surfaced to diagnostics
+  tests by the harness's MIR-stage pass).
+  - E490: ref inside effect sugar (`-> &T throws E` → `Result[&T, E]`) — hir-lower
+  - E491: ref-returning function used as a value / captured / stored — type-infer
+  - E492: ref leaked into a generic type argument via inference — type-infer
+  - E493: `ambiguous_borrow_source` (decl/ref_return.rs) — free fn with ≥2
+    non-consuming params returning a ref; methods root at the receiver
+  - E494: returned ref roots at a local — escape error (mir verify::check_escapes)
+  - E495: `-> &mutating` without a mutable root (mir verify::check_escapes)
+  - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes)
+  - E497: ref live across a control-flow merge (mir-lower set_terminator)
+  - E498: consume-while-borrowed (mir verify `try_consume`) — only when a
+    LIVE ref (@guaranteed call result) chains to the consumed value; an
+    unattributable blocking borrow stays an uncoded ICE (lowering bug)
+- E207: `mutating_through_shared_ref` (body/access_mode.rs) — E-REF-20, the
+  const-cast guard; lives in the E203–E206 family. `util::ref_place` is the
+  single classifier (also consulted by body/assignment.rs); it must run
+  BEFORE the syntactic walk — the receiver check accepts temporaries, so a
+  shared-ref receiver would otherwise silently pass.
+- E208: `assign_through_shared_ref` (body/assignment.rs) — plain assignment
+  through a `&T`-returning call/getter (`arr.at(index: i) = v`,
+  `cell.value = v`). The compound form (`+=`) is E207 instead (the
+  desugared `addAssign` receiver is a mutating use). Division of labor:
+  assignment.rs admits `&mutating`-returning targets and rejects plain-value
+  call targets with E202 ("left-hand side of compound assignment is not
+  assignable" for the Sugar walk); access_mode owns all `&T` mutating-USE
+  errors.
 - E500: `use_after_move` (body/move_tracking.rs)
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)
-- E503: `move_out_of_borrow` (body/move_tracking.rs) — moving a non-Copyable value bound from a borrowed scrutinee; backstopped in MIR lowering by `emit_copy_value` (kestrel-mir-lower `body/mod.rs`)
+- E503: `move_out_of_borrow` (body/move_tracking.rs) — moving a non-Copyable value bound from a borrowed scrutinee; backstopped in MIR lowering by `emit_copy_value` (kestrel-mir-lower `body/mod.rs`), which emits the same code E503 for shapes the front-end can't see (e.g. binding decay of a ref to a NotCopyable pointee)
 - E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
 - E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build

@@ -20,6 +20,36 @@ what implementation needs; the *why* stays in the research docs.
 ✅ defined now · 🚧 partially defined (open sections marked inline) ·
 ⬜ blank — needs exploration (stub states the blocker)
 
+## Implementation status
+
+- **stage0.5 — SHIPPED** (79c48ca0): refs parse everywhere, rejected
+  everywhere (E480–E489), `Pointer(to:)` pinned.
+- **stage1 — IMPLEMENTED 2026-06-10** (feature/115 branch): `-> &T` /
+  `-> &mutating T` returns, root-rule escape checker (E494–E497, user-facing
+  MIR verify diagnostics), `ret_borrow` ABI on both backends, transparent
+  place + binding/scrutinee decay, `Pointer.value`/`.mutatingValue` bridge,
+  `Array.at(index:)` / `mutableAt(index:)`. Deltas discovered while
+  implementing:
+  - `PointerDerived` originates at the `lang.ptr_ref`/`ptr_mut_ref`
+    intrinsics, not at the `Pointer` nominal. It crosses exactly one call
+    seam: a thin intrinsic wrapper (every return-position expression is a
+    direct intrinsic call — the `RetRefPointerDerived` query) stamps its
+    call-site result `PointerDerived`; every other ref-returning call roots
+    at its borrow source, which is the verified discipline.
+  - ~~Compound assignment through a ref-returning call rejected~~ SHIPPED
+    2026-06-10: `arr.mutableAt(index: i) = v` and `+= v` both write through
+    any `&mutating T`-returning call/getter (E202/E207/E208 reject the
+    non-place and shared-ref forms). Value-subscript writeback
+    (`arr(0) += 1`) remains stage 1.5.
+  - Dict ref accessors deferred to 1.5+ (maintainer decision; Bucket
+    enum-payload layout has no stable-address path).
+  - The two formerly-uncoded guards are now coded diagnostics (2026-06-10),
+    and the references suite has zero skips: copy-out of a NotCopyable
+    pointee = **E503** (the MIR-lowering backstop of the front-end move
+    checker's code), consume-while-borrowed = **E498** (verify `try_consume`,
+    coded only when a live ref chains to the consumed value — an
+    unattributable conflict stays an ICE).
+
 ## What blocks the blanks
 
 1. ~~**Q8 — use semantics**~~ **Decided 2026-06-09: transparent place (a),

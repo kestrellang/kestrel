@@ -182,6 +182,10 @@ fn describe_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
         },
         ResolvedTy::Never => "Never".into(),
         ResolvedTy::Error => "?".into(),
+        ResolvedTy::Ref { pointee, mutating } => {
+            let prefix = if *mutating { "&mutating " } else { "&" };
+            format!("{prefix}{}", describe_type(cx, pointee))
+        },
         ResolvedTy::Param { .. } => "type parameter".into(),
         ResolvedTy::SelfType { .. } => "Self".into(),
         ResolvedTy::Function { .. } => "function type".into(),

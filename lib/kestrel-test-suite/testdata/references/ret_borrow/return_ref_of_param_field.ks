@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs ref returns end-to-end (S1+M6)
 
 // The canonical safe ret_borrow: a borrowed-self accessor returning
 // `&self.field` (Param root, fully checked). The caller reads via binding

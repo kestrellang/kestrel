@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: false
-// skip: stage1 — needs stage-1 front-end (S1) + E207 classifier (F4)
 
 // E-REF-20: mutating use through a SHARED `&T` is the const-cast error —
 // a mutating method, `mutating`-param argument, compound assign, or setter

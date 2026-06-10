@@ -247,6 +247,7 @@ fn contains_error(ty: &ResolvedTy) -> bool {
             params.iter().any(contains_error) || contains_error(ret)
         },
         ResolvedTy::AssocProjection { base, .. } => contains_error(base),
+        ResolvedTy::Ref { pointee, .. } => contains_error(pointee),
         ResolvedTy::Opaque {
             bounds,
             origin_args,

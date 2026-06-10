@@ -118,6 +118,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // === Calls ===
         HirExpr::Call { callee, args, span } => {
+            // A direct callee may carry a ref-returning function type;
+            // exempt it from the E491 fn-as-value check.
+            ctx.direct_callee_exprs.insert(*callee);
             // Overloaded free function call: emit OverloadedCall constraint
             if let HirExpr::OverloadSet {
                 candidates,
@@ -467,6 +470,14 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ..
         } => {
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
+            // Stage-1 transparent place: a scrutinee is a VALUE context, so a
+            // ref-returning call used as a scrutinee must bind its result var
+            // to the POINTEE (decay) — recorded here, enacted by
+            // `bind_call_result` when the member resolves. Patterns stay
+            // wired directly to the scrutinee var (an earlier fresh-var
+            // indirection broke array/tuple pattern generation, which
+            // inspects the scrutinee's resolution).
+            ctx.scrutinee_exprs.insert(*scrutinee);
             let result_tv = ctx.fresh();
 
             // Empty match has no arms to pin the result type. An analyzer
@@ -548,6 +559,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             value,
             span,
         } => {
+            // A `&mutating T`-returning target types as the pointee
+            // (bind_call_result decay) so the value Coerce is `T -> T`.
+            ctx.assign_target_exprs.insert(*target);
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
             ctx.coerce(value_tv, target_tv, *value, span.clone());
@@ -771,6 +785,12 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 let val_tv = gen_expr(ctx, hir, *val);
                 ctx.expected_array_elem = prev_hint;
                 ctx.expected_dict_entry = prev_dict_hint;
+                // Stage-1 binding decay: a binding is a VALUE context. The
+                // coerce decay arm handles a resolved ref, but with an
+                // unannotated binding the coerce can run BEFORE the member
+                // resolves (unify redirects local ≡ result) — record the
+                // init expr so bind_call_result binds the POINTEE directly.
+                ctx.binding_init_exprs.insert(*val);
                 // Value flows to the binding (allows promotion)
                 ctx.coerce(val_tv, local_tv, *val, span.clone());
             }
@@ -2081,11 +2101,13 @@ pub(crate) fn lower_hir_ty_with_subs(
             tv
         },
         HirTy::Error(span) => ctx.report_error(InferError::FromHir { span: span.clone() }),
-        // Stage-0.5 invariant: refs are rejected (rewritten to Error) at HIR
-        // lowering and must never reach type inference.
-        HirTy::Ref { span, .. } => {
-            debug_assert!(false, "HirTy::Ref survived HIR lowering");
-            ctx.report_error(InferError::FromHir { span: span.clone() })
+        // Stage 1: a ref survives HIR lowering in return position only (the
+        // E481 carve-out); free-function ref returns land here.
+        HirTy::Ref {
+            inner, mutating, ..
+        } => {
+            let pointee = lower_hir_ty_with_subs(ctx, inner, subs);
+            ctx.ref_ty(pointee, *mutating)
         },
     }
 }

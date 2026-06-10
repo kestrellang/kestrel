@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Pointer.mutatingValue (S3)
 
 // §10.1: `&mutating T → &T` coerces one-way (free bit-copy under
 // may-alias), and a borrow-convention argument position is a PLACE

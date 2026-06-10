@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.at(index:) (S4)
 
 // No-clone pin: a borrowed-self method called THROUGH `&T` must not clone
 // the pointee. The read-only through-ref tests pass identically under a

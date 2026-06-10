@@ -22,6 +22,17 @@ impl OssaBodyCtx<'_, '_> {
                 let name = self.hir.locals[*local].name.clone();
                 if let Some(init_expr) = value {
                     let init_val = self.lower_expr(*init_expr);
+                    // Stage-1 binding decay: a ref-typed initializer
+                    // (ret_borrow call result) is COPIED out — the binding
+                    // owns a value, never the place — and the copy is the
+                    // ref's single use, so its borrow ends here.
+                    let init_val = if self.ref_results.contains(&init_val) {
+                        let owned = self.emit_copy_value(init_val);
+                        self.emit_end_borrow(init_val);
+                        owned
+                    } else {
+                        init_val
+                    };
                     if is_var {
                         let ty = self.resolve_local_type(*local);
                         let addr = self.emit_uninit(ty);
@@ -67,6 +78,14 @@ impl OssaBodyCtx<'_, '_> {
             HirStmt::Deinit { local: None, .. } => {
                 // Unresolved deinit — nothing to do
             },
+        }
+
+        // Statement boundary: a single-use ref still tracked here was fully
+        // used inside the statement — end it before it can leak into a later
+        // terminator as a false E497. No watermark: nothing pending can span
+        // a statement boundary.
+        if !self.is_terminated() {
+            self.end_stale_refs_since(0);
         }
 
         self.current_span = prev_span;

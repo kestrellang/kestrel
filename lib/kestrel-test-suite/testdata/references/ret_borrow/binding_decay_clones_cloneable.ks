@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.at(index:) (S4)
 
 // Decay of a Cloneable (heap String) element retains/clones — no aliasing,
 // no double-free (the string_literal_return_no_alias class). Both the bound

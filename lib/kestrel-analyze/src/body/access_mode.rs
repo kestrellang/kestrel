@@ -45,6 +45,14 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // Stage-1 references (E-REF-20): mutating use through a SHARED `&T` —
+    // the const-cast guard. Sibling of E203-E205, hence this family.
+    DiagnosticDescriptor {
+        id: "E207",
+        name: "mutating_through_shared_ref",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct AccessModeAnalyzer;
@@ -63,6 +71,9 @@ enum MutClass {
     Mutable,
     ImmutableLocal(String), // local name
     ImmutableField(String), // field name
+    /// A shared `&T` place (ret_borrow call result). Distinct from Temporary
+    /// — temporaries are owned and may be mutated; a shared ref must not be.
+    SharedRef,
     Temporary,
 }
 
@@ -157,6 +168,12 @@ fn check_mutating_receiver(
     let span = util::expr_span(cx.hir, recv_id);
     match classify_mutability(cx, recv_id) {
         MutClass::Mutable | MutClass::Temporary => {}, // ok — owned or mutable place
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot call a 'mutating' method through a shared reference",
+            ));
+        },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[0].id,
@@ -197,6 +214,12 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
     let span = util::expr_span(cx.hir, arg_id);
     match classify_mutability(cx, arg_id) {
         MutClass::Mutable => {}, // ok
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot pass a shared reference to a 'mutating' parameter",
+            ));
+        },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[0].id,
@@ -245,8 +268,37 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
     }
 }
 
+/// E207: mutating use through a shared `&T` — the const-cast guard.
+fn shared_ref_diag(span: kestrel_span::Span, message: &str) -> AnalyzeDiagnostic {
+    AnalyzeDiagnostic {
+        descriptor_id: DESCRIPTORS[4].id,
+        severity: DESCRIPTORS[4].default_severity,
+        message: message.into(),
+        labels: vec![DiagLabel {
+            span,
+            message: "this is a shared `&` reference".into(),
+            is_primary: true,
+        }],
+        notes: vec![
+            "mutation needs `&mutating` — use the mutable accessor (e.g. `mutableAt`, \
+             `mutatingValue`) on a mutable base"
+                .into(),
+        ],
+    }
+}
+
 /// Classify an expression's mutability for access mode checking.
 fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
+    // Stage-1 refs FIRST, before the syntactic walk: a `&mutating T` call
+    // result is a mutable place (it would fall to Temporary below and
+    // wrongly trip E205), and a shared `&T` must not fall to Temporary —
+    // the receiver check ACCEPTS temporaries, so without this consult a
+    // mutating method on a shared ref would silently pass (const-cast hole).
+    match util::ref_place(cx, expr_id) {
+        Some(true) => return MutClass::Mutable,
+        Some(false) => return MutClass::SharedRef,
+        None => {},
+    }
     match &cx.hir.exprs[expr_id] {
         // Local variable reference — check if binding is mutable
         HirExpr::Local(local_id, _) => {

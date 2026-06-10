@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Pointer.value (S3)
 
 // The strongest no-clone pin: a NotCopyable pointee. If the borrowed-self
 // call through `&Res` were misclassified as a value context, the copy

@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: false
-// skip: stage1 — needs stage-1 front-end (S1)
 
 // E-REF-17: a ref can never ride inside an effect/sugar wrapper — `throws`
 // desugars the return to `Result[&T, E]`, a ref-in-enum-payload backdoor

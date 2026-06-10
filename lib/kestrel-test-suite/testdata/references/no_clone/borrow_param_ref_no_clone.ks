@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Array.at(index:) (S4)
 
 // Decision (a), borrow args are place contexts: a ref passed to a
 // borrow-convention free-function param passes the referent place as the

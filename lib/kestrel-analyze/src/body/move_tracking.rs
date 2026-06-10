@@ -783,10 +783,14 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             // `hir_type_copy_semantics`); functions/opaque/never/error are
             // pointer-like / recovery — all Copyable. Explicit so a future
             // ResolvedTy variant forces a decision here.
+            // A ref (stage 1) is a borrow: copying it duplicates the pointer,
+            // never the pointee — Copyable, the same answer nightly's old
+            // catch-all gave.
             ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Function { .. }
             | ResolvedTy::Opaque { .. }
             | ResolvedTy::Never
+            | ResolvedTy::Ref { .. }
             | ResolvedTy::Error => CopySemantics::Copyable,
         }
     }

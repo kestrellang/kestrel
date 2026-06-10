@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // backends: cranelift,llvm
-// skip: stage1 — needs Pointer.mutatingValue (S3)
 
 // THE resolve_scalar miscompile pin: a ret_borrow function must return
 // the POINTER, not the loaded pointee. Write-through observation
