@@ -16,7 +16,8 @@ use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_semantics::{
-    CopyRequirement, CopySemantics, NominalCopySemantics, TypeParamCopyRequirement,
+    CopyRequirement, CopySemantics, NominalCopySemantics, StaticRequirement,
+    TypeParamCopyRequirement, TypeParamStaticRequirement,
 };
 
 use crate::resolve::WhereClause;
@@ -107,6 +108,12 @@ pub fn resolve_where_clauses(
     // (unconstrained params still get the implicit bound).
     inject_implicit_copyable_bounds(ctx, entity, root, &mut result);
 
+    // Likewise the implicit `T: Static` containment bound (references 2a):
+    // generic code may store/return/capture its params, so a param accepts
+    // reference-bearing arguments only when relaxed with `where T: not
+    // Static` (or when its owner is itself `not Static`).
+    inject_implicit_static_bounds(ctx, entity, root, &mut result);
+
     result
 }
 
@@ -176,6 +183,60 @@ fn inject_implicit_copyable_bounds(
             result.push(WhereClause::Bound {
                 param,
                 protocol,
+                protocol_type_args: Vec::new(),
+            });
+        }
+    }
+}
+
+/// Push an implicit `T: Static` `WhereClause::Bound` for each generic param
+/// of `entity` whose requirement is `RequiresStatic`. Relaxed params
+/// (`where T: not Static`, or a `not Static` owner — both folded into
+/// `TypeParamStaticRequirement`) get nothing: they accept any argument.
+fn inject_implicit_static_bounds(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+    result: &mut Vec<WhereClause>,
+) {
+    // Same exclusions as the Copyable injection: extensions have no callers
+    // passing type args, and intrinsics (`lang.ptr_read`, `lang.cast_ptr`,
+    // `lang.sizeof`, …) operate at the ABI level — `lang.ptr` itself must
+    // not require `T: Static` or `Pointer[T]`'s unsafe escape hatch closes.
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Extension) {
+        return;
+    }
+    if ctx.get::<Intrinsic>(entity).is_some() {
+        return;
+    }
+    let Some(type_params) = ctx.get::<TypeParams>(entity) else {
+        return;
+    };
+    let Some(static_proto) = ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root,
+    }) else {
+        return;
+    };
+
+    for &param in &type_params.0 {
+        match ctx.query(TypeParamStaticRequirement {
+            param,
+            context: entity,
+            root,
+        }) {
+            StaticRequirement::RequiresStatic => {},
+            StaticRequirement::MayBeNonStatic => continue,
+        }
+        let already_bound = result.iter().any(|wc| {
+            matches!(wc,
+                WhereClause::Bound { param: p, protocol: pr, .. }
+                if *p == param && *pr == static_proto)
+        });
+        if !already_bound {
+            result.push(WhereClause::Bound {
+                param,
+                protocol: static_proto,
                 protocol_type_args: Vec::new(),
             });
         }

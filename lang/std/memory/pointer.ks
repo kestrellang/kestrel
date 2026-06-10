@@ -133,7 +133,10 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 /// Non-owning. The pointee's lifetime is the caller's responsibility; the
 /// pointer does not increment any refcount, register with any GC, or
 /// trigger a deinit.
-public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
+// `T: not Static` (references 2a): the pointee may be reference-bearing —
+// Pointer is the unsafe escape hatch, and Pointer[T] itself stores only a
+// raw address (no T), so it stays Static regardless of T.
+public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Static {
     // `fileprivate`, not `private`: the conditional `pointee` accessor lives in
     // `extend Pointer[T] where T: Copyable` (a conditional member can't sit in
     // the struct body), and an extension can only reach file-scoped members.
