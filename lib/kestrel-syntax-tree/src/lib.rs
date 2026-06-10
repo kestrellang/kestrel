@@ -341,6 +341,8 @@ pub enum SyntaxKind {
     // mid-enum would shift every later kind and corrupt cached trees.
     TyRef,    // &T - shared reference type (parsed, rejected until stage 1)
     TyMutRef, // &mutating T - mutable reference type
+    RefClause, // ref { ... } place accessor (stage 1.5)
+    MutatingRefClause, // mutating ref { ... } place accessor (stage 1.5)
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
@@ -733,6 +735,8 @@ impl Language for KestrelLanguage {
         const MISSING: u16 = SyntaxKind::Missing as u16;
         const TY_REF: u16 = SyntaxKind::TyRef as u16;
         const TY_MUT_REF: u16 = SyntaxKind::TyMutRef as u16;
+        const REF_CLAUSE: u16 = SyntaxKind::RefClause as u16;
+        const MUTATING_REF_CLAUSE: u16 = SyntaxKind::MutatingRefClause as u16;
 
         match raw.0 {
             ROOT => SyntaxKind::Root,
@@ -994,6 +998,8 @@ impl Language for KestrelLanguage {
             MISSING => SyntaxKind::Missing,
             TY_REF => SyntaxKind::TyRef,
             TY_MUT_REF => SyntaxKind::TyMutRef,
+            REF_CLAUSE => SyntaxKind::RefClause,
+            MUTATING_REF_CLAUSE => SyntaxKind::MutatingRefClause,
             _ => SyntaxKind::Error,
         }
     }

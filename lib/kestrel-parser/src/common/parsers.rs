@@ -16,8 +16,8 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 
 use super::data::{
-    DeinitDeclarationData, FunctionBodyData, InitEffect, InitializerDeclarationData,
-    ParameterAccessMode, ParameterData,
+    AccessorClauseData, AccessorClauseKind, DeinitDeclarationData, FunctionBodyData, InitEffect,
+    InitializerDeclarationData, ParameterAccessMode, ParameterData,
 };
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser};
@@ -84,6 +84,74 @@ pub fn identifier<'tokens>()
     trivia(select! {
         Token::Identifier = e => to_kestrel_span(e.span()),
     })
+}
+
+/// Match an identifier with a specific TEXT, skipping leading trivia — a
+/// contextual keyword. Tokens are payload-less, so the text is recovered by
+/// slicing the source (threaded through parser state) at the token's span.
+/// Used for the `ref` accessor-clause keyword, which is NOT reserved: `ref`
+/// stays a legal identifier everywhere outside accessor-clause position.
+pub fn contextual_keyword<'tokens>(
+    kw: &'static str,
+) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
+    trivia(just(Token::Identifier).try_map_with(
+        move |_, e: &mut chumsky::input::MapExtra<'tokens, '_, ParserInput<'tokens>, ParserExtra<'tokens>>| {
+            let span = to_kestrel_span(e.span());
+            let src: &str = e.state().0;
+            if src.get(span.start..span.end) == Some(kw) {
+                Ok(span)
+            } else {
+                Err(chumsky::error::Rich::custom(
+                    e.span(),
+                    format!("expected `{kw}`"),
+                ))
+            }
+        },
+    ))
+}
+
+/// One accessor clause: `get { … }` / `set { … }` / `ref { … }` /
+/// `mutating ref { … }`. Each head must be followed by a code block —
+/// otherwise the clause fails and the caller's explicit-accessor parse
+/// backtracks to the shorthand form (so `{ ref }` is a shorthand body
+/// reading the identifier `ref`, not a malformed accessor). Shared by the
+/// computed-property and subscript body parsers.
+pub fn accessor_clause_parser<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, AccessorClauseData, ParserExtra<'tokens>> + Clone {
+    let get = token(Token::Get)
+        .then(code_block_parser())
+        .map(|(kw_span, body)| AccessorClauseData {
+            kind: AccessorClauseKind::Get,
+            kw_span,
+            mutating_span: None,
+            body,
+        });
+    let set = token(Token::Set)
+        .then(code_block_parser())
+        .map(|(kw_span, body)| AccessorClauseData {
+            kind: AccessorClauseKind::Set,
+            kw_span,
+            mutating_span: None,
+            body,
+        });
+    let mutating_ref = token(Token::Mutating)
+        .then(contextual_keyword("ref"))
+        .then(code_block_parser())
+        .map(|((mutating_span, kw_span), body)| AccessorClauseData {
+            kind: AccessorClauseKind::MutatingRef,
+            kw_span,
+            mutating_span: Some(mutating_span),
+            body,
+        });
+    let ref_ = contextual_keyword("ref")
+        .then(code_block_parser())
+        .map(|(kw_span, body)| AccessorClauseData {
+            kind: AccessorClauseKind::Ref,
+            kw_span,
+            mutating_span: None,
+            body,
+        });
+    get.or(set).or(mutating_ref).or(ref_).boxed()
 }
 
 /// Parse an identifier or keyword token, skipping leading trivia.

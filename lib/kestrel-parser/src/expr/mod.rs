@@ -1310,7 +1310,7 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match expr_parser().parse(input).into_result() {
+    match expr_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result() {
         Ok(variant) => {
             // Transform strings with interpolation to InterpolatedString variant
             let transformed = emit::maybe_convert_to_interpolated(source, variant);

@@ -37,8 +37,17 @@ pub type SpannedToken = (Token, ChumskySpan);
 /// This is created by calling `.split_token_span(eoi_span)` on a slice of spanned tokens.
 pub type ParserInput<'tokens> = MappedInput<'tokens, Token, ChumskySpan, &'tokens [SpannedToken]>;
 
-/// Extra type alias for error handling
-pub type ParserExtra<'tokens> = extra::Err<Rich<'tokens, Token, ChumskySpan>>;
+/// Extra type alias for error handling + parser state.
+///
+/// The state carries the SOURCE TEXT so parsers can match contextual
+/// keywords (identifiers with specific text, e.g. the `ref` accessor
+/// clause) — tokens are payload-less, so the text is only recoverable by
+/// slicing the source at the token's span. Entry points must use
+/// `parse_with_state(input, &mut SimpleState(source))`; `parse()` no
+/// longer compiles (`SimpleState<&str>` has no `Default`), which keeps
+/// the two in lockstep.
+pub type ParserExtra<'tokens> =
+    extra::Full<Rich<'tokens, Token, ChumskySpan>, extra::SimpleState<&'tokens str>, ()>;
 
 /// Convert a Kestrel Span to a chumsky SimpleSpan
 ///
@@ -104,7 +113,8 @@ macro_rules! parse_and_emit {
         use ::chumsky::Parser as _;
         let prepared = $crate::input::prepare_tokens($tokens);
         let input = $crate::input::create_input(&prepared, $source.len());
-        let result = $parser.parse(input);
+        let mut state = ::chumsky::extra::SimpleState(&*$source);
+        let result = $parser.parse_with_state(input, &mut state);
         for error in result.errors() {
             $sink.error_from_rich(error);
         }

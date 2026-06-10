@@ -1130,7 +1130,7 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match pattern_parser().parse(input).into_result() {
+    match pattern_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result() {
         Ok(variant) => {
             emit_pattern_variant(sink, &variant);
         },

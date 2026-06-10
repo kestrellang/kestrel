@@ -345,7 +345,7 @@ mod emit_syntax_trait_tests {
         let prepared = prepare_tokens(tokens.into_iter());
         let input = create_input(&prepared, source.len());
         let data = struct_declaration_parser_internal()
-            .parse(input)
+            .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
             .into_output()
             .expect("struct should parse");
         let mut sink_trait = EventSink::new(0);
