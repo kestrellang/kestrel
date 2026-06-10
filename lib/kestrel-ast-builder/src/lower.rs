@@ -2173,6 +2173,7 @@ fn token_to_unary_op(kind: SyntaxKind) -> Option<UnaryOp> {
         SyntaxKind::Plus => Some(UnaryOp::Pos),
         SyntaxKind::DotDotLess => Some(UnaryOp::RangeUpTo),
         SyntaxKind::DotDotEquals => Some(UnaryOp::RangeThrough),
+        SyntaxKind::Ampersand => Some(UnaryOp::Borrow),
         _ => None,
     }
 }

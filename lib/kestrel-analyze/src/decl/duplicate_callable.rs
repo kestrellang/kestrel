@@ -29,7 +29,7 @@ use std::collections::HashMap;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, NodeKind};
 use kestrel_name_res::ConformingProtocols;
@@ -45,8 +45,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct DuplicateCallableAnalyzer;
 
 impl Describe for DuplicateCallableAnalyzer {
-    fn id(&self) -> &'static str {
-        "duplicate_callable"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DuplicateCallable
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -195,22 +195,14 @@ fn is_protocol_method_impl(cx: &DeclContext<'_>, name: &str, labels: &[Option<St
     for &proto in &protocols {
         // Search protocol's children for a matching method
         let candidates = if name == "init" {
-            cx.query
-                .children_of(proto)
-                .iter()
-                .filter(|&&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Initializer))
-                .copied()
-                .collect::<Vec<_>>()
+            util::children_of_kind(cx.query, proto, NodeKind::Initializer)
         } else {
-            cx.query
-                .children_of(proto)
-                .iter()
-                .filter(|&&c| {
-                    cx.query.get::<NodeKind>(c) == Some(&NodeKind::Function)
-                        && util::entity_name(cx.query, c) == name
-                })
-                .copied()
-                .collect::<Vec<_>>()
+            // entity_name (not the Name component) — keys for anonymous
+            // functions carry the "<anonymous>" fallback and must still match.
+            util::children_of_kind(cx.query, proto, NodeKind::Function)
+                .into_iter()
+                .filter(|&c| util::entity_name(cx.query, c) == name)
+                .collect()
         };
 
         for cand in candidates {

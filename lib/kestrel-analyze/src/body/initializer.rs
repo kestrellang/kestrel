@@ -71,7 +71,7 @@ use std::collections::HashSet;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, CstNode, InitEffect, NodeKind, Settable};
 use kestrel_hir::body::*;
@@ -113,8 +113,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct InitializerAnalyzer;
 
 impl Describe for InitializerAnalyzer {
-    fn id(&self) -> &'static str {
-        "initializer"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Initializer
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -146,10 +146,7 @@ impl BodyCheck for InitializerAnalyzer {
         let mut all_fields = HashSet::new();
         let mut let_fields = HashSet::new();
 
-        for &child in cx.query.children_of(parent) {
-            if !matches!(cx.query.get::<NodeKind>(child), Some(NodeKind::Field)) {
-                continue;
-            }
+        for child in util::children_of_kind(cx.query, parent, NodeKind::Field) {
             let name = util::entity_name(cx.query, child);
             // Skip computed properties — they have a Callable component (getter with receiver)
             if cx.query.get::<Callable>(child).is_some() {

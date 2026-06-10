@@ -48,6 +48,16 @@ pub enum MirTy {
         ret: TyId,
     },
 
+    /// Second-class reference `&T` / `&mutating T` (stage 1). Appears ONLY
+    /// on signatures (`FunctionDef.ret` / `MonoFunction.ret`) — never as a
+    /// `ValueDef.ty`: a ref-typed call result registers as an ordinary
+    /// `@guaranteed` value of the *pointee* type ("a borrowed param that
+    /// travels"). Layout is a pointer scalar.
+    Ref {
+        pointee: TyId,
+        mutating: bool,
+    },
+
     Error,
 }
 
@@ -132,6 +142,17 @@ impl TyArena {
     }
     pub fn named(&mut self, entity: Entity, type_args: Vec<TyId>) -> TyId {
         self.intern(MirTy::Named { entity, type_args })
+    }
+    pub fn ref_ty(&mut self, pointee: TyId, mutating: bool) -> TyId {
+        self.intern(MirTy::Ref { pointee, mutating })
+    }
+    /// The pointee of a `Ref`, or the type itself — signature consumers use
+    /// this to recover the value type a ref-typed return registers as.
+    pub fn peel_ref(&self, id: TyId) -> TyId {
+        match self.get(id) {
+            MirTy::Ref { pointee, .. } => *pointee,
+            _ => id,
+        }
     }
     pub fn error(&mut self) -> TyId {
         self.intern(MirTy::Error)

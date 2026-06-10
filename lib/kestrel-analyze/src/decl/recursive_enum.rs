@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{Callable, IsIndirect, NodeKind, TypeAnnotation};
@@ -34,8 +34,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct RecursiveEnumAnalyzer;
 
 impl Describe for RecursiveEnumAnalyzer {
-    fn id(&self) -> &'static str {
-        "recursive_enum"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::RecursiveEnum
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -97,10 +97,7 @@ fn find_recursive_case(
     target_enum: Entity,
     visited: &mut HashSet<Entity>,
 ) -> Option<RecursiveCase> {
-    for &child in cx.query.children_of(target_enum) {
-        if cx.query.get::<NodeKind>(child) != Some(&NodeKind::EnumCase) {
-            continue;
-        }
+    for child in util::children_of_kind(cx.query, target_enum, NodeKind::EnumCase) {
         let Some(callable) = cx.query.get::<Callable>(child) else {
             continue; // valueless case
         };
@@ -168,10 +165,7 @@ fn entity_contains(
     match kind {
         Some(NodeKind::Enum) => {
             // Walk enum case payloads
-            for &child in cx.query.children_of(entity) {
-                if cx.query.get::<NodeKind>(child) != Some(&NodeKind::EnumCase) {
-                    continue;
-                }
+            for child in util::children_of_kind(cx.query, entity, NodeKind::EnumCase) {
                 let Some(callable) = cx.query.get::<Callable>(child) else {
                     continue;
                 };
@@ -186,10 +180,7 @@ fn entity_contains(
         },
         Some(NodeKind::Struct) => {
             // Walk stored fields
-            for &child in cx.query.children_of(entity) {
-                if cx.query.get::<NodeKind>(child) != Some(&NodeKind::Field) {
-                    continue;
-                }
+            for child in util::children_of_kind(cx.query, entity, NodeKind::Field) {
                 // Skip computed properties (have a Callable for the getter)
                 if cx.query.get::<Callable>(child).is_some() {
                     continue;

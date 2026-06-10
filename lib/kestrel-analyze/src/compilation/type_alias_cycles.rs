@@ -40,7 +40,7 @@ use std::collections::HashSet;
 use crate::compilation::cycle_util::{Cycle, CycleDetector};
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
@@ -65,8 +65,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct TypeAliasCycleAnalyzer;
 
 impl Describe for TypeAliasCycleAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_alias_cycles"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeAliasCycles
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

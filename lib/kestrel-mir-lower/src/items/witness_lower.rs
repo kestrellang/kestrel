@@ -170,9 +170,9 @@ fn lower_witnesses_for_type(
         });
 
         let method_entries: Vec<(WitnessMethodKey, String, ProtocolMember)> = proto_members
-            .into_iter()
+            .iter()
             .flat_map(|m| {
-                let name = protocol_member_name(ctx, &m);
+                let name = protocol_member_name(ctx, m);
                 let labels = get_param_labels(ctx, m.entity).unwrap_or_default();
                 let mut entries = vec![(
                     WitnessMethodKey::new(name.clone(), labels.clone()),
@@ -184,7 +184,7 @@ fn lower_witnesses_for_type(
                     entries.push((
                         WitnessMethodKey::new(setter_name.clone(), labels.clone()),
                         setter_name,
-                        m,
+                        m.clone(),
                     ));
                 }
                 entries

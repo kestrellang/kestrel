@@ -65,7 +65,7 @@ use std::collections::HashSet;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
@@ -119,8 +119,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ClosureAnalyzer;
 
 impl Describe for ClosureAnalyzer {
-    fn id(&self) -> &'static str {
-        "closure"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Closure
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

@@ -19,7 +19,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{ExtensionTarget, NodeKind, TypeParams};
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
@@ -42,8 +42,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ExtensionValidationAnalyzer;
 
 impl Describe for ExtensionValidationAnalyzer {
-    fn id(&self) -> &'static str {
-        "extension_validation"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ExtensionValidation
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

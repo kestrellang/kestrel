@@ -69,7 +69,7 @@ pub async fn handle(
 
                 let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
                 let ctx = world.query_context();
-                let hir: HirBody = ctx.query(LowerBody {
+                let hir = ctx.query(LowerBody {
                     entity: body_entity,
                     root,
                 })?;

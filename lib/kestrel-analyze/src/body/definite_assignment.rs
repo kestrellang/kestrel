@@ -21,7 +21,7 @@ use std::collections::HashSet;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
@@ -37,8 +37,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct DefiniteAssignmentAnalyzer;
 
 impl Describe for DefiniteAssignmentAnalyzer {
-    fn id(&self) -> &'static str {
-        "definite_assignment"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DefiniteAssignment
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

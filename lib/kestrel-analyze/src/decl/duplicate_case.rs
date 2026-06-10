@@ -22,7 +22,7 @@ use std::collections::HashMap;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::NodeKind;
 use kestrel_span::Span;
@@ -37,8 +37,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct DuplicateCaseAnalyzer;
 
 impl Describe for DuplicateCaseAnalyzer {
-    fn id(&self) -> &'static str {
-        "duplicate_enum_case"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::DuplicateEnumCase
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -54,11 +54,7 @@ impl DeclCheck for DuplicateCaseAnalyzer {
         let mut seen: HashMap<String, Span> = HashMap::new();
         let mut diags = Vec::new();
 
-        for &child in cx.query.children_of(cx.entity) {
-            if !matches!(cx.query.get::<NodeKind>(child), Some(NodeKind::EnumCase)) {
-                continue;
-            }
-
+        for child in util::children_of_kind(cx.query, cx.entity, NodeKind::EnumCase) {
             let name = util::entity_name(cx.query, child);
             let span = util::entity_span(cx.query, child);
 

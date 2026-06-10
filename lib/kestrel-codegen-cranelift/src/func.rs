@@ -44,6 +44,16 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
     pub fn resolve_scalar(&mut self, builder: &mut FunctionBuilder, id: ValueId) -> Value {
         let val = self.get_value(builder, id);
         let vd = &self.body.values[id.index()];
+        // Ref is signature-only: ref-typed call results register as
+        // @guaranteed POINTEE values, so no ValueDef ever carries it. A Ref
+        // here would mean the load below derefs one level too many.
+        debug_assert!(
+            !matches!(
+                self.ctx.module.ty_arena.get(vd.ty),
+                kestrel_mir::MirTy::Ref { .. }
+            ),
+            "MirTy::Ref appeared as a value type in codegen"
+        );
         if vd.ownership == kestrel_mir::value::Ownership::Guaranteed {
             let repr = self
                 .ctx

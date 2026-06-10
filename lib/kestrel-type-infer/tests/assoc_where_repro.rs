@@ -63,7 +63,11 @@ fn method_under_kind(
     panic!("method {method} not found under any {container_kind:?}");
 }
 
-fn infer(ctx: &kestrel_hecs::QueryContext<'_>, root: Entity, m: Entity) -> TypedBody {
+fn infer(
+    ctx: &kestrel_hecs::QueryContext<'_>,
+    root: Entity,
+    m: Entity,
+) -> std::sync::Arc<TypedBody> {
     ctx.query(InferBody { entity: m, root })
         .expect("InferBody None")
 }

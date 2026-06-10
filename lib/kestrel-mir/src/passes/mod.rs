@@ -157,5 +157,9 @@ pub fn run_pipeline_until(
     // so this currently fails ~550 tests until the lowering's move/copy
     // decision is fixed to borrow/move those instead of copying.
     errors.extend(copy_check::check_copies(module));
+    // References stage 1: the root rule for ret_borrow functions — returned
+    // borrows must root at Param/Static/PointerDerived (user diagnostics
+    // E494-E496, not ICEs).
+    errors.extend(crate::verify::check_escapes(module));
     errors
 }

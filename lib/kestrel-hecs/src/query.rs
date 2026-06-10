@@ -1,6 +1,6 @@
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHasher};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -118,36 +118,36 @@ impl ErasedStore {
 }
 
 /// Type-erased memoization storage. Each query type Q gets its own
-/// `HashMap<Q, MemoEntry<Q::Output>>`.
+/// `FxHashMap<Q, MemoEntry<Q::Output>>`.
 pub(crate) struct QueryStorage {
-    stores: HashMap<TypeId, ErasedStore>,
+    stores: FxHashMap<TypeId, ErasedStore>,
     /// Type-erased verifiers keyed by QueryKey. Registered when a query
     /// is first computed. Called during dep verification to recursively
     /// check if sub-queries have changed.
-    verifiers: HashMap<QueryKey, VerifierFn>,
+    verifiers: FxHashMap<QueryKey, VerifierFn>,
 }
 
 impl QueryStorage {
     pub fn new() -> Self {
         Self {
-            stores: HashMap::new(),
-            verifiers: HashMap::new(),
+            stores: FxHashMap::default(),
+            verifiers: FxHashMap::default(),
         }
     }
 
     fn get_memo<Q: QueryFn>(&self, key: &Q) -> Option<&MemoEntry<Q::Output>> {
         self.stores
             .get(&TypeId::of::<Q>())
-            .and_then(|s| s.data.downcast_ref::<HashMap<Q, MemoEntry<Q::Output>>>())
+            .and_then(|s| s.data.downcast_ref::<FxHashMap<Q, MemoEntry<Q::Output>>>())
             .and_then(|map| map.get(key))
     }
 
     fn insert_memo<Q: QueryFn>(&mut self, key: Q, entry: MemoEntry<Q::Output>) {
         self.stores
             .entry(TypeId::of::<Q>())
-            .or_insert_with(|| ErasedStore::new(HashMap::<Q, MemoEntry<Q::Output>>::new()))
+            .or_insert_with(|| ErasedStore::new(FxHashMap::<Q, MemoEntry<Q::Output>>::default()))
             .data
-            .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
+            .downcast_mut::<FxHashMap<Q, MemoEntry<Q::Output>>>()
             .expect("type mismatch in query storage")
             .insert(key, entry);
     }
@@ -156,7 +156,7 @@ impl QueryStorage {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
             && let Some(map) = store
                 .data
-                .downcast_mut::<HashMap<Q, MemoEntry<Q::Output>>>()
+                .downcast_mut::<FxHashMap<Q, MemoEntry<Q::Output>>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;
@@ -312,26 +312,22 @@ impl<'a> QueryContext<'a> {
     /// Returns (value, changed_at). Does NOT record a dependency —
     /// the caller (query() or a verifier) handles that.
     fn ensure_fresh<Q: QueryFn>(&self, q: &Q, qk: &QueryKey) -> (Q::Output, Revision) {
-        // Phase 1: Check memo (borrow, clone what we need, drop borrow)
+        // Phase 1: Check memo. The fast path (already verified this revision)
+        // is by far the hottest, so return from it before cloning the deps
+        // vector — for widely-used queries deps can be long, and cloning it
+        // on every cache hit dominated batch-build profiles.
         let memo_info = {
             let storage = self.queries.borrow();
-            storage.get_memo::<Q>(q).map(|memo| {
-                (
-                    memo.value.clone(),
-                    memo.verified_at,
-                    memo.changed_at,
-                    memo.deps.clone(),
-                    memo.fingerprint,
-                )
-            })
+            match storage.get_memo::<Q>(q) {
+                Some(memo) if memo.verified_at >= self.revision => {
+                    return (memo.value.clone(), memo.changed_at);
+                },
+                Some(memo) => Some((memo.verified_at, memo.changed_at, memo.deps.clone())),
+                None => None,
+            }
         };
 
-        if let Some((value, verified_at, changed_at, deps, _fp)) = memo_info {
-            // Already verified this revision — fast path
-            if verified_at >= self.revision {
-                return (value, changed_at);
-            }
-
+        if let Some((verified_at, changed_at, deps)) = memo_info {
             // Tentatively mark as verified to break verification cycles.
             // If deps check fails, we'll re-execute and overwrite the memo.
             self.queries
@@ -340,7 +336,16 @@ impl<'a> QueryContext<'a> {
 
             // Check if all deps are still valid (may recursively verify sub-queries)
             if self.deps_unchanged(&deps, verified_at) {
-                return (value, changed_at);
+                // Memo still valid — clone the value only now; cloning it
+                // before verification would be wasted work whenever the
+                // deps turn out to be stale. The tentative verified-mark
+                // above guarantees a recursive verify of `q` couldn't have
+                // re-executed it, so the memo entry is still the same one.
+                let storage = self.queries.borrow();
+                if let Some(memo) = storage.get_memo::<Q>(q) {
+                    return (memo.value.clone(), changed_at);
+                }
+                // Memo unexpectedly gone — fall through to re-execute.
             }
 
             // Deps changed — fall through to re-execute
@@ -480,12 +485,12 @@ fn hierarchy_dep_type() -> TypeId {
 fn query_key<Q: QueryFn>(q: &Q) -> QueryKey {
     // Use TypeId bits as the type discriminant
     let type_id_hash = {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = FxHasher::default();
         TypeId::of::<Q>().hash(&mut h);
         h.finish()
     };
     let key_hash = {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = FxHasher::default();
         q.hash(&mut h);
         h.finish()
     };

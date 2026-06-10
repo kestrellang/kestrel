@@ -12,7 +12,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::resolve_name::{NameResolution, ResolveName};
+use crate::resolve_name::{find_assoc_type, NameResolution, ResolveName};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== TypeResolution =====
@@ -91,93 +91,117 @@ impl QueryFn for ResolveTypePath {
             }
         }
 
-        // Resolve first segment via name resolution
-        let first = &self.segments[0];
-        let result = ctx.query(ResolveName {
-            name: first.clone(),
-            context: self.context,
-            root: self.root,
-        });
-
-        let entity = match result {
-            NameResolution::Found(entities) => {
-                if self.segments.len() == 1 {
-                    // Single segment must be a type
-                    match find_type_entity(ctx, &entities) {
-                        Some(e) => return TypeResolution::Found(e),
-                        None => return TypeResolution::NotAType(entities[0]),
-                    }
-                } else {
-                    // Multi-segment: first can be a module or type, prefer types
-                    find_type_entity(ctx, &entities).unwrap_or(entities[0])
-                }
-            },
-            NameResolution::Ambiguous(entities) => {
-                if self.segments.len() == 1 {
-                    match find_type_entity(ctx, &entities) {
-                        Some(e) => return TypeResolution::Found(e),
-                        None => return TypeResolution::NotAType(entities[0]),
-                    }
-                } else {
-                    find_type_entity(ctx, &entities).unwrap_or(entities[0])
-                }
-            },
-            NameResolution::NotFound => {
-                return TypeResolution::NotFound(first.clone());
-            },
-        };
+        // Resolve first segment via name resolution; single-segment paths
+        // and lookup failures resolve fully here.
+        let mut current =
+            match resolve_first_segment(ctx, &self.segments, self.context, self.root) {
+                Ok(entity) => entity,
+                Err(resolution) => return resolution,
+            };
 
         // Multi-segment: walk remaining segments
-        let mut current = entity;
         for segment in &self.segments[1..] {
-            // Check if current is a type parameter — look for associated types
-            // in where-clause bounds (e.g. T.Item where T: Iterator)
-            if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter) {
-                if let Some(assoc) =
-                    resolve_type_param_assoc(ctx, current, segment, self.context, self.root)
-                {
-                    current = assoc;
-                    continue;
-                }
-                return TypeResolution::NotFound(segment.clone());
-            }
-
-            // Check if current is an associated type (TypeAlias in a protocol) —
-            // look for nested associated types via its bounds (e.g. T.Iter.Item)
-            if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
-                && let Some(assoc) =
-                    resolve_assoc_type_nested(ctx, current, segment, self.context, self.root)
-            {
-                current = assoc;
-                continue;
-            }
-            // Fall through to child walk — the alias might have children
-
-            // Otherwise walk children
-            let visible = ctx.query(VisibleChildrenByName {
-                parent: current,
-                name: segment.clone(),
-                context: self.context,
-            });
-
-            match find_type_entity(ctx, &visible) {
-                Some(e) => current = e,
-                None if visible.is_empty() => {
-                    return TypeResolution::NotFound(segment.clone());
-                },
-                None => {
-                    // Allow modules as intermediate segments (e.g. std.collections.Array)
-                    if ctx.get::<NodeKind>(visible[0]) == Some(&NodeKind::Module) {
-                        current = visible[0];
-                    } else {
-                        return TypeResolution::NotAType(visible[0]);
-                    }
-                },
-            }
+            current = match resolve_segment(ctx, current, segment, self.context, self.root) {
+                Ok(next) => next,
+                Err(resolution) => return resolution,
+            };
         }
 
         TypeResolution::Found(current)
     }
+}
+
+/// Resolve the first path segment via name resolution.
+///
+/// `Ok` is the entity to continue walking from; `Err` is the final
+/// `TypeResolution` to return early (single-segment paths and failures).
+fn resolve_first_segment(
+    ctx: &QueryContext<'_>,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+) -> Result<Entity, TypeResolution> {
+    let first = &segments[0];
+    let result = ctx.query(ResolveName {
+        name: first.clone(),
+        context,
+        root,
+    });
+
+    // Found and Ambiguous carry the same candidate list and are handled
+    // identically: type-preference picks the entity either way.
+    let entities = match result {
+        NameResolution::Found(entities) | NameResolution::Ambiguous(entities) => entities,
+        NameResolution::NotFound => return Err(TypeResolution::NotFound(first.clone())),
+    };
+
+    if segments.len() == 1 {
+        // Single segment must be a type
+        return Err(match find_type_entity(ctx, &entities) {
+            Some(e) => TypeResolution::Found(e),
+            None => TypeResolution::NotAType(entities[0]),
+        });
+    }
+
+    // Multi-segment: first can be a module or type, prefer types
+    Ok(find_type_entity(ctx, &entities).unwrap_or(entities[0]))
+}
+
+/// Resolve one path segment relative to `current`.
+///
+/// Order matters: type-param associated types (where-clause bounds) are
+/// checked before nested alias bounds, which fall through to the child walk.
+fn resolve_segment(
+    ctx: &QueryContext<'_>,
+    current: Entity,
+    segment: &str,
+    context: Entity,
+    root: Entity,
+) -> Result<Entity, TypeResolution> {
+    // Type parameter — look for associated types in where-clause bounds
+    // (e.g. T.Item where T: Iterator); no child-walk fallback.
+    if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeParameter) {
+        return resolve_type_param_assoc(ctx, current, segment, context, root)
+            .ok_or_else(|| TypeResolution::NotFound(segment.to_string()));
+    }
+
+    // Associated type (TypeAlias in a protocol) — look for nested associated
+    // types via its bounds (e.g. T.Iter.Item). On failure fall through to the
+    // child walk — the alias might have children.
+    if ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias)
+        && let Some(assoc) = resolve_assoc_type_nested(ctx, current, segment, context, root)
+    {
+        return Ok(assoc);
+    }
+
+    walk_children_for_segment(ctx, current, segment, context)
+}
+
+/// Walk `parent`'s visible children for `segment`: prefer a type entity,
+/// allow modules as intermediate segments (e.g. std.collections.Array),
+/// otherwise fail with NotFound/NotAType.
+fn walk_children_for_segment(
+    ctx: &QueryContext<'_>,
+    parent: Entity,
+    segment: &str,
+    context: Entity,
+) -> Result<Entity, TypeResolution> {
+    let visible = ctx.query(VisibleChildrenByName {
+        parent,
+        name: segment.to_string(),
+        context,
+    });
+
+    if let Some(e) = find_type_entity(ctx, &visible) {
+        return Ok(e);
+    }
+    if visible.is_empty() {
+        return Err(TypeResolution::NotFound(segment.to_string()));
+    }
+    if ctx.get::<NodeKind>(visible[0]) == Some(&NodeKind::Module) {
+        return Ok(visible[0]);
+    }
+    Err(TypeResolution::NotAType(visible[0]))
 }
 
 /// Find the first entity in the list that is a type (has Typed marker
@@ -266,7 +290,7 @@ fn try_resolve_self_via_extension_target(
     for segment in &segments[1..] {
         // Check if resolved is a protocol — look for associated types
         if ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol)
-            && let Some(assoc) = crate::resolve_name::find_assoc_type(ctx, resolved, segment)
+            && let Some(assoc) = find_assoc_type(ctx, resolved, segment)
         {
             resolved = assoc;
             continue;
@@ -598,17 +622,6 @@ fn is_type_param_name(ctx: &QueryContext<'_>, entity: Entity, name: &str) -> boo
     } else {
         false
     }
-}
-
-/// Find an associated type (TypeAlias child) in a protocol by name.
-fn find_assoc_type(ctx: &QueryContext<'_>, protocol: Entity, name: &str) -> Option<Entity> {
-    ctx.children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && ctx.get::<Name>(child).is_some_and(|n| n.0 == name)
-        })
-        .copied()
 }
 
 /// Find an associated type in a protocol's inherited (parent) protocols.

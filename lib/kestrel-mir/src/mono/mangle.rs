@@ -156,6 +156,17 @@ fn mangle_type(
             mangle_type(arena, entity_names, inner, out);
         },
 
+        // `R`/`Rm` must stay distinct from both `P` (Pointer) and the bare
+        // pointee mangle: `-> &T` and `-> T` are different ABIs.
+        MirTy::Ref { pointee, mutating } => {
+            let pointee = *pointee;
+            out.push('R');
+            if *mutating {
+                out.push('m');
+            }
+            mangle_type(arena, entity_names, pointee, out);
+        },
+
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();

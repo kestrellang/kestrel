@@ -36,9 +36,11 @@
 //!
 //! **Notes:** "value was moved in one branch but not another"
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
+use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
     WhereConstraint,
@@ -56,7 +58,7 @@ use kestrel_type_infer::result::ResolvedTy;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -83,8 +85,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct MoveTrackingAnalyzer;
 
 impl Describe for MoveTrackingAnalyzer {
-    fn id(&self) -> &'static str {
-        "move_tracking"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::MoveTracking
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -725,101 +727,81 @@ fn local_is_non_copyable(mcx: &MoveCtx<'_>, local: LocalId) -> bool {
     !ty_is_copyable(mcx, ty)
 }
 
-/// Per-instantiation copy semantics of a resolved type, mirroring
-/// `kestrel_semantics::hir_type_copy_semantics` on `ResolvedTy`. Both Copyable
-/// and Cloneable are duplicable (a use copies/clones, never moves); only
-/// `NotCopyable` forces a move.
-fn resolved_ty_copy_semantics(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> CopySemantics {
-    match ty {
-        ResolvedTy::Named { entity, args } => nominal_instance_copy_semantics(mcx, *entity, args),
-        ResolvedTy::SelfType { entity } => {
-            mcx.cx
-                .query
-                .query(NominalCopySemantics {
-                    entity: *entity,
-                    root: mcx.cx.root,
-                })
-                .semantics
-        },
-        ResolvedTy::Param { entity } => match mcx.cx.query.query(TypeParamCopyRequirement {
-            param: *entity,
-            context: mcx.cx.entity,
-            root: mcx.cx.root,
-        }) {
-            CopyRequirement::RequiresCloneable => CopySemantics::Cloneable,
-            CopyRequirement::RequiresCopyable => CopySemantics::Copyable,
-            CopyRequirement::MayBeNonCopyable => CopySemantics::NotCopyable,
-        },
-        ResolvedTy::Tuple(elems) => fold_elem_copy_semantics(mcx, elems),
-        // Assoc projections are Copyable-by-default (matches
-        // `hir_type_copy_semantics`); functions/never/error are pointer-like.
-        _ => CopySemantics::Copyable,
-    }
+/// `CopyLayer` over `ResolvedTy` — the move checker's hooks into the shared
+/// decision tree (`kestrel_copy_fold::instance_semantics`, the single source
+/// of truth for per-instantiation copy semantics across semantics / solver /
+/// analyze / MIR). Layer-specific plumbing: the body owner (`mcx.cx.entity`)
+/// scopes type-param bound lookups.
+struct MoveCopyLayer<'a, 'b> {
+    mcx: &'a MoveCtx<'b>,
 }
 
-/// Copy semantics of a concrete nominal instance `entity[args]`, folding a
-/// conditional `Copyable where …` conformance over the gating arg positions.
-/// Mirrors `kestrel_semantics::nominal_instance_copy_semantics`.
-fn nominal_instance_copy_semantics(
-    mcx: &MoveCtx<'_>,
-    entity: Entity,
-    args: &[ResolvedTy],
-) -> CopySemantics {
-    let base = mcx
-        .cx
-        .query
-        .query(NominalCopySemantics {
+impl CopyLayer for MoveCopyLayer<'_, '_> {
+    type Ty = ResolvedTy;
+    type Sem = CopySemantics;
+
+    fn base_semantics(&self, entity: Entity) -> CopySemantics {
+        self.mcx
+            .cx
+            .query
+            .query(NominalCopySemantics {
+                entity,
+                root: self.mcx.cx.root,
+            })
+            .semantics
+    }
+
+    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+        Cow::Owned(self.mcx.cx.query.query(ConditionalCopyableParams {
             entity,
-            root: mcx.cx.root,
-        })
-        .semantics;
-    if base != CopySemantics::NotCopyable {
-        return base;
+            root: self.mcx.cx.root,
+        }))
     }
-    // A `not Copyable` base may still be conditionally Copyable per-instantiation.
-    let positions = mcx.cx.query.query(ConditionalCopyableParams {
-        entity,
-        root: mcx.cx.root,
-    });
-    if positions.is_empty() {
-        return CopySemantics::NotCopyable;
+
+    fn sem_from_class(&self, _: Entity, class: CopySemantics) -> CopySemantics {
+        class
     }
-    let mut saw_cloneable = false;
-    for pos in positions {
-        // A missing gating arg means the instance can't be proven Copyable.
-        let Some(arg) = args.get(pos) else {
-            return CopySemantics::NotCopyable;
-        };
-        match resolved_ty_copy_semantics(mcx, arg) {
-            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
-            CopySemantics::Cloneable => saw_cloneable = true,
-            CopySemantics::Copyable => {},
+
+    fn member_semantics(&self, ty: &ResolvedTy) -> CopySemantics {
+        match ty {
+            ResolvedTy::Named { entity, args } => instance_semantics(self, *entity, args),
+            // No per-instantiation refinement for Self (current behavior).
+            ResolvedTy::SelfType { entity } => self.base_semantics(*entity),
+            // HOOK: body-owner context scopes the bound lookup.
+            ResolvedTy::Param { entity } => self
+                .mcx
+                .cx
+                .query
+                .query(TypeParamCopyRequirement {
+                    param: *entity,
+                    context: self.mcx.cx.entity,
+                    root: self.mcx.cx.root,
+                })
+                .into(),
+            ResolvedTy::Tuple(elems) => fold_members(elems.iter().map(|e| self.member_semantics(e))),
+            // Assoc projections are Copyable-by-default (matches
+            // `hir_type_copy_semantics`); functions/opaque/never/error are
+            // pointer-like / recovery — all Copyable. Explicit so a future
+            // ResolvedTy variant forces a decision here.
+            // A ref (stage 1) is a borrow: copying it duplicates the pointer,
+            // never the pointee — Copyable, the same answer nightly's old
+            // catch-all gave.
+            ResolvedTy::AssocProjection { .. }
+            | ResolvedTy::Function { .. }
+            | ResolvedTy::Opaque { .. }
+            | ResolvedTy::Never
+            | ResolvedTy::Ref { .. }
+            | ResolvedTy::Error => CopySemantics::Copyable,
         }
-    }
-    if saw_cloneable {
-        CopySemantics::Cloneable
-    } else {
-        CopySemantics::Copyable
     }
 }
 
-/// Fold copy semantics across aggregate members / gating args: any
-/// `NotCopyable` → `NotCopyable`, else any `Cloneable` → `Cloneable`, else
-/// `Copyable`.
-fn fold_elem_copy_semantics(mcx: &MoveCtx<'_>, elems: &[ResolvedTy]) -> CopySemantics {
-    let mut saw_cloneable = false;
-    for elem in elems {
-        match resolved_ty_copy_semantics(mcx, elem) {
-            CopySemantics::NotCopyable => return CopySemantics::NotCopyable,
-            CopySemantics::Cloneable => saw_cloneable = true,
-            CopySemantics::Copyable => {},
-        }
-    }
-    if saw_cloneable {
-        CopySemantics::Cloneable
-    } else {
-        CopySemantics::Copyable
-    }
+/// Per-instantiation copy semantics of a resolved type, the analyze face of
+/// `kestrel_copy_fold::instance_semantics`. Both Copyable and Cloneable are
+/// duplicable (a use copies/clones, never moves); only `NotCopyable` forces a
+/// move.
+fn resolved_ty_copy_semantics(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> CopySemantics {
+    MoveCopyLayer { mcx }.member_semantics(ty)
 }
 
 fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
@@ -1103,16 +1085,8 @@ fn find_protocol_method(
     protocol: Entity,
     method_name: &str,
 ) -> Option<Entity> {
-    cx.query
-        .children_of(protocol)
-        .iter()
-        .find(|&&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::Function)
-                && cx
-                    .query
-                    .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == method_name)
-        })
+    util::children_named_of_kind(cx.query, protocol, method_name, NodeKind::Function)
+        .first()
         .copied()
 }
 

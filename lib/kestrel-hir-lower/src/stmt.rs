@@ -70,7 +70,7 @@ impl LowerCtx<'_> {
         value: Option<ExprId>,
         span: &Span,
     ) -> HirStmtId {
-        let lowered_ty = ty.map(|t| self.lower_type(t));
+        let lowered_ty = ty.map(|t| self.lower_type_in(t, crate::ty::RefPosition::Binding));
         let lowered_value = value.map(|v| self.lower_expr(body, v));
 
         // Check if pattern is a simple binding

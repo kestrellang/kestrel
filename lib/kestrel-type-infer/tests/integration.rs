@@ -62,13 +62,13 @@ fn find_function(
     find_child(ctx, module, NodeKind::Function, func_name)
 }
 
-/// Infer types for a function and return the TypedBody.
+/// Infer types for a function and return the TypedBody (Arc-shared query output).
 fn infer_func(
     ctx: &kestrel_hecs::QueryContext<'_>,
     root: Entity,
     module_name: &str,
     func_name: &str,
-) -> TypedBody {
+) -> std::sync::Arc<TypedBody> {
     let func = find_function(ctx, root, module_name, func_name);
     ctx.query(InferBody { entity: func, root })
         .unwrap_or_else(|| panic!("InferBody returned None for {}.{}", module_name, func_name))

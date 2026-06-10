@@ -104,3 +104,13 @@ double-freed any heap member (crashed bootstrapped `flock` on
 `Optional[(String, Int64)]`). Tests stayed green because they used string
 *literals* — only **heap** strings corrupt malloc, so a correctness suite that
 doesn't allocate won't catch this class. See [[tuple_drop_copy_elaboration_gap]].
+
+## Copy semantics: never re-implement the fold
+
+The copy-semantics decision tree lives in `kestrel-copy-fold`
+(`instance_semantics` / `fold_members`); this crate's `MirCopyLayer`
+(ty_query.rs) and `MonoCopyLayer` (mono/mod.rs) are adapters. Never
+re-implement the gating fold in a pass; tuple folds inline the canonical rule
+only to keep their native `Clone` payload. Any deliberate divergence must
+carry a `TODO(copy-drift #n)` comment at its classifier arm — never converge
+or introduce one silently.

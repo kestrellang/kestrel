@@ -265,6 +265,8 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::MethodNotCalled { .. } => "MethodNotCalled",
         InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
         InferError::ConventionMismatch { .. } => "ConventionMismatch",
+        InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
+        InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
     }
 }
 
@@ -407,6 +409,12 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::ConventionMismatch { .. } => {
             format!("ConventionMismatch at {}:{}", span.file_id, span.start)
+        },
+        InferError::RefFunctionAsValue { .. } => {
+            format!("RefFunctionAsValue at {}:{}", span.file_id, span.start)
+        },
+        InferError::RefInTypeArgument { .. } => {
+            format!("RefInTypeArgument at {}:{}", span.file_id, span.start)
         },
     }
 }

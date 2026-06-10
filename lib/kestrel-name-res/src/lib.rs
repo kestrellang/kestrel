@@ -17,6 +17,7 @@ pub mod resolve_name;
 pub mod resolve_type;
 pub mod resolve_value;
 pub mod scope;
+pub mod traversal;
 pub mod type_members;
 pub mod visibility;
 
@@ -27,7 +28,8 @@ pub use conformances::{
 };
 pub use extensions::{ExtensionTargetEntity, ExtensionsFor, ResolvedExtensionTarget};
 pub use protocol_members::{
-    ProtocolAssociatedTypes, ProtocolMember, ProtocolMembers, ProtocolMembersByName,
+    ProtocolAssociatedTypes, ProtocolMember, ProtocolMemberMap, ProtocolMembers,
+    ProtocolMembersByName,
 };
 pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
 pub use resolve_module::{ResolveModulePath, StdModules};
@@ -35,5 +37,8 @@ pub use resolve_name::{NameResolution, ResolveName};
 pub use resolve_type::{ResolveTypePath, TypeResolution};
 pub use resolve_value::{ResolveValuePath, ValueResolution};
 pub use scope::{Scope, ScopeFor};
-pub use type_members::{TypeMember, TypeMemberSource, TypeMembers, TypeMembersByName};
+pub use traversal::MemberMap;
+pub use type_members::{
+    TypeMember, TypeMemberMap, TypeMemberSource, TypeMembers, TypeMembersByName,
+};
 pub use visibility::{IsVisibleFrom, VisibleChildrenByName};

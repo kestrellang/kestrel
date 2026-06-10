@@ -7,7 +7,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[];
@@ -15,8 +15,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[];
 pub struct ExtensionConflictAnalyzer;
 
 impl Describe for ExtensionConflictAnalyzer {
-    fn id(&self) -> &'static str {
-        "extension_conflict_decl_stub"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ExtensionConflictDeclStub
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

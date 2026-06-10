@@ -75,7 +75,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use kestrel_hir::body::{
     EscapeError, EscapeErrorKind, HirExpr, HirLiteral, HirPat, UnicodeEscapeErrorReason,
 };
@@ -134,8 +134,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct StringEscapeAnalyzer;
 
 impl Describe for StringEscapeAnalyzer {
-    fn id(&self) -> &'static str {
-        "string_escape"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::StringEscape
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

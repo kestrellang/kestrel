@@ -12,7 +12,7 @@
 use crate::context::DeclContext;
 use crate::decl::extern_ffi_safe::is_ffi_safe;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Callable, Name, NodeKind};
 use kestrel_hir::builtin::Builtin;
@@ -29,8 +29,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ProtocolFieldConformanceAnalyzer;
 
 impl Describe for ProtocolFieldConformanceAnalyzer {
-    fn id(&self) -> &'static str {
-        "protocol_field_conformance"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ProtocolFieldConformance
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -61,13 +61,7 @@ impl DeclCheck for ProtocolFieldConformanceAnalyzer {
 
         // Check each field's type conforms to FFISafe
         let mut bad_fields = Vec::new();
-        for &child in cx.query.children_of(cx.entity) {
-            let Some(kind) = cx.query.get::<NodeKind>(child) else {
-                continue;
-            };
-            if *kind != NodeKind::Field {
-                continue;
-            }
+        for child in util::children_of_kind(cx.query, cx.entity, NodeKind::Field) {
             // Skip computed properties — only stored fields affect layout
             if cx.query.has::<Callable>(child) {
                 continue;

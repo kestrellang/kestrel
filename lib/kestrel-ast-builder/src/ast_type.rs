@@ -163,6 +163,20 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
         SyntaxKind::TyUnit => Some(AstType::Unit(span)),
         SyntaxKind::TyNever => Some(AstType::Never(span)),
         SyntaxKind::TyInferred => Some(AstType::Inferred(span)),
+        // The `mutating` token of `&mutating T` lives inside the atomic
+        // TyMutRef node (never at TyList level), so the positional
+        // `mutating`-scan in the TyFunction arm above cannot see it.
+        SyntaxKind::TyRef | SyntaxKind::TyMutRef => {
+            let inner = node
+                .children()
+                .find(|c| is_type_node(c.kind()))
+                .and_then(|c| ast_type_from_cst(&c, file_id))?;
+            Some(AstType::Ref {
+                inner: Box::new(inner),
+                mutating: node.kind() == SyntaxKind::TyMutRef,
+                span,
+            })
+        },
         SyntaxKind::TySome => {
             let bounds: Vec<AstType> = node
                 .children()
@@ -202,6 +216,8 @@ pub(crate) fn is_type_node(kind: SyntaxKind) -> bool {
             | SyntaxKind::TyNever
             | SyntaxKind::TyInferred
             | SyntaxKind::TySome
+            | SyntaxKind::TyRef
+            | SyntaxKind::TyMutRef
     )
 }
 

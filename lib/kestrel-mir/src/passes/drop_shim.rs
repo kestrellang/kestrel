@@ -9,7 +9,7 @@ use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
 use crate::terminator::{SwitchArm, Terminator, TerminatorKind};
 use crate::ty::{MirTy, ParamConvention};
-use crate::value::{Ownership, ValueDef};
+use crate::value::{Ownership, RootProvenance, ValueDef};
 use crate::{DropBehavior, FieldIdx, Immediate, MirModule, TyId};
 
 /// Synthesize `__drop$T` functions for all types that need cleanup.
@@ -234,6 +234,7 @@ fn generate_struct_shim(
             ty: field_def.ty,
             ownership,
             borrow_source: None,
+            root: RootProvenance::derived(),
             span: None,
         }));
     }
@@ -427,6 +428,7 @@ fn generate_enum_shim(
                 ty: pf.ty,
                 ownership,
                 borrow_source: None,
+                root: RootProvenance::derived(),
                 span: None,
             }));
         }

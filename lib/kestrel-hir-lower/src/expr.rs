@@ -1318,7 +1318,10 @@ impl LowerCtx<'_> {
                 // and the body lowers the param as a by-reference place.
                 let param_is_mut = is_mut || p.is_mut;
                 let local = self.define_local(&name, param_is_mut, span.clone());
-                let ty = p.ty.as_ref().map(|t| self.lower_type(t));
+                let ty = p
+                    .ty
+                    .as_ref()
+                    .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));
 
                 let pattern = if needs_desugar {
                     // Lower the pattern (creates locals for bindings)

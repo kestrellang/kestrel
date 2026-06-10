@@ -19,7 +19,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use kestrel_ast_builder::Vis;
 use kestrel_type_infer::error::InferError;
 
@@ -33,8 +33,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct TypeCheckAnalyzer;
 
 impl Describe for TypeCheckAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_check"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeCheck
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -236,6 +236,15 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         InferError::ConventionMismatch { .. } => (
             format!("convention mismatch: {}", detail),
             "mutating closure not allowed here".into(),
+        ),
+        InferError::RefFunctionAsValue { .. } => (
+            "a reference-returning function cannot be used as a value".into(),
+            "call it instead; its return convention is not expressible in a function type"
+                .into(),
+        ),
+        InferError::RefInTypeArgument { .. } => (
+            "a reference cannot be a generic type argument".into(),
+            "bind the value first (`let x = ...`) to store an owned copy".into(),
         ),
         InferError::FromHir { .. } => unreachable!("filtered above"),
     }

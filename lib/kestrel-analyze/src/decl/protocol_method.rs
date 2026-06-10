@@ -19,7 +19,7 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{Body, NodeKind, Valued};
 
@@ -33,8 +33,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ProtocolMethodAnalyzer;
 
 impl Describe for ProtocolMethodAnalyzer {
-    fn id(&self) -> &'static str {
-        "protocol_method"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ProtocolMethod
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -51,11 +51,7 @@ impl DeclCheck for ProtocolMethodAnalyzer {
         let mut diags = Vec::new();
 
         // Iterate children looking for Function entities with bodies
-        for &child in cx.query.children_of(cx.entity) {
-            if !matches!(cx.query.get::<NodeKind>(child), Some(NodeKind::Function)) {
-                continue;
-            }
-
+        for child in util::children_of_kind(cx.query, cx.entity, NodeKind::Function) {
             // Check if this method has a body or computed value
             let has_body =
                 cx.query.get::<Body>(child).is_some() || cx.query.get::<Valued>(child).is_some();

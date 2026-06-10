@@ -78,4 +78,14 @@ pub enum HirTy {
     Infer(Span),
     /// Error recovery
     Error(Span),
+    /// Reference type: `&T` / `&mutating T` (stage 0.5: parsed everywhere,
+    /// accepted nowhere). INVARIANT: never survives HIR lowering — every
+    /// occurrence is rewritten to `Error` with a diagnostic by
+    /// `reject_ref_types` at the lowering-query boundaries, so type
+    /// inference and MIR never see it.
+    Ref {
+        inner: Box<HirTy>,
+        mutating: bool,
+        span: Span,
+    },
 }

@@ -25,7 +25,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 
@@ -39,8 +39,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct RefutablePatternAnalyzer;
 
 impl Describe for RefutablePatternAnalyzer {
-    fn id(&self) -> &'static str {
-        "refutable_pattern"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::RefutablePattern
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

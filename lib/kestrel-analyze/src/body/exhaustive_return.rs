@@ -24,7 +24,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
@@ -41,8 +41,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct ExhaustiveReturnAnalyzer;
 
 impl Describe for ExhaustiveReturnAnalyzer {
-    fn id(&self) -> &'static str {
-        "exhaustive_return"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ExhaustiveReturn
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

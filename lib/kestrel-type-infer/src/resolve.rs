@@ -1998,10 +1998,16 @@ impl WorldResolver<'_> {
         protocols
     }
 
-    /// Copy-semantics of a resolved `TyKind`, mirroring `hir_type_copy_semantics`
-    /// in kestrel-semantics. Used to answer Copyable/Cloneable conformance
-    /// structurally (those are not declared conformances). Nested args are
-    /// `TyVar`s the resolver cannot resolve, but the entity-based queries
+    /// Copy-semantics of a resolved `TyKind`. DELIBERATE NON-MEMBER of the
+    /// shared decision tree in `kestrel-copy-fold` (`instance_semantics`):
+    /// this variant is intentionally permissive and arg-independent — no
+    /// `ConditionalCopyableParams` fold, `Tuple → Copyable`, `AssocProjection
+    /// → NotCopyable` — because it answers a different question ("could this
+    /// structurally conform; never block the resolver"), not the
+    /// per-instantiation classification. Unifying it would change resolver
+    /// behavior. Used to answer Copyable/Cloneable conformance structurally
+    /// (those are not declared conformances). Nested args are `TyVar`s the
+    /// resolver cannot resolve, but the entity-based queries
     /// (`NominalCopySemantics`, `TypeParamCopyRequirement`) don't need them —
     /// a struct/enum's copy-semantics is a function of its declared fields, and
     /// invariant 1 prevents instantiating a default-param container with a
@@ -2041,9 +2047,12 @@ impl WorldResolver<'_> {
             // Tuple elements aren't resolvable here; Function/Never/Error and
             // reducible aliases never block a Copyable bound. Permissive — the
             // MIR layer is element-aware for the cases that matter.
+            // Ref: never a stored value (decay copies the POINTEE; the copy
+            // guards judge that copy) — permissive like the others.
             TyKind::Tuple(_)
             | TyKind::Function { .. }
             | TyKind::TypeAlias { .. }
+            | TyKind::Ref { .. }
             | TyKind::Never
             | TyKind::Error => CopySemantics::Copyable,
         }

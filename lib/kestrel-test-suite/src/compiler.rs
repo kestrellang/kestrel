@@ -91,12 +91,18 @@ impl TestCompiler {
         // Ensure inference has run (triggers lex/parse/infer diagnostics)
         self.infer();
 
+        // Run analyzers BEFORE snapshotting codespan diagnostics: analyzers
+        // may force lowering queries (e.g. the stage-0.5 ref rejection on a
+        // field no body touches) whose accumulated codespan diagnostics
+        // would otherwise be dropped.
+        let analyze_summary = self.analyze();
+
         let mut result = Vec::new();
 
         // Collect sources for byte-offset-to-line resolution
         let sources = self.source_map();
 
-        // Codespan diagnostics (lex + parse + infer)
+        // Codespan diagnostics (lex + parse + infer + analyzer-forced lowering)
         let codespan_diags = self.compiler.diagnostics();
         result.extend(from_codespan_diagnostics(&codespan_diags, &sources));
 
@@ -107,7 +113,6 @@ impl TestCompiler {
         //     analyzer both independently emit "cannot find type 'X' in this scope"
         //     for the same unresolved annotation; the codespan version appends a
         //     label suffix (": not found (failed at 'X')"), so prefix-match catches it.
-        let analyze_summary = self.analyze();
         let analyzer_diags: Vec<_> = analyze_summary
             .diagnostics
             .iter()
@@ -128,6 +133,29 @@ impl TestCompiler {
             }
         }
 
+        // MIR-stage diagnostics (escape check E494-E496, ref-across-merge
+        // E497): the MIR pipeline never ran for diagnostics tests before, so
+        // these were invisible. Run lowering only when the front end is clean
+        // (error-recovery HIR would ICE-spam) and append only CODED
+        // diagnostics — uncoded verify errors are ICEs, not an annotatable
+        // surface (and lower_to_mir suppresses them as cascade noise anyway).
+        let front_end_clean = !result.iter().any(|d| d.severity == TestSeverity::Error);
+        if front_end_clean {
+            let before = self.compiler.diagnostics();
+            let _ = self.compiler.lower_to_mir();
+            let new: Vec<_> = self
+                .compiler
+                .diagnostics()
+                .into_iter()
+                .filter(|d| !before.contains(d))
+                .collect();
+            result.extend(
+                from_codespan_diagnostics(&new, &sources)
+                    .into_iter()
+                    .filter(|d| d.code.is_some()),
+            );
+        }
+
         result
     }
 
@@ -139,10 +167,15 @@ impl TestCompiler {
             .map_err(|e| format!("MIR lowering failed: {e}"))
     }
 
-    /// Compile, link, and run. Returns the run result.
+    /// Compile, link, and run on the env-default backend.
     pub fn run(&self) -> Result<RunResult, String> {
+        self.run_on(runner::Backend::default_from_env())
+    }
+
+    /// Compile, link, and run on a specific backend (`// backends:` trials).
+    pub fn run_on(&self, backend: runner::Backend) -> Result<RunResult, String> {
         self.infer();
-        runner::compile_and_run(&self.compiler)
+        runner::compile_and_run(&self.compiler, backend)
     }
 
     /// Access the underlying compiler.

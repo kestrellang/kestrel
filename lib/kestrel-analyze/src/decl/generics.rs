@@ -68,7 +68,7 @@ use std::collections::HashMap;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
@@ -125,8 +125,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct GenericsAnalyzer;
 
 impl Describe for GenericsAnalyzer {
-    fn id(&self) -> &'static str {
-        "generics"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::Generics
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -207,8 +207,8 @@ fn check_duplicate_type_params(
 pub struct TypeArgArityAnalyzer;
 
 impl Describe for TypeArgArityAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_arg_arity"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeArgArity
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         &DESCRIPTORS[4..5] // E438

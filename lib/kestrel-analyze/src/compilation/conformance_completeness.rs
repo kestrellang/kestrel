@@ -34,7 +34,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
@@ -120,8 +120,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct ConformanceCompletenessAnalyzer;
 
 impl Describe for ConformanceCompletenessAnalyzer {
-    fn id(&self) -> &'static str {
-        "conformance_completeness"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::ConformanceCompleteness
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -266,7 +266,7 @@ fn check_protocol_requirements(
         .map(|member| member.entity)
         .collect();
 
-    for member in &members {
+    for member in members.iter() {
         if member.extension.is_some() {
             continue;
         }
@@ -602,10 +602,8 @@ fn collect_declared_associated_types(
         return;
     }
 
-    for &child in cx.query.children_of(protocol) {
-        if cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-            && cx.query.get::<QualifiedTarget>(child).is_none()
-        {
+    for child in util::children_of_kind(cx.query, protocol, NodeKind::TypeAlias) {
+        if cx.query.get::<QualifiedTarget>(child).is_none() {
             out.push((child, protocol));
         }
     }
@@ -720,35 +718,27 @@ fn find_type_alias_binding(
     type_entity: Entity,
     assoc_name: &str,
 ) -> Option<Entity> {
-    // Search direct children
-    for &child in cx.query.children_of(type_entity) {
-        if cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-            && cx
-                .query
-                .get::<Name>(child)
-                .is_some_and(|n| n.0 == assoc_name)
-            && cx.query.get::<TypeAnnotation>(child).is_some()
-        {
-            return Some(child);
-        }
+    // Search direct children, then extensions. Only aliases with a concrete
+    // RHS (TypeAnnotation) bind.
+    let bound_alias = |child: &Entity| cx.query.get::<TypeAnnotation>(*child).is_some();
+    let direct =
+        util::children_named_of_kind(cx.query, type_entity, assoc_name, NodeKind::TypeAlias)
+            .into_iter()
+            .find(|c| bound_alias(c));
+    if direct.is_some() {
+        return direct;
     }
 
-    // Search extensions
     let extensions = cx.query.query(ExtensionsFor {
         target: type_entity,
         root: cx.root,
     });
     for ext in &extensions {
-        for &child in cx.query.children_of(*ext) {
-            if cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && cx
-                    .query
-                    .get::<Name>(child)
-                    .is_some_and(|n| n.0 == assoc_name)
-                && cx.query.get::<TypeAnnotation>(child).is_some()
-            {
-                return Some(child);
-            }
+        let found = util::children_named_of_kind(cx.query, *ext, assoc_name, NodeKind::TypeAlias)
+            .into_iter()
+            .find(|c| bound_alias(c));
+        if found.is_some() {
+            return found;
         }
     }
     None
@@ -791,17 +781,9 @@ fn find_protocol_extension_assoc_binding(
             root: cx.root,
         });
         for ext in extensions {
-            for &child in cx.query.children_of(ext) {
-                if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
-                    continue;
-                }
-                if cx
-                    .query
-                    .get::<Name>(child)
-                    .is_none_or(|name| name.0 != assoc_name)
-                {
-                    continue;
-                }
+            for child in
+                util::children_named_of_kind(cx.query, ext, assoc_name, NodeKind::TypeAlias)
+            {
                 let Some(ann) = cx.query.get::<TypeAnnotation>(child) else {
                     continue;
                 };
@@ -1238,16 +1220,8 @@ fn find_associated_type_binding_entity(
     // that would otherwise apply to any conformed protocol.
     let mut fallback: Option<Entity> = None;
     for &entity in &search {
-        for &child in cx.query.children_of(entity) {
-            if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
-                continue;
-            }
-            let Some(name) = cx.query.get::<Name>(child) else {
-                continue;
-            };
-            if name.0 != assoc_name {
-                continue;
-            }
+        for child in util::children_named_of_kind(cx.query, entity, assoc_name, NodeKind::TypeAlias)
+        {
             if cx.query.get::<TypeAnnotation>(child).is_none() {
                 continue;
             }
@@ -1400,10 +1374,7 @@ fn member_lookup_name(cx: &CompilationContext<'_>, entity: Entity) -> Option<Str
 
 /// Check if an entity has a TypeAlias child with the given name (regardless of binding).
 fn has_type_alias_by_name(cx: &CompilationContext<'_>, entity: Entity, name: &str) -> bool {
-    cx.query.children_of(entity).iter().any(|&child| {
-        cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-            && cx.query.get::<Name>(child).is_some_and(|n| n.0 == name)
-    })
+    !util::children_named_of_kind(cx.query, entity, name, NodeKind::TypeAlias).is_empty()
 }
 
 struct ProvidedMembers {
@@ -1508,7 +1479,7 @@ fn collect_provided_members_for_conformance(
     // rebuild them for every extension on the same protocol.
     let mut subs_cache: HashMap<Entity, HashMap<Entity, ResolvedTy>> = HashMap::new();
 
-    for member in candidates {
+    for member in candidates.iter() {
         if let TypeMemberSource::ProtocolExtension {
             protocol,
             extension,
@@ -1862,10 +1833,7 @@ fn check_ambiguous_method_satisfaction(
             // declaration exactly once.
             let mut matching_protocols: Vec<Entity> = Vec::new();
             for &proto in &conforming {
-                for &child in cx.query.children_of(proto) {
-                    if cx.query.get::<NodeKind>(child) != Some(&NodeKind::Function) {
-                        continue;
-                    }
+                for child in util::children_of_kind(cx.query, proto, NodeKind::Function) {
                     let Some(child_name) = member_lookup_name(cx, child) else {
                         continue;
                     };

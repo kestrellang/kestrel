@@ -125,7 +125,7 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 // Fall back to "inferred type of the expression at the cursor".
                 let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
                 let ctx = world.query_context();
-                let hir: HirBody = ctx.query(LowerBody {
+                let hir = ctx.query(LowerBody {
                     entity: body_entity,
                     root,
                 })?;

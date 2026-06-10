@@ -88,6 +88,22 @@ Fixed at the source. When you see `resolve_expr_type` → `Error` for a
 well-typed program, look upstream first rather than reconstructing the type
 from HIR here.
 
+## Callee facts at call seams — entity-keyed queries, never `module.functions`
+
+When emitting a call and you need a fact about the **callee** (return
+convention, ref-return-ness, PointerDerived wrapper status, …), derive it
+from an entity-keyed front-end query (`CallableRefReturn`,
+`RetRefPointerDerived`, …), **never** from
+`self.ctx.module.functions.get(callee)`. `FunctionDef`s fill the module
+incrementally as declarations lower, so a def lookup silently returns
+`None` for any callee whose defining file lowers later — and `and_then`
+chains turn that into a wrong-but-well-typed answer, not an error.
+Historical instance: `array.ks` lowers before `pointer.ks`, so
+`Pointer.value` calls inside `Array.at` found no def, fell back to a
+value-convention result, and the returned ref became a false E494.
+Looking up **your own** function's def (e.g. the `ret_borrow` prologue
+check) is safe — it is registered before its body lowers.
+
 ## var_locals
 
 `var_locals` are mutable locals stored at stack addresses via `uninit` +

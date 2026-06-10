@@ -23,17 +23,21 @@ What this crate does **not** do: method/field resolution, overload resolution, t
 | Type | Description |
 |------|-------------|
 | `LowerCtx` | Lowering context: arenas, scope stack, current entity, references |
-| `LowerBody` | Query: entity → `HirBody` (main entry point) |
+| `LowerBody` | Query: entity → `Arc<HirBody>` (main entry point) |
 | `LowerTypeAnnotation` | Query: entity → `HirTy` (type annotation lowering) |
-| `LowerCallableTypes` | Query: entity → params + return type |
+| `LowerCallableTypes` | Query: entity → per-param annotation types |
+| `LowerCallableReturnType` | Query: callable entity → declared return type |
+| `LowerExtensionTargetTypeArgs` | Query: extension entity → target type args |
 
 ## Queries
 
 | Query | Input | Output |
 |-------|-------|--------|
-| `LowerBody` | Entity with `Valued` component | `HirBody` (expressions, statements, patterns, locals) |
+| `LowerBody` | Entity with `Valued` component | `Option<Arc<HirBody>>` (expressions, statements, patterns, locals; Arc-wrapped so memo cache hits share one allocation) |
 | `LowerTypeAnnotation` | Entity with `TypeAnnotation` component | `HirTy` |
-| `LowerCallableTypes` | Entity with `Callable` component | Parameter types + return type |
+| `LowerCallableTypes` | Entity with `Callable` component | Parameter types, `None` per unannotated param |
+| `LowerCallableReturnType` | Callable entity | `HirTy` — explicit `-> T` if annotated, else unit `()` (the single fallback rule; initializers count as unit) |
+| `LowerExtensionTargetTypeArgs` | Entity with `ExtensionTarget` component | Target type args as `HirTy` (`Some(vec![])` when none; excess args beyond target arity become `HirTy::Error`, left to E453) |
 
 ## Module Map
 

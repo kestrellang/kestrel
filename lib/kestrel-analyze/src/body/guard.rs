@@ -21,7 +21,7 @@
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
-use crate::traits::{BodyCheck, Describe};
+use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
 
@@ -35,8 +35,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct GuardDivergenceAnalyzer;
 
 impl Describe for GuardDivergenceAnalyzer {
-    fn id(&self) -> &'static str {
-        "guard_divergence"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::GuardDivergence
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS

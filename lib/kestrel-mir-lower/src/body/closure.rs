@@ -32,7 +32,7 @@ use kestrel_mir::body::OssaBody;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir::item::struct_def::{FieldDef, StructDef};
-use kestrel_mir::value::{Ownership, ValueDef};
+use kestrel_mir::value::{Ownership, RootProvenance, ValueDef};
 use kestrel_mir::{FieldIdx, Immediate, MirTy, Op, ParamConvention, TyId, ValueId};
 use kestrel_type_infer::captures::{CaptureKind, CapturedPlace};
 
@@ -63,6 +63,11 @@ struct SavedState {
     /// it must be swapped out for the closure's separate arena (otherwise a
     /// stale forwarding entry resolves into the wrong arena: out-of-bounds).
     value_forwarding: HashMap<ValueId, ValueId>,
+    /// ret_borrow is per-body: a closure can never ret_borrow (E491), so it
+    /// lowers with `false` and the parent's flag is restored after.
+    ret_borrow: bool,
+    /// Per-body value ids — same swap rationale as `value_forwarding`.
+    ref_results: std::collections::HashSet<ValueId>,
 }
 
 impl OssaBodyCtx<'_, '_> {
@@ -188,7 +193,8 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Env param is the first ValueId (index 0) in the closure body
-        let env_val = closure_body.alloc_value(ValueDef::owned(env_ty));
+        let env_val =
+            closure_body.alloc_value(ValueDef::owned(env_ty).with_root(RootProvenance::Param(0)));
         func_def.params.push(ParamDef::new(
             "env",
             env_val,
@@ -219,8 +225,10 @@ impl OssaBodyCtx<'_, '_> {
                         ty,
                         ownership: Ownership::Guaranteed,
                         borrow_source: None,
+                        root: RootProvenance::Param((i + 1) as u32),
                         span: None,
                     });
+                    closure_body.value_names.insert(val, name.clone());
                     func_def
                         .params
                         .push(ParamDef::new(name, val, ty, ParamConvention::MutBorrow));
@@ -229,7 +237,9 @@ impl OssaBodyCtx<'_, '_> {
                 _ => {
                     // Consuming (default) / Borrow: keep the @owned SSA binding
                     // (unchanged from pre-#106 behavior).
-                    let val = closure_body.alloc_value(ValueDef::owned(ty));
+                    let val = closure_body
+                        .alloc_value(ValueDef::owned(ty).with_root(RootProvenance::Param((i + 1) as u32)));
+                    closure_body.value_names.insert(val, name.clone());
                     func_def
                         .params
                         .push(ParamDef::new(name, val, ty, ParamConvention::Consuming));
@@ -256,6 +266,8 @@ impl OssaBodyCtx<'_, '_> {
             temp_counter: self.temp_counter,
             body_context: std::mem::replace(&mut self.body_context, super::BodyContext::Normal),
             value_forwarding: mem::take(&mut self.value_forwarding),
+            ret_borrow: mem::replace(&mut self.ret_borrow, false),
+            ref_results: mem::take(&mut self.ref_results),
         };
         self.current_block = Some(entry_block);
         self.temp_counter = 0;
@@ -343,6 +355,8 @@ impl OssaBodyCtx<'_, '_> {
         self.temp_counter = saved.temp_counter;
         self.body_context = saved.body_context;
         self.value_forwarding = saved.value_forwarding;
+        self.ret_borrow = saved.ret_borrow;
+        self.ref_results = saved.ref_results;
 
         // Attach body and register function
         func_def.body = Some(completed_body);

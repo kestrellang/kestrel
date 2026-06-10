@@ -16,7 +16,7 @@
 
 use crate::context::CompilationContext;
 use crate::diagnostic::*;
-use crate::traits::{CompilationCheck, Describe};
+use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
@@ -32,8 +32,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 pub struct TypeAnnotationResolutionAnalyzer;
 
 impl Describe for TypeAnnotationResolutionAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_annotation_resolution"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeAnnotationResolution
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -74,6 +74,18 @@ fn walk_entity(
         // Resolve context: use the entity itself so its own type params are in scope.
         // ResolveName walks up the hierarchy, so parent/ancestor names are also found.
         check_ast_type(cx, &ann.0, entity, diags);
+
+        // Stage 0.5: reference types are rejected at HIR lowering, but
+        // nothing forces lowering for unused decls (e.g. a field of a
+        // struct no body touches). Force the (memoized) lowering query —
+        // only when a ref is actually present, so no other annotation
+        // gains a new lowering trigger.
+        if crate::util::ast_contains_ref(&ann.0) {
+            let _ = cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity,
+                root: cx.root,
+            });
+        }
     }
 
     for &child in cx.query.children_of(entity) {
@@ -157,7 +169,12 @@ fn check_ast_type(
                 check_ast_type(cx, b, context, diags);
             }
         },
+        // Reference types — recurse into the pointee
+        AstType::Ref { inner, .. } => {
+            check_ast_type(cx, inner, context, diags);
+        },
         // Unit, Never, Inferred — no type references to check
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }
 }
+

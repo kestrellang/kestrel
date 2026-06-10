@@ -60,3 +60,12 @@ mapping lives in name-res `ExtensionTargetEntity` (`AstType::Unit`/`Never`) and
 mir-lower `try_lang_primitive` (entity → `Tuple([])` / `Never` / `I64`) — **all
 sites must agree**, so when you add a new Entity-keyed conformance/member path,
 add the mapping too.
+
+## Copy semantics: never re-implement the fold
+
+The copy-semantics decision tree lives in `kestrel-copy-fold`
+(`instance_semantics` / `fold_members`); this crate's `SolverCopyLayer`
+(solver.rs) is one adapter. Never re-implement the gating fold or the tuple
+fold in solver code. Any deliberate divergence from the kernel rule must carry
+a `TODO(copy-drift #n)` comment at its classifier arm — never converge or
+introduce one silently.

@@ -139,6 +139,23 @@ impl LowerCtx<'_> {
             return self.lower_expr(body, operand);
         }
 
+        // Prefix `&` parses (for recovery) but is never a valid expression:
+        // borrowing is decided by the callee's signature, not the call site.
+        if *op == UnaryOp::Borrow {
+            self.lower_expr(body, operand); // still lower for downstream diags
+            self.ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E488")
+                    .with_message("borrow expressions are not written; the signature decides")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec![
+                        "a parameter `x: T` already borrows; `mutating x: T` mutably borrows"
+                            .to_string(),
+                    ]),
+            );
+            return self.alloc_expr(HirExpr::Error { span: span.clone() });
+        }
+
         let lowered_operand = self.lower_expr(body, operand);
 
         if let Some((proto, method)) = lookup_unary_op(op)
@@ -226,7 +243,12 @@ impl LowerCtx<'_> {
         // Detected shapes are syntactic; deeper validity (mutability of the
         // resolved binding) is checked later by the assignment analyzer once
         // the desugared `addAssign` is treated as a write to its receiver.
-        if !ast_is_place_expr(body, lhs) {
+        // Call-shaped LHS is admitted TENTATIVELY: a call returning
+        // `&mutating T` (`arr.mutableAt(index: i) += v`) is a writable place,
+        // but only the typed layer can tell it apart from a temporary — the
+        // assignment analyzer rejects the non-ref ones.
+        let call_shaped = matches!(&body.exprs[lhs], AstExpr::Call { .. });
+        if !ast_is_place_expr(body, lhs) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_message("left-hand side of compound assignment is not assignable")
@@ -1329,6 +1351,7 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::Pos => "+",
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
+        UnaryOp::Borrow => "&",
     }
 }
 

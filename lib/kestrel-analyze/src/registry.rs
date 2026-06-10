@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::traits::{BodyCheck, CompilationCheck, DeclCheck};
+use crate::traits::{AnalyzerId, BodyCheck, CompilationCheck, DeclCheck};
 
 /// Registry of all analyzers, organized by granularity.
 pub struct AnalyzerRegistry {
@@ -42,17 +42,17 @@ impl AnalyzerRegistry {
     }
 
     /// Look up a body check by analyzer ID.
-    pub fn find_body_check(&self, id: &str) -> Option<&Arc<dyn BodyCheck>> {
+    pub fn find_body_check(&self, id: AnalyzerId) -> Option<&Arc<dyn BodyCheck>> {
         self.body_checks.iter().find(|a| a.id() == id)
     }
 
     /// Look up a decl check by analyzer ID.
-    pub fn find_decl_check(&self, id: &str) -> Option<&Arc<dyn DeclCheck>> {
+    pub fn find_decl_check(&self, id: AnalyzerId) -> Option<&Arc<dyn DeclCheck>> {
         self.decl_checks.iter().find(|a| a.id() == id)
     }
 
     /// Look up a compilation check by analyzer ID.
-    pub fn find_compilation_check(&self, id: &str) -> Option<&Arc<dyn CompilationCheck>> {
+    pub fn find_compilation_check(&self, id: AnalyzerId) -> Option<&Arc<dyn CompilationCheck>> {
         self.compilation_checks.iter().find(|a| a.id() == id)
     }
 }

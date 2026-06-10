@@ -408,6 +408,12 @@ fn ty(t: &AstType) -> String {
             let b: Vec<_> = bounds.iter().map(ty).collect();
             format!("some {}", b.join(" and "))
         },
+        AstType::Ref {
+            inner, mutating, ..
+        } => {
+            let kw = if *mutating { "&mutating " } else { "&" };
+            format!("{kw}{}", ty(inner))
+        },
     }
 }
 

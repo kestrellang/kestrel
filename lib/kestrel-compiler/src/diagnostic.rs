@@ -294,6 +294,26 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     Label::primary(file_id, range)
                         .with_message("mutating closure not allowed here"),
                 ]),
+            InferError::RefFunctionAsValue { .. } => Diagnostic::error()
+                .with_code("E491")
+                .with_message("a reference-returning function cannot be used as a value")
+                .with_labels(vec![Label::primary(file_id, range).with_message(
+                    "call it instead — `-> &T` is a return convention, not part of a \
+                     function type",
+                )])
+                .with_notes(vec![
+                    "capturing or storing it would erase the ret_borrow calling convention"
+                        .into(),
+                ]),
+            InferError::RefInTypeArgument { .. } => Diagnostic::error()
+                .with_code("E492")
+                .with_message("a reference cannot be a generic type argument")
+                .with_labels(vec![Label::primary(file_id, range).with_message(
+                    "this would store the reference; references are second-class",
+                )])
+                .with_notes(vec![
+                    "bind the value first (`let x = ...;`) to store an owned copy".into(),
+                ]),
         }
     }
 }
@@ -317,6 +337,21 @@ pub fn mir_verify_error_to_diagnostic(
     world: &World,
 ) -> Diagnostic<usize> {
     let span = resolve_span(error.span.as_ref(), error.entity, world);
+
+    // Coded errors (escape check E494-E496) are user diagnostics, not ICEs.
+    if let Some(diag) = &error.diag {
+        let mut labels = vec![Label::primary(span.file_id, span.range())];
+        if let Some((sec_span, sec_msg)) = &diag.secondary {
+            labels.push(
+                Label::secondary(sec_span.file_id, sec_span.range()).with_message(sec_msg),
+            );
+        }
+        return Diagnostic::error()
+            .with_code(diag.code)
+            .with_message(&error.message)
+            .with_labels(labels)
+            .with_notes(diag.notes.clone());
+    }
 
     let location = match error.inst {
         Some(i) => format!(" at bb{}[{}]", error.block.index(), i),

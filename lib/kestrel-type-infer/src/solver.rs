@@ -7,6 +7,8 @@
 //! 4. Report any unresolved generic type parameters at call sites
 //! 5. Report any remaining unsolved constraints as errors
 
+use std::borrow::Cow;
+
 use crate::constraint::{CallArg, Constraint, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
@@ -14,14 +16,14 @@ use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 use kestrel_ast_builder::arg_binding::{BindError, BindParam, Binding, bind_arguments};
 use kestrel_ast_builder::{Callable, InitEffect, Intrinsic, Name, NodeKind, TypeParams};
+use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopyRequirement, CopySemantics, NominalCopySemantics,
-    TypeParamCopyRequirement,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, TypeParamCopyRequirement,
 };
 use kestrel_span::Span;
 
@@ -84,6 +86,14 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // `report_and_poison`) before the generic "could not infer type" fallback
     // gets a chance to eat them.
     report_unsolved(ctx);
+
+    // Phase 5.25 (stage-1 references): refs are second-class — legal only as
+    // the TOP-LEVEL type of an expression. A ref nested in a generic arg or
+    // tuple leaked through inference (E492, e.g. `[box.peek()]` →
+    // `Array[&T]`); a function type carrying a ref return is a non-callee
+    // use of a ret_borrow function (E491 — the convention is not
+    // expressible in function types).
+    validate_ref_placement(ctx, hir);
 
     // Phase 4.5: report any expression or local whose TyVar stayed unresolved.
     // These slots would otherwise surface as `MirTy::Error` downstream and
@@ -313,6 +323,7 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
             TySlot::Resolved(TyKind::Function { params, ret, .. }) => {
                 params.iter().any(|&param| walk(ctx, param, seen)) || walk(ctx, *ret, seen)
             },
+            TySlot::Resolved(TyKind::Ref { pointee, .. }) => walk(ctx, *pointee, seen),
             TySlot::Resolved(TyKind::AssocProjection { base, .. }) => walk(ctx, *base, seen),
             TySlot::Resolved(TyKind::Opaque {
                 bounds,
@@ -370,6 +381,90 @@ fn expr_span(expr: &HirExpr) -> &Span {
 /// Run rounds until no progress, with a safety cap to prevent unbounded spins
 /// from misbehaving constraint interactions (e.g. reducible types that keep
 /// marking "progress" without actually converging).
+/// Where a ref was found relative to the expression's type root.
+#[derive(Clone, Copy, PartialEq)]
+enum RefPos {
+    Top,
+    Nested,
+    InFn,
+}
+
+/// Depth-first search for an illegally-placed `TyKind::Ref` in a type tree.
+/// Returns the violating position, or None. A Top-level ref is legal (the
+/// ref-returning call result itself); its pointee subtree is searched as
+/// Nested.
+fn find_ref_violation(
+    ctx: &InferCtx<'_>,
+    tv: TyVar,
+    pos: RefPos,
+    seen: &mut std::collections::HashSet<TyVar>,
+) -> Option<RefPos> {
+    let r = ctx.resolve(tv);
+    if !seen.insert(r) {
+        return None;
+    }
+    let kind = match ctx.slot(r) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => return None,
+    };
+    match kind {
+        TyKind::Ref { pointee, .. } => {
+            if pos == RefPos::Top {
+                find_ref_violation(ctx, pointee, RefPos::Nested, seen)
+            } else {
+                Some(pos)
+            }
+        },
+        TyKind::Struct { args, .. }
+        | TyKind::Enum { args, .. }
+        | TyKind::Protocol { args, .. }
+        | TyKind::TypeAlias { args, .. } => args
+            .iter()
+            .find_map(|&a| find_ref_violation(ctx, a, RefPos::Nested, seen)),
+        TyKind::Tuple(elems) => elems
+            .iter()
+            .find_map(|&e| find_ref_violation(ctx, e, RefPos::Nested, seen)),
+        TyKind::Function { params, ret, .. } => params
+            .iter()
+            .chain(std::iter::once(&ret))
+            .find_map(|&p| find_ref_violation(ctx, p, RefPos::InFn, seen)),
+        TyKind::AssocProjection { base, .. } => {
+            find_ref_violation(ctx, base, RefPos::Nested, seen)
+        },
+        TyKind::Opaque {
+            bounds,
+            origin_args,
+            ..
+        } => bounds
+            .iter()
+            .flat_map(|(_, args)| args.iter())
+            .chain(origin_args.iter())
+            .find_map(|&a| find_ref_violation(ctx, a, RefPos::Nested, seen)),
+        _ => None,
+    }
+}
+
+/// Stage-1 second-class enforcement over the solved expression types.
+fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    let entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> =
+        ctx.expr_types.iter().map(|(k, v)| (*k, *v)).collect();
+    for (expr_id, tv) in entries {
+        if ctx.direct_callee_exprs.contains(&expr_id) {
+            continue;
+        }
+        let mut seen = std::collections::HashSet::new();
+        let Some(pos) = find_ref_violation(ctx, tv, RefPos::Top, &mut seen) else {
+            continue;
+        };
+        let span = expr_span(&hir.exprs[expr_id]).clone();
+        let err = match pos {
+            RefPos::InFn => InferError::RefFunctionAsValue { span },
+            _ => InferError::RefInTypeArgument { span },
+        };
+        ctx.report_error(err);
+    }
+}
+
 fn fixpoint(ctx: &mut InferCtx<'_>) {
     const MAX_ROUNDS: usize = 256;
     for _ in 0..MAX_ROUNDS {
@@ -1314,6 +1409,80 @@ fn solve_coerce(
         }
         return SolveResult::Solved;
     }
+
+    // Stage-1 transparent place: the two ref coercion arms, BEFORE the unify
+    // attempt (unify(unresolved_from, Ref_to) would bind the body var to the
+    // ref wholesale).
+    //
+    // 1. `to` is a ref — only reachable from return-position coercion (params
+    //    never carry ref types; E480 is permanent). From-ref: §10.1's one-way
+    //    `&mutating → &` plus pointee unification. From non-ref/unresolved:
+    //    the return-position implicit borrow — body exprs type as `T`; the
+    //    borrow is MIR's, the escape checker judges the root.
+    if let TySlot::Resolved(TyKind::Ref {
+        pointee: tp,
+        mutating: tm,
+    }) = ctx.slot(tr)
+    {
+        let (tp, tm) = (*tp, *tm);
+        match ctx.slot(fr) {
+            TySlot::Resolved(TyKind::Ref {
+                pointee: fp,
+                mutating: fm,
+            }) => {
+                let (fp, fm) = (*fp, *fm);
+                // Equal mutability, or mut→shared decay. Shared→mutating is
+                // the const-cast mismatch.
+                if fm == tm || (fm && !tm) {
+                    return match unify::unify(ctx, fp, tp) {
+                        Ok(()) => SolveResult::Solved,
+                        Err(_) => SolveResult::Error(mismatch_error(ctx, to, from, span)),
+                    };
+                }
+                return SolveResult::Error(mismatch_error(ctx, to, from, span));
+            },
+            TySlot::Resolved(_) => {
+                // Return-position implicit borrow: a `T`-typed body expr
+                // satisfies `-> &T`; the borrow is MIR's, the escape checker
+                // judges the root.
+                return match unify::unify(ctx, from, tp) {
+                    Ok(()) => SolveResult::Solved,
+                    Err(_) => SolveResult::Error(mismatch_error(ctx, to, from, span)),
+                };
+            },
+            TySlot::Unresolved { literal: Some(_) } => {
+                // A literal can never be a pending ref-call result, so pin it
+                // to the POINTEE now (deferring would strand it: in no-stdlib
+                // bodies defaulting can't rescue it and the retry would
+                // bottom out against the whole `&T`).
+                return match unify::unify(ctx, from, tp) {
+                    Ok(()) => SolveResult::Solved,
+                    Err(_) => SolveResult::Error(mismatch_error(ctx, to, from, span)),
+                };
+            },
+            _ => {
+                // Unresolved source: WAIT. Eagerly unifying with the pointee
+                // would pin a ref-returning call's pending result var to the
+                // pointee and break its in-flight `result = &T` binding
+                // (order-fragile).
+                return SolveResult::Deferred(Constraint::Coerce {
+                    from,
+                    to,
+                    expr,
+                    span,
+                });
+            },
+        }
+    }
+    // 2. `from` is a ref, `to` is not — copy-out DECAY (binding decay,
+    //    consuming args, assignment RHS, return-of-T): the value read is of
+    //    the POINTEE type; continue the whole coercion (incl. FromValue
+    //    promotion — a promotion reads the place) with the pointee.
+    if let TySlot::Resolved(TyKind::Ref { pointee: fp, .. }) = ctx.slot(fr) {
+        let fp = *fp;
+        return solve_coerce(ctx, fp, to, expr, span);
+    }
+
     // Try unification first (handles the common case)
     match unify::unify(ctx, from, to) {
         Ok(()) => return SolveResult::Solved,
@@ -1484,12 +1653,24 @@ fn solve_conforms(
             poison_ty_on_failure,
         }),
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
+        // Transparent place: a ref conforms as its POINTEE — protocol
+        // dispatch through `&T` (for-in's Iterable bound, operator
+        // protocols) borrows the place.
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            let pointee = *pointee;
+            SolveResult::Deferred(Constraint::Conforms {
+                ty: pointee,
+                protocol,
+                span,
+                poison_ty_on_failure,
+            })
+        },
         TySlot::Resolved(_) => {
             // Per-instantiation Copyable/Cloneable: evaluate conditional
             // `extend X: Copyable where T: Copyable` against the resolved type
             // args, so `Box[Int]` is Copyable while `Box[File]` is move-only.
             let conforms = if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
-                type_conforms_copyable(ctx, resolved, want_cloneable, 0)
+                type_conforms_copyable(ctx, resolved, want_cloneable)
             } else {
                 let kind = match ctx.slot(resolved) {
                     TySlot::Resolved(k) => k.clone(),
@@ -1581,121 +1762,125 @@ pub(crate) fn copyable_builtin_kind(ctx: &InferCtx<'_>, protocol: Entity) -> Opt
     None
 }
 
-/// Per-instantiation Copyable/Cloneable check. Evaluates conditional
+/// `CopyLayer` over `TyVar` — the solver's hooks into the shared decision tree
+/// (`kestrel_copy_fold::instance_semantics`, the single source of truth for
+/// per-instantiation copy semantics across semantics / solver / analyze /
+/// MIR). Layer-specific plumbing: the recursion-depth bookkeeping threaded
+/// through `member_semantics`.
+struct SolverCopyLayer<'a, 'i> {
+    ctx: &'a InferCtx<'i>,
+    depth: u32,
+}
+
+impl CopyLayer for SolverCopyLayer<'_, '_> {
+    type Ty = TyVar;
+    type Sem = CopySemantics;
+
+    fn base_semantics(&self, entity: Entity) -> CopySemantics {
+        // Plain NominalCopySemantics query (no cycle guard needed mid-inference).
+        let sem = self
+            .ctx
+            .query_ctx
+            .query(NominalCopySemantics {
+                entity,
+                root: self.ctx.root,
+            })
+            .semantics;
+        kestrel_debug::ktrace!("copyable", "nominal {:?} sem={:?}", entity, sem);
+        sem
+    }
+
+    fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
+        Cow::Owned(self.ctx.query_ctx.query(ConditionalCopyableParams {
+            entity,
+            root: self.ctx.root,
+        }))
+    }
+
+    fn sem_from_class(&self, _: Entity, class: CopySemantics) -> CopySemantics {
+        class
+    }
+
+    fn member_semantics(&self, &tv: &TyVar) -> CopySemantics {
+        // Depth bookkeeping = layer plumbing.
+        solver_copy_class(self.ctx, tv, self.depth + 1)
+    }
+}
+
+/// Per-instantiation Copyable/Cloneable classification. Evaluates conditional
 /// `extend X: Copyable where T: Copyable` conformances against the resolved
-/// type args, recursing into args / tuple elements, so `Box[Int]` is Copyable
-/// while `Box[File]` is move-only. `want_cloneable` selects the Cloneable
-/// (`true`) vs Copyable (`false`) question.
-fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool, depth: u32) -> bool {
+/// type args (via `kestrel_copy_fold::instance_semantics`), recursing into
+/// args / tuple elements, so `Box[Int]` is Copyable while `Box[File]` is
+/// move-only. Answer-equivalent to the former boolean `want_cloneable`
+/// recursion: per node, `(conforms(Copyable), conforms(Cloneable)) ==
+/// (class != NotCopyable, class == Cloneable)` — the "never block" arms
+/// return `Cloneable` so BOTH questions pass.
+///
+/// WARNING: `Cloneable` from the never-block arms (unresolved vars,
+/// `TyKind::Error`, the depth guard) is a stand-in for "don't block the
+/// solver", not a real classification. Consume only via
+/// `type_conforms_copyable`; reading the class directly for clone-vs-bitcopy
+/// decisions or diagnostics would inherit a wrong answer.
+fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics {
     if depth > 64 {
-        return true; // recursion guard — never block
+        return CopySemantics::Cloneable; // recursion guard — never block (both questions)
     }
     let resolved = ctx.resolve(tv);
     let kind = match ctx.slot(resolved) {
         TySlot::Resolved(k) => k.clone(),
-        _ => return true, // unresolved / error: never block
+        _ => return CopySemantics::Cloneable, // unresolved: never block (both questions)
     };
     match kind {
-        TyKind::Error => true,
+        TyKind::Error => CopySemantics::Cloneable, // never block (both questions)
         TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
-            nominal_conforms_copyable(ctx, entity, &args, want_cloneable, depth)
+            instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &args)
         },
+        // Empty args: a gated base folds to NotCopyable, as today.
         TyKind::SelfType { entity } => {
-            nominal_conforms_copyable(ctx, entity, &[], want_cloneable, depth)
+            instance_semantics(&SolverCopyLayer { ctx, depth }, entity, &[])
         },
+        // HOOK: structural parent context scopes the bound lookup.
         TyKind::Param { entity } => {
             let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
-            match ctx.query_ctx.query(TypeParamCopyRequirement {
-                param: entity,
-                context,
-                root: ctx.root,
-            }) {
-                CopyRequirement::RequiresCloneable => true,
-                CopyRequirement::RequiresCopyable => !want_cloneable,
-                CopyRequirement::MayBeNonCopyable => false,
-            }
+            ctx.query_ctx
+                .query(TypeParamCopyRequirement {
+                    param: entity,
+                    context,
+                    root: ctx.root,
+                })
+                .into()
         },
-        TyKind::Tuple(elems) => elems
-            .iter()
-            .all(|&e| type_conforms_copyable(ctx, e, want_cloneable, depth + 1)),
+        // Canonical fold (copy-drift #2 resolved 2026-06-10): a mixed tuple
+        // like `(Int64, RcBox)` is Cloneable — it satisfies `T: Copyable` AND
+        // `T: Cloneable` bounds (MIR already clone-elaborates its copies).
+        // `()` folds to Copyable, no longer vacuously Cloneable.
+        TyKind::Tuple(elems) => {
+            fold_members(elems.iter().map(|&e| solver_copy_class(ctx, e, depth + 1)))
+        },
+        // A ref in copy position decays to its pointee — judge the pointee.
+        TyKind::Ref { pointee, .. } => solver_copy_class(ctx, pointee, depth + 1),
         // Mirror `hir_type_copy_semantics`: protocol existentials / `some P` /
-        // functions are Copyable; an abstract associated projection is not
-        // known-copyable.
+        // functions are Copyable (not known Cloneable).
         TyKind::Protocol { .. }
         | TyKind::Opaque { .. }
         | TyKind::Function { .. }
         | TyKind::Never
-        | TyKind::TypeAlias { .. } => !want_cloneable,
+        | TyKind::TypeAlias { .. } => CopySemantics::Copyable,
         // Associated projection (`I.Item`) is Copyable-by-default (implicit
         // bound), like a type param — matches `hir_type_copy_semantics` and MIR
         // `ty_query`. Not known to be Cloneable, so only satisfies Copyable.
-        TyKind::AssocProjection { .. } => !want_cloneable,
+        TyKind::AssocProjection { .. } => CopySemantics::Copyable,
     }
 }
 
-/// Copyability of `entity[args]`: the generic classification, refined by a
-/// conditional `extend entity: Copyable/Cloneable where ...` evaluated against
-/// `args` when the base is `not Copyable`.
-fn nominal_conforms_copyable(
-    ctx: &InferCtx<'_>,
-    entity: Entity,
-    args: &[TyVar],
-    want_cloneable: bool,
-    depth: u32,
-) -> bool {
-    let sem = ctx
-        .query_ctx
-        .query(NominalCopySemantics {
-            entity,
-            root: ctx.root,
-        })
-        .semantics;
-    kestrel_debug::ktrace!(
-        "copyable",
-        "nominal {:?} args={:?} sem={:?} want_cloneable={}",
-        entity,
-        args,
-        sem,
-        want_cloneable
-    );
-    match sem {
-        // Cloneable ⟹ satisfies both Cloneable and Copyable.
+/// Boundary mapping from the tri-state classifier to the solver's boolean
+/// conformance question — sole caller is `solve_conforms`. `want_cloneable`
+/// selects the Cloneable (`true`) vs Copyable (`false`) question.
+fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool) -> bool {
+    match solver_copy_class(ctx, tv, 0) {
+        CopySemantics::NotCopyable => false,
         CopySemantics::Cloneable => true,
         CopySemantics::Copyable => !want_cloneable,
-        CopySemantics::NotCopyable => {
-            // A `not Copyable` base may still be *conditionally* Copyable via
-            // `extend X: Copyable where T: Copyable`. The gating positions come
-            // from the shared `ConditionalCopyableParams` query — the same
-            // source MIR `copy_behavior` and the semantics layer use, so all
-            // three agree per-instantiation.
-            let positions = ctx.query_ctx.query(ConditionalCopyableParams {
-                entity,
-                root: ctx.root,
-            });
-            if positions.is_empty() {
-                return false;
-            }
-            // Copyable: every gating arg must itself be Copyable.
-            let all_copyable = positions.iter().all(|&pos| {
-                args.get(pos)
-                    .is_some_and(|&arg| type_conforms_copyable(ctx, arg, false, depth + 1))
-            });
-            if !all_copyable {
-                return false;
-            }
-            if !want_cloneable {
-                return true;
-            }
-            // Cloneable: in addition, at least one gating arg must itself be
-            // Cloneable. A container of all bit-copyable args is Copyable but
-            // not Cloneable — matching `nominal_instance_copy_semantics`
-            // (Cloneable iff ≥1 Cloneable child) and MIR `instantiated_copy_behavior`
-            // (`Clone(entity)` only when a gating arg is `Clone`).
-            positions.iter().any(|&pos| {
-                args.get(pos)
-                    .is_some_and(|&arg| type_conforms_copyable(ctx, arg, true, depth + 1))
-            })
-        },
     }
 }
 
@@ -2002,6 +2187,18 @@ fn solve_call(
         _ => unreachable!(),
     };
 
+    // Transparent-place peel for callees: paren-subscripting a ref-typed
+    // value (`h.view()(1)`) calls the POINTEE in place.
+    if let TyKind::Ref { pointee, .. } = &kind {
+        return SolveResult::Deferred(Constraint::Call {
+            callee: *pointee,
+            args,
+            result,
+            expr,
+            span,
+        });
+    }
+
     // If the callee is a concrete TypeAlias, reduce before dispatch.
     // This handles `type C = Counter; C(42)` — the callee is TypeAlias{C}
     // which reduces to Struct{Counter}, and then init-call dispatch proceeds.
@@ -2048,7 +2245,10 @@ fn solve_call(
                 }
                 ctx.coerce(arg.ty, *param, arg.value, span.clone());
             }
-            ctx.equal(result, ret, span);
+            // Ref-aware: a direct callee's Function type carries `ret: &T`
+            // (intrinsics like lang.ptr_ref); the result may already be
+            // pinned to the pointee by an earlier return-position coerce.
+            bind_call_result(ctx, result, ret, expr, span);
             if let Some(err) = conv_err {
                 ctx.report_error(err);
             }
@@ -2243,6 +2443,41 @@ fn binding_plan_for(
     bind_arguments(&bind_params, &arg_labels).ok()
 }
 
+/// Bind a call's result var to the signature return type, ref-aware:
+/// - a match-SCRUTINEE call decays: a scrutinee is a value context, so the
+///   result binds to the POINTEE and patterns never see a ref;
+/// - a result already pinned to a non-ref (an early Coerce ran before the
+///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
+///   instead of erroring.
+/// Consequence: a ref-returning call's recorded type is `&T` in the common
+/// solve order but `T` in the pinned/scrutinee orders — consumers key
+/// place-ness on `CallableRefReturn` (entity), never on expr_types alone.
+fn bind_call_result(
+    ctx: &mut InferCtx<'_>,
+    result: TyVar,
+    ret_tv: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) {
+    let rr = ctx.resolve(ret_tv);
+    if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(rr) {
+        let pointee = *pointee;
+        let pinned_non_ref = matches!(
+            ctx.slot(ctx.resolve(result)),
+            TySlot::Resolved(k) if !matches!(k, TyKind::Ref { .. })
+        );
+        if ctx.scrutinee_exprs.contains(&expr)
+            || ctx.binding_init_exprs.contains(&expr)
+            || ctx.assign_target_exprs.contains(&expr)
+            || pinned_non_ref
+        {
+            ctx.equal(result, pointee, span);
+            return;
+        }
+    }
+    ctx.equal(result, ret_tv, span);
+}
+
 fn emit_resolved_call(
     ctx: &mut InferCtx<'_>,
     entity: Entity,
@@ -2402,10 +2637,10 @@ fn emit_resolved_call(
             let final_ty = wrap_init_call_result(ctx, entity, parent_ty, &subs, &span);
             ctx.equal(result, final_ty, span);
         } else {
-            ctx.equal(result, ret_tv, span);
+            bind_call_result(ctx, result, ret_tv, expr, span);
         }
     } else {
-        ctx.equal(result, ret_tv, span);
+        bind_call_result(ctx, result, ret_tv, expr, span);
     }
 
     SolveResult::Solved
@@ -2458,7 +2693,15 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
         };
 
         // Get the concrete arg type
-        let arg_resolved = ctx.resolve(arg.ty);
+        let mut arg_resolved = ctx.resolve(arg.ty);
+        // Transparent place: a ref-typed argument disambiguates as its
+        // POINTEE — borrow params receive the place, consuming params the
+        // decayed copy, so `f(box.peek())` matches `f(x: T)` overloads.
+        if let crate::ty::TySlot::Resolved(crate::ty::TyKind::Ref { pointee, .. }) =
+            &ctx.types[arg_resolved.0 as usize]
+        {
+            arg_resolved = ctx.resolve(*pointee);
+        }
         let arg_kind = match &ctx.types[arg_resolved.0 as usize] {
             crate::ty::TySlot::Resolved(k) => k,
             _ => return false, // not concrete — shouldn't happen (caller checks)
@@ -2568,6 +2811,27 @@ fn solve_member(
             span,
         });
     };
+
+    // THE transparent-place peel: a ref-typed receiver requeues with the
+    // POINTEE as the receiver, so nominal lookup, Self-substitution,
+    // conformance and witness constraints all see `T`. One arm covers every
+    // member-shaped form — field/method/paren-subscript/operators/for-in/
+    // compound-assign/interpolation funnel through solve_member. The
+    // receiver EXPRESSION's var is never rebound, so its recorded type
+    // stays `&T`; mutability is policed in analyze (E207), like E203-E206.
+    if let TyKind::Ref { pointee, .. } = &recv_kind {
+        return SolveResult::Deferred(Constraint::Member {
+            receiver: *pointee,
+            name: name.to_string(),
+            args,
+            result,
+            expr,
+            is_call,
+            is_static_context,
+            explicit_type_args: explicit_type_args.to_vec(),
+            span,
+        });
+    }
 
     // If the receiver is an AssocProjection or a TypeAlias whose entity is
     // bound via a where-clause equality AND that bound resolves to a concrete
@@ -3150,7 +3414,8 @@ fn solve_member(
         }
     }
 
-    // Equate result with return type
+    // Equate result with return type (ref-aware: scrutinee decay / pinned
+    // result — see bind_call_result)
     let ret_tv = lower_opaque_aware(
         ctx,
         &resolution.return_type,
@@ -3160,7 +3425,7 @@ fn solve_member(
         &subs,
     );
 
-    ctx.equal(result, ret_tv, span.clone());
+    bind_call_result(ctx, result, ret_tv, expr, span.clone());
 
     SolveResult::Solved
 }
@@ -3825,6 +4090,11 @@ pub fn kind_to_tyvar_sub(
             }));
             TyVar(idx)
         },
+        TyKind::Ref { pointee, mutating } => {
+            let pointee_tv =
+                kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *pointee), self_entity, recv_tv);
+            ctx.ref_ty(pointee_tv, *mutating)
+        },
         TyKind::Never => ctx.never(),
         TyKind::Error => {
             let idx = ctx.types.len() as u32;
@@ -4263,6 +4533,15 @@ fn lower_hir_ty_sub(
         HirTy::Opaque { .. } => ctx.fresh(),
         HirTy::Never(_) => ctx.never(),
         HirTy::Infer(_) => ctx.fresh(),
+        // Stage 1: a ref survives HIR lowering in return position only (the
+        // E481 carve-out) — methods returning `&T` land here via
+        // MemberResolution.return_type.
+        HirTy::Ref {
+            inner, mutating, ..
+        } => {
+            let pointee = lower_hir_ty_sub(ctx, inner, self_entity, recv_tv, subs);
+            ctx.ref_ty(pointee, *mutating)
+        },
         HirTy::Error(_) => {
             let idx = ctx.types.len() as u32;
             ctx.types.push(TySlot::Resolved(TyKind::Error));

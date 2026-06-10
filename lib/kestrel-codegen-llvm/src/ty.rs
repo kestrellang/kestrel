@@ -170,7 +170,11 @@ impl TypeCache {
             MirTy::F32 => TypeRepr::Scalar(ScalarTy::F32),
             MirTy::F64 => TypeRepr::Scalar(ScalarTy::F64),
 
-            MirTy::Pointer(_) | MirTy::FuncThin { .. } => TypeRepr::Scalar(ptr_scalar),
+            // Ref appears on ret_borrow signatures only (never a value type);
+            // its ABI is a true `ptr` to the pointee (typed-ptr model).
+            MirTy::Pointer(_) | MirTy::FuncThin { .. } | MirTy::Ref { .. } => {
+                TypeRepr::Scalar(ptr_scalar)
+            },
 
             MirTy::Never => TypeRepr::Zst,
 

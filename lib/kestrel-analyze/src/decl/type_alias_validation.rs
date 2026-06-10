@@ -90,10 +90,10 @@
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
-use crate::traits::{DeclCheck, Describe};
+use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast_builder::{
-    ConformanceItem, Conformances, Name, NodeKind, QualifiedTarget, TypeAnnotation,
+    ConformanceItem, Conformances, NodeKind, QualifiedTarget, TypeAnnotation,
 };
 use kestrel_name_res::{ConformingProtocols, ExtensionsFor, ResolveTypePath, TypeResolution};
 
@@ -139,8 +139,8 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
 pub struct TypeAliasValidationAnalyzer;
 
 impl Describe for TypeAliasValidationAnalyzer {
-    fn id(&self) -> &'static str {
-        "type_alias_validation"
+    fn id(&self) -> AnalyzerId {
+        AnalyzerId::TypeAliasValidation
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
@@ -339,13 +339,9 @@ fn check_qualified_binding(
     }
 
     // Check 4 (E444): Does the protocol declare this associated type?
-    let has_assoc_type = cx.query.children_of(protocol_entity).iter().any(|&child| {
-        cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-            && cx
-                .query
-                .get::<Name>(child)
-                .is_some_and(|n| n.0 == alias_name)
-    });
+    let has_assoc_type =
+        !util::children_named_of_kind(cx.query, protocol_entity, alias_name, NodeKind::TypeAlias)
+            .is_empty();
     if !has_assoc_type {
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[3].id,
@@ -388,13 +384,9 @@ fn check_unqualified_ambiguity(
     // Find all conformed protocols that declare an associated type with this name
     let mut matching_protocols: Vec<(kestrel_hecs::Entity, String)> = Vec::new();
     for &proto in &conforming {
-        let has_assoc = cx.query.children_of(proto).iter().any(|&child| {
-            cx.query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
-                && cx
-                    .query
-                    .get::<Name>(child)
-                    .is_some_and(|n| n.0 == alias_name)
-        });
+        let has_assoc =
+            !util::children_named_of_kind(cx.query, proto, alias_name, NodeKind::TypeAlias)
+                .is_empty();
         if has_assoc {
             matching_protocols.push((proto, util::entity_name(cx.query, proto)));
         }
@@ -527,19 +519,10 @@ fn protocols_covered_by_qualified_bindings(
         });
 
         for ext in &extensions {
-            // Walk the extension's TypeAlias children
-            for &child in cx.query.children_of(*ext) {
-                if cx.query.get::<NodeKind>(child) != Some(&NodeKind::TypeAlias) {
-                    continue;
-                }
-                // Must have the same name as the alias we're checking
-                if cx
-                    .query
-                    .get::<Name>(child)
-                    .is_none_or(|n| n.0 != alias_name)
-                {
-                    continue;
-                }
+            // Walk the extension's TypeAlias children with the alias's name
+            for child in
+                util::children_named_of_kind(cx.query, *ext, alias_name, NodeKind::TypeAlias)
+            {
                 // Must be a qualified binding (has AssociatedTypeTarget in CST)
                 if !is_qualified_binding(cx, child) {
                     continue;

@@ -150,8 +150,19 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
 
     /// @name To Value
     /// Takes the address of `value`. Equivalent to `&value` in C — the
-    /// caller must ensure `value` outlives any use of the resulting
-    /// pointer.
+    /// borrowed place itself is captured; no copy is made.
+    ///
+    /// # Safety
+    ///
+    /// The pointer does not keep `value` alive: the caller must ensure the
+    /// place outlives every use of the resulting pointer, or any read is
+    /// undefined behavior.
+    ///
+    /// This is the sole capture init and it accepts any place — `var` or
+    /// `let` — yielding the same write-capable `Pointer[T]`. Writing
+    /// through a pointer captured from an immutable place is the C
+    /// const-cast footgun: it compiles, and it is on the caller to know the
+    /// storage is actually mutable.
     public init(to value: T) {
         self._raw = lang.ptr_to(value)
     }
@@ -203,8 +214,51 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
         body(lang.ptr_mut_borrow(self._raw))
     }
 
+    /// Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
+    /// requirement. Member access, operators, and borrow-convention calls
+    /// go through it in place; binding it (`let x = p.value;`) stores an
+    /// owned copy instead (binding decay).
+    ///
+    /// # Safety
+    ///
+    /// - The pointer must be non-null and the storage must hold a valid,
+    ///   initialized `T` for as long as the reference is used.
+    /// - The reference inherits this pointer's contract: the compiler does
+    ///   not verify the pointee's lifetime. Using it after the storage is
+    ///   freed is undefined behavior — the same trust point as `read()`,
+    ///   returning a view instead of a copy.
+    public var value: &T {
+        lang.ptr_ref(self._raw)
+    }
+
+    /// Mutable borrowed view of the pointee. Mutating methods and
+    /// `mutating`-convention arguments through the result write the storage
+    /// in place — no clone, no write-back.
+    ///
+    /// # Safety
+    ///
+    /// - Same validity preconditions as `value`.
+    /// - This is the const-cast escape hatch: `Pointer(to: x).mutatingValue`
+    ///   on a `let`/shared place compiles and writes through it — the
+    ///   compiler does not stop it (same class as `write()` after
+    ///   `Pointer(to:)` on a `let`).
+    /// - Writing through a pointer into storage shared by a COW container
+    ///   (`Array`, `String`, `Dictionary`) is visible through every copy,
+    ///   breaking value semantics. Make the storage unique first.
+    public var mutatingValue: &mutating T {
+        lang.ptr_mut_ref(self._raw)
+    }
+
     /// Writes `value` through the pointer. Same safety preconditions as
     /// `pointee.set`.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be non-null and the storage valid for writes of
+    /// `T`. The previous pointee is overwritten without running its
+    /// `deinit`. If the pointer was captured with `Pointer(to:)` from a
+    /// `let` place, writing is the documented const-cast footgun — the
+    /// compiler does not stop it.
     public func write(consuming value: T) {
         lang.ptr_write(self._raw, value)
     }

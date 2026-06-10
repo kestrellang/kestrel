@@ -13,14 +13,13 @@
 //! first" behavior — the direct declaration is inserted first and then
 //! overwritten by a later entry only if one exists.
 
-use kestrel_ast_builder::{
-    Callable, Gettable, Name, NodeKind, QualifiedTarget, Subscript as SubscriptMarker,
-};
+use std::sync::Arc;
+
+use kestrel_ast_builder::{Callable, Gettable, NodeKind, QualifiedTarget};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::conformances::ConformingProtocols;
-use crate::extensions::ExtensionsFor;
-use crate::visibility::IsVisibleFrom;
+use crate::helpers::filter_members_by_name;
+use crate::traversal::{MemberMap, collect_members_transitive};
 
 /// A member discovered via protocol traversal, with provenance info.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -37,6 +36,10 @@ pub struct ProtocolMember {
 }
 
 // ===== ProtocolMembers =====
+
+/// Name-indexed map of every member reachable from a protocol. See
+/// `MemberMap` for the order/precedence guarantees.
+pub type ProtocolMemberMap = MemberMap<ProtocolMember>;
 
 /// Query: all callable / gettable members reachable from a protocol.
 ///
@@ -56,10 +59,11 @@ pub struct ProtocolMembers {
 }
 
 impl QueryFn for ProtocolMembers {
-    type Output = Vec<ProtocolMember>;
+    type Output = Arc<ProtocolMemberMap>;
 
-    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<ProtocolMember> {
-        collect_with_filter(ctx, self.protocol, self.root, is_method)
+    fn execute(&self, ctx: &QueryContext<'_>) -> Arc<ProtocolMemberMap> {
+        let members = collect_with_filter(ctx, self.protocol, self.root, is_method);
+        Arc::new(ProtocolMemberMap::build(ctx, members, |m| m.entity))
     }
 }
 
@@ -103,39 +107,14 @@ impl QueryFn for ProtocolMembersByName {
     type Output = Vec<ProtocolMember>;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Vec<ProtocolMember> {
-        let all = ctx.query(ProtocolMembers {
+        let map = ctx.query(ProtocolMembers {
             protocol: self.protocol,
             root: self.root,
         });
-        all.into_iter()
-            .filter(|m| {
-                if !member_name_matches(ctx, m.entity, &self.name) {
-                    return false;
-                }
-                ctx.query(IsVisibleFrom {
-                    target: m.entity,
-                    context: self.context,
-                })
-            })
-            .collect()
-    }
-}
-
-/// Does `entity` answer to the query name?
-///
-/// Matches the entity's `Name` component literally, OR — for nameless
-/// callables — recognizes the keyword sentinels `"init"` (→ Initializer
-/// NodeKind) and `"subscript"` (→ Subscript marker). Both sentinels are
-/// reserved keywords, so they can't collide with a user-declared method
-/// name.
-fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> bool {
-    if let Some(n) = ctx.get::<Name>(entity) {
-        return n.0 == query;
-    }
-    match query {
-        "init" => ctx.get::<NodeKind>(entity) == Some(&NodeKind::Initializer),
-        "subscript" => ctx.get::<SubscriptMarker>(entity).is_some(),
-        _ => false,
+        // Bucket lookup replaces the full scan; the visibility check stays
+        // here because it's per-`context` and can't be baked into the map.
+        let bucket: Vec<ProtocolMember> = map.named(&self.name).cloned().collect();
+        filter_members_by_name(ctx, bucket, &self.name, self.context, |m| m.entity)
     }
 }
 
@@ -143,56 +122,28 @@ fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query: &str) -> b
 
 /// Shared traversal: walk the queried protocol and its transitive
 /// ancestors (via `ConformingProtocols`), emitting children that pass
-/// `filter` from both the protocol itself and its extensions.
+/// `filter` from both the protocol itself and its extensions. Parent
+/// protocols contribute their direct children too — protocol inheritance
+/// pulls in the parent's requirements, unlike type conformance.
 fn collect_with_filter(
     ctx: &QueryContext<'_>,
     protocol: Entity,
     root: Entity,
     filter: fn(&QueryContext<'_>, Entity) -> bool,
 ) -> Vec<ProtocolMember> {
-    let mut out = Vec::new();
-
-    // Start with the protocol itself, then its ancestors. ConformingProtocols
-    // already deduplicates and expands through protocol-inheritance plus
-    // extension-added conformances transitively.
-    let mut protocols = vec![protocol];
-    protocols.extend(ctx.query(ConformingProtocols {
-        entity: protocol,
+    collect_members_transitive(
+        ctx,
+        protocol,
         root,
-    }));
-
-    for proto in protocols {
-        // Direct children first — keeps "protocol declaration wins" ordering
-        // when a consumer uses insert-overwrite semantics on the same name.
-        for &child in ctx.children_of(proto) {
-            if filter(ctx, child) {
-                out.push(ProtocolMember {
-                    entity: child,
-                    declaring_protocol: proto,
-                    extension: None,
-                });
-            }
-        }
-
-        // Extension defaults on this protocol.
-        let extensions = ctx.query(ExtensionsFor {
-            target: proto,
-            root,
-        });
-        for ext in extensions {
-            for &child in ctx.children_of(ext) {
-                if filter(ctx, child) {
-                    out.push(ProtocolMember {
-                        entity: child,
-                        declaring_protocol: proto,
-                        extension: Some(ext),
-                    });
-                }
-            }
-        }
-    }
-
-    out
+        true,
+        filter,
+        |entity, via_protocol, extension| ProtocolMember {
+            entity,
+            // `None` means "found on the queried protocol itself".
+            declaring_protocol: via_protocol.unwrap_or(protocol),
+            extension,
+        },
+    )
 }
 
 /// Include entities that can be invoked or read: functions, inits,

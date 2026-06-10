@@ -106,6 +106,16 @@ fn compile_return(
     builder: &mut FunctionBuilder,
     value_id: ValueId,
 ) -> Result<(), CodegenError> {
+    // ret_borrow: the function returns the raw POINTER to the pointee. The
+    // returned @guaranteed value's map entry already is that pointer —
+    // `resolve_scalar` below would LOAD a scalar pointee through it and
+    // silently return it by value (the scalar_ret_borrow_not_loaded
+    // miscompile). Bypass for aggregates too (only accidentally correct).
+    if fc.func.ret_borrow {
+        let val = fc.get_value(builder, value_id);
+        builder.ins().return_(&[val]);
+        return Ok(());
+    }
     let ret_repr = fc
         .ctx
         .tc

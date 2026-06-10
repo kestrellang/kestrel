@@ -1132,6 +1132,34 @@ pub(crate) fn try_intrinsic(
             bctx.track_borrow(view);
             return Some(view);
         },
+        "ptr_ref" | "ptr_mut_ref" => {
+            // Stage-1 reference bridge: a borrow view of the pointee, shaped
+            // exactly like `ptr_mut_borrow` above, plus THE provenance stamp —
+            // PointerDerived is the escape-checker root that may escape
+            // returns ("inherits the pointer's contract", gaps §10.3). The
+            // result type is already the PEELED pointee (expression types
+            // never carry MirTy::Ref).
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let arg = bctx.lower_expr(args.first()?.value);
+            let view = bctx.alloc_guaranteed(result_ty, arg);
+            bctx.stamp_root(
+                view,
+                kestrel_mir::value::RootProvenance::PointerDerived {
+                    mutable: name == "ptr_mut_ref",
+                },
+            );
+            bctx.push_inst(InstKind::Op1 {
+                result: view,
+                op: Op::PtrRead(ty_arg),
+                arg,
+            });
+            bctx.track_borrow(view);
+            // Direct `lang.ptr_ref(..)` calls get the same single-use ref
+            // lifetime machinery as ret_borrow call results.
+            bctx.ref_results.insert(view);
+            return Some(view);
+        },
         "drop_in_place" => {
             let ty_arg = *type_args.first()?;
             let arg = bctx.lower_expr(args.first()?.value);

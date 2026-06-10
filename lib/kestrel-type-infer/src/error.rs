@@ -70,6 +70,16 @@ pub enum InferError {
     /// Infinite type (occurs check failure).
     InfiniteType { span: Span },
 
+    /// E491: a ref-returning function used as a first-class value (captured,
+    /// stored, passed) — the ret_borrow ABI is not expressible in function
+    /// types, so this would be a silent-miscompile backdoor.
+    RefFunctionAsValue { span: Span },
+
+    /// E492: a reference leaked into a generic type argument via inference
+    /// (e.g. `[box.peek()]` inferring `Array[&T]`). Refs are second-class;
+    /// bind the value first (`let x = ...`) to store the decayed copy.
+    RefInTypeArgument { span: Span },
+
     /// Error propagated from HIR (HirExpr::Error, HirPat::Error, etc.)
     FromHir { span: Span },
 
@@ -240,6 +250,8 @@ impl InferError {
             | Self::MemberAccessOnPrimitive { span, .. }
             | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span }
+            | Self::RefFunctionAsValue { span }
+            | Self::RefInTypeArgument { span }
             | Self::ConventionMismatch { span } => span,
         }
     }
