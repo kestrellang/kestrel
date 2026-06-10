@@ -13,13 +13,13 @@ import std.numeric.(Int64)
 @main
 func main() -> lang.i64 {
     var arr = [11, 22, 33];
-    arr.mutableAt(index: 1) += 77;
+    arr(at: 1) += 77;
     if arr(1) != 99 { return 1; }
     if arr(0) != 11 { return 2; }
 
     // COW isolation: the write is invisible through a prior snapshot
     let snap = arr;
-    arr.mutableAt(index: 2) += 1;
+    arr(at: 2) += 1;
     if arr(2) != 34 { return 3; }
     if snap(2) != 33 { return 4; }
 

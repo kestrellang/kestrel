@@ -9,7 +9,7 @@ module Test
 @main
 func main() -> lang.i64 {
     var arr = [10, 20, 30];
-    let x = arr.at(index: 0);
+    let x = arr(at: 0);
     arr(0) = 99;
     if x != 10 { return 1; }
     if arr(0) != 99 { return 2; }

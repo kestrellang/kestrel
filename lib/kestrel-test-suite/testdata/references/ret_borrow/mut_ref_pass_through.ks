@@ -13,7 +13,7 @@ func bump(mutating x: Int64) {
 @main
 func main() -> lang.i64 {
     var arr = [7, 8];
-    bump(arr.mutableAt(index: 0));
+    bump(arr(at: 0));
     if arr(0) != 8 { return 1; }
     if arr(1) != 8 { return 2; }
     0

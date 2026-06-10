@@ -11,11 +11,16 @@
 // (compound_assign_immutable_base_rejected.ks).
 module Test
 
+struct Holder {
+    var v: Int64
+    func peek() -> &Int64 { self.v }
+}
+
 func five() -> Int64 { 5 }
 
 @main
 func main() {
-    var arr = [1, 2, 3];
+    var h = Holder(v: 1);
     five() += 1; // ERROR(E202)
-    arr.at(index: 0) += 1; // ERROR(E207)
+    h.peek() += 1; // ERROR(E207)
 }

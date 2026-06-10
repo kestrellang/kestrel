@@ -531,41 +531,49 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         ArraySlice(pointer: self.ptr(), count: self.len())
     }
 
-    /// Borrowed view of the element at `index` — no copy, no clone, no
-    /// `T: Cloneable` requirement. Member access, operators, and
-    /// borrow-convention calls go through it in place; binding it stores
-    /// an owned copy instead (binding decay). Panics if out of bounds,
-    /// like `arr(index)`.
-    public func at(index index: Int64) -> &T {
-        // Hoisted: `or`'s short-circuit RHS is a closure, and a closure
-        // capturing Cloneable `self` deep-clones the array.
-        let count = self.len();
-        if index < 0 or index >= count {
-            fatalError("Array.at(index:): index out of bounds");
-        }
-        self.ptr().offset(by: index).value
-    }
-
-    /// Mutable borrowed view of the element at `index`. Ensures unique
-    /// (COW) storage BEFORE the view is created, so writes through it
-    /// never touch a sibling copy's buffer. Panics on out-of-bounds.
+    /// In-place element access (stage-1.5 place accessors): reads borrow
+    /// the element — no copy, no clone, no `T: Cloneable` requirement —
+    /// and writes, `+=`, and mutating methods go through the element's
+    /// address. Binding the read (`let x = arr(at: i)`) stores an owned
+    /// copy instead (binding decay). Panics if out of bounds, like
+    /// `arr(index)`.
     ///
-    /// Copying `self` inside the same expression that uses the view
-    /// (`f(arr.mutableAt(index: 0), arr)`) re-shares the buffer and can
-    /// make the write observable through the copy — accepted stage-1
-    /// behavior, recorded in the references semantics.
-    public mutating func mutableAt(index index: Int64) -> &mutating T {
-        // Hoisted: `or`'s short-circuit RHS is a closure, and a closure
-        // capturing Cloneable `self` deep-clones the array.
-        let count = self.len();
-        if index < 0 or index >= count {
-            fatalError("Array.mutableAt(index:): index out of bounds");
-        }
-        self.makeUnique();
-        self.ptr().offset(by: index).mutatingValue
+    /// The mutating accessor ensures unique (COW) storage BEFORE the
+    /// place is fabricated, so writes through it never touch a sibling
+    /// copy's buffer. Copying `self` inside the same expression that
+    /// uses the place (`f(arr(at: 0), arr)` with a mutating first arg)
+    /// re-shares the buffer and can make the write observable through
+    /// the copy — accepted stage-1 behavior, recorded in the references
+    /// semantics.
+    ///
+    /// The unlabeled subscripts (`arr(i)`, `arr(1..<3)`, `checked:`,
+    /// `unchecked:`, `clamped:`, `wrapped:`) live on `extend Slice[T]`
+    /// and keep get/set semantics; `at:` is the labeled in-place form.
+    public func atProbe(index index: Int64) -> T {
+        self.asSlice()(unchecked: index)
     }
 
-    // All subscripts provided by extend Slice[T] in slice.ks
+    public subscript(at index: Int64) -> T {
+        ref {
+            // Hoisted: `or`'s short-circuit RHS is a closure, and a
+            // closure capturing Cloneable `self` deep-clones the array.
+            let count = self.len();
+            if index < 0 or index >= count {
+                fatalError("Array(at:): index out of bounds");
+            }
+            self.ptr().offset(by: index).value
+        }
+        mutating ref {
+            let count = self.len();
+            if index < 0 or index >= count {
+                fatalError("Array(at:): index out of bounds");
+            }
+            self.makeUnique();
+            self.ptr().offset(by: index).mutatingValue
+        }
+    }
+
+    // All other subscripts provided by extend Slice[T] in slice.ks
 
     /// COW write barrier — deep-copies storage if shared.
     public mutating func ensureUnique() {

@@ -3,28 +3,73 @@
 Ergonomics follow-ons, scheduled **on demand** after stage 1 ships. Items
 are independently shippable; do not bundle.
 
-1. **Call-as-place**: ~~assignment through a mut-ref accessor~~ **SHIPPED
-   EARLY (2026-06-10)**: both `arr.mutableAt(index: i) = v` (PtrTo on the
-   @guaranteed ref result + StoreAssign) and
-   `arr.mutableAt(index: i) += v` (desugar admits call-shaped LHS;
-   assignment analyzer validates — E202 for plain-value calls, E207/E208
-   for `&T`) work through any `&mutating T`-returning call or getter.
-   REMAINING here: value-subscript writeback (`arr(0) += 1` — read-modify-
-   write through the getter/setter pair) and its reconciliation with the
-   subscript-setter lowering (`references-gaps.md` §10.4).
+1. **Call-as-place → place accessors — IMPLEMENTED 2026-06-10**:
+   `ref` / `mutating ref` accessor kinds on subscripts and computed
+   properties (`syntax.md`), per-operation provider routing with
+   `get`/`set` writeback as the permanent fallback (`semantics.md`),
+   decl rules E619–E622. The subscript-resolution question was settled
+   by DECISION (2026-06-10): the **labeled place form** — Array's
+   in-place subscript is `subscript(at index: Int64)` (inherent, ref
+   pair), the unlabeled/`checked:`/… forms stay on `extend Slice[T]`
+   get/set, and distinct labels route through the existing label-based
+   fallback with ZERO resolution changes (the type-aware fallback-tier
+   option from `compiler-arch.md` stays unbuilt). `arr(i) += v` works
+   via writeback (COW copy path); `arr(at: i) += v` is the in-place
+   fast path. `Array.at`/`mutableAt` removed; references tests migrated
+   to `arr(at: i)`.
 2. **Named ref bindings**: `let r = &expr;` with the visible-`&` cue
-   (`references-syntax.md` §2 Option C), block-local.
+   (`references-syntax.md` §2 Option C), block-local. Fine semantics
+   proposed in `syntax.md` (store-through, no rebind, copy-on-rebind);
+   not ratified. Unlocks **`&` pattern bindings** (decided spelling,
+   `syntax.md`) and with them in-place enum-payload access.
 3. **Dangle lint**: same-function `Pointer(to: local)` returned as a ref
    (`references-gaps.md` §10.3).
-4. **Shared-read projection sugar** over `Pointer.with` / Design-B closures
-   — covers the `Optional[&T]`-shaped lookup APIs stage 1 cannot express
-   (`references-gaps.md` §5.3).
-5. **Arm-value decay**: a ref as a raw `if`/`match` arm VALUE
-   (`match c { 1 => b.peek(), _ => 0 }`) is a type error today — arm
-   merges unify with Equal, not Coerce, so the `&T → T` decay arm never
-   runs (same family as array-literal elements, stage-1 risk #7). The
-   errors.md E-REF-12 note assumed arms decay to owned copies; uses
-   *inside* arms (operator/binding/arg/condition) already work and are
-   pinned by `ret_borrow/arm_position_ref_uses.ks`.
+4. **Shared-read projection sugar** over `Pointer.with` / Design-B
+   closures — covers the `Optional[&T]`-shaped lookup APIs stage 1
+   cannot express (`references-gaps.md` §5.3). Leaning (not ratified):
+   dissolve into "ship `dict.modify(key:)` closure interim now, revisit
+   as a conditional ref binding (`if let r = &dict.find(key)`) once
+   item 2 + `Optional[&T]` exist" — items 2 and 4 converge there.
+5. **Arm-value decay — IMPLEMENTED 2026-06-10** (arms; literal elements
+   remain the follow-up): `match c { 1 => b.peek(), _ => 0 }` decays to
+   owned. Mechanism CORRECTION: stage 1 never shipped a
+   `Constraint::Decay` — scrutinee/binding/assign-target decay is
+   expr-id SETS (`ctx.rs`) consulted in `bind_call_result`, and arm
+   values are simply the 4th set (`arm_value_exprs`, marked for
+   `UserMatch`/`IfLet` arms and if-else branch tails; `GuardLet` is
+   deliberately unmarked — its pattern arm is the CPS continuation).
+   Merge `Equal`s stay fully bidirectional. MIR: `capture_arm_exit`
+   already copied @guaranteed arm results; it now also ends the ref's
+   borrow (no false E497), with arm-value spans threaded for the E503
+   copy-guard. Arms ALWAYS decay to owned — all-refs included; a
+   match/if in return position of a `-> &T` fn errs as E494 (was E497),
+   pinned. Array/tuple literal elements: follow-up commit (interacts
+   with #127 and ExpressibleByArrayLiteral).
+
+## Dictionary deferral (DECIDED 2026-06-09)
+
+**Dict's stdlib adoption of refs waits for `Optional[&T]`.** The useful
+Dict ref API is conditional (`find(key) -> Optional[&V]`); the only
+shape expressible under stage-1 rules is a panicking unconditional
+accessor, which isn't worth an API change. Revisit when `Optional[&T]`
+becomes expressible (stage-2 territory, or a dedicated narrow carve in
+the Rust-`Option<&T>` style — niche-able: a ref is never null, so the
+optional is free at runtime). Interim: closure-based
+`dict.modify(key) { ... }` is implementable today with writeback under
+the hood and upgrades silently to in-place access later — no API change.
+
+**Enum-payload projection is wanted regardless (100%, decided) — via
+`&` pattern bindings, NOT an intrinsic.** The MIR + codegen mechanism
+already exists: `InstKind::EnumPayload` on a `@guaranteed` operand
+returns the payload field's in-place ADDRESS in both backends; pattern
+bindings then copy out of the projected address, which is the only
+missing piece. The match proves the tag before the projection — safe by
+construction, unlike an `enum_payload_ptr` intrinsic (unchecked-tag
+contract, no near-term customer). Anchors in `compiler-arch.md`.
+
+The **parallel-array restructure** (Swiss-table shape) is demoted to a
+pure performance project — never required for refs. Rehash invalidation
+was never a blocker: stage-1 refs are expression-scoped, so no
+insert/remove/rehash can intervene while one is live.
 
 Entry: stage 1 shipped + concrete demand. ~4-6 wk total.
