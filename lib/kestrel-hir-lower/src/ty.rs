@@ -876,6 +876,47 @@ impl QueryFn for LowerTypeAnnotation {
             });
         }
 
+        // Stage 2d: an ASSOC-TYPE BINDING (`type Item = &T` in a struct/
+        // enum/extension conformance) may be a bare ref or carry refs in
+        // aggregate positions — ref-Item iterators hang off this. The carve
+        // is restricted to TRIVIAL member aliases: those are eagerly
+        // expanded at every named use (`let x: Foo.Item` re-applies the
+        // use-site position rules, E482/E480 — nothing smuggles), while
+        // non-trivial aliases flow as AliasUse through solver Reduce with
+        // no position re-check, so they stay Strict. Protocol-parented
+        // aliases (assoc DECLS and their defaults) also stay Strict.
+        let parent_kind = ctx
+            .parent_of(self.entity)
+            .and_then(|p| ctx.get::<NodeKind>(p).cloned());
+        if matches!(nk, Some(NodeKind::TypeAlias))
+            && matches!(
+                parent_kind,
+                Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Extension)
+            )
+            && is_trivial_alias(ctx, self.entity)
+        {
+            if let HirTy::Ref {
+                inner,
+                mutating,
+                span,
+            } = lowered
+            {
+                let inner =
+                    reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
+                return Some(HirTy::Ref {
+                    inner: Box::new(inner),
+                    mutating,
+                    span,
+                });
+            }
+            return Some(reject_ref_types(
+                ctx,
+                lowered,
+                RefPosition::Other,
+                RefPolicy::AllowAggregate,
+            ));
+        }
+
         // A TypeAnnotation on a callable is its return annotation; on a
         // field/enum-case it is the stored type. Classify the ref rejection
         // accordingly (stage 1 carved out only the Return position, above;
