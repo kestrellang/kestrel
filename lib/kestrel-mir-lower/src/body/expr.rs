@@ -21,6 +21,7 @@ use kestrel_mir::op::Op;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
+use super::place::{FieldViews, PlaceRepr};
 use super::{OssaBodyCtx, expr_span};
 use crate::ty::lower_resolved_ty;
 
@@ -484,40 +485,24 @@ impl OssaBodyCtx<'_, '_> {
                 FieldIdx::new(0)
             });
 
-        // Stage 2b ref FIELD: the slot stores an ADDRESS — reading projects
-        // the ref (one load), never the pointee bits. The address-chain fast
-        // path below would copy_addr the slot as if it held the pointee
-        // (it holds a pointer) — bypass it. `emit_struct_extract`'s ref arm
-        // handles owned and borrowed bases and registers the result for
-        // per-use decay (resolve_expr_type already names the PEELED pointee,
-        // which is exactly the ref result's value type).
-        if struct_entity.is_some() {
-            let slot_tys = self.struct_field_tys(base_ty);
-            if let Some(&slot_ty) = slot_tys.get(field_idx.index())
-                && matches!(self.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. })
-            {
-                let base_val = self.lower_expr_for_borrow(base);
-                return self.emit_struct_extract(base_val, field_idx, slot_ty);
-            }
-        }
-
-        // If the base roots at a var-local (a `mutating`/MutBorrow receiver or
-        // a mutable local, bound to a stack address), project the field's
-        // ADDRESS and read just the field. The fallback path below loads the
-        // whole struct for a var-local base — an illegal copy when the struct
-        // is non-Copyable, even if the field itself is Copyable (e.g.
-        // `IntersperseIterator.next` reading `self.separator`). This is the
-        // address-analog of `emit_struct_extract`: a @guaranteed place for a
-        // non-Copyable field, and a clone (snapshot at read time) for a
-        // Copyable one — the snapshot matters for read-then-mutate sequences
-        // like `let v = self.x; self.x = self.x + 1` where `v` must be the old
-        // value, not an alias of the now-written field.
-        if let Some(base_addr) = self.try_field_addr_chain(base) {
-            let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-            if self.is_non_copyable(result_ty) {
-                return self.emit_begin_borrow_addr(field_addr, result_ty);
-            }
-            return self.emit_copy_addr(field_addr, result_ty);
+        // Place-resolved read (the resolver owns BOTH special routes that
+        // used to live here):
+        // - a ref-slot field comes back as a View — the loaded ref,
+        //   registered for per-use decay (reading the slot as pointee bits
+        //   was the corruption class);
+        // - a var-rooted chain comes back as an Addr and reads via
+        //   `read_place`'s snapshot rule: clone for a Copyable field (the
+        //   `let v = self.x; self.x = self.x + 1` old-value guarantee),
+        //   in-place @guaranteed view for a non-Copyable one (the fallback
+        //   below would load the WHOLE struct — an illegal copy, e.g.
+        //   `IntersperseIterator.next` reading `self.separator`).
+        // Field-over-View bases resolve None under Forbid and take the
+        // extraction fallback below.
+        if let Some(p) = self.lower_place(expr_id, FieldViews::Forbid) {
+            return match p.repr {
+                PlaceRepr::View(v) => v,
+                PlaceRepr::Addr(_) => self.read_place(&p),
+            };
         }
 
         let base_val = self.lower_expr_for_borrow(base);

@@ -241,7 +241,6 @@ impl OssaBodyCtx<'_, '_> {
     /// snapshot (`let v = self.x; self.x += 1` must see the old value);
     /// Addr + non-Copyable = an in-place view (copying is illegal); views
     /// read as themselves.
-    #[allow(dead_code)] // TODO(place-C3)
     pub(crate) fn read_place(&mut self, place: &Place) -> ValueId {
         match place.repr {
             PlaceRepr::Addr(addr) => {
