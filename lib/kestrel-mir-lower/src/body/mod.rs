@@ -29,7 +29,7 @@ use kestrel_type_infer::captures::{ClosureCaptureMap, PlaceKey};
 use kestrel_type_infer::result::TypedBody;
 
 use crate::context::LowerCtx;
-use crate::ty::{lower_resolved_ty, lower_type};
+use crate::ty::{lower_resolved_ty, lower_resolved_ty_preserving, lower_type};
 
 pub(crate) struct LoopInfo {
     pub header_block: BlockId,
@@ -2963,9 +2963,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(typed) = self.typed.as_ref()
             && let Some(resolved_args) = typed.type_args.get(&expr_id)
         {
+            // Type-side position: a `&T` type argument (stage 2b) is the
+            // type itself, not an expression value — never peel it, or
+            // `(Optional, [&T])` collapses into `(Optional, [T])`.
             return resolved_args
                 .iter()
-                .map(|ty| lower_resolved_ty(self.ctx, ty))
+                .map(|ty| lower_resolved_ty_preserving(self.ctx, ty))
                 .collect();
         }
         Vec::new()
