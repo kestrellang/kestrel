@@ -74,6 +74,25 @@ pub enum Constraint {
         span: Span,
     },
 
+    /// `value → local target` — an assignment whose target is a LOCAL read.
+    /// A ref-typed target is STORE-THROUGH: the RHS coerces to the POINTEE
+    /// (`r = v` on a `&mutating` binding). A non-ref target is a plain
+    /// Coerce. An UNRESOLVED target DEFERS: a pattern-payload ref binding
+    /// (`if let .Some(w) = call()`) resolves only when the deferred
+    /// ImplicitPat fires, and an eager Coerce would pin `w` from the RHS
+    /// literal first — the late payload equate then collided ("expected
+    /// Int64 got &mutating Int64"). Targets nothing ever resolves fall back
+    /// to the plain Coerce after the literal-relaxation loop exhausts
+    /// (`break_stalled_assign_targets`), so plain `x = 5` shapes cannot
+    /// deadlock. Mutability legality is analyze's job (E200/E208), not
+    /// typing's.
+    AssignTarget {
+        value: TyVar,
+        target: TyVar,
+        expr: HirExprId,
+        span: Span,
+    },
+
     /// `ty : Protocol` — protocol conformance.
     /// Deferred until ty is concrete.
     Conforms {

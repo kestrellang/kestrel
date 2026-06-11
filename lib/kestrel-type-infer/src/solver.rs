@@ -69,6 +69,12 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         }
     }
 
+    // AssignTarget stall-breaker: any assignment still waiting on an
+    // unresolved local target falls back to the plain Coerce — at this
+    // point the system is at a fixpoint (every fireable pattern has
+    // fired), so the target's type has no other source.
+    break_stalled_assign_targets(ctx);
+
     // Phase 3: solve again with defaults
     fixpoint(ctx);
 
@@ -613,6 +619,35 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 report_and_poison(ctx, err, value, target);
                 continue;
             },
+            Constraint::AssignTarget {
+                value,
+                target,
+                span,
+                ..
+            } => {
+                // `break_stalled_assign_targets` converts every still-deferred
+                // AssignTarget to a plain Coerce before this runs, so an
+                // unsolved one means a side never resolved — report like
+                // Equal (poison-propagation included), as EqualDecayed does.
+                let v_err = ctx.is_error(ctx.resolve(value));
+                let t_err = ctx.is_error(ctx.resolve(target));
+                if v_err || t_err {
+                    if v_err
+                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(target);
+                    }
+                    if t_err
+                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(value);
+                    }
+                    continue;
+                }
+                let err = mismatch_error(ctx, target, value, span);
+                report_and_poison(ctx, err, value, target);
+                continue;
+            },
             Constraint::Conforms {
                 ty,
                 protocol,
@@ -833,6 +868,12 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             target,
             span,
         } => solve_equal_decayed(ctx, value, target, span),
+        Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        } => solve_assign_target(ctx, value, target, expr, span),
         Constraint::Conforms {
             ty,
             protocol,
@@ -1540,6 +1581,66 @@ fn solve_equal_decayed(
     match unify::unify(ctx, pointee, target) {
         Ok(()) => SolveResult::Solved,
         Err(_) => SolveResult::Error(mismatch_error(ctx, target, pointee, span)),
+    }
+}
+
+/// Assignment into a LOCAL target (see `Constraint::AssignTarget`): a
+/// ref-typed target is store-through — the RHS coerces to the POINTEE; a
+/// resolved non-ref (or literal-kinded) target is a plain Coerce; an
+/// unresolved target WAITS for whatever owns its type (a deferred
+/// ImplicitPat's payload, an annotation). The post-relaxation
+/// stall-breaker (`break_stalled_assign_targets`) guarantees progress.
+fn solve_assign_target(
+    ctx: &mut InferCtx<'_>,
+    value: TyVar,
+    target: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    match ctx.slot(ctx.resolve(target)) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            let pointee = *pointee;
+            solve_coerce(ctx, value, pointee, expr, span)
+        },
+        TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => {
+            solve_coerce(ctx, value, target, expr, span)
+        },
+        _ => SolveResult::Deferred(Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        }),
+    }
+}
+
+/// Post-relaxation stall-breaker for `AssignTarget`: a target nothing
+/// resolved (no pattern fired, no annotation pinned it) takes the plain
+/// Coerce — the deferral existed only so a deferred pattern could deliver
+/// the target's ref-ness first; once the literal-relaxation loop exhausts,
+/// the system is at a fixpoint and waiting longer cannot help. This keeps
+/// assignment-driven inference (`x = 5` pinning `x`) working for locals
+/// whose type has no other source.
+fn break_stalled_assign_targets(ctx: &mut InferCtx<'_>) {
+    for i in 0..ctx.constraints.len() {
+        let Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        } = &ctx.constraints[i]
+        else {
+            continue;
+        };
+        let (value, target, expr, span) = (*value, *target, *expr, span.clone());
+        if matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
+            ctx.constraints[i] = Constraint::Coerce {
+                from: value,
+                to: target,
+                expr,
+                span,
+            };
+        }
     }
 }
 

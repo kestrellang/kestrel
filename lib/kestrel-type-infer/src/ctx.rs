@@ -632,6 +632,16 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    /// Assignment into a local target — see `Constraint::AssignTarget`.
+    pub fn assign_target(&mut self, value: TyVar, target: TyVar, expr: HirExprId, span: Span) {
+        self.constraints.push(Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        });
+    }
+
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
         self.constraints.push(Constraint::Conforms {
             ty,

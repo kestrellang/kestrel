@@ -610,7 +610,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ctx.assign_target_exprs.insert(*target);
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
-            ctx.coerce(value_tv, target_tv, *value, span.clone());
+            // A LOCAL target keeps its raw type (a `&mutating` binding's
+            // local type IS the ref) and may resolve late (pattern-payload
+            // bindings) — route through AssignTarget, which picks
+            // store-through vs plain coerce once the target resolves.
+            // Field/call targets already type as the pointee (see above).
+            if matches!(hir.exprs[*target], HirExpr::Local(..)) {
+                ctx.assign_target(value_tv, target_tv, *value, span.clone());
+            } else {
+                ctx.coerce(value_tv, target_tv, *value, span.clone());
+            }
             ctx.tuple(vec![]) // assignment returns unit
         },
 
