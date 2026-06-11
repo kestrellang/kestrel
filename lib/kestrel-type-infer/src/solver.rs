@@ -52,6 +52,17 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
             relax_level = 0;
             continue;
         }
+        // Stage 2b decay defaulting: before relaxing literal blocking
+        // further, decay any deferred ref→unresolved coercion whose target
+        // nothing else pinned — those targets often gate the very literals
+        // the next relax level would FORCE to the wrong default
+        // (`let y = ru8; y + 1` must pin `1` to UInt8 via y's decay, not
+        // force-default it to Int64).
+        if apply_ref_decay_defaults(ctx) {
+            fixpoint(ctx);
+            relax_level = 0;
+            continue;
+        }
         relax_level += 1;
         if relax_level > 2 {
             break;
@@ -1540,6 +1551,23 @@ fn solve_coerce(
     //    the POINTEE type; continue the whole coercion (incl. FromValue
     //    promotion — a promotion reads the place) with the pointee.
     if let TySlot::Resolved(TyKind::Ref { pointee: fp, .. }) = ctx.slot(fr) {
+        // Stage 2b: a FULLY-unresolved target WAITS — an annotation
+        // (`let o: Optional[&Int64] = .Some(r)`) may be about to pin it
+        // through the ref type itself; decaying now loses that race and
+        // manufactures a mismatch. Literal targets can't be refs (arm-1
+        // twin) and decay immediately. Targets nothing ever pins are
+        // decayed by `apply_ref_decay_defaults` between fixpoint phases.
+        if matches!(
+            ctx.slot(ctx.resolve(to)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+            });
+        }
         let fp = *fp;
         return solve_coerce(ctx, fp, to, expr, span);
     }
@@ -4030,6 +4058,44 @@ fn extension_where_clauses_satisfied(
 
 /// Apply deferred type-parameter defaults for TyVars that are still
 /// unconstrained. Returns true if any default was applied.
+/// Stage-2b ref-decay defaulting: a deferred ref→unresolved `Coerce` whose
+/// target NOTHING else pinned takes the stage-1.5 copy-out decay now — the
+/// value position owns a copy of the POINTEE (`let y = r` gives the pointee
+/// type). Runs inside the literal-relaxation loop so a decayed target can
+/// still pin blocked literals before force-defaulting. The deferral itself
+/// lives in `solve_coerce` arm 2: an annotation pinning the target to the
+/// ref TYPE (`let o: Optional[&Int64] = .Some(r)`) must win the race.
+fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
+    let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
+    for c in &ctx.constraints {
+        let Constraint::Coerce { from, to, .. } = c else {
+            continue;
+        };
+        let fr = ctx.resolve(*from);
+        let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(fr) else {
+            continue;
+        };
+        if matches!(
+            ctx.slot(ctx.resolve(*to)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            decays.push((*to, *pointee));
+        }
+    }
+    let mut progress = false;
+    for (to, pointee) in decays {
+        // Re-check: an earlier decay in this batch may have pinned it.
+        if matches!(
+            ctx.slot(ctx.resolve(to)),
+            TySlot::Unresolved { literal: None }
+        ) && unify::unify(ctx, to, pointee).is_ok()
+        {
+            progress = true;
+        }
+    }
+    progress
+}
+
 fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     let defaults = std::mem::take(&mut ctx.type_param_defaults);
