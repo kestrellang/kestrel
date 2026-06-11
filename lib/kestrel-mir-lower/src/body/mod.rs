@@ -774,6 +774,79 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .alloc_value(ValueDef::guaranteed(ty, source).with_span(self.current_span.clone()))
     }
 
+    /// A @guaranteed value with NO borrow_source and an explicit provenance
+    /// root — the shape of a ref extracted from a ref-bearing aggregate
+    /// (stage 2b): consuming the aggregate does not invalidate the ref (the
+    /// pointer was loaded out, it borrows nothing), but the ref still
+    /// carries the aggregate's escape provenance.
+    pub fn alloc_guaranteed_rooted(&mut self, ty: TyId, root: RootProvenance) -> ValueId {
+        self.body.alloc_value(
+            ValueDef {
+                ty,
+                ownership: Ownership::Guaranteed,
+                borrow_source: None,
+                root,
+                span: None,
+            }
+            .with_span(self.current_span.clone()),
+        )
+    }
+
+    /// Shared shape of a ref-slot extraction (struct field / tuple element /
+    /// enum payload whose declared slot type is `&T`): the instruction LOADS
+    /// the stored address; the result is the ref itself — @guaranteed
+    /// pointee-typed, rooted at the aggregate's root. An @owned aggregate is
+    /// viewed through a transient borrow (ended immediately: the result
+    /// doesn't depend on it). The result registers like a ref-returning call
+    /// result (per-use decay; named-binding registration is the caller's).
+    pub(crate) fn extract_ref_slot(
+        &mut self,
+        operand: ValueId,
+        pointee: TyId,
+        push: impl FnOnce(&mut Self, ValueId, ValueId),
+    ) -> ValueId {
+        let agg_root = self.body.value(operand).root;
+        let owned_op = self.body.value(operand).ownership == Ownership::Owned;
+        let view = if owned_op {
+            self.emit_begin_borrow(operand)
+        } else {
+            operand
+        };
+        let result = self.alloc_guaranteed_rooted(pointee, agg_root);
+        push(self, result, view);
+        if owned_op {
+            self.emit_end_borrow(view);
+        }
+        self.ref_results.insert(result);
+        self.track_borrow(result);
+        result
+    }
+
+    /// Register an extracted ref value as a NAMED ref binding (multi-use,
+    /// scope-tracked, threads through control flow). The pattern-binding
+    /// analog of `lower_borrow_init`'s registration.
+    pub(crate) fn register_ref_binding(&mut self, v: ValueId, local: HirLocalId) {
+        self.ref_binding_vals.insert(v, local);
+        let uses = self.local_use_count(local);
+        self.ref_binding_remaining.insert(local, uses);
+        let name = self.hir.locals[local].name.clone();
+        self.body.value_names.insert(v, name);
+        self.local_map.insert(local, LocalBinding::Ssa(v));
+    }
+
+    /// The CURRENT function's entry-param conventions — `RootProvenance::join`
+    /// ranks `Param(i)` roots by convention (roots are caller-frame
+    /// provenance). Empty when the def isn't lowered yet (join then ranks
+    /// params conservatively).
+    pub(crate) fn current_param_convs(&self) -> Vec<ParamConvention> {
+        self.ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .map(|f| f.params.iter().map(|p| p.convention).collect())
+            .unwrap_or_default()
+    }
+
     // ================================================================
     // Scope tracking
     // ================================================================
@@ -1296,6 +1369,33 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     nd.span = span;
                 }
                 self.ref_binding_vals.insert(new, local);
+                continue;
+            }
+            // Stage 2b: an OWNED ref-bearing value keeps its escape taint
+            // through threading — a stamped root (≠ its own self-root) is
+            // copied onto the continued value, Local roots remapped through
+            // the same rebinding. Untainted values keep their fresh
+            // self-root (the param's own id), so the owned-return check's
+            // "root == self" discriminator stays sound across merges.
+            let (ownership, root, ty) = {
+                let d = self.body.value(old);
+                (d.ownership, d.root, d.ty)
+            };
+            if ownership == Ownership::Owned
+                && root != RootProvenance::Local(old)
+                && self.ctx.module.ty_arena.contains_ref(ty)
+            {
+                let remapped = match root {
+                    RootProvenance::Local(w) => RootProvenance::Local(
+                        old_vals
+                            .iter()
+                            .position(|&o| o == w)
+                            .map(|p| new_vals[p])
+                            .unwrap_or(w),
+                    ),
+                    r => r,
+                };
+                self.body.values[new.index()].root = remapped;
             }
         }
         for scope in self.scope_stack.iter_mut() {
@@ -1448,8 +1548,24 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         let result = self.alloc_value(ty, Ownership::Owned);
         self.push_inst(InstKind::CopyValue { result, operand });
+        // Stage 2b: a copy of a ref-BEARING value aliases the same refs —
+        // the escape taint travels with it (a stamped root ≠ the operand's
+        // own self-root). Gated on contains_ref so nothing else changes.
+        self.carry_ref_taint(result, operand);
         self.track_owned(result);
         result
+    }
+
+    /// Copy the operand's provenance root onto `result` when the operand is
+    /// a TAINTED ref-bearing value (root differs from its own self-root).
+    fn carry_ref_taint(&mut self, result: ValueId, operand: ValueId) {
+        let (ty, root) = {
+            let d = self.body.value(operand);
+            (d.ty, d.root)
+        };
+        if root != RootProvenance::Local(operand) && self.ctx.module.ty_arena.contains_ref(ty) {
+            self.stamp_root(result, root);
+        }
     }
 
     /// Backstop diagnostic for the lowering of a move-out-of-borrow (duplicating
@@ -1483,6 +1599,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let ty = self.body.value(operand).ty;
         let result = self.alloc_value(ty, Ownership::Owned);
         self.push_inst(InstKind::MoveValue { result, operand });
+        self.carry_ref_taint(result, operand);
         self.consume(operand);
         self.track_owned(result);
         result
@@ -1689,30 +1806,102 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// Stage 2b packaging: prepare one element bound for a REF slot. The
+    /// borrow itself is the operand — the address is the payload: no
+    /// copy-to-owned (that would clone the POINTEE) and, for @guaranteed
+    /// operands, no consume (a borrow isn't owned; consuming would also
+    /// un-thread a named binding). The ref's provenance joins the
+    /// aggregate's taint; a fresh single-use expression ref has done its
+    /// job once packaged (collected in `end_after`, ended after the inst).
+    fn prep_ref_slot_element(
+        &mut self,
+        v: ValueId,
+        taint: &mut Option<RootProvenance>,
+        end_after: &mut Vec<ValueId>,
+    ) -> ValueId {
+        let v = self.resolve_value(v);
+        let (root, guaranteed) = {
+            let d = self.body.value(v);
+            (d.root, d.ownership == Ownership::Guaranteed)
+        };
+        let convs = self.current_param_convs();
+        *taint = Some(match taint.take() {
+            None => root,
+            Some(j) => j.join(root, &convs),
+        });
+        if guaranteed && self.ref_results.contains(&v) && !self.ref_binding_vals.contains_key(&v) {
+            end_after.push(v);
+        }
+        v
+    }
+
+    /// Is the declared (substituted) slot type at `slot` a `&T`?
+    pub(crate) fn slot_is_ref(&self, slot_tys: &[TyId], slot: usize) -> bool {
+        slot_tys
+            .get(slot)
+            .is_some_and(|&t| matches!(self.ctx.module.ty_arena.get(t), MirTy::Ref { .. }))
+    }
+
     pub fn emit_struct(&mut self, ty: TyId, fields: Vec<(FieldIdx, ValueId)>) -> ValueId {
+        let slot_tys = self.struct_field_tys(ty);
         let result = self.alloc_value(ty, Ownership::Owned);
+        let mut taint: Option<RootProvenance> = None;
+        let mut end_after: Vec<ValueId> = Vec::new();
         let fields: Vec<(FieldIdx, ValueId)> = fields
             .into_iter()
-            .map(|(idx, v)| (idx, self.own_aggregate_element(v)))
+            .map(|(idx, v)| {
+                if self.slot_is_ref(&slot_tys, idx.index()) {
+                    (idx, self.prep_ref_slot_element(v, &mut taint, &mut end_after))
+                } else {
+                    (idx, self.own_aggregate_element(v))
+                }
+            })
             .collect();
         for &(_, v) in &fields {
-            self.consume(v);
+            // @guaranteed ref-slot operands are borrows — never consumed.
+            if self.body.value(v).ownership == Ownership::Owned {
+                self.consume(v);
+            }
+        }
+        if let Some(root) = taint {
+            self.stamp_root(result, root);
         }
         self.push_inst(InstKind::Struct { result, ty, fields });
+        for v in end_after {
+            self.end_ref_if_single_use(v);
+        }
         self.track_owned(result);
         result
     }
 
     pub fn emit_tuple(&mut self, ty: TyId, elements: Vec<ValueId>) -> ValueId {
+        let slot_tys = self.tuple_elem_tys(ty);
         let result = self.alloc_value(ty, Ownership::Owned);
+        let mut taint: Option<RootProvenance> = None;
+        let mut end_after: Vec<ValueId> = Vec::new();
         let elements: Vec<ValueId> = elements
             .into_iter()
-            .map(|v| self.own_aggregate_element(v))
+            .enumerate()
+            .map(|(i, v)| {
+                if self.slot_is_ref(&slot_tys, i) {
+                    self.prep_ref_slot_element(v, &mut taint, &mut end_after)
+                } else {
+                    self.own_aggregate_element(v)
+                }
+            })
             .collect();
         for &v in &elements {
-            self.consume(v);
+            if self.body.value(v).ownership == Ownership::Owned {
+                self.consume(v);
+            }
+        }
+        if let Some(root) = taint {
+            self.stamp_root(result, root);
         }
         self.push_inst(InstKind::Tuple { result, elements });
+        for v in end_after {
+            self.end_ref_if_single_use(v);
+        }
         self.track_owned(result);
         result
     }
@@ -1723,13 +1912,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         variant: VariantIdx,
         payload: Vec<ValueId>,
     ) -> ValueId {
+        let slot_tys = self.enum_variant_payload_tys(enum_ty, variant);
         let result = self.alloc_value(enum_ty, Ownership::Owned);
+        let mut taint: Option<RootProvenance> = None;
+        let mut end_after: Vec<ValueId> = Vec::new();
         let payload: Vec<ValueId> = payload
             .into_iter()
-            .map(|v| self.own_aggregate_element(v))
+            .enumerate()
+            .map(|(i, v)| {
+                if self.slot_is_ref(&slot_tys, i) {
+                    self.prep_ref_slot_element(v, &mut taint, &mut end_after)
+                } else {
+                    self.own_aggregate_element(v)
+                }
+            })
             .collect();
         for &v in &payload {
-            self.consume(v);
+            if self.body.value(v).ownership == Ownership::Owned {
+                self.consume(v);
+            }
+        }
+        if let Some(root) = taint {
+            self.stamp_root(result, root);
         }
         self.push_inst(InstKind::Enum {
             result,
@@ -1737,6 +1941,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             variant,
             payload,
         });
+        for v in end_after {
+            self.end_ref_if_single_use(v);
+        }
         self.track_owned(result);
         result
     }
@@ -1747,6 +1954,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         field: FieldIdx,
         result_ty: TyId,
     ) -> ValueId {
+        // Stage 2b ref slot: the extraction loads the stored address — see
+        // `extract_ref_slot`. Never the copy path (it would clone the
+        // POINTEE).
+        if let MirTy::Ref { pointee, .. } = self.ctx.module.ty_arena.get(result_ty) {
+            let pointee = *pointee;
+            return self.extract_ref_slot(operand, pointee, |s, result, view| {
+                s.push_inst(InstKind::StructExtract {
+                    result,
+                    operand: view,
+                    field,
+                });
+            });
+        }
         let operand_ownership = self.body.value(operand).ownership;
         if operand_ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
@@ -1779,6 +1999,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_tuple_extract(&mut self, operand: ValueId, index: u32, result_ty: TyId) -> ValueId {
+        // Stage 2b ref slot — see `extract_ref_slot`.
+        if let MirTy::Ref { pointee, .. } = self.ctx.module.ty_arena.get(result_ty) {
+            let pointee = *pointee;
+            return self.extract_ref_slot(operand, pointee, |s, result, view| {
+                s.push_inst(InstKind::TupleExtract {
+                    result,
+                    operand: view,
+                    index,
+                });
+            });
+        }
         let operand_ownership = self.body.value(operand).ownership;
         if operand_ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
@@ -2119,7 +2350,36 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
             } else {
                 let ownership = self.ownership_for(ty);
-                self.alloc_value(ty, ownership)
+                let v = self.alloc_value(ty, ownership);
+                // Stage 2b: an owned result that CARRIES refs (a ref-bearing
+                // aggregate, e.g. `-> Optional[&T]`) roots at the join of
+                // the borrowable args — the callee can only have rooted its
+                // refs at its params (mirror of the ret_borrow source rule).
+                // No candidate args ⇒ the callee used statics/pointers —
+                // inherit the unverified pointer contract.
+                if self.ctx.module.ty_arena.contains_ref(ty) {
+                    let convs = self.current_param_convs();
+                    let mut joined: Option<RootProvenance> = None;
+                    for a in &args {
+                        let (a_root, a_guaranteed, a_ty) = {
+                            let d = self.body.value(a.value);
+                            (d.root, d.ownership == Ownership::Guaranteed, d.ty)
+                        };
+                        let candidate = a_guaranteed
+                            || (a.convention == ParamConvention::Consuming
+                                && self.ctx.module.ty_arena.contains_ref(a_ty));
+                        if candidate {
+                            joined = Some(match joined {
+                                None => a_root,
+                                Some(j) => j.join(a_root, &convs),
+                            });
+                        }
+                    }
+                    let root = joined
+                        .unwrap_or(RootProvenance::PointerDerived { mutable: false });
+                    self.stamp_root(v, root);
+                }
+                v
             }
         });
         let mut borrows: Vec<ValueId> = args

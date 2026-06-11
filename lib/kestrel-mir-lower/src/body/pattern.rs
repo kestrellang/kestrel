@@ -272,6 +272,25 @@ impl OssaBodyCtx<'_, '_> {
         if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
+        // Stage 2b: a ref-bearing result's escape taint must survive the
+        // merge — join the per-edge result roots (mirror of `lower_if`).
+        if self.ctx.module.ty_arena.contains_ref(result_ty) {
+            let convs = self.current_param_convs();
+            let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
+            for exit in &exits {
+                let d = self.body.value(exit.result);
+                if d.root != kestrel_mir::value::RootProvenance::Local(exit.result) {
+                    let r = d.root;
+                    joined = Some(match joined {
+                        None => r,
+                        Some(j) => j.join(r, &convs),
+                    });
+                }
+            }
+            if let Some(root) = joined {
+                self.stamp_root(result_param, root);
+            }
+        }
 
         // Restore outer tracker, propagating survivors and dropping the dead.
         self.tracker = saved_tracker;
@@ -875,7 +894,18 @@ impl OssaBodyCtx<'_, '_> {
                 .any(|b| self.path_requires_moveout(scrutinee_ty, &b.path));
 
         if needs_moveout {
-            let items: Vec<MoveItem> = bindings
+            // Stage 2b: bindings whose path touches a ref slot extract
+            // NON-destructively (the extraction loads the stored address;
+            // through-ref navigation reads the pointee in place) — peel them
+            // off before the consuming destructure so the moveout only
+            // routes components that actually move.
+            let (ref_bindings, move_bindings): (Vec<&Binding>, Vec<&Binding>) = bindings
+                .iter()
+                .partition(|b| self.path_touches_ref_slot(scrutinee_ty, &b.path));
+            for b in ref_bindings {
+                self.bind_path_copy(scrutinee, scrutinee_ty, &b.path, b.local_id);
+            }
+            let items: Vec<MoveItem> = move_bindings
                 .iter()
                 .map(|b| MoveItem {
                     path: b.path.clone(),
@@ -913,6 +943,9 @@ impl OssaBodyCtx<'_, '_> {
             let (proj, _) = self.apply_access_path(view, scrutinee_ty, &binding.path);
             match binding.by_ref {
                 Some(_) => {
+                    // On a ref SLOT, `proj` is already the loaded ref; the
+                    // sub-borrow below aliases the same pointee (`&v` on a
+                    // `&T` payload collapses — never a double ref).
                     let bound = self.emit_begin_borrow(proj);
                     self.ref_results.insert(bound);
                     self.ref_binding_vals.insert(bound, binding.local_id);
@@ -921,6 +954,11 @@ impl OssaBodyCtx<'_, '_> {
                     self.body.value_names.insert(bound, binding.name.clone());
                     self.local_map
                         .insert(binding.local_id, super::LocalBinding::Ssa(bound));
+                },
+                // Stage 2b ref slot: a plain binding of a `&T` payload binds
+                // the REF (front-end types it `&T`; no decay).
+                None if self.ref_results.contains(&proj) => {
+                    self.register_ref_binding(proj, binding.local_id);
                 },
                 None => {
                     // Force the copy: place-mode plain bindings OWN their
@@ -945,6 +983,13 @@ impl OssaBodyCtx<'_, '_> {
         local_id: LocalId,
     ) {
         let (extracted, _) = self.apply_access_path(base, base_ty, path);
+        // Stage 2b: a ref-slot extraction binds as a NAMED ref binding —
+        // `.Some(r)` on `Optional[&T]` gives `r: &T` (no decay; reads
+        // through `r` decay per-use like any binding).
+        if self.ref_results.contains(&extracted) {
+            self.register_ref_binding(extracted, local_id);
+            return;
+        }
         let bound_val = if self.body.value(extracted).ownership == Ownership::Owned {
             self.emit_copy_value(extracted)
         } else {
@@ -1009,6 +1054,11 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.resolve_struct_field(current_ty, name).1
                     };
+                    // A ref slot never moves out (the extraction is a load),
+                    // and nothing BEHIND a ref can move (it's borrowed).
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return false;
+                    }
                     if self.is_non_copyable(field_ty)
                         || self.copy_behavior_is_mono_dependent(field_ty)
                     {
@@ -1026,6 +1076,9 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.resolve_tuple_element(current_ty, *i)
                     };
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return false;
+                    }
                     if self.is_non_copyable(field_ty)
                         || self.copy_behavior_is_mono_dependent(field_ty)
                     {
@@ -1034,6 +1087,55 @@ impl OssaBodyCtx<'_, '_> {
                     current_ty = field_ty;
                 },
                 // Array suffix/rest patterns aren't aggregate destructures.
+                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
+            }
+        }
+        false
+    }
+
+    /// True if any step of `path` extracts through a `&T` slot. Such
+    /// bindings extract non-destructively (the ref loads out; pointee
+    /// components read in place) and must never route into a consuming
+    /// moveout. Mirrors `path_requires_moveout`'s type walk.
+    fn path_touches_ref_slot(&mut self, root_ty: TyId, path: &[PathElement]) -> bool {
+        let mut current_ty = root_ty;
+        let mut pending_downcast: Option<VariantIdx> = None;
+        for elem in path {
+            match elem {
+                PathElement::Downcast(name) => {
+                    let variant_idx = self
+                        .ty_entity(current_ty)
+                        .and_then(|e| self.ctx.resolve_variant_idx(e, name))
+                        .unwrap_or(VariantIdx::new(0));
+                    pending_downcast = Some(variant_idx);
+                },
+                PathElement::Field(name) => {
+                    let field_ty = if let Some(variant_idx) = pending_downcast.take() {
+                        self.resolve_enum_payload_field(current_ty, variant_idx, name)
+                            .1
+                    } else {
+                        self.resolve_struct_field(current_ty, name).1
+                    };
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return true;
+                    }
+                    current_ty = field_ty;
+                },
+                PathElement::Index(i) => {
+                    let field_ty = if let Some(variant_idx) = pending_downcast.take() {
+                        self.resolve_enum_payload_field_by_index(
+                            current_ty,
+                            variant_idx,
+                            FieldIdx::new(*i),
+                        )
+                    } else {
+                        self.resolve_tuple_element(current_ty, *i)
+                    };
+                    if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return true;
+                    }
+                    current_ty = field_ty;
+                },
                 PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
             }
         }
@@ -1177,7 +1279,11 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// All payload field types of an enum variant, with generic substitution.
-    fn enum_variant_payload_tys(&mut self, enum_ty: TyId, variant_idx: VariantIdx) -> Vec<TyId> {
+    pub(crate) fn enum_variant_payload_tys(
+        &mut self,
+        enum_ty: TyId,
+        variant_idx: VariantIdx,
+    ) -> Vec<TyId> {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(enum_ty) {
             MirTy::Named {
                 entity, type_args, ..
@@ -1206,7 +1312,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// All field types of a struct, with generic substitution.
-    fn struct_field_tys(&mut self, struct_ty: TyId) -> Vec<TyId> {
+    pub(crate) fn struct_field_tys(&mut self, struct_ty: TyId) -> Vec<TyId> {
         let (entity, type_args) = match self.ctx.module.ty_arena.get(struct_ty) {
             MirTy::Named {
                 entity, type_args, ..
@@ -1228,7 +1334,7 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// All element types of a tuple type.
-    fn tuple_elem_tys(&self, tuple_ty: TyId) -> Vec<TyId> {
+    pub(crate) fn tuple_elem_tys(&self, tuple_ty: TyId) -> Vec<TyId> {
         match self.ctx.module.ty_arena.get(tuple_ty) {
             MirTy::Tuple(elements) => elements.clone(),
             _ => vec![],
@@ -1288,11 +1394,14 @@ impl OssaBodyCtx<'_, '_> {
                         let (field_idx, field_ty) =
                             self.resolve_enum_payload_field(current_ty, variant_idx, name);
                         current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
-                        current_ty = field_ty;
+                        // A ref slot's extraction result is POINTEE-typed
+                        // (the loaded ref is a view of the pointee), so the
+                        // path continues navigating the pointee in place.
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
                     } else {
                         let (field_idx, field_ty) = self.resolve_struct_field(current_ty, name);
                         current = self.emit_struct_extract(current, field_idx, field_ty);
-                        current_ty = field_ty;
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
                     }
                 },
                 PathElement::Index(i) => {
@@ -1304,11 +1413,11 @@ impl OssaBodyCtx<'_, '_> {
                             field_idx,
                         );
                         current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
-                        current_ty = field_ty;
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
                         current = self.emit_tuple_extract(current, *i as u32, elem_ty);
-                        current_ty = elem_ty;
+                        current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
                     }
                 },
                 PathElement::Downcast(variant_name) => {
@@ -1384,6 +1493,22 @@ impl OssaBodyCtx<'_, '_> {
         field: FieldIdx,
         result_ty: TyId,
     ) -> ValueId {
+        // Stage 2b ref slot: extraction LOADS the stored address — the
+        // result IS the ref (@guaranteed pointee, rooted at the aggregate's
+        // root, borrowing nothing: the loaded pointer doesn't depend on the
+        // aggregate staying alive). Never copy through the slot — that
+        // would duplicate the POINTEE.
+        if let MirTy::Ref { pointee, .. } = self.ctx.module.ty_arena.get(result_ty) {
+            let pointee = *pointee;
+            return self.extract_ref_slot(operand, pointee, |s, result, view| {
+                s.push_inst(kestrel_mir::inst::InstKind::EnumPayload {
+                    result,
+                    operand: view,
+                    variant,
+                    field,
+                });
+            });
+        }
         if self.body.value(operand).ownership == Ownership::Guaranteed {
             let result = self.alloc_guaranteed(result_ty, operand);
             self.push_inst(kestrel_mir::inst::InstKind::EnumPayload {

@@ -135,6 +135,28 @@ impl OssaBodyCtx<'_, '_> {
         if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
         }
+        // Stage 2b: a ref-bearing result's escape taint must survive the
+        // merge — join the per-edge result roots. Untainted (self-rooted)
+        // edges contribute nothing, so `if c { .Some(&local) } else { .None }`
+        // joins to the local taint (conservative on the .None path — the
+        // sound direction).
+        if self.ctx.module.ty_arena.contains_ref(result_ty) {
+            let convs = self.current_param_convs();
+            let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
+            for exit in &reaching {
+                let d = self.body.value(exit.result);
+                if d.root != kestrel_mir::value::RootProvenance::Local(exit.result) {
+                    let r = d.root;
+                    joined = Some(match joined {
+                        None => r,
+                        Some(j) => j.join(r, &convs),
+                    });
+                }
+            }
+            if let Some(root) = joined {
+                self.stamp_root(result_param, root);
+            }
+        }
 
         // Restore outer tracker, propagating survivors and dropping the dead.
         self.tracker = saved_tracker;

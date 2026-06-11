@@ -306,7 +306,8 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         // drop. Must match the Bitwise arm in `copy_behavior`. NEXT VERSION:
         // Rc-boxed closures need drop → release.
         | MirTy::FuncThick { .. }
-        // Ref: signature-only borrow view — never owns, never drops.
+        // Ref: a borrow view (signature or stage-2b payload/field slot) —
+        // never owns its pointee, never drops.
         | MirTy::Ref { .. }
         | MirTy::Error => false,
 

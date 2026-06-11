@@ -163,16 +163,24 @@ impl OssaBodyCtx<'_, '_> {
             },
 
             HirExpr::Tuple { elements, .. } => {
+                let ty = self.resolve_expr_type(expr_id);
+                let slot_tys = self.tuple_elem_tys(ty);
                 let elems: Vec<ValueId> = elements
                     .iter()
-                    .map(|&e| {
+                    .enumerate()
+                    .map(|(i, &e)| {
                         let v = self.lower_expr(e);
                         // Stage 1.5: a ref element decays to an owned copy
-                        // (the tuple owns its elements).
-                        self.decay_if_ref(v)
+                        // (the tuple owns its elements) — EXCEPT a stage-2b
+                        // ref SLOT, which takes the ref itself
+                        // (`emit_tuple`'s packaging owns the bookkeeping).
+                        if self.slot_is_ref(&slot_tys, i) {
+                            v
+                        } else {
+                            self.decay_if_ref(v)
+                        }
                     })
                     .collect();
-                let ty = self.resolve_expr_type(expr_id);
                 self.emit_tuple(ty, elems)
             },
 
@@ -190,8 +198,18 @@ impl OssaBodyCtx<'_, '_> {
                     return self.emit_value_use(v);
                 }
                 let base_val = self.lower_expr_for_borrow(*base);
-                let result_ty = self.resolve_expr_type(expr_id);
-                let result = self.emit_tuple_extract(base_val, *index, result_ty);
+                // Stage 2b ref slot: extract with the SLOT type (the expr
+                // type is the peeled pointee) so the ref arm loads the
+                // stored address instead of reading pointer bits as the
+                // pointee.
+                let base_ty = self.resolve_expr_type(*base);
+                let slot_tys = self.tuple_elem_tys(base_ty);
+                let extract_ty = if self.slot_is_ref(&slot_tys, *index as usize) {
+                    slot_tys[*index as usize]
+                } else {
+                    self.resolve_expr_type(expr_id)
+                };
+                let result = self.emit_tuple_extract(base_val, *index, extract_ty);
                 // Single-use ref: element copy-out ends the ref (see the
                 // stored-field twin in lower_field). Named bindings stay live.
                 if self.ref_results.contains(&base_val)
@@ -465,6 +483,23 @@ impl OssaBodyCtx<'_, '_> {
                 );
                 FieldIdx::new(0)
             });
+
+        // Stage 2b ref FIELD: the slot stores an ADDRESS — reading projects
+        // the ref (one load), never the pointee bits. The address-chain fast
+        // path below would copy_addr the slot as if it held the pointee
+        // (it holds a pointer) — bypass it. `emit_struct_extract`'s ref arm
+        // handles owned and borrowed bases and registers the result for
+        // per-use decay (resolve_expr_type already names the PEELED pointee,
+        // which is exactly the ref result's value type).
+        if struct_entity.is_some() {
+            let slot_tys = self.struct_field_tys(base_ty);
+            if let Some(&slot_ty) = slot_tys.get(field_idx.index())
+                && matches!(self.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. })
+            {
+                let base_val = self.lower_expr_for_borrow(base);
+                return self.emit_struct_extract(base_val, field_idx, slot_ty);
+            }
+        }
 
         // If the base roots at a var-local (a `mutating`/MutBorrow receiver or
         // a mutable local, bound to a stack address), project the field's
