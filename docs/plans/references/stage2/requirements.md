@@ -64,22 +64,65 @@ or capture it — containment must precede expressiveness:
   child types) — the declared-extension-scan `ConditionalStaticParams`
   analog dissolved into that. Static never reaches MIR (no runtime
   semantics) — three layers, not five.
-- **2b. Refs in enums/tuples/STRUCTS** (structs ratified IN 2026-06-10
-  — ref-storing iterators/cursors are wanted; this is full Hylo remote
-  parts): `&T`/`&mutating T` as type arguments and field types
-  (instantiation, substitution, conformance); layout — a ref
-  payload/field is a pointer scalar, `Optional[&T]` can take the
-  nullable-pointer niche; drop shim no-ops / clone is pointer-copy on
-  ref components (the `MirTy::Ref` marker exists for the explicit
-  skip); escape provenance through wrap (construction taints the
-  aggregate with the ref's root) and unwrap/projection (extraction
-  roots at the aggregate's root); tag+pointer return ABI as a strict
-  extension of `ret_borrow`. `Optional` is the flagship; user
-  enums/structs fall out of the same machinery. NOTE the verify-level
-  consequence: a ref stored into an aggregate in a memory slot leaves
-  SSA borrow tracking — soundness for those refs rests on type-level
-  containment + scope rules, not per-value Check-4 tracking (E498-class
-  blind spots grow; accepted).
+- **2b. Refs in enums/tuples/STRUCTS — ✅ IMPLEMENTED 2026-06-11**
+  (structs ratified IN 2026-06-10 — full Hylo remote parts). Shipped
+  shape (10 commits, each full-suite green; final 3299+):
+  - **Rulings**: refs are COPYABLE as payload/field values (bit-copy
+    aliases, may-alias); NO Optional[&T]↔Optional[T] decay; both `&`
+    and `&mutating` bits; machinery-only (no Array/Dict API adoption).
+  - **Formation**: `RefPolicy{Strict,AllowAggregate}` two-mode walk in
+    hir-lower — refs legal at Field/TupleElement/GenericArg + enum
+    payloads; bare positions (E480/E482/E486/E487/E490) and Strict
+    entries (alias RHS, protocol args, extension targets, where-clause
+    types — a previously UNGUARDED gap, now closed) still reject.
+    `.Some(&x)` borrow-args stay E488 — payloads are built from named
+    bindings / ref-returning calls; construction needs a type-side pin
+    (`let o: Optional[&T] = .Some(r)`), unpinned `.Some(r)` decays.
+  - **Inference**: ref type args come from the TYPE side only.
+    `Constraint::EqualDecayed` (arm results + tuple-literal elements,
+    LOCAL reads only) and the deferred arm-2 Coerce decay + decay-
+    defaulting pass let annotations win the race; `solver_copy_class`
+    Ref→Copyable; ConformsOrigin{Expr,TypeArg} gate: a ref TYPE ARG
+    satisfies only Copyable (other bounds → clean DoesNotConform with a
+    "because" detail; `type_satisfies` Ref arm mirrors it) — ref-Item
+    witnesses are 2d. The mir-lower peel seam split
+    (`lower_resolved_ty_preserving`) keeps `(Optional,[&T])` ≠
+    `(Optional,[T])`.
+  - **Provenance**: wrap stamps the aggregate root = JOIN of ref-operand
+    roots (`RootProvenance::join`, most-restrictive over escape/
+    consuming/mutability); unwrap = @guaranteed pointee, borrow_source
+    NONE (consuming the aggregate is harmless), rooted at the
+    aggregate's root, joins the binding registry; taint carries through
+    copies/moves, if/match merges, threading, caller-side call results,
+    and (the G1 closure) VAR SLOTS — stores taint the slot monotonely,
+    loads inherit, so `var o = .Some(&local); return o` is still E494
+    while param-rooted cursor-in-var stays returnable. verify
+    `check_escapes` gained the owned-return Carrier mode (E494/E495/
+    E496 reused with carrier wordings; untainted `.None` returnable).
+  - **Codegen** (both backends): ref slot = pointer scalar stored RAW
+    (resolve_slot_value); extraction LOADS the slot only for
+    POINTEE-typed results — Ref-typed results (clone/drop shim
+    projections) keep the slot address (representation contract: owned
+    Ref value = the pointer; @guaranteed Ref value = slot address);
+    tuple layout from the RESULT type; ref-typed param args pass the
+    address raw. NO new return ABI (tag+pointer rides Direct/Sret).
+  - **Generic `-> T` at `T=&U`** (`unwrap()`, `identity[&U]`): mono
+    ret_borrow derives from the DECLARED ret; the caller detects the
+    instantiated-ref return from the declared `-> T` + type args and
+    registers the result like a ret_borrow result.
+  - **Stdlib**: Optional + the formation cascade (Result.T,
+    ControlFlow.C, OptionalIterator.T, ResultIterator.T) relaxed
+    `T: not Static`; compile-time A/B flat.
+  - **Known gap**: protocol-dispatched OPERATORS at ref instantiations
+    (`a == b` on `Optional[&Int64]`) bypass both gates (member dispatch
+    never consults the extension's conformance clause) and surface as a
+    post-mono "Callee::Witness not resolved" ICE — still REJECTED,
+    wrong message (`references/composition/README.md`).
+  - NOTE the accepted verify-level narrowing stands: a ref stored into
+    an aggregate leaves SSA borrow tracking — soundness rests on
+    type-level containment + scope rules, not per-value Check-4
+    tracking (E498-class blind spots grow; G2 consume-after-packaging
+    accepted; G1 var-laundering CLOSED via slot taint).
 - **2c. Ref-capturing closures** (maintainer requirement 2026-06-10):
   capture classification = the contains-ref predicate applied to the
   capture list; E212 relaxes from a ban to "this capture makes the

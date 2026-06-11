@@ -169,19 +169,23 @@ Current allocations:
 - E451: `circular_constraint` (compilation/constraint_cycles.rs)
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
 - E461: `unknown_attribute` (compilation/unknown_attribute.rs)
-- E480–E489: reference-type rejections (stage 0.5 of references; `&T` /
-  `&mutating T` parse everywhere, accepted nowhere). NOT analyzer
-  descriptors — emitted from HIR lowering via codespan `with_code`
-  (kestrel-hir-lower `ty.rs::reject_ref_types` + `desugar.rs` for E488);
-  the test matcher passes codespan codes through. E480 is PERMANENT
-  (params never take ref types — conventions are the only spelling,
-  references-gaps.md §10.6); E481 is carved out (made legal) in stage 1.
+- E480–E489: reference-type rejections (stage 0.5 of references). NOT
+  analyzer descriptors — emitted from HIR lowering via codespan
+  `with_code` (kestrel-hir-lower `ty.rs::reject_ref_types` +
+  `desugar.rs` for E488); the test matcher passes codespan codes
+  through. E480 is PERMANENT (params never take ref types — conventions
+  are the only spelling, references-gaps.md §10.6); E481 was carved out
+  in stage 1; **stage 2b carved out E483/E484/E485 under
+  `RefPolicy::AllowAggregate`** — those codes now fire only from STRICT
+  entry points (alias RHS, protocol/extension-target args, where-clause
+  types). Enum case payloads classify as Field (E483's position), NOT
+  Param, despite living in the `Callable` component.
   - E480: ref type in parameter position (incl. function-type params, closure params)
-  - E481: ref type in return position
-  - E482: ref type in a `var`/`let` annotation
-  - E483: ref type in a struct/enum field (incl. enum case payload)
-  - E484: ref type in a tuple element
-  - E485: ref type as a generic type argument
+  - E481: ref type in return position (legal since stage 1)
+  - E482: ref type in a `var`/`let` annotation (aggregates wrapping refs are legal)
+  - E483: ref type in a struct/enum field — LEGAL since 2b except Strict entries
+  - E484: ref type in a tuple element — LEGAL since 2b except Strict entries
+  - E485: ref type as a generic type argument — LEGAL since 2b except Strict entries
   - E486: ref type as a function-type return
   - E487: nested reference (`&&T`, `&mutating &T`)
   - E488: `&` in expression position (desugar.rs, `UnaryOp::Borrow`)
@@ -197,9 +201,14 @@ Current allocations:
   - E492: ref leaked into a generic type argument via inference — type-infer
   - E493: `ambiguous_borrow_source` (decl/ref_return.rs) — free fn with ≥2
     non-consuming params returning a ref; methods root at the receiver
-  - E494: returned ref roots at a local — escape error (mir verify::check_escapes)
-  - E495: `-> &mutating` without a mutable root (mir verify::check_escapes)
-  - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes)
+  - E494: returned ref roots at a local — escape error (mir verify::check_escapes).
+    Since 2b also the owned-return CARRIER variant: a ref-BEARING aggregate
+    return (`-> Optional[&T]`) whose taint roots at a local ("cannot return
+    this value: it carries a reference that borrows local …")
+  - E495: `-> &mutating` without a mutable root (mir verify::check_escapes;
+    2b carrier variant: a return TYPE carrying `&mutating` demands a mutable root)
+  - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes;
+    2b carrier variant for ref-bearing aggregate returns)
   - E497: ref live across a control-flow merge (mir-lower set_terminator)
   - E498: consume-while-borrowed (mir verify `try_consume`) — only when a
     LIVE ref (@guaranteed call result) chains to the consumed value; an

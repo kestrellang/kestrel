@@ -14,7 +14,7 @@ what implementation needs; the *why* stays in the research docs.
 | **stage0.5** — pointer capture + reserved ref syntax | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1** — returnable refs | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1.5** — ergonomics | ✅ | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE |
-| **stage2** — second-class composition (2a ✅ SHIPPED 2026-06-11) | ✅ | 2a ✅ | 2a ✅ | 2a ✅ | 2a ✅ | 2a ✅ |
+| **stage2** — second-class composition (2a ✅, 2b ✅ SHIPPED 2026-06-11) | ✅ | 2a+2b ✅ | 2a+2b ✅ | 2a+2b ✅ | 2a+2b ✅ | 2a+2b ✅ |
 | **stage3** — DISSOLVED into stage2 (Static→2a, witness refs→2d; closure-return carve remains) | ✅ scope only | ✅ | ⬜ | ⬜ | ⬜ | ✅ sketch |
 
 ✅ defined now · 🚧 partially defined (open sections marked inline) ·
@@ -22,6 +22,24 @@ what implementation needs; the *why* stays in the research docs.
 
 ## Implementation status
 
+- **stage2b — SHIPPED 2026-06-11** (feature/115 branch): refs in enums,
+  tuples, and structs. `Optional[&T]`, ref struct fields (memberwise
+  construction), ref tuple elements; wrap taints the aggregate with the
+  ref's root (joined, most-restrictive), unwrap roots the extraction at
+  the aggregate's root, returns follow the root rule (owned-return
+  Carrier mode of E494/E495/E496; `.None` returnable; var-slot
+  laundering closed by monotone slot taint); drop skips ref slots, copy
+  bit-copies (refs ruled COPYABLE; may-alias); NO decay between
+  `Optional[&T]` and `Optional[T]` (ruled); construction is type-driven
+  (`let o: Optional[&T] = .Some(r)` — unpinned `.Some(r)` decays,
+  `.Some(&x)` stays E488); generic `-> T` at `T = &U` (unwrap) returns
+  the ref by value with caller-side ret_borrow-style registration; ref
+  TYPE ARGS satisfy only Copyable until 2d (ConformsOrigin gate +
+  type_satisfies Ref arm — known gap: operator dispatch bypasses both
+  and ICEs at mono instead of erroring cleanly). Stdlib: Optional,
+  Result(T), ControlFlow(C), OptionalIterator, ResultIterator relaxed
+  `T: not Static`; compile time flat. Full record:
+  `stage2/requirements.md` 2b bullet.
 - **stage2a — SHIPPED 2026-06-11** (feature/115 branch): the `Static`
   containment bound. `@builtin(.Static)` marker protocol; structural
   staticness kernel (`kestrel-semantics/src/staticness.rs`, single
@@ -152,8 +170,10 @@ what implementation needs; the *why* stays in the research docs.
 
 ## Gating order
 
-stage0.5 ✅ → stage1 ✅ → stage1.5 ✅ → pre-2 work (resolution
-fallback-tier fix, Dict split storage, cross-block refs) → stage2
-(2a Static → 2b aggregates → 2c closures → 2d witnesses/iterators).
-Stage 3 is dissolved; only the closure-return root-rule carve remains
-as a possible follow-on.
+stage0.5 ✅ → stage1 ✅ → stage1.5 ✅ → cross-block refs ✅ → stage2:
+2a Static ✅ → 2b aggregates ✅ → remaining: resolution fallback-tier
+fix + Array `checked:` adoption, Dict split storage (both un-dodge the
+goal API), 2c closures, 2d witnesses/iterators (incl. the ref-witness
+gate dissolving + the operator-dispatch gap). Stage 3 is dissolved;
+only the closure-return root-rule carve remains as a possible
+follow-on.
