@@ -4,6 +4,7 @@ pub mod control;
 pub mod expr;
 pub mod literal;
 pub mod pattern;
+pub mod place;
 pub mod stmt;
 
 use std::collections::HashMap;
@@ -2762,42 +2763,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     // ================================================================
-    // Var-local address access
+    // Var-local address access — the address walk lives in `place.rs`
+    // (`try_field_addr_chain` / `try_var_addr`), the place resolver.
     // ================================================================
-
-    /// Walk a chain of HirExpr::Field nodes to find a root var local.
-    /// If found, emit a chain of FieldAddr instructions and return the
-    /// final address. Returns None if the root isn't addressable.
-    pub fn try_field_addr_chain(&mut self, expr_id: HirExprId) -> Option<ValueId> {
-        let expr = self.hir.exprs[expr_id].clone();
-        match expr {
-            kestrel_hir::body::HirExpr::Local(hir_local, _) => {
-                match self.local_map.get(&hir_local).copied() {
-                    Some(LocalBinding::Var(addr)) => Some(addr),
-                    _ => None,
-                }
-            },
-            kestrel_hir::body::HirExpr::Field { base, name, .. } => {
-                let base_addr = self.try_field_addr_chain(base)?;
-                let base_ty = self.resolve_expr_type(base);
-                let field_name = name.as_str_or_empty();
-                let struct_entity = match self.ctx.module.ty_arena.get(base_ty) {
-                    MirTy::Named { entity, .. } => Some(*entity),
-                    _ => None,
-                };
-                let field_idx =
-                    struct_entity.and_then(|e| self.ctx.resolve_field_idx(e, field_name))?;
-                Some(self.emit_field_addr(base_addr, base_ty, field_idx))
-            },
-            _ => None,
-        }
-    }
-
-    /// If `expr_id` resolves to a var local (possibly through a field chain),
-    /// return its address.
-    pub fn try_var_addr(&mut self, expr_id: HirExprId) -> Option<ValueId> {
-        self.try_field_addr_chain(expr_id)
-    }
 
     /// Inside a closure body: if `expr_id` is a captured *projected* place
     /// (e.g. `self.cap`), return the env value loaded for it. Returns `None`
