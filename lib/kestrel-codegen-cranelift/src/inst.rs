@@ -307,7 +307,7 @@ pub fn compile_inst(
 
         // elements: VALUE each → result: @owned aggregate
         InstKind::Tuple { result, elements } => {
-            let val = compile_tuple(fc, builder, elements)?;
+            let val = compile_tuple(fc, builder, *result, elements)?;
             fc.map_value(builder, *result, val);
         },
 
@@ -714,6 +714,24 @@ fn compile_op3(
 // Aggregate construction
 // ======================================================================
 
+/// Resolve an aggregate-slot operand's store value. A REF slot (stage 2b)
+/// stores the ADDRESS: a @guaranteed pointee-typed operand's codegen value
+/// IS that address, and an @owned `MirTy::Ref` operand already carries the
+/// pointer scalar — neither may go through `resolve_scalar` (it would load
+/// a scalar POINTEE through the address).
+fn resolve_slot_value(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    slot_ty: TyId,
+    value_id: ValueId,
+) -> Value {
+    if matches!(fc.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. }) {
+        fc.get_value(builder, value_id)
+    } else {
+        fc.resolve_scalar(builder, value_id)
+    }
+}
+
 fn compile_struct(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -727,12 +745,18 @@ fn compile_struct(
         TypeRepr::Zst => Ok(builder.ins().iconst(ptr_ty, 0)),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
-                return Ok(fc.resolve_scalar(builder, fields[0].1));
+                let field_ty = struct_field_type(
+                    ty,
+                    fields[0].0,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                );
+                return Ok(resolve_slot_value(fc, builder, field_ty, fields[0].1));
             }
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
             mem::zero_memory(builder, slot, repr.size());
             for &(field_idx, value_id) in fields {
-                let val = fc.resolve_scalar(builder, value_id);
                 let offset = struct_field_offset(
                     ty,
                     field_idx,
@@ -747,6 +771,7 @@ fn compile_struct(
                     fc.ctx.module,
                     &fc.ctx.tc,
                 );
+                let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
                     .tc
@@ -762,7 +787,6 @@ fn compile_struct(
             let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
             mem::zero_memory(builder, slot, size);
             for &(field_idx, value_id) in fields {
-                let val = fc.resolve_scalar(builder, value_id);
                 let offset = struct_field_offset(
                     ty,
                     field_idx,
@@ -777,6 +801,7 @@ fn compile_struct(
                     fc.ctx.module,
                     &fc.ctx.tc,
                 );
+                let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
                     .tc
@@ -796,6 +821,7 @@ fn compile_struct(
 fn compile_tuple(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
+    result: ValueId,
     elements: &[ValueId],
 ) -> Result<Value, CodegenError> {
     let ptr_ty = fc.ctx.ptr_ty;
@@ -804,13 +830,24 @@ fn compile_tuple(
         return Ok(builder.ins().iconst(ptr_ty, 0));
     }
 
+    // Layout comes from the RESULT tuple type's declared element types —
+    // never from the operands' value types: a ref-slot operand (stage 2b)
+    // is a @guaranteed POINTEE-typed value whose pointee size would corrupt
+    // the layout (the slot holds a pointer). Same authority TupleExtract
+    // reads, so offsets agree.
+    let result_ty = fc.body.values[result.index()].ty;
+    let elem_tys: Vec<TyId> = match fc.ctx.module.ty_arena.get(result_ty) {
+        MirTy::Tuple(elems) => elems.clone(),
+        // Fallback (hand-built bodies): operand value types.
+        _ => elements
+            .iter()
+            .map(|&e| fc.body.values[e.index()].ty)
+            .collect(),
+    };
     let mut layout = StructLayout::new();
-    let mut elem_tys = Vec::with_capacity(elements.len());
-    for &elem_id in elements {
-        let ty = fc.body.values[elem_id.index()].ty;
+    for &ty in &elem_tys {
         let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         layout.append_field(StructLayout::scalar(repr.size(), repr.align()));
-        elem_tys.push(ty);
     }
     layout.pad_to_align();
 
@@ -818,7 +855,7 @@ fn compile_tuple(
     mem::zero_memory(builder, slot, layout.size);
 
     for (i, &elem_id) in elements.iter().enumerate() {
-        let val = fc.resolve_scalar(builder, elem_id);
+        let val = resolve_slot_value(fc, builder, elem_tys[i], elem_id);
         let offset = layout.field_offsets[i];
         let repr = fc
             .ctx
@@ -912,12 +949,12 @@ fn store_variant_payload(
             && let Some(vl) = el.variant_layouts.get(variant.index())
         {
             for (i, &value_id) in payload.iter().enumerate() {
-                let val = fc.resolve_scalar(builder, value_id);
                 let field_offset = vl.field_offsets.get(i).copied().unwrap_or_else(|| {
                     panic!("ICE: enum variant field offset missing for field {i}")
                 });
                 let total_offset = payload_offset + field_offset;
                 let field_ty = e.cases[variant.index()].payload_fields[i].ty;
+                let val = resolve_slot_value(fc, builder, field_ty, value_id);
                 let field_repr = fc
                     .ctx
                     .tc
@@ -1084,6 +1121,17 @@ fn compile_struct_extract(
         } else {
             base
         };
+        // Stage 2b ref slot: the result is the REF itself — load the
+        // stored address (a @guaranteed pointee-typed result's codegen
+        // value IS that address), not the slot's address.
+        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+            return Ok(builder.ins().load(
+                fc.ctx.ptr_ty,
+                MemFlags::new(),
+                addr,
+                Offset32::new(0),
+            ));
+        }
         return Ok(addr);
     }
 
@@ -1143,6 +1191,16 @@ fn compile_tuple_extract(
             base
         };
         if is_borrowed {
+            // Stage 2b ref slot: load the stored address — the result is
+            // the ref itself (see compile_struct_extract).
+            if matches!(arena.get(elem_ty), MirTy::Ref { .. }) {
+                return Ok(builder.ins().load(
+                    fc.ctx.ptr_ty,
+                    MemFlags::new(),
+                    addr,
+                    Offset32::new(0),
+                ));
+            }
             return Ok(addr);
         }
         let elem_repr = fc.ctx.tc.repr(elem_ty, arena, fc.ctx.module);
@@ -1178,10 +1236,20 @@ fn compile_enum_payload(
                 let field_offset = vl.field_offsets[field.index()];
                 let total_offset = payload_offset + field_offset;
                 let addr = builder.ins().iadd_imm(base, total_offset as i64);
+                let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
                 if is_borrowed {
+                    // Stage 2b ref slot: load the stored address — the
+                    // result is the ref itself (see compile_struct_extract).
+                    if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+                        return Ok(builder.ins().load(
+                            fc.ctx.ptr_ty,
+                            MemFlags::new(),
+                            addr,
+                            Offset32::new(0),
+                        ));
+                    }
                     return Ok(addr);
                 }
-                let field_ty = e.cases[variant.index()].payload_fields[field.index()].ty;
                 let field_repr = fc
                     .ctx
                     .tc
@@ -1332,21 +1400,33 @@ fn compile_resolved_call(
         let arg_is_guaranteed = fc.body.values[call_arg.value.index()].ownership
             == kestrel_mir::value::Ownership::Guaranteed;
 
+        // Stage 2b: a ref-typed PARAM takes the ADDRESS as its value. A
+        // @guaranteed pointee-typed arg's codegen value IS that address —
+        // the guaranteed-scalar load below would deref one level too many.
+        let param_is_ref = matches!(
+            fc.ctx.module.ty_arena.get(param.ty),
+            kestrel_mir::MirTy::Ref { .. }
+        );
+
         match pass {
             PassMode::ByVal(expected_ty) => {
                 // @guaranteed scalars are pointers; load the value for by-val passing.
                 let val = if arg_is_guaranteed {
-                    let arg_ty = fc.body.values[call_arg.value.index()].ty;
-                    let arg_repr = fc
-                        .ctx
-                        .tc
-                        .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-                    if let TypeRepr::Scalar(t) = arg_repr {
-                        builder
-                            .ins()
-                            .load(t, MemFlags::new(), val, Offset32::new(0))
-                    } else {
+                    if param_is_ref {
                         val
+                    } else {
+                        let arg_ty = fc.body.values[call_arg.value.index()].ty;
+                        let arg_repr = fc
+                            .ctx
+                            .tc
+                            .repr(arg_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+                        if let TypeRepr::Scalar(t) = arg_repr {
+                            builder
+                                .ins()
+                                .load(t, MemFlags::new(), val, Offset32::new(0))
+                        } else {
+                            val
+                        }
                     }
                 } else {
                     let actual_ty = builder.func.dfg.value_type(val);
@@ -1361,7 +1441,13 @@ fn compile_resolved_call(
                 call_args.push(val);
             },
             PassMode::ByRef => {
-                if matches!(
+                if arg_is_guaranteed && param_is_ref {
+                    // The ref VALUE is the address itself; ByRef wants the
+                    // address OF the ref value — spill it.
+                    let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
+                    mem::store_to_repr(builder, repr, slot, val);
+                    call_args.push(slot);
+                } else if matches!(
                     call_arg.convention,
                     ParamConvention::Borrow | ParamConvention::MutBorrow
                 ) {
