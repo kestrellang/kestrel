@@ -43,6 +43,24 @@ use crate::where_clauses::WhereClausesOf;
 /// `TypeResolver::conforms_to`. See the module docs for the conservative
 /// rejection rule.
 pub fn type_satisfies(ctx: &QueryContext<'_>, ty: &HirTy, protocol: Entity, root: Entity) -> bool {
+    type_satisfies_at_depth(ctx, ty, protocol, root, 0)
+}
+
+/// Depth-threaded worker. Two recursion axes meet here: structural (bound
+/// evaluation walks into type args) and refinement (a protocol-sourced
+/// conformance recurses on the PARENT protocol). Protocol cycles are
+/// rejected elsewhere (E459), but this query can run before that
+/// diagnostic fires — the guard falls back to the conservative permit.
+fn type_satisfies_at_depth(
+    ctx: &QueryContext<'_>,
+    ty: &HirTy,
+    protocol: Entity,
+    root: Entity,
+    depth: u32,
+) -> bool {
+    if depth > 32 {
+        return true;
+    }
     // Static is structural, never declared — the ConformingProtocols walk
     // below can't answer it. The HIR staticness walk shares this function's
     // conservative contract exactly (abstract positions permit).
@@ -75,18 +93,18 @@ pub fn type_satisfies(ctx: &QueryContext<'_>, ty: &HirTy, protocol: Entity, root
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
         | HirTy::Protocol { entity, args, .. } => {
-            nominal_satisfies(ctx, ty, *entity, args, protocol, root)
+            nominal_satisfies(ctx, ty, *entity, args, protocol, root, depth)
         },
         // Structural singletons conform via their synthetic `lang` entities
         // (`extend (): P` / `extend !: P`), keyed the same as nominal types.
         HirTy::Tuple(elems, _) if elems.is_empty() => {
             match kestrel_name_res::extensions::resolve_lang_child(ctx, root, "()") {
-                Some(e) => nominal_satisfies(ctx, ty, e, &[], protocol, root),
+                Some(e) => nominal_satisfies(ctx, ty, e, &[], protocol, root, depth),
                 None => true,
             }
         },
         HirTy::Never(_) => match kestrel_name_res::extensions::resolve_lang_child(ctx, root, "!") {
-            Some(e) => nominal_satisfies(ctx, ty, e, &[], protocol, root),
+            Some(e) => nominal_satisfies(ctx, ty, e, &[], protocol, root, depth),
             None => true,
         },
         // Param / SelfType / AssocProjection / Opaque / Function / AliasUse /
@@ -113,7 +131,7 @@ pub fn extension_bounds_hold(
     let target_args = ctx
         .query(LowerExtensionTargetTypeArgs { extension, root })
         .unwrap_or_default();
-    extension_bounds_hold_impl(ctx, extension, &target_args, recv, hir_args(recv), root)
+    extension_bounds_hold_impl(ctx, extension, &target_args, recv, hir_args(recv), root, 0)
 }
 
 /// Nominal `entity[args]` conformance to `protocol`, bounds included.
@@ -124,6 +142,7 @@ fn nominal_satisfies(
     args: &[HirTy],
     protocol: Entity,
     root: Entity,
+    depth: u32,
 ) -> bool {
     // Must at least *declare* the conformance (closure-aware: inheritance,
     // extension-added, refinement). A plain non-conformer fails here.
@@ -134,43 +153,88 @@ fn nominal_satisfies(
         return false;
     }
 
-    // Find the most-specific extension that *supplies* this conformance with a
-    // `where` clause. A direct (non-extension) conformance is unconditional.
+    // A protocol-typed receiver is abstract — nothing concrete to disprove
+    // (same conservative rule as Param/Opaque in `type_satisfies`).
+    if ctx.get::<NodeKind>(entity) == Some(&NodeKind::Protocol) {
+        return true;
+    }
+
+    // Classify the sources that *supply* this conformance. A conformance in
+    // the type's own decl header is unconditional. An Extension on the TYPE
+    // carries evaluable `where` clauses (most-specific applicable wins). Two
+    // source shapes arrive INDIRECTLY through another protocol and hold only
+    // if the receiver genuinely satisfies that parent — recurse instead of
+    // trusting the declaration:
+    //   * a PROTOCOL source (refinement: `protocol Comparable: Equatable`
+    //     attributes Equatable to the Comparable entity), and
+    //   * an extension whose TARGET is a protocol (blanket:
+    //     `extend Equatable: Equal[Self]` supplies Equal to everything
+    //     Equatable — gate on Equatable, not on the blanket's empty clauses).
+    // Trusting them was the stage-2b operator gap: `Optional[&Int64] == …`
+    // accepted Equal via the blanket, never evaluated `extend Optional[T]:
+    // Equatable where T: Equatable`, and ICEd post-mono on the missing
+    // `&Int64` witness. (The blanket's own where clauses are NOT evaluated
+    // here: its params don't positionally map onto the receiver's args, and
+    // before this fix they were never consulted either — the parent-protocol
+    // gate is the genuine requirement.)
     let insts = ctx.query(ConformingProtocolInstantiations { entity, root });
     let mut best: Option<(Entity, Vec<HirTy>, usize)> = None; // (ext, target_args, specificity)
+    let mut parent_protocols: Vec<Entity> = Vec::new();
     for (proto, source, _proto_args) in &insts {
         if *proto != protocol {
             continue;
         }
-        if ctx.get::<NodeKind>(*source) != Some(&NodeKind::Extension) {
-            // Direct / inherited conformance — unconditional from our vantage.
-            return true;
-        }
-        let target_args = ctx
-            .query(LowerExtensionTargetTypeArgs {
-                extension: *source,
-                root,
-            })
-            .unwrap_or_default();
-        // A specialized extension applies only if its concrete target positions
-        // structurally match the instance args.
-        if !target_args_apply(&target_args, args) {
-            continue;
-        }
-        let specificity = target_args.iter().filter(|t| !is_param(t)).count();
-        if best.as_ref().is_none_or(|(_, _, s)| specificity > *s) {
-            best = Some((*source, target_args, specificity));
+        match ctx.get::<NodeKind>(*source) {
+            Some(NodeKind::Extension) => {
+                if let Some(target) = ctx.query(ExtensionTargetEntity {
+                    extension: *source,
+                    root,
+                }) && ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
+                {
+                    parent_protocols.push(target);
+                    continue;
+                }
+                let target_args = ctx
+                    .query(LowerExtensionTargetTypeArgs {
+                        extension: *source,
+                        root,
+                    })
+                    .unwrap_or_default();
+                // A specialized extension applies only if its concrete target
+                // positions structurally match the instance args.
+                if !target_args_apply(&target_args, args) {
+                    continue;
+                }
+                let specificity = target_args.iter().filter(|t| !is_param(t)).count();
+                if best.as_ref().is_none_or(|(_, _, s)| specificity > *s) {
+                    best = Some((*source, target_args, specificity));
+                }
+            },
+            Some(NodeKind::Protocol) => parent_protocols.push(*source),
+            // The type decl itself (or another non-evaluable source) —
+            // unconditional from our vantage.
+            _ => return true,
         }
     }
 
-    let Some((source, target_args, _)) = best else {
-        // Declares is true but no direct extension source matched (e.g. the
-        // conformance arrived via protocol closure/refinement). Defer to the
-        // declares result; never reject on incompleteness.
+    if let Some((source, target_args, _)) = &best
+        && extension_bounds_hold_impl(ctx, *source, target_args, recv, args, root, depth)
+    {
         return true;
-    };
-
-    extension_bounds_hold_impl(ctx, source, &target_args, recv, args, root)
+    }
+    // Indirect supply: holds iff the receiver genuinely satisfies a parent
+    // protocol that carries it.
+    if parent_protocols
+        .iter()
+        .any(|&parent| type_satisfies_at_depth(ctx, recv, parent, root, depth + 1))
+    {
+        return true;
+    }
+    // No evaluable source said yes. Reject only when something evaluable
+    // said no (a provable violation); with no applicable extension and no
+    // parent protocol, defer to the declares result — never reject on
+    // incompleteness.
+    best.is_none() && parent_protocols.is_empty()
 }
 
 fn extension_bounds_hold_impl(
@@ -180,6 +244,7 @@ fn extension_bounds_hold_impl(
     recv: &HirTy,
     recv_args: &[HirTy],
     root: Entity,
+    depth: u32,
 ) -> bool {
     let clauses = ctx.query(WhereClausesOf {
         entity: extension,
@@ -225,7 +290,7 @@ fn extension_bounds_hold_impl(
         } else {
             continue; // Unknown param — permit (conservative).
         };
-        if !type_satisfies(ctx, &sub_ty, *pb, root) {
+        if !type_satisfies_at_depth(ctx, &sub_ty, *pb, root, depth + 1) {
             return false;
         }
     }
