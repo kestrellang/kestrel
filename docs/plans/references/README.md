@@ -14,7 +14,7 @@ what implementation needs; the *why* stays in the research docs.
 | **stage0.5** — pointer capture + reserved ref syntax | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1** — returnable refs | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **stage1.5** — ergonomics | ✅ | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE | ✅ COMPLETE |
-| **stage2** — second-class composition (2a ✅, 2b ✅ SHIPPED 2026-06-11) | ✅ | 2a+2b ✅ | 2a+2b ✅ | 2a+2b ✅ | 2a+2b ✅ | 2a+2b ✅ |
+| **stage2** — second-class composition (2a ✅, 2b ✅, 2d ✅ SHIPPED 2026-06-11; 2c closures remaining) | ✅ | 2a+2b+2d ✅ | 2a+2b+2d ✅ | 2a+2b+2d ✅ | 2a+2b+2d ✅ | 2a+2b+2d ✅ |
 | **stage3** — DISSOLVED into stage2 (Static→2a, witness refs→2d; closure-return carve remains) | ✅ scope only | ✅ | ⬜ | ⬜ | ⬜ | ✅ sketch |
 
 ✅ defined now · 🚧 partially defined (open sections marked inline) ·
@@ -22,6 +22,28 @@ what implementation needs; the *why* stays in the research docs.
 
 ## Implementation status
 
+- **stage2d — SHIPPED 2026-06-11** (feature/115 branch, 8 commits
+  ed8dd65a..): ref-bearing protocols, witnesses & iterators.
+  `type Item = &T` / `&mutating T` assoc bindings (trivial-member-alias
+  carve; use-site position transparency); where-clause equality RHS refs
+  (`where I.Item = &Int64`); concrete AND generic for-in over ref Items
+  (witness machinery was already ref-clean — zero mir/mono changes);
+  bare-ref witness requirements (`-> &Self.Item`) via the
+  Callee::Witness ret_borrow arm + the E458 exact-shape rule (ref-return
+  shape and mutability must match exactly; compare.rs Ref normalization
+  fixed a latent debug-assert); the 2b operator gap CLOSED
+  (`Optional[&Int64] == …` → clean DoesNotConform; nominal_satisfies
+  gates blanket/refinement supply on the parent protocol genuinely
+  holding); two inference fixes (pattern-binder gate — a binder types
+  from its PATTERN, never its uses; solver-side Static formation
+  wellformedness — `refs().collect()` can no longer materialize
+  `Array[&Int64]` from inference); stdlib `Array.refs()` /
+  `Array.mutableRefs()` over `RefSliceIterator` / `MutRefSliceIterator`
+  (COW barrier pinned). Residual: G3 (generic Item returns not
+  escape-re-checked post-mono, accepted) + G4 (free-fn instantiated-
+  signature wf, Copyable-gap family); peel-and-forward `&U: Protocol`
+  is the ruled follow-up. Full record: `stage2/requirements.md` 2d
+  bullet.
 - **stage2b — SHIPPED 2026-06-11** (feature/115 branch): refs in enums,
   tuples, and structs. `Optional[&T]`, ref struct fields (memberwise
   construction), ref tuple elements; wrap taints the aggregate with the
@@ -183,9 +205,9 @@ what implementation needs; the *why* stays in the research docs.
 ## Gating order
 
 stage0.5 ✅ → stage1 ✅ → stage1.5 ✅ → cross-block refs ✅ → stage2:
-2a Static ✅ → 2b aggregates ✅ → remaining: resolution fallback-tier
-fix + Array `checked:` adoption, Dict split storage (both un-dodge the
-goal API), 2c closures, 2d witnesses/iterators (incl. the ref-witness
-gate dissolving + the operator-dispatch gap). Stage 3 is dissolved;
-only the closure-return root-rule carve remains as a possible
-follow-on.
+2a Static ✅ → 2b aggregates ✅ → 2d witnesses/iterators ✅ (ref-witness
+gate dissolved, operator gap closed) → remaining: 2c closures (the last
+letter), resolution fallback-tier fix + Array `checked:` adoption, Dict
+split storage (both un-dodge the goal API), peel-and-forward
+`&U: Protocol` (ruled follow-up). Stage 3 is dissolved; only the
+closure-return root-rule carve remains as a possible follow-on.

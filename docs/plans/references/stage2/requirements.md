@@ -131,21 +131,69 @@ or capture it — containment must precede expressiveness:
   env field, no load/own/drop). **Two-tier model**: Static closures get
   the planned Rc upgrade (storable, copy = retain); ref-capturing
   closures stay stack-env, called-then-dropped, never Rc'd or stored.
-- **2d. Ref-bearing protocols + for-in** (old stage 3 PULLED IN
-  2026-06-10 — ref-yielding iterators are a stated goal; stage 3
-  dissolves into this): `type Item = &T` associated-type instantiation
-  and `next() -> Optional[&T]` witness requirements. With 2b making
-  `&T` an honest type, the ref rides IN the type — §9's side-channel
-  borrow-annotation threading (`-> &Self.Item`) may largely dissolve
-  into ordinary assoc-type machinery + E48x carve-outs; the
-  witness-erasure hazard (shape mismatch between a ref-Item witness and
-  an owned-Item witness — `witness_instantiation_collapse` class) is
-  the standing watch-item. for-in desugar over ref Items; `refs()` /
-  mutating-iteration surface TBD. Iterator COMBINATORS make the Static
-  relaxation spelling load-bearing: `MapIterator[I, F]` is
-  conditionally Static (the `ConditionalStaticParams` analog), and
-  generic algorithms need "I need not be Static" bounds — this moves
-  from open question to core 2a deliverable.
+- **2d. Ref-bearing protocols + for-in — ✅ IMPLEMENTED 2026-06-11**
+  (8 commits ed8dd65a..; every commit full-suite green; final 3360+).
+  The §9 prediction held: with 2b's honest ref types, witness refs
+  dissolved into ordinary assoc-type machinery + targeted carve-outs —
+  the whole arc needed ~5 small compiler changes:
+  - **Formation carves**: `type Item = &T` / `&mutating T` legal on
+    TRIVIAL member aliases (the assoc-binding shape; eager use-site
+    expansion re-applies position rules, so `let x: Foo.Item` is E482
+    exactly like a written `&T` — anti-smuggling free); where-clause
+    EQUALITY RHS may be a ref (`where I.Item = &Int64`, the generic-
+    algorithm spelling) via shared `reject_ref_types_allowing_top_ref`.
+    Protocol assoc DEFAULTS, non-trivial aliases, protocol-bound args
+    stay Strict.
+  - **Witness seam**: assoc bindings/projections were ALREADY ref-clean
+    (resolve→LowerTypeAnnotation→TyKind::Ref; mono `substitute` walks
+    Ref) — concrete for-in over ref Items worked with ZERO mir/mono
+    changes once formation landed (note: for-in's desugared
+    `iter()`/`next()` ProtocolCalls dispatch Callee::Witness even on
+    concrete receivers). Bare-ref requirements (`-> &Self.Item`) needed
+    ONE arm: emit_call derives ret_ref_mutating for Callee::Witness
+    from the protocol method's declared return (it was Direct-only —
+    generic dispatch read pointer bits as the pointee). The
+    witness-erasure hazard became the E458 exact-shape rule: ref-return
+    shape AND mutability must match the requirement exactly (faithful
+    Ref normalization in compare.rs replaced a stale stage-0.5
+    debug_assert).
+  - **Two inference fixes shaken out by the literal-defaulting race**:
+    pattern-binder gate (a binder's type comes from its PATTERN, never
+    its uses — use-site Coerces from a still-unresolved ImplicitPat
+    binder defer while the gate is up; drops next to the AssignTarget
+    stall-breaker) and solver-side STATIC formation wellformedness in
+    `lower_hir_ty_sub` (member-RESULT instantiation is a formation
+    site: `refs().collect()` materialized `Array[&Int64]` out of
+    inference — heap refs past the line that never moves; now a clean
+    DoesNotConform anchored at the signature span — synthetic spans
+    render as NOTHING, builds fail silently).
+  - **Operator gap CLOSED** (the 2b carry-over): `a == b` at
+    `Optional[&Int64]` is a clean `!: Equal` DoesNotConform. The bypass
+    was `nominal_satisfies` trusting INDIRECT conformance sources
+    unconditionally — blanket extensions on protocols
+    (`extend Equatable: Equal[Self]`, the actual `==` route) and
+    refinement parents (`Comparable: Equatable`) now both gate on
+    `type_satisfies(recv, parent_protocol)` (depth-guarded recursion).
+  - **Stdlib surface**: `RefSliceIterator[T]` / `MutRefSliceIterator[T]`
+    (pointer.ks; ptr+remaining, Pointer-bridge next() bodies, Static —
+    no relaxation needed) + `Array.refs()` / `Array.mutableRefs()`
+    (mutableRefs runs `ensureUnique()` first — COW-safe, pinned).
+    `for x in arr.mutableRefs() { x += 1 }` mutates in place.
+  - **Residual gaps (recorded)**: G3 — generic `-> I.Item` bodies are
+    not escape-re-checked post-mono (accepted narrowing, G2 precedent;
+    both shipped iterators yield heap PointerDerived refs; follow-up
+    sketch: abstract-aware taint joins at mir-lower body/mod.rs:2496 /
+    control.rs:143 / pattern.rs:277 + mono-side carrier re-run, blocked
+    on a mono user-diagnostic channel). G4 — the Static formation
+    wellformedness covers MEMBER dispatch; free-function generic calls
+    still bypass (instantiated-signature wf residual, same family as
+    the Copyable mono-substitution gap). Peel-and-forward witnesses
+    (`&U: Protocol` via pointee forwarding — would make `==` on
+    `Optional[&T]`, contains(), sorts WORK instead of clean-reject) are
+    the ruled follow-up. Ref-Item closure combinators (map/filter) are
+    out of scope pending 2c. Tail-position decay of ref-returning calls
+    (`func f() -> Int64 { b.fetch() }`) is a pre-existing stage-1 gap,
+    unrelated to witnesses (bind via `let` first).
 
 1. **Type-aware fallback-tier resolution** (recorded option 1 in
    stage1.5/compiler-arch.md) + Array adoption — `arr(i)` as a place.
