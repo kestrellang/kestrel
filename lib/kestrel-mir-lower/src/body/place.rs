@@ -38,13 +38,12 @@ pub(crate) enum PlaceMut {
 /// stored-field shapes there. Call-arg/assignment consumers forbid them so
 /// Copyable-field snapshot semantics and clone counts stay byte-identical.
 #[derive(Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // TODO(place-C3)
 pub(crate) enum FieldViews {
+    #[allow(dead_code)] // TODO(place-C5): call-arg/assignment consumers
     Forbid,
     Allow,
 }
 
-#[allow(dead_code)] // TODO(place-C3)
 pub(crate) enum PlaceRepr {
     /// Real storage address: a `Pointer[pointee]`-typed value (var slot or
     /// FieldAddr chain). Borrow via `Begin(Mut)BorrowAddr`; stores write
@@ -56,7 +55,6 @@ pub(crate) enum PlaceRepr {
     View(ValueId),
 }
 
-#[allow(dead_code)] // TODO(place-C3)
 pub(crate) struct Place {
     pub repr: PlaceRepr,
     /// The place's value type (what a read yields; refs already peeled).
@@ -68,7 +66,6 @@ impl OssaBodyCtx<'_, '_> {
     /// this policy (rvalue, call, computed member, accessor subscript, …) —
     /// the caller composes its own fallback. Read-count-neutral: callers
     /// that meter named-binding reads keep doing so themselves.
-    #[allow(dead_code)] // TODO(place-C3)
     pub(crate) fn lower_place(&mut self, expr_id: HirExprId, views: FieldViews) -> Option<Place> {
         // Captured projected place (`self.cap` in a closure): the env value
         // loaded at entry is the view. Checked first, like

@@ -2781,56 +2781,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.place_capture_map.get(&key).copied()
     }
 
-    /// Resolve an expression to a value suitable for borrowing — returns the
-    /// original value without copying. For non-local expressions, falls back
-    /// to lower_expr (which may copy).
-    /// Lower a ret_borrow function's return expression as a PLACE
-    /// projection: stored-field chains extract @guaranteed views (keeping
-    /// the provenance root for the escape check) instead of copying the
-    /// field out — `lower_expr`'s Copyable-field snapshot would re-root at
-    /// a fresh Local and turn every `&self.field` return into E494.
-    /// Used ONLY at ret_borrow return sites; everything else falls back to
-    /// the ordinary paths.
+    /// Lower a ret_borrow function's return expression as a PLACE: the
+    /// resolver keeps the provenance root for the escape check — value-mode
+    /// lowering's Copyable-field snapshot would re-root at a fresh Local and
+    /// turn every `&self.field` return into E494. `FieldViews::Allow` makes
+    /// resolution total for stored-field shapes (borrowing receivers project
+    /// @guaranteed views); everything else falls back to the ordinary paths.
+    /// Used ONLY at ret_borrow return sites.
     pub fn lower_expr_for_ref_return(&mut self, expr_id: HirExprId) -> ValueId {
-        let expr = self.hir.exprs[expr_id].clone();
-        if let HirExpr::Field { base, name, .. } = &expr {
-            let resolved = self
-                .typed
-                .as_ref()
-                .and_then(|t| t.resolutions.get(&expr_id))
-                .copied();
-            let plain_stored = resolved.is_none_or(|e| {
-                self.ctx.world.get::<kestrel_ast_builder::Callable>(e).is_none()
-                    && self.ctx.world.get::<kestrel_ast_builder::Static>(e).is_none()
-            });
-            let base_ty = self.resolve_expr_type(*base);
-            let field_idx = match self.ctx.module.ty_arena.get(base_ty) {
-                MirTy::Named { entity, .. } => {
-                    let entity = *entity;
-                    self.ctx.resolve_field_idx(entity, name.as_str_or_empty())
-                },
-                _ => None,
+        if let Some(place) = self.lower_place(expr_id, place::FieldViews::Allow) {
+            return match place.repr {
+                place::PlaceRepr::Addr(addr) => self.emit_begin_borrow_addr(addr, place.pointee),
+                place::PlaceRepr::View(v) => v,
             };
-            if plain_stored && let Some(field_idx) = field_idx {
-                let result_ty = self.resolve_expr_type(expr_id);
-                if let Some(base_addr) = self.try_field_addr_chain(*base) {
-                    let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-                    return self.emit_begin_borrow_addr(field_addr, result_ty);
-                }
-                let base_val = self.lower_expr_for_ref_return(*base);
-                let base_ref = if self.body.value(base_val).ownership == Ownership::Owned {
-                    self.emit_begin_borrow(base_val)
-                } else {
-                    base_val
-                };
-                let result = self.alloc_guaranteed(result_ty, base_ref);
-                self.push_inst(InstKind::StructExtract {
-                    result,
-                    operand: base_ref,
-                    field: field_idx,
-                });
-                return result;
-            }
         }
         self.lower_expr_for_borrow(expr_id)
     }
