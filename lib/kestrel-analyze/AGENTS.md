@@ -214,7 +214,7 @@ Current allocations:
 - E211: `ref_pattern_position` — hir-lower codespan code (pat.rs): `&`/`&mutating` binder pattern outside its supported position (match-arm support = stage 1.5 item 2 place-mode lowering)
 - E212: `non_static_capture` (body/closure.rs) — closure captures a non-Static value (env may outlive the borrow). WIDENED 2026-06-11 (references 2a): was ref-bindings-only (`ref_binding_captured`); now any non-Static-typed root via `staticness::resolved_ty_is_static`. Ref roots keep the original "ref binding" wording. TODO(static-2c): relaxes to "capture makes the closure non-Static" once function types carry the Static bit
 - E499: `borrow_of_temporary` (body/access_mode.rs `check_borrow_init`) — `let r = &<rvalue>`; a borrow names an existing place
-- E497 has a SECOND wording (mir-lower `emit_binding_across_merge_error`): a named ref binding still used after an inside-fn terminator — bindings are block-local (no @guaranteed block params; verify Check 4 would accept forwarding, unimplemented)
+- E497 has a SECOND wording (mir-lower `emit_binding_across_merge_error`): a named ref binding still used after an inside-fn terminator that did NOT forward it. Since 2026-06-11 ("1.75") bindings thread through all control flow as @guaranteed block args, so this is a defensive FALLBACK for jumps emitted outside the LiveTracker pattern — no user-reachable shape is known to trigger it
 - E208: `assign_through_shared_ref` (body/assignment.rs) — plain assignment
   through a `&T`-returning call/getter (`arr.at(index: i) = v`,
   `cell.value = v`). The compound form (`+=`) is E207 instead (the

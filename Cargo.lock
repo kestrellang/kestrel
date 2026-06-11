@@ -1027,6 +1027,7 @@ dependencies = [
  "kestrel-codegen-cranelift",
  "kestrel-compiler",
  "kestrel-compiler-driver",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",

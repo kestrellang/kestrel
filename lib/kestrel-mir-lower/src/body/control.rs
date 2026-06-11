@@ -190,18 +190,31 @@ impl OssaBodyCtx<'_, '_> {
         let (exit_block, exit_params) = self.new_block_with_params(&descs);
 
         if !self.is_terminated() {
+            // Pop EVERY threaded entry — owned values and binding borrows —
+            // and re-track them below in desc order: break/continue rely on
+            // "the loop's tracked values are the first N slots", which is
+            // positional over scope-entry order.
             for &v in &initial_args {
                 self.pop_owned_from_scope(v);
+                self.untrack_borrow(v);
             }
             self.emit_jump(header_block, initial_args.clone());
         }
 
         self.switch_to(header_block);
+        // Rebinds local_map/tracker and stamps threaded binding params
+        // (borrow_source/root + ref_binding_vals) even though the scope
+        // entries were popped above.
         self.rebind_scope_values(&initial_args, &header_params);
-        // initial_args were consumed before the jump, so rebind won't
-        // find them in scope. Track the header params fresh.
-        for &param in header_params.iter() {
-            self.track_owned(param);
+        for (i, &param) in header_params.iter().enumerate() {
+            match descs[i].1 {
+                Ownership::Owned => self.track_owned(param),
+                // A threaded ref binding continues as the header's
+                // @guaranteed param — re-add its Borrow entry here, in desc
+                // order (the loop-exit path restores the pre-loop scope, so
+                // this placement only governs in-body teardown).
+                Ownership::Guaranteed => self.track_borrow(param),
+            }
         }
 
         let scope_depth = self.scope_stack.len();

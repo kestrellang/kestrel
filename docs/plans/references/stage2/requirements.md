@@ -110,10 +110,21 @@ or capture it — containment must precede expressiveness:
 2. **Dict split storage** (parallel meta/keys/values buffers) — gives V
    an address; `dict(at:)`/`dict(unwrap:)` become real places;
    `modify` becomes truly in-place.
-3. **Cross-block ref flow** ("stage 1.75": `add_guaranteed_block_param`,
-   kestrel-mir builder.rs; verify Check 4 already accepts forwarded
-   @guaranteed block args) — hard prerequisite for `if let .Some(r)`
-   and for closures called inside branches.
+3. **Cross-block ref flow — ✅ IMPLEMENTED 2026-06-11** ("stage 1.75").
+   Named ref bindings now thread through ALL control flow (if/match
+   arms+merges, loop headers/back-edges, break/continue) as @guaranteed
+   block args — they joined the existing LiveTracker threading
+   (`all_live_tracked`/`rebind_scope_values`), with the param stamped
+   from the forwarded value (borrow_source remapped through the same
+   rebind, provenance ROOT preserved → `return r` after a merge is
+   still E494). Verify gained one narrow rule: a forwarding-consume is
+   exempt from borrow-blocking when the borrow is forwarded by the same
+   terminator (var slot + its borrow travel together). Codegen: block
+   args destined for @guaranteed params pass the ADDRESS (both
+   backends' terminator arg resolution; the param machinery already
+   handled Guaranteed). Bindings now end at lexical scope exit, not at
+   block boundaries; the binding-E497 survives only as a fallback for
+   non-tracker-pattern jumps.
 
 ## Ratified cuts (2026-06-10)
 

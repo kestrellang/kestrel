@@ -138,10 +138,11 @@ because the stdlib BUILT that layout; enum layout is compiler-owned).
   scope-tracked — arm-internal control flow hits the binding E497
   policy instead of an untracked-value verify error. No verifier
   changes; `new_block_with_params` never sees a Guaranteed desc.
-- `add_guaranteed_block_param` is still only a panic-string aspiration
-  (`kestrel-mir/src/builder.rs:147`) — the seam for CROSS-BLOCK
-  bindings if ever wanted; verify Check 4 already accepts @guaranteed
-  block-arg forwarding.
+- ~~`add_guaranteed_block_param` is still only a panic-string
+  aspiration~~ IMPLEMENTED 2026-06-11 ("1.75"): bindings thread through
+  all control flow as @guaranteed block args via the LiveTracker
+  machinery — see `stage2/requirements.md` prerequisite 3 for the
+  shipped shape.
 - **Dangle lint home**: analyze body check (`body/dangle_ref.rs`), NOT
   verify — it shares `RetRefPointerDerived` (moved mir-lower →
   kestrel-type-infer so analyze can reach it; hir-lower can't host it,

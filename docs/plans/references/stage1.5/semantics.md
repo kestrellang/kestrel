@@ -93,9 +93,10 @@ write the payload in place.
   ratified and shipped.
 - Interaction with `diamond_conditional_move_let_drop_timing`
   (still-open bug — a conditionally-consumed `let r = &x` inherits it).
-- Cross-block: bindings stay block-local; if that is ever relaxed,
-  `add_guaranteed_block_param` stops being a panic string — verify
-  Check 4 already accepts @guaranteed block-arg forwarding.
+- ~~Cross-block: bindings stay block-local~~ RELAXED 2026-06-11
+  ("1.75"): bindings thread through all control flow as @guaranteed
+  block args and end at lexical scope exit. The block-local rule below
+  is historical; `if` conditions, arms, merges, and loops all work.
 - **Accepted E498 blind spot**: a place-mode match (or store-through)
   whose address came from a single-use expression ref ends that ref at
   pin time (`PtrTo` then EndBorrow) — a later consume of the

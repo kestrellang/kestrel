@@ -599,7 +599,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let block = self.body.alloc_block();
         let mut values = Vec::new();
         for &(ty, ownership) in params {
-            let val = self.alloc_value(ty, ownership);
+            let val = match ownership {
+                Ownership::Owned => self.alloc_value(ty, ownership),
+                // A THREADED binding borrow continuing across the block
+                // boundary (verify Check 4's forwarded form). borrow_source
+                // and the provenance root are stamped from the forwarded
+                // value when the block is entered (rebind_scope_values).
+                Ownership::Guaranteed => self.body.alloc_value(
+                    ValueDef {
+                        ty,
+                        ownership,
+                        borrow_source: None,
+                        root: RootProvenance::derived(),
+                        span: None,
+                    }
+                    .with_span(self.current_span.clone()),
+                ),
+            };
             self.body.block_mut(block).params.push(BlockParam {
                 value: val,
                 ty,
@@ -1200,6 +1216,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .flat_map(|s| {
                 s.entries.iter().filter_map(|e| match e {
                     ScopeEntry::Owned(v) => Some((*v, self.body.value(*v).ty, Ownership::Owned)),
+                    // NAMED ref bindings thread through control flow as
+                    // @guaranteed block args (references "1.75"): the borrow
+                    // stays live across merges/loops and ends at its lexical
+                    // scope exit. Single-use expression refs (ref_results)
+                    // deliberately stay block-local (E497).
+                    ScopeEntry::Borrow(v) if self.ref_binding_vals.contains_key(v) => {
+                        Some((*v, self.body.value(*v).ty, Ownership::Guaranteed))
+                    },
                     _ => None,
                 })
             })
@@ -1215,12 +1239,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn restore_scope(&mut self, snapshot: &ScopeSnapshot) {
+        // Single-use borrows can't cross block boundaries — strip on
+        // restore. NAMED ref bindings survive: they thread through control
+        // flow as @guaranteed block args, and the next rebind_scope_values
+        // maps the restored (pre-branch) value to the entered block's param.
+        let bindings: std::collections::HashSet<ValueId> =
+            self.ref_binding_vals.keys().copied().collect();
         self.scope_stack.truncate(snapshot.scopes.len());
         for (i, frame) in self.scope_stack.iter_mut().enumerate() {
-            // Borrows can't cross block boundaries — strip on restore.
             frame.entries = snapshot.scopes[i]
                 .iter()
-                .filter(|e| !matches!(e, ScopeEntry::Borrow(_)))
+                .filter(|e| match e {
+                    ScopeEntry::Borrow(v) => bindings.contains(v),
+                    _ => true,
+                })
                 .cloned()
                 .collect();
         }
@@ -1231,12 +1263,50 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Replace scope-tracked values when entering a new block.
     /// Updates scope stack, local_map, AND the shared LiveTracker.
     pub fn rebind_scope_values(&mut self, old_vals: &[ValueId], new_vals: &[ValueId]) {
+        // Threaded binding borrows: the new block's @guaranteed param IS the
+        // same borrow continued. Stamp it with the original's borrow_source
+        // (verify tracks it as an open borrow so the scope-exit EndBorrow
+        // lands and Check 4 holds) and provenance root (the escape checker
+        // still sees the original root through merges — `return r` after an
+        // `if` stays E494). Register it as the binding's current name.
+        for (&old, &new) in old_vals.iter().zip(new_vals.iter()) {
+            if old == new {
+                continue;
+            }
+            if let Some(&local) = self.ref_binding_vals.get(&old) {
+                let (src, root, span) = {
+                    let d = self.body.value(old);
+                    (d.borrow_source, d.root, d.span.clone())
+                };
+                // Remap the borrow's source through the SAME rebinding: when
+                // the borrowed var slot is itself threaded (old→new in this
+                // call), the continued borrow must point at the slot's new
+                // name or the next block's consume-protection goes stale.
+                let remap = |x: ValueId| {
+                    old_vals
+                        .iter()
+                        .position(|&o| o == x)
+                        .map(|p| new_vals[p])
+                        .unwrap_or(x)
+                };
+                let nd = &mut self.body.values[new.index()];
+                nd.borrow_source = src.map(remap).or(Some(old));
+                nd.root = root;
+                if nd.span.is_none() {
+                    nd.span = span;
+                }
+                self.ref_binding_vals.insert(new, local);
+            }
+        }
         for scope in self.scope_stack.iter_mut() {
             for entry in scope.entries.iter_mut() {
-                if let ScopeEntry::Owned(v) = entry
-                    && let Some(pos) = old_vals.iter().position(|&old| old == *v)
-                {
-                    *v = new_vals[pos];
+                match entry {
+                    ScopeEntry::Owned(v) | ScopeEntry::Borrow(v) => {
+                        if let Some(pos) = old_vals.iter().position(|&old| old == *v) {
+                            *v = new_vals[pos];
+                        }
+                    },
+                    _ => {},
                 }
             }
         }
@@ -2131,21 +2201,58 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn set_terminator(&mut self, kind: TerminatorKind) {
         self.drain_deferred_borrows();
-        // End any scope-tracked borrows before the terminator — borrows
-        // can't cross block boundaries.
+        // Values this terminator forwards as block args. A NAMED binding
+        // borrow among them is THREADED (references "1.75"): verify Check 4
+        // accepts forwarded @guaranteed block args, the scope entry survives,
+        // and the entered block rebinds it to the matching @guaranteed param
+        // (rebind_scope_values). All control-flow constructs forward the
+        // live-tracked set — and bindings joined it via all_live_tracked —
+        // so this is the normal path; the E497 below is the fallback for
+        // any jump emitted outside the tracker pattern.
+        let forwarded: std::collections::HashSet<ValueId> = match &kind {
+            TerminatorKind::Jump { args, .. } => args.iter().copied().collect(),
+            TerminatorKind::Branch {
+                then_args,
+                else_args,
+                ..
+            } => then_args.iter().chain(else_args.iter()).copied().collect(),
+            TerminatorKind::Switch { cases, .. } => cases
+                .iter()
+                .flat_map(|c| c.args.iter())
+                .copied()
+                .collect(),
+            _ => Default::default(),
+        };
+        // Threading is keyed by the binding's LOCAL, not the ValueId: arms
+        // are lowered sequentially but their exit jumps are emitted later
+        // under whatever scope state lowering currently holds, so the scope
+        // entry may name a SIBLING arm's param for the same binding. The
+        // forwarded arg always names the exiting path's own value; a scope
+        // borrow for the same local is the same logical binding.
+        let threaded_locals: std::collections::HashSet<HirLocalId> = forwarded
+            .iter()
+            .filter_map(|v| self.ref_binding_vals.get(v).copied())
+            .collect();
+        let is_threaded = |vals: &HashMap<ValueId, HirLocalId>, v: &ValueId| {
+            vals.get(v).is_some_and(|l| threaded_locals.contains(l))
+        };
+        // End all scope-tracked borrows EXCEPT threaded bindings before the
+        // terminator — single-use borrows can't cross block boundaries.
         let all_borrows: Vec<ValueId> = self
             .scope_stack
             .iter()
             .flat_map(|s| s.entries.iter())
             .filter_map(|e| match e {
-                ScopeEntry::Borrow(v) => Some(*v),
+                ScopeEntry::Borrow(v) if !is_threaded(&self.ref_binding_vals, v) => Some(*v),
                 _ => None,
             })
             .collect();
+        let binding_vals = &self.ref_binding_vals;
         for scope in &mut self.scope_stack {
-            scope
-                .entries
-                .retain(|e| !matches!(e, ScopeEntry::Borrow(_)));
+            scope.entries.retain(|e| match e {
+                ScopeEntry::Borrow(v) => is_threaded(binding_vals, v),
+                _ => true,
+            });
         }
         // ret_borrow carve-out: the one returned borrow IS the function's
         // result — it outlives the body (belt-and-suspenders with
@@ -2163,14 +2270,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 continue;
             }
             // A ret_borrow call result crossing a Jump/Branch/Switch would
-            // dangle past the merge — stage 1 keeps refs intra-block (E497).
-            // Still EndBorrow for IR sanity; the error aborts compilation.
-            // A NAMED binding ends silently here when fully used (its
-            // remaining-use count is 0); with uses left it is the binding
-            // E497 — bindings never cross blocks.
+            // dangle past the merge — single-use refs stay intra-block
+            // (E497). Still EndBorrow for IR sanity; the error aborts
+            // compilation. A NAMED binding only lands here on a jump that
+            // did NOT forward it (a non-tracker-pattern edge): silent end
+            // when fully used, the binding E497 otherwise.
             if ends_block_inside_fn {
                 if let Some(&local) = self.ref_binding_vals.get(&v) {
                     if self.ref_binding_remaining.get(&local).copied().unwrap_or(0) > 0 {
+                        kestrel_debug::ktrace!(
+                            "xblock",
+                            "E497 fallback: v={:?} local={:?} forwarded={:?} kind={:?}",
+                            v,
+                            local,
+                            forwarded,
+                            kind
+                        );
                         self.emit_binding_across_merge_error(v, local);
                     }
                 } else if self.ref_results.contains(&v) {

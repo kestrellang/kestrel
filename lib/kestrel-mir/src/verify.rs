@@ -358,6 +358,20 @@ impl<'a> BlockVerifier<'a> {
 
     /// Attempt to consume an @owned value. Returns false if already consumed.
     fn try_consume(&mut self, v: ValueId, inst: Option<u32>) -> bool {
+        self.try_consume_exempting(v, inst, None)
+    }
+
+    /// `try_consume` with an exemption set: borrows in `exempt` do not block
+    /// the consume. Used by terminator forwarding — when a borrowed value and
+    /// its borrow are BOTH forwarded as block args, the pair continues
+    /// together in the target block (threaded ref bindings ride var slots
+    /// across merges this way), so the forwarding "consume" is not an escape.
+    fn try_consume_exempting(
+        &mut self,
+        v: ValueId,
+        inst: Option<u32>,
+        exempt: Option<&FxHashSet<ValueId>>,
+    ) -> bool {
         let ownership = self.body.value(v).ownership;
         if ownership != Ownership::Owned {
             return true; // not tracked
@@ -368,7 +382,10 @@ impl<'a> BlockVerifier<'a> {
                 let blocking: Vec<ValueId> = self
                     .borrows
                     .iter()
-                    .filter(|(_, info)| info.source == v)
+                    .filter(|(borrow_val, info)| {
+                        info.source == v
+                            && !exempt.is_some_and(|e| e.contains(borrow_val))
+                    })
                     .map(|(borrow_val, _)| *borrow_val)
                     .collect();
                 if !blocking.is_empty() {
@@ -1090,10 +1107,17 @@ impl<'a> BlockVerifier<'a> {
             _ => {},
         }
 
-        // Consume forwarded @owned values.
+        // Consume forwarded @owned values. Borrows forwarded by the same
+        // terminator don't block: value and borrow continue together in the
+        // target block (threaded ref bindings over var slots).
+        let forwarded_guaranteed: FxHashSet<ValueId> = forwarded
+            .iter()
+            .copied()
+            .filter(|v| self.body.value(*v).ownership == Ownership::Guaranteed)
+            .collect();
         for v in &forwarded {
             if self.body.value(*v).ownership == Ownership::Owned {
-                self.try_consume(*v, None);
+                self.try_consume_exempting(*v, None, Some(&forwarded_guaranteed));
             }
         }
 

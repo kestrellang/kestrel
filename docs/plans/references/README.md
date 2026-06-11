@@ -40,10 +40,10 @@ what implementation needs; the *why* stays in the research docs.
     holds any place across STATEMENTS — multiple reads through one
     borrow, `let s = r` decays to a copy, `let s = &r` re-borrows,
     `r = v` store-through on `&mutating` bindings, var-slot aliasing
-    (writes visible — may-alias). BLOCK-LOCAL: last use must precede
-    control flow (binding-worded E497; `if` conditions fine); the
-    cross-block follow-up seam is `add_guaranteed_block_param` (verify
-    Check 4 already accepts forwarded @guaranteed block args). Decl/use
+    (writes visible — may-alias). ~~BLOCK-LOCAL~~ **bindings cross ALL
+    control flow since 2026-06-11** ("1.75": threaded as @guaranteed
+    block args through if/match/loops; end at lexical scope exit; root
+    preserved so post-merge `return r` stays E494). Decl/use
     rules: E209 (let-only), E210 (`&mutating` needs a mutable place),
     E212 (no closure capture), E499 (no rvalue borrows), E482 kept for
     annotations.

@@ -77,7 +77,17 @@ fn add_block_args<'ctx>(
 ) {
     let pred = builder.get_insert_block().unwrap();
     for (i, &arg) in args.iter().enumerate() {
-        let raw = fc.resolve_scalar(builder, arg);
+        // A @guaranteed arg is a THREADED borrow continuing into the
+        // target's @guaranteed (pointer-typed) phi — pass the ADDRESS
+        // as-is; `resolve_scalar` would load through it (twin of the
+        // Cranelift `resolve_block_arg`).
+        let raw = if fc.body.values[arg.index()].ownership
+            == kestrel_mir::value::Ownership::Guaranteed
+        {
+            fc.get_value(arg)
+        } else {
+            fc.resolve_scalar(builder, arg)
+        };
         let phi = fc.block_phis[target][i];
         let expected = phi.as_basic_value().get_type();
         let coerced = coerce(builder, expected, raw);
