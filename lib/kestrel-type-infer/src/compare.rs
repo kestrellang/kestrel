@@ -214,11 +214,17 @@ fn normalize_hir_type(
         },
         HirTy::Never(_) => ResolvedTy::Never,
         HirTy::Infer(_) | HirTy::Error(_) => ResolvedTy::Error,
-        // Stage-0.5 invariant: refs are rejected (rewritten to Error) at HIR
-        // lowering and must never reach type inference.
-        HirTy::Ref { .. } => {
-            debug_assert!(false, "HirTy::Ref survived HIR lowering");
-            ResolvedTy::Error
+        // Faithful Ref normalization (stage 2d): conformance signature
+        // checking compares ref returns (`-> &Self.Item` vs an impl's
+        // `-> &T`) and ref-bearing aggregates. The derived equality then
+        // enforces exact shape AND mutability — a `-> T` impl never
+        // witnesses a `-> &T` requirement (the ABIs differ: raw pointer
+        // vs owned value) and `&` never matches `&mutating`.
+        HirTy::Ref {
+            inner, mutating, ..
+        } => ResolvedTy::Ref {
+            pointee: Box::new(normalize_hir_type(qctx, root, inner, env, state)),
+            mutating: *mutating,
         },
     }
 }
