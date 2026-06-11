@@ -168,6 +168,18 @@ Current allocations:
 - E450: `circular_struct_containment` (compilation/struct_cycles.rs)
 - E451: `circular_constraint` (compilation/constraint_cycles.rs)
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
+  — **WARNING: double-allocated**; conformance_completeness.rs also
+  claims E459. Pre-existing; resolve before allocating near it.
+- E454–E458, E460, E462–E465: conformance completeness + indirect-enum
+  checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
+  this list is stale for that range; **next free E4xx is E466**.
+  E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
+  a witness's reference return must match the requirement EXACTLY in
+  shape and mutability (`-> T` never witnesses `-> &T` and vice versa —
+  the ABIs differ: raw pointer vs owned value; `&` never matches
+  `&mutating`). The normalization is `kestrel-type-infer` compare.rs
+  (`ResolvedTy::Ref`); a mismatch with a ref on either side gets the
+  ABI-explainer note.
 - E461: `unknown_attribute` (compilation/unknown_attribute.rs)
 - E480–E489: reference-type rejections (stage 0.5 of references). NOT
   analyzer descriptors — emitted from HIR lowering via codespan
@@ -189,7 +201,17 @@ Current allocations:
   - E486: ref type as a function-type return
   - E487: nested reference (`&&T`, `&mutating &T`)
   - E488: `&` in expression position (desugar.rs, `UnaryOp::Borrow`)
-  - E489: ref type in any other position (alias RHS, where-clause, bound)
+  - E489: ref type in any other position (alias RHS, where-clause, bound).
+    **Stage 2d carved out two RHS shapes** via
+    `reject_ref_types_allowing_top_ref`: TRIVIAL member aliases
+    (`type Item = &T` in a struct/enum/extension — the assoc-binding
+    shape) and where-clause EQUALITY RHS (`where I.Item = &Int64`).
+    Protocol-parented assoc defaults, non-trivial aliases, and
+    protocol-bound args stay Strict. Anti-smuggling rides the eager
+    trivial-alias expansion: a named USE re-applies the use-site position
+    rules, so `let x: Foo.Item` is E482 — but the diagnostic ANCHORS at
+    the alias RHS span (the expansion reuses the alias's AST), one error
+    per illegal use.
 - E490–E498: stage-1 reference rules (returnable refs). Mixed homes — E490
   is a hir-lower codespan code; E491/E492 are solver `InferError`s; E493 is
   an analyzer descriptor; E494–E498 are coded MIR diagnostics

@@ -61,6 +61,18 @@ mir-lower `try_lang_primitive` (entity → `Tuple([])` / `Never` / `I64`) — **
 sites must agree**, so when you add a new Entity-keyed conformance/member path,
 add the mapping too.
 
+## Synthetic-span diagnostics fail SILENTLY
+
+A solver error whose span is `Span::synthetic(0)` renders as NOTHING in
+the CLI — the build fails with no output and no binary, which reads as
+success to anything grepping stderr. Every emitted constraint that can
+ERROR must carry a real span: for solver-side type formations use the
+formed `HirTy`'s own span (the declared-signature site renders fine even
+when it points into stdlib — `emit_static_wellformedness` in solver.rs
+is the precedent). When probing compiler behavior from the CLI, verify
+the OUTPUT EXECUTABLE exists; never conclude "compiles" from empty
+stderr.
+
 ## Copy semantics: never re-implement the fold
 
 The copy-semantics decision tree lives in `kestrel-copy-fold`
