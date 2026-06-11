@@ -81,6 +81,23 @@ pub struct InferCtx<'a> {
     /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
     pub(crate) always_decay_exprs: HashSet<HirExprId>,
 
+    /// TyVars allocated for ENUM-PATTERN BINDERS whose `ImplicitPat` may
+    /// fire late (the scrutinee can wait on literal defaulting — e.g.
+    /// `for x in [1,2,3].refs()`: the array's element literal pins T, which
+    /// pins the iterator, which pins `next()`'s `Optional[&T]`). A binder's
+    /// type comes from its PATTERN, never its uses (the AssignTarget
+    /// principle): while `pattern_binder_gate` is up, a use-site Coerce
+    /// FROM one of these still-unresolved vars against a resolved target
+    /// defers instead of pinning via plain unify (which manufactured
+    /// "expected Int64 got &Int64" when the late payload equate landed).
+    pub(crate) pattern_binder_tvs: HashSet<TyVar>,
+
+    /// Drops after the literal-relaxation loop (next to the AssignTarget
+    /// stall-breaker): at that point every fireable pattern has fired, so a
+    /// binder still unresolved has no pattern-side source and its uses may
+    /// pin it (old behavior) rather than deadlock.
+    pub(crate) pattern_binder_gate: bool,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -263,6 +280,8 @@ impl<'a> InferCtx<'a> {
             always_decay_exprs: HashSet::new(),
             direct_callee_exprs: HashSet::new(),
             binding_init_exprs: HashSet::new(),
+            pattern_binder_tvs: HashSet::new(),
+            pattern_binder_gate: true,
             poison_protocol_call_recv_on_failure: HashSet::new(),
             resolutions: HashMap::new(),
             field_subscripts: HashMap::new(),

@@ -2486,6 +2486,10 @@ fn gen_implicit_variant_pat(
         .iter()
         .map(|arg| {
             let tv = ctx.fresh();
+            // A binder's type comes from the PATTERN, never its uses: gate
+            // use-site Coerces while the ImplicitPat may still fire (see
+            // `pattern_binder_tvs`).
+            ctx.pattern_binder_tvs.insert(tv);
             gen_pat(ctx, hir, arg.pattern, tv, source);
             tv
         })

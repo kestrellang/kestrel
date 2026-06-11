@@ -75,6 +75,12 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // fired), so the target's type has no other source.
     break_stalled_assign_targets(ctx);
 
+    // Pattern-binder gate drops for the same reason: every fireable
+    // ImplicitPat has fired, so a still-unresolved binder has no
+    // pattern-side source left — let its uses pin it (old behavior)
+    // rather than stall to "could not infer type".
+    ctx.pattern_binder_gate = false;
+
     // Phase 3: solve again with defaults
     fixpoint(ctx);
 
@@ -1755,6 +1761,28 @@ fn solve_coerce(
         }
         let fp = *fp;
         return solve_coerce(ctx, fp, to, expr, span);
+    }
+
+    // Stage 2d: a PATTERN BINDER's type comes from its pattern, never its
+    // uses (the AssignTarget principle applied to use-site coercions).
+    // While the binder's ImplicitPat may still fire, a use against an
+    // already-pinned target (`sum + x` racing the array literal's
+    // defaulting in `for x in [1,2,3].refs()`) must WAIT — plain unify
+    // here pinned the binder to the use's type and the late payload
+    // equate manufactured "expected Int64 got &Int64". The gate drops
+    // next to the AssignTarget stall-breaker, so a binder whose pattern
+    // never fires falls back to use-pinning instead of deadlocking.
+    if ctx.pattern_binder_gate
+        && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
+        && !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
+        && (ctx.pattern_binder_tvs.contains(&from) || ctx.pattern_binder_tvs.contains(&fr))
+    {
+        return SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span,
+        });
     }
 
     // Try unification first (handles the common case)
@@ -4886,6 +4914,58 @@ fn lower_opaque_aware(
 /// Convert HirTy to TyVar with substitutions.
 /// - Self entity → receiver TyVar
 /// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
+/// Solver-side twin of `generate::emit_copyable_wellformedness`, scoped to
+/// the STATIC bound (the ref-containment soundness line). Pushes a
+/// TypeArg-origin Conforms for each formed arg whose param carries the
+/// (implicit or explicit) Static bound. Copyable/Cloneable stay
+/// generate-side only — widening them here would newly flag code the
+/// move checker already governs (orthogonal, larger change).
+fn emit_static_wellformedness(
+    ctx: &mut InferCtx<'_>,
+    entity: kestrel_hecs::Entity,
+    arg_tvs: &[TyVar],
+    span: &Span,
+) {
+    if arg_tvs.is_empty() {
+        return;
+    }
+    let Some(static_proto) = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root: ctx.root,
+    }) else {
+        return;
+    };
+    let Some(params) = ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+    else {
+        return;
+    };
+    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root: ctx.root,
+    });
+    for clause in where_clauses {
+        let crate::resolve::WhereClause::Bound { param, protocol, .. } = clause else {
+            continue;
+        };
+        if protocol != static_proto {
+            continue;
+        }
+        let Some(pos) = params.iter().position(|p| *p == param) else {
+            continue;
+        };
+        if let Some(&tv) = arg_tvs.get(pos) {
+            kestrel_debug::ktrace!("static-wf", "emit Static wf for {entity:?} arg {tv:?}");
+            // The formed type's own span (the declared signature site) —
+            // a synthetic span here renders as NOTHING and the build
+            // fails silently.
+            ctx.conforms_typearg(tv, static_proto, span.clone());
+        }
+    }
+}
+
 fn lower_hir_ty_sub(
     ctx: &mut InferCtx<'_>,
     ty: &kestrel_hir::ty::HirTy,
@@ -4906,9 +4986,15 @@ fn lower_hir_ty_sub(
                 ctx.fresh()
             }
         },
-        HirTy::Struct { entity, args, .. }
-        | HirTy::Enum { entity, args, .. }
-        | HirTy::Protocol { entity, args, .. } => {
+        HirTy::Struct {
+            entity, args, span, ..
+        }
+        | HirTy::Enum {
+            entity, args, span, ..
+        }
+        | HirTy::Protocol {
+            entity, args, span, ..
+        } => {
             // Pre-SelfType compatibility: some sites still explicitly construct
             // `HirTy::Protocol(P)` meaning "Self where Self: P". Keep the old
             // guard as a safety net until every Self emission is confirmed to
@@ -4923,6 +5009,16 @@ fn lower_hir_ty_sub(
                 .iter()
                 .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
                 .collect();
+            // Solver-side formation wellformedness, STATIC bound only: a
+            // member-result instantiation is a formation site too —
+            // `collect() -> Array[Item]` at `Item = &Int64` must fail
+            // Array's implicit `T: Static` exactly like the annotation
+            // route (`let xs: Array[&Int64]`), or heap storage of refs
+            // materializes out of inference (the line that never moves).
+            // Abstract args stay conservative: the obligation defers until
+            // the arg resolves, and Param/assoc kinds pass through the
+            // usual entailment arms.
+            emit_static_wellformedness(ctx, *entity, &arg_tvs, span);
             ctx.named(*entity, arg_tvs)
         },
         HirTy::AliasUse { entity, args, .. } => {
