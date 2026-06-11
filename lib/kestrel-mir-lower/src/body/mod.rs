@@ -2987,21 +2987,26 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             return self.prepare_call_arg(val, convention);
         }
         if convention == ParamConvention::Borrow {
-            if let Some(addr) = self.try_var_addr(expr_id) {
-                let ty = self.resolve_expr_type(expr_id);
-                let borrow = self.emit_begin_borrow_addr(addr, ty);
-                return CallArg {
-                    value: borrow,
-                    convention,
+            // Place-resolved: Addr (var locals / var-rooted field chains)
+            // borrows the address; a View (SSA/@guaranteed receiver, closure
+            // param, loaded ref-slot field) goes through prepare_call_arg —
+            // its sub-borrow semantics protect named-binding multi-use, and
+            // it never emits the spurious copy_value lower_expr would (a
+            // clone() for Cloneable receivers, corrupting @guaranteed
+            // aggregates, e.g. `valuePtr().with { v in v.clone() }`).
+            if let Some(p) = self.lower_place(expr_id, place::FieldViews::Forbid) {
+                return match p.repr {
+                    place::PlaceRepr::Addr(addr) => {
+                        let borrow = self.emit_begin_borrow_addr(addr, p.pointee);
+                        CallArg {
+                            value: borrow,
+                            convention,
+                        }
+                    },
+                    place::PlaceRepr::View(v) => self.prepare_call_arg(v, convention),
                 };
             }
-            // SSA / @guaranteed receiver (e.g. a closure param or an already-borrowed
-            // value used as a borrowing method's receiver): borrow it in place.
-            // lower_expr would emit a spurious copy_value, which for a Cloneable type
-            // expands to a clone() — double-cloning the receiver and corrupting
-            // @guaranteed aggregate values (e.g. `valuePtr().with { v in v.clone() }`).
-            // Mirrors the MutBorrow path above.
-            let val = self.lower_expr_for_borrow(expr_id);
+            let val = self.lower_expr(expr_id);
             return self.prepare_call_arg(val, convention);
         }
         // Single-use SSA local with Consuming convention: move directly,

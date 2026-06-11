@@ -23,15 +23,6 @@ use kestrel_mir::{FieldIdx, MirTy, TyId, ValueId};
 
 use super::{LocalBinding, OssaBodyCtx};
 
-/// How a resolved place will be borrowed (decided at borrow time, not
-/// resolution time — no resolution rule depends on it).
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // TODO(place-C3): consumers arrive in follow-up commits
-pub(crate) enum PlaceMut {
-    Shared,
-    Mutating,
-}
-
 /// Whether stored-field chains may resolve through @guaranteed StructExtract
 /// VIEWS when no address exists (e.g. a borrowing receiver's fields). Only
 /// ret_borrow return sites allow views — that makes resolution total for
@@ -215,27 +206,12 @@ impl OssaBodyCtx<'_, '_> {
         result
     }
 
-    /// Take the borrow a consumer asked for. Addr → `Begin(Mut)BorrowAddr`;
-    /// @guaranteed views pass through (they already ARE borrows); @owned
-    /// views borrow in place.
-    #[allow(dead_code)] // TODO(place-C3)
-    pub(crate) fn borrow_place(&mut self, place: &Place, m: PlaceMut) -> ValueId {
-        match place.repr {
-            PlaceRepr::Addr(addr) => match m {
-                PlaceMut::Shared => self.emit_begin_borrow_addr(addr, place.pointee),
-                PlaceMut::Mutating => self.emit_begin_mut_borrow_addr(addr, place.pointee),
-            },
-            PlaceRepr::View(v) => {
-                if self.body.value(v).ownership == Ownership::Guaranteed {
-                    return v;
-                }
-                match m {
-                    PlaceMut::Shared => self.emit_begin_borrow(v),
-                    PlaceMut::Mutating => self.emit_begin_mut_borrow(v),
-                }
-            },
-        }
-    }
+    // NOTE: there is deliberately no `borrow_place` helper. How a place is
+    // borrowed is the CONSUMER's semantic: call args go through
+    // `prepare_call_arg` (sub-borrows protect named-binding multi-use;
+    // @guaranteed mutating receivers pass through), ret_borrow returns
+    // borrow Addr results directly and forward Views. A one-size helper
+    // papered over exactly that difference.
 
     /// Value-context read of a place. Addr + Copyable = the LOAD-BEARING
     /// snapshot (`let v = self.x; self.x += 1` must see the old value);
