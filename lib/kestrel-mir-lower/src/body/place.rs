@@ -39,7 +39,6 @@ pub(crate) enum PlaceMut {
 /// Copyable-field snapshot semantics and clone counts stay byte-identical.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FieldViews {
-    #[allow(dead_code)] // TODO(place-C5): call-arg/assignment consumers
     Forbid,
     Allow,
 }

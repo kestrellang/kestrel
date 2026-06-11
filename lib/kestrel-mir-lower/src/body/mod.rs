@@ -2799,25 +2799,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
-        // A captured projected place reads its env value directly.
-        if let Some(v) = self.captured_place_value(expr_id) {
-            return v;
+        // Local/captured places resolve through the place resolver: var
+        // locals borrow their address in place (value-mode would
+        // `emit_copy_addr` — an illegal copy for a non-Copyable var); owned
+        // SSA locals come back RAW (callers own the borrow decision —
+        // borrowing here stranded Iterator.fold's receiver on a temp).
+        // Field exprs deliberately fall to lower_expr: value-context reads
+        // keep the Copyable-field snapshot and its clone counts.
+        if !matches!(self.hir.exprs[expr_id], HirExpr::Field { .. })
+            && let Some(place) = self.lower_place(expr_id, place::FieldViews::Forbid)
+        {
+            return match place.repr {
+                place::PlaceRepr::Addr(addr) => self.emit_begin_borrow_addr(addr, place.pointee),
+                place::PlaceRepr::View(v) => v,
+            };
         }
-        let expr = self.hir.exprs[expr_id].clone();
-        match &expr {
-            HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
-                self.map_local(*hir_local)
-            },
-            HirExpr::Local(hir_local, _) => {
-                // var-local: borrow the address directly (Swift `load [borrow]`).
-                // Falling through to lower_expr would `emit_copy_addr` — an
-                // illegal copy for a non-Copyable var.
-                let addr = self.map_local(*hir_local);
-                let ty = self.resolve_local_type(*hir_local);
-                self.emit_begin_borrow_addr(addr, ty)
-            },
-            _ => self.lower_expr(expr_id),
-        }
+        self.lower_expr(expr_id)
     }
 
     /// Lower an expression for a consuming context — moves ownership
