@@ -1385,13 +1385,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // the same rebinding. Untainted values keep their fresh
             // self-root (the param's own id), so the owned-return check's
             // "root == self" discriminator stays sound across merges.
+            // Tainted VAR SLOTS (the G1 closure: Pointer-of-ref-bearing)
+            // thread their taint the same way.
             let (ownership, root, ty) = {
                 let d = self.body.value(old);
                 (d.ownership, d.root, d.ty)
             };
+            let carries_taint = self.ctx.module.ty_arena.contains_ref(ty)
+                || matches!(
+                    self.ctx.module.ty_arena.get(ty),
+                    MirTy::Pointer(p) if self.ctx.module.ty_arena.contains_ref(*p)
+                );
             if ownership == Ownership::Owned
                 && root != RootProvenance::Local(old)
-                && self.ctx.module.ty_arena.contains_ref(ty)
+                && carries_taint
             {
                 let remapped = match root {
                     RootProvenance::Local(w) => RootProvenance::Local(
@@ -2177,12 +2184,49 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
+    /// G1 closure (stage 2b): a TAINTED ref-bearing value stored into a
+    /// var slot taints the SLOT's root (monotone join — reassignments only
+    /// tighten), and loads inherit it — so
+    /// `var o = .Some(&local); return o` stays E494 instead of laundering
+    /// the taint through memory. Param-rooted stores keep slots (and their
+    /// loads) returnable: the cursor-in-a-var flagship is unaffected.
+    fn taint_slot_from_store(&mut self, address: ValueId, value: ValueId) {
+        let (v_root, v_ty) = {
+            let d = self.body.value(value);
+            (d.root, d.ty)
+        };
+        if v_root == RootProvenance::Local(value) || !self.ctx.module.ty_arena.contains_ref(v_ty)
+        {
+            return;
+        }
+        let slot_root = self.body.value(address).root;
+        let new_root = if slot_root == RootProvenance::Local(address) {
+            v_root
+        } else {
+            let convs = self.current_param_convs();
+            slot_root.join(v_root, &convs)
+        };
+        self.stamp_root(address, new_root);
+    }
+
+    /// The load half of the G1 closure: a load of a ref-bearing type from
+    /// a tainted slot carries the slot's root.
+    fn inherit_slot_taint(&mut self, result: ValueId, address: ValueId, ty: TyId) {
+        let slot_root = self.body.value(address).root;
+        if slot_root != RootProvenance::Local(address)
+            && self.ctx.module.ty_arena.contains_ref(ty)
+        {
+            self.stamp_root(result, slot_root);
+        }
+    }
+
     pub fn emit_store_init(&mut self, address: ValueId, value: ValueId) {
         let value = if self.body.value(value).ownership == Ownership::Guaranteed {
             self.emit_copy_value(value)
         } else {
             value
         };
+        self.taint_slot_from_store(address, value);
         self.push_inst(InstKind::StoreInit { address, value });
         self.consume(value);
     }
@@ -2211,12 +2255,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         } else {
             value
         };
+        self.taint_slot_from_store(address, value);
         self.push_inst(InstKind::StoreAssign { address, value });
         self.consume(value);
     }
 
     pub fn emit_load(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.alloc_value(ty, Ownership::Owned);
+        self.inherit_slot_taint(result, address, ty);
         self.push_inst(InstKind::Load { result, address });
         self.track_owned(result);
         result
@@ -2224,6 +2270,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
 
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.alloc_value(ty, Ownership::Owned);
+        self.inherit_slot_taint(result, address, ty);
         self.push_inst(InstKind::Take {
             result,
             address,
@@ -2307,6 +2354,57 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .map(|r| r.mutating),
             _ => None,
         };
+        // Stage 2b: a generic `-> T` callee instantiated at `T = &U`
+        // (unwrap()/or() on Optional[&U], `identity[&U]`) returns the REF
+        // by value — the mono instance's ret IS `MirTy::Ref` while
+        // ret_borrow stays false (derived from the DECLARED ret). The
+        // caller registers the result exactly like a ret_borrow result:
+        // @guaranteed pointee, rooted at the borrowable args (extraction
+        // roots at the aggregate's root). Derivable here from the declared
+        // return + instantiated type args — no expr context needed.
+        let ret_ref_mutating = ret_ref_mutating.or_else(|| {
+            let Callee::Direct {
+                func, type_args, ..
+            } = &callee
+            else {
+                return None;
+            };
+            let kestrel_hir::ty::HirTy::Param(p, _) =
+                self.ctx.query.query(kestrel_hir_lower::LowerCallableReturnType {
+                    entity: *func,
+                    root: self.ctx.root,
+                })
+            else {
+                return None;
+            };
+            // `type_args` is [enclosing type/extension params] ++ [own
+            // params] (prepend_receiver_type_args) — search both lists.
+            let own: Vec<kestrel_hecs::Entity> = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::TypeParams>(*func)
+                .map(|tp| tp.0.clone())
+                .unwrap_or_default();
+            let parent: Vec<kestrel_hecs::Entity> = self
+                .ctx
+                .world
+                .parent_of(*func)
+                .and_then(|par| {
+                    self.ctx
+                        .world
+                        .get::<kestrel_ast_builder::TypeParams>(par)
+                        .map(|tp| tp.0.clone())
+                })
+                .unwrap_or_default();
+            let idx = parent
+                .iter()
+                .position(|&e| e == p)
+                .or_else(|| own.iter().position(|&e| e == p).map(|i| parent.len() + i))?;
+            match self.ctx.module.ty_arena.get(*type_args.get(idx)?) {
+                MirTy::Ref { mutating, .. } => Some(*mutating),
+                _ => None,
+            }
+        });
         // PointerDerived originates at the `ptr_ref`/`ptr_mut_ref` intrinsics:
         // a callee that is a thin intrinsic wrapper (Pointer.value /
         // .mutatingValue) returns a view inheriting the raw pointer's
