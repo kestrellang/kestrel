@@ -502,4 +502,90 @@ public struct ArraySliceIterator[T]: Iterator {
     }
 }
 
+/// Forward iterator yielding SHARED REFERENCES (`&T`) to contiguous
+/// elements in place — no copies, no clones. The by-reference sibling of
+/// `ArraySliceIterator`; surfaced as `Array.refs()`.
+///
+/// # Invalidation
+///
+/// Holds a raw pointer into the underlying buffer. Mutating the source
+/// collection's STRUCTURE while iterating (append/realloc, removal)
+/// invalidates the cursor and any yielded reference — the same contract
+/// as every pointer-backed iterator, met through references here.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
+public struct RefSliceIterator[T]: Iterator {
+    type Item = &T
+
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    /// Yields a reference to the next element in place, or `.None` when
+    /// the count reaches zero.
+    public mutating func next() -> Optional[&T] {
+        if self.remaining > 0 {
+            let r = &self.ptr.value;
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            let o: Optional[&T] = .Some(r);
+            o
+        } else {
+            .None
+        }
+    }
+}
+
+/// Forward iterator yielding MUTABLE REFERENCES (`&mutating T`) to
+/// contiguous elements — in-place mutation without writeback
+/// (`for x in arr.mutableRefs() { x += 1 }`). Surfaced as
+/// `Array.mutableRefs()`, which runs the COW barrier before handing out
+/// the buffer.
+///
+/// # Invalidation
+///
+/// Same contract as `RefSliceIterator`: mutating the source collection's
+/// STRUCTURE while iterating invalidates the cursor and any yielded
+/// reference. Element writes through the yielded references are the
+/// intended use.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
+public struct MutRefSliceIterator[T]: Iterator {
+    type Item = &mutating T
+
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    /// Yields a mutable reference to the next element in place, or
+    /// `.None` when the count reaches zero.
+    public mutating func next() -> Optional[&mutating T] {
+        if self.remaining > 0 {
+            let r = &mutating self.ptr.mutatingValue;
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            let o: Optional[&mutating T] = .Some(r);
+            o
+        } else {
+            .None
+        }
+    }
+}
+
 

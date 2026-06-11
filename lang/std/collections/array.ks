@@ -10,7 +10,7 @@ import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
+import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
@@ -1320,6 +1320,43 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// Returns a forward iterator over the array's elements.
     public func iter() -> ArraySliceIterator[T] {
         ArraySliceIterator(ptr: self.ptr(), remaining: self.len())
+    }
+
+    /// Returns an iterator yielding SHARED REFERENCES (`&T`) to the
+    /// elements in place — no copies, no clones. References are
+    /// read-only views; they alias the array's buffer, so structural
+    /// mutation (append, removal) during iteration invalidates them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let words = ["alpha", "beta"];
+    /// for w in words.refs() {
+    ///     print(w.len());   // reads in place — no element copy
+    /// }
+    /// ```
+    public func refs() -> RefSliceIterator[T] {
+        RefSliceIterator(ptr: self.ptr(), remaining: self.len())
+    }
+
+    /// Returns an iterator yielding MUTABLE REFERENCES (`&mutating T`)
+    /// to the elements — in-place mutation without writeback. Runs the
+    /// COW barrier first, so writes never leak into shared storage.
+    /// Structural mutation (append, removal) during iteration
+    /// invalidates the yielded references.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var xs = [1, 2, 3];
+    /// for x in xs.mutableRefs() {
+    ///     x += 1;
+    /// }
+    /// // xs == [2, 3, 4]
+    /// ```
+    public mutating func mutableRefs() -> MutRefSliceIterator[T] {
+        self.ensureUnique();
+        MutRefSliceIterator(ptr: self.ptr(), remaining: self.len())
     }
 
     // chunks(of:), windows(of:): provided by extend Slice[T] — return
