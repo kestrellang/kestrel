@@ -269,6 +269,28 @@ fn build_hir_ty_for_entity(
     }
 }
 
+/// A type-naming RHS that may itself BE a ref (stage 2d): an assoc-type
+/// binding (`type Item = &T`) or a where-clause equality RHS
+/// (`where I.Item = &Int64`). Keeps a top-level ref (mirror of the
+/// function-return carve) and walks everything else with the aggregate
+/// policy — bare refs in nested non-aggregate positions still reject.
+pub fn reject_ref_types_allowing_top_ref(ctx: &QueryContext<'_>, ty: HirTy) -> HirTy {
+    if let HirTy::Ref {
+        inner,
+        mutating,
+        span,
+    } = ty
+    {
+        let inner = reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
+        return HirTy::Ref {
+            inner: Box::new(inner),
+            mutating,
+            span,
+        };
+    }
+    reject_ref_types(ctx, ty, RefPosition::Other, RefPolicy::AllowAggregate)
+}
+
 /// True if an alias entity is trivial — has no type params, no protocol bounds,
 /// no where clause. These aliases can be safely expanded at HIR lowering.
 fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
@@ -895,26 +917,7 @@ impl QueryFn for LowerTypeAnnotation {
             )
             && is_trivial_alias(ctx, self.entity)
         {
-            if let HirTy::Ref {
-                inner,
-                mutating,
-                span,
-            } = lowered
-            {
-                let inner =
-                    reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
-                return Some(HirTy::Ref {
-                    inner: Box::new(inner),
-                    mutating,
-                    span,
-                });
-            }
-            return Some(reject_ref_types(
-                ctx,
-                lowered,
-                RefPosition::Other,
-                RefPolicy::AllowAggregate,
-            ));
+            return Some(reject_ref_types_allowing_top_ref(ctx, lowered));
         }
 
         // A TypeAnnotation on a callable is its return annotation; on a

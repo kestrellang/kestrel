@@ -77,14 +77,14 @@ pub fn resolve_where_clauses(
                     }
                 },
                 WhereConstraint::Equality { lhs, rhs, .. } => {
-                    // Where-clause RHS types are Strict ref territory
-                    // (pre-2b this site had NO reject walk at all — a ref
-                    // here silently survived).
-                    let rhs_hir = kestrel_hir_lower::reject_ref_types(
+                    // Stage 2d: an equality RHS may itself be a ref
+                    // (`where I.Item = &Int64` — generic algorithms over
+                    // ref-Item iterators pin the Item this way). Nested
+                    // non-aggregate refs still reject; protocol-bound type
+                    // args (below) stay Strict.
+                    let rhs_hir = kestrel_hir_lower::reject_ref_types_allowing_top_ref(
                         ctx,
                         kestrel_hir_lower::lower_ast_type(ctx, entity, root, rhs),
-                        kestrel_hir_lower::RefPosition::Other,
-                        kestrel_hir_lower::RefPolicy::Strict,
                     );
                     if let Some((param, assoc_name)) =
                         extract_associated_type_path(ctx, lhs, entity, root)
