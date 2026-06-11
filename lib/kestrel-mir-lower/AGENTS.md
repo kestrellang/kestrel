@@ -112,6 +112,35 @@ that reads a var_local must load from the address (`emit_copy_addr`).
 Closures capturing var_locals must snapshot the value, not capture the
 raw address.
 
+## Place resolution — `body/place.rs` is THE resolver
+
+Any code that turns a HIR expression into a place (an address or a
+@guaranteed view) goes through `lower_place` or the addr-only walk
+(`try_field_addr_chain` / `try_var_addr`) in `body/place.rs` — ret_borrow
+returns, borrow lowering, field reads, and both call-arg conventions
+already do. Don't grow a new bespoke route: the pre-unification drift is
+exactly what produced three latent bugs (false E494 on every
+addressed-receiver field projection; lost writes when a mutating method
+ran through a `&mutating` field; stored-`&T`-field returns yielding the
+pointer's bits as the value).
+
+- **Never emit a `FieldAddr` whose provenance isn't inherited.**
+  `emit_field_addr` stamps the base's root (the `alloc_value` funnel only
+  chases `borrow_source`, and addresses are owned — an unstamped address
+  self-roots `Local` and severs a `mutating` receiver's `Param` root) and
+  records the chain's storage anchor in `addr_anchors`;
+  `emit_begin_(mut_)borrow_addr` uses that anchor as `borrow_source` so a
+  returned borrow never chains to the scope-destroyed address temp (the
+  consume-while-borrowed verify ICE). Any new address-projection emitter
+  must do both.
+- **`lower_place` is EFFECTFUL for ref-slot fields** — it emits the ref
+  extraction (`extract_ref_slot`: instructions, borrow tracking,
+  `ref_results` registration). Never call it as a maybe-probe and discard
+  the result. If you only want an address, use `try_field_addr_chain`
+  (a pure walk; it stops at ref slots — a `&T` field's storage is its
+  POINTEE, and a `FieldAddr` there aliases the stored pointer's bits).
+  If you call `lower_place`, consume BOTH the `Addr` and `View` arms.
+
 ## Closure captures — query, don't recompute
 
 Closure captures come from the post-inference `ClosureCaptures` query
