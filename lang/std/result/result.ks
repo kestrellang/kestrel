@@ -37,7 +37,10 @@ import std.result.(Optional)
 ///
 /// A two-case tagged union — discriminant plus the larger of `T` / `E`.
 /// Niche optimisation applies the same way it does to `Optional`.
-public enum Result[T, E]: Tryable, not Copyable {
+// `T: not Static` (references 2b): Optional's relaxed payload flows into
+// `okOr`/`okOrElse` — the success slot may carry a reference. The error
+// slot stays Static (`throws` + refs is E490; a ref error never forms).
+public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     /// The success branch — wraps a `T`.
     case Ok(T)
 
@@ -387,7 +390,9 @@ extend Result[T, E]: Formattable where T: Formattable, E: Formattable {
 ///
 /// Stores the success value in an `Optional[T]` field; `next()` empties
 /// it on first call.
-public struct ResultIterator[T, E] {
+// `T: not Static` (references 2b): mirrors Result's relaxation so
+// `iter()` stays formable.
+public struct ResultIterator[T, E] where T: not Static {
     type Item = T
 
     private var value: Optional[T]

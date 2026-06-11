@@ -48,8 +48,13 @@ import std.iter.(Iterator)
 /// discriminant plus the payload of `T`. The compiler will use a niche
 /// when one is available (e.g. a non-zero pointer), so `Optional[Pointer]`
 /// is the same size as `Pointer`.
+// `T: not Static` (references 2b): the payload may be a reference —
+// `Optional[&T]` is the checked-access result type. The relaxation is
+// need-not (Static arguments still flow); `Optional[&U]` instances are
+// themselves non-Static, so the 2a containment bound keeps them out of
+// heap storage, statics, and captures.
 @builtin(.OptionalEnum)
-public enum Optional[T]: not Copyable {
+public enum Optional[T]: not Copyable where T: not Static {
     /// Wraps a present value of `T`.
     @builtin(.OptionalSomeCase)
     case Some(T)
@@ -796,7 +801,10 @@ extend Optional[T]: Coalesce[T] {
 /// # Representation
 ///
 /// One `Optional[T]` field. `next()` empties it on first call.
-public struct OptionalIterator[T]: Iterator {
+// `T: not Static` (references 2b): mirrors Optional's relaxation so
+// `iter()` stays formable; an `OptionalIterator[&U]` instance is itself
+// non-Static (it stores the Optional), so containment holds.
+public struct OptionalIterator[T]: Iterator where T: not Static {
     type Item = T
 
     private var value: Optional[T]

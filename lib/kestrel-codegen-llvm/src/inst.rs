@@ -326,7 +326,7 @@ pub fn compile_inst<'ctx>(
             operand,
             field,
         } => {
-            let val = compile_struct_extract(fc, builder, *operand, *field)?;
+            let val = compile_struct_extract(fc, builder, *result, *operand, *field)?;
             fc.map_value(*result, val);
         },
 
@@ -335,7 +335,7 @@ pub fn compile_inst<'ctx>(
             operand,
             index,
         } => {
-            let val = compile_tuple_extract(fc, builder, *operand, *index)?;
+            let val = compile_tuple_extract(fc, builder, *result, *operand, *index)?;
             fc.map_value(*result, val);
         },
 
@@ -345,20 +345,20 @@ pub fn compile_inst<'ctx>(
             variant,
             field,
         } => {
-            let val = compile_enum_payload(fc, builder, *operand, *variant, *field)?;
+            let val = compile_enum_payload(fc, builder, *result, *operand, *variant, *field)?;
             fc.map_value(*result, val);
         },
 
         InstKind::DestructureStruct { results, operand } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_struct_extract(fc, builder, *operand, FieldIdx::new(i))?;
+                let val = compile_struct_extract(fc, builder, result_id, *operand, FieldIdx::new(i))?;
                 fc.map_value(result_id, val);
             }
         },
 
         InstKind::DestructureTuple { results, operand } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_tuple_extract(fc, builder, *operand, i as u32)?;
+                let val = compile_tuple_extract(fc, builder, result_id, *operand, i as u32)?;
                 fc.map_value(result_id, val);
             }
         },
@@ -369,7 +369,7 @@ pub fn compile_inst<'ctx>(
             variant,
         } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_enum_payload(fc, builder, *operand, *variant, FieldIdx::new(i))?;
+                let val = compile_enum_payload(fc, builder, result_id, *operand, *variant, FieldIdx::new(i))?;
                 fc.map_value(result_id, val);
             }
         },
@@ -1172,6 +1172,7 @@ fn compile_apply_partial<'ctx>(
 fn compile_struct_extract<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     operand: ValueId,
     field: FieldIdx,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
@@ -1197,10 +1198,15 @@ fn compile_struct_extract<'ctx>(
     if is_borrowed {
         let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
         let addr = mem::field_gep(cx, builder, base.into_pointer_value(), offset);
-        // Stage 2b ref slot: the result is the REF itself — load the stored
-        // address (a @guaranteed pointee-typed result's value IS that
-        // address), not the slot's address.
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+        // Stage 2b ref slot extracted as a POINTEE-typed result: load the
+        // stored address. A REF-typed result (clone/drop shim projections)
+        // keeps the slot's address per the representation contract.
+        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
             return Ok(builder
                 .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
                 .unwrap());
@@ -1222,6 +1228,7 @@ fn compile_struct_extract<'ctx>(
 fn compile_tuple_extract<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     operand: ValueId,
     index: u32,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
@@ -1247,9 +1254,14 @@ fn compile_tuple_extract<'ctx>(
     );
     let addr = mem::field_gep(cx, builder, base, offset);
     if is_borrowed {
-        // Stage 2b ref slot: load the stored address — the result is the
-        // ref itself (see compile_struct_extract).
-        if matches!(fc.ctx.module.ty_arena.get(elem_ty), MirTy::Ref { .. }) {
+        // Stage 2b ref slot with a POINTEE-typed result: load the stored
+        // address (see compile_struct_extract).
+        if matches!(fc.ctx.module.ty_arena.get(elem_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
             return Ok(builder
                 .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
                 .unwrap());
@@ -1266,6 +1278,7 @@ fn compile_tuple_extract<'ctx>(
 fn compile_enum_payload<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     operand: ValueId,
     variant: VariantIdx,
     field: FieldIdx,
@@ -1309,9 +1322,14 @@ fn compile_enum_payload<'ctx>(
 
     let addr = mem::field_gep(cx, builder, base, total_offset);
     if is_borrowed {
-        // Stage 2b ref slot: load the stored address — the result is the
-        // ref itself (see compile_struct_extract).
-        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
+        // Stage 2b ref slot with a POINTEE-typed result: load the stored
+        // address (see compile_struct_extract).
+        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
             return Ok(builder
                 .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
                 .unwrap());

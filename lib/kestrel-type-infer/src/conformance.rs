@@ -57,6 +57,21 @@ pub fn type_satisfies(ctx: &QueryContext<'_>, ty: &HirTy, protocol: Entity, root
         return kestrel_semantics::hir_type_is_static(ctx, ty, root, root);
     }
     match ty {
+        // A REF is concrete: it satisfies Copyable (bit-copy, stage 2b
+        // ruling) and NOTHING else — permitting it here would let an
+        // extension bound (`extend Optional: Equatable where T: Equatable`)
+        // instantiate a pointee witness at `&U` and ICE at mono
+        // ("Callee::Witness not resolved", the witness_instantiation_
+        // collapse class). The Expr-side transparent place never reaches
+        // this check (solve_conforms peels first). Real ref witnesses
+        // are 2d.
+        HirTy::Ref { .. } => {
+            kestrel_debug::ktrace!("ref-gate", "type_satisfies(Ref, {protocol:?})");
+            ctx.query(ResolveBuiltin {
+                builtin: Builtin::Copyable,
+                root,
+            }) == Some(protocol)
+        },
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
         | HirTy::Protocol { entity, args, .. } => {

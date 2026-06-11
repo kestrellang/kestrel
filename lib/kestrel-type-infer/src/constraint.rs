@@ -58,6 +58,22 @@ pub enum Constraint {
         span: Span,
     },
 
+    /// `value ⇒ target` — Equal with the ref-decay dimension (stage 2b):
+    /// a REF-typed value unifies ref-to-ref when the target is a ref
+    /// (annotated ref slots, `-> &T` arm positions), decays to its POINTEE
+    /// when the target is a non-ref, and DEFERS while the target is
+    /// unresolved (an annotation may be about to pin it; targets nothing
+    /// pins take the decay in `apply_ref_decay_defaults`). Non-ref values
+    /// are plain Equal — no promotion, no other coercions. Used at
+    /// if/match arm-result equates and tuple-literal elements, replacing
+    /// the eager generation-time peel (which pattern-payload ref bindings
+    /// resolve too late for, and which annotations could never override).
+    EqualDecayed {
+        value: TyVar,
+        target: TyVar,
+        span: Span,
+    },
+
     /// `ty : Protocol` — protocol conformance.
     /// Deferred until ty is concrete.
     Conforms {

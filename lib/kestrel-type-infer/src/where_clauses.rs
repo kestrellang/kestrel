@@ -77,7 +77,15 @@ pub fn resolve_where_clauses(
                     }
                 },
                 WhereConstraint::Equality { lhs, rhs, .. } => {
-                    let rhs_hir = kestrel_hir_lower::lower_ast_type(ctx, entity, root, rhs);
+                    // Where-clause RHS types are Strict ref territory
+                    // (pre-2b this site had NO reject walk at all — a ref
+                    // here silently survived).
+                    let rhs_hir = kestrel_hir_lower::reject_ref_types(
+                        ctx,
+                        kestrel_hir_lower::lower_ast_type(ctx, entity, root, rhs),
+                        kestrel_hir_lower::RefPosition::Other,
+                        kestrel_hir_lower::RefPolicy::Strict,
+                    );
                     if let Some((param, assoc_name)) =
                         extract_associated_type_path(ctx, lhs, entity, root)
                     {
@@ -349,7 +357,16 @@ fn extract_protocol_type_args(
             .map(|seg| {
                 seg.type_args
                     .iter()
-                    .map(|a| kestrel_hir_lower::lower_ast_type(ctx, entity, root, a))
+                    .map(|a| {
+                        // Protocol bound type args are Strict ref territory
+                        // (pre-2b this site had no reject walk).
+                        kestrel_hir_lower::reject_ref_types(
+                            ctx,
+                            kestrel_hir_lower::lower_ast_type(ctx, entity, root, a),
+                            kestrel_hir_lower::RefPosition::GenericArg,
+                            kestrel_hir_lower::RefPolicy::Strict,
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default(),

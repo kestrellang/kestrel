@@ -461,8 +461,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Both branches must agree — use block value spans so
                 // errors point at the mismatched expression, not the if keyword
                 let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
-                let then_tv = peel_ref_tv(ctx, then_tv);
-                ctx.equal(then_tv, result_tv, then_span);
+                // Decayed equate (stage 2b): a ref-binding arm decays to its
+                // pointee UNLESS the result position is itself a ref —
+                // deferred for local reads (pattern-payload ref bindings
+                // resolve after generation), eager-peel otherwise.
+                match then_body.tail_expr {
+                    Some(tail) => {
+                        equate_decaying_value(ctx, hir, tail, then_tv, result_tv, then_span)
+                    },
+                    None => ctx.equal(then_tv, result_tv, then_span),
+                }
                 mark_arm_value_block(ctx, hir, then_body);
                 // Guard desugars to `if cond {} else { body }` where the
                 // else block is required to diverge. Don't equate its value
@@ -471,8 +479,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 if !is_guard_if(hir, id) {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
-                    let else_tv = peel_ref_tv(ctx, else_tv);
-                    ctx.equal(else_tv, result_tv, else_span);
+                    match else_block.tail_expr {
+                        Some(tail) => {
+                            equate_decaying_value(ctx, hir, tail, else_tv, result_tv, else_span)
+                        },
+                        None => ctx.equal(else_tv, result_tv, else_span),
+                    }
                     mark_arm_value_block(ctx, hir, else_block);
                 }
                 result_tv
@@ -526,10 +538,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Never, `default_never_fallback` settles it.
                 let body_tv = gen_expr(ctx, hir, arm.body);
                 let body_span = expr_span(hir, arm.body);
-                // Arm values decay; a ref-binding read as an arm value
-                // contributes its pointee (the copy happens in MIR).
-                let body_tv = peel_ref_tv(ctx, body_tv);
-                ctx.equal(body_tv, result_tv, body_span);
+                // Arm values decay to the pointee UNLESS the result position
+                // is a ref (stage 2b): deferred for local reads, eager-peel
+                // otherwise.
+                equate_decaying_value(ctx, hir, arm.body, body_tv, result_tv, body_span);
                 // Arm-value decay applies only where the arm value is the
                 // user's expression. GuardLet is CPS-desugared — its pattern
                 // arm is the CONTINUATION, and marking it would decay a legal
@@ -691,13 +703,23 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         HirExpr::Tuple { elements, span: _ } => {
+            // Local-read elements flow through a decayed equate into a
+            // FRESH slot var: an annotation pinning the slot to `&T`
+            // (stage 2b ref tuples) keeps the ref; unpinned ref elements
+            // decay to owned (the stage-1.5 behavior). Non-local elements
+            // keep the eager peel.
             let elem_tvs: Vec<TyVar> = elements
                 .iter()
                 .map(|&e| {
                     let tv = gen_expr(ctx, hir, e);
-                    // Tuple elements always decay refs to owned (stage 1.5).
                     mark_arm_value(ctx, hir, e);
-                    peel_ref_tv(ctx, tv)
+                    if value_expr_is_local(hir, e) {
+                        let slot = ctx.fresh();
+                        ctx.equal_decayed(tv, slot, expr_span(hir, e));
+                        slot
+                    } else {
+                        peel_ref_tv(ctx, tv)
+                    }
                 })
                 .collect();
             ctx.tuple(elem_tvs)
@@ -890,13 +912,24 @@ fn gen_pat(
             // No constraint — matches anything
         },
 
-        HirPat::Binding { local, by_ref, .. } => {
+        HirPat::Binding {
+            local,
+            by_ref,
+            span,
+        } => {
             match by_ref {
                 // `&v` / `&mutating v`: the binding is a named ref to the
                 // matched place — same downstream behavior as a `let r = &…`
                 // binding (resolved-Ref local type, value reads decay).
+                // Via BorrowPointee, not a direct wrap: on a REF-typed
+                // payload (stage 2b) the re-borrow COLLAPSES — `v` aliases
+                // the same pointee, never `& &T` (the E487 axiom). For
+                // owned payloads the solver sets pointee ≡ payload, the old
+                // behavior.
                 Some(mutating) => {
-                    let ref_tv = ctx.ref_ty(scrutinee_tv, *mutating);
+                    let pointee_tv = ctx.fresh();
+                    let ref_tv = ctx.ref_ty(pointee_tv, *mutating);
+                    ctx.borrow_pointee(scrutinee_tv, pointee_tv, span.clone());
                     ctx.local_types.insert(*local, ref_tv);
                 },
                 // Bind local to the scrutinee type
@@ -2245,6 +2278,41 @@ fn mark_arm_value(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) {
 fn mark_arm_value_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock) {
     if let Some(tail) = block.tail_expr {
         mark_arm_value(ctx, hir, tail);
+    }
+}
+
+/// Is this value expression a LOCAL read (through block tails)? Only local
+/// reads can be late-resolving refs (a pattern-payload ref binding's type
+/// lands after generation), so only they take the DEFERRED decayed equate.
+/// Everything else keeps the eager-peel + Equal path: expected-driven arm
+/// values (implicit members, literals) need the target to flow INTO them
+/// immediately — deferring would deadlock the resolution.
+fn value_expr_is_local(hir: &HirBody, id: HirExprId) -> bool {
+    match &hir.exprs[id] {
+        HirExpr::Local(..) => true,
+        HirExpr::Block { body, .. } => body
+            .tail_expr
+            .is_some_and(|tail| value_expr_is_local(hir, tail)),
+        _ => false,
+    }
+}
+
+/// Equate an arm/element value with its result slot, picking deferred
+/// decay (local reads — see `Constraint::EqualDecayed`) or the eager
+/// stage-1.5 peel + Equal (everything else).
+fn equate_decaying_value(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    value_expr: HirExprId,
+    value_tv: TyVar,
+    target_tv: TyVar,
+    span: Span,
+) {
+    if value_expr_is_local(hir, value_expr) {
+        ctx.equal_decayed(value_tv, target_tv, span);
+    } else {
+        let peeled = peel_ref_tv(ctx, value_tv);
+        ctx.equal(peeled, target_tv, span);
     }
 }
 

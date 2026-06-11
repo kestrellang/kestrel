@@ -623,6 +623,15 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    /// Equal with the ref-decay dimension — see `Constraint::EqualDecayed`.
+    pub fn equal_decayed(&mut self, value: TyVar, target: TyVar, span: Span) {
+        self.constraints.push(Constraint::EqualDecayed {
+            value,
+            target,
+            span,
+        });
+    }
+
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
         self.constraints.push(Constraint::Conforms {
             ty,

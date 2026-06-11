@@ -1253,12 +1253,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // terminator that follows every destroy site doesn't end the same
         // borrow a second time. References are deliberately left tracked:
         // `set_terminator` owns their endgame (the E497 check on inside-fn
-        // jumps and the ret_borrow return carve-out).
+        // jumps and the ret_borrow return carve-out) — EXCEPT named binding
+        // borrows at a FUNCTION exit (depth 0): their lexical scope ends
+        // right here, and the end must precede the destroys below (the
+        // borrowed var slot dies in the same exit; a slot consume under an
+        // open borrow is the verify error the machinery exists to catch).
+        // `keep` exempts a returned borrow (ret_borrow of the binding).
         for entry in &entries {
-            if let ScopeEntry::Borrow(v) = entry
-                && !self.ref_results.contains(v)
-            {
-                self.emit_end_borrow(*v);
+            if let ScopeEntry::Borrow(v) = entry {
+                let binding_at_exit = target_depth == 0
+                    && self.ref_binding_vals.contains_key(v)
+                    && !keep.contains(v);
+                if !self.ref_results.contains(v) || binding_at_exit {
+                    self.emit_end_borrow(*v);
+                }
             }
         }
         for entry in &entries {

@@ -468,14 +468,59 @@ impl RefPosition {
     }
 }
 
-/// THE type-position walk (stage 0.5): rejects every `HirTy::Ref` with a
-/// position-specific diagnostic and rewrites it to `HirTy::Error`, so no
-/// `Ref` survives past HIR lowering. Called at every lowering-query
-/// boundary. Stage 1 carves out only `RefPosition::Return`.
-pub fn reject_ref_types(ctx: &QueryContext<'_>, ty: HirTy, pos: RefPosition) -> HirTy {
+/// Whether the walk ACCEPTS refs at aggregate positions (stage 2b) or
+/// rejects every position (stage 0.5). The policy is per ENTRY POINT, not
+/// per position: a Strict entry (alias RHS, assoc-type default, protocol
+/// bound, extension target, where-clause type) rejects refs even inside
+/// nested type args, because those whole annotations feed machinery that
+/// has no ref story yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefPolicy {
+    Strict,
+    /// Refs are legal at {Field, TupleElement, GenericArg} positions —
+    /// enum payloads route as Field. Bare-position rules (E480 param,
+    /// E482 binding, E486 fn-type return, E487 nesting, E489 other) and
+    /// the protocol-arg rejection still hold.
+    AllowAggregate,
+}
+
+/// THE type-position walk (stage 0.5): rejects `HirTy::Ref` with a
+/// position-specific diagnostic and rewrites it to `HirTy::Error`. Called
+/// at every lowering-query boundary. Stage 1 carved out only
+/// `RefPosition::Return`; stage 2b accepts aggregate positions under
+/// `RefPolicy::AllowAggregate`.
+pub fn reject_ref_types(
+    ctx: &QueryContext<'_>,
+    ty: HirTy,
+    pos: RefPosition,
+    policy: RefPolicy,
+) -> HirTy {
     match ty {
-        HirTy::Ref { inner, span, .. } => {
-            let (code, message) = if matches!(*inner, HirTy::Ref { .. }) {
+        HirTy::Ref {
+            inner,
+            mutating,
+            span,
+        } => {
+            let nested = matches!(*inner, HirTy::Ref { .. });
+            // Stage 2b carve: a ref in an aggregate slot is an honest type.
+            // Nesting (`& &T`) stays banned; the pointee subtree is still
+            // walked (its own aggregate args may carry refs; its bare
+            // positions still reject).
+            if !nested
+                && policy == RefPolicy::AllowAggregate
+                && matches!(
+                    pos,
+                    RefPosition::Field | RefPosition::TupleElement | RefPosition::GenericArg
+                )
+            {
+                let inner = reject_ref_types(ctx, *inner, RefPosition::Other, policy);
+                return HirTy::Ref {
+                    inner: Box::new(inner),
+                    mutating,
+                    span,
+                };
+            }
+            let (code, message) = if nested {
                 // `&&T` / `&mutating &T`: one diagnostic for the whole
                 // cluster — fixing the nesting then surfaces the positional
                 // error, if any (E-REF-08).
@@ -495,33 +540,38 @@ pub fn reject_ref_types(ctx: &QueryContext<'_>, ty: HirTy, pos: RefPosition) -> 
             while let HirTy::Ref { inner, .. } = core {
                 core = *inner;
             }
-            reject_ref_types(ctx, core, RefPosition::Other);
+            reject_ref_types(ctx, core, RefPosition::Other, policy);
             HirTy::Error(span)
         },
         HirTy::Struct { entity, args, span } => HirTy::Struct {
             entity,
-            args: reject_ref_args(ctx, args),
+            args: reject_ref_args(ctx, args, policy),
             span,
         },
         HirTy::Enum { entity, args, span } => HirTy::Enum {
             entity,
-            args: reject_ref_args(ctx, args),
+            args: reject_ref_args(ctx, args, policy),
             span,
         },
+        // Protocol type args stay Strict regardless of policy: a ref
+        // protocol arg instantiates witnesses at the ref (2d, not 2b).
         HirTy::Protocol { entity, args, span } => HirTy::Protocol {
             entity,
-            args: reject_ref_args(ctx, args),
+            args: reject_ref_args(ctx, args, RefPolicy::Strict),
             span,
         },
+        // Alias args stay Strict too: trivial aliases expand at the use
+        // site BEFORE this walk, so a ref smuggled through an alias arg
+        // would bypass the positional rules (the R5 smuggling class).
         HirTy::AliasUse { entity, args, span } => HirTy::AliasUse {
             entity,
-            args: reject_ref_args(ctx, args),
+            args: reject_ref_args(ctx, args, RefPolicy::Strict),
             span,
         },
         HirTy::Tuple(elems, span) => HirTy::Tuple(
             elems
                 .into_iter()
-                .map(|e| reject_ref_types(ctx, e, RefPosition::TupleElement))
+                .map(|e| reject_ref_types(ctx, e, RefPosition::TupleElement, policy))
                 .collect(),
             span,
         ),
@@ -533,21 +583,26 @@ pub fn reject_ref_types(ctx: &QueryContext<'_>, ty: HirTy, pos: RefPosition) -> 
         } => HirTy::Function {
             params: params
                 .into_iter()
-                .map(|p| reject_ref_types(ctx, p, RefPosition::Param))
+                .map(|p| reject_ref_types(ctx, p, RefPosition::Param, policy))
                 .collect(),
             param_conventions,
-            ret: Box::new(reject_ref_types(ctx, *ret, RefPosition::FunctionReturn)),
+            ret: Box::new(reject_ref_types(
+                ctx,
+                *ret,
+                RefPosition::FunctionReturn,
+                policy,
+            )),
             span,
         },
         HirTy::AssocProjection { base, assoc, span } => HirTy::AssocProjection {
-            base: Box::new(reject_ref_types(ctx, *base, RefPosition::Other)),
+            base: Box::new(reject_ref_types(ctx, *base, RefPosition::Other, policy)),
             assoc,
             span,
         },
         HirTy::Opaque { bounds, span } => HirTy::Opaque {
             bounds: bounds
                 .into_iter()
-                .map(|b| reject_ref_types(ctx, b, RefPosition::Other))
+                .map(|b| reject_ref_types(ctx, b, RefPosition::Other, RefPolicy::Strict))
                 .collect(),
             span,
         },
@@ -559,9 +614,9 @@ pub fn reject_ref_types(ctx: &QueryContext<'_>, ty: HirTy, pos: RefPosition) -> 
     }
 }
 
-fn reject_ref_args(ctx: &QueryContext<'_>, args: Vec<HirTy>) -> Vec<HirTy> {
+fn reject_ref_args(ctx: &QueryContext<'_>, args: Vec<HirTy>, policy: RefPolicy) -> Vec<HirTy> {
     args.into_iter()
-        .map(|a| reject_ref_types(ctx, a, RefPosition::GenericArg))
+        .map(|a| reject_ref_types(ctx, a, RefPosition::GenericArg, policy))
         .collect()
 }
 
@@ -723,10 +778,13 @@ impl LowerCtx<'_> {
         self.lower_type_in(ty, RefPosition::GenericArg)
     }
 
-    /// Lower an AST type, classifying a top-level `&T` by `pos`.
+    /// Lower an AST type, classifying a top-level `&T` by `pos`. In-body
+    /// positions accept aggregate refs (stage 2b): explicit `f[&T]` type
+    /// args and `let o: Optional[&T]` annotations are legal; the bare
+    /// positions (E482 binding, E480 closure param) still reject by `pos`.
     pub fn lower_type_in(&mut self, ty: &AstType, pos: RefPosition) -> HirTy {
         let lowered = lower_ast_type(self.ctx, self.owner, self.root, ty);
-        reject_ref_types(self.ctx, lowered, pos)
+        reject_ref_types(self.ctx, lowered, pos, RefPolicy::AllowAggregate)
     }
 }
 
@@ -810,7 +868,7 @@ impl QueryFn for LowerTypeAnnotation {
                 span,
             } = lowered
         {
-            let inner = reject_ref_types(ctx, *inner, RefPosition::Other);
+            let inner = reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
             return Some(HirTy::Ref {
                 inner: Box::new(inner),
                 mutating,
@@ -820,16 +878,20 @@ impl QueryFn for LowerTypeAnnotation {
 
         // A TypeAnnotation on a callable is its return annotation; on a
         // field/enum-case it is the stored type. Classify the ref rejection
-        // accordingly (stage 1 carved out only the Return position, above).
-        let pos = match nk {
+        // accordingly (stage 1 carved out only the Return position, above;
+        // stage 2b accepts aggregate positions everywhere EXCEPT alias
+        // RHS / other annotations, which stay Strict).
+        let (pos, policy) = match nk {
             Some(
                 NodeKind::Function | NodeKind::Initializer | NodeKind::Subscript | NodeKind::Deinit,
-            ) => RefPosition::Return,
-            Some(NodeKind::Field | NodeKind::EnumCase) => RefPosition::Field,
-            Some(NodeKind::TypeParameter) => RefPosition::GenericArg,
-            _ => RefPosition::Other,
+            ) => (RefPosition::Return, RefPolicy::AllowAggregate),
+            Some(NodeKind::Field | NodeKind::EnumCase) => {
+                (RefPosition::Field, RefPolicy::AllowAggregate)
+            },
+            Some(NodeKind::TypeParameter) => (RefPosition::GenericArg, RefPolicy::AllowAggregate),
+            _ => (RefPosition::Other, RefPolicy::Strict),
         };
-        Some(reject_ref_types(ctx, lowered, pos))
+        Some(reject_ref_types(ctx, lowered, pos, policy))
     }
 }
 
@@ -970,6 +1032,15 @@ impl QueryFn for LowerCallableTypes {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<Vec<Option<HirTy>>> {
         let callable = ctx.get::<Callable>(self.entity)?;
+        // Enum payloads live in the Callable component but are STORAGE
+        // slots, not parameters: stage 2b accepts refs there (Field
+        // position), while real params keep E480 on bare refs — ref-bearing
+        // AGGREGATE params (`o: Optional[&T]`) are legal either way.
+        let pos = if matches!(ctx.get::<NodeKind>(self.entity), Some(NodeKind::EnumCase)) {
+            RefPosition::Field
+        } else {
+            RefPosition::Param
+        };
         Some(
             callable
                 .params
@@ -977,7 +1048,7 @@ impl QueryFn for LowerCallableTypes {
                 .map(|p| {
                     p.ty.as_ref().map(|ast_ty| {
                         let lowered = lower_ast_type(ctx, self.entity, self.root, ast_ty);
-                        reject_ref_types(ctx, lowered, RefPosition::Param)
+                        reject_ref_types(ctx, lowered, pos, RefPolicy::AllowAggregate)
                     })
                 })
                 .collect(),
@@ -1040,7 +1111,9 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             .map(|(i, ast_ty)| {
                 if i < limit {
                     let lowered = lower_ast_type(ctx, context, self.root, ast_ty);
-                    reject_ref_types(ctx, lowered, RefPosition::GenericArg)
+                    // Extension targets stay Strict: extending a
+                    // ref-instantiation engages witness machinery (2d).
+                    reject_ref_types(ctx, lowered, RefPosition::GenericArg, RefPolicy::Strict)
                 } else {
                     HirTy::Error(ast_type_span(ast_ty))
                 }

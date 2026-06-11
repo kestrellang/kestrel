@@ -990,7 +990,16 @@ fn extract_protocol_type_args(
                 .map(|seg| {
                     seg.type_args
                         .iter()
-                        .map(|a| kestrel_hir_lower::lower_ast_type(ctx, owner, root, a))
+                        .map(|a| {
+                            // Protocol bound type args are Strict ref
+                            // territory (pre-2b: no reject walk here).
+                            kestrel_hir_lower::reject_ref_types(
+                                ctx,
+                                kestrel_hir_lower::lower_ast_type(ctx, owner, root, a),
+                                kestrel_hir_lower::RefPosition::GenericArg,
+                                kestrel_hir_lower::RefPolicy::Strict,
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default();

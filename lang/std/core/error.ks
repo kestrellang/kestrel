@@ -10,8 +10,10 @@ module std.core
 /// control-flow flavoured because that is what the compiler does with
 /// them — `Continue` flows to the next instruction, `Break` lowers into a
 /// branch back to the function's epilogue via `FromResidual`.
+// `C: not Static` (references 2b): Optional's relaxed payload flows into
+// `tryExtract() -> ControlFlow[T, ()]`.
 @builtin(.ControlFlowEnum)
-public enum ControlFlow[C, B]: not Copyable {
+public enum ControlFlow[C, B]: not Copyable where C: not Static {
     /// Normal flow — carries the value to use as the operator result.
     case Continue(C)
     /// Residual-return flow — carries the residual to propagate via `FromResidual`.

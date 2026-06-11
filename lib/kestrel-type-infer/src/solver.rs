@@ -586,6 +586,33 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 }
                 continue;
             },
+            Constraint::EqualDecayed {
+                value,
+                target,
+                span,
+            } => {
+                // `apply_ref_decay_defaults` settles every deferred decay,
+                // so an unsolved one means a side never resolved — report
+                // like Equal (poison-propagation included).
+                let v_err = ctx.is_error(ctx.resolve(value));
+                let t_err = ctx.is_error(ctx.resolve(target));
+                if v_err || t_err {
+                    if v_err
+                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(target);
+                    }
+                    if t_err
+                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(value);
+                    }
+                    continue;
+                }
+                let err = mismatch_error(ctx, target, value, span);
+                report_and_poison(ctx, err, value, target);
+                continue;
+            },
             Constraint::Conforms {
                 ty,
                 protocol,
@@ -801,6 +828,11 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             pointee,
             span,
         } => solve_borrow_pointee(ctx, inner, pointee, span),
+        Constraint::EqualDecayed {
+            value,
+            target,
+            span,
+        } => solve_equal_decayed(ctx, value, target, span),
         Constraint::Conforms {
             ty,
             protocol,
@@ -1456,6 +1488,58 @@ fn solve_borrow_pointee(
     match unify::unify(ctx, pointee, target) {
         Ok(()) => SolveResult::Solved,
         Err(_) => SolveResult::Error(mismatch_error(ctx, pointee, target, span)),
+    }
+}
+
+/// Equal with the ref-decay dimension (see `Constraint::EqualDecayed`):
+/// arm results and tuple-literal elements decay a REF value to its pointee
+/// UNLESS the target position is itself a ref (an annotation or `-> &T`
+/// pinned it) — and wait while the target is unresolved so the annotation
+/// can win the race (unpinned targets decay in `apply_ref_decay_defaults`).
+fn solve_equal_decayed(
+    ctx: &mut InferCtx<'_>,
+    value: TyVar,
+    target: TyVar,
+    span: Span,
+) -> SolveResult {
+    let vr = ctx.resolve(value);
+    let (pointee, value_is_ref) = match ctx.slot(vr) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => (*pointee, true),
+        TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => (vr, false),
+        // Unresolved value (e.g. a pattern-payload binding whose scrutinee
+        // hasn't resolved): WAIT.
+        _ => {
+            return SolveResult::Deferred(Constraint::EqualDecayed {
+                value,
+                target,
+                span,
+            });
+        },
+    };
+    if value_is_ref {
+        match ctx.slot(ctx.resolve(target)) {
+            // Ref slot pinned by the position: ref-to-ref equality.
+            TySlot::Resolved(TyKind::Ref { .. }) => {
+                return match unify::unify(ctx, value, target) {
+                    Ok(()) => SolveResult::Solved,
+                    Err(_) => SolveResult::Error(mismatch_error(ctx, target, value, span)),
+                };
+            },
+            // Nothing pinned the target yet: wait for the annotation race.
+            TySlot::Unresolved { literal: None } => {
+                return SolveResult::Deferred(Constraint::EqualDecayed {
+                    value,
+                    target,
+                    span,
+                });
+            },
+            // Non-ref (or literal) target: decay to the pointee below.
+            _ => {},
+        }
+    }
+    match unify::unify(ctx, pointee, target) {
+        Ok(()) => SolveResult::Solved,
+        Err(_) => SolveResult::Error(mismatch_error(ctx, target, pointee, span)),
     }
 }
 
@@ -4068,8 +4152,11 @@ fn extension_where_clauses_satisfied(
 fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
     for c in &ctx.constraints {
-        let Constraint::Coerce { from, to, .. } = c else {
-            continue;
+        let (from, to) = match c {
+            Constraint::Coerce { from, to, .. } => (from, to),
+            // Arm results / tuple-literal elements wait on the same race.
+            Constraint::EqualDecayed { value, target, .. } => (value, target),
+            _ => continue,
         };
         let fr = ctx.resolve(*from);
         let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(fr) else {
