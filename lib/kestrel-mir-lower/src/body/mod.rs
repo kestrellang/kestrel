@@ -356,6 +356,14 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// argument can't steal an outer writeback. A statement-boundary
     /// drain(0) is the safety net — a dropped writeback is a lost write.
     pub(crate) pending_writebacks: Vec<PendingWriteback>,
+    /// Derived address → its storage anchor (the chain's base: a param
+    /// address or var slot). A `FieldAddr` result is an owned TEMP that is
+    /// destroyed at scope exit; a borrow through it semantically borrows the
+    /// underlying STORAGE, so `emit_begin_(mut_)borrow_addr` records the
+    /// anchor as `borrow_source` — otherwise destroying the temp while a
+    /// returned borrow still chains to it is a verify consume-while-borrowed
+    /// ICE (and E498 would blame the temp instead of the real storage).
+    pub(crate) addr_anchors: HashMap<ValueId, ValueId>,
 }
 
 /// One deferred get→op→set writeback (see `pending_writebacks`).
@@ -417,6 +425,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             ref_binding_remaining: HashMap::new(),
             ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
+            addr_anchors: HashMap::new(),
         }
     }
 
@@ -1636,8 +1645,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// Borrow directly from an address (e.g. a mutable self parameter).
     /// Avoids the copy_addr + begin_borrow pattern which creates an @owned
     /// copy whose destruction runs drop shims (breaking refcount for RcBox etc.)
+    /// The borrow's source is the address's storage ANCHOR (the chain base),
+    /// not an intermediate `FieldAddr` temp — the temp is destroyed at scope
+    /// exit, and a returned borrow must not chain to it (see `addr_anchors`).
     pub fn emit_begin_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
-        let result = self.alloc_guaranteed(ty, address);
+        let anchor = self.addr_anchors.get(&address).copied().unwrap_or(address);
+        let result = self.alloc_guaranteed(ty, anchor);
         self.push_inst(InstKind::BeginBorrowAddr {
             result,
             address,
@@ -1737,7 +1750,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_begin_mut_borrow_addr(&mut self, address: ValueId, ty: TyId) -> ValueId {
-        let result = self.alloc_guaranteed(ty, address);
+        // Anchored like `emit_begin_borrow_addr` — see that doc comment.
+        let anchor = self.addr_anchors.get(&address).copied().unwrap_or(address);
+        let result = self.alloc_guaranteed(ty, anchor);
         self.push_inst(InstKind::BeginMutBorrowAddr {
             result,
             address,
@@ -2174,6 +2189,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         };
         let ptr_ty = self.ctx.module.ty_arena.pointer(field_ty);
         let result = self.alloc_value(ptr_ty, Ownership::Owned);
+        // A field address lives exactly where its base lives: inherit the
+        // base's provenance root. Without this the address self-roots
+        // `Local` (the alloc_value funnel only chases borrow_source, and
+        // addresses are owned), severing the Param(i) root of a `mutating`
+        // receiver — every `-> &T { self.v }` projection then failed E494
+        // "borrows local" even though the verifier accepts Param roots.
+        // Chains (`self.a.b`) compose transitively; Begin(Mut)BorrowAddr
+        // results inherit from the address via borrow_source as before.
+        let base_root = self.body.value(base).root;
+        self.stamp_root(result, base_root);
+        // Thread the storage anchor: borrows through this derived address
+        // record the chain's BASE as their source (see `addr_anchors`).
+        let anchor = self.addr_anchors.get(&base).copied().unwrap_or(base);
+        self.addr_anchors.insert(result, anchor);
         self.push_inst(InstKind::FieldAddr {
             result,
             base,
