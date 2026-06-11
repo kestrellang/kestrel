@@ -166,10 +166,20 @@ pub fn monomorphize(
             receiver,
         );
 
-        // ret_borrow is derivable from the mono ret type alone — the Ref
-        // wrapper survives substitution (its pointee is what changes).
+        // ret_borrow is an ABI property of the DECLARED signature, so derive
+        // it from the generic `FunctionDef.ret` (same arena — mono extends
+        // it). Deriving from the substituted mono ret would wrongly flip a
+        // `-> T` instance at `T = &U` to the borrow ABI (stage 2b mints such
+        // instances): the body produces an owned pointer scalar there, while
+        // a declared `-> &T` keeps `MirTy::Ref` through substitution either
+        // way. Synthesized functions absent from `functions` (shims) can't
+        // be ret_borrow; fall back to the substituted ret for them.
+        let declared_ret = functions
+            .get(&key.func_entity)
+            .map(|f| f.ret)
+            .unwrap_or(body_result.ret);
         let ret_borrow = matches!(
-            crate::item::function::ret_convention(&mono_module.ty_arena, body_result.ret),
+            crate::item::function::ret_convention(&mono_module.ty_arena, declared_ret),
             crate::item::function::RetConvention::RefBorrow { .. }
         );
         mono_module.add_function(MonoFunction {
