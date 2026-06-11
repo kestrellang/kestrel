@@ -2382,6 +2382,23 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     root: self.ctx.root,
                 })
                 .map(|r| r.mutating),
+            // Stage 2d: a witness call to a `-> &Self.Item`-shaped
+            // requirement is a ret_borrow call too — derive from the
+            // PROTOCOL method's declared return (the E458 exact-shape rule
+            // guarantees every impl agrees). Without this arm the returned
+            // raw pointer registered as an owned value and the pointer
+            // BITS read as the pointee (generic-dispatch corruption).
+            Callee::Witness {
+                protocol, method, ..
+            } => self
+                .find_protocol_method_entity(*protocol, method)
+                .and_then(|entity| {
+                    self.ctx.query.query(kestrel_hir_lower::CallableRefReturn {
+                        entity,
+                        root: self.ctx.root,
+                    })
+                })
+                .map(|r| r.mutating),
             _ => None,
         };
         // Stage 2b: a generic `-> T` callee instantiated at `T = &U`
