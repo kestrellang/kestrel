@@ -2960,12 +2960,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         convention: ParamConvention,
     ) -> CallArg {
         if convention == ParamConvention::MutBorrow {
-            if let Some(addr) = self.try_var_addr(expr_id) {
-                let ty = self.resolve_expr_type(expr_id);
-                let borrow = self.emit_begin_mut_borrow_addr(addr, ty);
-                return CallArg {
-                    value: borrow,
-                    convention,
+            // Place-resolved: Addr borrows the address (writes go through);
+            // a View (SSA owned receiver like a `consuming` func's self,
+            // loaded ref-slot field) routes through prepare_call_arg —
+            // borrowing the value in place, never lower_expr's copy_value,
+            // which would strand the mutation on a throwaway copy (the
+            // Iterator.fold/reduce infinite loop).
+            if let Some(p) = self.lower_place(expr_id, place::FieldViews::Forbid) {
+                return match p.repr {
+                    place::PlaceRepr::Addr(addr) => {
+                        let borrow = self.emit_begin_mut_borrow_addr(addr, p.pointee);
+                        CallArg {
+                            value: borrow,
+                            convention,
+                        }
+                    },
+                    place::PlaceRepr::View(v) => self.prepare_call_arg(v, convention),
                 };
             }
             // Stage 1.5 accessor place: an accessor-backed member in mutable
@@ -2974,16 +2984,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             // result IS the by-reference address (see prepare_call_arg's
             // MutBorrow pass-through); scope machinery ends its borrow at the
             // statement boundary, exactly like the shipped
-            // `arr.mutableAt(index: i) += 1` shape.
+            // `arr.mutableAt(index: i) += 1` shape. Accessor-backed members
+            // are None for lower_place (not plain stored), so the probe
+            // order place → accessor → value matches the old
+            // var-addr → accessor → value chain.
             if let Some(arg) = self.try_lower_accessor_place_mut(expr_id) {
                 return arg;
             }
-            // SSA owned receiver (e.g. a `consuming` func's `self`): borrow the
-            // value in place via lower_expr_for_borrow. lower_expr would emit
-            // copy_value here, stranding the mutation on the throwaway copy while
-            // the loop-carried original never advances — the infinite loop in
-            // Iterator.fold/reduce (`while let .Some = self.next()`).
-            let val = self.lower_expr_for_borrow(expr_id);
+            let val = self.lower_expr(expr_id);
             return self.prepare_call_arg(val, convention);
         }
         if convention == ParamConvention::Borrow {
