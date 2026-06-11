@@ -108,11 +108,23 @@ what implementation needs; the *why* stays in the research docs.
     landed: array/tuple/dict elements decay (set renamed
     `always_decay_exprs`), which emptied E492's inference surface
     (validation kept as backstop).
-  - **Known carry-over gap**: a `&mutating` return from a direct FIELD
-    projection (`mutating func m() -> &mutating T { self.v }`) still
-    E494s — stage 1 verifies only param-rooted/Pointer-derived mutable
-    roots — so mutating-ref accessor bodies use the Pointer bridge
-    (`…ptr().offset(by:).mutatingValue`), like Array's.
+  - ~~**Known carry-over gap**~~ **FIXED 2026-06-11** (place-resolver
+    unification, "Option C", 8 commits 43c36a3b..): field ADDRESSES now
+    inherit their base's provenance root (`emit_field_addr` was the one
+    address projection that self-rooted `Local`, severing the Param root
+    of every addressed receiver) and addr-borrows anchor at the chain's
+    storage base — so `mutating func m() -> &mutating T { self.v }`,
+    the shared variant, nested chains, and binding-tail returns all
+    verify with REAL Param roots (no Pointer bridge; heap accessors
+    like Array's legitimately keep theirs). MIR place resolution is
+    unified in `kestrel-mir-lower/src/body/place.rs` (`lower_place` —
+    ret_borrow returns, borrow lowering, field reads, both call-arg
+    conventions; the (base, field-idx) sites share its addr-only walk).
+    The unification also fixed two SILENT-corruption bugs: a mutating
+    method through a `&mutating` FIELD lost its write (FieldAddr of the
+    slot aliased the stored pointer's bits as the receiver), and
+    returning a stored `&T` field returned the pointer's bits as the
+    value. 12 new tests across ret_borrow/escape/composition.
 - **stage1 — IMPLEMENTED 2026-06-10** (feature/115 branch): `-> &T` /
   `-> &mutating T` returns, root-rule escape checker (E494–E497, user-facing
   MIR verify diagnostics), `ret_borrow` ABI on both backends, transparent
