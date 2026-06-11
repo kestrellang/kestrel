@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use crate::constraint::{CallArg, Constraint, labels_match};
+use crate::constraint::{CallArg, ConformsOrigin, Constraint, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
@@ -388,14 +388,21 @@ fn expr_span(expr: &HirExpr) -> &Span {
 #[derive(Clone, Copy, PartialEq)]
 enum RefPos {
     Top,
+    /// A nominal type argument or tuple element — a LEGAL ref position
+    /// since stage 2b (ref-bearing aggregates); recorded so the walk can
+    /// keep hunting deeper for the still-illegal positions.
+    Slot,
     Nested,
     InFn,
 }
 
 /// Depth-first search for an illegally-placed `TyKind::Ref` in a type tree.
-/// Returns the violating position, or None. A Top-level ref is legal (the
-/// ref-returning call result itself); its pointee subtree is searched as
-/// Nested.
+/// Returns the violating position, or None. Legal positions (stage 2b): the
+/// top level (a ref-returning call result) and aggregate slots (nominal
+/// type args, tuple elements — the HIR formation walk checks annotations;
+/// inference can't mint them elsewhere). Still-illegal backstops: function
+/// types (E491), protocol args / opaque bounds / assoc-projection bases
+/// (E492 — positions the formation walk also still rejects).
 fn find_ref_violation(
     ctx: &InferCtx<'_>,
     tv: TyVar,
@@ -411,22 +418,21 @@ fn find_ref_violation(
         _ => return None,
     };
     match kind {
-        TyKind::Ref { pointee, .. } => {
-            if pos == RefPos::Top {
-                find_ref_violation(ctx, pointee, RefPos::Nested, seen)
-            } else {
-                Some(pos)
-            }
+        TyKind::Ref { pointee, .. } => match pos {
+            RefPos::Top | RefPos::Slot => find_ref_violation(ctx, pointee, RefPos::Slot, seen),
+            _ => Some(pos),
         },
         TyKind::Struct { args, .. }
         | TyKind::Enum { args, .. }
-        | TyKind::Protocol { args, .. }
         | TyKind::TypeAlias { args, .. } => args
+            .iter()
+            .find_map(|&a| find_ref_violation(ctx, a, RefPos::Slot, seen)),
+        TyKind::Protocol { args, .. } => args
             .iter()
             .find_map(|&a| find_ref_violation(ctx, a, RefPos::Nested, seen)),
         TyKind::Tuple(elems) => elems
             .iter()
-            .find_map(|&e| find_ref_violation(ctx, e, RefPos::Nested, seen)),
+            .find_map(|&e| find_ref_violation(ctx, e, RefPos::Slot, seen)),
         TyKind::Function { params, ret, .. } => params
             .iter()
             .chain(std::iter::once(&ret))
@@ -574,6 +580,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 protocol,
                 span,
                 poison_ty_on_failure,
+                origin: _,
             } => {
                 if ctx.is_error(ctx.resolve(ty)) {
                     continue;
@@ -788,7 +795,8 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             protocol,
             span,
             poison_ty_on_failure,
-        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure),
+            origin,
+        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure, origin),
         Constraint::Associated {
             container,
             name,
@@ -1200,7 +1208,7 @@ fn solve_reduce(ctx: &mut InferCtx<'_>, alias: TyVar, result: TyVar, span: Span)
         if let Some(&(_, arg_tv)) = subs.iter().find(|(e, _)| *e == param) {
             let bound_protocols = direct_param_bound_protocols(ctx, param);
             for protocol in bound_protocols {
-                ctx.conforms(arg_tv, protocol, span.clone());
+                ctx.conforms_typearg(arg_tv, protocol, span.clone());
             }
         }
     }
@@ -1696,6 +1704,7 @@ fn solve_conforms(
     protocol: kestrel_hecs::Entity,
     span: Span,
     poison_ty_on_failure: bool,
+    origin: ConformsOrigin,
 ) -> SolveResult {
     let resolved = ctx.resolve(ty);
     match ctx.slot(resolved) {
@@ -1704,15 +1713,36 @@ fn solve_conforms(
             protocol,
             span,
             poison_ty_on_failure,
+            origin,
         }),
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
-        // Transparent place: a ref conforms as its POINTEE — protocol
-        // dispatch through `&T` (for-in's Iterable bound, operator
-        // protocols) borrows the place. EXCEPT Static: a ref is the one
-        // thing that is never Static, and judging the pointee would let
-        // `&T` slip through containment bounds.
+        // The ref matrix (stage 2b):
+        // - Static: a ref is the one thing that is never Static — reject
+        //   regardless of origin (judging the pointee would let `&T` slip
+        //   through containment bounds).
+        // - Expr origin: transparent place — a ref conforms as its POINTEE
+        //   (protocol dispatch through `&T` borrows the place: for-in's
+        //   Iterable bound, operator protocols).
+        // - TypeArg origin: the ref ITSELF is judged. Refs bit-copy, so
+        //   Copyable holds (not known Cloneable); every other bound is
+        //   rejected until 2d builds ref-Item witnesses — peeling here
+        //   would instantiate a pointee witness at `&U` (the
+        //   witness_instantiation_collapse class).
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
             if is_static_builtin(ctx, protocol) {
+                if poison_ty_on_failure {
+                    ctx.poison(ty);
+                }
+                return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+            }
+            if origin == ConformsOrigin::TypeArg {
+                let conforms = match copyable_builtin_kind(ctx, protocol) {
+                    Some(want_cloneable) => !want_cloneable,
+                    None => false,
+                };
+                if conforms {
+                    return SolveResult::Solved;
+                }
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
@@ -1724,6 +1754,7 @@ fn solve_conforms(
                 protocol,
                 span,
                 poison_ty_on_failure,
+                origin,
             })
         },
         TySlot::Resolved(_) => {
@@ -1803,6 +1834,13 @@ fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
         TyKind::Tuple(elems) => HirTy::Tuple(reify_args(elems), span),
         TyKind::Never => HirTy::Never(span),
         TyKind::Param { entity } => HirTy::Param(*entity, span),
+        // Faithful Ref reification (stage 2b): `type_satisfies` must see
+        // `Optional[&T]`, not `Optional[Error]`.
+        TyKind::Ref { pointee, mutating } => HirTy::Ref {
+            inner: Box::new(reify_tv(ctx, *pointee)),
+            mutating: *mutating,
+            span,
+        },
         _ => HirTy::Error(span),
     }
 }
@@ -1922,8 +1960,13 @@ fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics
         TyKind::Tuple(elems) => {
             fold_members(elems.iter().map(|&e| solver_copy_class(ctx, e, depth + 1)))
         },
-        // A ref in copy position decays to its pointee — judge the pointee.
-        TyKind::Ref { pointee, .. } => solver_copy_class(ctx, pointee, depth + 1),
+        // A ref-as-TYPE is Copyable (stage 2b ruling: payload/field refs
+        // bit-copy — the copy aliases the same storage, may-alias model).
+        // Not known Cloneable. The pointee question ("can a read through
+        // this ref place copy?") is the Expr-origin peel in solve_conforms,
+        // never this fold — this classifies the ref VALUE for gating-arg
+        // folds (`Optional[&File]` is Copyable even though File isn't).
+        TyKind::Ref { .. } => CopySemantics::Copyable,
         // Mirror `hir_type_copy_semantics`: protocol existentials / `some P` /
         // functions are Copyable (not known Cloneable).
         TyKind::Protocol { .. }
@@ -2716,7 +2759,7 @@ fn emit_resolved_call(
                 protocol_type_args,
             } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
-                    ctx.conforms(tv, protocol, span.clone());
+                    ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
                     // an extension's free TypeParams when projecting through
                     // `extend ConcreteType: Proto[FreeParams]`.
@@ -3448,10 +3491,10 @@ fn solve_member(
             } => {
                 let bound_tv =
                     if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
-                        ctx.conforms(fresh_params[idx], *protocol, span.clone());
+                        ctx.conforms_typearg(fresh_params[idx], *protocol, span.clone());
                         Some(fresh_params[idx])
                     } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
-                        ctx.conforms(tv, *protocol, span.clone());
+                        ctx.conforms_typearg(tv, *protocol, span.clone());
                         Some(tv)
                     } else {
                         None
@@ -4512,7 +4555,7 @@ fn emit_type_alias_where_clauses(
                 ..
             } => {
                 // Emit conformance: e.g., `Iter: Iterator` → Conforms(alias_tv, Iterator)
-                ctx.conforms(alias_tv, protocol, span.clone());
+                ctx.conforms_typearg(alias_tv, protocol, span.clone());
                 // Cache protocol args so projecting through this alias's bound
                 // protocol can substitute extension free TypeParams.
                 let arg_tvs: Vec<TyVar> = protocol_type_args

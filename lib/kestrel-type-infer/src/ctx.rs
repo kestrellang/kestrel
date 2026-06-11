@@ -629,6 +629,20 @@ impl<'a> InferCtx<'a> {
             protocol,
             span,
             poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::Expr,
+        });
+    }
+
+    /// Conforms variant for TYPE-ARGUMENT obligations (where-clause bounds,
+    /// formation wellformedness, alias bounds): a ref judged here is the
+    /// ref ITSELF, never its pointee — see `ConformsOrigin`.
+    pub fn conforms_typearg(&mut self, ty: TyVar, protocol: Entity, span: Span) {
+        self.constraints.push(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::TypeArg,
         });
     }
 
@@ -642,6 +656,7 @@ impl<'a> InferCtx<'a> {
             protocol,
             span,
             poison_ty_on_failure: true,
+            origin: crate::constraint::ConformsOrigin::Expr,
         });
     }
 

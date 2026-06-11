@@ -379,7 +379,7 @@ fn emit_method_bound_constraint(
     }
     // Find or create a TyVar for this param
     let tv = ctx.param(param);
-    ctx.conforms(tv, protocol, span.clone());
+    ctx.conforms_typearg(tv, protocol, span.clone());
     // Cache protocol args for solve_associated to use when projecting
     // through `extend ConcreteType: Proto[FreeParams]` bindings.
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
@@ -504,7 +504,7 @@ fn create_return_type_with_opaque(
                 }) = &ctx.types[resolved.0 as usize]
                 {
                     opaque_bounds.push((*proto, args.clone()));
-                    ctx.conforms(concrete_ret, *proto, span.clone());
+                    ctx.conforms_typearg(concrete_ret, *proto, span.clone());
                 }
             }
 
@@ -629,7 +629,7 @@ fn emit_container_where_clauses(
                     self_tv,
                     query_ctx,
                 );
-                ctx.conforms(subject_tv, protocol, span.clone());
+                ctx.conforms_typearg(subject_tv, protocol, span.clone());
 
                 // Cache protocol args so solve_associated can substitute
                 // extension free TypeParams when projecting through the witness.
@@ -827,7 +827,7 @@ fn emit_protocol_assoc_type_where_clauses(
                     protocol_type_args,
                     ..
                 } => {
-                    ctx.conforms(alias_tv, bound_proto, span.clone());
+                    ctx.conforms_typearg(alias_tv, bound_proto, span.clone());
                     let subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
                         .zip(fresh_args.iter())

@@ -12,6 +12,21 @@ use kestrel_span::Span;
 
 use crate::ty::TyVar;
 
+/// How a `Conforms` obligation arose — decides what a REF type judges
+/// (stage 2b). An `Expr` obligation (a protocol-dispatched USE of a value:
+/// receiver bounds, operator protocols, literal protocols) keeps the
+/// transparent-place rule: a `&T` peels and the POINTEE is judged. A
+/// `TypeArg` obligation (where-clause bounds, formation wellformedness,
+/// alias bounds — positions whose success instantiates WITNESSES at the
+/// type) must judge the ref ITSELF: refs satisfy only Copyable (bit-copy)
+/// until 2d builds real ref-Item witnesses. Default `Expr`: a missed site
+/// fails toward today's behavior, never toward breaking place dispatch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConformsOrigin {
+    Expr,
+    TypeArg,
+}
+
 /// A type constraint emitted during constraint generation.
 #[derive(Clone, Debug)]
 pub enum Constraint {
@@ -54,6 +69,9 @@ pub enum Constraint {
         /// constraints so cascading Member/ImplicitMember constraints inside
         /// the desugared subtree see an Error receiver and absorb silently.
         poison_ty_on_failure: bool,
+        /// What the conformance judges when `ty` is a ref — see
+        /// `ConformsOrigin`.
+        origin: ConformsOrigin,
     },
 
     /// `Container.Name → result` — associated type projection.

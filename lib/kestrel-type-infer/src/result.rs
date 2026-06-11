@@ -427,6 +427,19 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
             }
+            // The 2b witness gate: a ref TYPE ARGUMENT failing a non-Static
+            // protocol bound is the deliberate "no ref witnesses yet" rule —
+            // say so, or the bare `&T !: P` reads like a missing extension.
+            if matches!(
+                ctx.slot(ctx.resolve(*ty)),
+                crate::ty::TySlot::Resolved(TyKind::Ref { .. })
+            ) {
+                return format!(
+                    "{} !: {} (a reference type argument cannot satisfy a protocol bound \
+                     yet — references are second-class)",
+                    ty_name, proto_name
+                );
+            }
             format!("{} !: {}", ty_name, proto_name)
         },
         InferError::NoMember {
@@ -641,6 +654,17 @@ fn describe_static_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> O
                     ))
                 },
             }
+        },
+        // Element-wise tuple fold: name the first non-Static element so
+        // `Array[(&T, Int64)]` failures say WHY.
+        TyKind::Tuple(elems) => {
+            let bad = elems
+                .iter()
+                .find(|&&e| !crate::solver::solver_ty_is_static(ctx, e, 0))?;
+            Some(format!(
+                "tuple element '{}' is non-Static",
+                describe_tyvar(ctx, *bad)
+            ))
         },
         _ => None,
     }
