@@ -22,6 +22,32 @@ what implementation needs; the *why* stays in the research docs.
 
 ## Implementation status
 
+- **ref conformances (`extend &T: P`) — SHIPPED 2026-06-12** (feature/115
+  branch, commits 08707392..): the 2d "peel-and-forward" follow-up,
+  ratified as a LANGUAGE construct instead of compiler-synthesized
+  forwarding witnesses — ref types are extension targets. Mechanism:
+  generic synthetic entities `lang.&` / `lang.&mutating` (the
+  `extend ():`/`extend !:` precedent + `lang.ptr`'s generic pattern);
+  the type layer never sees the entities (every chokepoint maps to
+  `HirTy::Ref`/`TyKind::Ref`/`MirTy::Ref` — try_lang_primitive,
+  build_self_type→lower_named_type, create_extension_self_type). The
+  TypeArg conformance gate became declared+satisfies (conforms_to Ref
+  arm via ConformingProtocols(lang.&); type_satisfies Ref arm →
+  nominal_satisfies, so `where T: P` evaluates at the pointee through
+  extension_bounds_hold — zero new bound-eval code). Dispatch: mono
+  match_pattern Ref arm (exact mutability, NO `&mutating`←`&`
+  subsumption); ref-typed SIGNATURE params (`other: Self`) keep their
+  ref type and peel once at entry into the let-ref VIEW representation;
+  codegen learned the two ref-arg representations (fused begin_borrow
+  peel + arg_is_ref_typed call-arg carve, both backends). Stdlib
+  (`core/ref.ks`): `extend &T/&mutating T: Equatable/Comparable where
+  T: …` — bodies are ordinary Kestrel (`self.isEqual(to: other)` peels
+  to the pointee via the transparent place). Shipped consumers:
+  `Optional[&Int64] ==`/`<`, `Result[&T,E] ==`, `xs.refs().contains()`/
+  `.min()`, user `extend &T: OwnProtocol`. The forwardability question
+  dissolved into ordinary typechecking — what can't be soundly written
+  won't compile. v1 surface: Equatable+Comparable; Hashable et al.
+  still cleanly reject (extension-driven acceptance, pinned).
 - **stage2d — SHIPPED 2026-06-11** (feature/115 branch, 8 commits
   ed8dd65a..): ref-bearing protocols, witnesses & iterators.
   `type Item = &T` / `&mutating T` assoc bindings (trivial-member-alias
@@ -206,8 +232,13 @@ what implementation needs; the *why* stays in the research docs.
 
 stage0.5 ✅ → stage1 ✅ → stage1.5 ✅ → cross-block refs ✅ → stage2:
 2a Static ✅ → 2b aggregates ✅ → 2d witnesses/iterators ✅ (ref-witness
-gate dissolved, operator gap closed) → remaining: 2c closures (the last
-letter), resolution fallback-tier fix + Array `checked:` adoption, Dict
-split storage (both un-dodge the goal API), peel-and-forward
-`&U: Protocol` (ruled follow-up). Stage 3 is dissolved; only the
-closure-return root-rule carve remains as a possible follow-on.
+gate dissolved, operator gap closed) → ref conformances
+(`extend &T: P`) ✅ (the peel-and-forward follow-up, shipped as a
+language construct — `==`/`<`/contains/min over ref payloads and ref
+Items work) → remaining: 2c closures (the last letter), resolution
+fallback-tier fix + Array `checked:` adoption, Dict split storage (both
+un-dodge the goal API). Stage 3 is dissolved; only the closure-return
+root-rule carve remains as a possible follow-on. Ref-conformance
+follow-ons: Hashable (needs method-level type params in ref-extension
+requirements), Matchable, struct-ANNOTATION formation bounds (today
+only generic-call instantiation checks custom bounds — G4 family).

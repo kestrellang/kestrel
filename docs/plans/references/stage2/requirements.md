@@ -190,10 +190,68 @@ or capture it — containment must precede expressiveness:
     the Copyable mono-substitution gap). Peel-and-forward witnesses
     (`&U: Protocol` via pointee forwarding — would make `==` on
     `Optional[&T]`, contains(), sorts WORK instead of clean-reject) are
-    the ruled follow-up. Ref-Item closure combinators (map/filter) are
+    the ruled follow-up — ✅ SHIPPED 2026-06-12, see the next bullet.
+    Ref-Item closure combinators (map/filter) are
     out of scope pending 2c. Tail-position decay of ref-returning calls
     (`func f() -> Int64 { b.fetch() }`) is a pre-existing stage-1 gap,
     unrelated to witnesses (bind via `let` first).
+- **Ref conformances (`extend &T: P`) — ✅ IMPLEMENTED 2026-06-12**
+  (commits 08707392, 6f1a19fc, 8ad4bc0b, 4b273479 + stdlib; every
+  commit full-suite green, final 3366+). The peel-and-forward follow-up,
+  RATIFIED 2026-06-11 as a language construct over compiler-synthesized
+  witnesses ("no special cases"): ref types are extension targets and
+  the stdlib AUTHORS the forwarding conformances in Kestrel. (The
+  third option, auto-deref, was assessed and rejected: refs already
+  auto-peel at every expression position — the gap is TYPE-ARGUMENT
+  conformance, which only a conformance mechanism reaches.)
+  - **Mechanism**: generic synthetic entities `lang.&`/`lang.&mutating`
+    (seed_ptr pattern, pointee param `T`; extension LHS args bind BY
+    NAME to the target's declared params, so ref extensions spell the
+    pointee `T`). The entities exist only at decl/name-res; every type
+    chokepoint maps them back to Ref (try_lang_primitive,
+    build_self_type→lower_named_type, create_extension_self_type —
+    Self inside a ref extension IS `TyKind::Ref{Param}`, which keeps
+    the transparent-place peel dispatching bodies on the POINTEE; a
+    leaked entity type would have made `self.isEqual(to:)` recurse).
+  - **Acceptance**: the TypeArg ref gate became declared+satisfies —
+    conforms_to gained a TyKind::Ref arm (ConformingProtocols of the
+    lang entity, declares-only); type_satisfies' Ref arm routes to
+    nominal_satisfies with args=[pointee], so the extension's
+    `where T: P` evaluates at the REAL pointee through the existing
+    extension_bounds_hold (zero new bound-eval code). Static/Copyable/
+    Cloneable builtin arms untouched (copy-fold kernel owns them). NO
+    `&mutating` ← `&` subsumption — each mutability conforms via its
+    own extension (match_pattern matches mutability exactly).
+  - **Dispatch**: mono match_pattern Ref arm (structural recursion,
+    exact mutability). Witness lowering needed ZERO new code — lang.&
+    is a module struct, so lower_witnesses already iterates it and the
+    C2 mapping makes implementing_type = `Ref{TypeParam}`.
+  - **Bodies/ABI**: ref-typed SIGNATURE params (`other: Self`) keep
+    their ref type in the body's value table (resolve_local_type peels
+    — the expr seam — and mismatched the ABI) and peel ONCE at entry
+    into the let-ref VIEW representation via a fused begin_borrow,
+    registered as named ref bindings (all existing use paths apply).
+    Codegen (both backends) learned the two ref-arg representations:
+    fused begin_borrow peel (ref operand, pointee result → load the
+    stored address; owned ref → pass through) and the call-arg carve
+    refined by `arg_is_ref_typed` (a ref-typed @guaranteed arg IS the
+    address ByRef wants; only pointee-typed views spill). A param
+    spelled literally `Self` may carry the target's top-level ref;
+    written `&T` params stay E480.
+  - **Stdlib surface (v1)**: `core/ref.ks` — `extend &T/&mutating T:
+    Equatable/Comparable where T: …`; bodies are one-liners through
+    the transparent place. Consumers shipped: `Optional[&Int64]`
+    ==/!=/<, `Result[&T,E] ==`, `xs.refs().contains()`/`.min()`,
+    user-defined `extend &T: P`. Hashable still rejects (method-level
+    `[H]` type param — ref-extension requirements with method generics
+    are a follow-up); rejection wording now names the `extend &T:`
+    rule.
+  - **Known carve-outs**: ref-extension INHERENT members are
+    dot-unreachable (the eager receiver peel resolves members on the
+    pointee) — conformance dispatch is the supported surface. Struct
+    ANNOTATION formation still only checks Static (custom bounds check
+    at generic-call instantiation — G4 family). Extensions must spell
+    the pointee `T` (the entity's declared param name).
 
 1. **Type-aware fallback-tier resolution** (recorded option 1 in
    stage1.5/compiler-arch.md) + Array adoption — `arr(i)` as a place.
