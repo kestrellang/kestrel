@@ -76,19 +76,34 @@ fn type_satisfies_at_depth(
     }
     match ty {
         // A REF is concrete: it satisfies Copyable (bit-copy, stage 2b
-        // ruling) and NOTHING else — permitting it here would let an
-        // extension bound (`extend Optional: Equatable where T: Equatable`)
-        // instantiate a pointee witness at `&U` and ICE at mono
-        // ("Callee::Witness not resolved", the witness_instantiation_
-        // collapse class). The Expr-side transparent place never reaches
-        // this check (solve_conforms peels first). Real ref witnesses
-        // are 2d.
-        HirTy::Ref { .. } => {
+        // ruling) plus whatever `extend &T: P` / `extend &mutating T: P`
+        // declares — routed through the generic synthetic `lang.&` /
+        // `lang.&mutating` entity exactly like `extend (): P`, so the
+        // extension's `where T: P` bounds evaluate at the REAL pointee via
+        // extension_bounds_hold. No declaring extension → reject (the 2d
+        // clean-reject; an unguarded permit here would instantiate a pointee
+        // witness at `&U` and ICE at mono — witness_instantiation_collapse
+        // class). The Expr-side transparent place never reaches this check
+        // (solve_conforms peels first).
+        HirTy::Ref {
+            inner, mutating, ..
+        } => {
             kestrel_debug::ktrace!("ref-gate", "type_satisfies(Ref, {protocol:?})");
-            ctx.query(ResolveBuiltin {
+            if ctx.query(ResolveBuiltin {
                 builtin: Builtin::Copyable,
                 root,
             }) == Some(protocol)
+            {
+                return true;
+            }
+            let name = if *mutating { "&mutating" } else { "&" };
+            match kestrel_name_res::extensions::resolve_lang_child(ctx, root, name) {
+                Some(amp) => {
+                    let args = std::slice::from_ref(inner.as_ref());
+                    nominal_satisfies(ctx, ty, amp, args, protocol, root, depth)
+                },
+                None => false,
+            }
         },
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }

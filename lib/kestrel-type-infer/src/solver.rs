@@ -1957,7 +1957,7 @@ fn solve_conforms(
             origin,
         }),
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
-        // The ref matrix (stage 2b):
+        // The ref matrix (stage 2b, conformances via `extend &T`):
         // - Static: a ref is the one thing that is never Static — reject
         //   regardless of origin (judging the pointee would let `&T` slip
         //   through containment bounds).
@@ -1965,10 +1965,13 @@ fn solve_conforms(
         //   (protocol dispatch through `&T` borrows the place: for-in's
         //   Iterable bound, operator protocols).
         // - TypeArg origin: the ref ITSELF is judged. Refs bit-copy, so
-        //   Copyable holds (not known Cloneable); every other bound is
-        //   rejected until 2d builds ref-Item witnesses — peeling here
-        //   would instantiate a pointee witness at `&U` (the
-        //   witness_instantiation_collapse class).
+        //   Copyable holds (not known Cloneable); every other bound holds
+        //   iff `extend &T: P` / `extend &mutating T: P` declares it AND the
+        //   extension's `where` clauses hold at the pointee — the same
+        //   declared+satisfies pair as the nominal arm, routed through the
+        //   synthetic `lang.&` entities. No declaring extension → clean
+        //   DoesNotConform (an unguarded permit would instantiate a pointee
+        //   witness at `&U` — the witness_instantiation_collapse ICE class).
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
             if is_static_builtin(ctx, protocol) {
                 if poison_ty_on_failure {
@@ -1979,7 +1982,21 @@ fn solve_conforms(
             if origin == ConformsOrigin::TypeArg {
                 let conforms = match copyable_builtin_kind(ctx, protocol) {
                     Some(want_cloneable) => !want_cloneable,
-                    None => false,
+                    None => {
+                        let kind = match ctx.slot(resolved) {
+                            TySlot::Resolved(k) => k.clone(),
+                            _ => unreachable!(),
+                        };
+                        ctx.resolver.conforms_to(&kind, protocol) && {
+                            let hir = reify_tv(ctx, resolved);
+                            crate::conformance::type_satisfies(
+                                ctx.query_ctx,
+                                &hir,
+                                protocol,
+                                ctx.root,
+                            )
+                        }
+                    },
                 };
                 if conforms {
                     return SolveResult::Solved;

@@ -427,16 +427,16 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
             }
-            // The 2b witness gate: a ref TYPE ARGUMENT failing a non-Static
-            // protocol bound is the deliberate "no ref witnesses yet" rule —
-            // say so, or the bare `&T !: P` reads like a missing extension.
+            // A ref TYPE ARGUMENT conforms to exactly what `extend &T: P`
+            // declares — when none does, a bare `&T !: P` reads like the
+            // pointee is at fault, so name the actual rule.
             if matches!(
                 ctx.slot(ctx.resolve(*ty)),
                 crate::ty::TySlot::Resolved(TyKind::Ref { .. })
             ) {
                 return format!(
-                    "{} !: {} (a reference type argument cannot satisfy a protocol bound \
-                     yet — references are second-class)",
+                    "{} !: {} (a reference satisfies only the protocols declared by an \
+                     `extend &T:` / `extend &mutating T:` extension)",
                     ty_name, proto_name
                 );
             }

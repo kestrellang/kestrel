@@ -595,6 +595,24 @@ impl TypeResolver for WorldResolver<'_> {
                 );
                 all_protocols.contains(&protocol)
             },
+            // Reference types conform via the generic synthetic entities
+            // (`extend &T: P` / `extend &mutating T: P`). Declares-only — the
+            // pointee is a TyVar (opaque here); the bound-aware answer is
+            // `type_satisfies`' Ref arm, which evaluates the extension's
+            // `where T: P` at the real pointee.
+            TyKind::Ref { mutating, .. } => {
+                let name = if *mutating { "&mutating" } else { "&" };
+                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, name)
+                    .map(|e| {
+                        self.ctx
+                            .query(kestrel_name_res::ConformingProtocols {
+                                entity: e,
+                                root: self.root,
+                            })
+                            .contains(&protocol)
+                    })
+                    .unwrap_or(false)
+            },
             // Structural singletons conform via their synthetic `lang` entities
             // (`extend (): P` / `extend !: P`), keyed the same as nominal types.
             TyKind::Tuple(elems) if elems.is_empty() => {
