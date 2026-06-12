@@ -185,3 +185,23 @@ to their structural `MirTy` (`I64` / `Tuple([])` / `Never`) via
 `implementing_type` matches the primitive self at call sites. A `Named{lang.i64}`
 witness never matches the `I64` self → `Callee::Witness not resolved`. See the
 type-infer AGENTS.md note for the parallel conformance/member-lookup mapping.
+
+## Body params: the first `param_count` ValueIds ARE the params
+
+`lower_body`'s param loop must allocate exactly one ValueId per parameter,
+in order, before anything else — codegen's prologue and OSSA verify identify
+params positionally as values `0..param_count`. Any entry instruction whose
+result allocates between param values shifts the later params out of the
+window and ICEs as "operand used but never defined". When the entry block
+needs setup instructions derived from params (e.g. the ref-param peels
+below), collect them in the loop and emit AFTER `param_count` is set.
+
+**Ref-typed SIGNATURE params** (`extend &T` methods' `self` / `other: Self`):
+the body value KEEPS the signature's `MirTy::Ref` (`resolve_local_type` peels
+local types — the expression seam — and would silently mismatch the ABI: the
+address of the ref slot flows where the pointee view belongs, comparing
+pointer bits as values with NO crash). One fused `BeginBorrow` at entry
+(ref-typed operand, pointee-typed result — codegen loads the stored address)
+converts to the let-ref VIEW representation, registered via
+`register_ref_binding` so every existing use path (receiver View, arg decay,
+aggregate packaging) applies unchanged.

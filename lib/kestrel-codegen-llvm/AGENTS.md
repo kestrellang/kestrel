@@ -115,3 +115,24 @@ Validate via the full suite with `KESTREL_BACKEND=llvm` (the test runner reads
 it). The triage build hash excludes env vars, so to compare against cranelift,
 bump the hash (edit a test-suite source comment) between runs. Goal: identical
 failure set to cranelift. Last validated 3037/17, identical — see [[llvm_backend]].
+
+## Two ref-value representations (stage 2b/extend-&T contract)
+
+A `&T` is a pointer scalar with TWO codegen representations, keyed by the
+MIR value's TYPE:
+
+- **Ref-TYPED value** (`MirTy::Ref`): @owned → the value IS the ref scalar
+  (pointer to pointee); @guaranteed → the value is the address OF the ref
+  slot (one extra level). Generic bodies at `T = &U` and `extend &T` method
+  params produce these.
+- **Pointee-typed VIEW** (the expression seam's peeled form — `let r = &x`
+  bindings, receiver Views): @guaranteed value whose codegen value IS the
+  ref scalar.
+
+The two translation seams: the fused `BeginBorrow` peel (ref-typed operand,
+pointee-typed result → @guaranteed loads the stored address, @owned passes
+through) and the call-arg carve (`param_is_ref` × `arg_is_ref_typed`: a
+ref-typed @guaranteed arg is ALREADY the address ByRef wants — pass as-is;
+a pointee-typed view must SPILL to materialize the ref slot). A missed
+translation does not crash — it reads pointer bits as the pointee (values
+compare as addresses). Both backends must mirror any change here.

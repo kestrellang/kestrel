@@ -61,6 +61,21 @@ mir-lower `try_lang_primitive` (entity → `Tuple([])` / `Never` / `I64`) — **
 sites must agree**, so when you add a new Entity-keyed conformance/member path,
 add the mapping too.
 
+**References (`extend &T: P`) join this pattern with GENERIC entities**:
+`lang.&` / `lang.&mutating` carry one type param (`T`, the pointee — extension
+LHS args bind BY NAME to the target's declared params, so ref extensions must
+spell the pointee `T`). The reverse detector is
+`kestrel_name_res::extensions::lang_ref_mutability`. The mapping-site list for
+refs: `conforms_to`'s `TyKind::Ref` arm (declared check — the pointee is an
+opaque TyVar there), `conformance.rs::type_satisfies`' Ref arm (routes to
+`nominal_satisfies(amp, [pointee])` so extension `where T: P` bounds evaluate
+at the real pointee), `lib.rs::create_extension_self_type` (Self inside a ref
+extension is `TyKind::Ref{Param}` — a leaked entity type makes extension
+bodies dispatch onto themselves and recurse), mir-lower
+`try_lang_primitive`/`build_self_type` (→ `MirTy::Ref`), and mono
+`match_pattern`'s Ref arm (exact mutability — NO `&mutating` ← `&`
+subsumption anywhere). The type layer must NEVER see the entities as `Named`.
+
 ## Synthetic-span diagnostics fail SILENTLY
 
 A solver error whose span is `Span::synthetic(0)` renders as NOTHING in
