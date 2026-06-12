@@ -74,6 +74,32 @@ pub fn compile_inst(
                 .ctx
                 .tc
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            // Fused ref peel (the 2b extraction contract, on locals/params):
+            // a borrow whose OPERAND is ref-typed but whose RESULT is the
+            // pointee reads through the ref once. @guaranteed ref value =
+            // address OF the ref slot → load the stored address; @owned ref
+            // value IS the address → pass through. Ref-typed bodies (e.g.
+            // `extend &T` methods reading `self`) produce this shape.
+            let operand_is_ref = matches!(
+                fc.ctx.module.ty_arena.get(operand_ty),
+                kestrel_mir::MirTy::Ref { .. }
+            );
+            let result_is_ref = matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                kestrel_mir::MirTy::Ref { .. }
+            );
+            if operand_is_ref && !result_is_ref {
+                let ptr_ty = fc.ctx.ptr_ty;
+                let v = if is_guaranteed {
+                    builder
+                        .ins()
+                        .load(ptr_ty, MemFlags::new(), val, Offset32::new(0))
+                } else {
+                    val
+                };
+                fc.map_value(builder, *result, v);
+                return Ok(false);
+            }
             match repr {
                 _ if is_guaranteed => {
                     fc.map_value(builder, *result, val);
@@ -1429,12 +1455,23 @@ fn compile_resolved_call(
             fc.ctx.module.ty_arena.get(param.ty),
             kestrel_mir::MirTy::Ref { .. }
         );
+        // A REF-TYPED @guaranteed arg is the other representation (2b
+        // contract): its codegen value is the address OF the ref slot, not
+        // the ref scalar — generic bodies produce these at T=&U. The two
+        // forms need opposite treatment in the ref-param carves below.
+        let arg_is_ref_typed = matches!(
+            fc.ctx
+                .module
+                .ty_arena
+                .get(fc.body.values[call_arg.value.index()].ty),
+            kestrel_mir::MirTy::Ref { .. }
+        );
 
         match pass {
             PassMode::ByVal(expected_ty) => {
                 // @guaranteed scalars are pointers; load the value for by-val passing.
                 let val = if arg_is_guaranteed {
-                    if param_is_ref {
+                    if param_is_ref && !arg_is_ref_typed {
                         val
                     } else {
                         let arg_ty = fc.body.values[call_arg.value.index()].ty;
@@ -1463,9 +1500,11 @@ fn compile_resolved_call(
                 call_args.push(val);
             },
             PassMode::ByRef => {
-                if arg_is_guaranteed && param_is_ref {
-                    // The ref VALUE is the address itself; ByRef wants the
-                    // address OF the ref value — spill it.
+                if arg_is_guaranteed && param_is_ref && !arg_is_ref_typed {
+                    // The (pointee-typed) ref VALUE is the address itself;
+                    // ByRef wants the address OF the ref value — spill it.
+                    // A REF-TYPED @guaranteed arg is already that address
+                    // and falls through to the pass-directly branches.
                     let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
                     mem::store_to_repr(builder, repr, slot, val);
                     call_args.push(slot);

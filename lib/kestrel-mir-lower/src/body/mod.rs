@@ -467,6 +467,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .get(&self.func_entity)
             .map(|f| f.params.iter().map(|p| p.convention).collect())
             .unwrap_or_default();
+        let param_sig_tys: Vec<TyId> = self
+            .ctx
+            .module
+            .functions
+            .get(&self.func_entity)
+            .map(|f| f.params.iter().map(|p| p.ty).collect())
+            .unwrap_or_default();
         self.ret_borrow = self
             .ctx
             .module
@@ -490,6 +497,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 )
             })
             .unwrap_or(false);
+        let mut pending_ref_param_views: Vec<(ValueId, TyId, HirLocalId)> = Vec::new();
         for (i, (hir_id, local)) in locals.iter().enumerate() {
             if i >= params_len {
                 break;
@@ -523,15 +531,40 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     val
                 },
                 ParamConvention::Borrow => {
-                    let val = self.body.alloc_value(ValueDef {
-                        ty,
-                        ownership: Ownership::Guaranteed,
-                        borrow_source: None,
-                        root,
-                        span: None,
+                    // A REF-typed SIGNATURE param (`extend &T` methods'
+                    // self/`other: Self`): the ABI value is the ref SLOT
+                    // (resolve_local_type peels to the pointee — the expr
+                    // seam — so it can't type this). Allocate the param at
+                    // its signature type; the entry peel into the let-ref
+                    // VIEW representation is deferred below the loop — the
+                    // first `params_len` ValueIds must be exactly the params.
+                    let sig_ref = param_sig_tys.get(i).and_then(|&t| {
+                        match self.ctx.module.ty_arena.get(t) {
+                            MirTy::Ref { pointee, .. } => Some((t, *pointee)),
+                            _ => None,
+                        }
                     });
-                    self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
-                    val
+                    if let Some((ref_ty, pointee)) = sig_ref {
+                        let val = self.body.alloc_value(ValueDef {
+                            ty: ref_ty,
+                            ownership: Ownership::Guaranteed,
+                            borrow_source: None,
+                            root,
+                            span: None,
+                        });
+                        pending_ref_param_views.push((val, pointee, *hir_id));
+                        val
+                    } else {
+                        let val = self.body.alloc_value(ValueDef {
+                            ty,
+                            ownership: Ownership::Guaranteed,
+                            borrow_source: None,
+                            root,
+                            span: None,
+                        });
+                        self.local_map.insert(*hir_id, LocalBinding::Ssa(val));
+                        val
+                    }
                 },
                 ParamConvention::Consuming => {
                     let ownership = self.ownership_for(ty);
@@ -545,6 +578,17 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             self.body.value_names.insert(val, local.name.clone());
         }
         self.body.param_count = params_len;
+
+        // Entry peels for ref-typed params: one fused begin_borrow each
+        // (codegen loads the stored address out of the param's ref slot),
+        // registered as named ref bindings so all existing let-ref use
+        // paths (receiver View, arg decay, packaging) apply unchanged.
+        for (param_val, pointee, hir_id) in pending_ref_param_views {
+            let view = self.extract_ref_slot(param_val, pointee, |s, result, operand| {
+                s.push_inst(InstKind::BeginBorrow { result, operand });
+            });
+            self.register_ref_binding(view, hir_id);
+        }
 
         // Failable-init partial drop: allocate drop flags for `self`'s droppable
         // stored fields in the entry block (so they dominate every failure

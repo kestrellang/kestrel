@@ -92,14 +92,42 @@ pub fn compile_inst<'ctx>(
                 .ctx
                 .tc
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            match repr {
-                _ if is_guaranteed => fc.map_value(*result, val),
-                TypeRepr::Aggregate { .. } | TypeRepr::Zst => fc.map_value(*result, val),
-                TypeRepr::Scalar(_) => {
-                    let slot = fc.alloca(repr.size(), repr.align());
-                    builder.build_store(slot, val).unwrap();
-                    fc.map_value(*result, slot.into());
-                },
+            // Fused ref peel (the 2b extraction contract, on locals/params):
+            // a borrow whose OPERAND is ref-typed but whose RESULT is the
+            // pointee reads through the ref once. @guaranteed ref value =
+            // address OF the ref slot → load the stored address; @owned ref
+            // value IS the address → pass through. Twin of the Cranelift arm.
+            let operand_is_ref = matches!(fc.ctx.module.ty_arena.get(operand_ty), MirTy::Ref { .. });
+            let result_is_ref = matches!(
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            );
+            if operand_is_ref && !result_is_ref {
+                let v = if is_guaranteed {
+                    builder
+                        .build_load(
+                            cx.ptr_type(inkwell::AddressSpace::default()),
+                            val.into_pointer_value(),
+                            "ref_peel",
+                        )
+                        .unwrap()
+                } else {
+                    val
+                };
+                fc.map_value(*result, v);
+            } else {
+                match repr {
+                    _ if is_guaranteed => fc.map_value(*result, val),
+                    TypeRepr::Aggregate { .. } | TypeRepr::Zst => fc.map_value(*result, val),
+                    TypeRepr::Scalar(_) => {
+                        let slot = fc.alloca(repr.size(), repr.align());
+                        builder.build_store(slot, val).unwrap();
+                        fc.map_value(*result, slot.into());
+                    },
+                }
             }
         },
 
@@ -1478,10 +1506,20 @@ fn compile_resolved_call<'ctx>(
         // the guaranteed-scalar load in coerce_byval_arg would deref one
         // level too many (twin of the Cranelift carve).
         let param_is_ref = matches!(module.ty_arena.get(param.ty), MirTy::Ref { .. });
+        // A REF-TYPED @guaranteed arg is the other representation (2b
+        // contract): its codegen value is the address OF the ref slot, not
+        // the ref scalar — generic bodies produce these at T=&U. The two
+        // forms need opposite treatment in the ref-param carves below.
+        let arg_is_ref_typed = matches!(
+            module
+                .ty_arena
+                .get(fc.body.values[call_arg.value.index()].ty),
+            MirTy::Ref { .. }
+        );
 
         match pass {
             PassMode::ByVal(expected) => {
-                let v = if param_is_ref && arg_is_guaranteed {
+                let v = if param_is_ref && arg_is_guaranteed && !arg_is_ref_typed {
                     val
                 } else {
                     coerce_byval_arg(fc, builder, val, call_arg.value, expected)
@@ -1489,9 +1527,11 @@ fn compile_resolved_call<'ctx>(
                 call_args.push(v.into());
             },
             PassMode::ByRef => {
-                if param_is_ref && arg_is_guaranteed {
-                    // The ref VALUE is the address itself; ByRef wants the
-                    // address OF the ref value — spill it.
+                if param_is_ref && arg_is_guaranteed && !arg_is_ref_typed {
+                    // The (pointee-typed) ref VALUE is the address itself;
+                    // ByRef wants the address OF the ref value — spill it.
+                    // A REF-TYPED @guaranteed arg is already that address
+                    // and falls through to the pass-directly branches.
                     let slot = fc.alloca(repr.size(), repr.align());
                     mem::store_to_repr(cx, builder, ptr_size, repr, slot, val);
                     call_args.push(slot.into());

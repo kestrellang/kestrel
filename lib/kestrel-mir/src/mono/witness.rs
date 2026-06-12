@@ -144,6 +144,21 @@ pub fn match_pattern(
         // Structural recursion on wrapper types
         (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(arena, a, b, bindings),
 
+        // Refs match exactly by mutability — `extend &T: P` witnesses carry
+        // `Ref{TypeParam}` implementing types; a `&mutating` self never
+        // matches a `&` pattern (no subsumption — each mutability conforms
+        // via its own extension).
+        (
+            MirTy::Ref {
+                pointee: p1,
+                mutating: m1,
+            },
+            MirTy::Ref {
+                pointee: p2,
+                mutating: m2,
+            },
+        ) => m1 == m2 && match_pattern(arena, p1, p2, bindings),
+
         (MirTy::Tuple(a), MirTy::Tuple(b)) => {
             a.len() == b.len()
                 && a.iter()
