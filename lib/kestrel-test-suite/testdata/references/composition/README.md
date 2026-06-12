@@ -11,6 +11,11 @@ via refinement parents (`protocol Comparable: Equatable`), and the early
 non-Extension/empty-clause accept skipped the genuine requirement. Now
 both source shapes gate on `type_satisfies(recv, parent_protocol)`, so
 the where clause of `extend Optional[T]: Equatable` is evaluated at
-`T = &Int64`, the ref gate fires, and the program rejects with a clean
-DoesNotConform (`op_dispatch_ref_payload_clean_reject.ks`; positive
-direction pinned by `op_dispatch_refinement_still_conforms.ks`).
+`T = &Int64`. As of 2026-06-12 that evaluation SUCCEEDS: the stdlib
+forwarding extension `extend &T: Equatable where T: Equatable`
+(core/ref.ks, via the generic synthetic `lang.&` entity) supplies the
+conformance and the operators dispatch the pointee's witnesses end to
+end (`op_dispatch_ref_payload_works.ks`; positive refinement direction
+pinned by `op_dispatch_refinement_still_conforms.ks`; the reject side —
+protocols no ref extension declares — by
+`references/extend_ref/stdlib_ref_conformance_surface.ks`).
