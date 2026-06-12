@@ -291,6 +291,19 @@ pub fn reject_ref_types_allowing_top_ref(ctx: &QueryContext<'_>, ty: HirTy) -> H
     reject_ref_types(ctx, ty, RefPosition::Other, RefPolicy::AllowAggregate)
 }
 
+/// True if the annotation is spelled literally `Self` (one bare segment, no
+/// args). Used to recognize params whose top-level ref came from Self
+/// SUBSTITUTION inside a ref-target extension rather than a written `&T`.
+fn is_bare_self_ast(ty: &AstType) -> bool {
+    matches!(
+        ty,
+        AstType::Named { segments, .. }
+            if segments.len() == 1
+                && segments[0].name == "Self"
+                && segments[0].type_args.is_empty()
+    )
+}
+
 /// True if an alias entity is trivial — has no type params, no protocol bounds,
 /// no where clause. These aliases can be safely expanded at HIR lowering.
 fn is_trivial_alias(ctx: &QueryContext<'_>, entity: Entity) -> bool {
@@ -1092,6 +1105,14 @@ impl QueryFn for LowerCallableTypes {
                 .map(|p| {
                     p.ty.as_ref().map(|ast_ty| {
                         let lowered = lower_ast_type(ctx, self.entity, self.root, ast_ty);
+                        // A param spelled literally `Self` inside a ref-target
+                        // extension (`extend &T`) resolves to the extended ref
+                        // type itself — the one place a top-level ref param is
+                        // the EXTENDED TYPE, not a smuggled `&T` annotation
+                        // (which keeps E480). The pointee subtree still walks.
+                        if is_bare_self_ast(ast_ty) {
+                            return reject_ref_types_allowing_top_ref(ctx, lowered);
+                        }
                         reject_ref_types(ctx, lowered, pos, RefPolicy::AllowAggregate)
                     })
                 })
@@ -1120,6 +1141,16 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Option<Vec<HirTy>> {
         let target = ctx.get::<ExtensionTarget>(self.extension)?;
+        // Ref target (`extend &T` / `extend &mutating T`): the POINTEE is the
+        // synthetic `lang.&` entity's single type arg. Strict pointee walk —
+        // `&&T` never parses past E487, and a ref-bearing pointee has no
+        // meaning here.
+        if let AstType::Ref { inner, .. } = &target.0 {
+            let lowered = lower_ast_type(ctx, self.extension, self.root, inner);
+            let lowered =
+                reject_ref_types(ctx, lowered, RefPosition::GenericArg, RefPolicy::Strict);
+            return Some(vec![lowered]);
+        }
         let AstType::Named { segments, .. } = &target.0 else {
             return Some(vec![]);
         };
