@@ -101,8 +101,9 @@ pub fn build_self_type(ctx: &mut LowerCtx, entity: Entity) -> TyId {
                 .collect()
         })
         .unwrap_or_default();
-    ctx.register_name(entity);
-    ctx.module.ty_arena.named(entity, type_args)
+    // Route through the shared chokepoint so lang-mapped entities (`lang.&`
+    // → `MirTy::Ref`, etc.) never leak as `Named` into signatures.
+    lower_named_type(ctx, entity, type_args)
 }
 
 // === HirTy → TyId ===
@@ -369,6 +370,16 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
         "ptr" => {
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.pointer(inner))
+        },
+        // Synthetic ref-extension targets: the type layer always uses
+        // `MirTy::Ref` — the entities exist only for decl/name-res.
+        "&" => {
+            let inner = type_args.first().copied()?;
+            Some(ctx.module.ty_arena.ref_ty(inner, false))
+        },
+        "&mutating" => {
+            let inner = type_args.first().copied()?;
+            Some(ctx.module.ty_arena.ref_ty(inner, true))
         },
         _ => None,
     }

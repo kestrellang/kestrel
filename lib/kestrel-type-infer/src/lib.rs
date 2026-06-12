@@ -245,6 +245,16 @@ fn create_extension_self_type(
     let target_kind = query_ctx.get::<NodeKind>(target).cloned();
     let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
         ctx.self_type_ty(target)
+    } else if let Some(mutating) =
+        kestrel_name_res::extensions::lang_ref_mutability(query_ctx, target)
+    {
+        // Ref-target extension (`extend &T`): self IS the ref type — never
+        // the synthetic entity. `TyKind::Ref` keeps the transparent-place
+        // receiver peel working, so `self.method()` in the body dispatches
+        // on the POINTEE (via the extension's where bounds), not back onto
+        // the extension's own members.
+        let pointee = args.first().copied().unwrap_or_else(|| ctx.fresh());
+        ctx.ref_ty(pointee, mutating)
     } else {
         ctx.named(target, args.clone())
     };
