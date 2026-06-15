@@ -234,6 +234,18 @@ pub struct InferCtx<'a> {
     /// Applied after constraint solving: only type vars still unconstrained
     /// get their default, so generic bodies like `Set.init()` keep `H` free.
     pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
+
+    /// De-dup set for TYPE-ARGUMENT conformance FAILURES, keyed by
+    /// `(structural type string, protocol)`. The same wellformedness
+    /// obligation (`X: Copyable`/`Static`) is emitted from several layers —
+    /// the call-site where-clause (`emit_where_clause_constraints_with_subs`),
+    /// the annotation formation (`lower_hir_ty_with_subs`), and the
+    /// return-position formation (`lower_return_ty_with_opaque`) — so the same
+    /// concrete violation can fail more than once. Report each distinct
+    /// `(type, protocol)` only once; the first (earliest-solved, best-span)
+    /// wins. Keyed structurally, not by TyVar, because the duplicate sites
+    /// form independent TyVar trees for the same concrete type.
+    pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -309,6 +321,7 @@ impl<'a> InferCtx<'a> {
             loop_break_tys: Vec::new(),
             opaque_return: None,
             type_param_defaults: Vec::new(),
+            reported_typearg_conformance: HashSet::new(),
         }
     }
 

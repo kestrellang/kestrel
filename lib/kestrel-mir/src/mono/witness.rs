@@ -417,10 +417,32 @@ pub fn resolve_witness_call(
     let mut type_args: Vec<TyId> = if needs_self {
         // Protocol-extension default methods receive Self via `self_type`.
         // Their function type params are the protocol-level args followed by
-        // the method-level args, already laid out that way at the call site.
-        // The witness implementation type params describe the concrete Self
-        // pattern and must not be prepended here.
-        method_type_args.to_vec()
+        // the method-level args, already laid out that way at the call site —
+        // so `method_type_args` normally suffices and the witness impl params
+        // (the concrete Self pattern) must not be prepended.
+        //
+        // Exception: a default reached through a *different* protocol than the
+        // one it's defined on (e.g. `Slice.isEqual` satisfying `Equatable`)
+        // has leading type params that `method_type_args` can't carry — they
+        // are the supplying extension's free params. `bind_witness_methods`
+        // records those in `binding.type_args` (mapped to the impl's
+        // vocabulary); recover them when the call-site args underfill the
+        // callee's arity.
+        let mut args = method_type_args.to_vec();
+        if let Some(func) = concrete_func
+            && args.len() < func.type_params.len()
+            && !binding.type_args.is_empty()
+        {
+            let bound: Vec<TyId> = binding
+                .type_args
+                .iter()
+                .map(|&ta| substitute(arena, ta, &subst))
+                .collect();
+            let method_level_args = method_type_args.get(proto_param_count..).unwrap_or(&[]);
+            args = bound;
+            args.extend_from_slice(method_level_args);
+        }
+        args
     } else {
         // Direct implementation: prepend witness implementation type args,
         // then append method-level type args past the protocol's own params.

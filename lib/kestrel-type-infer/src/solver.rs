@@ -1939,6 +1939,28 @@ fn solve_coerce(
     SolveResult::Error(mismatch_error(ctx, to, from, span))
 }
 
+/// For a TYPE-ARGUMENT conformance FAILURE, record `(structural type,
+/// protocol)` and return whether this exact violation was already reported.
+/// The same wellformedness obligation is emitted from the call-site
+/// where-clause, the annotation formation, and the return-position formation,
+/// so a single concrete violation can fail several times over independent
+/// TyVar trees — key structurally and report once. Expr-origin conforms are
+/// never deduped (false), so genuine value-level conformance errors are
+/// unaffected.
+fn typearg_failure_is_duplicate(
+    ctx: &mut InferCtx<'_>,
+    resolved: TyVar,
+    protocol: kestrel_hecs::Entity,
+    origin: ConformsOrigin,
+) -> bool {
+    if origin != ConformsOrigin::TypeArg {
+        return false;
+    }
+    let key = (crate::result::describe_tyvar(ctx, resolved), protocol);
+    // `insert` returns false when the key was already present.
+    !ctx.reported_typearg_conformance.insert(key)
+}
+
 fn solve_conforms(
     ctx: &mut InferCtx<'_>,
     ty: TyVar,
@@ -2001,6 +2023,9 @@ fn solve_conforms(
                 if conforms {
                     return SolveResult::Solved;
                 }
+                if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
+                    return SolveResult::Solved;
+                }
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
@@ -2044,6 +2069,8 @@ fn solve_conforms(
                 }
             };
             if conforms {
+                SolveResult::Solved
+            } else if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                 SolveResult::Solved
             } else {
                 if poison_ty_on_failure {
@@ -3532,6 +3559,25 @@ fn solve_member(
             receiver,
             &field_subs,
         );
+        // Zero-arg call syntax on a field is only valid for a function-valued
+        // field (e.g. `separator: () -> Item`). A method call on a name that
+        // resolves to a non-callable field — `slice.len()` where `len: Int64` —
+        // is really a missing method. Don't forward into solve_call, which would
+        // misreport "no matching subscript on type '<field type>'" against the
+        // field's type instead of "no member 'len' on type '<receiver>'".
+        if is_call && args.is_empty() {
+            let resolved = ctx.resolve(field_tv);
+            if ctx.is_concrete(resolved)
+                && !matches!(ctx.slot(resolved), TySlot::Resolved(TyKind::Function { .. }))
+            {
+                return SolveResult::Error(InferError::NoMember {
+                    receiver,
+                    name: name.to_string(),
+                    is_call,
+                    span,
+                });
+            }
+        }
         // Dispatch via solve_call — handles both function calls and subscript calls
         return solve_call(ctx, field_tv, args, result, expr, span);
     }

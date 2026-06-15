@@ -258,6 +258,14 @@ fn bind_witness_methods(
             };
         }
 
+        // When the chosen impl is a protocol-extension default whose supplying
+        // extension carries free type params (e.g. `Slice.isEqual` from
+        // `extend Slice[T]` serving an `Equatable` witness), its leading type
+        // params live in the *supplying extension's* vocabulary, mapped to the
+        // implementing type via the conformance — not the implementing type's
+        // own params. `None` keeps the default `impl_type_arg_tys` path.
+        let mut binding_type_args: Option<Vec<TyId>> = None;
+
         if impl_func.is_none() {
             let candidates = ctx.query.query(TypeMembersByName {
                 type_entity,
@@ -265,7 +273,7 @@ fn bind_witness_methods(
                 context: type_entity,
                 root: ctx.root,
             });
-            let type_side: Vec<Entity> = candidates
+            let type_side: Vec<(Entity, TypeMemberSource)> = candidates
                 .iter()
                 .filter(|tm| {
                     matches!(
@@ -275,20 +283,36 @@ fn bind_witness_methods(
                             | TypeMemberSource::ProtocolExtension { .. }
                     )
                 })
-                .map(|tm| tm.entity)
+                .map(|tm| (tm.entity, tm.source.clone()))
                 .collect();
+            let entities: Vec<Entity> = type_side.iter().map(|(e, _)| *e).collect();
 
             impl_func = if method_name.ends_with(".set") {
-                find_setter_among(ctx, &type_side)
+                find_setter_among(ctx, &entities)
             } else {
                 find_impl_among(
                     ctx,
-                    &type_side,
+                    &entities,
                     method_name,
                     Some(&method_key.labels),
                     expected_param_types.as_deref(),
                 )
             };
+
+            let chosen_src = impl_func.and_then(|chosen| {
+                type_side
+                    .iter()
+                    .find(|(e, _)| *e == chosen)
+                    .map(|(_, s)| s.clone())
+            });
+            if let Some(TypeMemberSource::ProtocolExtension {
+                protocol,
+                extension,
+            }) = chosen_src
+            {
+                binding_type_args =
+                    protocol_ext_default_type_args(ctx, type_entity, protocol, extension);
+            }
         }
 
         if let Some(impl_func) = impl_func {
@@ -296,7 +320,7 @@ fn bind_witness_methods(
             witness.add_method(WitnessMethodBinding::new(
                 method_key.clone(),
                 impl_func,
-                impl_type_arg_tys.to_vec(),
+                binding_type_args.unwrap_or_else(|| impl_type_arg_tys.to_vec()),
             ));
             continue;
         }
@@ -370,6 +394,71 @@ fn lower_concrete_target_args(ctx: &mut LowerCtx, source: Entity) -> Option<Vec<
         return None;
     }
     Some(hir_args.iter().map(|h| lower_type(ctx, h)).collect())
+}
+
+/// Leading type args for a protocol-extension default reached through a
+/// *different* protocol than the one it's defined on.
+///
+/// `Slice.isEqual` lives on `extend Slice[T] where T: Equatable`, but satisfies
+/// an `Array[T]: Equatable` requirement. Its own type param `T` is the Slice
+/// element, which `Equatable`'s `method_type_args` never carries. We recover it
+/// from the implementing type's `Slice` conformance: the supplying extension
+/// instantiates `Slice` with its free params, and `Array[T]: Slice[T]` maps
+/// those to the implementing type's vocabulary (`T_ext ↦ T_array`).
+///
+/// Returns `None` when the supplying extension has no free params (blanket
+/// defaults like `extend Equatable: Equal[Self]`, where `Self` carries the
+/// type) — those keep the `method_type_args`-driven resolver path.
+fn protocol_ext_default_type_args(
+    ctx: &mut LowerCtx,
+    type_entity: Entity,
+    supplied_protocol: Entity,
+    supplying_ext: Entity,
+) -> Option<Vec<TyId>> {
+    let ext_params = ctx.world.get::<TypeParams>(supplying_ext).map(|t| t.0.clone())?;
+    if ext_params.is_empty() {
+        return None;
+    }
+    // The extension's target args (`[T]` in `extend Slice[T]`), in ext vocabulary.
+    let ext_target_args = ctx.query.query(LowerExtensionTargetTypeArgs {
+        extension: supplying_ext,
+        root: ctx.root,
+    })?;
+    // The implementing type's conformance args to `supplied_protocol`, in impl vocabulary.
+    let instantiations = ctx.query.query(ConformingProtocolInstantiations {
+        entity: type_entity,
+        root: ctx.root,
+    });
+    let (conf_owner, conf_ast_args) = instantiations.iter().find_map(|(p, source, args)| {
+        if *p != supplied_protocol {
+            return None;
+        }
+        let owner = if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
+            *source
+        } else {
+            type_entity
+        };
+        Some((owner, args.clone()))
+    })?;
+    let conf_args = lower_protocol_type_args(ctx, conf_owner, &conf_ast_args);
+
+    // Map each free ext param to its impl-vocabulary type, by position.
+    let mut map: std::collections::HashMap<Entity, TyId> = std::collections::HashMap::new();
+    for (tgt, &conf) in ext_target_args.iter().zip(conf_args.iter()) {
+        if let HirTy::Param(e, _) = tgt {
+            map.insert(*e, conf);
+        }
+    }
+    Some(
+        ext_params
+            .iter()
+            .map(|&e| {
+                map.get(&e)
+                    .copied()
+                    .unwrap_or_else(|| ctx.module.ty_arena.intern(MirTy::TypeParam(e)))
+            })
+            .collect(),
+    )
 }
 
 fn lower_protocol_type_args(

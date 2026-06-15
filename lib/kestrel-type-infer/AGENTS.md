@@ -76,6 +76,39 @@ bodies dispatch onto themselves and recurse), mir-lower
 `match_pattern`'s Ref arm (exact mutability — NO `&mutating` ← `&`
 subsumption anywhere). The type layer must NEVER see the entities as `Named`.
 
+## Ref decay (`&T → T`) has FIVE value-position sites
+
+A ref-returning call's result is pinned to its pointee (copy/clone) only in
+value positions. There is **no** decay logic on the constraint itself —
+`bind_call_result` (solver.rs) forces `result ≡ pointee` iff the call's
+`HirExprId` was recorded in one of the decay-position sets during constraint
+generation (generate.rs). Outside those sets the result stays `&T`. The five
+sites:
+
+| Position           | Set                  | Recorded at (generate.rs) |
+|--------------------|----------------------|---------------------------|
+| match scrutinee    | `scrutinee_exprs`    | the `Match` arm           |
+| let-binding init   | `binding_init_exprs` | the `Let` stmt arm        |
+| assignment target  | `assign_target_exprs`| the `Assign` arm          |
+| if/match arm value | `always_decay_exprs` | `mark_arm_value`          |
+| **return tail**    | `always_decay_exprs` | the tail-expr block       |
+
+**Invariant:** every position where a ref-returning call's value is *consumed
+as its pointee* must record its expr id, or the recorded `expr_types[expr]`
+stays `&T` and a downstream consumer surfaces `expected T, got &T`
+(order-dependent — `bind_call_result` may run before the coerce). `let v =
+call(); v` working while `return call()` failed (bug B1) was exactly a missing
+site. Reuse `mark_arm_value` — it recurses through `Block` wrappers and is inert
+for non-call tails.
+
+**The gate is the declared/target type, not the position.** `bind_call_result`
+decays *unconditionally* once an expr is in a set, so a position whose target may
+legitimately be `&T` (return tail of a `-> &T` fn) must NOT record the expr when
+the target resolves to `TyKind::Ref` — else the ref is wrongly peeled and
+mismatches. The return-tail site gates on `ctx.return_ty` being non-ref;
+`if`/`match` arms cannot carry refs across a merge by design, so they always
+decay.
+
 ## Synthetic-span diagnostics fail SILENTLY
 
 A solver error whose span is `Span::synthetic(0)` renders as NOTHING in

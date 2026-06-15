@@ -297,7 +297,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
 }
 
 /// Describe a TyVar as a short type name string (for diagnostics).
-fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
+pub(crate) fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
     let resolved = ctx.resolve(tv);
     match &ctx.types[resolved.0 as usize] {
         TySlot::Resolved(kind) => describe_tykind(ctx, kind),

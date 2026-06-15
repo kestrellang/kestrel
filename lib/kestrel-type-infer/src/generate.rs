@@ -45,6 +45,18 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
         let tail_tv = gen_expr(ctx, hir, tail);
         if tail_is_exhaustive(hir, tail) {
             let span = expr_span(hir, tail);
+            // Return-tail is a value position: a ref-returning call decays to
+            // the pointee when the declared return type is non-ref. Mirrors the
+            // binding/arm decay wiring (the missing fifth decay site) so
+            // bind_call_result pins the pointee. When the return type IS `&T` we
+            // leave the ref intact — the return-position borrow / ref-to-ref
+            // pass-through in solve_coerce handles it.
+            if !matches!(
+                ctx.slot(ctx.resolve(ctx.return_ty)),
+                TySlot::Resolved(TyKind::Ref { .. })
+            ) {
+                mark_arm_value(ctx, hir, tail);
+            }
             ctx.coerce(tail_tv, ctx.return_ty, tail, span);
         }
     }
@@ -1143,6 +1155,17 @@ fn gen_struct_init(
     }
 
     let result_tv = ctx.named(struct_entity, fresh_args.clone());
+
+    // Constructing `Box(value: r)` FORMS `Box[Res]`, so it is a formation site
+    // for the container's Copyable/Cloneable/Static bounds — exactly like
+    // writing `let b: Box[Res]`. The init/memberwise where-clause emission
+    // below only sees the init's OWN type params, never the parent struct's
+    // injected `T: Copyable`, so without this a non-Copyable arg substituted
+    // into a Copyable-by-default container escapes the frontend and only trips
+    // the post-mono containment ICE (Inv-3b). De-dup in `solve_conforms`
+    // keeps this from double-reporting with the call-site/annotation checks.
+    // See BUG-04 (Copyable mono-substitution gap).
+    emit_copyable_wellformedness(ctx, struct_entity, &fresh_args, span);
 
     // Substitution map: struct type params → fresh TyVars.
     // Used to instantiate init param/field types with the right type vars.
