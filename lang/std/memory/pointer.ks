@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError)
+import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError, Indirection, MutableIndirection)
 import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(ArraySlice)
 import std.result.(Optional)
@@ -586,6 +586,16 @@ public struct MutRefSliceIterator[T]: Iterator {
             .None
         }
     }
+}
+
+// A raw `Pointer[T]` is a smart pointer: `ptr.field` reaches the pointee.
+// `pointeeRef`/`pointeeMutRef` are the existing `value`/`mutatingValue` views
+// under the protocol's names. Works for any `T` (Copyable or not), unlike the
+// by-value `pointee` accessor.
+extend Pointer[T]: MutableIndirection {
+    type Target = T
+    public func pointeeRef() -> &T { self.value }
+    public mutating func pointeeMutRef() -> &mutating T { self.mutatingValue }
 }
 
 

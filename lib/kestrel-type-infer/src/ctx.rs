@@ -18,6 +18,15 @@ use crate::resolve::TypeResolver;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use kestrel_ast_builder::NodeKind;
 
+/// One level of an in-progress `Indirection` peel, accumulated during solving.
+/// `target_tv` is resolved to a concrete `ResolvedTy` in `build_result` to
+/// form the final `crate::result::IndirectionPeel`.
+pub(crate) struct PendingPeel {
+    pub read_method: kestrel_hecs::Entity,
+    pub mut_method: Option<kestrel_hecs::Entity>,
+    pub target_tv: TyVar,
+}
+
 /// Mutable state for type inference of a single function/init/getter body.
 pub struct InferCtx<'a> {
     /// Type resolver for querying the world (members, conformances, builtins).
@@ -107,9 +116,21 @@ pub struct InferCtx<'a> {
     /// gen helpers before they recurse into `inner`.
     pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
 
+    /// Member-access exprs that came from a desugared `ProtocolCall`
+    /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
+    /// is SKIPPED for these — operators/conformances forward via explicit
+    /// `extend`, never through the member peel (the receiver-only rule, R7).
+    /// Populated by the `ProtocolCall` arm of `generate.rs`.
+    pub(crate) protocol_dispatch_members: HashSet<HirExprId>,
+
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
+
+    /// `Indirection`-peel plan per member-access expr (outer→inner chain).
+    /// Accumulated by the peel arm in `solve_member`; `build_result` resolves
+    /// each `target_tv` and copies the chain to `TypedBody.indirection_peels`.
+    pub(crate) indirection_peels: HashMap<HirExprId, Vec<PendingPeel>>,
 
     /// MethodCall exprs where the resolution went through a field access.
     /// Maps expr → field entity. MIR lowering must interpose a field
@@ -295,7 +316,9 @@ impl<'a> InferCtx<'a> {
             pattern_binder_tvs: HashSet::new(),
             pattern_binder_gate: true,
             poison_protocol_call_recv_on_failure: HashSet::new(),
+            protocol_dispatch_members: HashSet::new(),
             resolutions: HashMap::new(),
+            indirection_peels: HashMap::new(),
             field_subscripts: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),

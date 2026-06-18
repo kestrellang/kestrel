@@ -24,6 +24,7 @@ use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 use super::place::{FieldViews, PlaceRepr};
 use super::{OssaBodyCtx, expr_span};
 use crate::ty::lower_resolved_ty;
+use kestrel_type_infer::result::IndirectionPeel;
 
 impl OssaBodyCtx<'_, '_> {
     /// Lower an HIR expression to a ValueId, applying promotion if needed.
@@ -351,12 +352,123 @@ impl OssaBodyCtx<'_, '_> {
     // Field access
     // ================================================================
 
+    /// The `Indirection`-peel chain recorded for `expr_id` (the side table),
+    /// or `None` when this member access did not peel. The `Vec` is the
+    /// outer→inner chain for nested wrappers.
+    pub(crate) fn indirection_peels_of(&self, expr_id: HirExprId) -> Option<Vec<IndirectionPeel>> {
+        self.typed
+            .as_ref()
+            .and_then(|t| t.indirection_peels.get(&expr_id))
+            .filter(|v| !v.is_empty())
+            .cloned()
+    }
+
+    /// Replay an `Indirection` peel: emit the `pointeeRef()` / `pointeeMutRef()`
+    /// accessor call(s) on member-access base `base`, returning the final
+    /// `&Target` / `&mutating Target` pointee view. `mutating` selects the
+    /// write accessor; each level's result is the next level's receiver
+    /// (nested `RcBox[Pointer[T]]`). The returned view is then projected
+    /// (field) or passed as a receiver (method) by the caller.
+    pub(crate) fn lower_indirection_chain(
+        &mut self,
+        base: HirExprId,
+        peels: &[IndirectionPeel],
+        mutating: bool,
+    ) -> ValueId {
+        let conv = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
+        // Level 0 receiver is the wrapper expression; later levels receive the
+        // previous level's pointee view.
+        let mut recv_ty = self.resolve_expr_type(base);
+        let mut recv_arg = self.prepare_call_arg_for_expr(base, conv);
+        let mut last: Option<ValueId> = None;
+        for peel in peels {
+            // `mut_method` is guaranteed Some at a write site (D2 rejects the
+            // read-only case before lowering); fall back to read for safety.
+            let method = if mutating {
+                peel.mut_method.unwrap_or(peel.read_method)
+            } else {
+                peel.read_method
+            };
+            self.ctx.register_name(method);
+            // Pass the POINTEE type as the result type, NOT `&Target`: the
+            // callee's `CallableRefReturn` (`pointeeRef -> &Target`) drives
+            // `emit_call_inner` to register the result @guaranteed as the
+            // pointee VIEW (holding the address) — exactly like `arr.at(i)`.
+            // Passing `&Target` would register an @owned pointer whose
+            // StructExtract reads the pointer's bytes as the pointee (segfault).
+            let target_ty = lower_resolved_ty(self.ctx, &peel.target);
+            let type_args = self.prepend_receiver_type_args(recv_ty, vec![]);
+            let callee = Callee::direct_with_args(method, type_args, None);
+            let ref_val = self.emit_call_returning(callee, vec![recv_arg], target_ty);
+            recv_ty = target_ty;
+            recv_arg = CallArg {
+                value: ref_val,
+                convention: conv,
+            };
+            last = Some(ref_val);
+        }
+        last.expect("indirection peel chain has at least one level")
+    }
+
+    /// Store `value` into `field_name` of an `Indirection` pointee reached by a
+    /// write peel: get the `&mutating Target` view via `pointeeMutRef()`, take
+    /// the field's address through it, and `StoreAssign` (drops the old value).
+    /// `rhs` is lowered first (pinned evaluation order).
+    fn lower_indirection_field_store(
+        &mut self,
+        base: HirExprId,
+        peels: &[IndirectionPeel],
+        field_name: &str,
+        value: HirExprId,
+    ) -> ValueId {
+        let rhs = self.lower_expr(value);
+        let view = self.lower_indirection_chain(base, peels, true);
+        let pointee_ty = self.body.value(view).ty;
+        let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
+            MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
+            _ => None,
+        }
+        .unwrap_or_else(|| {
+            debug_assert!(false, "ICE: peeled write field '{field_name}' not on pointee");
+            FieldIdx::new(0)
+        });
+        // PtrTo on the @guaranteed mutable view yields the pointee's address;
+        // FieldAddr projects the field; StoreAssign drops the old field value.
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
+        let pointee_addr = self.emit_op1(Op::PtrTo(pointee_ty), view, ptr_ty);
+        let field_addr = self.emit_field_addr(pointee_addr, pointee_ty, field_idx);
+        self.emit_store_assign(field_addr, rhs);
+        self.end_ref_if_single_use(view);
+        self.emit_literal(Immediate::unit())
+    }
+
     pub(crate) fn lower_field_access(
         &mut self,
         expr_id: HirExprId,
         base: HirExprId,
         field_name: &str,
     ) -> ValueId {
+        // Indirection read peel: `wrapper.field` where the wrapper has no
+        // `field` → resolve it on the pointee, reached via `pointeeRef()`.
+        if let Some(peels) = self.indirection_peels_of(expr_id) {
+            let view = self.lower_indirection_chain(base, &peels, false);
+            let result_ty = self.resolve_expr_type(expr_id);
+            let pointee_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+            let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
+                MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
+                _ => None,
+            }
+            .unwrap_or_else(|| {
+                debug_assert!(false, "ICE: peeled field '{field_name}' not on pointee");
+                FieldIdx::new(0)
+            });
+            return self.emit_struct_extract(view, field_idx, result_ty);
+        }
+
         let resolved = self
             .typed
             .as_ref()
@@ -689,6 +801,16 @@ impl OssaBodyCtx<'_, '_> {
         target: HirExprId,
         value: HirExprId,
     ) -> ValueId {
+        // Indirection write peel: `wrapper.field = v` where the wrapper has no
+        // `field` → store through the pointee, reached via `pointeeMutRef()`.
+        if let HirExpr::Field { base, name, .. } = &self.hir.exprs[target]
+            && let Some(peels) = self.indirection_peels_of(target)
+        {
+            let base = *base;
+            let field_name = name.as_str_or_empty().to_string();
+            return self.lower_indirection_field_store(base, &peels, &field_name, value);
+        }
+
         // Setter dispatch: computed properties, subscripts, field-subscripts
         if let Some(result) = self.try_lower_setter_assign(target, value) {
             return result;

@@ -365,6 +365,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.poison(result_tv);
                 return result_tv;
             };
+            // Operators / for-in / try desugar to ProtocolCall. Their method
+            // lookup must NOT trigger the lazy Indirection peel — a wrapper's
+            // `==` forwards via `extend W: Equatable`, never by peeling the
+            // member to the pointee (which would coerce the argument; R7).
+            ctx.protocol_dispatch_members.insert(id);
             // Resolve method on the protocol
             ctx.member(
                 recv_tv,

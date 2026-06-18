@@ -14,7 +14,7 @@ use kestrel_mir::{
 };
 
 use super::OssaBodyCtx;
-use crate::ty::lower_type;
+use crate::ty::{lower_resolved_ty, lower_type};
 
 impl OssaBodyCtx<'_, '_> {
     pub fn lower_call_expr(
@@ -165,7 +165,23 @@ impl OssaBodyCtx<'_, '_> {
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
+            // Indirection method peel: `wrapper.method()` where the wrapper has
+            // no `method` → dispatch to the pointee, reached via
+            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // == MutBorrow) peels through the mutating accessor. `receiver_ty`
+            // is retargeted to the pointee so the callee's type args resolve
+            // against the pointee, not the wrapper.
+            let receiver_arg = if let Some(peels) = self.indirection_peels_of(expr_id) {
+                let mutating = recv_conv == ParamConvention::MutBorrow;
+                let view = self.lower_indirection_chain(receiver_expr, &peels, mutating);
+                receiver_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+                CallArg {
+                    value: view,
+                    convention: recv_conv,
+                }
+            } else {
+                self.prepare_call_arg_for_expr(receiver_expr, recv_conv)
+            };
             let mut a = vec![receiver_arg];
             a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1));
             a

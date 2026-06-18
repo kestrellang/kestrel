@@ -220,6 +220,21 @@ fn check_target(
         // Field access: check Settable component on the resolved entity.
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
+            // Indirection write peel through a READ-ONLY wrapper: the field is
+            // reached via `pointeeRef()` (a `&T` place) because the wrapper is
+            // `Indirection` but not `MutableIndirection` — no `pointeeMutRef()`.
+            // Same class as E208: a `&T` place can't be written. (D2)
+            if cx
+                .typed
+                .indirection_peels
+                .get(&target)
+                .and_then(|peels| peels.last())
+                .is_some_and(|p| p.mut_method.is_none())
+            {
+                push_assign_through_shared_ref(cx, target, diags);
+                return;
+            }
+
             // Ref-returning getter (`cell.mutatingValue = v`): the place's
             // writability comes from the REFERENCE type, not the binding —
             // skip the Settable/base-mutability checks. `&T` is read-only.

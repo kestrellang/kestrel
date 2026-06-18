@@ -3267,6 +3267,77 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
     true
 }
 
+/// Lazy `Indirection` member peel. When member `name` was not found on the
+/// concrete nominal `recv_kind`, but its entity conforms to the `Indirection`
+/// protocol, this:
+///   1. resolves the concrete `pointeeRef`/`pointeeMutRef` accessors on the
+///      wrapper and records an `IndirectionPeel` for MIR (appending → the
+///      outer→inner chain for nested wrappers), and
+///   2. emits an `Associated` constraint binding a fresh TyVar to the
+///      wrapper's `Indirection.Target` (reusing `solve_associated`),
+/// returning that pointee TyVar for the caller to requeue the member on.
+/// Returns `None` (no peel) when the receiver isn't a nominal or doesn't
+/// conform to `Indirection`.
+fn try_indirection_peel(
+    ctx: &mut InferCtx<'_>,
+    recv_kind: &TyKind,
+    receiver: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<TyVar> {
+    // Only nominal wrappers peel.
+    let _w_entity = match recv_kind {
+        TyKind::Struct { entity, .. }
+        | TyKind::Enum { entity, .. }
+        | TyKind::Protocol { entity, .. } => *entity,
+        _ => return None,
+    };
+
+    // Does the wrapper conform to `Indirection`? (bound-aware — a conditional
+    // `extend CowBox[T]: MutableIndirection where T: Cloneable` is evaluated
+    // here via `type_satisfies`.)
+    let indirection = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Indirection,
+        root: ctx.root,
+    })?;
+    let w_hir = reify_tv(ctx, receiver);
+    if !crate::conformance::type_satisfies(ctx.query_ctx, &w_hir, indirection, ctx.root) {
+        return None;
+    }
+
+    // Resolve the concrete pointee accessors on the wrapper (for MIR replay).
+    // `pointeeRef` is required by `Indirection`; `pointeeMutRef` only exists on
+    // `MutableIndirection` conformers (None ⇒ read-only ⇒ writes are D2).
+    let read_method = ctx
+        .resolver
+        .resolve_member(recv_kind, "pointeeRef", &[])
+        .ok()?
+        .entity;
+    let mut_method = ctx
+        .resolver
+        .resolve_member(recv_kind, "pointeeMutRef", &[])
+        .ok()
+        .map(|r| r.entity);
+
+    // Pointee type = wrapper's `Indirection.Target`. Reuse the assoc-type
+    // machinery via an `Associated` constraint on a fresh TyVar.
+    let pointee_tv = ctx.fresh();
+    ctx.associated(receiver, "Target", pointee_tv, span.clone());
+
+    // Record the peel for MIR — append so nested wrappers build a chain.
+    // `target_tv` is resolved in `build_result`.
+    ctx.indirection_peels
+        .entry(expr)
+        .or_default()
+        .push(crate::ctx::PendingPeel {
+            read_method,
+            mut_method,
+            target_tv: pointee_tv,
+        });
+
+    Some(pointee_tv)
+}
+
 fn solve_member(
     ctx: &mut InferCtx<'_>,
     receiver: TyVar,
@@ -3414,6 +3485,30 @@ fn solve_member(
             match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
                 Ok(res) => res,
                 Err(_) => {
+                    // Lazy `Indirection` peel: the member is on neither the
+                    // wrapper's instance nor static members, but if the wrapper
+                    // conforms to `Indirection`, requeue the member on its
+                    // pointee (`Target`). Skipped for protocol-dispatched
+                    // members (operators/for-in) — those forward via `extend`,
+                    // never the peel (R7). This is the LAZY twin of the eager
+                    // `TyKind::Ref` arm above: same shape, fires only after the
+                    // wrapper's own lookup misses (so the wrapper wins clashes).
+                    if !ctx.protocol_dispatch_members.contains(&expr)
+                        && let Some(pointee_tv) =
+                            try_indirection_peel(ctx, &recv_kind, receiver, expr, &span)
+                    {
+                        return SolveResult::Deferred(Constraint::Member {
+                            receiver: pointee_tv,
+                            name: name.to_string(),
+                            args,
+                            result,
+                            expr,
+                            is_call,
+                            is_static_context,
+                            explicit_type_args: explicit_type_args.to_vec(),
+                            span,
+                        });
+                    }
                     return SolveResult::Error(member_not_found_error(
                         ctx, receiver, &recv_kind, name, is_call, span,
                     ));

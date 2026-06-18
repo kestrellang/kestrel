@@ -262,6 +262,11 @@ pub enum Builtin {
     Exitable,
     ExitableReport,
     ExitCode,
+
+    // ===== Indirection / smart-pointer member peel =====
+    /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
+    /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
+    Indirection,
 }
 
 impl Builtin {
@@ -465,6 +470,9 @@ impl Builtin {
             Self::Exitable => "Exitable",
             Self::ExitableReport => "ExitableReport",
             Self::ExitCode => "ExitCode",
+
+            // Indirection — resolves by source name (auto-imported from std.core).
+            Self::Indirection => "Indirection",
         }
     }
 
@@ -664,6 +672,9 @@ impl Builtin {
             "ExitableReport" => Some(Self::ExitableReport),
             "ExitCode" => Some(Self::ExitCode),
 
+            // Indirection / smart-pointer member peel
+            "Indirection" => Some(Self::Indirection),
+
             _ => None,
         }
     }
@@ -854,6 +865,10 @@ impl Builtin {
             Self::Exitable => BuiltinKind::protocol(),
             Self::ExitableReport => BuiltinKind::ProtocolMethod,
             Self::ExitCode => BuiltinKind::Struct,
+
+            // Indirection: non-marker protocol with a required `pointeeRef()`
+            // method; explicit conformance (NOT implicit, unlike Copyable).
+            Self::Indirection => BuiltinKind::protocol(),
 
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,
