@@ -281,6 +281,12 @@ fn analyze_expr(
             }
         },
 
+        // `&inner` borrows the place — not a move, but reading a moved
+        // local through a borrow is still a use-after-move.
+        HirExpr::Borrow { inner, .. } => {
+            state = analyze_expr(mcx, *inner, state, false, diags);
+        },
+
         // ===== Assignment =====
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(mcx, *value, state, false, diags);

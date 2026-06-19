@@ -99,8 +99,15 @@ impl DeclCheck for SubscriptAnalyzer {
             return diags;
         }
 
+        // A pure-ref subscript (`{ ref {…} }`, no getter) keeps the parent
+        // entity bodyless — its bodies live on RefAccessor/Setter children.
         let has_body = cx.query.get::<Body>(cx.entity).is_some()
-            || cx.query.get::<Valued>(cx.entity).is_some();
+            || cx.query.get::<Valued>(cx.entity).is_some()
+            || cx
+                .query
+                .children_of(cx.entity)
+                .iter()
+                .any(|&c| cx.query.get::<Body>(c).is_some());
 
         if !has_body {
             diags.push(AnalyzeDiagnostic {

@@ -1393,7 +1393,11 @@ impl LowerCtx<'_> {
             .iter()
             .map(|arm| {
                 self.push_scope();
+                // `&` binder patterns are legal exactly here — user-match
+                // arm patterns (the place-mode lowering's domain).
+                let prev = std::mem::replace(&mut self.ref_patterns_allowed, true);
                 let pattern = self.lower_pat(body, arm.pattern);
+                self.ref_patterns_allowed = prev;
                 let guard = arm.guard.map(|g| self.lower_expr(body, g));
                 let arm_body = self.lower_expr(body, arm.body);
                 self.pop_scope();

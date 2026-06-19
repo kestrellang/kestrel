@@ -230,6 +230,9 @@ pub enum AstPat {
     Binding {
         is_mut: bool,
         name: String,
+        /// `&` / `&mutating` binder (stage 1.5 `&` patterns): `None` = plain
+        /// binding, `Some(false)` = `&name`, `Some(true)` = `&mutating name`.
+        by_ref: Option<bool>,
         span: Span,
     },
     Tuple {
@@ -379,9 +382,11 @@ pub enum UnaryOp {
     Pos,
     RangeUpTo,
     RangeThrough,
-    /// Prefix `&` — parsed for recovery only; always rejected at HIR
-    /// lowering (borrow expressions are not written; the signature decides).
+    /// Prefix `&` — legal only as a `let` initializer (named ref binding,
+    /// stage 1.5 item 2); rejected everywhere else at HIR lowering (E488).
     Borrow,
+    /// Prefix `&mutating` — the mutable twin of `Borrow`; same gating.
+    BorrowMutating,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

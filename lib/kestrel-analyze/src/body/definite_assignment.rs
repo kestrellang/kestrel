@@ -191,6 +191,11 @@ fn analyze_expr(
             }
         },
 
+        // `&inner` reads the borrowed place — it must be initialized.
+        HirExpr::Borrow { inner, .. } => {
+            state = analyze_expr(cx, *inner, state, false, pattern_bound, diags);
+        },
+
         // Assignment: analyze value first, then mark target local as assigned
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(cx, *value, state, false, pattern_bound, diags);

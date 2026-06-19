@@ -147,11 +147,12 @@ pub(crate) fn node_kind_to_symbol_kind(kind: &NodeKind) -> Option<SymbolKind> {
         NodeKind::Field => SymbolKind::FIELD,
         NodeKind::TypeAlias => SymbolKind::CLASS,
         NodeKind::Subscript => SymbolKind::OPERATOR,
-        // Hidden from outline: imports clutter the panel; setters / deinits /
-        // param-defaults / type-parameters are sub-decls without their own
-        // identifier worth highlighting.
+        // Hidden from outline: imports clutter the panel; setters / ref
+        // accessors / deinits / param-defaults / type-parameters are
+        // sub-decls without their own identifier worth highlighting.
         NodeKind::Import
         | NodeKind::Setter
+        | NodeKind::RefAccessor
         | NodeKind::Deinit
         | NodeKind::ParamDefault
         | NodeKind::TypeParameter => return None,

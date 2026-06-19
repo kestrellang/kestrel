@@ -98,9 +98,11 @@ fn node_kind_to_token_type(kind: &NodeKind) -> u32 {
         | NodeKind::TypeParameter => TYPE,
         NodeKind::Field | NodeKind::EnumCase => PROPERTY,
         NodeKind::Module => NAMESPACE,
-        NodeKind::Extension | NodeKind::Import | NodeKind::Setter | NodeKind::ParamDefault => {
-            VARIABLE
-        },
+        NodeKind::Extension
+        | NodeKind::Import
+        | NodeKind::Setter
+        | NodeKind::RefAccessor
+        | NodeKind::ParamDefault => VARIABLE,
     }
 }
 

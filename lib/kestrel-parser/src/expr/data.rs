@@ -102,8 +102,9 @@ pub enum ExprVariant {
         dot: Span,
         index: Span,
     },
-    /// Unary prefix expression: -expr, !expr, not expr, +expr
-    Unary(Token, Span, Box<ExprVariant>), // (operator_token, operator_span, operand)
+    /// Unary prefix expression: -expr, !expr, not expr, +expr, &expr
+    /// (operator_token, operator_span, `mutating` span for `&mutating`, operand)
+    Unary(Token, Span, Option<Span>, Box<ExprVariant>),
     /// Postfix expression: expr!
     Postfix {
         operand: Box<ExprVariant>,

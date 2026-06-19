@@ -150,32 +150,22 @@ pub fn copy_behavior(
             )
         },
 
-        // First matching constraint decides (copy-drift #5 resolved 2026-06-10:
-        // behavior kept, order-dependence asserted away). Declaration order
-        // could only pick the answer if a positive Copyable/Cloneable bound
-        // coexisted with `not Copyable` on the same param — asserted absent
-        // below. (This scan is the MIR form of the per-layer Param hook —
-        // precomputed where_clause instead of TypeParamCopyRequirement.)
+        // A positive `Copyable`/`Cloneable` bound WINS over a `not Copyable`
+        // relaxation on the same param (copy-drift #5, revised 2026-06-16):
+        // `where T: not Copyable` on a struct means "T NEED NOT be Copyable",
+        // while a method's `where T: Copyable` NARROWS that — when both are
+        // present the param is Copyable in this context. So positive bounds
+        // return immediately and the negative is honored only if no positive
+        // appears, making the positive-vs-negative case order-independent.
+        // (This was previously first-match-wins + a debug assert that the two
+        // never coexist; they legitimately do — e.g. `Pointer.read() -> T
+        // where T: Copyable` on `struct Pointer[T] where T: not Copyable`.)
+        // This scan is the MIR form of the per-layer Param hook — precomputed
+        // where_clause instead of TypeParamCopyRequirement.
         MirTy::TypeParam(entity) => {
             let entity = *entity;
             if let Some(wc) = where_clause {
-                #[cfg(debug_assertions)]
-                {
-                    let positive = wc.constraints.iter().any(|c| {
-                        matches!(c, WhereConstraint::Implements { type_param, protocol, .. }
-                            if *type_param == entity
-                                && (is_cloneable_protocol(module, *protocol)
-                                    || is_copyable_protocol(module, *protocol)))
-                    });
-                    let negative = wc.constraints.iter().any(|c| {
-                        matches!(c, WhereConstraint::NotImplements { type_param, protocol }
-                            if *type_param == entity && is_copyable_protocol(module, *protocol))
-                    });
-                    assert!(
-                        !(positive && negative),
-                        "type param {entity:?} bounds both Copyable/Cloneable and `not Copyable` — declaration order would decide its copy behavior"
-                    );
-                }
+                let mut not_copyable = false;
                 for constraint in &wc.constraints {
                     match constraint {
                         WhereConstraint::Implements {
@@ -195,11 +185,16 @@ pub fn copy_behavior(
                             protocol,
                         } if *type_param == entity => {
                             if is_copyable_protocol(module, *protocol) {
-                                return CopyBehavior::None;
+                                // Defer: a positive bound later in the list
+                                // overrides this relaxation (positive wins).
+                                not_copyable = true;
                             }
                         },
                         _ => {},
                     }
+                }
+                if not_copyable {
+                    return CopyBehavior::None;
                 }
             }
             CopyBehavior::Bitwise
@@ -306,7 +301,8 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         // drop. Must match the Bitwise arm in `copy_behavior`. NEXT VERSION:
         // Rc-boxed closures need drop → release.
         | MirTy::FuncThick { .. }
-        // Ref: signature-only borrow view — never owns, never drops.
+        // Ref: a borrow view (signature or stage-2b payload/field slot) —
+        // never owns its pointee, never drops.
         | MirTy::Ref { .. }
         | MirTy::Error => false,
 

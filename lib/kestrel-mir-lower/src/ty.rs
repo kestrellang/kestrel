@@ -101,8 +101,9 @@ pub fn build_self_type(ctx: &mut LowerCtx, entity: Entity) -> TyId {
                 .collect()
         })
         .unwrap_or_default();
-    ctx.register_name(entity);
-    ctx.module.ty_arena.named(entity, type_args)
+    // Route through the shared chokepoint so lang-mapped entities (`lang.&`
+    // → `MirTy::Ref`, etc.) never leak as `Named` into signatures.
+    lower_named_type(ctx, entity, type_args)
 }
 
 // === HirTy → TyId ===
@@ -174,16 +175,33 @@ thread_local! {
     static OPAQUE_RESOLVE_STACK: RefCell<HashSet<Entity>> = RefCell::new(HashSet::new());
 }
 
-/// Lower a ResolvedTy (from type inference) to an interned TyId.
+/// Lower a ResolvedTy (from type inference) to an interned TyId — the
+/// EXPRESSION seam: a TOP-LEVEL ref-typed expression value registers as an
+/// ordinary @guaranteed value of the POINTEE type ("a borrowed param that
+/// travels"), so the outermost Ref peels. NESTED refs (nominal type args,
+/// tuple elements, field types — stage 2b ref-bearing aggregates) are
+/// honest types and survive: `Optional[&T]` must never collapse to
+/// `Optional[T]` (distinct mono instances, distinct drop/clone shims).
 pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
+    let id = lower_resolved_ty_preserving(ctx, ty);
+    ctx.module.ty_arena.peel_ref(id)
+}
+
+/// The full lowering, ref-PRESERVING at every depth. Use this (not the
+/// peeling wrapper) for type-side positions: call-site type args, opaque
+/// concretes in signatures — anywhere a top-level `&T` is itself the type
+/// being named rather than an expression value's type.
+pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
     match ty {
-        // The EXPRESSION seam: a ref-typed expression value registers as an
-        // ordinary @guaranteed value of the POINTEE type ("a borrowed param
-        // that travels") — `ValueDef.ty` never carries `MirTy::Ref`. The
-        // signature seam (`lower_type` on `HirTy::Ref`) keeps the Ref.
-        ResolvedTy::Ref { pointee, .. } => lower_resolved_ty(ctx, pointee),
+        ResolvedTy::Ref { pointee, mutating } => {
+            let inner = lower_resolved_ty_preserving(ctx, pointee);
+            ctx.module.ty_arena.ref_ty(inner, *mutating)
+        },
         ResolvedTy::Named { entity, args } => {
-            let mir_args: Vec<TyId> = args.iter().map(|a| lower_resolved_ty(ctx, a)).collect();
+            let mir_args: Vec<TyId> = args
+                .iter()
+                .map(|a| lower_resolved_ty_preserving(ctx, a))
+                .collect();
             lower_named_type(ctx, *entity, mir_args)
         },
         ResolvedTy::Param { entity } => {
@@ -192,7 +210,7 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
         },
         ResolvedTy::SelfType { entity } => build_self_type(ctx, *entity),
         ResolvedTy::AssocProjection { base, assoc } => {
-            let base_ty = lower_resolved_ty(ctx, base);
+            let base_ty = lower_resolved_ty_preserving(ctx, base);
             let Some(protocol) = ctx.world.parent_of(*assoc) else {
                 return ctx.module.ty_arena.error();
             };
@@ -204,7 +222,10 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
             })
         },
         ResolvedTy::Tuple(elems) => {
-            let lowered: Vec<TyId> = elems.iter().map(|t| lower_resolved_ty(ctx, t)).collect();
+            let lowered: Vec<TyId> = elems
+                .iter()
+                .map(|t| lower_resolved_ty_preserving(ctx, t))
+                .collect();
             ctx.module.ty_arena.tuple(lowered)
         },
         ResolvedTy::Function {
@@ -221,10 +242,10 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
                         .copied()
                         .map(to_mir_convention)
                         .unwrap_or(ParamConvention::Consuming);
-                    (lower_resolved_ty(ctx, t), conv)
+                    (lower_resolved_ty_preserving(ctx, t), conv)
                 })
                 .collect();
-            let lowered_ret = lower_resolved_ty(ctx, ret);
+            let lowered_ret = lower_resolved_ty_preserving(ctx, ret);
             ctx.intern(MirTy::FuncThick {
                 params: lowered_params,
                 ret: lowered_ret,
@@ -259,7 +280,7 @@ pub fn lower_resolved_ty(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId {
                 .unwrap_or_default();
 
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
-            let result = lower_resolved_ty(ctx, &substituted);
+            let result = lower_resolved_ty_preserving(ctx, &substituted);
 
             OPAQUE_RESOLVE_STACK.with(|stack| stack.borrow_mut().remove(origin));
             result
@@ -350,6 +371,16 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
             let inner = type_args.first().copied()?;
             Some(ctx.module.ty_arena.pointer(inner))
         },
+        // Synthetic ref-extension targets: the type layer always uses
+        // `MirTy::Ref` — the entities exist only for decl/name-res.
+        "&" => {
+            let inner = type_args.first().copied()?;
+            Some(ctx.module.ty_arena.ref_ty(inner, false))
+        },
+        "&mutating" => {
+            let inner = type_args.first().copied()?;
+            Some(ctx.module.ty_arena.ref_ty(inner, true))
+        },
         _ => None,
     }
 }
@@ -357,7 +388,9 @@ fn try_lang_primitive(ctx: &mut LowerCtx, entity: Entity, type_args: &[TyId]) ->
 /// Walk HirTy, replacing Opaque nodes with the concrete type from inference.
 fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &ResolvedTy) -> TyId {
     match ty {
-        HirTy::Opaque { .. } => lower_resolved_ty(ctx, concrete),
+        // Signature position: preserve refs at every depth, matching
+        // `lower_type`'s treatment of the surrounding annotation.
+        HirTy::Opaque { .. } => lower_resolved_ty_preserving(ctx, concrete),
         HirTy::Struct { entity, args, .. }
         | HirTy::Enum { entity, args, .. }
         | HirTy::Protocol { entity, args, .. } => {

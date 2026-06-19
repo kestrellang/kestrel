@@ -92,14 +92,42 @@ pub fn compile_inst<'ctx>(
                 .ctx
                 .tc
                 .repr(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            match repr {
-                _ if is_guaranteed => fc.map_value(*result, val),
-                TypeRepr::Aggregate { .. } | TypeRepr::Zst => fc.map_value(*result, val),
-                TypeRepr::Scalar(_) => {
-                    let slot = fc.alloca(repr.size(), repr.align());
-                    builder.build_store(slot, val).unwrap();
-                    fc.map_value(*result, slot.into());
-                },
+            // Fused ref peel (the 2b extraction contract, on locals/params):
+            // a borrow whose OPERAND is ref-typed but whose RESULT is the
+            // pointee reads through the ref once. @guaranteed ref value =
+            // address OF the ref slot → load the stored address; @owned ref
+            // value IS the address → pass through. Twin of the Cranelift arm.
+            let operand_is_ref = matches!(fc.ctx.module.ty_arena.get(operand_ty), MirTy::Ref { .. });
+            let result_is_ref = matches!(
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            );
+            if operand_is_ref && !result_is_ref {
+                let v = if is_guaranteed {
+                    builder
+                        .build_load(
+                            cx.ptr_type(inkwell::AddressSpace::default()),
+                            val.into_pointer_value(),
+                            "ref_peel",
+                        )
+                        .unwrap()
+                } else {
+                    val
+                };
+                fc.map_value(*result, v);
+            } else {
+                match repr {
+                    _ if is_guaranteed => fc.map_value(*result, val),
+                    TypeRepr::Aggregate { .. } | TypeRepr::Zst => fc.map_value(*result, val),
+                    TypeRepr::Scalar(_) => {
+                        let slot = fc.alloca(repr.size(), repr.align());
+                        builder.build_store(slot, val).unwrap();
+                        fc.map_value(*result, slot.into());
+                    },
+                }
             }
         },
 
@@ -286,7 +314,7 @@ pub fn compile_inst<'ctx>(
 
         // elements: VALUE each → result: @owned aggregate
         InstKind::Tuple { result, elements } => {
-            let val = compile_tuple(fc, builder, elements)?;
+            let val = compile_tuple(fc, builder, *result, elements)?;
             fc.map_value(*result, val);
         },
 
@@ -326,7 +354,7 @@ pub fn compile_inst<'ctx>(
             operand,
             field,
         } => {
-            let val = compile_struct_extract(fc, builder, *operand, *field)?;
+            let val = compile_struct_extract(fc, builder, *result, *operand, *field)?;
             fc.map_value(*result, val);
         },
 
@@ -335,7 +363,7 @@ pub fn compile_inst<'ctx>(
             operand,
             index,
         } => {
-            let val = compile_tuple_extract(fc, builder, *operand, *index)?;
+            let val = compile_tuple_extract(fc, builder, *result, *operand, *index)?;
             fc.map_value(*result, val);
         },
 
@@ -345,20 +373,20 @@ pub fn compile_inst<'ctx>(
             variant,
             field,
         } => {
-            let val = compile_enum_payload(fc, builder, *operand, *variant, *field)?;
+            let val = compile_enum_payload(fc, builder, *result, *operand, *variant, *field)?;
             fc.map_value(*result, val);
         },
 
         InstKind::DestructureStruct { results, operand } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_struct_extract(fc, builder, *operand, FieldIdx::new(i))?;
+                let val = compile_struct_extract(fc, builder, result_id, *operand, FieldIdx::new(i))?;
                 fc.map_value(result_id, val);
             }
         },
 
         InstKind::DestructureTuple { results, operand } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_tuple_extract(fc, builder, *operand, i as u32)?;
+                let val = compile_tuple_extract(fc, builder, result_id, *operand, i as u32)?;
                 fc.map_value(result_id, val);
             }
         },
@@ -369,7 +397,7 @@ pub fn compile_inst<'ctx>(
             variant,
         } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_enum_payload(fc, builder, *operand, *variant, FieldIdx::new(i))?;
+                let val = compile_enum_payload(fc, builder, result_id, *operand, *variant, FieldIdx::new(i))?;
                 fc.map_value(result_id, val);
             }
         },
@@ -824,6 +852,24 @@ fn compile_op3<'ctx>(
 // Aggregate construction
 // ======================================================================
 
+/// Resolve an aggregate-slot operand's store value. A REF slot (stage 2b)
+/// stores the ADDRESS: a @guaranteed pointee-typed operand's codegen value
+/// IS that address, and an @owned `MirTy::Ref` operand already carries the
+/// pointer scalar — neither may go through `resolve_scalar` (it would load
+/// a scalar POINTEE through the address). Twin of the Cranelift helper.
+fn resolve_slot_value<'ctx>(
+    fc: &mut FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    slot_ty: TyId,
+    value_id: ValueId,
+) -> BasicValueEnum<'ctx> {
+    if matches!(fc.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. }) {
+        fc.get_value(value_id)
+    } else {
+        fc.resolve_scalar(builder, value_id)
+    }
+}
+
 fn compile_struct<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
@@ -838,7 +884,9 @@ fn compile_struct<'ctx>(
         TypeRepr::Zst => Ok(mem::null_ptr(cx).into()),
         TypeRepr::Scalar(t) => {
             if fields.len() == 1 {
-                return Ok(fc.resolve_scalar(builder, fields[0].1));
+                let field_ty =
+                    struct_field_type(ty, fields[0].0, &fc.ctx.module.ty_arena, fc.ctx.module);
+                return Ok(resolve_slot_value(fc, builder, field_ty, fields[0].1));
             }
             let slot = fc.alloca(repr.size(), repr.align());
             mem::zero_memory(cx, builder, ptr_size, slot, repr.size());
@@ -864,9 +912,9 @@ fn store_struct_fields<'ctx>(
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
     for &(field_idx, value_id) in fields {
-        let val = fc.resolve_scalar(builder, value_id);
         let offset = struct_field_offset(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
         let field_ty = struct_field_type(ty, field_idx, &fc.ctx.module.ty_arena, fc.ctx.module);
+        let val = resolve_slot_value(fc, builder, field_ty, value_id);
         let field_repr = fc
             .ctx
             .tc
@@ -880,6 +928,7 @@ fn store_struct_fields<'ctx>(
 fn compile_tuple<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     elements: &[ValueId],
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
     let cx = fc.ctx.cx;
@@ -889,13 +938,24 @@ fn compile_tuple<'ctx>(
         return Ok(mem::null_ptr(cx).into());
     }
 
+    // Layout comes from the RESULT tuple type's declared element types —
+    // never from the operands' value types: a ref-slot operand (stage 2b)
+    // is a @guaranteed POINTEE-typed value whose pointee size would corrupt
+    // the layout (the slot holds a pointer). Same authority TupleExtract
+    // reads, so offsets agree.
+    let result_ty = fc.body.values[result.index()].ty;
+    let elem_tys: Vec<TyId> = match fc.ctx.module.ty_arena.get(result_ty) {
+        MirTy::Tuple(elems) => elems.clone(),
+        // Fallback (hand-built bodies): operand value types.
+        _ => elements
+            .iter()
+            .map(|&e| fc.body.values[e.index()].ty)
+            .collect(),
+    };
     let mut layout = StructLayout::new();
-    let mut elem_tys = Vec::with_capacity(elements.len());
-    for &elem_id in elements {
-        let ty = fc.body.values[elem_id.index()].ty;
+    for &ty in &elem_tys {
         let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
         layout.append_field(StructLayout::scalar(repr.size(), repr.align()));
-        elem_tys.push(ty);
     }
     layout.pad_to_align();
 
@@ -903,7 +963,7 @@ fn compile_tuple<'ctx>(
     mem::zero_memory(cx, builder, ptr_size, slot, layout.size);
 
     for (i, &elem_id) in elements.iter().enumerate() {
-        let val = fc.resolve_scalar(builder, elem_id);
+        let val = resolve_slot_value(fc, builder, elem_tys[i], elem_id);
         let offset = layout.field_offsets[i];
         let repr = fc
             .ctx
@@ -1014,8 +1074,8 @@ fn store_variant_payload<'ctx>(
         .collect();
 
     for (i, &value_id) in payload.iter().enumerate() {
-        let val = fc.resolve_scalar(builder, value_id);
         let (total_offset, field_ty) = plan[i];
+        let val = resolve_slot_value(fc, builder, field_ty, value_id);
         let field_repr = fc
             .ctx
             .tc
@@ -1140,6 +1200,7 @@ fn compile_apply_partial<'ctx>(
 fn compile_struct_extract<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     operand: ValueId,
     field: FieldIdx,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
@@ -1164,7 +1225,21 @@ fn compile_struct_extract<'ctx>(
     // @guaranteed operands are always pointers. Return the field address.
     if is_borrowed {
         let offset = struct_field_offset(operand_ty, field, &fc.ctx.module.ty_arena, fc.ctx.module);
-        return Ok(mem::field_gep(cx, builder, base.into_pointer_value(), offset).into());
+        let addr = mem::field_gep(cx, builder, base.into_pointer_value(), offset);
+        // Stage 2b ref slot extracted as a POINTEE-typed result: load the
+        // stored address. A REF-typed result (clone/drop shim projections)
+        // keeps the slot's address per the representation contract.
+        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
+            return Ok(builder
+                .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
+                .unwrap());
+        }
+        return Ok(addr.into());
     }
 
     // @owned single-field newtype: value IS the field (classify_named delegates).
@@ -1181,6 +1256,7 @@ fn compile_struct_extract<'ctx>(
 fn compile_tuple_extract<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     operand: ValueId,
     index: u32,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
@@ -1206,6 +1282,18 @@ fn compile_tuple_extract<'ctx>(
     );
     let addr = mem::field_gep(cx, builder, base, offset);
     if is_borrowed {
+        // Stage 2b ref slot with a POINTEE-typed result: load the stored
+        // address (see compile_struct_extract).
+        if matches!(fc.ctx.module.ty_arena.get(elem_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
+            return Ok(builder
+                .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
+                .unwrap());
+        }
         return Ok(addr.into());
     }
     let elem_repr = fc
@@ -1218,6 +1306,7 @@ fn compile_tuple_extract<'ctx>(
 fn compile_enum_payload<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
+    result: ValueId,
     operand: ValueId,
     variant: VariantIdx,
     field: FieldIdx,
@@ -1261,6 +1350,18 @@ fn compile_enum_payload<'ctx>(
 
     let addr = mem::field_gep(cx, builder, base, total_offset);
     if is_borrowed {
+        // Stage 2b ref slot with a POINTEE-typed result: load the stored
+        // address (see compile_struct_extract).
+        if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
+            && !matches!(
+                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                MirTy::Ref { .. }
+            )
+        {
+            return Ok(builder
+                .build_load(cx.ptr_type(inkwell::AddressSpace::default()), addr, "ref")
+                .unwrap());
+        }
         return Ok(addr.into());
     }
     let field_repr = fc
@@ -1400,13 +1501,41 @@ fn compile_resolved_call<'ctx>(
         let arg_is_guaranteed =
             fc.body.values[call_arg.value.index()].ownership == Ownership::Guaranteed;
 
+        // Stage 2b: a ref-typed PARAM takes the ADDRESS as its value. A
+        // @guaranteed pointee-typed arg's codegen value IS that address —
+        // the guaranteed-scalar load in coerce_byval_arg would deref one
+        // level too many (twin of the Cranelift carve).
+        let param_is_ref = matches!(module.ty_arena.get(param.ty), MirTy::Ref { .. });
+        // A REF-TYPED @guaranteed arg is the other representation (2b
+        // contract): its codegen value is the address OF the ref slot, not
+        // the ref scalar — generic bodies produce these at T=&U. The two
+        // forms need opposite treatment in the ref-param carves below.
+        let arg_is_ref_typed = matches!(
+            module
+                .ty_arena
+                .get(fc.body.values[call_arg.value.index()].ty),
+            MirTy::Ref { .. }
+        );
+
         match pass {
             PassMode::ByVal(expected) => {
-                let v = coerce_byval_arg(fc, builder, val, call_arg.value, expected);
+                let v = if param_is_ref && arg_is_guaranteed && !arg_is_ref_typed {
+                    val
+                } else {
+                    coerce_byval_arg(fc, builder, val, call_arg.value, expected)
+                };
                 call_args.push(v.into());
             },
             PassMode::ByRef => {
-                if matches!(
+                if param_is_ref && arg_is_guaranteed && !arg_is_ref_typed {
+                    // The (pointee-typed) ref VALUE is the address itself;
+                    // ByRef wants the address OF the ref value — spill it.
+                    // A REF-TYPED @guaranteed arg is already that address
+                    // and falls through to the pass-directly branches.
+                    let slot = fc.alloca(repr.size(), repr.align());
+                    mem::store_to_repr(cx, builder, ptr_size, repr, slot, val);
+                    call_args.push(slot.into());
+                } else if matches!(
                     call_arg.convention,
                     ParamConvention::Borrow | ParamConvention::MutBorrow
                 ) || arg_is_guaranteed

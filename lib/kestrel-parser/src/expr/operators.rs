@@ -13,23 +13,33 @@ use crate::common::skip_trivia;
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
 
 /// Prefix unary operators: `-`, `+`, `!` (bitwise-not), `not` (logical-not).
-/// `&` parses here only so it can be rejected with a real diagnostic at HIR
-/// lowering (borrow expressions are not written in Kestrel); binary
-/// bitwise-`&` is unaffected — this parser only runs in operand position.
+/// `&` / `&mutating` parse here so they can be gated with a real diagnostic
+/// at HIR lowering (a borrow expression is legal only as a `let`
+/// initializer — stage 1.5 named ref bindings); binary bitwise-`&` is
+/// unaffected — this parser only runs in operand position. The third tuple
+/// element is the `mutating` keyword's span (`&mutating` only).
 pub(super) fn unary_op_parser<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (Token, Span), ParserExtra<'tokens>> + Clone {
-    skip_trivia()
-        .ignore_then(
-            just(Token::Minus)
-                .map_with(|tok, e| (tok, to_kestrel_span(e.span())))
-                .or(just(Token::Plus).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::DotDotLess).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::DotDotEquals).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
-                .or(just(Token::Ampersand).map_with(|tok, e| (tok, to_kestrel_span(e.span())))),
+-> impl Parser<'tokens, ParserInput<'tokens>, (Token, Span, Option<Span>), ParserExtra<'tokens>> + Clone
+{
+    let plain = just(Token::Minus)
+        .map_with(|tok, e| (tok, to_kestrel_span(e.span())))
+        .or(just(Token::Plus).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+        .or(just(Token::Bang).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+        .or(just(Token::Not).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+        .or(just(Token::DotDotLess).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+        .or(just(Token::DotDotEquals).map_with(|tok, e| (tok, to_kestrel_span(e.span()))))
+        .map(|(tok, span)| (tok, span, None));
+    let borrow = just(Token::Ampersand)
+        .map_with(|tok, e| (tok, to_kestrel_span(e.span())))
+        .then(
+            skip_trivia()
+                .ignore_then(
+                    just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())),
+                )
+                .or_not(),
         )
-        .boxed()
+        .map(|((tok, span), mutating)| (tok, span, mutating));
+    skip_trivia().ignore_then(plain.or(borrow)).boxed()
 }
 
 /// Binary operators (arithmetic, bitwise, shift, comparison, logical, range, coalesce).

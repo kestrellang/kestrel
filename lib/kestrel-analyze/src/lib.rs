@@ -20,6 +20,7 @@ pub mod context;
 pub mod decl;
 pub mod diagnostic;
 pub mod registry;
+pub mod staticness;
 pub mod traits;
 pub mod util;
 
@@ -53,6 +54,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::access_mode::AccessModeAnalyzer);
     // TODO(move-checker): retire in favor of a MIR/OSSA-level move check.
     r.add_body_check(body::move_tracking::MoveTrackingAnalyzer);
+    r.add_body_check(body::dangle_ref::DangleRefAnalyzer);
 
     // Wave 6: Pattern checks
     r.add_body_check(body::refutable_pattern::RefutablePatternAnalyzer);
@@ -67,6 +69,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
+    r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
     r.add_decl_check(decl::duplicate_deinit::DuplicateDeinitAnalyzer);
@@ -74,6 +77,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::duplicate_label::DuplicateLabelAnalyzer);
     r.add_decl_check(decl::field::FieldAnalyzer);
     r.add_decl_check(decl::subscript::SubscriptAnalyzer);
+    r.add_decl_check(decl::place_accessor::PlaceAccessorAnalyzer);
     r.add_decl_check(decl::ref_return::RefReturnAnalyzer);
     r.add_decl_check(decl::extern_ffi_safe::ExternFfiSafeAnalyzer);
     r.add_decl_check(decl::default_param_ordering::DefaultParamOrderingAnalyzer);

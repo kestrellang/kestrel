@@ -48,6 +48,32 @@ pub struct TypedBody {
     /// concrete type that the body's return expressions unified to.
     /// Used by MIR lowering to substitute the opaque type with concrete.
     pub opaque_concrete_type: Option<ResolvedTy>,
+
+    /// `Indirection`-peel plan for member-access exprs that resolved through a
+    /// smart-pointer's pointee (`wrapper.m` → `wrapper.pointeeRef().m`). The
+    /// `Vec` is the peel CHAIN, outer→inner, for nested wrappers
+    /// (`RcBox[Pointer[T]]`). MIR lowering replays it: project the receiver
+    /// through each `pointeeRef()`/`pointeeMutRef()` before the member access.
+    /// Single source of truth — MIR never re-derives the peel (mirrors
+    /// `resolutions` / `ClosureCaptures`).
+    pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
+}
+
+/// One level of an `Indirection` member peel: the concrete pointee accessors
+/// on the wrapper type at this level. `mut_method` is `None` when the wrapper
+/// is `Indirection` but not `MutableIndirection` (read-only) — a write through
+/// it is the `indirection_no_mutating_accessor` error.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IndirectionPeel {
+    /// `pointeeRef()` on the wrapper — yields `&Target` for reads.
+    pub read_method: Entity,
+    /// `pointeeMutRef()` on the wrapper — yields `&mutating Target` for
+    /// writes / RMW / mutating-method receivers; `None` if read-only.
+    pub mut_method: Option<Entity>,
+    /// The concrete pointee type (`Indirection.Target`) at this level. MIR
+    /// builds the `&Target` / `&mutating Target` result type of the accessor
+    /// call from this, and projects the member off it.
+    pub target: ResolvedTy,
 }
 
 /// Manual Hash: hash each map as sorted (key, value) pairs for determinism.
@@ -82,6 +108,14 @@ impl std::hash::Hash for TypedBody {
 
         // Hash opaque_concrete_type
         self.opaque_concrete_type.hash(state);
+
+        // Hash indirection_peels (sorted by expr for determinism)
+        let mut peel_pairs: Vec<_> = self.indirection_peels.iter().collect();
+        peel_pairs.sort_by_key(|(k, _)| k.raw());
+        for (k, v) in &peel_pairs {
+            k.hash(state);
+            v.hash(state);
+        }
     }
 }
 
@@ -293,11 +327,26 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
         errors: ctx.errors.clone(),
         error_details: ctx.error_details.clone(),
         opaque_concrete_type,
+        indirection_peels: ctx
+            .indirection_peels
+            .iter()
+            .map(|(&expr, peels)| {
+                let resolved: Vec<IndirectionPeel> = peels
+                    .iter()
+                    .map(|p| IndirectionPeel {
+                        read_method: p.read_method,
+                        mut_method: p.mut_method,
+                        target: resolve_to_concrete(ctx, p.target_tv),
+                    })
+                    .collect();
+                (expr, resolved)
+            })
+            .collect(),
     }
 }
 
 /// Describe a TyVar as a short type name string (for diagnostics).
-fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
+pub(crate) fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
     let resolved = ctx.resolve(tv);
     match &ctx.types[resolved.0 as usize] {
         TySlot::Resolved(kind) => describe_tykind(ctx, kind),
@@ -422,6 +471,24 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 .get::<kestrel_ast_builder::Name>(*protocol)
                 .map(|n| n.0.clone())
                 .unwrap_or_else(|| format!("{:?}", protocol));
+            // Static failures get a "because" detail — deep in generic
+            // instantiation chains the bare `T !: Static` is miserable.
+            if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
+                return format!("{} !: {} ({})", ty_name, proto_name, why);
+            }
+            // A ref TYPE ARGUMENT conforms to exactly what `extend &T: P`
+            // declares — when none does, a bare `&T !: P` reads like the
+            // pointee is at fault, so name the actual rule.
+            if matches!(
+                ctx.slot(ctx.resolve(*ty)),
+                crate::ty::TySlot::Resolved(TyKind::Ref { .. })
+            ) {
+                return format!(
+                    "{} !: {} (a reference satisfies only the protocols declared by an \
+                     `extend &T:` / `extend &mutating T:` extension)",
+                    ty_name, proto_name
+                );
+            }
             format!("{} !: {}", ty_name, proto_name)
         },
         InferError::NoMember {
@@ -580,5 +647,74 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
+    }
+}
+
+/// "Because" detail for a failed `Static` bound (references 2a): names the
+/// declaration, the offending stored member, or the offending type argument.
+/// `None` for non-Static protocols or shapes with nothing specific to say.
+fn describe_static_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    use kestrel_semantics::{NominalStaticness, Staticness, StaticnessReason};
+
+    if !crate::solver::is_static_builtin(ctx, protocol) {
+        return None;
+    }
+    let resolved = ctx.resolve(ty);
+    let TySlot::Resolved(kind) = ctx.slot(resolved) else {
+        return None;
+    };
+    match kind.clone() {
+        TyKind::Ref { .. } => Some("a reference is never Static".into()),
+        TyKind::Param { .. } => {
+            Some("the type parameter is relaxed with 'not Static', so it may hold references".into())
+        },
+        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+            let info = ctx.query_ctx.query(NominalStaticness {
+                entity,
+                root: ctx.root,
+            });
+            match info.reason {
+                StaticnessReason::DeclaredNotStatic => Some("declared 'not Static'".into()),
+                StaticnessReason::NonStaticChild(child) => {
+                    let word = match ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(child) {
+                        Some(kestrel_ast_builder::NodeKind::EnumCase) => "case",
+                        _ => "field",
+                    };
+                    let name = ctx
+                        .query_ctx
+                        .get::<kestrel_ast_builder::Name>(child)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_else(|| "<unnamed>".into());
+                    Some(format!("{} '{}' is non-Static", word, name))
+                },
+                StaticnessReason::Default => {
+                    // Conditional base: the failure came from a gating arg —
+                    // re-fold to name the first offender.
+                    let Staticness::ConditionalOn(positions) = info.staticness else {
+                        return None;
+                    };
+                    let bad = positions
+                        .iter()
+                        .filter_map(|&i| args.get(i))
+                        .find(|&&arg| !crate::solver::solver_ty_is_static(ctx, arg, 0))?;
+                    Some(format!(
+                        "type argument '{}' is non-Static",
+                        describe_tyvar(ctx, *bad)
+                    ))
+                },
+            }
+        },
+        // Element-wise tuple fold: name the first non-Static element so
+        // `Array[(&T, Int64)]` failures say WHY.
+        TyKind::Tuple(elems) => {
+            let bad = elems
+                .iter()
+                .find(|&&e| !crate::solver::solver_ty_is_static(ctx, e, 0))?;
+            Some(format!(
+                "tuple element '{}' is non-Static",
+                describe_tyvar(ctx, *bad)
+            ))
+        },
+        _ => None,
     }
 }

@@ -72,6 +72,45 @@ pub fn ref_place(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<bool> {
         .map(|r| r.mutating)
 }
 
+/// Stage 1.5 accessor places: when `expr` is a member expression (`x(i)`,
+/// `x.first`) whose member has a WRITE provider — a `mutating ref` accessor
+/// OR a setter (the get→op→set writeback fallback) — return the BASE
+/// expression: the member is a place PROJECTION and its mutability is the
+/// base's. Returns None for read-only members, non-member exprs, stored
+/// fields (no accessor children; the Field classify arm handles them), and
+/// static members (their base is a type reference, not a place). Shared by
+/// the access-mode classifier (which must consult this BEFORE the
+/// `ref_place` type signal — a ref-provider member's read types `&T` and
+/// would wrongly classify SharedRef) and the assignment analyzer's
+/// compound-assign check.
+pub fn accessor_place_mut_base(cx: &BodyContext<'_>, expr_id: HirExprId) -> Option<HirExprId> {
+    let base = match &cx.hir.exprs[expr_id] {
+        HirExpr::Call { callee, .. } => *callee,
+        HirExpr::Field { base, .. } => *base,
+        _ => return None,
+    };
+    let member = cx.typed.resolutions.get(&expr_id).copied()?;
+    if !matches!(
+        cx.query.get::<NodeKind>(member),
+        Some(NodeKind::Subscript | NodeKind::Field)
+    ) {
+        return None;
+    }
+    if cx.query.has::<kestrel_ast_builder::Static>(member) {
+        return None;
+    }
+    let has_mutating_ref = cx
+        .query
+        .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+        .is_some_and(|info| info.mutating_ref_accessor.is_some());
+    let has_setter_child = cx
+        .query
+        .children_of(member)
+        .iter()
+        .any(|&c| cx.query.get::<NodeKind>(c) == Some(&NodeKind::Setter));
+    (has_mutating_ref || has_setter_child).then_some(base)
+}
+
 /// Syntactic pre-check: does this annotation mention a reference type
 /// anywhere? Used to GATE forced lowering queries (ref analyzers must not
 /// force `LowerTypeAnnotation`/`LowerCallableReturnType` on arbitrary
@@ -108,6 +147,7 @@ pub fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
         | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }

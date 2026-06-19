@@ -53,6 +53,22 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    // Stage-1.5 named ref bindings: `&mutating expr` of a place that
+    // isn't mutable (let local/field, shared ref, get/set-only member).
+    DiagnosticDescriptor {
+        id: "E210",
+        name: "mutable_borrow_of_immutable",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
+    // Stage-1.5 named ref bindings: `&expr` of an rvalue — there is no
+    // place to borrow.
+    DiagnosticDescriptor {
+        id: "E499",
+        name: "borrow_of_temporary",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct AccessModeAnalyzer;
@@ -113,11 +129,133 @@ impl BodyCheck for AccessModeAnalyzer {
                         check_call_args(cx, method_entity, args, Some(*receiver), &mut diags);
                     }
                 },
+                HirExpr::Borrow {
+                    inner,
+                    mutating,
+                    span,
+                } => {
+                    check_borrow_init(cx, *inner, *mutating, span, &mut diags);
+                },
+                HirExpr::Match {
+                    scrutinee,
+                    arms,
+                    span,
+                    ..
+                } => {
+                    // `&mutating v` patterns need a MUTABLE scrutinee place
+                    // (E495's predicate family) — writes through the binding
+                    // must land in real storage, not a match-scoped temp.
+                    if arms
+                        .iter()
+                        .any(|arm| pat_has_mutating_ref_binder(cx, arm.pattern))
+                        && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
+                    {
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[5].id,
+                            severity: DESCRIPTORS[5].default_severity,
+                            message: "`&mutating` pattern bindings need a mutable scrutinee place"
+                                .to_string(),
+                            labels: vec![DiagLabel {
+                                span: span.clone(),
+                                message: "scrutinee is not a mutable place".into(),
+                                is_primary: true,
+                            }],
+                            notes: vec![
+                                "match on a `var`, a `&mutating` reach, or a mutable element place"
+                                    .to_string(),
+                            ],
+                        });
+                    }
+                },
                 _ => {},
             }
         }
 
         diags
+    }
+}
+
+/// Borrow-initializer legality (`let r = &expr;`, stage 1.5 item 2): a
+/// borrow needs a PLACE (E499 otherwise); a `&mutating` borrow needs a
+/// MUTABLE place (E210 otherwise). Mutability is `classify_mutability` —
+/// the same predicate every access-mode check uses.
+fn check_borrow_init(
+    cx: &BodyContext<'_>,
+    inner: HirExprId,
+    mutating: bool,
+    span: &kestrel_span::Span,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    let push = |diags: &mut Vec<AnalyzeDiagnostic>, d: usize, message: String, note: String| {
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: DESCRIPTORS[d].id,
+            severity: DESCRIPTORS[d].default_severity,
+            message,
+            labels: vec![DiagLabel {
+                span: span.clone(),
+                message: "borrow initializer".into(),
+                is_primary: true,
+            }],
+            notes: vec![note],
+        });
+    };
+    const E210: usize = 5;
+    const E499: usize = 6;
+
+    // A get/set-only member has no mutable place to lend — the writeback
+    // temp the lowering would borrow strands every later store made
+    // through the binding.
+    if mutating
+        && let Some(&member) = cx.typed.resolutions.get(&inner)
+        && matches!(
+            cx.query.get::<NodeKind>(member),
+            Some(NodeKind::Subscript | NodeKind::Field)
+        )
+        && util::accessor_place_mut_base(cx, inner).is_some()
+        && !cx
+            .query
+            .query(kestrel_hir_lower::PlaceAccessors { entity: member })
+            .is_some_and(|info| info.mutating_ref_accessor.is_some())
+    {
+        push(
+            diags,
+            E210,
+            "cannot take a `&mutating` borrow of a get/set member".to_string(),
+            "writes through this member go get→set; a borrowable place needs a \
+             `mutating ref` accessor"
+                .to_string(),
+        );
+        return;
+    }
+
+    match classify_mutability(cx, inner) {
+        MutClass::Temporary => push(
+            diags,
+            E499,
+            "cannot borrow a temporary value".to_string(),
+            "a borrow names an existing place; bind the value first (`let x = ...;`) \
+             and borrow that"
+                .to_string(),
+        ),
+        MutClass::SharedRef if mutating => push(
+            diags,
+            E210,
+            "cannot take a `&mutating` borrow through a shared reference".to_string(),
+            "the place is reached through `&T`, which permits reads only".to_string(),
+        ),
+        MutClass::ImmutableLocal(name) if mutating => push(
+            diags,
+            E210,
+            format!("cannot take a `&mutating` borrow of immutable variable '{name}'"),
+            "declare the variable with `var`, or take a shared `&` borrow".to_string(),
+        ),
+        MutClass::ImmutableField(name) if mutating => push(
+            diags,
+            E210,
+            format!("cannot take a `&mutating` borrow of immutable field '{name}'"),
+            "the field is declared with `let`".to_string(),
+        ),
+        _ => {},
     }
 }
 
@@ -289,7 +427,15 @@ fn shared_ref_diag(span: kestrel_span::Span, message: &str) -> AnalyzeDiagnostic
 
 /// Classify an expression's mutability for access mode checking.
 fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
-    // Stage-1 refs FIRST, before the syntactic walk: a `&mutating T` call
+    // Stage-1.5 accessor places FIRST: a member with a `mutating ref`
+    // accessor is a place PROJECTION — classify the base (`x(i) += 1`
+    // requires `x` mutable). Must precede the ref_place consult below:
+    // a ref-provider member's READ types `&T`, which would wrongly
+    // classify the projection as SharedRef.
+    if let Some(base) = util::accessor_place_mut_base(cx, expr_id) {
+        return classify_mutability(cx, base);
+    }
+    // Stage-1 refs next, before the syntactic walk: a `&mutating T` call
     // result is a mutable place (it would fall to Temporary below and
     // wrongly trip E205), and a shared `&T` must not fall to Temporary —
     // the receiver check ACCEPTS temporaries, so without this consult a
@@ -327,6 +473,29 @@ fn classify_mutability(cx: &BodyContext<'_>, expr_id: HirExprId) -> MutClass {
         HirExpr::TupleIndex { base, .. } => classify_mutability(cx, *base),
         // Everything else is a temporary (call results, literals, if-exprs, etc.)
         _ => MutClass::Temporary,
+    }
+}
+
+/// Does this pattern (recursively) contain a `&mutating name` binder?
+fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::HirPatId) -> bool {
+    use kestrel_hir::body::HirPat;
+    match &cx.hir.pats[pat] {
+        HirPat::Binding { by_ref, .. } => *by_ref == Some(true),
+        HirPat::At { subpattern, .. } => pat_has_mutating_ref_binder(cx, *subpattern),
+        HirPat::Tuple { prefix, suffix, .. } | HirPat::Array { prefix, suffix, .. } => prefix
+            .iter()
+            .chain(suffix)
+            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
+        HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
+            .iter()
+            .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
+        HirPat::Struct { fields, .. } => fields
+            .iter()
+            .any(|f| f.pattern.is_some_and(|p| pat_has_mutating_ref_binder(cx, p))),
+        HirPat::Or { alternatives, .. } => alternatives
+            .iter()
+            .any(|&p| pat_has_mutating_ref_binder(cx, p)),
+        _ => false,
     }
 }
 

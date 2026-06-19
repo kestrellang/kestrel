@@ -10,8 +10,9 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use crate::attribute::attribute_list_parser;
 use crate::block::{CodeBlockData, code_block_parser, emit_code_block};
 use crate::common::{
-    AttributeData, emit_attribute_list, emit_name, emit_static_modifier, emit_visibility,
-    identifier, let_var_parser, skip_trivia, static_parser, token, visibility_parser_internal,
+    AccessorClauseData, AttributeData, accessor_clause_parser, emit_accessor_clause,
+    emit_attribute_list, emit_name, emit_static_modifier, emit_visibility, identifier,
+    let_var_parser, skip_trivia, static_parser, token, visibility_parser_internal,
 };
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
@@ -120,6 +121,20 @@ impl FieldDeclaration {
             .find(|child| child.kind() == SyntaxKind::SetterClause)
     }
 
+    /// Get the `ref { ... }` place-accessor clause if present (stage 1.5)
+    pub fn ref_clause(&self) -> Option<SyntaxNode> {
+        self.property_accessors()?
+            .children()
+            .find(|child| child.kind() == SyntaxKind::RefClause)
+    }
+
+    /// Get the `mutating ref { ... }` place-accessor clause if present
+    pub fn mutating_ref_clause(&self) -> Option<SyntaxNode> {
+        self.property_accessors()?
+            .children()
+            .find(|child| child.kind() == SyntaxKind::MutatingRefClause)
+    }
+
     /// Check if this computed property is getter-only (no setter)
     pub fn is_getter_only(&self) -> bool {
         self.is_computed() && self.setter_clause().is_none()
@@ -131,17 +146,22 @@ impl FieldDeclaration {
 pub enum ComputedBodyData {
     /// Shorthand: `{ expr }`
     Shorthand(CodeBlockData),
-    /// Explicit: `{ get { } set { } }`
+    /// Explicit accessor block: `{ get { } set { } ref { } mutating ref { } }`
+    /// — one or more clauses, each with a body, in source order.
     Accessors {
         /// Span of the opening brace (for property accessors block)
         lbrace: Span,
-        /// Span of the "get" keyword
-        get_span: Span,
-        getter: Option<CodeBlockData>, // None for protocol `{ get }`
-        /// Span of the "set" keyword (if present)
-        set_span: Option<Span>,
-        setter: Option<CodeBlockData>, // None for protocol `{ get set }`
+        clauses: Vec<AccessorClauseData>,
         /// Span of the closing brace (for property accessors block)
+        rbrace: Span,
+    },
+    /// Protocol requirement: `{ get }` or `{ get set }` (bare keywords,
+    /// no bodies). There is no `{ ref }` protocol form — ref accessors
+    /// are rejected in protocols (stage 1.5 scope restriction).
+    ProtocolRequirement {
+        lbrace: Span,
+        get_span: Span,
+        set_span: Option<Span>,
         rbrace: Span,
     },
 }
@@ -191,53 +211,33 @@ fn computed_body_parser<'tokens>()
         .then_ignore(skip_trivia())
         .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .map(|(((lbrace_span, get_span), set_span_opt), rbrace_span)| {
-            ComputedBodyData::Accessors {
+            ComputedBodyData::ProtocolRequirement {
                 lbrace: lbrace_span,
                 get_span,
-                getter: None,
-                set_span: set_span_opt.clone(),
-                setter: if set_span_opt.is_some() {
-                    Some(CodeBlockData {
-                        lbrace: Span::new(0, 0..0),
-                        items: vec![],
-                        rbrace: Span::new(0, 0..0),
-                    })
-                } else {
-                    None
-                },
+                set_span: set_span_opt,
                 rbrace: rbrace_span,
             }
         });
 
-    // Explicit accessors: { get { body } set { body }? }
-    // getter is required, setter is optional
+    // Explicit accessors: one or more `get/set/ref/mutating ref { body }`
+    // clauses in any order. Every clause requires a body, so `{ ref }`
+    // fails here and falls through to the shorthand form (an expression
+    // reading the identifier `ref`).
     let explicit_accessors = skip_trivia()
         .ignore_then(just(Token::LBrace).map_with(|_, e| to_kestrel_span(e.span())))
-        .then_ignore(skip_trivia())
-        .then(just(Token::Get).map_with(|_, e| to_kestrel_span(e.span())))
-        .then(code_block_parser())
         .then(
-            skip_trivia()
-                .ignore_then(just(Token::Set).map_with(|_, e| to_kestrel_span(e.span())))
-                .then(code_block_parser())
-                .or_not(),
+            accessor_clause_parser()
+                .repeated()
+                .at_least(1)
+                .collect::<Vec<_>>(),
         )
         .then_ignore(skip_trivia())
         .then(just(Token::RBrace).map_with(|_, e| to_kestrel_span(e.span())))
         .map(
-            |((((lbrace_span, get_span), getter_body), setter_opt), rbrace_span)| {
-                let (set_span, setter_body) = match setter_opt {
-                    Some((set_span, setter_body)) => (Some(set_span), Some(setter_body)),
-                    None => (None, None),
-                };
-                ComputedBodyData::Accessors {
-                    lbrace: lbrace_span,
-                    get_span,
-                    getter: Some(getter_body),
-                    set_span,
-                    setter: setter_body,
-                    rbrace: rbrace_span,
-                }
+            |((lbrace_span, clauses), rbrace_span)| ComputedBodyData::Accessors {
+                lbrace: lbrace_span,
+                clauses,
+                rbrace: rbrace_span,
             },
         );
 
@@ -341,10 +341,7 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
         },
         ComputedBodyData::Accessors {
             lbrace,
-            get_span,
-            getter,
-            set_span,
-            setter,
+            clauses,
             rbrace,
         } => {
             // Emit the outer `{` so the event sink advances over it
@@ -353,38 +350,24 @@ fn emit_property_accessors(sink: &mut EventSink, computed_body: &ComputedBodyDat
             // in this accessor's leading-trivia slot, swallowing doc
             // comments on subsequent items.
             sink.add_token(SyntaxKind::LBrace, lbrace.clone());
-
-            // Emit getter
-            if let Some(getter_body) = getter {
-                // Full getter with body: emit GetterClause containing Get token and code block
-                sink.start_node(SyntaxKind::GetterClause);
-                sink.add_token(SyntaxKind::Get, get_span.clone());
-                emit_code_block(sink, getter_body);
-                sink.finish_node();
-            } else {
-                // Protocol requirement: emit Get token without body (no GetterClause wrapper)
-                sink.add_token(SyntaxKind::Get, get_span.clone());
+            for clause in clauses {
+                emit_accessor_clause(sink, clause);
             }
-
-            // Emit setter
-            if let Some(setter_body) = setter {
-                // Check if this is a real setter body or a placeholder for protocol requirement
-                if setter_body.lbrace.start == 0 && setter_body.lbrace.end == 0 {
-                    // Protocol requirement: emit Set token without body
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                } else {
-                    // Full setter with body: emit SetterClause containing Set token and code block
-                    sink.start_node(SyntaxKind::SetterClause);
-                    if let Some(set_span) = set_span {
-                        sink.add_token(SyntaxKind::Set, set_span.clone());
-                    }
-                    emit_code_block(sink, setter_body);
-                    sink.finish_node();
-                }
+            sink.add_token(SyntaxKind::RBrace, rbrace.clone());
+        },
+        ComputedBodyData::ProtocolRequirement {
+            lbrace,
+            get_span,
+            set_span,
+            rbrace,
+        } => {
+            // Bare Get/Set tokens without clause wrappers — the absence of
+            // a GetterClause is how downstream detects the protocol form.
+            sink.add_token(SyntaxKind::LBrace, lbrace.clone());
+            sink.add_token(SyntaxKind::Get, get_span.clone());
+            if let Some(set_span) = set_span {
+                sink.add_token(SyntaxKind::Set, set_span.clone());
             }
-
             sink.add_token(SyntaxKind::RBrace, rbrace.clone());
         },
     }
@@ -473,6 +456,78 @@ where
 mod tests {
     use super::*;
     use kestrel_lexer::lex;
+
+    fn parse_field(source: &str) -> FieldDeclaration {
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect::<Vec<_>>();
+        let mut sink = EventSink::new(0);
+        parse_field_declaration(source, tokens.into_iter(), &mut sink);
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+        FieldDeclaration {
+            syntax: tree,
+            span: Span::new(0, 0..source.len()),
+        }
+    }
+
+    #[test]
+    fn test_field_ref_accessor() {
+        let decl = parse_field("var first: Int { ref { self.v } }");
+        assert!(decl.is_computed());
+        assert!(decl.ref_clause().is_some());
+        assert!(decl.getter_clause().is_none());
+        assert!(decl.setter_clause().is_none());
+        assert!(decl.mutating_ref_clause().is_none());
+    }
+
+    #[test]
+    fn test_field_ref_pair() {
+        let decl = parse_field("var first: Int { ref { self.v } mutating ref { self.v } }");
+        assert!(decl.ref_clause().is_some());
+        assert!(decl.mutating_ref_clause().is_some());
+    }
+
+    #[test]
+    fn test_field_get_plus_mutating_ref() {
+        let decl = parse_field("var first: Int { get { self.v } mutating ref { self.v } }");
+        assert!(decl.getter_clause().is_some());
+        assert!(decl.mutating_ref_clause().is_some());
+        assert!(decl.ref_clause().is_none());
+    }
+
+    #[test]
+    fn test_field_set_before_get_parses() {
+        // Clause order is free; the missing-read-provider decl check (not
+        // the parser) rejects set-only blocks.
+        let decl = parse_field("var v: Int { set { self.store(newValue) } get { self.load() } }");
+        assert!(decl.getter_clause().is_some());
+        assert!(decl.setter_clause().is_some());
+    }
+
+    #[test]
+    fn test_field_shorthand_ref_identifier() {
+        // `ref` is NOT reserved: a shorthand body reading an identifier
+        // named `ref` (no `{` after it) is a shorthand getter, not an
+        // accessor block.
+        let decl = parse_field("var x: Int { ref }");
+        assert!(decl.is_computed());
+        assert!(decl.ref_clause().is_none());
+    }
+
+    #[test]
+    fn test_field_shorthand_ref_call() {
+        let decl = parse_field("var x: Int { ref(y) }");
+        assert!(decl.is_computed());
+        assert!(decl.ref_clause().is_none());
+    }
+
+    #[test]
+    fn test_field_shorthand_ref_prefixed_identifier() {
+        let decl = parse_field("var x: Int { refValue }");
+        assert!(decl.is_computed());
+        assert!(decl.ref_clause().is_none());
+    }
 
     #[test]
     fn test_field_declaration_basic() {

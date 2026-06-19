@@ -53,6 +53,11 @@ impl Pattern {
         self.kind() == SyntaxKind::BindingPattern
     }
 
+    /// Check if this is a `&name` / `&mutating name` ref binder pattern
+    pub fn is_ref_binding(&self) -> bool {
+        self.kind() == SyntaxKind::RefBindingPattern
+    }
+
     /// Check if this is a tuple pattern
     pub fn is_tuple(&self) -> bool {
         self.kind() == SyntaxKind::TuplePattern
@@ -107,6 +112,15 @@ pub enum PatternVariant {
         /// Optional `var` keyword span (if mutable)
         var_span: Option<Span>,
         /// Name identifier span
+        name_span: Span,
+    },
+    /// Ref binder pattern: `&name` or `&mutating name` (stage 1.5 item 2 —
+    /// borrows the matched place instead of copying it out). Binder form
+    /// only; `&` is not a structural pattern operator.
+    Ref {
+        amp_span: Span,
+        /// `mutating` keyword span (`&mutating name` only)
+        mutating_span: Option<Span>,
         name_span: Span,
     },
     /// Tuple pattern: `(p1, p2, ...)`
@@ -332,6 +346,27 @@ pub fn pattern_parser<'tokens>()
                     var_span: Some(var_span),
                     name_span,
                 },
+            });
+
+        // Ref binder: `&name` / `&mutating name`. Pattern grammar has no
+        // binary operators, so `&` is unambiguous here.
+        let ref_binding = skip_trivia()
+            .ignore_then(just(Token::Ampersand).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(
+                skip_trivia()
+                    .ignore_then(
+                        just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())),
+                    )
+                    .or_not(),
+            )
+            .then(
+                skip_trivia()
+                    .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) }),
+            )
+            .map(|((amp_span, mutating_span), name_span)| PatternVariant::Ref {
+                amp_span,
+                mutating_span,
+                name_span,
             });
 
         let immutable_binding = skip_trivia()
@@ -610,6 +645,7 @@ pub fn pattern_parser<'tokens>()
                 .or(enum_pattern.clone())
                 .or(struct_pattern.clone())
                 .or(array_pattern.clone())
+                .or(ref_binding.clone())
                 .or(mutable_binding.clone())
                 .or(tuple_pattern.clone())
                 .or(immutable_binding.clone())
@@ -661,6 +697,19 @@ pub fn emit_pattern_variant(sink: &mut EventSink, variant: &PatternVariant) {
             sink.start_node(SyntaxKind::BindingPattern);
             if let Some(var) = var_span {
                 sink.add_token(SyntaxKind::Var, var.clone());
+            }
+            sink.add_token(SyntaxKind::Identifier, name_span.clone());
+            sink.finish_node();
+        },
+        PatternVariant::Ref {
+            amp_span,
+            mutating_span,
+            name_span,
+        } => {
+            sink.start_node(SyntaxKind::RefBindingPattern);
+            sink.add_token(SyntaxKind::Ampersand, amp_span.clone());
+            if let Some(m) = mutating_span {
+                sink.add_token(SyntaxKind::Mutating, m.clone());
             }
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
             sink.finish_node();
@@ -917,6 +966,19 @@ fn emit_pattern_variant_inner(sink: &mut EventSink, variant: &PatternVariant) {
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
             sink.finish_node();
         },
+        PatternVariant::Ref {
+            amp_span,
+            mutating_span,
+            name_span,
+        } => {
+            sink.start_node(SyntaxKind::RefBindingPattern);
+            sink.add_token(SyntaxKind::Ampersand, amp_span.clone());
+            if let Some(m) = mutating_span {
+                sink.add_token(SyntaxKind::Mutating, m.clone());
+            }
+            sink.add_token(SyntaxKind::Identifier, name_span.clone());
+            sink.finish_node();
+        },
         PatternVariant::Tuple {
             lparen,
             elements,
@@ -1130,7 +1192,7 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match pattern_parser().parse(input).into_result() {
+    match pattern_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result() {
         Ok(variant) => {
             emit_pattern_variant(sink, &variant);
         },
@@ -1187,6 +1249,35 @@ mod tests {
         let source = "var x";
         let pattern = parse_pattern_from_source(source);
         assert!(pattern.is_binding());
+    }
+
+    #[test]
+    fn test_ref_binding_pattern() {
+        let source = "&v";
+        let pattern = parse_pattern_from_source(source);
+        assert!(pattern.is_ref_binding());
+    }
+
+    #[test]
+    fn test_mutating_ref_binding_pattern() {
+        let source = "&mutating v";
+        let pattern = parse_pattern_from_source(source);
+        assert!(pattern.is_ref_binding());
+    }
+
+    #[test]
+    fn test_ref_binding_in_enum_pattern() {
+        // Binder position inside an enum payload: `.Occupied(_, &v, _)`
+        let source = ".Occupied(_, &v, _)";
+        let pattern = parse_pattern_from_source(source);
+        assert!(pattern.is_enum());
+    }
+
+    #[test]
+    fn test_mutating_ref_binding_in_enum_pattern() {
+        let source = ".Some(&mutating v)";
+        let pattern = parse_pattern_from_source(source);
+        assert!(pattern.is_enum());
     }
 
     #[test]

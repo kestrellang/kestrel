@@ -10,7 +10,7 @@ module Test
 @main
 func main() -> lang.i64 {
     var arr = ["alpha", "beta"];
-    let s = arr.at(index: 0);
+    let s = arr(at: 0);
     arr(0) = "gamma";
     if s != "alpha" { return 1; }
     if arr(0) != "gamma" { return 2; }

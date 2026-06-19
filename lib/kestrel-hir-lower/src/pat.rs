@@ -34,10 +34,39 @@ impl LowerCtx<'_> {
         match pat {
             AstPat::Wildcard { span } => self.alloc_pat(HirPat::Wildcard { span: span.clone() }),
 
-            AstPat::Binding { is_mut, name, span } => {
+            AstPat::Binding {
+                is_mut,
+                name,
+                by_ref,
+                span,
+            } => {
+                // `&`/`&mutating` binder patterns (stage 1.5 item 2) are
+                // match-arm constructs: the place-mode lowering needs a
+                // pinnable scrutinee place. Everywhere else (let/for
+                // destructures, if/while-let conditions, params) they
+                // reject (E211) and degrade to a plain binding so
+                // downstream diagnostics stay useful.
+                let allowed = self.ref_patterns_allowed;
+                if by_ref.is_some() && !allowed {
+                    self.ctx.accumulate(
+                        kestrel_reporting::Diagnostic::error()
+                            .with_code("E211")
+                            .with_message(
+                                "`&` pattern bindings are not supported in this position",
+                            )
+                            .with_labels(vec![
+                                kestrel_reporting::Label::primary(span.file_id, span.range())
+                                    .with_message("`&` binder pattern"),
+                            ])
+                            .with_notes(vec![
+                                "`&` binders are supported in `match` arm patterns".to_string(),
+                            ]),
+                    );
+                }
                 let local = self.define_local(name, *is_mut || force_mut, span.clone());
                 self.alloc_pat(HirPat::Binding {
                     local,
+                    by_ref: if allowed { *by_ref } else { None },
                     span: span.clone(),
                 })
             },
@@ -316,6 +345,7 @@ impl LowerCtx<'_> {
                     let local = self.define_local(&f.field_name, force_mut, span.clone());
                     Some(self.alloc_pat(HirPat::Binding {
                         local,
+                        by_ref: None,
                         span: span.clone(),
                     }))
                 };
@@ -424,6 +454,7 @@ impl LowerCtx<'_> {
                 let local = self.define_local(name, *is_mut || force_mut, span.clone());
                 self.alloc_pat(HirPat::Binding {
                     local,
+                    by_ref: None,
                     span: span.clone(),
                 })
             },

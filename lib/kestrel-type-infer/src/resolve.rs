@@ -20,8 +20,8 @@ use kestrel_name_res::{
     TypeResolution, expand_protocol_closure_in_place,
 };
 use kestrel_semantics::{
-    CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics,
-    TypeParamCopyRequirement,
+    CopyRequirement, CopySemantics, IsBuiltinProtocol, NominalCopySemantics, NominalStaticness,
+    StaticRequirement, Staticness, TypeParamCopyRequirement, TypeParamStaticRequirement,
 };
 use kestrel_span::Span;
 
@@ -511,6 +511,41 @@ impl TypeResolver for WorldResolver<'_> {
         }) {
             return self.copy_semantics_of(ty) == CopySemantics::Cloneable;
         }
+        // Static is likewise structural, never declared. DELIBERATELY
+        // permissive (arg-independent — this resolver answer must never
+        // block member routing): only a `NotStatic` base, an unrelaxed-less
+        // param, or a bare ref reject; conditional bases pass and the
+        // precise per-instantiation answer is the solver's
+        // `solver_ty_is_static` / `type_satisfies`.
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Static,
+            root: self.root,
+        }) {
+            return match ty {
+                TyKind::Ref { .. } => false,
+                TyKind::Struct { entity, .. }
+                | TyKind::Enum { entity, .. }
+                | TyKind::SelfType { entity } => !matches!(
+                    self.ctx
+                        .query(NominalStaticness {
+                            entity: *entity,
+                            root: self.root,
+                        })
+                        .staticness,
+                    Staticness::NotStatic
+                ),
+                TyKind::Param { entity } => {
+                    let context = self.ctx.parent_of(*entity).unwrap_or(*entity);
+                    self.ctx.query(TypeParamStaticRequirement {
+                        param: *entity,
+                        context,
+                        root: self.root,
+                    }) == StaticRequirement::RequiresStatic
+                },
+                _ => true,
+            };
+        }
         match ty {
             TyKind::Struct { entity, .. }
             | TyKind::Enum { entity, .. }
@@ -559,6 +594,24 @@ impl TypeResolver for WorldResolver<'_> {
                     &mut visited,
                 );
                 all_protocols.contains(&protocol)
+            },
+            // Reference types conform via the generic synthetic entities
+            // (`extend &T: P` / `extend &mutating T: P`). Declares-only — the
+            // pointee is a TyVar (opaque here); the bound-aware answer is
+            // `type_satisfies`' Ref arm, which evaluates the extension's
+            // `where T: P` at the real pointee.
+            TyKind::Ref { mutating, .. } => {
+                let name = if *mutating { "&mutating" } else { "&" };
+                kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, name)
+                    .map(|e| {
+                        self.ctx
+                            .query(kestrel_name_res::ConformingProtocols {
+                                entity: e,
+                                root: self.root,
+                            })
+                            .contains(&protocol)
+                    })
+                    .unwrap_or(false)
             },
             // Structural singletons conform via their synthetic `lang` entities
             // (`extend (): P` / `extend !: P`), keyed the same as nominal types.
@@ -955,7 +1008,16 @@ fn extract_protocol_type_args(
                 .map(|seg| {
                     seg.type_args
                         .iter()
-                        .map(|a| kestrel_hir_lower::lower_ast_type(ctx, owner, root, a))
+                        .map(|a| {
+                            // Protocol bound type args are Strict ref
+                            // territory (pre-2b: no reject walk here).
+                            kestrel_hir_lower::reject_ref_types(
+                                ctx,
+                                kestrel_hir_lower::lower_ast_type(ctx, owner, root, a),
+                                kestrel_hir_lower::RefPosition::GenericArg,
+                                kestrel_hir_lower::RefPolicy::Strict,
+                            )
+                        })
                         .collect()
                 })
                 .unwrap_or_default();

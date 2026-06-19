@@ -10,6 +10,6 @@ module Test
 @main
 func main() -> lang.i64 {
     let arr = [42];
-    print("v=\(arr.at(index: 0))");
+    print("v=\(arr(at: 0))");
     0
 }

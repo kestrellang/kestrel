@@ -81,11 +81,15 @@ pub fn build_field(
             || accessors
                 .children_with_tokens()
                 .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Set));
+        // Place accessors (stage 1.5): `ref` is a read provider (Gettable),
+        // `mutating ref` a write provider (Settable).
+        let has_ref = find_child(&accessors, SyntaxKind::RefClause).is_some();
+        let has_mutating_ref = find_child(&accessors, SyntaxKind::MutatingRefClause).is_some();
 
-        if has_getter {
+        if has_getter || has_ref {
             world.set(entity, Gettable);
         }
-        if has_setter {
+        if has_setter || has_mutating_ref {
             world.set(entity, Settable);
         }
 
@@ -130,6 +134,17 @@ pub fn build_field(
                     receiver: receiver.clone(),
                 },
             );
+        } else if has_ref || has_mutating_ref {
+            // Pure-ref member (`{ ref {…} }`, no getter): the parent stays
+            // bodyless — reads route to the RefAccessor child — but still
+            // needs a Callable so member resolution sees the signature.
+            world.set(
+                entity,
+                Callable {
+                    params: Vec::new(),
+                    receiver: receiver.clone(),
+                },
+            );
         }
 
         // Setter accessor: spawn a child entity with its own Callable + Body.
@@ -166,6 +181,37 @@ pub fn build_field(
                 file_id,
                 is_static_field,
             );
+        }
+
+        // Place accessors (stage 1.5): spawn a RefAccessor child per clause.
+        // Field accessors take no params (no index, no newValue).
+        for (clause_kind, mutating) in [
+            (SyntaxKind::RefClause, false),
+            (SyntaxKind::MutatingRefClause, true),
+        ] {
+            if let Some(clause) = find_child(&accessors, clause_kind)
+                && let Some(clause_body) = find_child(&clause, SyntaxKind::CodeBlock)
+            {
+                let accessor_receiver = if is_static_field || !parent_is_type {
+                    None
+                } else if mutating {
+                    Some(ReceiverKind::Mutating)
+                } else {
+                    Some(ReceiverKind::Borrowing)
+                };
+                spawn_ref_accessor(
+                    world,
+                    entity,
+                    &clause,
+                    &clause_body,
+                    Vec::new(),
+                    accessor_receiver,
+                    mutating,
+                    file_entity,
+                    file_id,
+                    is_static_field,
+                );
+            }
         }
     } else {
         // Stored property: always Gettable

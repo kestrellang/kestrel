@@ -11,8 +11,8 @@ module Test
 @main
 func main() -> lang.i64 {
     let arr = [11, 22, 33];
-    if arr.at(index: 0) != 11 { return 1; }
-    if arr.at(index: 1) != 22 { return 2; }
-    if arr.at(index: 2) != 33 { return 3; }
+    if arr(at: 0) != 11 { return 1; }
+    if arr(at: 1) != 22 { return 2; }
+    if arr(at: 2) != 33 { return 3; }
     0
 }

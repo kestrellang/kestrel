@@ -78,8 +78,8 @@ pub fn emit_expr_variant(sink: &mut EventSink, variant: &ExprVariant) {
         ExprVariant::TupleIndex { base, dot, index } => {
             emit_tuple_index_expr(sink, base, dot.clone(), index.clone());
         },
-        ExprVariant::Unary(tok, span, operand) => {
-            emit_unary_expr(sink, tok.clone(), span.clone(), operand);
+        ExprVariant::Unary(tok, span, mutating, operand) => {
+            emit_unary_expr(sink, tok.clone(), span.clone(), mutating.as_ref(), operand);
         },
         ExprVariant::Call {
             callee,
@@ -484,10 +484,21 @@ fn emit_tuple_index_expr(sink: &mut EventSink, base: &ExprVariant, dot: Span, in
     sink.finish_node();
 }
 
-fn emit_unary_expr(sink: &mut EventSink, tok: Token, span: Span, operand: &ExprVariant) {
+fn emit_unary_expr(
+    sink: &mut EventSink,
+    tok: Token,
+    span: Span,
+    mutating: Option<&Span>,
+    operand: &ExprVariant,
+) {
     sink.start_node(SyntaxKind::Expression);
     sink.start_node(SyntaxKind::ExprUnary);
     sink.add_token(SyntaxKind::from(tok), span);
+    // `&mutating expr`: the keyword rides inside the unary node so the AST
+    // builder can distinguish BorrowMutating from Borrow.
+    if let Some(m) = mutating {
+        sink.add_token(SyntaxKind::Mutating, m.clone());
+    }
     emit_expr_variant(sink, operand);
     sink.finish_node();
     sink.finish_node();

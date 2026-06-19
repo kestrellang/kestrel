@@ -79,6 +79,13 @@ pub enum Builtin {
     Cloneable,
     CloneMethod,
 
+    // ===== Reference containment (references stage 2a) =====
+    /// A type is Static iff it transitively contains no reference (`&T`).
+    /// Conformance is structural (never declared); `implicit_conformance`
+    /// turns on `: not Static` declarations and `where T: not Static`
+    /// relaxations, exactly like Copyable.
+    Static,
+
     // ===== Pattern matching =====
     Matchable,
     RangeMatchable,
@@ -255,6 +262,11 @@ pub enum Builtin {
     Exitable,
     ExitableReport,
     ExitCode,
+
+    // ===== Indirection / smart-pointer member peel =====
+    /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
+    /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
+    Indirection,
 }
 
 impl Builtin {
@@ -273,6 +285,9 @@ impl Builtin {
             Self::Copyable => "Copyable",
             Self::Cloneable => "Cloneable",
             Self::CloneMethod => "Clone",
+
+            // Reference containment
+            Self::Static => "Static",
 
             // Pattern matching
             Self::Matchable => "Matchable",
@@ -455,6 +470,9 @@ impl Builtin {
             Self::Exitable => "Exitable",
             Self::ExitableReport => "ExitableReport",
             Self::ExitCode => "ExitCode",
+
+            // Indirection — resolves by source name (auto-imported from std.core).
+            Self::Indirection => "Indirection",
         }
     }
 
@@ -470,6 +488,9 @@ impl Builtin {
             "Copyable" => Some(Self::Copyable),
             "Cloneable" => Some(Self::Cloneable),
             "Clone" => Some(Self::CloneMethod),
+
+            // Reference containment
+            "Static" => Some(Self::Static),
 
             // Pattern matching
             "Matchable" => Some(Self::Matchable),
@@ -651,6 +672,9 @@ impl Builtin {
             "ExitableReport" => Some(Self::ExitableReport),
             "ExitCode" => Some(Self::ExitCode),
 
+            // Indirection / smart-pointer member peel
+            "Indirection" => Some(Self::Indirection),
+
             _ => None,
         }
     }
@@ -668,6 +692,16 @@ impl Builtin {
             },
             Self::Cloneable => BuiltinKind::protocol(),
             Self::CloneMethod => BuiltinKind::ProtocolMethod,
+
+            // Reference containment — same marker shape as Copyable:
+            // implicit (structural) conformance + negative declarations.
+            Self::Static => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
 
             // Pattern matching
             Self::Matchable | Self::RangeMatchable | Self::ArrayMatchable => {
@@ -831,6 +865,10 @@ impl Builtin {
             Self::Exitable => BuiltinKind::protocol(),
             Self::ExitableReport => BuiltinKind::ProtocolMethod,
             Self::ExitCode => BuiltinKind::Struct,
+
+            // Indirection: non-marker protocol with a required `pointeeRef()`
+            // method; explicit conformance (NOT implicit, unlike Copyable).
+            Self::Indirection => BuiltinKind::protocol(),
 
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,

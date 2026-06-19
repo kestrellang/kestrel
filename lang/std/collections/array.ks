@@ -10,7 +10,7 @@ import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.numeric.(RandomNumberGenerator, Lcg64)
 import std.result.(Optional)
-import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
+import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy)
 import std.iter.(Iterator, Iterable)
 import std.text.(String)
@@ -531,41 +531,49 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         ArraySlice(pointer: self.ptr(), count: self.len())
     }
 
-    /// Borrowed view of the element at `index` — no copy, no clone, no
-    /// `T: Cloneable` requirement. Member access, operators, and
-    /// borrow-convention calls go through it in place; binding it stores
-    /// an owned copy instead (binding decay). Panics if out of bounds,
-    /// like `arr(index)`.
-    public func at(index index: Int64) -> &T {
-        // Hoisted: `or`'s short-circuit RHS is a closure, and a closure
-        // capturing Cloneable `self` deep-clones the array.
-        let count = self.len();
-        if index < 0 or index >= count {
-            fatalError("Array.at(index:): index out of bounds");
-        }
-        self.ptr().offset(by: index).value
-    }
-
-    /// Mutable borrowed view of the element at `index`. Ensures unique
-    /// (COW) storage BEFORE the view is created, so writes through it
-    /// never touch a sibling copy's buffer. Panics on out-of-bounds.
+    /// In-place element access (stage-1.5 place accessors): reads borrow
+    /// the element — no copy, no clone, no `T: Cloneable` requirement —
+    /// and writes, `+=`, and mutating methods go through the element's
+    /// address. Binding the read (`let x = arr(at: i)`) stores an owned
+    /// copy instead (binding decay). Panics if out of bounds, like
+    /// `arr(index)`.
     ///
-    /// Copying `self` inside the same expression that uses the view
-    /// (`f(arr.mutableAt(index: 0), arr)`) re-shares the buffer and can
-    /// make the write observable through the copy — accepted stage-1
-    /// behavior, recorded in the references semantics.
-    public mutating func mutableAt(index index: Int64) -> &mutating T {
-        // Hoisted: `or`'s short-circuit RHS is a closure, and a closure
-        // capturing Cloneable `self` deep-clones the array.
-        let count = self.len();
-        if index < 0 or index >= count {
-            fatalError("Array.mutableAt(index:): index out of bounds");
-        }
-        self.makeUnique();
-        self.ptr().offset(by: index).mutatingValue
+    /// The mutating accessor ensures unique (COW) storage BEFORE the
+    /// place is fabricated, so writes through it never touch a sibling
+    /// copy's buffer. Copying `self` inside the same expression that
+    /// uses the place (`f(arr(at: 0), arr)` with a mutating first arg)
+    /// re-shares the buffer and can make the write observable through
+    /// the copy — accepted stage-1 behavior, recorded in the references
+    /// semantics.
+    ///
+    /// The unlabeled subscripts (`arr(i)`, `arr(1..<3)`, `checked:`,
+    /// `unchecked:`, `clamped:`, `wrapped:`) live on `extend Slice[T]`
+    /// and keep get/set semantics; `at:` is the labeled in-place form.
+    public func atProbe(index index: Int64) -> T {
+        self.asSlice()(unchecked: index)
     }
 
-    // All subscripts provided by extend Slice[T] in slice.ks
+    public subscript(at index: Int64) -> T {
+        ref {
+            // Hoisted: `or`'s short-circuit RHS is a closure, and a
+            // closure capturing Cloneable `self` deep-clones the array.
+            let count = self.len();
+            if index < 0 or index >= count {
+                fatalError("Array(at:): index out of bounds");
+            }
+            self.ptr().offset(by: index).value
+        }
+        mutating ref {
+            let count = self.len();
+            if index < 0 or index >= count {
+                fatalError("Array(at:): index out of bounds");
+            }
+            self.makeUnique();
+            self.ptr().offset(by: index).mutatingValue
+        }
+    }
+
+    // All other subscripts provided by extend Slice[T] in slice.ks
 
     /// COW write barrier — deep-copies storage if shared.
     public mutating func ensureUnique() {
@@ -1312,6 +1320,43 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// Returns a forward iterator over the array's elements.
     public func iter() -> ArraySliceIterator[T] {
         ArraySliceIterator(ptr: self.ptr(), remaining: self.len())
+    }
+
+    /// Returns an iterator yielding SHARED REFERENCES (`&T`) to the
+    /// elements in place — no copies, no clones. References are
+    /// read-only views; they alias the array's buffer, so structural
+    /// mutation (append, removal) during iteration invalidates them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let words = ["alpha", "beta"];
+    /// for w in words.refs() {
+    ///     print(w.len());   // reads in place — no element copy
+    /// }
+    /// ```
+    public func refs() -> RefSliceIterator[T] {
+        RefSliceIterator(ptr: self.ptr(), remaining: self.len())
+    }
+
+    /// Returns an iterator yielding MUTABLE REFERENCES (`&mutating T`)
+    /// to the elements — in-place mutation without writeback. Runs the
+    /// COW barrier first, so writes never leak into shared storage.
+    /// Structural mutation (append, removal) during iteration
+    /// invalidates the yielded references.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var xs = [1, 2, 3];
+    /// for x in xs.mutableRefs() {
+    ///     x += 1;
+    /// }
+    /// // xs == [2, 3, 4]
+    /// ```
+    public mutating func mutableRefs() -> MutRefSliceIterator[T] {
+        self.ensureUnique();
+        MutRefSliceIterator(ptr: self.ptr(), remaining: self.len())
     }
 
     // chunks(of:), windows(of:): provided by extend Slice[T] — return

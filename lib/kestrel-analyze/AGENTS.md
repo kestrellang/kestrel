@@ -168,24 +168,50 @@ Current allocations:
 - E450: `circular_struct_containment` (compilation/struct_cycles.rs)
 - E451: `circular_constraint` (compilation/constraint_cycles.rs)
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
+  — **WARNING: double-allocated**; conformance_completeness.rs also
+  claims E459. Pre-existing; resolve before allocating near it.
+- E454–E458, E460, E462–E465: conformance completeness + indirect-enum
+  checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
+  this list is stale for that range; **next free E4xx is E466**.
+  E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
+  a witness's reference return must match the requirement EXACTLY in
+  shape and mutability (`-> T` never witnesses `-> &T` and vice versa —
+  the ABIs differ: raw pointer vs owned value; `&` never matches
+  `&mutating`). The normalization is `kestrel-type-infer` compare.rs
+  (`ResolvedTy::Ref`); a mismatch with a ref on either side gets the
+  ABI-explainer note.
 - E461: `unknown_attribute` (compilation/unknown_attribute.rs)
-- E480–E489: reference-type rejections (stage 0.5 of references; `&T` /
-  `&mutating T` parse everywhere, accepted nowhere). NOT analyzer
-  descriptors — emitted from HIR lowering via codespan `with_code`
-  (kestrel-hir-lower `ty.rs::reject_ref_types` + `desugar.rs` for E488);
-  the test matcher passes codespan codes through. E480 is PERMANENT
-  (params never take ref types — conventions are the only spelling,
-  references-gaps.md §10.6); E481 is carved out (made legal) in stage 1.
+- E480–E489: reference-type rejections (stage 0.5 of references). NOT
+  analyzer descriptors — emitted from HIR lowering via codespan
+  `with_code` (kestrel-hir-lower `ty.rs::reject_ref_types` +
+  `desugar.rs` for E488); the test matcher passes codespan codes
+  through. E480 is PERMANENT (params never take ref types — conventions
+  are the only spelling, references-gaps.md §10.6); E481 was carved out
+  in stage 1; **stage 2b carved out E483/E484/E485 under
+  `RefPolicy::AllowAggregate`** — those codes now fire only from STRICT
+  entry points (alias RHS, protocol/extension-target args, where-clause
+  types). Enum case payloads classify as Field (E483's position), NOT
+  Param, despite living in the `Callable` component.
   - E480: ref type in parameter position (incl. function-type params, closure params)
-  - E481: ref type in return position
-  - E482: ref type in a `var`/`let` annotation
-  - E483: ref type in a struct/enum field (incl. enum case payload)
-  - E484: ref type in a tuple element
-  - E485: ref type as a generic type argument
+  - E481: ref type in return position (legal since stage 1)
+  - E482: ref type in a `var`/`let` annotation (aggregates wrapping refs are legal)
+  - E483: ref type in a struct/enum field — LEGAL since 2b except Strict entries
+  - E484: ref type in a tuple element — LEGAL since 2b except Strict entries
+  - E485: ref type as a generic type argument — LEGAL since 2b except Strict entries
   - E486: ref type as a function-type return
   - E487: nested reference (`&&T`, `&mutating &T`)
   - E488: `&` in expression position (desugar.rs, `UnaryOp::Borrow`)
-  - E489: ref type in any other position (alias RHS, where-clause, bound)
+  - E489: ref type in any other position (alias RHS, where-clause, bound).
+    **Stage 2d carved out two RHS shapes** via
+    `reject_ref_types_allowing_top_ref`: TRIVIAL member aliases
+    (`type Item = &T` in a struct/enum/extension — the assoc-binding
+    shape) and where-clause EQUALITY RHS (`where I.Item = &Int64`).
+    Protocol-parented assoc defaults, non-trivial aliases, and
+    protocol-bound args stay Strict. Anti-smuggling rides the eager
+    trivial-alias expansion: a named USE re-applies the use-site position
+    rules, so `let x: Foo.Item` is E482 — but the diagnostic ANCHORS at
+    the alias RHS span (the expansion reuses the alias's AST), one error
+    per illegal use.
 - E490–E498: stage-1 reference rules (returnable refs). Mixed homes — E490
   is a hir-lower codespan code; E491/E492 are solver `InferError`s; E493 is
   an analyzer descriptor; E494–E498 are coded MIR diagnostics
@@ -197,9 +223,14 @@ Current allocations:
   - E492: ref leaked into a generic type argument via inference — type-infer
   - E493: `ambiguous_borrow_source` (decl/ref_return.rs) — free fn with ≥2
     non-consuming params returning a ref; methods root at the receiver
-  - E494: returned ref roots at a local — escape error (mir verify::check_escapes)
-  - E495: `-> &mutating` without a mutable root (mir verify::check_escapes)
-  - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes)
+  - E494: returned ref roots at a local — escape error (mir verify::check_escapes).
+    Since 2b also the owned-return CARRIER variant: a ref-BEARING aggregate
+    return (`-> Optional[&T]`) whose taint roots at a local ("cannot return
+    this value: it carries a reference that borrows local …")
+  - E495: `-> &mutating` without a mutable root (mir verify::check_escapes;
+    2b carrier variant: a return TYPE carrying `&mutating` demands a mutable root)
+  - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes;
+    2b carrier variant for ref-bearing aggregate returns)
   - E497: ref live across a control-flow merge (mir-lower set_terminator)
   - E498: consume-while-borrowed (mir verify `try_consume`) — only when a
     LIVE ref (@guaranteed call result) chains to the consumed value; an
@@ -209,6 +240,12 @@ Current allocations:
   single classifier (also consulted by body/assignment.rs); it must run
   BEFORE the syntactic walk — the receiver check accepts temporaries, so a
   shared-ref receiver would otherwise silently pass.
+- E209: `ref_binding_requires_let` — hir-lower codespan code (stmt.rs): a `&`/`&mutating` initializer on `var` or a destructuring pattern (named ref bindings are simple `let`s only; recovery drops the `&`)
+- E210: `mutable_borrow_of_immutable` (body/access_mode.rs `check_borrow_init`) — `&mutating expr` of a non-mutable place: let local/field, shared-`&` reach, or a get/set-only member (no `mutating ref` accessor to lend a place)
+- E211: `ref_pattern_position` — hir-lower codespan code (pat.rs): `&`/`&mutating` binder pattern outside its supported position (match-arm support = stage 1.5 item 2 place-mode lowering)
+- E212: `non_static_capture` (body/closure.rs) — closure captures a non-Static value (env may outlive the borrow). WIDENED 2026-06-11 (references 2a): was ref-bindings-only (`ref_binding_captured`); now any non-Static-typed root via `staticness::resolved_ty_is_static`. Ref roots keep the original "ref binding" wording. TODO(static-2c): relaxes to "capture makes the closure non-Static" once function types carry the Static bit
+- E499: `borrow_of_temporary` (body/access_mode.rs `check_borrow_init`) — `let r = &<rvalue>`; a borrow names an existing place
+- E497 has a SECOND wording (mir-lower `emit_binding_across_merge_error`): a named ref binding still used after an inside-fn terminator that did NOT forward it. Since 2026-06-11 ("1.75") bindings thread through all control flow as @guaranteed block args, so this is a defensive FALLBACK for jumps emitted outside the LiveTracker pattern — no user-reachable shape is known to trigger it
 - E208: `assign_through_shared_ref` (body/assignment.rs) — plain assignment
   through a `&T`-returning call/getter (`arr.at(index: i) = v`,
   `cell.value = v`). The compound form (`+=`) is E207 instead (the
@@ -221,10 +258,16 @@ Current allocations:
 - E501: `maybe_moved` (body/move_tracking.rs)
 - E502: `cloneable_field_requires_conformance` (decl/cloneable_field.rs)
 - E503: `move_out_of_borrow` (body/move_tracking.rs) — moving a non-Copyable value bound from a borrowed scrutinee; backstopped in MIR lowering by `emit_copy_value` (kestrel-mir-lower `body/mod.rs`), which emits the same code E503 for shapes the front-end can't see (e.g. binding decay of a ref to a NotCopyable pointee)
+- E504: `dangling_pointer_ref` (body/dangle_ref.rs) — WARNING: ref-returning body returns `Pointer(to: <same-fn local>).value`/`.mutatingValue` (traced through single-assignment `let` pointers); the storage dies at return. Claims nothing beyond that shape (references-gaps.md §10.3). Wrapper recognition shares `kestrel_type_infer::RetRefPointerDerived` (moved there from mir-lower so both can reach it)
+- E505: `static_requires_static_type` (decl/static_value_type.rs) — references 2a: a module-level value decl or `static` member whose type is non-Static (globals live for the whole program; only reference-free types may be stored). Selection mirrors MIR `lower_static` (module-parent Field without Callable, or `Static`-marked member); Computed skipped; inert without the Static builtin. Predicate = `kestrel_semantics::hir_type_is_static` (the staticness kernel — single source of truth; solver + analyze mirrors route through `instance_is_static`)
 - E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
 - E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build
 - E618: `missing_main` (compilation/entry_point.rs) — executable build with no `@main`; gated on `CompilationContext::is_executable` (set by the driver's `analyze_all(is_executable)`), so it fires only for `kestrel build` / execution tests, never for libraries / `kestrel check` / LSP / diagnostics tests
+- E619: `duplicate_read_provider` (decl/place_accessor.rs) — `get` + `ref` on one subscript/computed property (stage-1.5 place accessors)
+- E620: `duplicate_write_provider` (decl/place_accessor.rs) — `set` + `mutating ref` on one member
+- E621: `ref_accessor_in_protocol` (decl/place_accessor.rs) — ref accessors are concrete-inherent-only; rejected in protocols and protocol extensions
+- E622: `accessor_missing_read_provider` (decl/place_accessor.rs) — write provider with no `get`/`ref` (set-only / mutating-ref-only accessor blocks)
 - E700: `invalid_escape_sequence` (body/string_escape.rs)
 - E701: `ascii_escape_out_of_range` (body/string_escape.rs)
 - E702: `invalid_unicode_escape` (body/string_escape.rs)

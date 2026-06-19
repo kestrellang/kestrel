@@ -174,12 +174,23 @@ fn is_free_type_param_name(name: &str) -> bool {
 
 /// Collect single-segment names appearing as top-level type args of the
 /// extension's target. For `extend Pair[T, U]` returns {"T", "U"}. For
-/// `extend Int64` returns {}.
+/// `extend Int64` returns {}. For a ref target `extend &T` the POINTEE is
+/// the param position, so it returns {"T"} — without this, an RHS scan
+/// would introduce a shadowing free param for the same name.
 fn collect_lhs_target_names(world: &World, entity: Entity) -> HashSet<String> {
     let mut names = HashSet::new();
     let Some(target) = world.get::<ExtensionTarget>(entity) else {
         return names;
     };
+    if let AstType::Ref { inner, .. } = &target.0 {
+        if let AstType::Named { segments, .. } = inner.as_ref()
+            && segments.len() == 1
+            && segments[0].type_args.is_empty()
+        {
+            names.insert(segments[0].name.clone());
+        }
+        return names;
+    }
     let AstType::Named { segments, .. } = &target.0 else {
         return names;
     };

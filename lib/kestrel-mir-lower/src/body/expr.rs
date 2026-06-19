@@ -14,14 +14,17 @@
 
 use kestrel_ast_builder::{Callable, NodeKind, Settable};
 use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
+use kestrel_mir::TyId;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
 use kestrel_mir::op::Op;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
+use super::place::{FieldViews, PlaceRepr};
 use super::{OssaBodyCtx, expr_span};
 use crate::ty::lower_resolved_ty;
+use kestrel_type_infer::result::IndirectionPeel;
 
 impl OssaBodyCtx<'_, '_> {
     /// Lower an HIR expression to a ValueId, applying promotion if needed.
@@ -116,6 +119,12 @@ impl OssaBodyCtx<'_, '_> {
         match expr {
             HirExpr::Literal { value, .. } => self.lower_literal(expr_id, value),
 
+            // Normally intercepted by the let-statement path (the only legal
+            // position); kept routable for error-recovery shapes.
+            HirExpr::Borrow {
+                inner, mutating, ..
+            } => self.lower_borrow_init(*inner, *mutating),
+
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);
@@ -148,13 +157,32 @@ impl OssaBodyCtx<'_, '_> {
                     }
                 } else {
                     let val = self.map_local(*hir_local);
+                    // Ref bindings: count the read (drives the terminator
+                    // policy — remaining uses at a merge = binding E497).
+                    self.note_binding_read(*hir_local, expr_id);
                     self.emit_value_use(val)
                 }
             },
 
             HirExpr::Tuple { elements, .. } => {
-                let elems: Vec<ValueId> = elements.iter().map(|&e| self.lower_expr(e)).collect();
                 let ty = self.resolve_expr_type(expr_id);
+                let slot_tys = self.tuple_elem_tys(ty);
+                let elems: Vec<ValueId> = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &e)| {
+                        let v = self.lower_expr(e);
+                        // Stage 1.5: a ref element decays to an owned copy
+                        // (the tuple owns its elements) — EXCEPT a stage-2b
+                        // ref SLOT, which takes the ref itself
+                        // (`emit_tuple`'s packaging owns the bookkeeping).
+                        if self.slot_is_ref(&slot_tys, i) {
+                            v
+                        } else {
+                            self.decay_if_ref(v)
+                        }
+                    })
+                    .collect();
                 self.emit_tuple(ty, elems)
             },
 
@@ -172,11 +200,22 @@ impl OssaBodyCtx<'_, '_> {
                     return self.emit_value_use(v);
                 }
                 let base_val = self.lower_expr_for_borrow(*base);
-                let result_ty = self.resolve_expr_type(expr_id);
-                let result = self.emit_tuple_extract(base_val, *index, result_ty);
+                // Stage 2b ref slot: extract with the SLOT type (the expr
+                // type is the peeled pointee) so the ref arm loads the
+                // stored address instead of reading pointer bits as the
+                // pointee.
+                let base_ty = self.resolve_expr_type(*base);
+                let slot_tys = self.tuple_elem_tys(base_ty);
+                let extract_ty = if self.slot_is_ref(&slot_tys, *index as usize) {
+                    slot_tys[*index as usize]
+                } else {
+                    self.resolve_expr_type(expr_id)
+                };
+                let result = self.emit_tuple_extract(base_val, *index, extract_ty);
                 // Single-use ref: element copy-out ends the ref (see the
-                // stored-field twin in lower_field).
+                // stored-field twin in lower_field). Named bindings stay live.
                 if self.ref_results.contains(&base_val)
+                    && !self.ref_binding_vals.contains_key(&base_val)
                     && self.body.value(result).ownership
                         == kestrel_mir::value::Ownership::Owned
                 {
@@ -313,12 +352,123 @@ impl OssaBodyCtx<'_, '_> {
     // Field access
     // ================================================================
 
+    /// The `Indirection`-peel chain recorded for `expr_id` (the side table),
+    /// or `None` when this member access did not peel. The `Vec` is the
+    /// outer→inner chain for nested wrappers.
+    pub(crate) fn indirection_peels_of(&self, expr_id: HirExprId) -> Option<Vec<IndirectionPeel>> {
+        self.typed
+            .as_ref()
+            .and_then(|t| t.indirection_peels.get(&expr_id))
+            .filter(|v| !v.is_empty())
+            .cloned()
+    }
+
+    /// Replay an `Indirection` peel: emit the `pointeeRef()` / `pointeeMutRef()`
+    /// accessor call(s) on member-access base `base`, returning the final
+    /// `&Target` / `&mutating Target` pointee view. `mutating` selects the
+    /// write accessor; each level's result is the next level's receiver
+    /// (nested `RcBox[Pointer[T]]`). The returned view is then projected
+    /// (field) or passed as a receiver (method) by the caller.
+    pub(crate) fn lower_indirection_chain(
+        &mut self,
+        base: HirExprId,
+        peels: &[IndirectionPeel],
+        mutating: bool,
+    ) -> ValueId {
+        let conv = if mutating {
+            ParamConvention::MutBorrow
+        } else {
+            ParamConvention::Borrow
+        };
+        // Level 0 receiver is the wrapper expression; later levels receive the
+        // previous level's pointee view.
+        let mut recv_ty = self.resolve_expr_type(base);
+        let mut recv_arg = self.prepare_call_arg_for_expr(base, conv);
+        let mut last: Option<ValueId> = None;
+        for peel in peels {
+            // `mut_method` is guaranteed Some at a write site (D2 rejects the
+            // read-only case before lowering); fall back to read for safety.
+            let method = if mutating {
+                peel.mut_method.unwrap_or(peel.read_method)
+            } else {
+                peel.read_method
+            };
+            self.ctx.register_name(method);
+            // Pass the POINTEE type as the result type, NOT `&Target`: the
+            // callee's `CallableRefReturn` (`pointeeRef -> &Target`) drives
+            // `emit_call_inner` to register the result @guaranteed as the
+            // pointee VIEW (holding the address) — exactly like `arr.at(i)`.
+            // Passing `&Target` would register an @owned pointer whose
+            // StructExtract reads the pointer's bytes as the pointee (segfault).
+            let target_ty = lower_resolved_ty(self.ctx, &peel.target);
+            let type_args = self.prepend_receiver_type_args(recv_ty, vec![]);
+            let callee = Callee::direct_with_args(method, type_args, None);
+            let ref_val = self.emit_call_returning(callee, vec![recv_arg], target_ty);
+            recv_ty = target_ty;
+            recv_arg = CallArg {
+                value: ref_val,
+                convention: conv,
+            };
+            last = Some(ref_val);
+        }
+        last.expect("indirection peel chain has at least one level")
+    }
+
+    /// Store `value` into `field_name` of an `Indirection` pointee reached by a
+    /// write peel: get the `&mutating Target` view via `pointeeMutRef()`, take
+    /// the field's address through it, and `StoreAssign` (drops the old value).
+    /// `rhs` is lowered first (pinned evaluation order).
+    fn lower_indirection_field_store(
+        &mut self,
+        base: HirExprId,
+        peels: &[IndirectionPeel],
+        field_name: &str,
+        value: HirExprId,
+    ) -> ValueId {
+        let rhs = self.lower_expr(value);
+        let view = self.lower_indirection_chain(base, peels, true);
+        let pointee_ty = self.body.value(view).ty;
+        let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
+            MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
+            _ => None,
+        }
+        .unwrap_or_else(|| {
+            debug_assert!(false, "ICE: peeled write field '{field_name}' not on pointee");
+            FieldIdx::new(0)
+        });
+        // PtrTo on the @guaranteed mutable view yields the pointee's address;
+        // FieldAddr projects the field; StoreAssign drops the old field value.
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
+        let pointee_addr = self.emit_op1(Op::PtrTo(pointee_ty), view, ptr_ty);
+        let field_addr = self.emit_field_addr(pointee_addr, pointee_ty, field_idx);
+        self.emit_store_assign(field_addr, rhs);
+        self.end_ref_if_single_use(view);
+        self.emit_literal(Immediate::unit())
+    }
+
     pub(crate) fn lower_field_access(
         &mut self,
         expr_id: HirExprId,
         base: HirExprId,
         field_name: &str,
     ) -> ValueId {
+        // Indirection read peel: `wrapper.field` where the wrapper has no
+        // `field` → resolve it on the pointee, reached via `pointeeRef()`.
+        if let Some(peels) = self.indirection_peels_of(expr_id) {
+            let view = self.lower_indirection_chain(base, &peels, false);
+            let result_ty = self.resolve_expr_type(expr_id);
+            let pointee_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+            let field_idx = match self.ctx.module.ty_arena.get(pointee_ty) {
+                MirTy::Named { entity, .. } => self.ctx.resolve_field_idx(*entity, field_name),
+                _ => None,
+            }
+            .unwrap_or_else(|| {
+                debug_assert!(false, "ICE: peeled field '{field_name}' not on pointee");
+                FieldIdx::new(0)
+            });
+            return self.emit_struct_extract(view, field_idx, result_ty);
+        }
+
         let resolved = self
             .typed
             .as_ref()
@@ -372,7 +522,15 @@ impl OssaBodyCtx<'_, '_> {
 
         // Computed property → getter call
         if is_callable {
-            let getter_entity = resolved.unwrap();
+            // Stage 1.5 read-provider routing: a computed property with a
+            // `ref { … }` accessor serves READS through the accessor child
+            // (the parent may be bodyless for pure-ref members). The result
+            // registers @guaranteed + ref_results via the child's
+            // CallableRefReturn — nothing else changes.
+            let getter_entity = self
+                .ctx
+                .find_ref_accessor_child(resolved.unwrap(), false)
+                .unwrap_or_else(|| resolved.unwrap());
             self.ctx.register_name(getter_entity);
             let result_ty = self.resolve_expr_type(expr_id);
 
@@ -439,23 +597,24 @@ impl OssaBodyCtx<'_, '_> {
                 FieldIdx::new(0)
             });
 
-        // If the base roots at a var-local (a `mutating`/MutBorrow receiver or
-        // a mutable local, bound to a stack address), project the field's
-        // ADDRESS and read just the field. The fallback path below loads the
-        // whole struct for a var-local base — an illegal copy when the struct
-        // is non-Copyable, even if the field itself is Copyable (e.g.
-        // `IntersperseIterator.next` reading `self.separator`). This is the
-        // address-analog of `emit_struct_extract`: a @guaranteed place for a
-        // non-Copyable field, and a clone (snapshot at read time) for a
-        // Copyable one — the snapshot matters for read-then-mutate sequences
-        // like `let v = self.x; self.x = self.x + 1` where `v` must be the old
-        // value, not an alias of the now-written field.
-        if let Some(base_addr) = self.try_field_addr_chain(base) {
-            let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-            if self.is_non_copyable(result_ty) {
-                return self.emit_begin_borrow_addr(field_addr, result_ty);
-            }
-            return self.emit_copy_addr(field_addr, result_ty);
+        // Place-resolved read (the resolver owns BOTH special routes that
+        // used to live here):
+        // - a ref-slot field comes back as a View — the loaded ref,
+        //   registered for per-use decay (reading the slot as pointee bits
+        //   was the corruption class);
+        // - a var-rooted chain comes back as an Addr and reads via
+        //   `read_place`'s snapshot rule: clone for a Copyable field (the
+        //   `let v = self.x; self.x = self.x + 1` old-value guarantee),
+        //   in-place @guaranteed view for a non-Copyable one (the fallback
+        //   below would load the WHOLE struct — an illegal copy, e.g.
+        //   `IntersperseIterator.next` reading `self.separator`).
+        // Field-over-View bases resolve None under Forbid and take the
+        // extraction fallback below.
+        if let Some(p) = self.lower_place(expr_id, FieldViews::Forbid) {
+            return match p.repr {
+                PlaceRepr::View(v) => v,
+                PlaceRepr::Addr(_) => self.read_place(&p),
+            };
         }
 
         let base_val = self.lower_expr_for_borrow(base);
@@ -465,7 +624,9 @@ impl OssaBodyCtx<'_, '_> {
         // here, or it leaks into the next terminator (false E497 inside an
         // `if` condition). A non-Copyable field instead keeps a @guaranteed
         // view alive; ending that view (call-arg machinery) ends the ref.
+        // Named bindings stay live for later reads (`r.field` twice).
         if self.ref_results.contains(&base_val)
+            && !self.ref_binding_vals.contains_key(&base_val)
             && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
         {
             self.emit_end_borrow(base_val);
@@ -640,6 +801,16 @@ impl OssaBodyCtx<'_, '_> {
         target: HirExprId,
         value: HirExprId,
     ) -> ValueId {
+        // Indirection write peel: `wrapper.field = v` where the wrapper has no
+        // `field` → store through the pointee, reached via `pointeeMutRef()`.
+        if let HirExpr::Field { base, name, .. } = &self.hir.exprs[target]
+            && let Some(peels) = self.indirection_peels_of(target)
+        {
+            let base = *base;
+            let field_name = name.as_str_or_empty().to_string();
+            return self.lower_indirection_field_store(base, &peels, &field_name, value);
+        }
+
         // Setter dispatch: computed properties, subscripts, field-subscripts
         if let Some(result) = self.try_lower_setter_assign(target, value) {
             return result;
@@ -659,7 +830,9 @@ impl OssaBodyCtx<'_, '_> {
             let ptr_ty = self.ctx.module.ty_arena.pointer(pointee);
             let addr = self.emit_op1(Op::PtrTo(pointee), ref_val, ptr_ty);
             self.emit_store_assign(addr, rhs);
-            self.emit_end_borrow(ref_val);
+            // A named `&mutating` binding stays live for later uses; an
+            // expression ref's store-through was its single use.
+            self.end_ref_if_single_use(ref_val);
             return self.emit_literal(Immediate::unit());
         }
 
@@ -782,6 +955,20 @@ impl OssaBodyCtx<'_, '_> {
     /// assignment analyzer rejects them with E208.)
     fn assign_target_is_mut_ref(&self, target: HirExprId) -> bool {
         let callee_entity = match &self.hir.exprs[target] {
+            // Named `&mutating` binding: `r = v` is store-through (the
+            // ratified item-2 semantics — there is no rebind spelling).
+            HirExpr::Local(local, _) => {
+                return self
+                    .typed
+                    .as_ref()
+                    .and_then(|t| t.local_types.get(local))
+                    .is_some_and(|ty| {
+                        matches!(
+                            ty,
+                            kestrel_type_infer::result::ResolvedTy::Ref { mutating: true, .. }
+                        )
+                    });
+            },
             HirExpr::Field { .. } | HirExpr::MethodCall { .. } => self
                 .typed
                 .as_ref()
@@ -813,6 +1000,30 @@ impl OssaBodyCtx<'_, '_> {
     // Setter dispatch
     // ----------------------------------------------------------------
 
+    /// Call a `mutating ref` accessor and store `rhs` through the returned
+    /// place — PtrTo + StoreAssign + EndBorrow, the shipped `&mutating`-call
+    /// assign shape (`lower_assign`). `call_args` = receiver + index args,
+    /// already prepared; `pointee_ty` is the member's declared type (what
+    /// the assign target expr resolves to). The call result registers in
+    /// `ref_results` via the accessor's CallableRefReturn; the store is the
+    /// ref's single use, so its borrow ends here.
+    fn emit_ref_accessor_store(
+        &mut self,
+        accessor: kestrel_hecs::Entity,
+        type_args: Vec<TyId>,
+        call_args: Vec<CallArg>,
+        pointee_ty: TyId,
+        rhs: ValueId,
+    ) -> ValueId {
+        let callee = Callee::direct_with_args(accessor, type_args, None);
+        let ref_val = self.emit_call_returning(callee, call_args, pointee_ty);
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
+        let addr = self.emit_op1(Op::PtrTo(pointee_ty), ref_val, ptr_ty);
+        self.emit_store_assign(addr, rhs);
+        self.emit_end_borrow(ref_val);
+        self.emit_literal(Immediate::unit())
+    }
+
     /// If the assignment target is a computed property or subscript with a
     /// setter, emit a setter call and return unit. Otherwise return None
     /// so the caller falls through to stored assignment.
@@ -826,7 +1037,7 @@ impl OssaBodyCtx<'_, '_> {
             HirExpr::Field { base, name, .. } => {
                 self.try_lower_field_setter(target_id, value_id, base, name.as_str_or_empty())
             },
-            HirExpr::Def(entity, _, _) => self.try_lower_def_setter(value_id, entity),
+            HirExpr::Def(entity, _, _) => self.try_lower_def_setter(target_id, value_id, entity),
             HirExpr::Call { callee, args, .. } => {
                 self.try_lower_call_setter(target_id, value_id, callee, &args)
             },
@@ -907,6 +1118,31 @@ impl OssaBodyCtx<'_, '_> {
             return Some(self.emit_literal(Immediate::unit()));
         }
 
+        // Stage 1.5: a `mutating ref` accessor is the write provider when
+        // declared — RHS lowered FIRST (pinned evaluation order), then the
+        // place ref is fabricated and stored through.
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(resolved, true) {
+            self.ctx.register_name(accessor);
+            let is_static = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Static>(resolved)
+                .is_some();
+            let rhs = self.lower_expr(value_id);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            let mut call_args: Vec<CallArg> = Vec::new();
+            let type_args = if is_static {
+                let self_type = self.type_from_type_ref(base);
+                self.prepend_receiver_type_args(self_type, vec![])
+            } else {
+                let receiver_ty = self.resolve_expr_type(base);
+                let ta = self.resolve_type_args(target_id);
+                call_args.push(self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow));
+                self.prepend_receiver_type_args(receiver_ty, ta)
+            };
+            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+        }
+
         // Concrete computed property setter
         let setter = self.ctx.find_setter_child(resolved)?;
         self.ctx.register_name(setter);
@@ -953,9 +1189,17 @@ impl OssaBodyCtx<'_, '_> {
     /// Arm 2: `globalComputedProp = v`
     fn try_lower_def_setter(
         &mut self,
+        target_id: HirExprId,
         value_id: HirExprId,
         entity: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
+        // Stage 1.5: `mutating ref` write provider (global member — no receiver).
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(entity, true) {
+            self.ctx.register_name(accessor);
+            let rhs = self.lower_expr(value_id);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            return Some(self.emit_ref_accessor_store(accessor, vec![], vec![], pointee_ty, rhs));
+        }
         let setter = self.ctx.find_setter_child(entity)?;
         self.ctx.register_name(setter);
         let rhs = self.lower_expr(value_id);
@@ -980,6 +1224,37 @@ impl OssaBodyCtx<'_, '_> {
             .copied()?;
         if self.ctx.world.get::<NodeKind>(resolved) != Some(&NodeKind::Subscript) {
             return None;
+        }
+
+        // Stage 1.5: a `mutating ref` accessor is the write provider when
+        // declared — RHS lowered FIRST (pinned evaluation order: the test
+        // wave pins `x(i) = expr-that-mutates-x`), then receiver + index
+        // args, then the place ref is fabricated and stored through.
+        if let Some(accessor) = self.ctx.find_ref_accessor_child(resolved, true) {
+            self.ctx.register_name(accessor);
+            let is_static = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Static>(resolved)
+                .is_some();
+            let rhs = self.lower_expr(value_id);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            let mut call_args: Vec<CallArg> = Vec::new();
+            let type_args = if is_static {
+                let self_type = self.type_from_type_ref(callee_expr);
+                self.prepend_receiver_type_args(self_type, vec![])
+            } else {
+                let receiver_ty = self.resolve_expr_type(callee_expr);
+                let ta = self.resolve_type_args(target_id);
+                call_args
+                    .push(self.prepare_call_arg_for_expr(callee_expr, ParamConvention::MutBorrow));
+                self.prepend_receiver_type_args(receiver_ty, ta)
+            };
+            for a in args {
+                let v = self.lower_expr(a.value);
+                call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
+            }
+            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
         }
 
         let setter = self.ctx.find_setter_child(resolved)?;
@@ -1083,8 +1358,12 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
 
-        let setter = self.ctx.find_setter_child(resolved)?;
-        self.ctx.register_name(setter);
+        let mutating_ref = self.ctx.find_ref_accessor_child(resolved, true);
+        let setter = if mutating_ref.is_none() {
+            Some(self.ctx.find_setter_child(resolved)?)
+        } else {
+            None
+        };
 
         // Resolve field type and extract through it
         let recv_entity = receiver_entity?;
@@ -1132,6 +1411,19 @@ impl OssaBodyCtx<'_, '_> {
         for v in subscript_args {
             call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
         }
+
+        // Stage 1.5: `mutating ref` write provider — fabricate the element
+        // place through the accessor (receiver = the field place) and store
+        // through it. RHS was lowered before the place fabrication above.
+        if let Some(accessor) = mutating_ref {
+            self.ctx.register_name(accessor);
+            let pointee_ty = self.resolve_expr_type(target_id);
+            let type_args = self.prepend_receiver_type_args(field_ty, type_args);
+            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+        }
+
+        let setter = setter.expect("setter present when no mutating ref accessor");
+        self.ctx.register_name(setter);
         call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
 
         if let Some(protocol) = self.ctx.is_protocol_method(setter) {

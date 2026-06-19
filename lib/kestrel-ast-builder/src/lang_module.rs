@@ -46,6 +46,13 @@ pub fn seed_lang_module(world: &mut World, root: Entity) -> Entity {
     // (see `try_lang_primitive`), so witnesses/uses agree on the structural repr.
     seed_scalar(world, lang, "()");
     seed_scalar(world, lang, "!");
+    // Reference types `&T` / `&mutating T` are likewise structural — these
+    // generic synthetic entities (seed_ptr pattern) make them extension
+    // targets (`extend &T: Equatable where T: Equatable`). The type layer
+    // never uses the entities: every chokepoint maps them back to
+    // `HirTy::Ref` / `TyKind::Ref` / `MirTy::Ref` (see `try_lang_primitive`).
+    seed_ref(world, lang, "&");
+    seed_ref(world, lang, "&mutating");
 
     // Intrinsic functions
     seed_integer_ops(world, lang);
@@ -87,6 +94,27 @@ fn seed_ptr(world: &mut World, lang: Entity) {
     world.set_parent(t, ptr);
 
     world.set(ptr, TypeParams(vec![t]));
+}
+
+/// Create `lang.&` / `lang.&mutating` — generic synthetic entities for the
+/// reference types, pointee type param named `T`. Extension LHS args bind by
+/// NAME against the target's declared params (resolve_extension_type_param),
+/// so ref extensions spell the pointee `T`: `extend &T: P where T: P`.
+fn seed_ref(world: &mut World, lang: Entity, name: &str) {
+    let r = world.spawn();
+    world.set(r, NodeKind::Struct);
+    world.set(r, Name(name.into()));
+    world.set(r, Vis::Public);
+    world.set(r, Typed);
+    world.set(r, Intrinsic);
+    world.set_parent(r, lang);
+
+    let t = world.spawn();
+    world.set(t, NodeKind::TypeParameter);
+    world.set(t, Name("T".into()));
+    world.set_parent(t, r);
+
+    world.set(r, TypeParams(vec![t]));
 }
 
 // ===== AstType helpers =====

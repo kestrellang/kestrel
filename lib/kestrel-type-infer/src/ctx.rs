@@ -18,6 +18,15 @@ use crate::resolve::TypeResolver;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use kestrel_ast_builder::NodeKind;
 
+/// One level of an in-progress `Indirection` peel, accumulated during solving.
+/// `target_tv` is resolved to a concrete `ResolvedTy` in `build_result` to
+/// form the final `crate::result::IndirectionPeel`.
+pub(crate) struct PendingPeel {
+    pub read_method: kestrel_hecs::Entity,
+    pub mut_method: Option<kestrel_hecs::Entity>,
+    pub target_tv: TyVar,
+}
+
 /// Mutable state for type inference of a single function/init/getter body.
 pub struct InferCtx<'a> {
     /// Type resolver for querying the world (members, conformances, builtins).
@@ -71,6 +80,33 @@ pub struct InferCtx<'a> {
     /// `CallableRefReturn`, not from this expression's recorded type.
     pub(crate) assign_target_exprs: HashSet<HirExprId>,
 
+    /// HirExprIds in ALWAYS-DECAY value positions: `if`/`match` ARM VALUES
+    /// (refs cannot cross merges) and array/tuple/dict LITERAL ELEMENTS
+    /// (aggregates own their elements). A ref-returning call here binds its
+    /// result to the POINTEE in `bind_call_result`, so the arm-merge /
+    /// element `Equal`s only ever see owned types — order-independently,
+    /// like the other value-context sets. The constraints stay `Equal`, so
+    /// bidirectional back-flow (annotation → arms/elements, literal
+    /// defaulting, ExpressibleByArrayLiteral targeting) is untouched.
+    pub(crate) always_decay_exprs: HashSet<HirExprId>,
+
+    /// TyVars allocated for ENUM-PATTERN BINDERS whose `ImplicitPat` may
+    /// fire late (the scrutinee can wait on literal defaulting — e.g.
+    /// `for x in [1,2,3].refs()`: the array's element literal pins T, which
+    /// pins the iterator, which pins `next()`'s `Optional[&T]`). A binder's
+    /// type comes from its PATTERN, never its uses (the AssignTarget
+    /// principle): while `pattern_binder_gate` is up, a use-site Coerce
+    /// FROM one of these still-unresolved vars against a resolved target
+    /// defers instead of pinning via plain unify (which manufactured
+    /// "expected Int64 got &Int64" when the late payload equate landed).
+    pub(crate) pattern_binder_tvs: HashSet<TyVar>,
+
+    /// Drops after the literal-relaxation loop (next to the AssignTarget
+    /// stall-breaker): at that point every fireable pattern has fired, so a
+    /// binder still unresolved has no pattern-side source and its uses may
+    /// pin it (old behavior) rather than deadlock.
+    pub(crate) pattern_binder_gate: bool,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -80,9 +116,21 @@ pub struct InferCtx<'a> {
     /// gen helpers before they recurse into `inner`.
     pub(crate) poison_protocol_call_recv_on_failure: HashSet<HirExprId>,
 
+    /// Member-access exprs that came from a desugared `ProtocolCall`
+    /// (operators, for-in, try). The lazy `Indirection` peel in `solve_member`
+    /// is SKIPPED for these — operators/conformances forward via explicit
+    /// `extend`, never through the member peel (the receiver-only rule, R7).
+    /// Populated by the `ProtocolCall` arm of `generate.rs`.
+    pub(crate) protocol_dispatch_members: HashSet<HirExprId>,
+
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
+
+    /// `Indirection`-peel plan per member-access expr (outer→inner chain).
+    /// Accumulated by the peel arm in `solve_member`; `build_result` resolves
+    /// each `target_tv` and copies the chain to `TypedBody.indirection_peels`.
+    pub(crate) indirection_peels: HashMap<HirExprId, Vec<PendingPeel>>,
 
     /// MethodCall exprs where the resolution went through a field access.
     /// Maps expr → field entity. MIR lowering must interpose a field
@@ -207,6 +255,18 @@ pub struct InferCtx<'a> {
     /// Applied after constraint solving: only type vars still unconstrained
     /// get their default, so generic bodies like `Set.init()` keep `H` free.
     pub(crate) type_param_defaults: Vec<(TyVar, HirTy)>,
+
+    /// De-dup set for TYPE-ARGUMENT conformance FAILURES, keyed by
+    /// `(structural type string, protocol)`. The same wellformedness
+    /// obligation (`X: Copyable`/`Static`) is emitted from several layers —
+    /// the call-site where-clause (`emit_where_clause_constraints_with_subs`),
+    /// the annotation formation (`lower_hir_ty_with_subs`), and the
+    /// return-position formation (`lower_return_ty_with_opaque`) — so the same
+    /// concrete violation can fail more than once. Report each distinct
+    /// `(type, protocol)` only once; the first (earliest-solved, best-span)
+    /// wins. Keyed structurally, not by TyVar, because the duplicate sites
+    /// form independent TyVar trees for the same concrete type.
+    pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -250,10 +310,15 @@ impl<'a> InferCtx<'a> {
             errored_coerce_exprs: HashSet::new(),
             scrutinee_exprs: HashSet::new(),
             assign_target_exprs: HashSet::new(),
+            always_decay_exprs: HashSet::new(),
             direct_callee_exprs: HashSet::new(),
             binding_init_exprs: HashSet::new(),
+            pattern_binder_tvs: HashSet::new(),
+            pattern_binder_gate: true,
             poison_protocol_call_recv_on_failure: HashSet::new(),
+            protocol_dispatch_members: HashSet::new(),
             resolutions: HashMap::new(),
+            indirection_peels: HashMap::new(),
             field_subscripts: HashMap::new(),
             promotions: HashMap::new(),
             type_args: HashMap::new(),
@@ -279,6 +344,7 @@ impl<'a> InferCtx<'a> {
             loop_break_tys: Vec::new(),
             opaque_return: None,
             type_param_defaults: Vec::new(),
+            reported_typearg_conformance: HashSet::new(),
         }
     }
 
@@ -604,12 +670,53 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    pub fn borrow_pointee(&mut self, inner: TyVar, pointee: TyVar, span: Span) {
+        self.constraints.push(Constraint::BorrowPointee {
+            inner,
+            pointee,
+            span,
+        });
+    }
+
+    /// Equal with the ref-decay dimension — see `Constraint::EqualDecayed`.
+    pub fn equal_decayed(&mut self, value: TyVar, target: TyVar, span: Span) {
+        self.constraints.push(Constraint::EqualDecayed {
+            value,
+            target,
+            span,
+        });
+    }
+
+    /// Assignment into a local target — see `Constraint::AssignTarget`.
+    pub fn assign_target(&mut self, value: TyVar, target: TyVar, expr: HirExprId, span: Span) {
+        self.constraints.push(Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        });
+    }
+
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
         self.constraints.push(Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::Expr,
+        });
+    }
+
+    /// Conforms variant for TYPE-ARGUMENT obligations (where-clause bounds,
+    /// formation wellformedness, alias bounds): a ref judged here is the
+    /// ref ITSELF, never its pointee — see `ConformsOrigin`.
+    pub fn conforms_typearg(&mut self, ty: TyVar, protocol: Entity, span: Span) {
+        self.constraints.push(Constraint::Conforms {
+            ty,
+            protocol,
+            span,
+            poison_ty_on_failure: false,
+            origin: crate::constraint::ConformsOrigin::TypeArg,
         });
     }
 
@@ -623,6 +730,7 @@ impl<'a> InferCtx<'a> {
             protocol,
             span,
             poison_ty_on_failure: true,
+            origin: crate::constraint::ConformsOrigin::Expr,
         });
     }
 

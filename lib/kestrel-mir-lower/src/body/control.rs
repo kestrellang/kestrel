@@ -59,7 +59,15 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&live_vals, &then_params);
         self.push_scope();
         let then_val = self.lower_hir_block(then_body);
+        // Arm-value decay copies in `capture_arm_exit` diagnose at the
+        // branch's value expression (a tail-less block's value is unit —
+        // never a ref/NotCopyable — so the enclosing span is fine there).
+        let prev_span = self.current_span.clone();
+        if let Some(tail) = then_body.tail_expr {
+            self.current_span = Some(super::value_expr_span(&self.hir, tail));
+        }
         let then_exit = self.capture_arm_exit(then_val);
+        self.current_span = prev_span;
         self.pop_scope();
 
         // -- Else arm --
@@ -69,7 +77,13 @@ impl OssaBodyCtx<'_, '_> {
         self.push_scope();
         let else_exit = if let Some(else_body) = else_body {
             let else_val = self.lower_hir_block(else_body);
-            self.capture_arm_exit(else_val)
+            let prev_span = self.current_span.clone();
+            if let Some(tail) = else_body.tail_expr {
+                self.current_span = Some(super::value_expr_span(&self.hir, tail));
+            }
+            let exit = self.capture_arm_exit(else_val);
+            self.current_span = prev_span;
+            exit
         } else {
             let unit = self.emit_literal(Immediate::unit());
             self.capture_arm_exit(unit)
@@ -120,6 +134,28 @@ impl OssaBodyCtx<'_, '_> {
         }
         if result_ownership == Ownership::Owned {
             self.track_owned(result_param);
+        }
+        // Stage 2b: a ref-bearing result's escape taint must survive the
+        // merge — join the per-edge result roots. Untainted (self-rooted)
+        // edges contribute nothing, so `if c { .Some(&local) } else { .None }`
+        // joins to the local taint (conservative on the .None path — the
+        // sound direction).
+        if self.ctx.module.ty_arena.contains_ref(result_ty) {
+            let convs = self.current_param_convs();
+            let mut joined: Option<kestrel_mir::value::RootProvenance> = None;
+            for exit in &reaching {
+                let d = self.body.value(exit.result);
+                if d.root != kestrel_mir::value::RootProvenance::Local(exit.result) {
+                    let r = d.root;
+                    joined = Some(match joined {
+                        None => r,
+                        Some(j) => j.join(r, &convs),
+                    });
+                }
+            }
+            if let Some(root) = joined {
+                self.stamp_root(result_param, root);
+            }
         }
 
         // Restore outer tracker, propagating survivors and dropping the dead.
@@ -176,18 +212,31 @@ impl OssaBodyCtx<'_, '_> {
         let (exit_block, exit_params) = self.new_block_with_params(&descs);
 
         if !self.is_terminated() {
+            // Pop EVERY threaded entry — owned values and binding borrows —
+            // and re-track them below in desc order: break/continue rely on
+            // "the loop's tracked values are the first N slots", which is
+            // positional over scope-entry order.
             for &v in &initial_args {
                 self.pop_owned_from_scope(v);
+                self.untrack_borrow(v);
             }
             self.emit_jump(header_block, initial_args.clone());
         }
 
         self.switch_to(header_block);
+        // Rebinds local_map/tracker and stamps threaded binding params
+        // (borrow_source/root + ref_binding_vals) even though the scope
+        // entries were popped above.
         self.rebind_scope_values(&initial_args, &header_params);
-        // initial_args were consumed before the jump, so rebind won't
-        // find them in scope. Track the header params fresh.
-        for &param in header_params.iter() {
-            self.track_owned(param);
+        for (i, &param) in header_params.iter().enumerate() {
+            match descs[i].1 {
+                Ownership::Owned => self.track_owned(param),
+                // A threaded ref binding continues as the header's
+                // @guaranteed param — re-add its Borrow entry here, in desc
+                // order (the loop-exit path restores the pre-loop scope, so
+                // this placement only governs in-body teardown).
+                Ownership::Guaranteed => self.track_borrow(param),
+            }
         }
 
         let scope_depth = self.scope_stack.len();

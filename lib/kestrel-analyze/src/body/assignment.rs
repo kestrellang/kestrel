@@ -145,6 +145,12 @@ impl BodyCheck for AssignmentAnalyzer {
             ) {
                 continue;
             }
+            // Stage 1.5: a member with a `mutating ref` accessor is a
+            // writable place projection — base mutability is enforced by
+            // the access-mode analyzer's mutating-receiver check.
+            if util::accessor_place_mut_base(cx, *receiver).is_some() {
+                continue;
+            }
             match util::ref_place(cx, *receiver) {
                 // `&mutating T` call result — a writable place.
                 Some(true) => {},
@@ -182,6 +188,19 @@ fn check_target(
     match &cx.hir.exprs[target] {
         // Local variable: check is_mut
         HirExpr::Local(local_id, _) => {
+            // Named ref binding (stage 1.5 item 2): writability comes from
+            // the REFERENCE type, not the binding's mutability — `r = v` on
+            // a `&mutating` binding is store-through (there is no rebind
+            // spelling); on a shared `&` binding it is the E208 family.
+            // Mirrors the Field arm's ref_place consult.
+            match util::ref_place(cx, target) {
+                Some(true) => return,
+                Some(false) => {
+                    push_assign_through_shared_ref(cx, target, &mut *diags);
+                    return;
+                },
+                None => {},
+            }
             let local = &cx.hir.locals[*local_id];
             if !local.is_mut && !util::is_mut_borrow_param(cx, *local_id) {
                 diags.push(AnalyzeDiagnostic {
@@ -201,6 +220,21 @@ fn check_target(
         // Field access: check Settable component on the resolved entity.
         // In an initializer, self.field assignments are always allowed.
         HirExpr::Field { base, name, .. } => {
+            // Indirection write peel through a READ-ONLY wrapper: the field is
+            // reached via `pointeeRef()` (a `&T` place) because the wrapper is
+            // `Indirection` but not `MutableIndirection` — no `pointeeMutRef()`.
+            // Same class as E208: a `&T` place can't be written. (D2)
+            if cx
+                .typed
+                .indirection_peels
+                .get(&target)
+                .and_then(|peels| peels.last())
+                .is_some_and(|p| p.mut_method.is_none())
+            {
+                push_assign_through_shared_ref(cx, target, diags);
+                return;
+            }
+
             // Ref-returning getter (`cell.mutatingValue = v`): the place's
             // writability comes from the REFERENCE type, not the binding —
             // skip the Settable/base-mutability checks. `&T` is read-only.

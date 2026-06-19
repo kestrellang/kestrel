@@ -840,12 +840,22 @@ impl LowerCtx {
         let span = self.span(node);
 
         // Operator token comes first
-        let op = node
+        let mut op = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
             .and_then(|t| token_to_unary_op(t.kind()))
             .unwrap_or(UnaryOp::Neg);
+        // `&mutating expr`: the parser puts the `mutating` keyword inside
+        // the unary node, right after the `&`.
+        if op == UnaryOp::Borrow
+            && node
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .any(|t| t.kind() == SyntaxKind::Mutating)
+        {
+            op = UnaryOp::BorrowMutating;
+        }
 
         // Operand expression
         let operand = node
@@ -1329,6 +1339,7 @@ impl LowerCtx {
             let pat = self.alloc_pat(AstPat::Binding {
                 is_mut: false,
                 name: "it".to_string(),
+                by_ref: None,
                 span: span.clone(),
             });
             params.push(ClosureParam {
@@ -1501,6 +1512,7 @@ impl LowerCtx {
                 self.alloc_pat(AstPat::Wildcard { span })
             },
             SyntaxKind::BindingPattern => self.lower_binding_pattern(&node),
+            SyntaxKind::RefBindingPattern => self.lower_ref_binding_pattern(&node),
             SyntaxKind::TuplePattern => self.lower_tuple_pattern(&node),
             SyntaxKind::LiteralPattern => self.lower_literal_pattern(&node),
             SyntaxKind::RangePattern => self.lower_range_pattern(&node),
@@ -1540,7 +1552,36 @@ impl LowerCtx {
             .map(|t| t.text().to_string())
             .unwrap_or_default();
 
-        self.alloc_pat(AstPat::Binding { is_mut, name, span })
+        self.alloc_pat(AstPat::Binding {
+            is_mut,
+            name,
+            by_ref: None,
+            span,
+        })
+    }
+
+    /// `&name` / `&mutating name` — a binding that borrows the matched
+    /// place (stage 1.5 item 2). `by_ref` carries the mutability axis.
+    fn lower_ref_binding_pattern(&mut self, node: &SyntaxNode) -> PatId {
+        let span = self.span(node);
+
+        let mutating = node
+            .children_with_tokens()
+            .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Mutating));
+
+        let name = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::Identifier)
+            .map(|t| t.text().to_string())
+            .unwrap_or_default();
+
+        self.alloc_pat(AstPat::Binding {
+            is_mut: false,
+            name,
+            by_ref: Some(mutating),
+            span,
+        })
     }
 
     fn lower_tuple_pattern(&mut self, node: &SyntaxNode) -> PatId {
@@ -1728,6 +1769,7 @@ impl LowerCtx {
                         self.alloc_pat(AstPat::Binding {
                             is_mut: false,
                             name,
+                            by_ref: None,
                             span: self.span(&arg_node),
                         })
                     });
@@ -2068,6 +2110,7 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
         SyntaxKind::Pattern
             | SyntaxKind::WildcardPattern
             | SyntaxKind::BindingPattern
+            | SyntaxKind::RefBindingPattern
             | SyntaxKind::TuplePattern
             | SyntaxKind::LiteralPattern
             | SyntaxKind::RangePattern
@@ -2420,6 +2463,25 @@ mod tests {
                 other => panic!("expected Unary, got {:?}", other),
             }
         }
+    }
+
+    #[test]
+    fn unary_borrow_operators() {
+        // `&x` → Borrow; `&mutating x` → BorrowMutating (the `mutating`
+        // keyword rides inside the unary CST node).
+        let body = lower_func_body("func f() { let r = &x; let m = &mutating x; }");
+        let ops: Vec<UnaryOp> = body
+            .statements
+            .iter()
+            .filter_map(|&s| match &body.stmts[s] {
+                AstStmt::Let { value: Some(v), .. } => match &body.exprs[*v] {
+                    AstExpr::Unary { op, .. } => Some(op.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ops, vec![UnaryOp::Borrow, UnaryOp::BorrowMutating]);
     }
 
     #[test]

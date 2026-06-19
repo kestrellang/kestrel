@@ -14,7 +14,7 @@ struct Counter {
 @main
 func main() -> lang.i64 {
     var arr = [Counter(n: 0), Counter(n: 5)];
-    arr.mutableAt(index: 0).bump();
+    arr(at: 0).bump();
     if arr(0).n != 1 { return 1; }
     if arr(1).n != 5 { return 2; }
     0

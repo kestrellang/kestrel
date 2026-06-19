@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use crate::constraint::{CallArg, Constraint, labels_match};
+use crate::constraint::{CallArg, ConformsOrigin, Constraint, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
@@ -23,7 +23,9 @@ use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, TypeParamCopyRequirement,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness,
+    StaticLayer, StaticRequirement, Staticness, TypeParamCopyRequirement,
+    TypeParamStaticRequirement, instance_is_static,
 };
 use kestrel_span::Span;
 
@@ -50,11 +52,34 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
             relax_level = 0;
             continue;
         }
+        // Stage 2b decay defaulting: before relaxing literal blocking
+        // further, decay any deferred ref→unresolved coercion whose target
+        // nothing else pinned — those targets often gate the very literals
+        // the next relax level would FORCE to the wrong default
+        // (`let y = ru8; y + 1` must pin `1` to UInt8 via y's decay, not
+        // force-default it to Int64).
+        if apply_ref_decay_defaults(ctx) {
+            fixpoint(ctx);
+            relax_level = 0;
+            continue;
+        }
         relax_level += 1;
         if relax_level > 2 {
             break;
         }
     }
+
+    // AssignTarget stall-breaker: any assignment still waiting on an
+    // unresolved local target falls back to the plain Coerce — at this
+    // point the system is at a fixpoint (every fireable pattern has
+    // fired), so the target's type has no other source.
+    break_stalled_assign_targets(ctx);
+
+    // Pattern-binder gate drops for the same reason: every fireable
+    // ImplicitPat has fired, so a still-unresolved binder has no
+    // pattern-side source left — let its uses pin it (old behavior)
+    // rather than stall to "could not infer type".
+    ctx.pattern_binder_gate = false;
 
     // Phase 3: solve again with defaults
     fixpoint(ctx);
@@ -359,6 +384,7 @@ fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
         | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }
@@ -385,14 +411,21 @@ fn expr_span(expr: &HirExpr) -> &Span {
 #[derive(Clone, Copy, PartialEq)]
 enum RefPos {
     Top,
+    /// A nominal type argument or tuple element — a LEGAL ref position
+    /// since stage 2b (ref-bearing aggregates); recorded so the walk can
+    /// keep hunting deeper for the still-illegal positions.
+    Slot,
     Nested,
     InFn,
 }
 
 /// Depth-first search for an illegally-placed `TyKind::Ref` in a type tree.
-/// Returns the violating position, or None. A Top-level ref is legal (the
-/// ref-returning call result itself); its pointee subtree is searched as
-/// Nested.
+/// Returns the violating position, or None. Legal positions (stage 2b): the
+/// top level (a ref-returning call result) and aggregate slots (nominal
+/// type args, tuple elements — the HIR formation walk checks annotations;
+/// inference can't mint them elsewhere). Still-illegal backstops: function
+/// types (E491), protocol args / opaque bounds / assoc-projection bases
+/// (E492 — positions the formation walk also still rejects).
 fn find_ref_violation(
     ctx: &InferCtx<'_>,
     tv: TyVar,
@@ -408,22 +441,21 @@ fn find_ref_violation(
         _ => return None,
     };
     match kind {
-        TyKind::Ref { pointee, .. } => {
-            if pos == RefPos::Top {
-                find_ref_violation(ctx, pointee, RefPos::Nested, seen)
-            } else {
-                Some(pos)
-            }
+        TyKind::Ref { pointee, .. } => match pos {
+            RefPos::Top | RefPos::Slot => find_ref_violation(ctx, pointee, RefPos::Slot, seen),
+            _ => Some(pos),
         },
         TyKind::Struct { args, .. }
         | TyKind::Enum { args, .. }
-        | TyKind::Protocol { args, .. }
         | TyKind::TypeAlias { args, .. } => args
+            .iter()
+            .find_map(|&a| find_ref_violation(ctx, a, RefPos::Slot, seen)),
+        TyKind::Protocol { args, .. } => args
             .iter()
             .find_map(|&a| find_ref_violation(ctx, a, RefPos::Nested, seen)),
         TyKind::Tuple(elems) => elems
             .iter()
-            .find_map(|&e| find_ref_violation(ctx, e, RefPos::Nested, seen)),
+            .find_map(|&e| find_ref_violation(ctx, e, RefPos::Slot, seen)),
         TyKind::Function { params, ret, .. } => params
             .iter()
             .chain(std::iter::once(&ret))
@@ -557,11 +589,77 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 report_and_poison(ctx, err, from, to);
                 continue;
             },
+            Constraint::BorrowPointee { pointee, .. } => {
+                // Unsolved = `inner` never resolved; its own diagnosis (or
+                // the generic could-not-infer) covers it. Poison the pointee
+                // so the enclosing Ref doesn't cascade a second error.
+                if matches!(ctx.slot(ctx.resolve(pointee)), TySlot::Unresolved { .. }) {
+                    ctx.poison(pointee);
+                }
+                continue;
+            },
+            Constraint::EqualDecayed {
+                value,
+                target,
+                span,
+            } => {
+                // `apply_ref_decay_defaults` settles every deferred decay,
+                // so an unsolved one means a side never resolved — report
+                // like Equal (poison-propagation included).
+                let v_err = ctx.is_error(ctx.resolve(value));
+                let t_err = ctx.is_error(ctx.resolve(target));
+                if v_err || t_err {
+                    if v_err
+                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(target);
+                    }
+                    if t_err
+                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(value);
+                    }
+                    continue;
+                }
+                let err = mismatch_error(ctx, target, value, span);
+                report_and_poison(ctx, err, value, target);
+                continue;
+            },
+            Constraint::AssignTarget {
+                value,
+                target,
+                span,
+                ..
+            } => {
+                // `break_stalled_assign_targets` converts every still-deferred
+                // AssignTarget to a plain Coerce before this runs, so an
+                // unsolved one means a side never resolved — report like
+                // Equal (poison-propagation included), as EqualDecayed does.
+                let v_err = ctx.is_error(ctx.resolve(value));
+                let t_err = ctx.is_error(ctx.resolve(target));
+                if v_err || t_err {
+                    if v_err
+                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(target);
+                    }
+                    if t_err
+                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
+                    {
+                        ctx.poison(value);
+                    }
+                    continue;
+                }
+                let err = mismatch_error(ctx, target, value, span);
+                report_and_poison(ctx, err, value, target);
+                continue;
+            },
             Constraint::Conforms {
                 ty,
                 protocol,
                 span,
                 poison_ty_on_failure,
+                origin: _,
             } => {
                 if ctx.is_error(ctx.resolve(ty)) {
                     continue;
@@ -766,12 +864,29 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             }
             r
         },
+        Constraint::BorrowPointee {
+            inner,
+            pointee,
+            span,
+        } => solve_borrow_pointee(ctx, inner, pointee, span),
+        Constraint::EqualDecayed {
+            value,
+            target,
+            span,
+        } => solve_equal_decayed(ctx, value, target, span),
+        Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        } => solve_assign_target(ctx, value, target, expr, span),
         Constraint::Conforms {
             ty,
             protocol,
             span,
             poison_ty_on_failure,
-        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure),
+            origin,
+        } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure, origin),
         Constraint::Associated {
             container,
             name,
@@ -1183,7 +1298,7 @@ fn solve_reduce(ctx: &mut InferCtx<'_>, alias: TyVar, result: TyVar, span: Span)
         if let Some(&(_, arg_tv)) = subs.iter().find(|(e, _)| *e == param) {
             let bound_protocols = direct_param_bound_protocols(ctx, param);
             for protocol in bound_protocols {
-                ctx.conforms(arg_tv, protocol, span.clone());
+                ctx.conforms_typearg(arg_tv, protocol, span.clone());
             }
         }
     }
@@ -1387,6 +1502,154 @@ fn try_literal_mismatch(
     })
 }
 
+/// `&inner` pointee resolution — see `Constraint::BorrowPointee`. The
+/// Borrow expr's own var is already a resolved `Ref { pointee }`; this
+/// fills the pointee: a ref inner re-borrows (same pointee), a value
+/// inner borrows the place directly. Mutability legality (`&mutating` of
+/// a shared ref / immutable place) is analyze's job, not typing's.
+fn solve_borrow_pointee(
+    ctx: &mut InferCtx<'_>,
+    inner: TyVar,
+    pointee: TyVar,
+    span: Span,
+) -> SolveResult {
+    let ir = ctx.resolve(inner);
+    let target = match ctx.slot(ir) {
+        // Re-borrow: `&r` where r is already `&T` — borrow the same place.
+        TySlot::Resolved(TyKind::Ref { pointee: p, .. }) => *p,
+        // Concrete value type: borrow the place itself.
+        TySlot::Resolved(_) => ir,
+        // A literal can never become a ref — pin the pointee now so
+        // literal defaulting can settle it (mirrors solve_coerce's arm).
+        TySlot::Unresolved { literal: Some(_) } => ir,
+        // Unresolved (e.g. a pending ref-returning accessor call): WAIT —
+        // eagerly unifying would pin the call's in-flight `&T` binding.
+        _ => {
+            return SolveResult::Deferred(Constraint::BorrowPointee {
+                inner,
+                pointee,
+                span,
+            });
+        },
+    };
+    match unify::unify(ctx, pointee, target) {
+        Ok(()) => SolveResult::Solved,
+        Err(_) => SolveResult::Error(mismatch_error(ctx, pointee, target, span)),
+    }
+}
+
+/// Equal with the ref-decay dimension (see `Constraint::EqualDecayed`):
+/// arm results and tuple-literal elements decay a REF value to its pointee
+/// UNLESS the target position is itself a ref (an annotation or `-> &T`
+/// pinned it) — and wait while the target is unresolved so the annotation
+/// can win the race (unpinned targets decay in `apply_ref_decay_defaults`).
+fn solve_equal_decayed(
+    ctx: &mut InferCtx<'_>,
+    value: TyVar,
+    target: TyVar,
+    span: Span,
+) -> SolveResult {
+    let vr = ctx.resolve(value);
+    let (pointee, value_is_ref) = match ctx.slot(vr) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => (*pointee, true),
+        TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => (vr, false),
+        // Unresolved value (e.g. a pattern-payload binding whose scrutinee
+        // hasn't resolved): WAIT.
+        _ => {
+            return SolveResult::Deferred(Constraint::EqualDecayed {
+                value,
+                target,
+                span,
+            });
+        },
+    };
+    if value_is_ref {
+        match ctx.slot(ctx.resolve(target)) {
+            // Ref slot pinned by the position: ref-to-ref equality.
+            TySlot::Resolved(TyKind::Ref { .. }) => {
+                return match unify::unify(ctx, value, target) {
+                    Ok(()) => SolveResult::Solved,
+                    Err(_) => SolveResult::Error(mismatch_error(ctx, target, value, span)),
+                };
+            },
+            // Nothing pinned the target yet: wait for the annotation race.
+            TySlot::Unresolved { literal: None } => {
+                return SolveResult::Deferred(Constraint::EqualDecayed {
+                    value,
+                    target,
+                    span,
+                });
+            },
+            // Non-ref (or literal) target: decay to the pointee below.
+            _ => {},
+        }
+    }
+    match unify::unify(ctx, pointee, target) {
+        Ok(()) => SolveResult::Solved,
+        Err(_) => SolveResult::Error(mismatch_error(ctx, target, pointee, span)),
+    }
+}
+
+/// Assignment into a LOCAL target (see `Constraint::AssignTarget`): a
+/// ref-typed target is store-through — the RHS coerces to the POINTEE; a
+/// resolved non-ref (or literal-kinded) target is a plain Coerce; an
+/// unresolved target WAITS for whatever owns its type (a deferred
+/// ImplicitPat's payload, an annotation). The post-relaxation
+/// stall-breaker (`break_stalled_assign_targets`) guarantees progress.
+fn solve_assign_target(
+    ctx: &mut InferCtx<'_>,
+    value: TyVar,
+    target: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: Span,
+) -> SolveResult {
+    match ctx.slot(ctx.resolve(target)) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            let pointee = *pointee;
+            solve_coerce(ctx, value, pointee, expr, span)
+        },
+        TySlot::Resolved(_) | TySlot::Unresolved { literal: Some(_) } => {
+            solve_coerce(ctx, value, target, expr, span)
+        },
+        _ => SolveResult::Deferred(Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        }),
+    }
+}
+
+/// Post-relaxation stall-breaker for `AssignTarget`: a target nothing
+/// resolved (no pattern fired, no annotation pinned it) takes the plain
+/// Coerce — the deferral existed only so a deferred pattern could deliver
+/// the target's ref-ness first; once the literal-relaxation loop exhausts,
+/// the system is at a fixpoint and waiting longer cannot help. This keeps
+/// assignment-driven inference (`x = 5` pinning `x`) working for locals
+/// whose type has no other source.
+fn break_stalled_assign_targets(ctx: &mut InferCtx<'_>) {
+    for i in 0..ctx.constraints.len() {
+        let Constraint::AssignTarget {
+            value,
+            target,
+            expr,
+            span,
+        } = &ctx.constraints[i]
+        else {
+            continue;
+        };
+        let (value, target, expr, span) = (*value, *target, *expr, span.clone());
+        if matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
+            ctx.constraints[i] = Constraint::Coerce {
+                from: value,
+                to: target,
+                expr,
+                span,
+            };
+        }
+    }
+}
+
 fn solve_coerce(
     ctx: &mut InferCtx<'_>,
     from: TyVar,
@@ -1479,8 +1742,47 @@ fn solve_coerce(
     //    the POINTEE type; continue the whole coercion (incl. FromValue
     //    promotion — a promotion reads the place) with the pointee.
     if let TySlot::Resolved(TyKind::Ref { pointee: fp, .. }) = ctx.slot(fr) {
+        // Stage 2b: a FULLY-unresolved target WAITS — an annotation
+        // (`let o: Optional[&Int64] = .Some(r)`) may be about to pin it
+        // through the ref type itself; decaying now loses that race and
+        // manufactures a mismatch. Literal targets can't be refs (arm-1
+        // twin) and decay immediately. Targets nothing ever pins are
+        // decayed by `apply_ref_decay_defaults` between fixpoint phases.
+        if matches!(
+            ctx.slot(ctx.resolve(to)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            return SolveResult::Deferred(Constraint::Coerce {
+                from,
+                to,
+                expr,
+                span,
+            });
+        }
         let fp = *fp;
         return solve_coerce(ctx, fp, to, expr, span);
+    }
+
+    // Stage 2d: a PATTERN BINDER's type comes from its pattern, never its
+    // uses (the AssignTarget principle applied to use-site coercions).
+    // While the binder's ImplicitPat may still fire, a use against an
+    // already-pinned target (`sum + x` racing the array literal's
+    // defaulting in `for x in [1,2,3].refs()`) must WAIT — plain unify
+    // here pinned the binder to the use's type and the late payload
+    // equate manufactured "expected Int64 got &Int64". The gate drops
+    // next to the AssignTarget stall-breaker, so a binder whose pattern
+    // never fires falls back to use-pinning instead of deadlocking.
+    if ctx.pattern_binder_gate
+        && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
+        && !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
+        && (ctx.pattern_binder_tvs.contains(&from) || ctx.pattern_binder_tvs.contains(&fr))
+    {
+        return SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span,
+        });
     }
 
     // Try unification first (handles the common case)
@@ -1637,12 +1939,35 @@ fn solve_coerce(
     SolveResult::Error(mismatch_error(ctx, to, from, span))
 }
 
+/// For a TYPE-ARGUMENT conformance FAILURE, record `(structural type,
+/// protocol)` and return whether this exact violation was already reported.
+/// The same wellformedness obligation is emitted from the call-site
+/// where-clause, the annotation formation, and the return-position formation,
+/// so a single concrete violation can fail several times over independent
+/// TyVar trees — key structurally and report once. Expr-origin conforms are
+/// never deduped (false), so genuine value-level conformance errors are
+/// unaffected.
+fn typearg_failure_is_duplicate(
+    ctx: &mut InferCtx<'_>,
+    resolved: TyVar,
+    protocol: kestrel_hecs::Entity,
+    origin: ConformsOrigin,
+) -> bool {
+    if origin != ConformsOrigin::TypeArg {
+        return false;
+    }
+    let key = (crate::result::describe_tyvar(ctx, resolved), protocol);
+    // `insert` returns false when the key was already present.
+    !ctx.reported_typearg_conformance.insert(key)
+}
+
 fn solve_conforms(
     ctx: &mut InferCtx<'_>,
     ty: TyVar,
     protocol: kestrel_hecs::Entity,
     span: Span,
     poison_ty_on_failure: bool,
+    origin: ConformsOrigin,
 ) -> SolveResult {
     let resolved = ctx.resolve(ty);
     match ctx.slot(resolved) {
@@ -1651,25 +1976,79 @@ fn solve_conforms(
             protocol,
             span,
             poison_ty_on_failure,
+            origin,
         }),
         TySlot::Resolved(TyKind::Error) => SolveResult::Solved,
-        // Transparent place: a ref conforms as its POINTEE — protocol
-        // dispatch through `&T` (for-in's Iterable bound, operator
-        // protocols) borrows the place.
+        // The ref matrix (stage 2b, conformances via `extend &T`):
+        // - Static: a ref is the one thing that is never Static — reject
+        //   regardless of origin (judging the pointee would let `&T` slip
+        //   through containment bounds).
+        // - Expr origin: transparent place — a ref conforms as its POINTEE
+        //   (protocol dispatch through `&T` borrows the place: for-in's
+        //   Iterable bound, operator protocols).
+        // - TypeArg origin: the ref ITSELF is judged. Refs bit-copy, so
+        //   Copyable holds (not known Cloneable); every other bound holds
+        //   iff `extend &T: P` / `extend &mutating T: P` declares it AND the
+        //   extension's `where` clauses hold at the pointee — the same
+        //   declared+satisfies pair as the nominal arm, routed through the
+        //   synthetic `lang.&` entities. No declaring extension → clean
+        //   DoesNotConform (an unguarded permit would instantiate a pointee
+        //   witness at `&U` — the witness_instantiation_collapse ICE class).
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            if is_static_builtin(ctx, protocol) {
+                if poison_ty_on_failure {
+                    ctx.poison(ty);
+                }
+                return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+            }
+            if origin == ConformsOrigin::TypeArg {
+                let conforms = match copyable_builtin_kind(ctx, protocol) {
+                    Some(want_cloneable) => !want_cloneable,
+                    None => {
+                        let kind = match ctx.slot(resolved) {
+                            TySlot::Resolved(k) => k.clone(),
+                            _ => unreachable!(),
+                        };
+                        ctx.resolver.conforms_to(&kind, protocol) && {
+                            let hir = reify_tv(ctx, resolved);
+                            crate::conformance::type_satisfies(
+                                ctx.query_ctx,
+                                &hir,
+                                protocol,
+                                ctx.root,
+                            )
+                        }
+                    },
+                };
+                if conforms {
+                    return SolveResult::Solved;
+                }
+                if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
+                    return SolveResult::Solved;
+                }
+                if poison_ty_on_failure {
+                    ctx.poison(ty);
+                }
+                return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+            }
             let pointee = *pointee;
             SolveResult::Deferred(Constraint::Conforms {
                 ty: pointee,
                 protocol,
                 span,
                 poison_ty_on_failure,
+                origin,
             })
         },
         TySlot::Resolved(_) => {
             // Per-instantiation Copyable/Cloneable: evaluate conditional
             // `extend X: Copyable where T: Copyable` against the resolved type
             // args, so `Box[Int]` is Copyable while `Box[File]` is move-only.
-            let conforms = if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
+            // Static first: structural (never declared), so the declared-
+            // conformance path below can't answer it.
+            let conforms = if is_static_builtin(ctx, protocol) {
+                solver_ty_is_static(ctx, resolved, 0)
+            } else if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
                 type_conforms_copyable(ctx, resolved, want_cloneable)
             } else {
                 let kind = match ctx.slot(resolved) {
@@ -1690,6 +2069,8 @@ fn solve_conforms(
                 }
             };
             if conforms {
+                SolveResult::Solved
+            } else if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                 SolveResult::Solved
             } else {
                 if poison_ty_on_failure {
@@ -1738,6 +2119,13 @@ fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
         TyKind::Tuple(elems) => HirTy::Tuple(reify_args(elems), span),
         TyKind::Never => HirTy::Never(span),
         TyKind::Param { entity } => HirTy::Param(*entity, span),
+        // Faithful Ref reification (stage 2b): `type_satisfies` must see
+        // `Optional[&T]`, not `Optional[Error]`.
+        TyKind::Ref { pointee, mutating } => HirTy::Ref {
+            inner: Box::new(reify_tv(ctx, *pointee)),
+            mutating: *mutating,
+            span,
+        },
         _ => HirTy::Error(span),
     }
 }
@@ -1857,8 +2245,13 @@ fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics
         TyKind::Tuple(elems) => {
             fold_members(elems.iter().map(|&e| solver_copy_class(ctx, e, depth + 1)))
         },
-        // A ref in copy position decays to its pointee — judge the pointee.
-        TyKind::Ref { pointee, .. } => solver_copy_class(ctx, pointee, depth + 1),
+        // A ref-as-TYPE is Copyable (stage 2b ruling: payload/field refs
+        // bit-copy — the copy aliases the same storage, may-alias model).
+        // Not known Cloneable. The pointee question ("can a read through
+        // this ref place copy?") is the Expr-origin peel in solve_conforms,
+        // never this fold — this classifies the ref VALUE for gating-arg
+        // folds (`Optional[&File]` is Copyable even though File isn't).
+        TyKind::Ref { .. } => CopySemantics::Copyable,
         // Mirror `hir_type_copy_semantics`: protocol existentials / `some P` /
         // functions are Copyable (not known Cloneable).
         TyKind::Protocol { .. }
@@ -1881,6 +2274,90 @@ fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool) -
         CopySemantics::NotCopyable => false,
         CopySemantics::Cloneable => true,
         CopySemantics::Copyable => !want_cloneable,
+    }
+}
+
+/// Is `protocol` the `Static` builtin (references 2a)?
+pub(crate) fn is_static_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root: ctx.root,
+    }) == Some(protocol)
+}
+
+/// `StaticLayer` over `TyVar` — the solver's hooks into the per-instantiation
+/// staticness rule (`kestrel_semantics::instance_is_static`, the single
+/// source of truth across semantics / solver / analyze). Depth bookkeeping
+/// mirrors `SolverCopyLayer`.
+struct SolverStaticLayer<'a, 'i> {
+    ctx: &'a InferCtx<'i>,
+    depth: u32,
+}
+
+impl StaticLayer for SolverStaticLayer<'_, '_> {
+    type Ty = TyVar;
+
+    fn nominal_staticness(&self, entity: Entity) -> Staticness {
+        self.ctx
+            .query_ctx
+            .query(NominalStaticness {
+                entity,
+                root: self.ctx.root,
+            })
+            .staticness
+    }
+
+    fn member_is_static(&self, &tv: &TyVar) -> bool {
+        solver_ty_is_static(self.ctx, tv, self.depth + 1)
+    }
+}
+
+/// Per-instantiation staticness for the solver: structural contains-ref over
+/// resolved type vars. Never-block arms (unresolved / Error / depth guard)
+/// answer `true` — in 2a nothing unresolved can become non-Static, and a
+/// missed rejection is a mono-stage gap, not a miscompile (Static has no
+/// runtime semantics). The universal fast path: `Staticness::Static` bases
+/// return without touching args.
+pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
+    if depth > 64 {
+        return true; // recursion guard — never block
+    }
+    let resolved = ctx.resolve(tv);
+    let kind = match ctx.slot(resolved) {
+        TySlot::Resolved(k) => k.clone(),
+        _ => return true, // unresolved: never block
+    };
+    match kind {
+        // The axiom: a reference is never Static.
+        TyKind::Ref { .. } => false,
+        TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
+            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &args)
+        },
+        // Empty args: a conditional base is unprovable here (mirrors the
+        // copy layer's empty-args rule).
+        TyKind::SelfType { entity } => {
+            instance_is_static(&SolverStaticLayer { ctx, depth }, entity, &[])
+        },
+        TyKind::Param { entity } => {
+            let context = ctx.query_ctx.parent_of(entity).unwrap_or(entity);
+            ctx.query_ctx.query(TypeParamStaticRequirement {
+                param: entity,
+                context,
+                root: ctx.root,
+            }) == StaticRequirement::RequiresStatic
+        },
+        TyKind::Tuple(elems) => elems.iter().all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
+        // Function types are Static in 2a. TODO(static-2c): the capture-
+        // derived Static bit on function types.
+        // Protocol / opaque / alias / assoc-projection / Never / Error:
+        // conservative never-block leaves — refs can't reach them in 2a.
+        TyKind::Error
+        | TyKind::Protocol { .. }
+        | TyKind::Opaque { .. }
+        | TyKind::Function { .. }
+        | TyKind::Never
+        | TyKind::TypeAlias { .. }
+        | TyKind::AssocProjection { .. } => true,
     }
 }
 
@@ -2446,6 +2923,9 @@ fn binding_plan_for(
 /// Bind a call's result var to the signature return type, ref-aware:
 /// - a match-SCRUTINEE call decays: a scrutinee is a value context, so the
 ///   result binds to the POINTEE and patterns never see a ref;
+/// - an if/match ARM-VALUE call decays: refs cannot cross merges, so arm
+///   values always produce owned values (the merge `Equal`s stay untouched
+///   and only ever see owned types);
 /// - a result already pinned to a non-ref (an early Coerce ran before the
 ///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
 ///   instead of erroring.
@@ -2460,6 +2940,17 @@ fn bind_call_result(
     span: Span,
 ) {
     let rr = ctx.resolve(ret_tv);
+    if matches!(ctx.slot(rr), TySlot::Resolved(TyKind::Ref { .. })) {
+        kestrel_debug::ktrace!(
+            "arm-decay",
+            "bind_call_result REF expr {expr:?} owner={:?} arm_set={} scrut={} bind={} assign={}",
+            ctx.owner,
+            ctx.always_decay_exprs.contains(&expr),
+            ctx.scrutinee_exprs.contains(&expr),
+            ctx.binding_init_exprs.contains(&expr),
+            ctx.assign_target_exprs.contains(&expr),
+        );
+    }
     if let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(rr) {
         let pointee = *pointee;
         let pinned_non_ref = matches!(
@@ -2469,6 +2960,7 @@ fn bind_call_result(
         if ctx.scrutinee_exprs.contains(&expr)
             || ctx.binding_init_exprs.contains(&expr)
             || ctx.assign_target_exprs.contains(&expr)
+            || ctx.always_decay_exprs.contains(&expr)
             || pinned_non_ref
         {
             ctx.equal(result, pointee, span);
@@ -2552,7 +3044,7 @@ fn emit_resolved_call(
                 protocol_type_args,
             } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
-                    ctx.conforms(tv, protocol, span.clone());
+                    ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
                     // an extension's free TypeParams when projecting through
                     // `extend ConcreteType: Proto[FreeParams]`.
@@ -2775,6 +3267,77 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
     true
 }
 
+/// Lazy `Indirection` member peel. When member `name` was not found on the
+/// concrete nominal `recv_kind`, but its entity conforms to the `Indirection`
+/// protocol, this:
+///   1. resolves the concrete `pointeeRef`/`pointeeMutRef` accessors on the
+///      wrapper and records an `IndirectionPeel` for MIR (appending → the
+///      outer→inner chain for nested wrappers), and
+///   2. emits an `Associated` constraint binding a fresh TyVar to the
+///      wrapper's `Indirection.Target` (reusing `solve_associated`),
+/// returning that pointee TyVar for the caller to requeue the member on.
+/// Returns `None` (no peel) when the receiver isn't a nominal or doesn't
+/// conform to `Indirection`.
+fn try_indirection_peel(
+    ctx: &mut InferCtx<'_>,
+    recv_kind: &TyKind,
+    receiver: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<TyVar> {
+    // Only nominal wrappers peel.
+    let _w_entity = match recv_kind {
+        TyKind::Struct { entity, .. }
+        | TyKind::Enum { entity, .. }
+        | TyKind::Protocol { entity, .. } => *entity,
+        _ => return None,
+    };
+
+    // Does the wrapper conform to `Indirection`? (bound-aware — a conditional
+    // `extend CowBox[T]: MutableIndirection where T: Cloneable` is evaluated
+    // here via `type_satisfies`.)
+    let indirection = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Indirection,
+        root: ctx.root,
+    })?;
+    let w_hir = reify_tv(ctx, receiver);
+    if !crate::conformance::type_satisfies(ctx.query_ctx, &w_hir, indirection, ctx.root) {
+        return None;
+    }
+
+    // Resolve the concrete pointee accessors on the wrapper (for MIR replay).
+    // `pointeeRef` is required by `Indirection`; `pointeeMutRef` only exists on
+    // `MutableIndirection` conformers (None ⇒ read-only ⇒ writes are D2).
+    let read_method = ctx
+        .resolver
+        .resolve_member(recv_kind, "pointeeRef", &[])
+        .ok()?
+        .entity;
+    let mut_method = ctx
+        .resolver
+        .resolve_member(recv_kind, "pointeeMutRef", &[])
+        .ok()
+        .map(|r| r.entity);
+
+    // Pointee type = wrapper's `Indirection.Target`. Reuse the assoc-type
+    // machinery via an `Associated` constraint on a fresh TyVar.
+    let pointee_tv = ctx.fresh();
+    ctx.associated(receiver, "Target", pointee_tv, span.clone());
+
+    // Record the peel for MIR — append so nested wrappers build a chain.
+    // `target_tv` is resolved in `build_result`.
+    ctx.indirection_peels
+        .entry(expr)
+        .or_default()
+        .push(crate::ctx::PendingPeel {
+            read_method,
+            mut_method,
+            target_tv: pointee_tv,
+        });
+
+    Some(pointee_tv)
+}
+
 fn solve_member(
     ctx: &mut InferCtx<'_>,
     receiver: TyVar,
@@ -2922,6 +3485,30 @@ fn solve_member(
             match ctx.resolver.resolve_static_member(&recv_kind, name, &args) {
                 Ok(res) => res,
                 Err(_) => {
+                    // Lazy `Indirection` peel: the member is on neither the
+                    // wrapper's instance nor static members, but if the wrapper
+                    // conforms to `Indirection`, requeue the member on its
+                    // pointee (`Target`). Skipped for protocol-dispatched
+                    // members (operators/for-in) — those forward via `extend`,
+                    // never the peel (R7). This is the LAZY twin of the eager
+                    // `TyKind::Ref` arm above: same shape, fires only after the
+                    // wrapper's own lookup misses (so the wrapper wins clashes).
+                    if !ctx.protocol_dispatch_members.contains(&expr)
+                        && let Some(pointee_tv) =
+                            try_indirection_peel(ctx, &recv_kind, receiver, expr, &span)
+                    {
+                        return SolveResult::Deferred(Constraint::Member {
+                            receiver: pointee_tv,
+                            name: name.to_string(),
+                            args,
+                            result,
+                            expr,
+                            is_call,
+                            is_static_context,
+                            explicit_type_args: explicit_type_args.to_vec(),
+                            span,
+                        });
+                    }
                     return SolveResult::Error(member_not_found_error(
                         ctx, receiver, &recv_kind, name, is_call, span,
                     ));
@@ -3067,6 +3654,25 @@ fn solve_member(
             receiver,
             &field_subs,
         );
+        // Zero-arg call syntax on a field is only valid for a function-valued
+        // field (e.g. `separator: () -> Item`). A method call on a name that
+        // resolves to a non-callable field — `slice.len()` where `len: Int64` —
+        // is really a missing method. Don't forward into solve_call, which would
+        // misreport "no matching subscript on type '<field type>'" against the
+        // field's type instead of "no member 'len' on type '<receiver>'".
+        if is_call && args.is_empty() {
+            let resolved = ctx.resolve(field_tv);
+            if ctx.is_concrete(resolved)
+                && !matches!(ctx.slot(resolved), TySlot::Resolved(TyKind::Function { .. }))
+            {
+                return SolveResult::Error(InferError::NoMember {
+                    receiver,
+                    name: name.to_string(),
+                    is_call,
+                    span,
+                });
+            }
+        }
         // Dispatch via solve_call — handles both function calls and subscript calls
         return solve_call(ctx, field_tv, args, result, expr, span);
     }
@@ -3284,10 +3890,10 @@ fn solve_member(
             } => {
                 let bound_tv =
                     if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
-                        ctx.conforms(fresh_params[idx], *protocol, span.clone());
+                        ctx.conforms_typearg(fresh_params[idx], *protocol, span.clone());
                         Some(fresh_params[idx])
                     } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
-                        ctx.conforms(tv, *protocol, span.clone());
+                        ctx.conforms_typearg(tv, *protocol, span.clone());
                         Some(tv)
                     } else {
                         None
@@ -3425,6 +4031,27 @@ fn solve_member(
         &subs,
     );
 
+    // Stage 1.5 read-provider typing: when a subscript/computed property
+    // declares a `ref { … }` accessor, READS of the member produce `&T` —
+    // wrap the declared type so all stage-1 decay machinery (binding/
+    // scrutinee/assign-target/arm decay, E492 validation, E497) applies
+    // unchanged. The wrap is read-only: RMW receivers are never typed
+    // `&mutating T` — analyze and mir-lower route writes and RMW by ENTITY
+    // (the PlaceAccessors query), not by this expression type.
+    let ret_tv = if matches!(
+        resolution.kind,
+        crate::resolve::MemberKind::Subscript | crate::resolve::MemberKind::ComputedProperty { .. }
+    ) && ctx
+        .query_ctx
+        .query(kestrel_hir_lower::PlaceAccessors {
+            entity: resolution.entity,
+        })
+        .is_some_and(|info| info.ref_accessor.is_some())
+    {
+        ctx.ref_ty(ret_tv, false)
+    } else {
+        ret_tv
+    };
     bind_call_result(ctx, result, ret_tv, expr, span.clone());
 
     SolveResult::Solved
@@ -3802,6 +4429,47 @@ fn extension_where_clauses_satisfied(
 
 /// Apply deferred type-parameter defaults for TyVars that are still
 /// unconstrained. Returns true if any default was applied.
+/// Stage-2b ref-decay defaulting: a deferred ref→unresolved `Coerce` whose
+/// target NOTHING else pinned takes the stage-1.5 copy-out decay now — the
+/// value position owns a copy of the POINTEE (`let y = r` gives the pointee
+/// type). Runs inside the literal-relaxation loop so a decayed target can
+/// still pin blocked literals before force-defaulting. The deferral itself
+/// lives in `solve_coerce` arm 2: an annotation pinning the target to the
+/// ref TYPE (`let o: Optional[&Int64] = .Some(r)`) must win the race.
+fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
+    let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
+    for c in &ctx.constraints {
+        let (from, to) = match c {
+            Constraint::Coerce { from, to, .. } => (from, to),
+            // Arm results / tuple-literal elements wait on the same race.
+            Constraint::EqualDecayed { value, target, .. } => (value, target),
+            _ => continue,
+        };
+        let fr = ctx.resolve(*from);
+        let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(fr) else {
+            continue;
+        };
+        if matches!(
+            ctx.slot(ctx.resolve(*to)),
+            TySlot::Unresolved { literal: None }
+        ) {
+            decays.push((*to, *pointee));
+        }
+    }
+    let mut progress = false;
+    for (to, pointee) in decays {
+        // Re-check: an earlier decay in this batch may have pinned it.
+        if matches!(
+            ctx.slot(ctx.resolve(to)),
+            TySlot::Unresolved { literal: None }
+        ) && unify::unify(ctx, to, pointee).is_ok()
+        {
+            progress = true;
+        }
+    }
+    progress
+}
+
 fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     let defaults = std::mem::take(&mut ctx.type_param_defaults);
@@ -4327,7 +4995,7 @@ fn emit_type_alias_where_clauses(
                 ..
             } => {
                 // Emit conformance: e.g., `Iter: Iterator` → Conforms(alias_tv, Iterator)
-                ctx.conforms(alias_tv, protocol, span.clone());
+                ctx.conforms_typearg(alias_tv, protocol, span.clone());
                 // Cache protocol args so projecting through this alias's bound
                 // protocol can substitute extension free TypeParams.
                 let arg_tvs: Vec<TyVar> = protocol_type_args
@@ -4404,6 +5072,58 @@ fn lower_opaque_aware(
 /// Convert HirTy to TyVar with substitutions.
 /// - Self entity → receiver TyVar
 /// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
+/// Solver-side twin of `generate::emit_copyable_wellformedness`, scoped to
+/// the STATIC bound (the ref-containment soundness line). Pushes a
+/// TypeArg-origin Conforms for each formed arg whose param carries the
+/// (implicit or explicit) Static bound. Copyable/Cloneable stay
+/// generate-side only — widening them here would newly flag code the
+/// move checker already governs (orthogonal, larger change).
+fn emit_static_wellformedness(
+    ctx: &mut InferCtx<'_>,
+    entity: kestrel_hecs::Entity,
+    arg_tvs: &[TyVar],
+    span: &Span,
+) {
+    if arg_tvs.is_empty() {
+        return;
+    }
+    let Some(static_proto) = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root: ctx.root,
+    }) else {
+        return;
+    };
+    let Some(params) = ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::TypeParams>(entity)
+        .map(|tp| tp.0.clone())
+    else {
+        return;
+    };
+    let where_clauses = ctx.query_ctx.query(crate::where_clauses::WhereClausesOf {
+        entity,
+        root: ctx.root,
+    });
+    for clause in where_clauses {
+        let crate::resolve::WhereClause::Bound { param, protocol, .. } = clause else {
+            continue;
+        };
+        if protocol != static_proto {
+            continue;
+        }
+        let Some(pos) = params.iter().position(|p| *p == param) else {
+            continue;
+        };
+        if let Some(&tv) = arg_tvs.get(pos) {
+            kestrel_debug::ktrace!("static-wf", "emit Static wf for {entity:?} arg {tv:?}");
+            // The formed type's own span (the declared signature site) —
+            // a synthetic span here renders as NOTHING and the build
+            // fails silently.
+            ctx.conforms_typearg(tv, static_proto, span.clone());
+        }
+    }
+}
+
 fn lower_hir_ty_sub(
     ctx: &mut InferCtx<'_>,
     ty: &kestrel_hir::ty::HirTy,
@@ -4424,9 +5144,15 @@ fn lower_hir_ty_sub(
                 ctx.fresh()
             }
         },
-        HirTy::Struct { entity, args, .. }
-        | HirTy::Enum { entity, args, .. }
-        | HirTy::Protocol { entity, args, .. } => {
+        HirTy::Struct {
+            entity, args, span, ..
+        }
+        | HirTy::Enum {
+            entity, args, span, ..
+        }
+        | HirTy::Protocol {
+            entity, args, span, ..
+        } => {
             // Pre-SelfType compatibility: some sites still explicitly construct
             // `HirTy::Protocol(P)` meaning "Self where Self: P". Keep the old
             // guard as a safety net until every Self emission is confirmed to
@@ -4441,6 +5167,16 @@ fn lower_hir_ty_sub(
                 .iter()
                 .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
                 .collect();
+            // Solver-side formation wellformedness, STATIC bound only: a
+            // member-result instantiation is a formation site too —
+            // `collect() -> Array[Item]` at `Item = &Int64` must fail
+            // Array's implicit `T: Static` exactly like the annotation
+            // route (`let xs: Array[&Int64]`), or heap storage of refs
+            // materializes out of inference (the line that never moves).
+            // Abstract args stay conservative: the obligation defers until
+            // the arg resolves, and Param/assoc kinds pass through the
+            // usual entailment arms.
+            emit_static_wellformedness(ctx, *entity, &arg_tvs, span);
             ctx.named(*entity, arg_tvs)
         },
         HirTy::AliasUse { entity, args, .. } => {

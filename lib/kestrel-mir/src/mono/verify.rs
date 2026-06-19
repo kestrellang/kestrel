@@ -554,6 +554,11 @@ fn check_type_concrete(
             }
             check_type_concrete(module, fi, block, inst, span, *ret, errors, context);
         },
+        // A `Ref{TypeParam}` must not hide post-mono (stage 2b: refs appear
+        // as payload/field/arg types, so the wrapper can carry params).
+        MirTy::Ref { pointee, .. } => {
+            check_type_concrete(module, fi, block, inst, span, *pointee, errors, context);
+        },
         _ => {},
     }
 }

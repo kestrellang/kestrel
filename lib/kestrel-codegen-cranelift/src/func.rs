@@ -41,19 +41,18 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
 
     /// Get the scalar value for a MIR ValueId. If the value is @guaranteed
     /// and the type is a scalar, loads from the ByRef pointer first.
+    ///
+    /// Representation contract for `MirTy::Ref`-typed values (stage 2b —
+    /// mono substitution and shim destructures mint them): an @owned Ref
+    /// value IS the pointer scalar; a @guaranteed Ref value is the address
+    /// OF the ref slot (one load recovers the pointer). `repr(Ref)` is
+    /// `Scalar(ptr)`, so both fall out of the ordinary scalar handling
+    /// below — ref-SLOT stores/loads must instead use the slot-aware
+    /// helpers (see `inst.rs`), never this function on a pointee-typed
+    /// @guaranteed value.
     pub fn resolve_scalar(&mut self, builder: &mut FunctionBuilder, id: ValueId) -> Value {
         let val = self.get_value(builder, id);
         let vd = &self.body.values[id.index()];
-        // Ref is signature-only: ref-typed call results register as
-        // @guaranteed POINTEE values, so no ValueDef ever carries it. A Ref
-        // here would mean the load below derefs one level too many.
-        debug_assert!(
-            !matches!(
-                self.ctx.module.ty_arena.get(vd.ty),
-                kestrel_mir::MirTy::Ref { .. }
-            ),
-            "MirTy::Ref appeared as a value type in codegen"
-        );
         if vd.ownership == kestrel_mir::value::Ownership::Guaranteed {
             let repr = self
                 .ctx

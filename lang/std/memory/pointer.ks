@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError)
+import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError, Indirection, MutableIndirection)
 import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(ArraySlice)
 import std.result.(Optional)
@@ -133,7 +133,10 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 /// Non-owning. The pointee's lifetime is the caller's responsibility; the
 /// pointer does not increment any refcount, register with any GC, or
 /// trigger a deinit.
-public struct Pointer[T]: Equatable, Hashable where T: not Copyable {
+// `T: not Static` (references 2a): the pointee may be reference-bearing —
+// Pointer is the unsafe escape hatch, and Pointer[T] itself stores only a
+// raw address (no T), so it stays Static regardless of T.
+public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Static {
     // `fileprivate`, not `private`: the conditional `pointee` accessor lives in
     // `extend Pointer[T] where T: Copyable` (a conditional member can't sit in
     // the struct body), and an extension can only reach file-scoped members.
@@ -497,6 +500,102 @@ public struct ArraySliceIterator[T]: Iterator {
             .None
         }
     }
+}
+
+/// Forward iterator yielding SHARED REFERENCES (`&T`) to contiguous
+/// elements in place — no copies, no clones. The by-reference sibling of
+/// `ArraySliceIterator`; surfaced as `Array.refs()`.
+///
+/// # Invalidation
+///
+/// Holds a raw pointer into the underlying buffer. Mutating the source
+/// collection's STRUCTURE while iterating (append/realloc, removal)
+/// invalidates the cursor and any yielded reference — the same contract
+/// as every pointer-backed iterator, met through references here.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
+public struct RefSliceIterator[T]: Iterator {
+    type Item = &T
+
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    /// Yields a reference to the next element in place, or `.None` when
+    /// the count reaches zero.
+    public mutating func next() -> Optional[&T] {
+        if self.remaining > 0 {
+            let r = &self.ptr.value;
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            let o: Optional[&T] = .Some(r);
+            o
+        } else {
+            .None
+        }
+    }
+}
+
+/// Forward iterator yielding MUTABLE REFERENCES (`&mutating T`) to
+/// contiguous elements — in-place mutation without writeback
+/// (`for x in arr.mutableRefs() { x += 1 }`). Surfaced as
+/// `Array.mutableRefs()`, which runs the COW barrier before handing out
+/// the buffer.
+///
+/// # Invalidation
+///
+/// Same contract as `RefSliceIterator`: mutating the source collection's
+/// STRUCTURE while iterating invalidates the cursor and any yielded
+/// reference. Element writes through the yielded references are the
+/// intended use.
+///
+/// # Representation
+///
+/// A `Pointer[T]` cursor and an `Int64` countdown.
+public struct MutRefSliceIterator[T]: Iterator {
+    type Item = &mutating T
+
+    private var ptr: Pointer[T]
+    private var remaining: Int64
+
+    /// @name From Storage
+    /// Builds an iterator from a starting pointer and remaining count.
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64) {
+        self.ptr = ptr;
+        self.remaining = remaining;
+    }
+
+    /// Yields a mutable reference to the next element in place, or
+    /// `.None` when the count reaches zero.
+    public mutating func next() -> Optional[&mutating T] {
+        if self.remaining > 0 {
+            let r = &mutating self.ptr.mutatingValue;
+            self.ptr = self.ptr.offset(by: 1);
+            self.remaining = self.remaining - 1;
+            let o: Optional[&mutating T] = .Some(r);
+            o
+        } else {
+            .None
+        }
+    }
+}
+
+// A raw `Pointer[T]` is a smart pointer: `ptr.field` reaches the pointee.
+// `pointeeRef`/`pointeeMutRef` are the existing `value`/`mutatingValue` views
+// under the protocol's names. Works for any `T` (Copyable or not), unlike the
+// by-value `pointee` accessor.
+extend Pointer[T]: MutableIndirection {
+    type Target = T
+    public func pointeeRef() -> &T { self.value }
+    public mutating func pointeeMutRef() -> &mutating T { self.mutatingValue }
 }
 
 

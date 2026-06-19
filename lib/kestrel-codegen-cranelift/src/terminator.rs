@@ -16,6 +16,22 @@ fn to_block_args(vals: &[Value]) -> Vec<BlockArg> {
     vals.iter().map(|v| BlockArg::Value(*v)).collect()
 }
 
+/// Resolve a terminator block arg. A @guaranteed arg is a THREADED borrow
+/// continuing into the target's @guaranteed (pointer-typed) param — pass the
+/// ADDRESS as-is; `resolve_scalar` would load through it and hand the param
+/// a value where it expects a pointer.
+fn resolve_block_arg(
+    fc: &mut FuncCompiler<'_, '_>,
+    builder: &mut FunctionBuilder,
+    v: ValueId,
+) -> Value {
+    if fc.body.values[v.index()].ownership == kestrel_mir::value::Ownership::Guaranteed {
+        fc.get_value(builder, v)
+    } else {
+        fc.resolve_scalar(builder, v)
+    }
+}
+
 /// Coerce values to match the target block's declared param types.
 fn coerce_block_args(
     builder: &mut FunctionBuilder,
@@ -60,7 +76,7 @@ pub fn compile_terminator(
             let block = fc.block_map[target.index()];
             let cl_args: Vec<Value> = args
                 .iter()
-                .map(|v| fc.resolve_scalar(builder, *v))
+                .map(|v| resolve_block_arg(fc, builder, *v))
                 .collect();
             let coerced = coerce_block_args(builder, block, &cl_args);
             let ba = to_block_args(&coerced);
@@ -160,11 +176,11 @@ fn compile_branch(
 
     let then_vals: Vec<Value> = then_args
         .iter()
-        .map(|v| fc.resolve_scalar(builder, *v))
+        .map(|v| resolve_block_arg(fc, builder, *v))
         .collect();
     let else_vals: Vec<Value> = else_args
         .iter()
-        .map(|v| fc.resolve_scalar(builder, *v))
+        .map(|v| resolve_block_arg(fc, builder, *v))
         .collect();
     let then_coerced = coerce_block_args(builder, then_cl, &then_vals);
     let else_coerced = coerce_block_args(builder, else_cl, &else_vals);
@@ -231,7 +247,7 @@ fn compile_switch(
         let cl_args: Vec<Value> = arm
             .args
             .iter()
-            .map(|v| fc.resolve_scalar(builder, *v))
+            .map(|v| resolve_block_arg(fc, builder, *v))
             .collect();
         let coerced = coerce_block_args(builder, cl_block, &cl_args);
         (cl_block, coerced)
@@ -257,7 +273,7 @@ fn compile_switch(
         let raw_args: Vec<Value> = arm
             .args
             .iter()
-            .map(|v| fc.resolve_scalar(builder, *v))
+            .map(|v| resolve_block_arg(fc, builder, *v))
             .collect();
         let target_args = coerce_block_args(builder, target, &raw_args);
         let is_last = i == concrete_cases.len() - 1;

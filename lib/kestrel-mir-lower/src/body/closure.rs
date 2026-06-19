@@ -68,6 +68,13 @@ struct SavedState {
     ret_borrow: bool,
     /// Per-body value ids — same swap rationale as `value_forwarding`.
     ref_results: std::collections::HashSet<ValueId>,
+    /// Named ref bindings are per-body too (value ids + the closure's own
+    /// locals); captures of a parent binding are rejected (E212).
+    ref_binding_vals: HashMap<ValueId, kestrel_hir::res::LocalId>,
+    ref_binding_remaining: HashMap<kestrel_hir::res::LocalId, usize>,
+    /// Derived-address anchors are per-body value ids — same swap rationale
+    /// as `value_forwarding`.
+    addr_anchors: HashMap<ValueId, ValueId>,
 }
 
 impl OssaBodyCtx<'_, '_> {
@@ -268,6 +275,9 @@ impl OssaBodyCtx<'_, '_> {
             value_forwarding: mem::take(&mut self.value_forwarding),
             ret_borrow: mem::replace(&mut self.ret_borrow, false),
             ref_results: mem::take(&mut self.ref_results),
+            ref_binding_vals: mem::take(&mut self.ref_binding_vals),
+            ref_binding_remaining: mem::take(&mut self.ref_binding_remaining),
+            addr_anchors: mem::take(&mut self.addr_anchors),
         };
         self.current_block = Some(entry_block);
         self.temp_counter = 0;
@@ -357,6 +367,9 @@ impl OssaBodyCtx<'_, '_> {
         self.value_forwarding = saved.value_forwarding;
         self.ret_borrow = saved.ret_borrow;
         self.ref_results = saved.ref_results;
+        self.ref_binding_vals = saved.ref_binding_vals;
+        self.ref_binding_remaining = saved.ref_binding_remaining;
+        self.addr_anchors = saved.addr_anchors;
 
         // Attach body and register function
         func_def.body = Some(completed_body);
