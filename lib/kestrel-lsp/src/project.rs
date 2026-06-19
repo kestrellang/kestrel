@@ -2,7 +2,7 @@
 //!
 //! Reads `[package]` (for the `source` directory) and `[dependencies]`. Path
 //! deps are walked transitively. Registry deps are resolved via `flock.lock`
-//! against the local flock cache (default `~/.kestrel/packages`, or the
+//! against the local flock cache (default `~/.flock/packages`, or the
 //! `kestrel.flockCachePath` setting).
 //!
 //! Errors / unreadable manifests are skipped silently — diagnostics will
@@ -59,9 +59,20 @@ pub struct CollectReport {
 }
 
 /// Default cache root used when `kestrel.flockCachePath` is unset. Mirrors
-/// flock's own default (`~/.kestrel/packages`).
+/// flock's own default (`~/.flock/packages`), falling back to the legacy
+/// `~/.kestrel/packages` if the new location doesn't exist yet (flock performs
+/// the one-time `~/.kestrel` → `~/.flock` move on its next run).
 pub fn default_cache_root() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".kestrel/packages"))
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let flock = home.join(".flock/packages");
+    if flock.is_dir() {
+        return Some(flock);
+    }
+    let legacy = home.join(".kestrel/packages");
+    if legacy.is_dir() {
+        return Some(legacy);
+    }
+    Some(flock)
 }
 
 /// Walk up from `start` looking for a `flock.toml`. Returns the manifest
@@ -80,7 +91,7 @@ pub fn find_manifest(start: &Path) -> Option<PathBuf> {
 
 /// Resolve a Kestrel package rooted at `manifest_path` plus its transitive
 /// path-dependency packages. Returns sources and any registry-dep cache
-/// misses. `cache_root` overrides the default `~/.kestrel/packages` (used
+/// misses. `cache_root` overrides the default `~/.flock/packages` (used
 /// to honor the `kestrel.flockCachePath` setting).
 pub fn collect_sources(manifest_path: &Path, cache_root: Option<&Path>) -> CollectReport {
     let mut visited: HashSet<PathBuf> = HashSet::new();

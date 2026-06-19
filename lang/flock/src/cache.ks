@@ -1,13 +1,13 @@
 // Local package cache management
 //
-// Packages are cached at ~/.kestrel/packages/{org}/{pkg}/{version}/
+// Packages are cached at ~/.flock/packages/{org}/{pkg}/{version}/
 // Each version directory is a self-contained package root with flock.toml + src/.
 
 module flock.cache
 
 import flock.error.(FlockError)
 import flock.version.(Version)
-import flock.source.(joinPath)
+import flock.source.(joinPath, flockHome)
 
 // ============================================================================
 // CACHE PATHS

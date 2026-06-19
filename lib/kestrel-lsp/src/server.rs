@@ -49,7 +49,7 @@ pub struct ServerState {
     /// them in every build. Empty/None = compiler-default behaviour.
     pub stdlib_path: Option<PathBuf>,
     /// `kestrel.flockCachePath` from `initializationOptions`. Overrides
-    /// flock's `~/.kestrel/packages` when resolving registry deps.
+    /// flock's `~/.flock/packages` when resolving registry deps.
     pub flock_cache_path: Option<PathBuf>,
     /// Handle to the worker thread that owns the persistent `Compiler`.
     /// Cloneable; handler tasks clone this to send their own jobs.

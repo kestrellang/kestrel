@@ -98,6 +98,27 @@ public struct BuildConfig: Cloneable {
 }
 
 // ============================================================================
+// BINARY TARGET DECLARATION
+// ============================================================================
+
+/// A `[[bin]]` entry from flock.toml. Overrides or adds a binary target on top
+/// of the convention-discovered ones (src/main.ks, src/bin/*.ks). `path` is
+/// relative to the package root.
+public struct BinDecl: Cloneable {
+    public var name: String
+    public var path: String
+
+    public init(name name: String, path path: String) {
+        self.name = name;
+        self.path = path;
+    }
+
+    public func clone() -> BinDecl {
+        BinDecl(name: self.name.clone(), path: self.path.clone())
+    }
+}
+
+// ============================================================================
 // MANIFEST
 // ============================================================================
 
@@ -108,12 +129,16 @@ public struct Manifest: Cloneable {
     public var build: BuildConfig
     /// Optional registry URL override from [registry] section.
     public var registryUrl: Optional[String]
+    /// `[[bin]]` declarations — binary targets that override or add to the
+    /// convention-discovered ones. Empty for typical lib/single-bin packages.
+    public var bins: Array[BinDecl]
 
     public init(package package: PackageInfo, dependencies dependencies: Array[Dependency]) {
         self.package = package;
         self.dependencies = dependencies;
         self.build = BuildConfig();
         self.registryUrl = .None;
+        self.bins = Array[BinDecl]();
     }
 
     public init(package package: PackageInfo, dependencies dependencies: Array[Dependency], build build: BuildConfig, registryUrl registryUrl: Optional[String]) {
@@ -121,10 +146,12 @@ public struct Manifest: Cloneable {
         self.dependencies = dependencies;
         self.build = build;
         self.registryUrl = registryUrl;
+        self.bins = Array[BinDecl]();
     }
 
     public func clone() -> Manifest {
         var m = Manifest(package: self.package.clone(), dependencies: self.dependencies.clone(), build: self.build.clone(), registryUrl: cloneOptionalString(self.registryUrl));
+        m.bins = self.bins.clone();
         m
     }
 }
@@ -324,7 +351,9 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
                 .None => {}
             }
 
-            .Ok(Manifest(package: packageInfo, dependencies: deps, build: buildCfg, registryUrl: registryUrl))
+            var manifest = Manifest(package: packageInfo, dependencies: deps, build: buildCfg, registryUrl: registryUrl);
+            manifest.bins = parseBinDecls(root);
+            .Ok(manifest)
         }
     }
 }
@@ -332,6 +361,41 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/// Parses `[[bin]]` array-of-tables from the manifest root. Each table needs a
+/// `name` and a `path`; entries missing either field are skipped (binary-target
+/// validation happens later, in discovery).
+func parseBinDecls(root: Value) -> Array[BinDecl] {
+    var result = Array[BinDecl]();
+    match root.value(forKey: "bin") {
+        .Some(binVal) => {
+            match binVal.asArray() {
+                .Some(arr) => {
+                    var i: Int64 = 0;
+                    while i < arr.count {
+                        let entry = arr(unchecked: i);
+                        i = i + 1;
+                        let nameOpt = match entry.value(forKey: "name") {
+                            .Some(v) => v.asString(),
+                            .None => .None
+                        };
+                        let pathOpt = match entry.value(forKey: "path") {
+                            .Some(v) => v.asString(),
+                            .None => .None
+                        };
+                        match (nameOpt, pathOpt) {
+                            (.Some(name), .Some(path)) => result.append(BinDecl(name: name, path: path)),
+                            _ => {}
+                        }
+                    }
+                },
+                .None => {}
+            }
+        },
+        .None => {}
+    }
+    result
+}
 
 /// Parses a string array field from a TOML value.
 func parseStringArray(parent: Value, key: String) -> Array[String] {
