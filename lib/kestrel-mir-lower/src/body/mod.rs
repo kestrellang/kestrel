@@ -2820,6 +2820,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_panic(&mut self, msg: &str) {
+        // Drop all in-scope owned values before the diverging `Panic`
+        // terminator so OSSA verification passes — owned intermediates (e.g.
+        // a `fatalError` message's formatting temps, or a match scrutinee in
+        // a non-exhaustive fallback) would otherwise be "live at block exit
+        // but never consumed". Mirrors the Never-returning call path
+        // (`emit_call_inner`), which already cleans up before `Panic`.
+        self.destroy_scopes_to_depth(0, &[]);
         self.set_terminator(TerminatorKind::Panic(msg.to_string()));
     }
 

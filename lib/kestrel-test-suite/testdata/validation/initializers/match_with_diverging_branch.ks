@@ -16,7 +16,7 @@ struct Container[T] {
             .Some(rawPtr) => {
                 self.ptr = rawPtr;
             },
-            .None => lang.panic("allocation failed")
+            .None => lang.panic()
         }
     }
 }

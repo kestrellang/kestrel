@@ -2,6 +2,9 @@
 
 module std.core
 
+import std.text.(String)
+import std.io.stdio.(eprintln)
+
 /// Aborts the process with `message`.
 ///
 /// Returns `!` (the never type), so the compiler treats any code after a
@@ -21,5 +24,10 @@ module std.core
 /// }
 /// ```
 public func fatalError(message: String) -> ! {
-    lang.panic_unwind("fatal error")
+    // Best-effort: print the message to stderr via the normal I/O path, then
+    // trap. The Result is intentionally discarded — there is no recovery and
+    // the trap is unconditional. `lang.panic()` is an argument-free diverging
+    // intrinsic (a bare CPU trap); the message surfaces here, not in codegen.
+    eprintln("fatal error: \(message)");
+    lang.panic()
 }

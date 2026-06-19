@@ -606,15 +606,11 @@ fn seed_string_ops(world: &mut World, lang: Entity) {
 fn seed_misc_ops(world: &mut World, lang: Entity) {
     let str_ty = lang_ty("str");
 
-    // panic(message) → Never (diverging function)
+    // panic() → Never (diverging bare trap). Takes no message: the stdlib
+    // caller (`fatalError`) prints the message via the normal I/O path before
+    // invoking the trap, so the intrinsic itself is argument-free.
     let never = AstType::Never(Span::synthetic(0));
-    seed_fn(
-        world,
-        lang,
-        "panic",
-        &[("message", str_ty.clone())],
-        never.clone(),
-    );
+    seed_fn(world, lang, "panic", &[], never.clone());
     seed_fn(world, lang, "panic_unwind", &[("message", str_ty)], never);
 
     // Atomic ops — generic over value type
