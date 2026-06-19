@@ -9,9 +9,9 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxKind;
 
 use super::data::{
-    AttributeArgData, AttributeArgValue, AttributeArgsData, AttributeData, DeinitDeclarationData,
-    FunctionBodyData, InitEffect, InitializerDeclarationData, ParameterAccessMode, ParameterData,
-    TypeDeclarationBodyItem,
+    AccessorClauseData, AccessorClauseKind, AttributeArgData, AttributeArgValue,
+    AttributeArgsData, AttributeData, DeinitDeclarationData, FunctionBodyData, InitEffect,
+    InitializerDeclarationData, ParameterAccessMode, ParameterData, TypeDeclarationBodyItem,
 };
 use crate::block::emit_code_block;
 use crate::enum_decl::{emit_enum_case, emit_enum_declaration};
@@ -27,6 +27,26 @@ use crate::subscript::emit_subscript_declaration;
 use crate::ty::emit_ty_variant;
 use crate::type_alias::emit_type_alias_declaration;
 use crate::type_param::{emit_type_parameter_list, emit_where_clause};
+
+/// Emit one accessor clause as its CST node: GetterClause/SetterClause/
+/// RefClause/MutatingRefClause wrapping the keyword token(s) + code block.
+/// The `ref` keyword is contextual, so it stays an Identifier token inside
+/// the Ref/MutatingRef clause nodes — the clause KIND carries the meaning.
+pub fn emit_accessor_clause(sink: &mut EventSink, clause: &AccessorClauseData) {
+    let (node, kw_kind) = match clause.kind {
+        AccessorClauseKind::Get => (SyntaxKind::GetterClause, SyntaxKind::Get),
+        AccessorClauseKind::Set => (SyntaxKind::SetterClause, SyntaxKind::Set),
+        AccessorClauseKind::Ref => (SyntaxKind::RefClause, SyntaxKind::Identifier),
+        AccessorClauseKind::MutatingRef => (SyntaxKind::MutatingRefClause, SyntaxKind::Identifier),
+    };
+    sink.start_node(node);
+    if let Some(mutating_span) = &clause.mutating_span {
+        sink.add_token(SyntaxKind::Mutating, mutating_span.clone());
+    }
+    sink.add_token(kw_kind, clause.kw_span.clone());
+    emit_code_block(sink, &clause.body);
+    sink.finish_node();
+}
 
 // =============================================================================
 // Module and Import Emitters

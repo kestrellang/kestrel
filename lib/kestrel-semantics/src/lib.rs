@@ -4,6 +4,13 @@
 //! downstream phases need so analyzers, type inference, move tracking, and MIR
 //! lowering do not each reinterpret raw conformance syntax differently.
 
+pub mod staticness;
+
+pub use staticness::{
+    NominalStaticness, StaticLayer, StaticRequirement, Staticness, StaticnessInfo,
+    StaticnessReason, TypeParamStaticRequirement, hir_type_is_static, instance_is_static,
+};
+
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};

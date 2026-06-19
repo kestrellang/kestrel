@@ -161,6 +161,12 @@ fn check_user_match(
     let Some(scrutinee_ty) = cx.typed.expr_types.get(&scrutinee) else {
         return;
     };
+    // A ref-binding scrutinee (`match r` where r: &T) matches its POINTEE —
+    // patterns never see a ref (stage-1.5 transparent place).
+    let scrutinee_ty = match scrutinee_ty {
+        ResolvedTy::Ref { pointee, .. } => pointee.as_ref(),
+        other => other,
+    };
 
     // Skip analysis when the scrutinee type couldn't be inferred — a
     // type-inference error will already be reported and any exhaustiveness

@@ -82,6 +82,9 @@ pub struct Binding {
     pub local_id: LocalId,
     pub name: String,
     pub is_mutable: bool,
+    /// `&`/`&mutating` binder (stage 1.5 `&` patterns): the binding takes
+    /// the projected place IN PLACE instead of copying out.
+    pub by_ref: Option<bool>,
     pub ty: ResolvedTy,
     pub path: AccessPath,
 }
@@ -347,12 +350,13 @@ fn collect_bindings(
     bindings: &mut Vec<Binding>,
 ) {
     match &hir.pats[pat_id] {
-        HirPat::Binding { local, .. } => {
+        HirPat::Binding { local, by_ref, .. } => {
             let local_data = &hir.locals[*local];
             bindings.push(Binding {
                 local_id: *local,
                 name: local_data.name.clone(),
                 is_mutable: local_data.is_mut,
+                by_ref: *by_ref,
                 ty: ResolvedTy::Error, // resolved later by codegen
                 path: path.clone(),
             });
@@ -368,6 +372,7 @@ fn collect_bindings(
                 local_id: *binding,
                 name: local_data.name.clone(),
                 is_mutable: local_data.is_mut,
+                by_ref: None,
                 ty: ResolvedTy::Error,
                 path: path.clone(),
             });
@@ -445,6 +450,7 @@ fn collect_bindings(
                     local_id: *local,
                     name: local_data.name.clone(),
                     is_mutable: local_data.is_mut,
+                    by_ref: None,
                     ty: ResolvedTy::Error,
                     path: rest_path,
                 });

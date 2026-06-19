@@ -245,6 +245,16 @@ fn create_extension_self_type(
     let target_kind = query_ctx.get::<NodeKind>(target).cloned();
     let self_tv = if matches!(target_kind, Some(NodeKind::Protocol)) {
         ctx.self_type_ty(target)
+    } else if let Some(mutating) =
+        kestrel_name_res::extensions::lang_ref_mutability(query_ctx, target)
+    {
+        // Ref-target extension (`extend &T`): self IS the ref type — never
+        // the synthetic entity. `TyKind::Ref` keeps the transparent-place
+        // receiver peel working, so `self.method()` in the body dispatches
+        // on the POINTEE (via the extension's where bounds), not back onto
+        // the extension's own members.
+        let pointee = args.first().copied().unwrap_or_else(|| ctx.fresh());
+        ctx.ref_ty(pointee, mutating)
     } else {
         ctx.named(target, args.clone())
     };
@@ -379,7 +389,7 @@ fn emit_method_bound_constraint(
     }
     // Find or create a TyVar for this param
     let tv = ctx.param(param);
-    ctx.conforms(tv, protocol, span.clone());
+    ctx.conforms_typearg(tv, protocol, span.clone());
     // Cache protocol args for solve_associated to use when projecting
     // through `extend ConcreteType: Proto[FreeParams]` bindings.
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
@@ -504,7 +514,7 @@ fn create_return_type_with_opaque(
                 }) = &ctx.types[resolved.0 as usize]
                 {
                     opaque_bounds.push((*proto, args.clone()));
-                    ctx.conforms(concrete_ret, *proto, span.clone());
+                    ctx.conforms_typearg(concrete_ret, *proto, span.clone());
                 }
             }
 
@@ -629,7 +639,7 @@ fn emit_container_where_clauses(
                     self_tv,
                     query_ctx,
                 );
-                ctx.conforms(subject_tv, protocol, span.clone());
+                ctx.conforms_typearg(subject_tv, protocol, span.clone());
 
                 // Cache protocol args so solve_associated can substitute
                 // extension free TypeParams when projecting through the witness.
@@ -827,7 +837,7 @@ fn emit_protocol_assoc_type_where_clauses(
                     protocol_type_args,
                     ..
                 } => {
-                    ctx.conforms(alias_tv, bound_proto, span.clone());
+                    ctx.conforms_typearg(alias_tv, bound_proto, span.clone());
                     let subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
                         .zip(fresh_args.iter())
@@ -910,6 +920,95 @@ fn get_or_create_subject_tv(
 
     // Fallback: create a fresh TyVar
     ctx.fresh()
+}
+
+// === RetRefPointerDerived query ===
+
+/// Cached query: does this ref-returning callable fabricate its reference
+/// DIRECTLY from `lang.ptr_ref` / `lang.ptr_mut_ref`?
+///
+/// `PointerDerived` trust originates at the intrinsic, not at any nominal
+/// type. A ref-returning call's result normally re-roots at the callee's
+/// borrow source (the receiver) — but a callee that is a thin intrinsic
+/// wrapper (`Pointer.value` / `.mutatingValue`: every return-position
+/// expression is a direct `ptr_ref`/`ptr_mut_ref` call) returns a view whose
+/// validity inherits the raw pointer's contract, not the receiver temp's
+/// lifetime. Without this, the wrapper's receiver temp re-roots the view as
+/// `Local` and `Array.at` hits a false E494. One seam is enough: a wrapper
+/// of the wrapper re-roots at its own borrowable arg, which is exactly the
+/// verified discipline callers should see.
+///
+/// Lives in type-infer (not mir-lower, its main consumer) so the analyze
+/// crate's dangle lint (E504) can share the same wrapper recognition —
+/// hir-lower can't host it because the impl needs `InferBody`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct RetRefPointerDerived {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for RetRefPointerDerived {
+    type Output = bool;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> bool {
+        let Some(hir) = ctx.query(LowerBody {
+            entity: self.entity,
+            root: self.root,
+        }) else {
+            return false;
+        };
+        let Some(typed) = ctx.query(InferBody {
+            entity: self.entity,
+            root: self.root,
+        }) else {
+            return false;
+        };
+
+        // Return-position exprs: the body's tail plus every explicit
+        // `return v` (a Return inside a nested closure would over-collect,
+        // which only makes the answer conservatively false).
+        let mut rets: Vec<kestrel_hir::body::HirExprId> = hir.tail_expr.into_iter().collect();
+        for (_, expr) in hir.exprs.iter() {
+            if let kestrel_hir::body::HirExpr::Return { value: Some(v), .. } = expr {
+                rets.push(*v);
+            }
+        }
+        !rets.is_empty()
+            && rets
+                .iter()
+                .all(|&e| is_ptr_ref_intrinsic_call(ctx, &hir, &typed, e))
+    }
+}
+
+fn is_ptr_ref_intrinsic_call(
+    ctx: &QueryContext<'_>,
+    hir: &kestrel_hir::body::HirBody,
+    typed: &TypedBody,
+    expr: kestrel_hir::body::HirExprId,
+) -> bool {
+    use kestrel_ast_builder::{Intrinsic, Name};
+    use kestrel_hir::body::HirExpr;
+
+    let HirExpr::Call { callee, .. } = &hir.exprs[expr] else {
+        return false;
+    };
+    // Mirror of body lowering's resolve_callee_entity_from_expr.
+    let entity = typed.resolutions.get(callee).copied().or_else(|| {
+        match &hir.exprs[*callee] {
+            HirExpr::Def(e, _, _) => Some(*e),
+            _ => None,
+        }
+    });
+    let Some(e) = entity else {
+        return false;
+    };
+    if ctx.get::<Intrinsic>(e).is_none() {
+        return false;
+    }
+    matches!(
+        ctx.get::<Name>(e).map(|n| n.0.as_str()),
+        Some("ptr_ref" | "ptr_mut_ref")
+    )
 }
 
 /// Find an associated type entity by searching protocol bounds of a TypeAlias.

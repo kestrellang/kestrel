@@ -181,7 +181,7 @@ fn determine_function_kind(ctx: &LowerCtx, entity: Entity) -> FunctionKind {
                 _ => FunctionKind::Free,
             }
         },
-        NodeKind::Field | NodeKind::Subscript | NodeKind::Setter => {
+        NodeKind::Field | NodeKind::Subscript | NodeKind::Setter | NodeKind::RefAccessor => {
             let parent = accessor_enclosing_container(ctx, entity).unwrap_or(ctx.root);
             if let Some(callable) = ctx.world.get::<Callable>(entity) {
                 if let Some(recv) = &callable.receiver {
@@ -266,8 +266,11 @@ fn collect_inherited_type_params(ctx: &mut LowerCtx, entity: Entity, def: &mut F
         }
     }
 
-    // Setter under generic subscript inherits subscript's type params
-    if matches!(ctx.world.get::<NodeKind>(entity), Some(NodeKind::Setter)) {
+    // Setter / ref accessor under a generic subscript inherits its type params
+    if matches!(
+        ctx.world.get::<NodeKind>(entity),
+        Some(NodeKind::Setter | NodeKind::RefAccessor)
+    ) {
         let parent_subscript = ctx
             .world
             .parent_of(entity)

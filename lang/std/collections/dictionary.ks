@@ -1118,6 +1118,44 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         }
     }
 
+    /// Mutates the value for `key` in place and returns the closure's
+    /// result, or `None` (without invoking `body`) if the key is absent.
+    ///
+    /// The interim form of in-place value access — the conditional
+    /// ref-returning lookup (`find(key:) -> Optional[&V]`) waits for
+    /// `Optional[&T]`. Today this is a bucket read → mutate → write-back
+    /// under the hood; it can upgrade to true in-place mutation later with
+    /// no API change. One probe (no re-hash on write-back, unlike
+    /// `update(...)`); triggers COW only when the key is present.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1];
+    /// dict.modify("a") { (mutating v) in v = v + 1 };  // .Some(())
+    /// dict.modify("z") { (mutating v) in v = v + 1 };  // .None; body not invoked
+    /// dict("a");  // Some(2)
+    /// ```
+    public mutating func modify[R](key: K, body: (mutating V) -> R) -> R? {
+        let maybeIndex = self.findEntry(key);
+        if let .Some(index) = maybeIndex {
+            self.makeUnique();
+            let myBuckets = self.buckets();
+            let bucket = myBuckets.offset(by: index).read();
+            match bucket {
+                .Occupied(k, v, h) => {
+                    var value = v;
+                    let result = body(value);
+                    myBuckets.offset(by: index).write(.Occupied(k, value, h));
+                    return .Some(result)
+                },
+                // Unreachable: findEntry only returns occupied slots.
+                _ => {}
+            }
+        }
+        .None
+    }
+
     /// Inserts `transform(defaultValue)` for a new key, or
     /// `transform(existing)` for an existing one.
     ///

@@ -32,7 +32,7 @@ func main() -> lang.i64 {
     let baseline = clones.read();
 
     // borrowed-self call through the ref: zero clones
-    if arr.at(index: 0).size() != 5 { return 1; }
+    if arr(at: 0).size() != 5 { return 1; }
     if clones.read() != baseline { return 2; }
     0
 }

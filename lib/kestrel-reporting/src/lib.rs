@@ -21,10 +21,55 @@ where
 {
     let writer = StandardStream::stderr(ColorChoice::Always);
     let config = term::Config::default();
+    let mut last_err = Ok(());
     for diagnostic in diagnostics {
-        term::emit_to_write_style(&mut writer.lock(), &config, files, diagnostic)?;
+        // Render each diagnostic independently: one with an unresolvable
+        // (synthetic/missing) span must not abort the whole batch.
+        if let Err(e) = emit_one(&mut writer.lock(), &config, files, diagnostic) {
+            last_err = Err(e);
+        }
     }
-    Ok(())
+    last_err
+}
+
+/// Emit a single diagnostic; never let an unresolvable span silence it.
+///
+/// A diagnostic attached to a synthesized (spanless) node carries a synthetic
+/// span pointing at a fileless entity. codespan's file lookup then returns a
+/// `files::Error` (e.g. `FileMissing`), which — if propagated — aborts the
+/// entire emit batch and the message is lost (a silent build failure). On any
+/// such span-derived error we re-emit the diagnostic with its labels stripped,
+/// so the message text always reaches the writer even without source context.
+/// Only a genuine write/IO failure on the stripped retry is surfaced.
+fn emit_one<'a, W, F>(
+    writer: &mut W,
+    config: &term::Config,
+    files: &'a F,
+    diagnostic: &Diagnostic<usize>,
+) -> Result<(), codespan_reporting::files::Error>
+where
+    W: term::termcolor::WriteColor,
+    F: codespan_reporting::files::Files<'a, FileId = usize>,
+{
+    match term::emit_to_write_style(writer, config, files, diagnostic) {
+        Ok(()) => Ok(()),
+        // `Io` is a real writer failure stripping labels won't fix; surface it.
+        Err(e @ files::Error::Io(_)) => Err(e),
+        // Any span/file-lookup error: retry without labels (which is the only
+        // part needing source context) so the message still prints.
+        Err(_) => term::emit_to_write_style(writer, config, files, &strip_labels(diagnostic)),
+    }
+}
+
+/// Clone a diagnostic without its labels, appending an explanatory note so the
+/// reader knows the location was unavailable rather than simply omitted.
+fn strip_labels(diagnostic: &Diagnostic<usize>) -> Diagnostic<usize> {
+    let mut bare = diagnostic.clone();
+    bare.labels.clear();
+    bare.notes.push(
+        "(no source location available — diagnostic attached to a synthesized node)".into(),
+    );
+    bare
 }
 
 /// Trait for types that can be converted into a diagnostic.
@@ -131,10 +176,15 @@ impl DiagnosticContext {
         diagnostics: &[Diagnostic<usize>],
     ) -> Result<(), codespan_reporting::files::Error> {
         let config = codespan_reporting::term::Config::default();
+        let mut last_err = Ok(());
         for diagnostic in diagnostics {
-            term::emit_to_write_style(writer, &config, &self.files, diagnostic)?;
+            // Resilient per-diagnostic emit: a synthetic-span diagnostic must
+            // not abort the batch (see `emit_one`).
+            if let Err(e) = emit_one(writer, &config, &self.files, diagnostic) {
+                last_err = Err(e);
+            }
         }
-        Ok(())
+        last_err
     }
 }
 
@@ -156,4 +206,55 @@ macro_rules! diagnostic {
     (note, $($args:tt)*) => {
         $crate::Diagnostic::note().with_message(format!($($args)*))
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codespan_reporting::files::SimpleFiles;
+    use codespan_reporting::term::termcolor::Buffer;
+
+    fn render(files: &SimpleFiles<String, String>, diags: &[Diagnostic<usize>]) -> String {
+        let mut buf = Buffer::no_color();
+        let config = term::Config::default();
+        let mut last = Ok(());
+        for d in diags {
+            if let Err(e) = emit_one(&mut buf, &config, files, d) {
+                last = Err(e);
+            }
+        }
+        last.expect("emit_one should not fail on synthetic spans");
+        String::from_utf8(buf.into_inner()).unwrap()
+    }
+
+    /// A diagnostic whose label points at a file absent from the registry
+    /// (the synthetic-span case) must still print its message, not vanish.
+    #[test]
+    fn synthetic_span_diagnostic_still_prints() {
+        let files = SimpleFiles::<String, String>::new(); // empty: file id 0 missing
+        let diag = Diagnostic::error()
+            .with_message("conformance failed on a synthesized node")
+            .with_labels(vec![Label::primary(0usize, 0..0)]);
+        let out = render(&files, &[diag]);
+        assert!(out.contains("conformance failed on a synthesized node"), "got: {out:?}");
+        assert!(out.contains("no source location available"), "got: {out:?}");
+    }
+
+    /// A bad-span diagnostic earlier in the batch must not suppress later
+    /// diagnostics that have valid spans.
+    #[test]
+    fn bad_span_does_not_abort_batch() {
+        let mut files = SimpleFiles::<String, String>::new();
+        let fid = files.add("real.ks".to_string(), "let x = 1;\n".to_string());
+        let bad = Diagnostic::error()
+            .with_message("first: synthetic")
+            .with_labels(vec![Label::primary(999usize, 0..0)]);
+        let good = Diagnostic::error()
+            .with_message("second: real span")
+            .with_labels(vec![Label::primary(fid, 4..5)]);
+        let out = render(&files, &[bad, good]);
+        assert!(out.contains("first: synthetic"), "got: {out:?}");
+        assert!(out.contains("second: real span"), "got: {out:?}");
+        assert!(out.contains("real.ks"), "real-span diagnostic should show source: {out:?}");
+    }
 }

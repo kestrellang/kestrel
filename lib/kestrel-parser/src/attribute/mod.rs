@@ -172,7 +172,7 @@ mod tests {
         let input = create_input(&prepared, source.len());
 
         attribute_list_parser()
-            .parse(input)
+            .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
             .into_result()
             .unwrap_or_default()
     }

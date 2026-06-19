@@ -135,6 +135,11 @@ impl OssaBuilder {
     }
 
     /// Create a block with typed, ownership-annotated params. Returns (block_id, param_value_ids).
+    /// A Guaranteed param is a THREADED borrow (a binding crossing the block
+    /// boundary as a forwarded block arg — verify Check 4's accepted form);
+    /// it carries no borrow_source here — use `add_guaranteed_block_param`
+    /// to attach one, or stamp the metadata after creation (the lowering
+    /// stamps at block entry, `rebind_scope_values`).
     pub fn new_block_with_params(
         &mut self,
         params: &[(TyId, Ownership)],
@@ -144,7 +149,13 @@ impl OssaBuilder {
         for &(ty, ownership) in params {
             let def = match ownership {
                 Ownership::Owned => ValueDef::owned(ty),
-                Ownership::Guaranteed => panic!("use add_guaranteed_block_param for @guaranteed"),
+                Ownership::Guaranteed => ValueDef {
+                    ty,
+                    ownership: Ownership::Guaranteed,
+                    borrow_source: None,
+                    root: RootProvenance::derived(),
+                    span: None,
+                },
             };
             let val = self.body.alloc_value(def);
             self.body.block_mut(block).params.push(BlockParam {
@@ -155,6 +166,25 @@ impl OssaBuilder {
             values.push(val);
         }
         (block, values)
+    }
+
+    /// Append a @guaranteed param to an existing block — a forwarded borrow
+    /// continuing across the block boundary. `source` is the borrowed value
+    /// (verify registers the param as an open borrow so a later EndBorrow
+    /// lands and Check 4 holds in the new block).
+    pub fn add_guaranteed_block_param(
+        &mut self,
+        block: BlockId,
+        ty: TyId,
+        source: ValueId,
+    ) -> ValueId {
+        let val = self.body.alloc_value(ValueDef::guaranteed(ty, source));
+        self.body.block_mut(block).params.push(BlockParam {
+            value: val,
+            ty,
+            ownership: Ownership::Guaranteed,
+        });
+        val
     }
 
     pub fn switch_to(&mut self, block: BlockId) {

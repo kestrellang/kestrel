@@ -20,12 +20,12 @@ struct Tracked {
 @main
 func main() -> lang.i64 {
     var arr = [11, 22, 33];
-    arr.mutableAt(index: 0) = 5;
+    arr(at: 0) = 5;
     if arr(0) != 5 { return 1; }
     if arr(1) != 22 { return 2; }
 
     let snap = arr;
-    arr.mutableAt(index: 2) = 1000;
+    arr(at: 2) = 1000;
     if arr(2) != 1000 { return 3; }
     if snap(2) != 33 { return 4; }
 
@@ -35,10 +35,10 @@ func main() -> lang.i64 {
     drops.write(0);
     var ts = [Tracked(tag: 1, drops: drops)];
     let baseline = drops.read();
-    ts.mutableAt(index: 0) = Tracked(tag: 2, drops: drops);
+    ts(at: 0) = Tracked(tag: 2, drops: drops);
     if drops.read() != baseline + 1 { return 5; }
     // read back through a borrowed view — no element copy, no extra deinit
-    if ts.at(index: 0).tag != 2 { return 6; }
+    if ts(at: 0).tag != 2 { return 6; }
     if drops.read() != baseline + 1 { return 7; }
 
     // Pointer bridge getter as the place

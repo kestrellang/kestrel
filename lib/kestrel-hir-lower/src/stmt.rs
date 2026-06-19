@@ -71,7 +71,54 @@ impl LowerCtx<'_> {
         span: &Span,
     ) -> HirStmtId {
         let lowered_ty = ty.map(|t| self.lower_type_in(t, crate::ty::RefPosition::Binding));
-        let lowered_value = value.map(|v| self.lower_expr(body, v));
+
+        // Named ref binding carve (stage 1.5 item 2): a `&expr` /
+        // `&mutating expr` initializer is legal exactly here — a simple
+        // immutable `let` — and lowers to `HirExpr::Borrow` instead of
+        // hitting the unary-op rejection (E488). `var` (no rebinding to
+        // confuse with store-through) and destructuring patterns (the
+        // desugared temp would dangle) reject with E209 but still lower
+        // as a Borrow so downstream diagnostics stay typed.
+        let borrow_init = value.and_then(|v| match &body.exprs[v] {
+            AstExpr::Unary {
+                op: op @ (UnaryOp::Borrow | UnaryOp::BorrowMutating),
+                operand,
+                span,
+            } => Some((*operand, *op == UnaryOp::BorrowMutating, span.clone())),
+            _ => None,
+        });
+        let lowered_value = match borrow_init {
+            Some((operand, mutating, uspan)) => {
+                if is_mut || !matches!(&body.pats[pattern], AstPat::Binding { .. }) {
+                    self.ctx.accumulate(
+                        Diagnostic::error()
+                            .with_code("E209")
+                            .with_message("a ref binding must be a simple `let`")
+                            .with_labels(vec![
+                                Label::primary(uspan.file_id, uspan.range())
+                                    .with_message("borrow initializer"),
+                            ])
+                            .with_notes(vec![
+                                "`&` bindings cannot be reassigned or destructured; \
+                                 write `let r = &…;`"
+                                    .to_string(),
+                            ]),
+                    );
+                    // Recovery: drop the `&` — a var/destructured local must
+                    // stay value-typed (a Ref-typed `var` slot has no MIR
+                    // representation).
+                    Some(self.lower_expr(body, operand))
+                } else {
+                    let inner = self.lower_expr(body, operand);
+                    Some(self.alloc_expr(HirExpr::Borrow {
+                        inner,
+                        mutating,
+                        span: uspan,
+                    }))
+                }
+            },
+            None => value.map(|v| self.lower_expr(body, v)),
+        };
 
         // Check if pattern is a simple binding
         match &body.pats[pattern] {

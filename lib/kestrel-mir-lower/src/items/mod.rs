@@ -54,7 +54,7 @@ fn lower_functions(ctx: &mut LowerCtx, parent: Entity) {
             NodeKind::Module => lower_functions(ctx, child),
             NodeKind::Struct | NodeKind::Enum => lower_member_functions(ctx, child),
             NodeKind::Extension => lower_member_functions(ctx, child),
-            NodeKind::Function | NodeKind::Setter => {
+            NodeKind::Function | NodeKind::Setter | NodeKind::RefAccessor => {
                 function_sig::lower_function_sig(ctx, child);
             },
             NodeKind::Field => {
@@ -81,7 +81,8 @@ fn lower_member_functions(ctx: &mut LowerCtx, parent: Entity) {
             | NodeKind::Initializer
             | NodeKind::Deinit
             | NodeKind::Subscript
-            | NodeKind::Setter => {
+            | NodeKind::Setter
+            | NodeKind::RefAccessor => {
                 function_sig::lower_function_sig(ctx, child);
                 if matches!(kind, NodeKind::Subscript) {
                     lower_functions(ctx, child);

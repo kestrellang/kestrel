@@ -12,6 +12,21 @@ use kestrel_span::Span;
 
 use crate::ty::TyVar;
 
+/// How a `Conforms` obligation arose — decides what a REF type judges
+/// (stage 2b). An `Expr` obligation (a protocol-dispatched USE of a value:
+/// receiver bounds, operator protocols, literal protocols) keeps the
+/// transparent-place rule: a `&T` peels and the POINTEE is judged. A
+/// `TypeArg` obligation (where-clause bounds, formation wellformedness,
+/// alias bounds — positions whose success instantiates WITNESSES at the
+/// type) must judge the ref ITSELF: refs satisfy only Copyable (bit-copy)
+/// until 2d builds real ref-Item witnesses. Default `Expr`: a missed site
+/// fails toward today's behavior, never toward breaking place dispatch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConformsOrigin {
+    Expr,
+    TypeArg,
+}
+
 /// A type constraint emitted during constraint generation.
 #[derive(Clone, Debug)]
 pub enum Constraint {
@@ -29,6 +44,55 @@ pub enum Constraint {
         span: Span,
     },
 
+    /// `&inner → Ref { pointee }` — a borrow expression's pointee
+    /// (stage 1.5 named ref bindings). The Borrow expr's own TyVar is
+    /// allocated as a structurally-resolved `Ref { pointee }` at
+    /// generation time (order-independence: later reads of the binding
+    /// always see a resolved Ref slot); this constraint fills the
+    /// pointee once `inner` resolves — a ref inner re-borrows (pointee
+    /// ≡ inner's pointee), a value inner borrows the place (pointee ≡
+    /// inner). Mutability legality is analyze's job, not typing's.
+    BorrowPointee {
+        inner: TyVar,
+        pointee: TyVar,
+        span: Span,
+    },
+
+    /// `value ⇒ target` — Equal with the ref-decay dimension (stage 2b):
+    /// a REF-typed value unifies ref-to-ref when the target is a ref
+    /// (annotated ref slots, `-> &T` arm positions), decays to its POINTEE
+    /// when the target is a non-ref, and DEFERS while the target is
+    /// unresolved (an annotation may be about to pin it; targets nothing
+    /// pins take the decay in `apply_ref_decay_defaults`). Non-ref values
+    /// are plain Equal — no promotion, no other coercions. Used at
+    /// if/match arm-result equates and tuple-literal elements, replacing
+    /// the eager generation-time peel (which pattern-payload ref bindings
+    /// resolve too late for, and which annotations could never override).
+    EqualDecayed {
+        value: TyVar,
+        target: TyVar,
+        span: Span,
+    },
+
+    /// `value → local target` — an assignment whose target is a LOCAL read.
+    /// A ref-typed target is STORE-THROUGH: the RHS coerces to the POINTEE
+    /// (`r = v` on a `&mutating` binding). A non-ref target is a plain
+    /// Coerce. An UNRESOLVED target DEFERS: a pattern-payload ref binding
+    /// (`if let .Some(w) = call()`) resolves only when the deferred
+    /// ImplicitPat fires, and an eager Coerce would pin `w` from the RHS
+    /// literal first — the late payload equate then collided ("expected
+    /// Int64 got &mutating Int64"). Targets nothing ever resolves fall back
+    /// to the plain Coerce after the literal-relaxation loop exhausts
+    /// (`break_stalled_assign_targets`), so plain `x = 5` shapes cannot
+    /// deadlock. Mutability legality is analyze's job (E200/E208), not
+    /// typing's.
+    AssignTarget {
+        value: TyVar,
+        target: TyVar,
+        expr: HirExprId,
+        span: Span,
+    },
+
     /// `ty : Protocol` — protocol conformance.
     /// Deferred until ty is concrete.
     Conforms {
@@ -40,6 +104,9 @@ pub enum Constraint {
         /// constraints so cascading Member/ImplicitMember constraints inside
         /// the desugared subtree see an Error receiver and absorb silently.
         poison_ty_on_failure: bool,
+        /// What the conformance judges when `ty` is a ref — see
+        /// `ConformsOrigin`.
+        origin: ConformsOrigin,
     },
 
     /// `Container.Name → result` — associated type projection.

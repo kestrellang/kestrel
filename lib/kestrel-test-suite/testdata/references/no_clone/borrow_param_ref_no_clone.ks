@@ -4,8 +4,8 @@
 
 // Decision (a), borrow args are place contexts: a ref passed to a
 // borrow-convention free-function param passes the referent place as the
-// @guaranteed argument — `describe(arr.at(index: 0))` borrows in place
-// exactly like `arr.at(index: 0).size()`. Zero clones.
+// @guaranteed argument — `describe(arr(at: 0))` borrows in place
+// exactly like `arr(at: 0).size()`. Zero clones.
 module Test
 
 import std.memory.(Pointer, Layout, SystemAllocator)
@@ -31,7 +31,7 @@ func main() -> lang.i64 {
     let arr = [Tracked(payload: "alpha", clones: clones)];
     let baseline = clones.read();
 
-    if describe(arr.at(index: 0)) != 5 { return 1; }
+    if describe(arr(at: 0)) != 5 { return 1; }
     if clones.read() != baseline { return 2; }
     0
 }

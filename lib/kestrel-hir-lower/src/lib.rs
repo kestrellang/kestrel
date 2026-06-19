@@ -27,7 +27,8 @@ use kestrel_span::Span;
 
 pub use ty::{
     CallableRefReturn, LowerCallableReturnType, LowerCallableTypes, LowerExtensionTargetTypeArgs,
-    LowerTypeAnnotation, RefReturn, lower_ast_type,
+    LowerTypeAnnotation, PlaceAccessorInfo, PlaceAccessors, RefPolicy, RefPosition, RefReturn,
+    lower_ast_type, reject_ref_types, reject_ref_types_allowing_top_ref,
 };
 
 use ctx::LowerCtx;
@@ -243,6 +244,7 @@ mod tests {
         let pat = pats.alloc(AstPat::Binding {
             is_mut: false,
             name: "x".into(),
+            by_ref: None,
             span: Span::synthetic(0),
         });
 
@@ -426,6 +428,7 @@ mod tests {
         let pat = pats.alloc(AstPat::Binding {
             is_mut: true,
             name: "x".into(),
+            by_ref: None,
             span: Span::synthetic(0),
         });
         let let_stmt = stmts.alloc(AstStmt::Let {

@@ -139,18 +139,23 @@ impl LowerCtx<'_> {
             return self.lower_expr(body, operand);
         }
 
-        // Prefix `&` parses (for recovery) but is never a valid expression:
-        // borrowing is decided by the callee's signature, not the call site.
-        if *op == UnaryOp::Borrow {
+        // Prefix `&`/`&mutating` parse but are not free-standing expressions:
+        // a borrow expression is legal only as a `let` initializer (named ref
+        // binding — that path intercepts before this desugar).
+        if matches!(op, UnaryOp::Borrow | UnaryOp::BorrowMutating) {
             self.lower_expr(body, operand); // still lower for downstream diags
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E488")
-                    .with_message("borrow expressions are not written; the signature decides")
+                    .with_message(
+                        "a borrow expression is only allowed as a `let` initializer",
+                    )
                     .with_labels(vec![Label::primary(span.file_id, span.range())])
                     .with_notes(vec![
-                        "a parameter `x: T` already borrows; `mutating x: T` mutably borrows"
+                        "arguments borrow by signature: a parameter `x: T` already borrows, \
+                         `mutating x: T` mutably borrows"
                             .to_string(),
+                        "to hold this borrow, name it first: `let r = &…;`".to_string(),
                     ]),
             );
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
@@ -768,6 +773,7 @@ impl LowerCtx<'_> {
         let value_local = self.define_local("$try_value", false, span.clone());
         let value_binding = self.alloc_pat(HirPat::Binding {
             local: value_local,
+            by_ref: None,
             span: span.clone(),
         });
         let continue_pat = self.alloc_pat(HirPat::ImplicitVariant {
@@ -785,6 +791,7 @@ impl LowerCtx<'_> {
         let early_local = self.define_local("$try_early", false, span.clone());
         let early_binding = self.alloc_pat(HirPat::Binding {
             local: early_local,
+            by_ref: None,
             span: span.clone(),
         });
         let break_pat = self.alloc_pat(HirPat::ImplicitVariant {
@@ -1352,6 +1359,7 @@ fn unary_op_symbol(op: &UnaryOp) -> &'static str {
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
         UnaryOp::Borrow => "&",
+        UnaryOp::BorrowMutating => "&mutating",
     }
 }
 

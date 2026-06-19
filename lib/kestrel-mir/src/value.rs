@@ -46,6 +46,41 @@ impl RootProvenance {
     pub fn is_derived_placeholder(self) -> bool {
         matches!(self, RootProvenance::Local(v) if v.index() == u32::MAX as usize)
     }
+
+    /// Join two provenance roots into the MOST RESTRICTIVE one (stage 2b:
+    /// an aggregate built from several refs carries a single root — the one
+    /// that gives the strictest verdict at every return-rule dimension).
+    /// `param_convs` is the owning function's entry-param convention list
+    /// (a `Param(i)` root's behavior is convention-derived, single source
+    /// of truth). Ties keep `self` so diagnostics anchor on the first
+    /// component encountered.
+    ///
+    /// The linear rank bakes in the three check dimensions:
+    /// - escape: `Local` beats everything (E494 on return);
+    /// - consuming: a consuming param beats borrow roots (E496);
+    /// - mutability: every immutable root (borrow param, immutable
+    ///   pointer-derived, static) beats every mutable one, so a
+    ///   `&mutating`-carrying return demands ALL components be
+    ///   mutable-rooted (E495).
+    pub fn join(self, other: Self, param_convs: &[crate::ty::ParamConvention]) -> Self {
+        let rank = |root: RootProvenance| -> u8 {
+            use crate::ty::ParamConvention as PC;
+            match root {
+                // Includes the derived placeholder ("Local, no known def").
+                RootProvenance::Local(_) => 6,
+                RootProvenance::Param(i) => match param_convs.get(i as usize) {
+                    // Out-of-range index = builder bug; rank conservatively.
+                    Some(PC::Consuming) | None => 5,
+                    Some(PC::Borrow) => 4,
+                    Some(PC::MutBorrow) => 1,
+                },
+                RootProvenance::PointerDerived { mutable: false } => 3,
+                RootProvenance::Static => 2,
+                RootProvenance::PointerDerived { mutable: true } => 0,
+            }
+        };
+        if rank(other) > rank(self) { other } else { self }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -147,5 +182,38 @@ mod tests {
         assert!(RootProvenance::derived().is_derived_placeholder());
         assert!(!RootProvenance::Local(ValueId::new(0)).is_derived_placeholder());
         assert!(!RootProvenance::Static.is_derived_placeholder());
+    }
+
+    // join picks the most restrictive root per the return-rule dimensions.
+    #[test]
+    fn join_rank_order() {
+        use crate::ty::ParamConvention as PC;
+        let convs = [PC::Consuming, PC::Borrow, PC::MutBorrow];
+        let local = RootProvenance::Local(ValueId::new(3));
+        let consuming = RootProvenance::Param(0);
+        let borrow = RootProvenance::Param(1);
+        let mut_borrow = RootProvenance::Param(2);
+        let pd_imm = RootProvenance::PointerDerived { mutable: false };
+        let pd_mut = RootProvenance::PointerDerived { mutable: true };
+        let stat = RootProvenance::Static;
+
+        // Escape dimension: Local beats everything, either side.
+        assert_eq!(consuming.join(local, &convs), local);
+        assert_eq!(local.join(stat, &convs), local);
+        // Consuming beats borrow roots.
+        assert_eq!(borrow.join(consuming, &convs), consuming);
+        // Mutability dimension: every immutable root beats every mutable one
+        // (a &mutating-carrying return needs ALL components mutable-rooted).
+        assert_eq!(mut_borrow.join(borrow, &convs), borrow);
+        assert_eq!(pd_mut.join(stat, &convs), stat);
+        assert_eq!(mut_borrow.join(pd_imm, &convs), pd_imm);
+        // Ties keep self (stable diagnostic anchor).
+        let borrow2 = RootProvenance::Param(1);
+        assert_eq!(borrow.join(borrow2, &convs), borrow);
+        // Placeholder ranks as Local.
+        assert_eq!(stat.join(RootProvenance::derived(), &convs), RootProvenance::derived());
+        // Out-of-range param index ranks conservatively (consuming).
+        let oob = RootProvenance::Param(9);
+        assert_eq!(borrow.join(oob, &convs), oob);
     }
 }

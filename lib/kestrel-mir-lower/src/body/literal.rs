@@ -245,6 +245,9 @@ impl OssaBodyCtx<'_, '_> {
         let unit_ty = self.ctx.module.ty_arena.unit();
         for (i, &elem_expr) in elements.iter().enumerate() {
             let elem_val = self.lower_expr(elem_expr);
+            // Stage 1.5: a ref element decays to an owned copy (the buffer
+            // owns its elements); the copy ends the ref's borrow.
+            let elem_val = self.decay_if_ref(elem_val);
             let elem_ptr = if i == 0 {
                 ptr
             } else {
@@ -342,7 +345,11 @@ impl OssaBodyCtx<'_, '_> {
         let unit_ty = self.ctx.module.ty_arena.unit();
         for (i, entry) in entries.iter().enumerate() {
             let key = self.lower_expr(entry.key);
+            // Stage 1.5: ref entries decay to owned copies (the dict owns
+            // its keys and values).
+            let key = self.decay_if_ref(key);
             let val = self.lower_expr(entry.value);
+            let val = self.decay_if_ref(val);
 
             // Build (key, val) tuple
             let pair = self.emit_tuple(pair_ty, vec![key, val]);

@@ -698,6 +698,7 @@ fn format_unary_op(op: &UnaryOp) -> &'static str {
         UnaryOp::RangeUpTo => "..<",
         UnaryOp::RangeThrough => "..=",
         UnaryOp::Borrow => "&",
+        UnaryOp::BorrowMutating => "&mutating ",
     }
 }
 

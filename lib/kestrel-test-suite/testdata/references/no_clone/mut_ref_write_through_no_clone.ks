@@ -30,11 +30,11 @@ func main() -> lang.i64 {
     var arr = [Tracked(payload: "alpha", clones: clones)];
     let baseline = clones.read();
 
-    arr.mutableAt(index: 0).rename(to: "renamed");
+    arr(at: 0).rename(to: "renamed");
     if clones.read() != baseline { return 1; }
 
     // observe through another borrow (a value subscript would clone)
-    if arr.at(index: 0).size() != 7 { return 2; }
+    if arr(at: 0).size() != 7 { return 2; }
     if clones.read() != baseline { return 3; }
     0
 }

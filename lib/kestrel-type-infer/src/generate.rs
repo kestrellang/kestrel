@@ -45,6 +45,18 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
         let tail_tv = gen_expr(ctx, hir, tail);
         if tail_is_exhaustive(hir, tail) {
             let span = expr_span(hir, tail);
+            // Return-tail is a value position: a ref-returning call decays to
+            // the pointee when the declared return type is non-ref. Mirrors the
+            // binding/arm decay wiring (the missing fifth decay site) so
+            // bind_call_result pins the pointee. When the return type IS `&T` we
+            // leave the ref intact — the return-position borrow / ref-to-ref
+            // pass-through in solve_coerce handles it.
+            if !matches!(
+                ctx.slot(ctx.resolve(ctx.return_ty)),
+                TySlot::Resolved(TyKind::Ref { .. })
+            ) {
+                mark_arm_value(ctx, hir, tail);
+            }
             ctx.coerce(tail_tv, ctx.return_ty, tail, span);
         }
     }
@@ -72,6 +84,21 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // === References ===
+        // `&expr` / `&mutating expr` (named-ref-binding initializer): the
+        // result var is a structurally-resolved `Ref { pointee }` from the
+        // start — later reads of the binding always see a resolved Ref
+        // slot — and BorrowPointee fills the pointee once `inner` resolves.
+        HirExpr::Borrow {
+            inner,
+            mutating,
+            span,
+        } => {
+            let inner_tv = gen_expr(ctx, hir, *inner);
+            let pointee = ctx.fresh();
+            ctx.borrow_pointee(inner_tv, pointee, span.clone());
+            ctx.ref_ty(pointee, *mutating)
+        },
+
         HirExpr::Local(local_id, _) => {
             // Return the TyVar assigned when this local was declared
             ctx.local_types.get(local_id).copied().unwrap_or_else(|| {
@@ -338,6 +365,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.poison(result_tv);
                 return result_tv;
             };
+            // Operators / for-in / try desugar to ProtocolCall. Their method
+            // lookup must NOT trigger the lazy Indirection peel — a wrapper's
+            // `==` forwards via `extend W: Equatable`, never by peeling the
+            // member to the pointee (which would coerce the argument; R7).
+            ctx.protocol_dispatch_members.insert(id);
             // Resolve method on the protocol
             ctx.member(
                 recv_tv,
@@ -446,7 +478,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Both branches must agree — use block value spans so
                 // errors point at the mismatched expression, not the if keyword
                 let then_span = block_value_span(hir, then_body).unwrap_or_else(|| span.clone());
-                ctx.equal(then_tv, result_tv, then_span);
+                // Decayed equate (stage 2b): a ref-binding arm decays to its
+                // pointee UNLESS the result position is itself a ref —
+                // deferred for local reads (pattern-payload ref bindings
+                // resolve after generation), eager-peel otherwise.
+                match then_body.tail_expr {
+                    Some(tail) => {
+                        equate_decaying_value(ctx, hir, tail, then_tv, result_tv, then_span)
+                    },
+                    None => ctx.equal(then_tv, result_tv, then_span),
+                }
+                mark_arm_value_block(ctx, hir, then_body);
                 // Guard desugars to `if cond {} else { body }` where the
                 // else block is required to diverge. Don't equate its value
                 // type with the empty then branch — the guard divergence
@@ -454,7 +496,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 if !is_guard_if(hir, id) {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
-                    ctx.equal(else_tv, result_tv, else_span);
+                    match else_block.tail_expr {
+                        Some(tail) => {
+                            equate_decaying_value(ctx, hir, tail, else_tv, result_tv, else_span)
+                        },
+                        None => ctx.equal(else_tv, result_tv, else_span),
+                    }
+                    mark_arm_value_block(ctx, hir, else_block);
                 }
                 result_tv
             } else {
@@ -478,6 +526,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // indirection broke array/tuple pattern generation, which
             // inspects the scrutinee's resolution).
             ctx.scrutinee_exprs.insert(*scrutinee);
+            // A ref-binding scrutinee (`match r`) matches its POINTEE —
+            // patterns never see a ref (the MIR scrutinee decay copies).
+            let scrut_tv = peel_ref_tv(ctx, scrut_tv);
             let result_tv = ctx.fresh();
 
             // Empty match has no arms to pin the result type. An analyzer
@@ -504,7 +555,19 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Never, `default_never_fallback` settles it.
                 let body_tv = gen_expr(ctx, hir, arm.body);
                 let body_span = expr_span(hir, arm.body);
-                ctx.equal(body_tv, result_tv, body_span);
+                // Arm values decay to the pointee UNLESS the result position
+                // is a ref (stage 2b): deferred for local reads, eager-peel
+                // otherwise.
+                equate_decaying_value(ctx, hir, arm.body, body_tv, result_tv, body_span);
+                // Arm-value decay applies only where the arm value is the
+                // user's expression. GuardLet is CPS-desugared — its pattern
+                // arm is the CONTINUATION, and marking it would decay a legal
+                // ref return at the tail of a `-> &T` function containing a
+                // `guard let`. The remaining sources have synthetic arm
+                // values (unit/Never/ControlFlow).
+                if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
+                    mark_arm_value(ctx, hir, arm.body);
+                }
             }
             result_tv
         },
@@ -564,7 +627,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ctx.assign_target_exprs.insert(*target);
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
-            ctx.coerce(value_tv, target_tv, *value, span.clone());
+            // A LOCAL target keeps its raw type (a `&mutating` binding's
+            // local type IS the ref) and may resolve late (pattern-payload
+            // bindings) — route through AssignTarget, which picks
+            // store-through vs plain coerce once the target resolves.
+            // Field/call targets already type as the pointee (see above).
+            if matches!(hir.exprs[*target], HirExpr::Local(..)) {
+                ctx.assign_target(value_tv, target_tv, *value, span.clone());
+            } else {
+                ctx.coerce(value_tv, target_tv, *value, span.clone());
+            }
             ctx.tuple(vec![]) // assignment returns unit
         },
 
@@ -597,9 +669,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             for &e in elements {
                 let e_tv = gen_expr(ctx, hir, e);
                 let e_span = expr_span(hir, e);
+                let e_tv = peel_ref_tv(ctx, e_tv);
                 // Order (elem_tv, e_tv) so diagnostics read "expected <target>
                 // got <element>" rather than the reverse.
                 ctx.equal(elem_tv, e_tv, e_span);
+                // Literal elements always decay refs to owned (stage 1.5).
+                mark_arm_value(ctx, hir, e);
             }
             arr_tv
         },
@@ -618,6 +693,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             for entry in entries {
                 let k = gen_expr(ctx, hir, entry.key);
                 let v = gen_expr(ctx, hir, entry.value);
+                let k = peel_ref_tv(ctx, k);
+                let v = peel_ref_tv(ctx, v);
                 let key_span = expr_span(hir, entry.key);
                 let value_span = expr_span(hir, entry.value);
                 let expected_key = expected_entry
@@ -644,12 +721,33 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ) {
                     ctx.equal(val_tv, v, value_span);
                 }
+                // Literal entries always decay refs to owned (stage 1.5).
+                mark_arm_value(ctx, hir, entry.key);
+                mark_arm_value(ctx, hir, entry.value);
             }
             dict_tv
         },
 
         HirExpr::Tuple { elements, span: _ } => {
-            let elem_tvs: Vec<TyVar> = elements.iter().map(|&e| gen_expr(ctx, hir, e)).collect();
+            // Local-read elements flow through a decayed equate into a
+            // FRESH slot var: an annotation pinning the slot to `&T`
+            // (stage 2b ref tuples) keeps the ref; unpinned ref elements
+            // decay to owned (the stage-1.5 behavior). Non-local elements
+            // keep the eager peel.
+            let elem_tvs: Vec<TyVar> = elements
+                .iter()
+                .map(|&e| {
+                    let tv = gen_expr(ctx, hir, e);
+                    mark_arm_value(ctx, hir, e);
+                    if value_expr_is_local(hir, e) {
+                        let slot = ctx.fresh();
+                        ctx.equal_decayed(tv, slot, expr_span(hir, e));
+                        slot
+                    } else {
+                        peel_ref_tv(ctx, tv)
+                    }
+                })
+                .collect();
             ctx.tuple(elem_tvs)
         },
 
@@ -785,14 +883,28 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 let val_tv = gen_expr(ctx, hir, *val);
                 ctx.expected_array_elem = prev_hint;
                 ctx.expected_dict_entry = prev_dict_hint;
-                // Stage-1 binding decay: a binding is a VALUE context. The
-                // coerce decay arm handles a resolved ref, but with an
-                // unannotated binding the coerce can run BEFORE the member
-                // resolves (unify redirects local ≡ result) — record the
-                // init expr so bind_call_result binds the POINTEE directly.
-                ctx.binding_init_exprs.insert(*val);
-                // Value flows to the binding (allows promotion)
-                ctx.coerce(val_tv, local_tv, *val, span.clone());
+                if matches!(&hir.exprs[*val], HirExpr::Borrow { .. }) {
+                    // Named ref binding (`let r = &expr;`): the one binding
+                    // form that is NOT a value context — no decay-set entry,
+                    // no Coerce (the from-ref arm would decay the Ref to its
+                    // pointee). The local maps DIRECTLY to the Borrow's
+                    // structurally-resolved Ref var, not through an Equal:
+                    // gen-time `peel_ref_tv` at later read sites must see a
+                    // resolved slot immediately, and constraints only solve
+                    // after generation. (The initializer cannot reference
+                    // the new local — it is defined after the init lowers.)
+                    ctx.local_types.insert(*local, val_tv);
+                } else {
+                    // Stage-1 binding decay: a binding is a VALUE context.
+                    // The coerce decay arm handles a resolved ref, but with
+                    // an unannotated binding the coerce can run BEFORE the
+                    // member resolves (unify redirects local ≡ result) —
+                    // record the init expr so bind_call_result binds the
+                    // POINTEE directly.
+                    ctx.binding_init_exprs.insert(*val);
+                    // Value flows to the binding (allows promotion)
+                    ctx.coerce(val_tv, local_tv, *val, span.clone());
+                }
             }
         },
 
@@ -826,9 +938,31 @@ fn gen_pat(
             // No constraint — matches anything
         },
 
-        HirPat::Binding { local, .. } => {
-            // Bind local to the scrutinee type
-            ctx.local_types.insert(*local, scrutinee_tv);
+        HirPat::Binding {
+            local,
+            by_ref,
+            span,
+        } => {
+            match by_ref {
+                // `&v` / `&mutating v`: the binding is a named ref to the
+                // matched place — same downstream behavior as a `let r = &…`
+                // binding (resolved-Ref local type, value reads decay).
+                // Via BorrowPointee, not a direct wrap: on a REF-typed
+                // payload (stage 2b) the re-borrow COLLAPSES — `v` aliases
+                // the same pointee, never `& &T` (the E487 axiom). For
+                // owned payloads the solver sets pointee ≡ payload, the old
+                // behavior.
+                Some(mutating) => {
+                    let pointee_tv = ctx.fresh();
+                    let ref_tv = ctx.ref_ty(pointee_tv, *mutating);
+                    ctx.borrow_pointee(scrutinee_tv, pointee_tv, span.clone());
+                    ctx.local_types.insert(*local, ref_tv);
+                },
+                // Bind local to the scrutinee type
+                None => {
+                    ctx.local_types.insert(*local, scrutinee_tv);
+                },
+            }
         },
 
         HirPat::Literal { value, span, .. } => {
@@ -1026,6 +1160,17 @@ fn gen_struct_init(
     }
 
     let result_tv = ctx.named(struct_entity, fresh_args.clone());
+
+    // Constructing `Box(value: r)` FORMS `Box[Res]`, so it is a formation site
+    // for the container's Copyable/Cloneable/Static bounds — exactly like
+    // writing `let b: Box[Res]`. The init/memberwise where-clause emission
+    // below only sees the init's OWN type params, never the parent struct's
+    // injected `T: Copyable`, so without this a non-Copyable arg substituted
+    // into a Copyable-by-default container escapes the frontend and only trips
+    // the post-mono containment ICE (Inv-3b). De-dup in `solve_conforms`
+    // keeps this from double-reporting with the call-site/annotation checks.
+    // See BUG-04 (Copyable mono-substitution gap).
+    emit_copyable_wellformedness(ctx, struct_entity, &fresh_args, span);
 
     // Substitution map: struct type params → fresh TyVars.
     // Used to instantiate init param/field types with the right type vars.
@@ -1701,7 +1846,9 @@ fn emit_where_clause_constraints_with_subs(
                 protocol_type_args,
             } => {
                 if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
-                    ctx.conforms(tv, protocol, site_span.clone());
+                    // Call-site where-clause obligation: a TYPE-ARGUMENT
+                    // bound (success instantiates witnesses at tv).
+                    ctx.conforms_typearg(tv, protocol, site_span.clone());
                     let arg_tvs: Vec<TyVar> = protocol_type_args
                         .iter()
                         .map(|hir_ty| lower_hir_ty_with_subs(ctx, hir_ty, subs))
@@ -1763,7 +1910,14 @@ fn emit_copyable_wellformedness(
         builtin: Builtin::Cloneable,
         root: ctx.root,
     });
-    if copyable.is_none() && cloneable.is_none() {
+    // Static rides the same formation-site wellformedness: an annotation
+    // like `-> Wrap[NS]` must check the (implicit or explicit) Static
+    // bounds against the formed args, like the Copyable wf check.
+    let static_proto = ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Static,
+        root: ctx.root,
+    });
+    if copyable.is_none() && cloneable.is_none() && static_proto.is_none() {
         return;
     }
     // Positional map from the type's declared params to the formed args.
@@ -1785,14 +1939,16 @@ fn emit_copyable_wellformedness(
         else {
             continue;
         };
-        if Some(protocol) != copyable && Some(protocol) != cloneable {
+        if Some(protocol) != copyable && Some(protocol) != cloneable && Some(protocol) != static_proto
+        {
             continue;
         }
         let Some(pos) = params.iter().position(|p| *p == param) else {
             continue;
         };
         if let Some(&tv) = arg_tvs.get(pos) {
-            ctx.conforms(tv, protocol, span.clone());
+            // Formation wellformedness: a TYPE-ARGUMENT bound.
+            ctx.conforms_typearg(tv, protocol, span.clone());
         }
     }
 }
@@ -2134,6 +2290,86 @@ fn is_guard_if(hir: &HirBody, expr_id: HirExprId) -> bool {
     )
 }
 
+/// Record an ALWAYS-DECAY value position in `always_decay_exprs` (stage
+/// 1.5): `if`/`match` arm values (refs cannot cross merges) and
+/// array/tuple/dict literal elements (aggregates own their elements).
+/// Recurses through `Block` wrappers to the tail expression — the set is
+/// keyed by the CALL's expr id and `bind_call_result` only consults it for
+/// resolved call results, so marking a non-call tail is inert; nested
+/// `if`/`match` arms are marked by their own generation.
+fn mark_arm_value(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) {
+    match &hir.exprs[id] {
+        HirExpr::Block { body, .. } => {
+            if let Some(tail) = body.tail_expr {
+                mark_arm_value(ctx, hir, tail);
+            }
+        },
+        _ => {
+            kestrel_debug::ktrace!("arm-decay", "mark arm value {id:?} owner={:?}", ctx.owner);
+            ctx.always_decay_exprs.insert(id);
+        },
+    }
+}
+
+/// `mark_arm_value` for an `if` branch, which holds its `HirBlock` directly.
+fn mark_arm_value_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock) {
+    if let Some(tail) = block.tail_expr {
+        mark_arm_value(ctx, hir, tail);
+    }
+}
+
+/// Is this value expression a LOCAL read (through block tails)? Only local
+/// reads can be late-resolving refs (a pattern-payload ref binding's type
+/// lands after generation), so only they take the DEFERRED decayed equate.
+/// Everything else keeps the eager-peel + Equal path: expected-driven arm
+/// values (implicit members, literals) need the target to flow INTO them
+/// immediately — deferring would deadlock the resolution.
+fn value_expr_is_local(hir: &HirBody, id: HirExprId) -> bool {
+    match &hir.exprs[id] {
+        HirExpr::Local(..) => true,
+        HirExpr::Block { body, .. } => body
+            .tail_expr
+            .is_some_and(|tail| value_expr_is_local(hir, tail)),
+        _ => false,
+    }
+}
+
+/// Equate an arm/element value with its result slot, picking deferred
+/// decay (local reads — see `Constraint::EqualDecayed`) or the eager
+/// stage-1.5 peel + Equal (everything else).
+fn equate_decaying_value(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    value_expr: HirExprId,
+    value_tv: TyVar,
+    target_tv: TyVar,
+    span: Span,
+) {
+    if value_expr_is_local(hir, value_expr) {
+        ctx.equal_decayed(value_tv, target_tv, span);
+    } else {
+        let peeled = peel_ref_tv(ctx, value_tv);
+        ctx.equal(peeled, target_tv, span);
+    }
+}
+
+/// Shallow ref peel for Equal-based decay sites (match scrutinee wiring,
+/// arm-value equates, literal-element equates): a RESOLVED `Ref` yields
+/// its pointee, anything else passes through. The complement of the
+/// expr-id decay sets: named ref bindings — the only non-call ref-typed
+/// exprs — are structurally-resolved Refs from generation time (locals
+/// are defined before use), while pending ref-returning CALLS are still
+/// unresolved here and decay via `bind_call_result` instead. A missed
+/// site surfaces as a `validate_ref_placement` diagnostic, never a
+/// miscompile.
+fn peel_ref_tv(ctx: &mut InferCtx<'_>, tv: TyVar) -> TyVar {
+    let r = ctx.resolve(tv);
+    match ctx.slot(r) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => *pointee,
+        _ => tv,
+    }
+}
+
 /// Get the span of a block's value expression (tail expr or last statement expr).
 /// Returns None if the block has no value expression.
 fn block_value_span(hir: &HirBody, block: &HirBlock) -> Option<Span> {
@@ -2159,6 +2395,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
         | HirExpr::OverloadSet { span, .. }
+        | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }
         | HirExpr::TupleIndex { span, .. }
         | HirExpr::ImplicitMember { span, .. }
@@ -2277,6 +2514,10 @@ fn gen_implicit_variant_pat(
         .iter()
         .map(|arg| {
             let tv = ctx.fresh();
+            // A binder's type comes from the PATTERN, never its uses: gate
+            // use-site Coerces while the ImplicitPat may still fire (see
+            // `pattern_binder_tvs`).
+            ctx.pattern_binder_tvs.insert(tv);
             gen_pat(ctx, hir, arg.pattern, tv, source);
             tv
         })

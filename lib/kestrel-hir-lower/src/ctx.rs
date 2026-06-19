@@ -58,6 +58,11 @@ pub(crate) struct LowerCtx<'a> {
 
     /// Maps LocalId → scope depth at creation (for closure capture detection).
     local_depths: HashMap<LocalId, usize>,
+
+    /// True while lowering a user-`match` arm pattern — the one position
+    /// where `&`/`&mutating` binder patterns are legal (stage 1.5 item 2;
+    /// the place-mode lowering needs a pinnable scrutinee place).
+    pub ref_patterns_allowed: bool,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -76,6 +81,7 @@ impl<'a> LowerCtx<'a> {
             while_conditions: Vec::new(),
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
+            ref_patterns_allowed: false,
         }
     }
 

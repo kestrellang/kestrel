@@ -78,11 +78,14 @@ pub enum HirTy {
     Infer(Span),
     /// Error recovery
     Error(Span),
-    /// Reference type: `&T` / `&mutating T` (stage 0.5: parsed everywhere,
-    /// accepted nowhere). INVARIANT: never survives HIR lowering — every
-    /// occurrence is rewritten to `Error` with a diagnostic by
-    /// `reject_ref_types` at the lowering-query boundaries, so type
-    /// inference and MIR never see it.
+    /// Reference type: `&T` / `&mutating T`. Survives HIR lowering only at
+    /// the positions `reject_ref_types` accepts — return types (stage 1)
+    /// and field / enum-payload / tuple-element / generic-argument slots
+    /// (stage 2b, `RefPolicy::AllowAggregate` entries); every other
+    /// occurrence is rewritten to `Error` with a diagnostic at the
+    /// lowering-query boundaries. Bare params (E480), bindings (E482),
+    /// fn-type returns (E486), nesting (E487), alias RHS / protocol args /
+    /// where-clause types (Strict entries) still reject.
     Ref {
         inner: Box<HirTy>,
         mutating: bool,

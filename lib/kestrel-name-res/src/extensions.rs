@@ -44,10 +44,16 @@ impl QueryFn for ExtensionTargetEntity {
         let ast_type = &target.0;
 
         // Structural singletons `()` and `!` resolve to synthetic `lang` entities
-        // (named "()" / "!") so they can be extension targets.
+        // (named "()" / "!") so they can be extension targets. Reference types
+        // `&T` / `&mutating T` resolve to the generic synthetic entities
+        // `lang.&` / `lang.&mutating` (pointee = the single type arg).
         match ast_type {
             kestrel_ast::AstType::Unit(..) => return resolve_lang_child(ctx, self.root, "()"),
             kestrel_ast::AstType::Never(..) => return resolve_lang_child(ctx, self.root, "!"),
+            kestrel_ast::AstType::Ref { mutating, .. } => {
+                let name = if *mutating { "&mutating" } else { "&" };
+                return resolve_lang_child(ctx, self.root, name);
+            },
             _ => {},
         }
 
@@ -72,6 +78,22 @@ impl QueryFn for ExtensionTargetEntity {
             _ => None,
         }
     }
+}
+
+/// Reverse detector for the synthetic ref-extension entities: `Some(false)`
+/// for `lang.&`, `Some(true)` for `lang.&mutating`, `None` otherwise. THE
+/// shared check for every Entity-keyed site that must map the entity back to
+/// a ref type (the type layer never uses these entities).
+pub fn lang_ref_mutability(ctx: &QueryContext<'_>, entity: Entity) -> Option<bool> {
+    let mutating = match ctx.get::<Name>(entity)?.0.as_str() {
+        "&" => false,
+        "&mutating" => true,
+        _ => return None,
+    };
+    let parent = ctx.parent_of(entity)?;
+    (ctx.get::<NodeKind>(parent) == Some(&NodeKind::Module)
+        && ctx.get::<Name>(parent).map(|n| n.0 == "lang").unwrap_or(false))
+    .then_some(mutating)
 }
 
 /// Resolve a synthetic child of the `lang` module by its (possibly

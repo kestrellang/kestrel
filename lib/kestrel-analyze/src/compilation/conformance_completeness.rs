@@ -48,7 +48,9 @@ use kestrel_name_res::{
     ProtocolMembers, ResolveTypePath, TypeMemberSource, TypeMembers, TypeResolution,
     extract_ast_type_args,
 };
-use kestrel_type_infer::compare::{AssocBinding, TypeCompareEnv, compare_hir_types};
+use kestrel_type_infer::compare::{
+    AssocBinding, TypeCompareEnv, TypeCompareResult, compare_hir_types,
+};
 use kestrel_type_infer::entailment::constraint_entailed_by;
 use kestrel_type_infer::resolve::WhereClause as ResolvedWhereClause;
 use kestrel_type_infer::result::ResolvedTy;
@@ -894,6 +896,28 @@ fn method_return_type_matches(
     protocol: Entity,
     proto_param_subs: &[(Entity, ResolvedTy)],
 ) -> bool {
+    method_return_type_compare(
+        cx,
+        proto_method,
+        impl_method,
+        type_entity,
+        protocol,
+        proto_param_subs,
+    )
+    .is_equal_or_unknown()
+}
+
+/// The full compare result, so the E458 reporter can inspect the normalized
+/// shapes (the ref-return note needs to know a `&T`/`T` or `&`/`&mutating`
+/// mismatch from an ordinary type mismatch).
+fn method_return_type_compare(
+    cx: &CompilationContext<'_>,
+    proto_method: Entity,
+    impl_method: Entity,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
+) -> TypeCompareResult {
     let expected = cx.query.query(LowerCallableReturnType {
         entity: proto_method,
         root: cx.root,
@@ -930,7 +954,7 @@ fn method_return_type_matches(
             .push((proto_param, ResolvedTy::Param { entity: impl_param }));
     }
 
-    compare_hir_types(cx.query, cx.root, &expected, &actual, &env).is_equal_or_unknown()
+    compare_hir_types(cx.query, cx.root, &expected, &actual, &env)
 }
 
 fn check_method_return_type(
@@ -944,15 +968,30 @@ fn check_method_return_type(
     proto_name: &str,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    if method_return_type_matches(
+    let result = method_return_type_compare(
         cx,
         proto_method,
         impl_method,
         type_entity,
         protocol,
         proto_param_subs,
-    ) {
+    );
+    if result.is_equal_or_unknown() {
         return;
+    }
+    // A ref involved in a return mismatch gets an ABI explainer: a borrow
+    // return (`-> &T`, raw pointer) and an owned return differ in calling
+    // convention, so near-miss witnesses must not silently "almost" match.
+    let mut notes = vec![];
+    if let TypeCompareResult::NotEqual { expected, actual } = &result
+        && (matches!(expected, ResolvedTy::Ref { .. }) || matches!(actual, ResolvedTy::Ref { .. }))
+    {
+        notes.push(
+            "reference returns must match the requirement exactly in shape and mutability: \
+             `-> &T` is a borrow return (a `-> T` impl cannot witness it, and vice versa), \
+             and `&` never matches `&mutating`"
+                .to_string(),
+        );
     }
     let impl_span = util::entity_span(cx.query, impl_method);
     diags.push(AnalyzeDiagnostic {
@@ -967,7 +1006,7 @@ fn check_method_return_type(
             message: "wrong return type".into(),
             is_primary: true,
         }],
-        notes: vec![],
+        notes,
     });
 }
 

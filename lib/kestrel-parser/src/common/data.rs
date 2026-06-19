@@ -169,6 +169,36 @@ pub struct DeinitDeclarationData {
     pub body: CodeBlockData,
 }
 
+/// Which accessor a clause declares (computed properties + subscripts).
+///
+/// `get`/`set` are reserved tokens; `ref` is a CONTEXTUAL keyword (an
+/// identifier matched by text in clause-head position only), so `ref`
+/// stays a legal identifier everywhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessorClauseKind {
+    Get,
+    Set,
+    /// `ref { ... }` — place accessor returning `&T` (stage 1.5)
+    Ref,
+    /// `mutating ref { ... }` — place accessor returning `&mutating T`
+    MutatingRef,
+}
+
+/// One accessor clause in an explicit accessor block:
+/// `get { ... }`, `set { ... }`, `ref { ... }`, or `mutating ref { ... }`.
+/// The clause head must be followed by a code block — a bare `ref`
+/// identifier with no `{` is NOT a clause, so shorthand bodies whose
+/// expression mentions `ref` still parse via the shorthand fallback.
+#[derive(Debug, Clone)]
+pub struct AccessorClauseData {
+    pub kind: AccessorClauseKind,
+    /// Span of the accessor keyword (`get`/`set`/`ref`)
+    pub kw_span: Span,
+    /// Span of the `mutating` modifier (MutatingRef only)
+    pub mutating_span: Option<Span>,
+    pub body: CodeBlockData,
+}
+
 /// A single conformance item, which can be positive or negative
 #[derive(Debug, Clone)]
 pub struct ConformanceItemData {

@@ -14,7 +14,7 @@ use kestrel_mir::{
 };
 
 use super::OssaBodyCtx;
-use crate::ty::lower_type;
+use crate::ty::{lower_resolved_ty, lower_type};
 
 impl OssaBodyCtx<'_, '_> {
     pub fn lower_call_expr(
@@ -67,6 +67,20 @@ impl OssaBodyCtx<'_, '_> {
         let Some(resolved) = resolved_entity else {
             return self
                 .emit_lowering_gap(expr_id, format!("could not resolve method `{method_name}`"));
+        };
+
+        // Stage 1.5 read-provider routing (method-call-shaped subscript
+        // reads, incl. field-subscripts): a subscript with a `ref { … }`
+        // accessor serves READS through the accessor child.
+        let resolved = if matches!(
+            self.ctx.world.get::<NodeKind>(resolved),
+            Some(NodeKind::Subscript)
+        ) {
+            self.ctx
+                .find_ref_accessor_child(resolved, false)
+                .unwrap_or(resolved)
+        } else {
+            resolved
         };
 
         // Field-stored thick/thin function: lower as field access + indirect call.
@@ -141,6 +155,9 @@ impl OssaBodyCtx<'_, '_> {
             (convs, None)
         };
 
+        // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
+        // `x(i).mutate()`) drain right after the call — watermark-scoped.
+        let wb_mark = self.pending_writebacks.len();
         let mut call_args = if is_static {
             self.lower_call_args_bound(args, resolved, &conventions, 0)
         } else {
@@ -148,7 +165,23 @@ impl OssaBodyCtx<'_, '_> {
                 .first()
                 .copied()
                 .unwrap_or(ParamConvention::Borrow);
-            let receiver_arg = self.prepare_call_arg_for_expr(receiver_expr, recv_conv);
+            // Indirection method peel: `wrapper.method()` where the wrapper has
+            // no `method` → dispatch to the pointee, reached via
+            // `pointeeRef()` / `pointeeMutRef()`. A mutating method (recv_conv
+            // == MutBorrow) peels through the mutating accessor. `receiver_ty`
+            // is retargeted to the pointee so the callee's type args resolve
+            // against the pointee, not the wrapper.
+            let receiver_arg = if let Some(peels) = self.indirection_peels_of(expr_id) {
+                let mutating = recv_conv == ParamConvention::MutBorrow;
+                let view = self.lower_indirection_chain(receiver_expr, &peels, mutating);
+                receiver_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
+                CallArg {
+                    value: view,
+                    convention: recv_conv,
+                }
+            } else {
+                self.prepare_call_arg_for_expr(receiver_expr, recv_conv)
+            };
             let mut a = vec![receiver_arg];
             a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1));
             a
@@ -193,7 +226,9 @@ impl OssaBodyCtx<'_, '_> {
         };
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn rewrite_field_subscript(
@@ -324,6 +359,10 @@ impl OssaBodyCtx<'_, '_> {
 
         let conventions = self.collect_witness_conventions(protocol, &method_key);
 
+        // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
+        // `x(i) += v`) drain right after the call — watermark-scoped so a
+        // nested call in a sibling arg can't steal them.
+        let wb_mark = self.pending_writebacks.len();
         let recv_conv = conventions
             .first()
             .copied()
@@ -345,7 +384,9 @@ impl OssaBodyCtx<'_, '_> {
             method_type_args,
         };
 
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn emit_resolved_call(
@@ -380,6 +421,22 @@ impl OssaBodyCtx<'_, '_> {
             }
         } else {
             return self.lower_indirect_call(expr_id, callee_expr, args);
+        };
+
+        // Stage 1.5 read-provider routing: a subscript with a `ref { … }`
+        // accessor serves READS through the accessor child (the parent may
+        // be bodyless for pure-ref subscripts). Write/RMW operations never
+        // reach this path — they route in the setter-assign / accessor-place
+        // lowerings.
+        let entity = if matches!(
+            self.ctx.world.get::<NodeKind>(entity),
+            Some(NodeKind::Subscript)
+        ) {
+            self.ctx
+                .find_ref_accessor_child(entity, false)
+                .unwrap_or(entity)
+        } else {
+            entity
         };
 
         self.ctx.register_name(entity);
@@ -453,6 +510,9 @@ impl OssaBodyCtx<'_, '_> {
             (convs, callee)
         };
 
+        // Writebacks pushed by THIS call's arg prep drain right after the
+        // call — watermark-scoped.
+        let wb_mark = self.pending_writebacks.len();
         let conv_offset = if has_receiver { 1 } else { 0 };
         let mut call_args = self.lower_call_args_bound(args, entity, &conventions, conv_offset);
         if has_receiver {
@@ -465,7 +525,9 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Defaults are already filled by `lower_call_args_bound` above.
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+        self.drain_writebacks(wb_mark);
+        result
     }
 
     fn try_enum_construct(

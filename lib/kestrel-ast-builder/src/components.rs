@@ -30,6 +30,12 @@ pub enum NodeKind {
     /// declaration it sets. Implicit `newValue` param and Mutating (or
     /// None, for static/global) receiver.
     Setter,
+    /// Place-accessor body (`ref { … }` / `mutating ref { … }`) for a
+    /// Field or Subscript (stage 1.5). Child of the declaration, like
+    /// Setter. Returns the synthesized `&T` / `&mutating T`; the
+    /// `MutatingAccessor` marker distinguishes the two kinds (receiver
+    /// kind can't — static accessors have no receiver).
+    RefAccessor,
     Subscript,
     TypeAlias,
     Import,
@@ -156,6 +162,12 @@ pub struct Gettable;
 /// Marker: can be written to.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Settable;
+
+/// Marker on a `NodeKind::RefAccessor` entity: this is the `mutating ref`
+/// accessor (returns `&mutating T`, Mutating receiver) rather than the
+/// shared `ref` accessor (returns `&T`, Borrowing receiver).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MutatingAccessor;
 
 /// Has body/initializer — CstNode of the body subtree.
 #[derive(Clone, Debug)]

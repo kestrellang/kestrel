@@ -2,7 +2,7 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable, Copyable, fatalError)
+import std.core.(Bool, Cloneable, Copyable, fatalError, Indirection, MutableIndirection)
 import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator)
@@ -169,4 +169,15 @@ public struct RcBox[T]: Cloneable {
     deinit {
         self.release()
     }
+}
+
+// Transparent member access: `rc.field` reaches the boxed value via the
+// heap pointee. `pointeeRef`/`pointeeMutRef` are `&T`/`&mutating T` views into
+// the shared storage — NOT through `getValue()` (which would copy out). The
+// wrapper still wins name clashes (`rc.clone()` is RcBox.clone, the peel is
+// lazy).
+extend RcBox[T]: MutableIndirection {
+    type Target = T
+    public func pointeeRef() -> &T { self.valuePtr().value }
+    public mutating func pointeeMutRef() -> &mutating T { self.valuePtr().mutatingValue }
 }

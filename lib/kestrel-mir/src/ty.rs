@@ -154,6 +154,49 @@ impl TyArena {
             _ => id,
         }
     }
+    /// Does this type carry a `&T` by value (stage 2b ref-bearing
+    /// aggregates)? Drives the owned-return escape check: a function whose
+    /// return type contains a ref gets the root rule applied to the
+    /// returned value's provenance.
+    ///
+    /// Deliberately an OVER-approximation on `Named` (every type arg is
+    /// walked, even args the nominal never stores): a false positive only
+    /// subjects an untainted (self-rooted) value to a check it passes.
+    /// `Pointer` pointees are NOT walked (a raw pointer doesn't carry its
+    /// pointee by value — mirrors `Pointer[T]` being Static regardless of
+    /// T). Fn types / params / projections are `false`: signature refs are
+    /// kept out of value-carried positions by E486/E491, and generic code
+    /// is gated by the front-end Static bound (escape checking is pre-mono;
+    /// instances are parametric). No cycle guard: interning is acyclic and
+    /// the walk never expands a nominal's fields, only its type args.
+    pub fn contains_ref(&self, id: TyId) -> bool {
+        match self.get(id) {
+            MirTy::Ref { .. } => true,
+            MirTy::Tuple(elems) => elems.iter().any(|&e| self.contains_ref(e)),
+            MirTy::Named { type_args, .. } => {
+                type_args.iter().any(|&a| self.contains_ref(a))
+            },
+            _ => false,
+        }
+    }
+    /// Like `contains_ref`, but true only when a `&mutating T` is carried —
+    /// feeds the E495 (mutable-root) variant of the owned-return check.
+    /// A shared `&T` wrapper still recurses (its pointee type may carry a
+    /// `&mutating` component, e.g. `-> &Optional[&mutating U]`).
+    pub fn contains_mutating_ref(&self, id: TyId) -> bool {
+        match self.get(id) {
+            MirTy::Ref { mutating: true, .. } => true,
+            MirTy::Ref {
+                pointee,
+                mutating: false,
+            } => self.contains_mutating_ref(*pointee),
+            MirTy::Tuple(elems) => elems.iter().any(|&e| self.contains_mutating_ref(e)),
+            MirTy::Named { type_args, .. } => {
+                type_args.iter().any(|&a| self.contains_mutating_ref(a))
+            },
+            _ => false,
+        }
+    }
     pub fn error(&mut self) -> TyId {
         self.intern(MirTy::Error)
     }
@@ -162,5 +205,54 @@ impl TyArena {
 impl Default for TyArena {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contains_ref_finds_nested_args_and_tuples() {
+        let mut a = TyArena::new();
+        let i64 = a.i64();
+        let r = a.ref_ty(i64, false);
+        let opt_ref = a.named(Entity::from_raw(7), vec![r]);
+        let tup = a.tuple(vec![i64, opt_ref]);
+        assert!(a.contains_ref(r));
+        assert!(a.contains_ref(opt_ref));
+        assert!(a.contains_ref(tup));
+        assert!(!a.contains_ref(i64));
+        let plain = a.tuple(vec![i64, i64]);
+        assert!(!a.contains_ref(plain));
+    }
+
+    #[test]
+    fn contains_ref_skips_pointer_and_fn_types() {
+        let mut a = TyArena::new();
+        let i64 = a.i64();
+        let r = a.ref_ty(i64, true);
+        let ptr = a.pointer(r);
+        assert!(!a.contains_ref(ptr));
+        let f = a.intern(MirTy::FuncThick {
+            params: vec![(r, ParamConvention::Consuming)],
+            ret: r,
+        });
+        assert!(!a.contains_ref(f));
+    }
+
+    #[test]
+    fn contains_mutating_ref_distinguishes_bits() {
+        let mut a = TyArena::new();
+        let i64 = a.i64();
+        let shared = a.ref_ty(i64, false);
+        let muta = a.ref_ty(i64, true);
+        assert!(!a.contains_mutating_ref(shared));
+        assert!(a.contains_mutating_ref(muta));
+        // A shared ref over a mutating-ref-bearing pointee still counts.
+        let inner = a.named(Entity::from_raw(7), vec![muta]);
+        let outer = a.ref_ty(inner, false);
+        assert!(a.contains_mutating_ref(outer));
+        assert!(a.contains_ref(outer));
     }
 }

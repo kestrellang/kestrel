@@ -358,6 +358,20 @@ impl<'a> BlockVerifier<'a> {
 
     /// Attempt to consume an @owned value. Returns false if already consumed.
     fn try_consume(&mut self, v: ValueId, inst: Option<u32>) -> bool {
+        self.try_consume_exempting(v, inst, None)
+    }
+
+    /// `try_consume` with an exemption set: borrows in `exempt` do not block
+    /// the consume. Used by terminator forwarding — when a borrowed value and
+    /// its borrow are BOTH forwarded as block args, the pair continues
+    /// together in the target block (threaded ref bindings ride var slots
+    /// across merges this way), so the forwarding "consume" is not an escape.
+    fn try_consume_exempting(
+        &mut self,
+        v: ValueId,
+        inst: Option<u32>,
+        exempt: Option<&FxHashSet<ValueId>>,
+    ) -> bool {
         let ownership = self.body.value(v).ownership;
         if ownership != Ownership::Owned {
             return true; // not tracked
@@ -368,7 +382,10 @@ impl<'a> BlockVerifier<'a> {
                 let blocking: Vec<ValueId> = self
                     .borrows
                     .iter()
-                    .filter(|(_, info)| info.source == v)
+                    .filter(|(borrow_val, info)| {
+                        info.source == v
+                            && !exempt.is_some_and(|e| e.contains(borrow_val))
+                    })
                     .map(|(borrow_val, _)| *borrow_val)
                     .collect();
                 if !blocking.is_empty() {
@@ -1090,10 +1107,17 @@ impl<'a> BlockVerifier<'a> {
             _ => {},
         }
 
-        // Consume forwarded @owned values.
+        // Consume forwarded @owned values. Borrows forwarded by the same
+        // terminator don't block: value and borrow continue together in the
+        // target block (threaded ref bindings over var slots).
+        let forwarded_guaranteed: FxHashSet<ValueId> = forwarded
+            .iter()
+            .copied()
+            .filter(|v| self.body.value(*v).ownership == Ownership::Guaranteed)
+            .collect();
         for v in &forwarded {
             if self.body.value(*v).ownership == Ownership::Owned {
-                self.try_consume(*v, None);
+                self.try_consume_exempting(*v, None, Some(&forwarded_guaranteed));
             }
         }
 
@@ -1212,15 +1236,30 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
     use crate::item::function::{RetConvention, ret_convention};
     use crate::value::RootProvenance;
 
+    // Two checked return shapes share the root rule:
+    // - RefBorrow returns (stage 1): the returned @guaranteed borrow's root.
+    // - Owned returns whose TYPE carries refs (stage 2b ref-bearing
+    //   aggregates, e.g. `-> Optional[&T]`): the value's escape taint,
+    //   stamped at packaging and joined through merges/copies/calls. An
+    //   UNTAINTED value (its own self-root — `.None`, a ref-free arm) is
+    //   always returnable.
+    enum EscapeMode {
+        RefBorrow { mutating: bool },
+        Carrier { mutating: bool },
+    }
+
     let mut errors = Vec::new();
     for func in module.functions.values() {
         let Some(body) = &func.body else { continue };
         if body.values.is_empty() || body.blocks.is_empty() {
             continue;
         }
-        let RetConvention::RefBorrow { mutating } = ret_convention(&module.ty_arena, func.ret)
-        else {
-            continue;
+        let mode = match ret_convention(&module.ty_arena, func.ret) {
+            RetConvention::RefBorrow { mutating } => EscapeMode::RefBorrow { mutating },
+            _ if module.ty_arena.contains_ref(func.ret) => EscapeMode::Carrier {
+                mutating: module.ty_arena.contains_mutating_ref(func.ret),
+            },
+            _ => continue,
         };
 
         for (block_idx, block) in body.blocks.iter().enumerate() {
@@ -1228,10 +1267,26 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 continue;
             };
             let vd = body.value(*v);
-            if vd.ownership != Ownership::Guaranteed {
-                // verify_terminator's hardening reports this as an ICE.
-                continue;
-            }
+            let (carrier, mutating) = match mode {
+                EscapeMode::RefBorrow { mutating } => {
+                    if vd.ownership != Ownership::Guaranteed {
+                        // verify_terminator's hardening reports this as an ICE.
+                        continue;
+                    }
+                    (false, mutating)
+                },
+                EscapeMode::Carrier { mutating } => {
+                    if vd.ownership != Ownership::Owned
+                        // Hand-built bodies may bypass alloc_value.
+                        || vd.root.is_derived_placeholder()
+                        // Untainted: the value's own self-root.
+                        || vd.root == RootProvenance::Local(*v)
+                    {
+                        continue;
+                    }
+                    (true, mutating)
+                },
+            };
             let mut push = |code: &'static str,
                             message: String,
                             secondary: Option<(Span, String)>,
@@ -1254,9 +1309,15 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             let mut root = vd.root;
             if root.is_derived_placeholder() {
                 // Hand-built bodies may bypass alloc_value; treat as a local
-                // with no known definition.
+                // with no known definition. (Carrier mode skipped these.)
                 root = RootProvenance::Local(*v);
             }
+            // Carrier-mode wordings name the VALUE (the ref rides inside it).
+            let what = if carrier {
+                "this value: it carries a reference that borrows"
+            } else {
+                "this reference: it borrows"
+            };
             match root {
                 RootProvenance::Local(local) => {
                     let name = body
@@ -1272,8 +1333,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                     push(
                         "E494",
                         format!(
-                            "cannot return this reference: it borrows local{name}, which does \
-                             not outlive the call"
+                            "cannot return {what} local{name}, which does not outlive the call"
                         ),
                         secondary,
                         vec![
@@ -1292,21 +1352,32 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                             .get(idx as usize)
                             .map(|p| format!(" `{}`", p.name))
                             .unwrap_or_default();
+                        let subject = if carrier {
+                            "a value carrying a reference"
+                        } else {
+                            "a reference"
+                        };
                         push(
                             "E496",
                             format!(
-                                "cannot return a reference rooted at consuming parameter{pname}: \
+                                "cannot return {subject} rooted at consuming parameter{pname}: \
                                  it is destroyed when the call returns"
                             ),
                             None,
                             vec![],
                         );
                     } else if mutating && convention != Some(ParamConvention::MutBorrow) {
+                        let subject = if carrier {
+                            "returning a value carrying `&mutating`"
+                        } else {
+                            "returning `&mutating`"
+                        };
                         push(
                             "E495",
-                            "returning `&mutating` requires a mutable root: a `mutating` \
-                             receiver or parameter, or `Pointer.mutatingValue`"
-                                .into(),
+                            format!(
+                                "{subject} requires a mutable root: a `mutating` receiver or \
+                                 parameter, or `Pointer.mutatingValue`"
+                            ),
                             None,
                             vec![],
                         );
@@ -1314,11 +1385,15 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 },
                 RootProvenance::Static => {
                     if mutating {
+                        let subject = if carrier {
+                            "returning a value carrying `&mutating`"
+                        } else {
+                            "returning `&mutating`"
+                        };
                         push(
                             "E495",
-                            "returning `&mutating` requires a mutable root; a static is not a \
-                             mutable root"
-                                .into(),
+                            format!("{subject} requires a mutable root; a static is not a \
+                                 mutable root"),
                             None,
                             vec![],
                         );
@@ -1326,11 +1401,17 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 },
                 RootProvenance::PointerDerived { mutable } => {
                     if mutating && !mutable {
+                        let subject = if carrier {
+                            "returning a value carrying `&mutating`"
+                        } else {
+                            "returning `&mutating`"
+                        };
                         push(
                             "E495",
-                            "returning `&mutating` requires a mutable root: use \
-                             `Pointer.mutatingValue`, not `.value`"
-                                .into(),
+                            format!(
+                                "{subject} requires a mutable root: use \
+                                 `Pointer.mutatingValue`, not `.value`"
+                            ),
                             None,
                             vec![],
                         );
