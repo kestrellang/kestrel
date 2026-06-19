@@ -909,7 +909,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// ```
     public mutating func clear() {
         self.makeUnique();
-        self.storage.modify { (mutating s) in s.len = 0 }
+        // Drop every live element (mirrors ArrayStorage.deinit) before
+        // resetting len; without this, elements with non-trivial deinits
+        // (e.g. heap-owning types) would leak because deinit only drops 0..<len.
+        self.storage.modify { (mutating s) in
+            var i: Int64 = 0;
+            while i < s.len {
+                s.ptr.offset(by: i).dropInPlace();
+                i = i + 1
+            };
+            s.len = 0
+        }
     }
 
     /// Keeps only elements for which `predicate` returns true; removes
