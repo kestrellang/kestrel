@@ -434,23 +434,14 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
 def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> str:
     """Generate the format(into:) method for integer types."""
 
-    # For converting values between types
-    if bits == 64 and signed:
-        digit_as_i64 = "digit"
-        radix_as_type = "radix"
-    elif bits == 64:
-        digit_as_i64 = "Int64(from: digit)"
-        radix_as_type = "UInt64(from: radix)"
-    else:
-        digit_as_i64 = f"Int64(from: digit)"
-        radix_as_type = f"{type_name}(from: radix)"
-
     if signed:
+        # For signed types, extract digits via the same-width unsigned type.
+        # This correctly handles minValue: negate() overflows back to minValue,
+        # but `UIntN.zero - UIntN(from: n)` gives the correct magnitude for all
+        # values including minValue (two's-complement unsigned wraparound).
+        uint_name = f"UInt{bits}"
         sign_handling = f'''
-        let isNegative = n < 0;
-        if isNegative {{
-            n = n.negate()
-        }}'''
+        let isNegative = n < 0;'''
         sign_prefix = '''
         if isNegative {
             result.append(char: '-')
@@ -459,7 +450,32 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         } else if options.sign == .Space {
             result.append(char: ' ')
         }'''
+        digit_body = f'''
+        // Convert to unsigned magnitude so minValue formats correctly.
+        // negate() overflows on minValue; unsigned subtraction from zero does not.
+        let mag: {uint_name} = if isNegative {{
+            {uint_name}.zero - {uint_name}(from: n)
+        }} else {{
+            {uint_name}(from: n)
+        }};
+        let radixVal: {uint_name} = {uint_name}(from: radix);
+        var m = mag;
+        while m != {uint_name}.zero {{
+            let digit: {uint_name} = m % radixVal;
+            let digitVal: Int64 = Int64(from: digit);
+            let charCode: Int64 = if digitVal < 10 {{
+                digitVal + 48
+            }} else if options.uppercase {{
+                digitVal - 10 + 65
+            }} else {{
+                digitVal - 10 + 97
+            }};
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }}'''
     else:
+        # For unsigned types no sign handling is needed; loop directly over self.
+        uint_name = type_name
         sign_handling = '''
         let isNegative = false;'''
         sign_prefix = '''
@@ -468,6 +484,28 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         } else if options.sign == .Space {
             result.append(char: ' ')
         }'''
+        if bits == 64:
+            radix_as_type = "UInt64(from: radix)"
+            digit_as_i64 = "Int64(from: digit)"
+        else:
+            radix_as_type = f"{type_name}(from: radix)"
+            digit_as_i64 = "Int64(from: digit)"
+        digit_body = f'''
+        let radixVal: {type_name} = {radix_as_type};
+        var m = n;
+        while m != {type_name}.zero {{
+            let digit: {type_name} = m % radixVal;
+            let digitVal: Int64 = {digit_as_i64};
+            let charCode: Int64 = if digitVal < 10 {{
+                digitVal + 48
+            }} else if options.uppercase {{
+                digitVal - 10 + 65
+            }} else {{
+                digitVal - 10 + 97
+            }};
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }}'''
 
     return f'''    // Formattable
     /// Formats the integer directly into `writer`, honouring the supplied
@@ -496,21 +534,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         var digits = String();
         if n == {type_name}.zero {{
             digits.appendByte(48)
-        }} else {{
-            let radixVal: {type_name} = {radix_as_type};
-            while n != {type_name}.zero {{
-                let digit: {type_name} = n % radixVal;
-                let digitVal: Int64 = {digit_as_i64};
-                let charCode: Int64 = if digitVal < 10 {{
-                    digitVal + 48
-                }} else if options.uppercase {{
-                    digitVal - 10 + 65
-                }} else {{
-                    digitVal - 10 + 97
-                }};
-                digits.appendByte(UInt8(from: charCode));
-                n = n / radixVal
-            }}
+        }} else {{{digit_body}
         }}
 
         // Build content: sign + prefix + reversed digits

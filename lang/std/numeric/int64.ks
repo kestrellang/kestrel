@@ -1016,9 +1016,6 @@ public struct Int64:
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         var n = self;
         let isNegative = n < 0;
-        if isNegative {
-            n = n.negate()
-        }
 
         var radix: Int64 = options.radix;
         if radix < 2 or radix > 36 {
@@ -1030,20 +1027,28 @@ public struct Int64:
         if n == Int64.zero {
             digits.appendByte(48)
         } else {
-            let radixVal: Int64 = radix;
-            while n != Int64.zero {
-                let digit: Int64 = n % radixVal;
-                let digitVal: Int64 = digit;
-                let charCode: Int64 = if digitVal < 10 {
-                    digitVal + 48
-                } else if options.uppercase {
-                    digitVal - 10 + 65
-                } else {
-                    digitVal - 10 + 97
-                };
-                digits.appendByte(UInt8(from: charCode));
-                n = n / radixVal
-            }
+        // Convert to unsigned magnitude so minValue formats correctly.
+        // negate() overflows on minValue; unsigned subtraction from zero does not.
+        let mag: UInt64 = if isNegative {
+            UInt64.zero - UInt64(from: n)
+        } else {
+            UInt64(from: n)
+        };
+        let radixVal: UInt64 = UInt64(from: radix);
+        var m = mag;
+        while m != UInt64.zero {
+            let digit: UInt64 = m % radixVal;
+            let digitVal: Int64 = Int64(from: digit);
+            let charCode: Int64 = if digitVal < 10 {
+                digitVal + 48
+            } else if options.uppercase {
+                digitVal - 10 + 65
+            } else {
+                digitVal - 10 + 97
+            };
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }
         }
 
         // Build content: sign + prefix + reversed digits

@@ -35,6 +35,10 @@ examples/weather/weather
 
 .triage
 
+# Python bytecode cache (e.g. from lang/std/numeric/generate.py)
+__pycache__/
+*.pyc
+
 **/flock.lock
 
 # Separate repos living inside the monorepo checkout — match both

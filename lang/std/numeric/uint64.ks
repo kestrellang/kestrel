@@ -954,20 +954,21 @@ public struct UInt64:
         if n == UInt64.zero {
             digits.appendByte(48)
         } else {
-            let radixVal: UInt64 = UInt64(from: radix);
-            while n != UInt64.zero {
-                let digit: UInt64 = n % radixVal;
-                let digitVal: Int64 = Int64(from: digit);
-                let charCode: Int64 = if digitVal < 10 {
-                    digitVal + 48
-                } else if options.uppercase {
-                    digitVal - 10 + 65
-                } else {
-                    digitVal - 10 + 97
-                };
-                digits.appendByte(UInt8(from: charCode));
-                n = n / radixVal
-            }
+        let radixVal: UInt64 = UInt64(from: radix);
+        var m = n;
+        while m != UInt64.zero {
+            let digit: UInt64 = m % radixVal;
+            let digitVal: Int64 = Int64(from: digit);
+            let charCode: Int64 = if digitVal < 10 {
+                digitVal + 48
+            } else if options.uppercase {
+                digitVal - 10 + 65
+            } else {
+                digitVal - 10 + 97
+            };
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }
         }
 
         // Build content: sign + prefix + reversed digits
