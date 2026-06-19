@@ -580,16 +580,20 @@ fn compile_op1<'ctx>(
             )
             .unwrap()
             .into(),
-        // Non-saturating fptosi (cf. Cranelift's saturating variant): out-of-range
-        // or NaN inputs are UB rather than clamped. Acceptable for in-range uses.
-        Op::FloatToInt(_, ib) => builder
-            .build_float_to_signed_int(
-                arg.into_float_value(),
-                int_bits_to_scalar(ib).llvm(cx).into_int_type(),
-                "f2i",
-            )
-            .unwrap()
-            .into(),
+        // Saturating float->int conversion matching Cranelift's fcvt_to_sint_sat:
+        // NaN -> 0, +inf -> INT_MAX, -inf -> INT_MIN, out-of-range clamped.
+        // Uses llvm.fptosi.sat (available since LLVM 13) to avoid UB.
+        Op::FloatToInt(fb, ib) => {
+            let int_ty: BasicTypeEnum = int_bits_to_scalar(ib).llvm(cx).into();
+            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx).into();
+            call_intrinsic(
+                &fc.ctx.llmod,
+                builder,
+                "llvm.fptosi.sat",
+                &[int_ty, float_ty],
+                &[arg.into_float_value().into()],
+            )?
+        },
         Op::FloatWiden(_, to) => builder
             .build_float_ext(
                 arg.into_float_value(),
