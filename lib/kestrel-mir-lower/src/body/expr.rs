@@ -752,42 +752,48 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_enum_variant(result_ty, variant_idx, payload)
         } else {
             // Static method call (e.g., .fromResidual)
+            // Determine callee + conventions BEFORE lowering args so that
+            // consuming params (e.g. `fromResidual(consuming residual:)`) receive
+            // @owned values instead of borrows — a borrow causes the call to clone
+            // then drop the original, giving a double-deinit for non-Copyable payloads.
             let resolved_entity = resolved.unwrap();
             self.ctx.register_name(resolved_entity);
-            let call_args: Vec<CallArg> = args
-                .map(|a| {
-                    a.iter()
-                        .map(|arg| {
-                            let val = self.lower_expr(arg.value);
-                            self.prepare_call_arg(val, ParamConvention::Borrow)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
 
-            if let Some(protocol) = self.ctx.is_protocol_method(resolved_entity) {
-                self.ctx.register_name(protocol);
-                let key = self.ctx.witness_method_key(resolved_entity);
-                let type_args = self.resolve_type_args(expr_id);
-                let callee = Callee::Witness {
-                    protocol,
-                    method: key,
-                    self_type: result_ty,
-                    method_type_args: type_args,
-                };
-                self.emit_call_returning(callee, call_args, result_ty)
-            } else {
-                let mut type_args = self.resolve_type_args(expr_id);
-                // Static methods on generic types need the parent's type args
-                type_args = self.prepend_receiver_type_args(result_ty, type_args);
-                let self_type = if !type_args.is_empty() {
-                    Some(result_ty)
+            let (callee, conventions) =
+                if let Some(protocol) = self.ctx.is_protocol_method(resolved_entity) {
+                    self.ctx.register_name(protocol);
+                    let key = self.ctx.witness_method_key(resolved_entity);
+                    let convs = self.collect_witness_conventions(protocol, &key);
+                    let type_args = self.resolve_type_args(expr_id);
+                    let c = Callee::Witness {
+                        protocol,
+                        method: key,
+                        self_type: result_ty,
+                        method_type_args: type_args,
+                    };
+                    (c, convs)
                 } else {
-                    None
+                    let mut type_args = self.resolve_type_args(expr_id);
+                    // Static methods on generic types need the parent's type args
+                    type_args = self.prepend_receiver_type_args(result_ty, type_args);
+                    let self_type = if !type_args.is_empty() {
+                        Some(result_ty)
+                    } else {
+                        None
+                    };
+                    let convs = self.collect_conventions(resolved_entity);
+                    let c = Callee::direct_with_args(resolved_entity, type_args, self_type);
+                    (c, convs)
                 };
-                let callee = Callee::direct_with_args(resolved_entity, type_args, self_type);
-                self.emit_call_returning(callee, call_args, result_ty)
-            }
+
+            // Lower args with the actual per-param conventions (no receiver slot — offset 0).
+            let call_args = self.lower_call_args(
+                args.unwrap_or(&[]),
+                &conventions,
+                0,
+            );
+
+            self.emit_call_returning(callee, call_args, result_ty)
         }
     }
 

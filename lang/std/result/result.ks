@@ -311,7 +311,7 @@ extend Result[T, E]: Copyable where T: Copyable, E: Copyable { }
 extend Result[T, E]: FromResidual[E] {
     /// Builds `.Err(residual)` from the residual produced by a `try`
     /// short-circuit.
-    public static func fromResidual(residual: E) -> Result[T, E] {
+    public static func fromResidual(consuming residual: E) -> Result[T, E] {
         .Err(residual)
     }
 }

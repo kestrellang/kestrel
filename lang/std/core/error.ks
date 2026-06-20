@@ -64,7 +64,7 @@ public protocol Tryable {
 public protocol FromResidual[Residual] {
     /// Builds an instance carrying `residual` as its failure payload.
     @builtin(.FromResidualMethod)
-    static func fromResidual(residual: Residual) -> Self
+    static func fromResidual(consuming residual: Residual) -> Self
 }
 
 /// Protocol enabling implicit promotion of a bare value into a wrapping type.

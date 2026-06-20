@@ -701,7 +701,7 @@ extend Optional[T]: ForceUnwrap {
 /// `.None` so chains of `try` returning optionals compose.
 extend Optional[T]: FromResidual[()] {
     /// Builds `.None` from the residual produced by a `try` short-circuit.
-    public static func fromResidual(residual: ()) -> Optional[T] {
+    public static func fromResidual(consuming residual: ()) -> Optional[T] {
         .None
     }
 }
