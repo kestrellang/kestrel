@@ -975,6 +975,10 @@ impl OssaBodyCtx<'_, '_> {
     /// Borrow-extract-copy a single binding from `base` and insert it into the
     /// local map. @owned results are copied (so the binding owns its value);
     /// @guaranteed results are used directly.
+    ///
+    /// Note: Cloneable and NotCopyable types go through `emit_moveout` via
+    /// `path_requires_moveout` when the scrutinee is @owned, so they never
+    /// reach here as @owned extractions (the copy here is bitwise-safe).
     fn bind_path_copy(
         &mut self,
         base: ValueId,
@@ -1059,7 +1063,12 @@ impl OssaBodyCtx<'_, '_> {
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
                     }
-                    if self.is_non_copyable(field_ty)
+                    // Move out any non-bitwise-Copyable payload: NotCopyable
+                    // (no clone shim, copy is illegal), Cloneable (borrow-
+                    // extract-copy would redundantly clone an already-owned
+                    // temporary — bug #180), or mono-dependent (pre-mono
+                    // Bitwise but may resolve to move-only post-mono).
+                    if !self.is_copy_type(field_ty)
                         || self.copy_behavior_is_mono_dependent(field_ty)
                     {
                         return true;
@@ -1079,7 +1088,7 @@ impl OssaBodyCtx<'_, '_> {
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
                     }
-                    if self.is_non_copyable(field_ty)
+                    if !self.is_copy_type(field_ty)
                         || self.copy_behavior_is_mono_dependent(field_ty)
                     {
                         return true;
