@@ -10,6 +10,7 @@ module std.numeric
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool,
+    Less, LessOrEqual, Greater, GreaterOrEqual,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
@@ -53,6 +54,10 @@ import std.numeric.(Int64, Float64)
 public struct Float32:
     Comparable,
     Equatable,
+    Less[Float32],
+    LessOrEqual[Float32],
+    Greater[Float32],
+    GreaterOrEqual[Float32],
     Formattable,
     Addable,
     Subtractable,
@@ -387,6 +392,43 @@ public struct Float32:
     type Multipliable.Output = Float32
     type Divisible.Output = Float32
     type Negatable.Output = Float32
+
+    // Direct IEEE 754 comparisons — override the Comparable blanket so that
+    // NaN operands always produce false (every ordered comparison against NaN
+    // must be false per IEEE 754; the blanket collapses NaN to .Equal and then
+    // uses != .Greater / != .Less, which incorrectly returns true).
+    type Less.Output = Bool
+    type LessOrEqual.Output = Bool
+    type Greater.Output = Bool
+    type GreaterOrEqual.Output = Bool
+
+    // ========================================================================
+    // ORDERED COMPARISONS (IEEE 754 — NaN-safe)
+    // ========================================================================
+
+    /// Returns true if `self < other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func lessThan(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_lt(self.raw, other.raw))
+    }
+
+    /// Returns true if `self <= other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func lessThanOrEqual(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_le(self.raw, other.raw))
+    }
+
+    /// Returns true if `self > other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func greaterThan(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_gt(self.raw, other.raw))
+    }
+
+    /// Returns true if `self >= other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func greaterThanOrEqual(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_ge(self.raw, other.raw))
+    }
 
     // ========================================================================
     // ARITHMETIC
