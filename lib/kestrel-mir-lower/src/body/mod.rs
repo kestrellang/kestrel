@@ -156,6 +156,12 @@ pub(crate) enum ScopeEntry {
         /// Stable identity of the slot across block-merge rebinds (`addr` itself is
         /// stable today, but reads key by the HIR local). `None` for self/params.
         local: Option<HirLocalId>,
+        /// `true` for an inout-borrow slot (a `mutating self`/`mutating arg`
+        /// param): the address is a @guaranteed pointer into the *caller's*
+        /// storage, so it participates in init-state tracking (so whole-slot
+        /// stores drop-vs-StoreInit correctly) but must NOT be DestroyAddr'd at
+        /// scope exit — the caller owns and drops the value.
+        borrowed: bool,
     },
     /// @guaranteed borrow needing EndBorrow at scope exit.
     Borrow(ValueId),
@@ -527,6 +533,18 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                             },
                             _ => BodyContext::Initializer { self_addr: val },
                         };
+                    } else {
+                        // Enroll the inout-borrow slot in the SAME init-state
+                        // machinery a regular `var` uses, so a whole-slot store
+                        // (`self = new`) consults its tracked init state: drop
+                        // the old value when the slot is live (DefInit), but
+                        // StoreInit (no drop) after a move-out (`let old = self;
+                        // self = n` — the Optional.take/replace shape). Without
+                        // this the slot is untracked, `var_init` returns `None`,
+                        // and the store always took the drop arm — double-freeing
+                        // the moved-out slot (#141). NOT enrolled for init bodies:
+                        // their self is uninitialized and driven by BodyContext.
+                        self.track_borrowed_var(val, ty, *hir_id);
                     }
                     val
                 },
@@ -757,6 +775,29 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         val
     }
 
+    /// Normalize a whole-slot var address to the canonical `Pointer[T]` form.
+    ///
+    /// A regular `var` slot's address is already `Pointer[T]` @owned. A
+    /// `mutating self`/`mutating arg` (MutBorrow) param, however, is bound as a
+    /// `LocalBinding::Var` whose value has type `T` @guaranteed (the inout
+    /// pointer presented as a value of the pointee type). Whole-slot reads
+    /// (`Take`) and stores (`StoreInit`/`StoreAssign`) need a `Pointer[T]`
+    /// address: codegen's `resolve_scalar` would otherwise *load through* a
+    /// @guaranteed scalar-repr value, treating the inout pointer as a
+    /// pointer-to-the-address and yielding the pointee bits instead of the
+    /// address (SIGSEGV / LLVM "expected PointerValue"). Materialise `Pointer[T]`
+    /// via `PtrTo` so both backends see the canonical form. Identity for an
+    /// already-@owned `Pointer[T]` slot. Single source of truth for the
+    /// inout-self address seam — used by every whole-self read/store site.
+    pub fn whole_slot_addr(&mut self, addr: ValueId) -> ValueId {
+        if self.body.value(addr).ownership != Ownership::Guaranteed {
+            return addr;
+        }
+        let pointee_ty = self.body.value(addr).ty;
+        let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
+        self.emit_op1(Op::PtrTo(pointee_ty), addr, ptr_ty)
+    }
+
     fn copy_behavior_of(&self, ty: TyId) -> CopyBehavior {
         let wc = self
             .ctx
@@ -918,6 +959,25 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         local: Option<HirLocalId>,
         flag: Option<ValueId>,
     ) {
+        self.track_var_inner(address, content_ty, local, flag, false);
+    }
+
+    /// Track an inout-borrow slot (`mutating self`/`mutating arg` param): it
+    /// participates in init-state tracking like a normal `var` (so whole-slot
+    /// stores correctly choose drop-vs-StoreInit after a move-out) but is never
+    /// DestroyAddr'd at scope exit — the caller owns the storage.
+    pub fn track_borrowed_var(&mut self, address: ValueId, content_ty: TyId, local: HirLocalId) {
+        self.track_var_inner(address, content_ty, Some(local), None, true);
+    }
+
+    fn track_var_inner(
+        &mut self,
+        address: ValueId,
+        content_ty: TyId,
+        local: Option<HirLocalId>,
+        flag: Option<ValueId>,
+        borrowed: bool,
+    ) {
         if let Some(frame) = self.scope_stack.last_mut() {
             frame.entries.push(ScopeEntry::Var {
                 addr: address,
@@ -925,6 +985,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 init: VarInit::DefInit,
                 flag,
                 local,
+                borrowed,
             });
         }
     }
@@ -1283,6 +1344,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         init: VarInit::DefInit,
                         addr,
                         ty,
+                        borrowed: false,
                         ..
                     } => {
                         self.push_inst(InstKind::DestroyAddr {
@@ -1330,10 +1392,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 },
                 // DefUninit: the slot was moved out (Swift `load [take]`) and owns
                 // nothing — emitting DestroyAddr would double-free. Skip it.
+                // borrowed: inout self/arg — the caller owns the storage. Skip it.
                 ScopeEntry::Var {
                     init: VarInit::DefUninit,
                     ..
-                } => {},
+                }
+                | ScopeEntry::Var { borrowed: true, .. } => {},
                 ScopeEntry::Var { addr, ty, .. } => {
                     self.push_inst(InstKind::DestroyAddr {
                         address: *addr,

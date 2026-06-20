@@ -127,9 +127,17 @@ impl OssaBodyCtx<'_, '_> {
 
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(hir_local) {
-                    let addr = self.map_local(*hir_local);
+                    let raw_addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
                     let ownership = self.ownership_for(ty);
+                    // Whole-slot read of a `mutating self` (@guaranteed inout
+                    // pointer): normalize to `Pointer[T]` so Take/Load operate on
+                    // the address, not load-through it. Identity for a normal
+                    // @owned var slot. (Reads through `ownership != Owned` below
+                    // pass the *type* ownership, not the addr's, so a @guaranteed
+                    // self with a non-Owned ty would still want the address —
+                    // hence the normalization happens on `addr` for both arms.)
+                    let addr = self.whole_slot_addr(raw_addr);
                     if ownership != kestrel_mir::value::Ownership::Owned {
                         return self.emit_load(addr, ty);
                     }
@@ -139,7 +147,17 @@ impl OssaBodyCtx<'_, '_> {
                     // uses never reach here (they route through
                     // lower_expr_for_borrow / prepare_call_arg_for_expr). Copyable
                     // vars still snapshot via copy_addr.
-                    if self.is_non_copyable(ty) {
+                    //
+                    // Mono-dependent copy types (a conditionally-Copyable
+                    // container over a bare type param — `Optional[T]`/`Result`,
+                    // self in their `take`/`replace` bodies) are ALSO moved here:
+                    // pre-mono their copy behavior is unknown, and a `copy_value`
+                    // (clone) is unsound when the param resolves non-Copyable (it
+                    // bitwise-aliases storage the subsequent `self = .None`
+                    // StoreAssign then drops — `Optional.take()` returned freed
+                    // bits). Moving + init-tracking is correct for the reassign
+                    // shape; mirrors the same guard in pattern.rs. (#141 cluster.)
+                    if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
                             "consuming read of an already-moved var — frontend should reject use-after-move"
@@ -849,8 +867,14 @@ impl OssaBodyCtx<'_, '_> {
                     // `rhs` is lowered above (rhs-first) so `x = f(x)` is correct.
                     match self.var_init(hir_local) {
                         // Moved-out on all paths: slot is empty, just StoreInit.
+                        // `whole_slot_addr` normalizes a @guaranteed inout-self
+                        // address to `Pointer[T]` (identity for a normal var slot);
+                        // this is the `self = n` after `let old = self` (Optional
+                        // .take/replace) path — StoreInit, no drop of the moved-out
+                        // slot (#141).
                         Some(super::VarInit::DefUninit) => {
-                            let addr = self.local_map[&hir_local].value();
+                            let raw = self.local_map[&hir_local].value();
+                            let addr = self.whole_slot_addr(raw);
                             self.emit_store_init(addr, rhs);
                             self.set_var_init(hir_local, super::VarInit::DefInit);
                         },
@@ -862,37 +886,33 @@ impl OssaBodyCtx<'_, '_> {
                             let flag = self
                                 .var_flag(hir_local)
                                 .expect("MaybeUninit var must have a drop flag");
-                            let addr = self.local_map[&hir_local].value();
-                            let remapped = self.emit_guarded_destroy(flag, addr, ty, &[rhs]);
+                            let raw = self.local_map[&hir_local].value();
+                            let addr = self.whole_slot_addr(raw);
+                            // Thread `addr` through the guarded-destroy merge so a
+                            // var-slot address rebound at the merge stays valid
+                            // (the @guaranteed inout PtrTo result is stable, but
+                            // threading it is harmless: it's just forwarded).
+                            let remapped = self.emit_guarded_destroy(flag, addr, ty, &[rhs, addr]);
                             let rhs = remapped[0];
-                            let addr = self.local_map[&hir_local].value();
+                            let addr = remapped[1];
                             self.emit_store_init(addr, rhs);
                             self.store_drop_flag(flag, true);
                             self.set_var_init(hir_local, super::VarInit::DefInit);
                         },
                         // Definitely initialized: StoreAssign drops the old value.
+                        // A MutBorrow param (`mutating self`) is bound as
+                        // LocalBinding::Var but its value has type `T` @guaranteed
+                        // (the inout pointer to the caller's storage), NOT
+                        // `Pointer[T]` @owned like a regular var slot. The expand
+                        // pass's StoreAssign drop-prefix check expects `Pointer[T]`
+                        // and silently skips the drop for a raw `T`-typed address,
+                        // leaking the old value. `whole_slot_addr` materialises the
+                        // canonical `Pointer[T]` (identity for an @owned var slot),
+                        // so the drop fires for both `self = newVal` in a mutating
+                        // method and plain `var x = v; x = w`.
                         _ => {
-                            let addr = self.local_map[&hir_local].value();
-                            // A MutBorrow param (e.g. `mutating self`) is bound as
-                            // LocalBinding::Var but its value has type `T` @guaranteed
-                            // (the inout pointer to the caller's storage), NOT
-                            // `Pointer[T]` @owned like a regular var slot. The expand
-                            // pass's StoreAssign drop-prefix check expects `Pointer[T]`
-                            // and silently skips the drop for a raw `T`-typed address,
-                            // causing the old value to leak instead of being deinit'd.
-                            // Materialise `Pointer[T]` via PtrTo so the expand pass
-                            // always sees the canonical form — the drop fires correctly
-                            // for both `self = newVal` in a mutating method and plain
-                            // `var x = v; x = w` (where addr is already Pointer[T]).
-                            let addr = if self.body.value(addr).ownership
-                                == kestrel_mir::value::Ownership::Guaranteed
-                            {
-                                let pointee_ty = self.body.value(addr).ty;
-                                let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
-                                self.emit_op1(kestrel_mir::op::Op::PtrTo(pointee_ty), addr, ptr_ty)
-                            } else {
-                                addr
-                            };
+                            let raw = self.local_map[&hir_local].value();
+                            let addr = self.whole_slot_addr(raw);
                             self.emit_store_assign(addr, rhs);
                         },
                     }

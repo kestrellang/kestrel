@@ -175,8 +175,28 @@ pub fn compile_inst(
         } => {
             let addr = fc.resolve_scalar(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
-            fc.map_value(builder, *result, val);
+            match repr {
+                // A Take is a destructive *move-out*: the result must be an
+                // independent @owned value. An aggregate is carried by address,
+                // so `load_from_repr` would alias the source storage — and if
+                // that storage is reinitialized before the moved value is
+                // consumed (the `let old = self; self = new` take/replace shape,
+                // or `var x = agg; …; x = new`), the moved value is clobbered.
+                // Memcpy the bytes into a fresh temp slot so the move is truly
+                // independent (a byte-copy of an abandoned source, not a clone —
+                // no double-ownership). Scalars are loaded by value and never
+                // alias.
+                TypeRepr::Aggregate { size, align } => {
+                    let ptr_ty = fc.ctx.ptr_ty;
+                    let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
+                    mem::copy_aggregate(builder, size, slot, addr);
+                    fc.map_value(builder, *result, slot);
+                },
+                _ => {
+                    let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
+                    fc.map_value(builder, *result, val);
+                },
+            }
         },
 
         // address: ADDR, value: VALUE → writes value to address
