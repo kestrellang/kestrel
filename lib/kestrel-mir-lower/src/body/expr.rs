@@ -873,6 +873,26 @@ impl OssaBodyCtx<'_, '_> {
                         // Definitely initialized: StoreAssign drops the old value.
                         _ => {
                             let addr = self.local_map[&hir_local].value();
+                            // A MutBorrow param (e.g. `mutating self`) is bound as
+                            // LocalBinding::Var but its value has type `T` @guaranteed
+                            // (the inout pointer to the caller's storage), NOT
+                            // `Pointer[T]` @owned like a regular var slot. The expand
+                            // pass's StoreAssign drop-prefix check expects `Pointer[T]`
+                            // and silently skips the drop for a raw `T`-typed address,
+                            // causing the old value to leak instead of being deinit'd.
+                            // Materialise `Pointer[T]` via PtrTo so the expand pass
+                            // always sees the canonical form — the drop fires correctly
+                            // for both `self = newVal` in a mutating method and plain
+                            // `var x = v; x = w` (where addr is already Pointer[T]).
+                            let addr = if self.body.value(addr).ownership
+                                == kestrel_mir::value::Ownership::Guaranteed
+                            {
+                                let pointee_ty = self.body.value(addr).ty;
+                                let ptr_ty = self.ctx.module.ty_arena.pointer(pointee_ty);
+                                self.emit_op1(kestrel_mir::op::Op::PtrTo(pointee_ty), addr, ptr_ty)
+                            } else {
+                                addr
+                            };
                             self.emit_store_assign(addr, rhs);
                         },
                     }
