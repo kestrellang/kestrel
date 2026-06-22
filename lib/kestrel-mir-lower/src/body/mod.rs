@@ -2409,10 +2409,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.alloc_value(ty, Ownership::Owned);
         self.inherit_slot_taint(result, address, ty);
+        // Default to independent (memcpy); the post-mono mark_independent_takes
+        // pass flips provably-safe moves to aliasing.
         self.push_inst(InstKind::Take {
             result,
             address,
             ty,
+            independent: true,
         });
         self.track_owned(result);
         result

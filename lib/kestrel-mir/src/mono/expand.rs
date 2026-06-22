@@ -681,6 +681,7 @@ fn expand_function(
                                             result: tmp,
                                             address,
                                             ty,
+                                            independent: true,
                                         },
                                         span: span.clone(),
                                     });
@@ -709,6 +710,7 @@ fn expand_function(
                                         result: tmp,
                                         address,
                                         ty,
+                                        independent: true,
                                     },
                                     span: span.clone(),
                                 });
@@ -751,6 +753,7 @@ fn expand_function(
                                         result: tmp,
                                         address,
                                         ty: pointee,
+                                        independent: true,
                                     },
                                     span: span.clone(),
                                 });

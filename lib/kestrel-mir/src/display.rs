@@ -384,11 +384,13 @@ fn fmt_inst(
             result,
             address,
             ty,
+            independent,
         } => {
             write!(
                 out,
-                "{} = take {}, {}",
+                "{} = take{} {}, {}",
                 fmt_value(*result),
+                if *independent { "" } else { " [alias]" },
                 fmt_value(*address),
                 fmt_ty(*ty, arena, module),
             )

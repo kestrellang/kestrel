@@ -262,10 +262,13 @@ impl OssaBuilder {
 
     pub fn emit_take(&mut self, address: ValueId, ty: TyId) -> ValueId {
         let result = self.new_value(ty, Ownership::Owned);
+        // Default to independent (memcpy) — the safe choice; mark_independent_takes
+        // flips it to aliasing only when provably safe.
         self.emit(InstKind::Take {
             result,
             address,
             ty,
+            independent: true,
         });
         result
     }

@@ -179,6 +179,7 @@ pub fn compile_inst<'ctx>(
             result,
             address,
             ty,
+            independent,
         } => {
             let addr = fc.resolve_scalar(builder, *address).into_pointer_value();
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
@@ -191,8 +192,11 @@ pub fn compile_inst<'ctx>(
                 // `var x = agg; …; x = new`), the moved value is clobbered.
                 // Memcpy into a fresh temp so the move is truly independent (a
                 // byte-copy of an abandoned source, not a clone — no
-                // double-ownership). Scalars load by value and never alias.
-                TypeRepr::Aggregate { size, align } => {
+                // double-ownership). When `mark_independent_takes` has proven
+                // the source slot is not reinitialized while this value is live,
+                // `independent` is false and we alias (zero-copy). Scalars load
+                // by value and never alias.
+                TypeRepr::Aggregate { size, align } if *independent => {
                     let slot = fc.alloca(size, align);
                     mem::copy_aggregate(cx, builder, ptr_size, size, slot, addr);
                     fc.map_value(*result, slot.into());
