@@ -16,6 +16,7 @@ import std.core.(
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, UInt64, Float32)
+import std.collections.Array
 
 /// A 64-bit IEEE 754 double-precision float.
 ///
@@ -966,34 +967,32 @@ public struct Float64:
             return null
         }
 
-        var integerPart: Float64 = 0.0;
-        var hasIntegerPart = false;
+        // Accumulate every significant digit into the big integer `mantissa`
+        // and count the fractional digits, so value = mantissa * 10^(exp - frac).
+        var mantissa = Array[UInt32]();
+        var hasDigits = false;
+        var fracCount: Int64 = 0;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            let digit = Float64(from: currentByte - 48);
-            integerPart = integerPart * 10.0 + digit;
-            hasIntegerPart = true;
+            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            hasDigits = true;
             index = index + 1;
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index))
             }
         }
 
-        var fractionalPart: Float64 = 0.0;
-        var hasFractionalPart = false;
-
         if index < len and currentByte == 46 {
             index = index + 1;
-            var divisor: Float64 = 10.0;
-
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    let digit = Float64(from: currentByte - 48);
-                    fractionalPart = fractionalPart + digit / divisor;
-                    divisor = divisor * 10.0;
-                    hasFractionalPart = true;
+                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    fracCount = fracCount + 1;
+                    hasDigits = true;
                     index = index + 1;
                     if index < len {
                         currentByte = Int64(from: string.bytes(unchecked: index))
@@ -1002,11 +1001,11 @@ public struct Float64:
             }
         }
 
-        if not hasIntegerPart and not hasFractionalPart {
+        if not hasDigits {
             return null
         }
 
-        var result = integerPart + fractionalPart;
+        var expValue: Int64 = 0;
 
         if index < len and (currentByte == 101 or currentByte == 69) {
             index = index + 1;
@@ -1035,11 +1034,16 @@ public struct Float64:
                 return null
             }
 
-            var exponent: Int64 = 0;
             var hasExpDigit = false;
 
             while index < len and currentByte >= 48 and currentByte <= 57 {
-                exponent = exponent * 10 + (currentByte - 48);
+                // Cap accumulation far beyond any representable exponent so an
+                // absurdly long exponent can't overflow Int64 and wrap negative
+                // (which would turn an overflow into a spurious 0). |k| > ~400
+                // already saturates to inf / 0.
+                if expValue < 1000000 {
+                    expValue = expValue * 10 + (currentByte - 48)
+                };
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
@@ -1051,12 +1055,8 @@ public struct Float64:
                 return null
             }
 
-            let expFloat = Float64(from: exponent);
-            let ten: Float64 = 10.0;
             if expNegative {
-                result = result / ten.pow(expFloat)
-            } else {
-                result = result * ten.pow(expFloat)
+                expValue = expValue.negate()
             }
         }
 
@@ -1064,11 +1064,26 @@ public struct Float64:
             return null
         }
 
+        // value = mantissa * 10^k, rounded to the nearest float (round-even).
+        let k = expValue - fracCount;
+        let parts = floatRoundDecimal(mantissa, k, 52, -1074, 971);
+        var rawBits = UInt64.zero;
+        if parts.overflow {
+            rawBits = UInt64(from: 2047).shiftLeft(by: 52)
+        } else if parts.m == UInt64.zero {
+            rawBits = UInt64.zero
+        } else if parts.m >= UInt64(from: 4503599627370496) {
+            let rawExp = parts.e + 1075;
+            rawBits = UInt64(from: rawExp).shiftLeft(by: 52)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 4503599627370495)))
+        } else {
+            rawBits = parts.m
+        }
         if isNegative {
-            result = result.negate()
+            rawBits = rawBits.bitwiseOr(UInt64.one.shiftLeft(by: 63))
         }
 
-        self.raw = result.raw;
+        self.raw = lang.f64_from_bits(rawBits.raw);
     }
 
     // ========================================================================

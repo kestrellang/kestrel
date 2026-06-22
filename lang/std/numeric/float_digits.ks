@@ -292,6 +292,117 @@ fileprivate func bitLen64(v: UInt64) -> Int64 {
     c
 }
 
+fileprivate func bnBitLen(n: Array[UInt32]) -> Int64 {
+    if bnIsZero(n) { return 0 };
+    let top = n.count - 1;
+    var bits = top * 32;
+    var v = n(top);
+    while v > UInt32.zero { bits = bits + 1; v = v.shiftRight(by: 1) };
+    bits
+}
+
+// low 64 bits of a big integer (caller guarantees it fits)
+fileprivate func bnToU64(n: Array[UInt32]) -> UInt64 {
+    var r = UInt64.zero;
+    if n.count >= 1 { r = UInt64(from: n(0)) };
+    if n.count >= 2 { r = r.bitwiseOr(UInt64(from: n(1)).shiftLeft(by: 32)) };
+    r
+}
+
+// n + v  (v small, used for digit accumulation)
+fileprivate func bnAddSmall(n: Array[UInt32], v: UInt64) -> Array[UInt32] {
+    let mask = UInt64(from: 4294967295);
+    var out = Array[UInt32]();
+    var i: Int64 = 0;
+    while i < n.count { out.append(n(i)); i = i + 1 };
+    var carry = v;
+    var j: Int64 = 0;
+    while carry > UInt64.zero {
+        if j < out.count {
+            let s = UInt64(from: out(j)).add(carry);
+            out(j) = UInt32(from: s.bitwiseAnd(mask));
+            carry = s.shiftRight(by: 32)
+        } else {
+            out.append(UInt32(from: carry.bitwiseAnd(mask)));
+            carry = carry.shiftRight(by: 32)
+        };
+        j = j + 1
+    };
+    bnTrim(out)
+}
+
+// ---------------------------------------------------------------------------
+// correctly-rounded decimal → float  (the inverse of digit generation)
+// ---------------------------------------------------------------------------
+
+/// Significand and binary exponent of the float nearest `D * 10^k`, or
+/// `overflow == true` for infinity. `m` carries the implicit bit: a normal
+/// result has `m` in [2^sigBits, 2^(sigBits+1)) with `e` its binary exponent;
+/// a subnormal has `m < 2^sigBits` and `e == minE`; zero has `m == 0`.
+struct FloatParts { var m: UInt64; var e: Int64; var overflow: Bool }
+
+/// Round `D * 10^k` (D a non-negative big integer) to the nearest float with
+/// `sigBits` significand bits, minimum binary exponent `minE`, and maximum
+/// normal binary exponent `maxE`. Round-to-nearest-even throughout.
+func floatRoundDecimal(D: Array[UInt32], k: Int64, sigBits: Int64, minE: Int64, maxE: Int64) -> FloatParts {
+    if bnIsZero(D) { return FloatParts(m: UInt64.zero, e: 0, overflow: false) };
+
+    // Cheap magnitude estimate (no big-integer work yet) to short-circuit clear
+    // over/underflow — otherwise an absurd exponent would build a giant 5^k.
+    let log2val = Float64(from: bnBitLen(D) - 1)
+        .add(Float64(from: k).multiply(Float64(floatLiteral: 3.321928094887362)));
+    if log2val > Float64(from: maxE + sigBits + 3) {
+        return FloatParts(m: UInt64.zero, e: 0, overflow: true)
+    };
+    if log2val < Float64(from: minE - 3) {
+        return FloatParts(m: UInt64.zero, e: 0, overflow: false)
+    };
+
+    var e = Int64(raw: lang.cast_f64_i64(log2val.floor().raw)) - sigBits;
+    if e < minE { e = minE };
+
+    // m = round(D * 10^k * 2^(-e)); adjust e until m is normalized.
+    var m = UInt64.zero;
+    var tries: Int64 = 0;
+    while tries < 8 {
+        var num = D;
+        if k > 0 { num = bnMul(num, bnPow5(k)) };
+        let twoExp = k - e;
+        if twoExp > 0 { num = bnShlBits(num, twoExp) };
+        let da = if k < 0 { 0 - k } else { 0 };
+        let db = if twoExp < 0 { 0 - twoExp } else { 0 };
+        let mBn = bnDivRound5_2(num, da, db);
+        let topBit = bnBitLen(mBn);
+        if topBit > sigBits + 1 {
+            e = e + (topBit - (sigBits + 1));
+            tries = tries + 1
+        } else if topBit < sigBits + 1 and e > minE {
+            var ne = e - ((sigBits + 1) - topBit);
+            if ne < minE { ne = minE };
+            e = ne;
+            tries = tries + 1
+        } else {
+            // normalized normal (topBit == sigBits+1) or subnormal (e == minE)
+            m = bnToU64(mBn);
+            tries = 100
+        }
+    };
+
+    if tries != 100 {
+        // estimate failed to converge (should not happen); recompute once more
+        var num = D;
+        if k > 0 { num = bnMul(num, bnPow5(k)) };
+        let twoExp = k - e;
+        if twoExp > 0 { num = bnShlBits(num, twoExp) };
+        let da = if k < 0 { 0 - k } else { 0 };
+        let db = if twoExp < 0 { 0 - twoExp } else { 0 };
+        m = bnToU64(bnDivRound5_2(num, da, db))
+    };
+
+    if e > maxE { return FloatParts(m: UInt64.zero, e: 0, overflow: true) };
+    FloatParts(m: m, e: e, overflow: false)
+}
+
 // ---------------------------------------------------------------------------
 // public-to-module digit-generation entry points (operate on m * 2^e)
 // ---------------------------------------------------------------------------

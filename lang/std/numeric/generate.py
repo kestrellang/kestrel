@@ -1199,8 +1199,35 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
 
 
 def generate_float_parse_method(type_name: str, bits: int) -> str:
-    """Generate the parse() method for float types."""
+    """Generate the parse() method for float types.
+
+    Digits are accumulated into a big integer and converted to the correctly-
+    rounded float by `floatRoundDecimal` (float_digits.ks). The old code did
+    `result * 10.pow(exp)` in float arithmetic, which lost precision and
+    overflowed `10^k` to infinity for large exponents -> 0 (issue #216).
+    """
     lang_type = f"f{bits}"
+
+    if bits == 64:
+        sig_bits = 52
+        min_e = -1074
+        max_e = 971
+        exp_bias_add = 1075     # rawExp = e + exp_bias_add
+        exp_mask = 2047
+        hidden_bit = 1 << 52
+        mant_mask = (1 << 52) - 1
+        sign_shift = 63
+        from_bits = "lang.f64_from_bits(rawBits.raw)"
+    else:
+        sig_bits = 23
+        min_e = -149
+        max_e = 104
+        exp_bias_add = 150
+        exp_mask = 255
+        hidden_bit = 1 << 23
+        mant_mask = (1 << 23) - 1
+        sign_shift = 31
+        from_bits = "lang.f32_from_bits(UInt32(from: rawBits).raw)"
 
     method = '''    /// @name Parsing
     /// Parses a `__TYPE_NAME__` from a string. Recognises decimal
@@ -1319,34 +1346,32 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             return null
         }
 
-        var integerPart: __TYPE_NAME__ = 0.0;
-        var hasIntegerPart = false;
+        // Accumulate every significant digit into the big integer `mantissa`
+        // and count the fractional digits, so value = mantissa * 10^(exp - frac).
+        var mantissa = Array[UInt32]();
+        var hasDigits = false;
+        var fracCount: Int64 = 0;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            let digit = __TYPE_NAME__(from: currentByte - 48);
-            integerPart = integerPart * 10.0 + digit;
-            hasIntegerPart = true;
+            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            hasDigits = true;
             index = index + 1;
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index))
             }
         }
 
-        var fractionalPart: __TYPE_NAME__ = 0.0;
-        var hasFractionalPart = false;
-
         if index < len and currentByte == 46 {
             index = index + 1;
-            var divisor: __TYPE_NAME__ = 10.0;
-
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    let digit = __TYPE_NAME__(from: currentByte - 48);
-                    fractionalPart = fractionalPart + digit / divisor;
-                    divisor = divisor * 10.0;
-                    hasFractionalPart = true;
+                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    fracCount = fracCount + 1;
+                    hasDigits = true;
                     index = index + 1;
                     if index < len {
                         currentByte = Int64(from: string.bytes(unchecked: index))
@@ -1355,11 +1380,11 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
         }
 
-        if not hasIntegerPart and not hasFractionalPart {
+        if not hasDigits {
             return null
         }
 
-        var result = integerPart + fractionalPart;
+        var expValue: Int64 = 0;
 
         if index < len and (currentByte == 101 or currentByte == 69) {
             index = index + 1;
@@ -1388,11 +1413,16 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                 return null
             }
 
-            var exponent: Int64 = 0;
             var hasExpDigit = false;
 
             while index < len and currentByte >= 48 and currentByte <= 57 {
-                exponent = exponent * 10 + (currentByte - 48);
+                // Cap accumulation far beyond any representable exponent so an
+                // absurdly long exponent can't overflow Int64 and wrap negative
+                // (which would turn an overflow into a spurious 0). |k| > ~400
+                // already saturates to inf / 0.
+                if expValue < 1000000 {
+                    expValue = expValue * 10 + (currentByte - 48)
+                };
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
@@ -1404,12 +1434,8 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                 return null
             }
 
-            let expFloat = __TYPE_NAME__(from: exponent);
-            let ten: __TYPE_NAME__ = 10.0;
             if expNegative {
-                result = result / ten.pow(expFloat)
-            } else {
-                result = result * ten.pow(expFloat)
+                expValue = expValue.negate()
             }
         }
 
@@ -1417,14 +1443,41 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             return null
         }
 
+        // value = mantissa * 10^k, rounded to the nearest float (round-even).
+        let k = expValue - fracCount;
+        let parts = floatRoundDecimal(mantissa, k, __SIG_BITS__, __MIN_E__, __MAX_E__);
+        var rawBits = UInt64.zero;
+        if parts.overflow {
+            rawBits = UInt64(from: __EXP_MASK__).shiftLeft(by: __SIG_BITS__)
+        } else if parts.m == UInt64.zero {
+            rawBits = UInt64.zero
+        } else if parts.m >= UInt64(from: __HIDDEN_BIT__) {
+            let rawExp = parts.e + __EXP_BIAS_ADD__;
+            rawBits = UInt64(from: rawExp).shiftLeft(by: __SIG_BITS__)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: __MANT_MASK__)))
+        } else {
+            rawBits = parts.m
+        }
         if isNegative {
-            result = result.negate()
+            rawBits = rawBits.bitwiseOr(UInt64.one.shiftLeft(by: __SIGN_SHIFT__))
         }
 
-        self.raw = result.raw;
+        self.raw = __FROM_BITS__;
     }'''
 
-    return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
+    return (
+        method.replace("__SIG_BITS__", str(sig_bits))
+        .replace("__MIN_E__", str(min_e))
+        .replace("__MAX_E__", str(max_e))
+        .replace("__EXP_BIAS_ADD__", str(exp_bias_add))
+        .replace("__EXP_MASK__", str(exp_mask))
+        .replace("__HIDDEN_BIT__", str(hidden_bit))
+        .replace("__MANT_MASK__", str(mant_mask))
+        .replace("__SIGN_SHIFT__", str(sign_shift))
+        .replace("__FROM_BITS__", from_bits)
+        .replace("__TYPE_NAME__", type_name)
+        .replace("__LANG_TYPE__", lang_type)
+    )
 
 
 def generate_float_format_method(type_name: str, bits: int) -> str:

@@ -16,6 +16,7 @@ import std.core.(
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, {{UINT_TYPE}}, {{OTHER_FLOAT}})
+import std.collections.Array
 
 /// A {{BITS}}-bit IEEE 754 {{PRECISION_KIND}} float.
 ///
