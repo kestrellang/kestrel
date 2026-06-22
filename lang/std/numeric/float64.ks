@@ -1152,27 +1152,46 @@ public struct Float64:
                 e = rawExp - 1075
             }
 
-            // Base-10 exponent of the leading digit (drives Auto style choice).
-            var decExp: Int64 = 0;
-            if m != UInt64.zero {
-                decExp = floatSigDigits(m, e, 1).decExp
-            }
-
-            if style == .Auto {
-                if precisionProvided == false {
-                    trimTrailingZeros = true
-                }
-                if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
-                    style = .Fixed
+            if precisionProvided == false and suffixPercent == false {
+                // No explicit precision: print the SHORTEST decimal that round-
+                // trips back to this exact value (Dragon4 boundary search). The
+                // lower gap is a half-ulp only at a binade boundary (fraction
+                // zero) above the smallest normal.
+                let lowerGapIsHalf = rawMant == UInt64.zero and rawExp >= 2;
+                let sr = floatShortestDigits(m, e, lowerGapIsHalf);
+                let decExp = sr.decExp;
+                var scientific = false;
+                if style == .Scientific or style == .ScientificUpper {
+                    scientific = true
+                } else if style == .Auto and m != UInt64.zero and (decExp < -4 or decExp >= precision) {
+                    scientific = true
+                };
+                if scientific {
+                    number = floatShortestSciString(sr, style == .ScientificUpper)
                 } else {
-                    style = .Scientific
+                    number = floatShortestFixedString(sr)
                 }
-            }
-
-            if style == .Scientific or style == .ScientificUpper {
-                number = floatSciString(m, e, precision, style == .ScientificUpper)
             } else {
-                number = floatFixedString(m, e, precision)
+                // Explicit precision (or percent): exact rounding to that many
+                // fractional / mantissa digits.
+                var decExp: Int64 = 0;
+                if m != UInt64.zero {
+                    decExp = floatSigDigits(m, e, 1).decExp
+                }
+
+                if style == .Auto {
+                    if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
+                        style = .Fixed
+                    } else {
+                        style = .Scientific
+                    }
+                }
+
+                if style == .Scientific or style == .ScientificUpper {
+                    number = floatSciString(m, e, precision, style == .ScientificUpper)
+                } else {
+                    number = floatFixedString(m, e, precision)
+                }
             }
 
             if suffixPercent and precisionProvided == false {

@@ -356,6 +356,79 @@ func floatSigDigits(m: UInt64, e: Int64, sig: Int64) -> FloatSig {
     FloatSig(digits: digits, decExp: decExp)
 }
 
+// Compare X = numX * 2^e2X * 5^e5X  vs  Y = numY * 2^e2Y * 5^e5Y, where the
+// exponents may be negative (denominators). Returns -1/0/1. Clears negative
+// exponents by scaling both sides equally, then compares as big integers.
+fileprivate func bnScaledCmp(
+    numX: Array[UInt32], e2X: Int64, e5X: Int64,
+    numY: Array[UInt32], e2Y: Int64, e5Y: Int64
+) -> Int64 {
+    var a2x = e2X;
+    var a2y = e2Y;
+    let m2 = if a2x < a2y { a2x } else { a2y };
+    if m2 < 0 { a2x = a2x - m2; a2y = a2y - m2 };
+    var a5x = e5X;
+    var a5y = e5Y;
+    let m5 = if a5x < a5y { a5x } else { a5y };
+    if m5 < 0 { a5x = a5x - m5; a5y = a5y - m5 };
+    let x = bnShlBits(bnMul(numX, bnPow5(a5x)), a2x);
+    let y = bnShlBits(bnMul(numY, bnPow5(a5y)), a2y);
+    bnCmp(x, y)
+}
+
+/// Shortest decimal digit sequence that round-trips back to `m * 2^e` (> 0),
+/// with the base-10 exponent of the leading digit. `lowerGapIsHalf` must be
+/// true exactly when the value sits at the lower edge of its binade with a
+/// half-ulp gap below (normal, fraction == 0, and not the smallest normal) —
+/// the caller computes it from the raw bits.
+///
+/// Strategy: ask `floatSigDigits` for the correctly-rounded `sig`-digit value
+/// for sig = 1, 2, … and return the first whose decimal lands inside the
+/// rounding interval `(L, U)` of `m*2^e` — Dragon4 boundary handling, with the
+/// interval closed iff `m` is even (round-to-nearest-even ties).
+func floatShortestDigits(m: UInt64, e: Int64, lowerGapIsHalf: Bool) -> FloatSig {
+    if m == UInt64.zero {
+        var z = Array[Int64]();
+        z.append(0);
+        return FloatSig(digits: z, decExp: 0)
+    };
+    let mEven = m.bitwiseAnd(UInt64.one) == UInt64.zero;
+    // Upper midpoint  U = (2m+1) * 2^(e-1).
+    let uNum = bnFromU64(m.multiply(UInt64(from: 2)).add(UInt64.one));
+    let uE2 = e - 1;
+    // Lower midpoint  L = (2m-1) * 2^(e-1)  [uniform]  or  (4m-1) * 2^(e-2) [half].
+    var lNum = bnFromU64(m.multiply(UInt64(from: 2)).subtract(UInt64.one));
+    var lE2 = e - 1;
+    if lowerGapIsHalf {
+        lNum = bnFromU64(m.multiply(UInt64(from: 4)).subtract(UInt64.one));
+        lE2 = e - 2
+    };
+
+    var sig: Int64 = 1;
+    var best = floatSigDigits(m, e, 17);   // 17 sig digits always round-trips
+    while sig <= 17 {
+        let sr = floatSigDigits(m, e, sig);
+        // candidate value = Dint * 10^f = Dint * 2^f * 5^f
+        var dv = UInt64.zero;
+        var i: Int64 = 0;
+        while i < sr.digits.count {
+            dv = dv.multiply(UInt64(from: 10)).add(UInt64(from: sr.digits(i)));
+            i = i + 1
+        };
+        let dint = bnFromU64(dv);
+        let f = sr.decExp - (sr.digits.count - 1);
+        let cmpHigh = bnScaledCmp(dint, f, f, uNum, uE2, 0);
+        let cmpLow = bnScaledCmp(dint, f, f, lNum, lE2, 0);
+        let aboveLow = cmpLow > 0 or (cmpLow == 0 and mEven);
+        let belowHigh = cmpHigh < 0 or (cmpHigh == 0 and mEven);
+        if aboveLow and belowHigh {
+            return sr
+        };
+        sig = sig + 1
+    };
+    best
+}
+
 // ---------------------------------------------------------------------------
 // numeric-string assembly (no sign / trim / pad — the caller applies those)
 // ---------------------------------------------------------------------------
@@ -389,6 +462,68 @@ func floatFixedString(m: UInt64, e: Int64, precision: Int64) -> String {
     out
 }
 
+// Append a base-10 exponent ("e18", "e-324") to `out`. `upper` selects 'E'.
+fileprivate func appendExponent(out: String, decExp: Int64, upper: Bool) -> String {
+    var s = out;
+    if upper { s.appendByte(UInt8(from: 69)) } else { s.appendByte(UInt8(from: 101)) };
+    var ex = decExp;
+    if ex < 0 { s.appendByte(UInt8(from: 45)); ex = 0 - ex };
+    if ex == 0 {
+        s.appendByte(UInt8(from: 48))
+    } else {
+        var tmp = String();
+        while ex > 0 { tmp.appendByte(UInt8(from: ex % 10 + 48)); ex = ex / 10 };
+        var k = tmp.byteCount - 1;
+        while k >= 0 { s.appendByte(tmp.bytes(unchecked: k)); k = k - 1 }
+    };
+    s
+}
+
+/// Fixed-point rendering of a digit sequence whose leading digit is at 10^decExp
+/// (used for shortest output, so there is no fixed precision). Examples:
+/// digits=[3,…],decExp=-1 → "0.30000000000000004"; [1],decExp=2 → "100".
+func floatShortestFixedString(sr: FloatSig) -> String {
+    let digits = sr.digits;
+    let len = digits.count;
+    let decExp = sr.decExp;
+    var out = String();
+    if decExp < 0 {
+        out.appendByte(UInt8(from: 48));   // "0"
+        out.appendByte(UInt8(from: 46));   // "."
+        var z: Int64 = 0;
+        while z < (0 - decExp) - 1 { out.appendByte(UInt8(from: 48)); z = z + 1 };
+        var i: Int64 = 0;
+        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 }
+    } else if decExp >= len - 1 {
+        // integer, possibly with trailing zeros
+        var i: Int64 = 0;
+        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 };
+        var z: Int64 = 0;
+        while z < decExp - (len - 1) { out.appendByte(UInt8(from: 48)); z = z + 1 }
+    } else {
+        let intLen = decExp + 1;
+        var i: Int64 = 0;
+        while i < intLen { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 };
+        out.appendByte(UInt8(from: 46));   // "."
+        while i < len { out.appendByte(UInt8(from: digits(i) + 48)); i = i + 1 }
+    };
+    out
+}
+
+/// Scientific rendering of a shortest digit sequence: "d0.d1…e±exp", or "d0e±exp"
+/// when there is a single digit. e.g. "1e20", "1.234568e8".
+func floatShortestSciString(sr: FloatSig, upper: Bool) -> String {
+    let digits = sr.digits;
+    var out = String();
+    out.appendByte(UInt8(from: digits(0) + 48));
+    if digits.count > 1 {
+        out.appendByte(UInt8(from: 46));   // "."
+        var j: Int64 = 1;
+        while j < digits.count { out.appendByte(UInt8(from: digits(j) + 48)); j = j + 1 }
+    };
+    appendExponent(out, sr.decExp, upper)
+}
+
 /// Scientific string of `m × 2^e` (> 0) with `precision` fractional mantissa
 /// digits, e.g. "9.223372e18", "4.940656e-324". `upper` selects 'E'.
 func floatSciString(m: UInt64, e: Int64, precision: Int64, upper: Bool) -> String {
@@ -405,16 +540,5 @@ func floatSciString(m: UInt64, e: Int64, precision: Int64, upper: Bool) -> Strin
             j = j + 1
         }
     };
-    if upper { out.appendByte(UInt8(from: 69)) } else { out.appendByte(UInt8(from: 101)) };
-    var ex = sr.decExp;
-    if ex < 0 { out.appendByte(UInt8(from: 45)); ex = 0 - ex };   // '-'
-    if ex == 0 {
-        out.appendByte(UInt8(from: 48))
-    } else {
-        var tmp = String();
-        while ex > 0 { tmp.appendByte(UInt8(from: ex % 10 + 48)); ex = ex / 10 };
-        var k = tmp.byteCount - 1;
-        while k >= 0 { out.appendByte(tmp.bytes(unchecked: k)); k = k - 1 }
-    };
-    out
+    appendExponent(out, sr.decExp, upper)
 }
