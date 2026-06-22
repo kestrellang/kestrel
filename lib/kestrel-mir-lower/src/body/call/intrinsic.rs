@@ -957,6 +957,26 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "f32_to_bits",
+        op: Op::FloatToBits(FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "f64_to_bits",
+        op: Op::FloatToBits(FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "f32_from_bits",
+        op: Op::BitsToFloat(FloatBits::F32),
+        arity: 1,
+    },
+    IntrinsicEntry {
+        name: "f64_from_bits",
+        op: Op::BitsToFloat(FloatBits::F64),
+        arity: 1,
+    },
+    IntrinsicEntry {
         name: "f32_is_nan",
         op: Op::FloatPred(FloatBits::F32, FloatPredicateKind::IsNan),
         arity: 1,

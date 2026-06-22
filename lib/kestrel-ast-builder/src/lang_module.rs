@@ -446,6 +446,27 @@ fn seed_float_ops(world: &mut World, lang: Entity) {
             &[("a", ty.clone()), ("b", ty.clone())],
             ty.clone(),
         );
+
+        // Bit reinterpretation: float ↔ same-width integer (exact, no value
+        // conversion). f64 ↔ i64, f32 ↔ i32. Used for IEEE-754 decomposition.
+        let int_ty = lang_ty(match ty_name {
+            "f32" => "i32",
+            _ => "i64",
+        });
+        seed_fn(
+            world,
+            lang,
+            &format!("{ty_name}_to_bits"),
+            &[("a", ty.clone())],
+            int_ty.clone(),
+        );
+        seed_fn(
+            world,
+            lang,
+            &format!("{ty_name}_from_bits"),
+            &[("a", int_ty.clone())],
+            ty.clone(),
+        );
     }
 }
 

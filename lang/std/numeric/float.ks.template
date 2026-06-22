@@ -15,7 +15,7 @@ import std.core.(
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
-import std.numeric.(Int64, {{OTHER_FLOAT}})
+import std.numeric.(Int64, {{UINT_TYPE}}, {{OTHER_FLOAT}})
 
 /// A {{BITS}}-bit IEEE 754 {{PRECISION_KIND}} float.
 ///
@@ -346,6 +346,32 @@ public struct {{TYPE_NAME}}:
     public var isZero: Bool { get {
         self == 0.0
     }}
+
+    /// The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+    /// ({{UINT_TYPE}} for {{TYPE_NAME}}). No value conversion — the bits are
+    /// preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+    /// masking. Inverse of `init(bitPattern:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+    /// ```
+    public var bitPattern: {{UINT_TYPE}} { get {
+        {{UINT_TYPE}}(raw: lang.{{LANG_TYPE}}_to_bits(self.raw))
+    }}
+
+    /// Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+    /// inverse of `bitPattern`). No value conversion — the bits are used directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// {{TYPE_NAME}}(bitPattern: 4607182418800017408);   // 1.0  (Float64)
+    /// ```
+    public init(bitPattern bits: {{UINT_TYPE}}) {
+        self.raw = lang.{{LANG_TYPE}}_from_bits(bits.raw)
+    }
 
     // ========================================================================
     // COMPARISON

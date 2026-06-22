@@ -15,7 +15,7 @@ import std.core.(
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
-import std.numeric.(Int64, Float64)
+import std.numeric.(Int64, UInt32, Float64)
 
 /// A 32-bit IEEE 754 single-precision float.
 ///
@@ -346,6 +346,32 @@ public struct Float32:
     public var isZero: Bool { get {
         self == 0.0
     }}
+
+    /// The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+    /// (UInt32 for Float32). No value conversion — the bits are
+    /// preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+    /// masking. Inverse of `init(bitPattern:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+    /// ```
+    public var bitPattern: UInt32 { get {
+        UInt32(raw: lang.f32_to_bits(self.raw))
+    }}
+
+    /// Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+    /// inverse of `bitPattern`). No value conversion — the bits are used directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Float32(bitPattern: 4607182418800017408);   // 1.0  (Float64)
+    /// ```
+    public init(bitPattern bits: UInt32) {
+        self.raw = lang.f32_from_bits(bits.raw)
+    }
 
     // ========================================================================
     // COMPARISON
@@ -1052,6 +1078,10 @@ public struct Float32:
     /// Formats the float directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements `Formattable`.
     ///
+    /// Digit generation uses the exact big-integer engine in `float_digits.ks`:
+    /// the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+    /// even on the stored binary value, so printed decimals are correct.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1107,148 +1137,42 @@ public struct Float32:
                 style = .Fixed
             }
 
+            // Exact IEEE-754 decomposition of the non-negative `value` into
+            // m * 2^e (m an integer significand, e a binary exponent).
+            let bits = UInt64(from: UInt32(raw: lang.f32_to_bits(value.raw)));
+            let rawExp = Int64(from: bits.shiftRight(by: 23).bitwiseAnd(UInt64(from: 255)));
+            let rawMant = bits.bitwiseAnd(UInt64(from: 8388607));
+            var m = UInt64.zero;
+            var e: Int64 = 0;
+            if rawExp == 0 {
+                m = rawMant;
+                e = -149
+            } else {
+                m = rawMant.bitwiseOr(UInt64(from: 8388608));
+                e = rawExp - 150
+            }
+
+            // Base-10 exponent of the leading digit (drives Auto style choice).
+            var decExp: Int64 = 0;
+            if m != UInt64.zero {
+                decExp = floatSigDigits(m, e, 1).decExp
+            }
+
             if style == .Auto {
                 if precisionProvided == false {
                     trimTrailingZeros = true
                 }
-                if value.isZero {
+                if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
                     style = .Fixed
                 } else {
-                    let expVal = value.log10().floor();
-                    let expInt: Int64 = Int64(raw: lang.cast_f32_i64(expVal.raw));
-                    if expInt < -4 or expInt >= precision {
-                        style = .Scientific
-                    } else {
-                        style = .Fixed
-                    }
+                    style = .Scientific
                 }
             }
 
             if style == .Scientific or style == .ScientificUpper {
-                var exponent: Int64 = 0;
-                var mantissa = value;
-                if value.isZero == false {
-                    let expVal = value.log10().floor();
-                    exponent = Int64(raw: lang.cast_f32_i64(expVal.raw));
-                    let pow10 = Float32(floatLiteral: 10.0).powi(exponent);
-                    mantissa = value.divide(pow10);
-                }
-
-                let scale = Float32(floatLiteral: 10.0).powi(precision);
-                mantissa = mantissa.multiply(scale).round().divide(scale);
-                if mantissa >= 10.0 {
-                    mantissa = mantissa.divide(10.0);
-                    exponent = exponent + 1
-                }
-
-                let intPart = mantissa.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
-                } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
-
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = mantissa - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: Float32 = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
-                        digitCount = digitCount + 1
-                    }
-                }
-
-                if style == .ScientificUpper {
-                    number.appendByte(69)  // 'E'
-                } else {
-                    number.appendByte(101)  // 'e'
-                }
-
-                var expVal: Int64 = exponent;
-                if expVal < 0 {
-                    number.appendByte(45);  // '-'
-                    expVal = expVal.negate()
-                }
-                if expVal == 0 {
-                    number.appendByte(48)  // '0'
-                } else {
-                    var digits = String();
-                    while expVal > 0 {
-                        let digit: Int64 = expVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        expVal = expVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
+                number = floatSciString(m, e, precision, style == .ScientificUpper)
             } else {
-                let scale = if precision > 0 {
-                    Float32(floatLiteral: 10.0).powi(precision)
-                } else {
-                    Float32(floatLiteral: 1.0)
-                };
-
-                var rounded = value;
-                if precision >= 0 {
-                    rounded = rounded.multiply(scale).round().divide(scale)
-                }
-
-                let intPart = rounded.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
-                } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
-
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = rounded - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: Float32 = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
-                        digitCount = digitCount + 1
-                    }
-                }
+                number = floatFixedString(m, e, precision)
             }
 
             if suffixPercent and precisionProvided == false {

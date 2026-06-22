@@ -154,4 +154,11 @@ pub enum Op {
     FloatMath(FloatBits, FloatMathKind),
     FloatFma(FloatBits),
     FloatCopysign(FloatBits),
+    /// Reinterpret a float's bits as the same-width integer (no value conversion,
+    /// pure bitcast): `f64 -> i64`, `f32 -> i32`. Unlike `FloatToInt`, the bit
+    /// pattern is preserved exactly — used for exact IEEE-754 decomposition.
+    FloatToBits(FloatBits),
+    /// Inverse of `FloatToBits`: reinterpret a same-width integer's bits as a
+    /// float (`i64 -> f64`, `i32 -> f32`).
+    BitsToFloat(FloatBits),
 }

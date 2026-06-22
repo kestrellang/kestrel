@@ -549,6 +549,15 @@ fn compile_op1(
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
         Op::IntToFloat(_, fb) => builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg),
         Op::FloatToInt(_, ib) => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        // Pure bitcast (no value conversion): float ↔ same-width integer.
+        Op::FloatToBits(fb) => {
+            let int_ty = match fb {
+                kestrel_mir::FloatBits::F32 => ir::types::I32,
+                _ => ir::types::I64,
+            };
+            builder.ins().bitcast(int_ty, MemFlags::new(), arg)
+        },
+        Op::BitsToFloat(fb) => builder.ins().bitcast(float_bits_to_cl(fb), MemFlags::new(), arg),
         Op::FloatWiden(_, to) => builder.ins().fpromote(float_bits_to_cl(to), arg),
         Op::FloatTruncate(_, to) => builder.ins().fdemote(float_bits_to_cl(to), arg),
         Op::RefToImmut => arg,

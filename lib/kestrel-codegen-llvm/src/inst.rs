@@ -616,6 +616,20 @@ fn compile_op1<'ctx>(
                 &[arg.into_float_value().into()],
             )?
         },
+        // Pure bitcast (no value conversion): float ↔ same-width integer.
+        Op::FloatToBits(fb) => {
+            let int_ty: BasicTypeEnum = match fb {
+                kestrel_mir::FloatBits::F32 => int_bits_to_scalar(kestrel_mir::IntBits::I32),
+                _ => int_bits_to_scalar(kestrel_mir::IntBits::I64),
+            }
+            .llvm(cx)
+            .into();
+            builder.build_bit_cast(arg, int_ty, "f2bits").unwrap()
+        },
+        Op::BitsToFloat(fb) => {
+            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx).into();
+            builder.build_bit_cast(arg, float_ty, "bits2f").unwrap()
+        },
         Op::FloatWiden(_, to) => builder
             .build_float_ext(
                 arg.into_float_value(),

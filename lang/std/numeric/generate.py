@@ -1428,11 +1428,38 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
 
 
 def generate_float_format_method(type_name: str, bits: int) -> str:
-    """Generate the format() method for float types."""
+    """Generate the format() method for float types.
+
+    Digit generation is delegated to the exact integer/big-integer engine in
+    `float_digits.ks` (shared by Float32/Float64). The value is decomposed into
+    `m * 2^e` and all decimal digits are produced by big-integer arithmetic, so
+    rounding is round-to-nearest-even of the stored binary value — fixing the
+    float-arithmetic double-rounding of the old pipeline (#161, #216).
+    """
     lang_type = f"f{bits}"
+
+    if bits == 64:
+        p = 52
+        exp_bits = 11
+        bias = 1023
+        bits_expr = "UInt64(raw: lang.f64_to_bits(value.raw))"
+    else:
+        p = 23
+        exp_bits = 8
+        bias = 127
+        bits_expr = "UInt64(from: UInt32(raw: lang.f32_to_bits(value.raw)))"
+    exp_mask = (1 << exp_bits) - 1
+    mant_mask = (1 << p) - 1
+    hidden_bit = 1 << p
+    bias_p = bias + p           # normal:  e = rawExp - (bias + p)
+    e_sub = 1 - bias - p        # subnormal exponent
 
     method = '''    /// Formats the float directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements `Formattable`.
+    ///
+    /// Digit generation uses the exact big-integer engine in `float_digits.ks`:
+    /// the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+    /// even on the stored binary value, so printed decimals are correct.
     ///
     /// # Examples
     ///
@@ -1489,148 +1516,42 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                 style = .Fixed
             }
 
+            // Exact IEEE-754 decomposition of the non-negative `value` into
+            // m * 2^e (m an integer significand, e a binary exponent).
+            let bits = __BITS_EXPR__;
+            let rawExp = Int64(from: bits.shiftRight(by: __PSHIFT__).bitwiseAnd(UInt64(from: __EXP_MASK__)));
+            let rawMant = bits.bitwiseAnd(UInt64(from: __MANT_MASK__));
+            var m = UInt64.zero;
+            var e: Int64 = 0;
+            if rawExp == 0 {
+                m = rawMant;
+                e = __E_SUB__
+            } else {
+                m = rawMant.bitwiseOr(UInt64(from: __HIDDEN_BIT__));
+                e = rawExp - __BIAS_P__
+            }
+
+            // Base-10 exponent of the leading digit (drives Auto style choice).
+            var decExp: Int64 = 0;
+            if m != UInt64.zero {
+                decExp = floatSigDigits(m, e, 1).decExp
+            }
+
             if style == .Auto {
                 if precisionProvided == false {
                     trimTrailingZeros = true
                 }
-                if value.isZero {
+                if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
                     style = .Fixed
                 } else {
-                    let expVal = value.log10().floor();
-                    let expInt: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(expVal.raw));
-                    if expInt < -4 or expInt >= precision {
-                        style = .Scientific
-                    } else {
-                        style = .Fixed
-                    }
+                    style = .Scientific
                 }
             }
 
             if style == .Scientific or style == .ScientificUpper {
-                var exponent: Int64 = 0;
-                var mantissa = value;
-                if value.isZero == false {
-                    let expVal = value.log10().floor();
-                    exponent = Int64(raw: lang.cast___LANG_TYPE___i64(expVal.raw));
-                    let pow10 = __TYPE_NAME__(floatLiteral: 10.0).powi(exponent);
-                    mantissa = value.divide(pow10);
-                }
-
-                let scale = __TYPE_NAME__(floatLiteral: 10.0).powi(precision);
-                mantissa = mantissa.multiply(scale).round().divide(scale);
-                if mantissa >= 10.0 {
-                    mantissa = mantissa.divide(10.0);
-                    exponent = exponent + 1
-                }
-
-                let intPart = mantissa.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
-                } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
-
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = mantissa - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: __TYPE_NAME__ = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - __TYPE_NAME__(raw: lang.cast_i64___LANG_TYPE__(digit.raw));
-                        digitCount = digitCount + 1
-                    }
-                }
-
-                if style == .ScientificUpper {
-                    number.appendByte(69)  // 'E'
-                } else {
-                    number.appendByte(101)  // 'e'
-                }
-
-                var expVal: Int64 = exponent;
-                if expVal < 0 {
-                    number.appendByte(45);  // '-'
-                    expVal = expVal.negate()
-                }
-                if expVal == 0 {
-                    number.appendByte(48)  // '0'
-                } else {
-                    var digits = String();
-                    while expVal > 0 {
-                        let digit: Int64 = expVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        expVal = expVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
+                number = floatSciString(m, e, precision, style == .ScientificUpper)
             } else {
-                let scale = if precision > 0 {
-                    __TYPE_NAME__(floatLiteral: 10.0).powi(precision)
-                } else {
-                    __TYPE_NAME__(floatLiteral: 1.0)
-                };
-
-                var rounded = value;
-                if precision >= 0 {
-                    rounded = rounded.multiply(scale).round().divide(scale)
-                }
-
-                let intPart = rounded.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
-                } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
-
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = rounded - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: __TYPE_NAME__ = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - __TYPE_NAME__(raw: lang.cast_i64___LANG_TYPE__(digit.raw));
-                        digitCount = digitCount + 1
-                    }
-                }
+                number = floatFixedString(m, e, precision)
             }
 
             if suffixPercent and precisionProvided == false {
@@ -1700,7 +1621,17 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         _writePadded(into: writer, result, options)
     }'''
 
-    return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
+    return (
+        method.replace("__BITS_EXPR__", bits_expr)
+        .replace("__PSHIFT__", str(p))
+        .replace("__EXP_MASK__", str(exp_mask))
+        .replace("__MANT_MASK__", str(mant_mask))
+        .replace("__HIDDEN_BIT__", str(hidden_bit))
+        .replace("__BIAS_P__", str(bias_p))
+        .replace("__E_SUB__", str(e_sub))
+        .replace("__TYPE_NAME__", type_name)
+        .replace("__LANG_TYPE__", lang_type)
+    )
 
 
 def generate_float(type_name: str, bits: int, is_default: bool) -> str:
@@ -1709,6 +1640,7 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     lang_type = f"f{bits}"
     other_float = "Float32" if bits == 64 else "Float64"
     other_lang_type = "f32" if bits == 64 else "f64"
+    uint_type = "UInt64" if bits == 64 else "UInt32"
 
     # Float literal init - need to cast from f64 for f32
     if bits == 64:
@@ -1779,6 +1711,7 @@ public type Float = {type_name}"""
     result = result.replace("{{LANG_TYPE}}", lang_type)
     result = result.replace("{{OTHER_FLOAT}}", other_float)
     result = result.replace("{{OTHER_LANG_TYPE}}", other_lang_type)
+    result = result.replace("{{UINT_TYPE}}", uint_type)
     result = result.replace("{{FLOAT_LITERAL_INIT}}", float_literal_init)
     result = result.replace("{{ZERO_LITERAL}}", zero_literal)
     result = result.replace("{{TYPE_ALIAS}}", type_alias)
