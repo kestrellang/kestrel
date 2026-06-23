@@ -305,24 +305,7 @@ impl LowerCtx {
             // Literals
             SyntaxKind::ExprInteger => self.lower_literal(&node, AstLiteral::Integer),
             SyntaxKind::ExprFloat => self.lower_literal(&node, AstLiteral::Float),
-            SyntaxKind::ExprString => {
-                // Parser only promotes top-level strings to ExprInterpolatedString.
-                // Re-check here so nested strings (inside calls etc.) get caught.
-                // The body span depends on whether this is single-line `"..."`
-                // or multi-line `"""..."""`, so route through `classify`.
-                if let Some(text) = first_token_text(&node) {
-                    let form = crate::string_token::classify_string_token(&text);
-                    if form.body_end > form.body_start
-                        && string_contains_interpolation(&text[form.body_start..form.body_end])
-                    {
-                        self.lower_interpolated_string_from_token(&text, &node)
-                    } else {
-                        self.lower_literal(&node, AstLiteral::String)
-                    }
-                } else {
-                    self.lower_literal(&node, AstLiteral::String)
-                }
-            },
+            SyntaxKind::ExprString => self.lower_string_token(&node),
             SyntaxKind::ExprRawString => self.lower_literal(&node, AstLiteral::RawString),
             SyntaxKind::ExprChar => self.lower_literal(&node, AstLiteral::Char),
             SyntaxKind::ExprBool => {
@@ -348,7 +331,7 @@ impl LowerCtx {
                     span,
                 })
             },
-            SyntaxKind::ExprInterpolatedString => self.lower_interpolated_string(&node),
+            SyntaxKind::ExprInterpolatedString => self.lower_string_token(&node),
 
             // Collections
             SyntaxKind::ExprArray => self.lower_array(&node),
@@ -427,56 +410,31 @@ impl LowerCtx {
 
     // ----- Interpolated String -----
 
-    fn lower_interpolated_string(&mut self, node: &SyntaxNode) -> ExprId {
-        let span = self.span(node);
-        let mut parts = Vec::new();
-
-        for child in node.children() {
-            match child.kind() {
-                SyntaxKind::StringLiteralPart => {
-                    let text = child
-                        .children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .map(|t| t.text().to_string())
-                        .collect::<Vec<_>>()
-                        .join("");
-                    parts.push(StringPart::Literal(text));
-                },
-                SyntaxKind::StringInterpolation => {
-                    // Contains an expression child, optional FormatSpecifier
-                    let expr = child
-                        .children()
-                        .find(|c| c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
-                        .map(|c| self.lower_expr(&c))
-                        .unwrap_or_else(|| {
-                            self.alloc_expr(AstExpr::Error {
-                                span: self.span(&child),
-                            })
-                        });
-
-                    let format = find_child(&child, SyntaxKind::FormatSpecifier).map(|fs| {
-                        fs.children_with_tokens()
-                            .filter_map(|e| e.into_token())
-                            .map(|t| t.text().to_string())
-                            .collect::<Vec<_>>()
-                            .join("")
-                    });
-
-                    parts.push(StringPart::Interpolation { expr, format });
-                },
-                _ => {},
-            }
-        }
-
-        // If no structured children, the interpolated string is a raw token —
-        // treat entire text as a literal part
-        if parts.is_empty()
-            && let Some(text) = first_token_text(node)
+    /// Lower a String-token-bearing node — both `ExprString` and
+    /// `ExprInterpolatedString` carry the literal as a single raw `String` token
+    /// (the parser never emits structured `StringLiteralPart`/`StringInterpolation`
+    /// children), so they lower identically: parse the token for `\(...)` holes
+    /// if the body contains interpolation, else emit a plain string literal.
+    ///
+    /// This is the single source of truth for string lowering. The parser only
+    /// promotes *top-level* strings to `ExprInterpolatedString`; nested strings
+    /// (inside calls, and reparsed interpolation holes) arrive as `ExprString`.
+    /// Both must take this path so nested `\(...)` holes are lowered rather than
+    /// dumped verbatim (#197).
+    fn lower_string_token(&mut self, node: &SyntaxNode) -> ExprId {
+        let Some(text) = first_token_text(node) else {
+            return self.lower_literal(node, AstLiteral::String);
+        };
+        // The body span depends on whether this is single-line `"..."` or
+        // multi-line `"""..."""`, so route through `classify`.
+        let form = crate::string_token::classify_string_token(&text);
+        if form.body_end > form.body_start
+            && string_contains_interpolation(&text[form.body_start..form.body_end])
         {
-            parts.push(StringPart::Literal(text));
+            self.lower_interpolated_string_from_token(&text, node)
+        } else {
+            self.lower_literal(node, AstLiteral::String)
         }
-
-        self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
 
     /// Parse a string token (e.g. `"hello \(name)!"` or
