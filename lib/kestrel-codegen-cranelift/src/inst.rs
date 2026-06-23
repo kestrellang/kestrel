@@ -446,13 +446,27 @@ pub fn compile_inst(
             field,
         } => {
             let base_val = fc.get_value(builder, *base);
-            let offset = struct_field_offset(
-                *ty,
-                *field,
-                &fc.ctx.module.ty_arena,
-                fc.ctx.module,
-                &fc.ctx.tc,
-            );
+            // Tuple container: positional element offset (mirrors
+            // `compile_tuple_extract`); structs use the layout's field_offsets.
+            let offset = if let MirTy::Tuple(elems) = fc.ctx.module.ty_arena.get(*ty) {
+                let elems = elems.clone();
+                tuple_elem_offset(
+                    &mut fc.ctx.tc,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &elems,
+                    field.index() as u32,
+                )
+                .0
+            } else {
+                struct_field_offset(
+                    *ty,
+                    *field,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                )
+            };
             let addr = if offset != 0 {
                 builder.ins().iadd_imm(base_val, offset as i64)
             } else {

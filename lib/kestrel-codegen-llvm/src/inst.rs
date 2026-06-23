@@ -432,7 +432,21 @@ pub fn compile_inst<'ctx>(
             field,
         } => {
             let base_val = fc.get_value(*base).into_pointer_value();
-            let offset = struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module);
+            // Tuple container: positional element offset (mirrors the tuple
+            // arm of TupleExtract); structs use the layout's field_offsets.
+            let offset = if let MirTy::Tuple(elems) = fc.ctx.module.ty_arena.get(*ty) {
+                let elems = elems.clone();
+                tuple_elem_offset(
+                    &mut fc.ctx.tc,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &elems,
+                    field.index() as u32,
+                )
+                .0
+            } else {
+                struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module)
+            };
             let addr = mem::field_gep(cx, builder, base_val, offset);
             fc.map_value(*result, addr.into());
         },

@@ -967,6 +967,9 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.emit_store_assign(field_addr, rhs);
                     }
+                } else if self.try_lower_field_assign_through_setter(base, base_ty, field_idx, rhs) {
+                    // `o.proxy.field = v` through a get/set computed property:
+                    // handled by a get→modify→set rewrite (#139).
                 } else {
                     let base_val = self.lower_expr(base);
                     let base_addr = self.emit_begin_mut_borrow(base_val);
@@ -975,16 +978,31 @@ impl OssaBodyCtx<'_, '_> {
                     self.emit_end_mut_borrow(base_addr);
                 }
             },
+            HirExpr::TupleIndex { base, index, .. } => {
+                // Tuple-element store (`t.0 = v`, `t.0.1 = v`, `t.0 += v`):
+                // the structural twin of the stored-field arm. Tuples are
+                // never `self`, so there is no init-self / store_init case.
+                // Without this arm the target fell into `_ => {}` below and
+                // the RHS was computed then silently dropped (#198, #143).
+                let base_ty = self.resolve_expr_type(base);
+                let field_idx = kestrel_mir::FieldIdx::new(index as usize);
+                if let Some(base_addr) = self.try_field_addr_chain(base) {
+                    let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(elem_addr, rhs);
+                } else {
+                    let base_val = self.lower_expr(base);
+                    let base_addr = self.emit_begin_mut_borrow(base_val);
+                    let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(addr, rhs);
+                    self.emit_end_mut_borrow(base_addr);
+                }
+            },
             HirExpr::Def(entity, _, _) => {
-                // Static/global stored field: covers both `static var` members
-                // and module-level globals (which lack the Static component).
-                let is_global = self
-                    .ctx
-                    .world
-                    .get::<kestrel_ast_builder::Static>(entity)
-                    .is_some()
-                    || self.ctx.module.statics.contains_key(&entity);
-                if is_global {
+                // Static/global stored field: `static var` members and
+                // module-level globals (see `is_stored_global_def` — the
+                // timing-independent criterion that also fixes assignment to a
+                // forward-referenced global, #140).
+                if self.is_stored_global_def(entity) {
                     self.ctx.register_name(entity);
                     let addr = self.emit_global_ref(entity);
                     self.emit_store_assign(addr, rhs);

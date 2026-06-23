@@ -2244,6 +2244,27 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result
     }
 
+    /// Is this `Def` entity a stored global — a module-level `var`/`let` or a
+    /// `static var`/`let` member — whose storage is a GlobalRef? Both are
+    /// `NodeKind::Field` with no `Callable` (a computed `get`/`set` member is
+    /// `Callable`; an instance field is `Field`+`!Callable` too but never
+    /// appears as a bare `Def`, only `self.x`). This is the criterion
+    /// `lower_def` already uses to READ a global, and it is timing-independent:
+    /// a forward-referenced global isn't yet in `module.statics` while an
+    /// earlier body lowers, but codegen registers every static before it runs,
+    /// so the GlobalRef resolves. Checking `module.statics` here silently
+    /// missed forward refs (a lost write); the `Static` component alone is too
+    /// broad (static methods carry it).
+    pub fn is_stored_global_def(&self, entity: Entity) -> bool {
+        self.ctx.world.get::<kestrel_ast_builder::NodeKind>(entity)
+            == Some(&kestrel_ast_builder::NodeKind::Field)
+            && self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Callable>(entity)
+                .is_none()
+    }
+
     pub fn emit_global_ref(&mut self, entity: Entity) -> ValueId {
         let i64_ty = self.ctx.module.ty_arena.i64();
         let result = self.alloc_value(i64_ty, Ownership::Owned);
@@ -2274,6 +2295,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // The expand pass uses the pointer's pointee type to decide which
         // drop shim to call for StoreAssign; using the struct type would
         // destroy the whole struct starting at the field's address.
+        // Tuple container: the element type is the pointee directly (no
+        // entity/field substitution). Mirrors the struct branch's result —
+        // codegen's `struct_field_offset` likewise special-cases tuples.
+        if let MirTy::Tuple(elems) = self.ctx.module.ty_arena.get(ty) {
+            let field_ty = elems[field.index()];
+            return self.finish_field_addr(base, ty, field, field_ty);
+        }
         let field_ty = if let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(ty)
         {
             let entity = *entity;
@@ -2296,6 +2324,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         } else {
             ty
         };
+        self.finish_field_addr(base, ty, field, field_ty)
+    }
+
+    /// Tail of `emit_field_addr`: allocate the `Pointer[field_ty]` result,
+    /// inherit the base's provenance root + storage anchor, and push the
+    /// FieldAddr inst. Shared by struct and tuple containers.
+    fn finish_field_addr(
+        &mut self,
+        base: ValueId,
+        ty: TyId,
+        field: FieldIdx,
+        field_ty: TyId,
+    ) -> ValueId {
         let ptr_ty = self.ctx.module.ty_arena.pointer(field_ty);
         let result = self.alloc_value(ptr_ty, Ownership::Owned);
         // A field address lives exactly where its base lives: inherit the
@@ -3187,29 +3228,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// `mutating ref` accessor (get/set members keep today's behavior until
     /// the writeback fallback lands).
     fn try_lower_accessor_place_mut(&mut self, expr_id: HirExprId) -> Option<CallArg> {
-        let expr = self.hir.exprs[expr_id].clone();
-        let (receiver_expr, index_args): (HirExprId, Vec<kestrel_hir::body::HirCallArg>) =
-            match &expr {
-                HirExpr::Call { callee, args, .. } => (*callee, args.clone()),
-                HirExpr::Field { base, .. } => (*base, Vec::new()),
-                _ => return None,
-            };
-        let member = self
-            .typed
-            .as_ref()
-            .and_then(|t| t.resolutions.get(&expr_id))
-            .copied()?;
-        if !matches!(
-            self.ctx.world.get::<kestrel_ast_builder::NodeKind>(member),
-            Some(kestrel_ast_builder::NodeKind::Subscript | kestrel_ast_builder::NodeKind::Field)
-        ) {
-            return None;
-        }
-        let is_static = self
-            .ctx
-            .world
-            .get::<kestrel_ast_builder::Static>(member)
-            .is_some();
+        let (receiver_expr, index_args, member, is_static) =
+            self.accessor_member_prelude(expr_id)?;
         let pointee_ty = self.resolve_expr_type(expr_id);
 
         if let Some(accessor) = self.ctx.find_ref_accessor_child(member, true) {
@@ -3240,11 +3260,43 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // get→op→set WRITEBACK fallback: computed accessors can't fabricate
         // addresses, so the element is copied out through `get` into a temp
         // slot, the mutating operation runs on the slot, and the owning call
-        // emitter writes the slot back through `set`. Statics keep today's
-        // rejection (not carved by the analyzer either).
-        if is_static {
+        // emitter (or the statement-boundary drain) writes the slot back
+        // through `set`. The slot-borrow IS the by-reference receiver arg.
+        let slot_addr =
+            self.fabricate_setter_writeback_slot(expr_id, receiver_expr, &index_args, member)?;
+        let slot_borrow = self.emit_begin_mut_borrow_addr(slot_addr, pointee_ty);
+        Some(CallArg {
+            value: slot_borrow,
+            convention: ParamConvention::MutBorrow,
+        })
+    }
+
+    /// Copy an accessor-backed member's value out through its read provider
+    /// into a fresh stack slot and register the set-back (`pending_writebacks`,
+    /// drained by the owning call or the statement boundary). Returns the
+    /// slot's ADDRESS so the caller can mutate it in place (a mut-borrow for a
+    /// call receiver, or a direct field store for `o.member.field = v`). The
+    /// member must have a setter, be non-static, and be Copyable (a
+    /// non-Copyable element can't ride the copy-out — E503). `expr_id` is the
+    /// accessor member expression; `receiver_expr`/`index_args`/`member` are
+    /// its already-resolved prelude (see `accessor_member_prelude`).
+    fn fabricate_setter_writeback_slot(
+        &mut self,
+        expr_id: HirExprId,
+        receiver_expr: HirExprId,
+        index_args: &[kestrel_hir::body::HirCallArg],
+        member: kestrel_hecs::Entity,
+    ) -> Option<ValueId> {
+        // Statics keep today's rejection (not carved by the analyzer either).
+        if self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Static>(member)
+            .is_some()
+        {
             return None;
         }
+        let pointee_ty = self.resolve_expr_type(expr_id);
         let setter = self.ctx.find_setter_child(member)?;
         // NotCopyable elements can't ride a copy-out — backstop the analyzer
         // (mirrors emit_move_out_of_borrow_backstop's accumulate pattern).
@@ -3324,7 +3376,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // Slot: the mutating operation runs on the slot's address.
         let slot_addr = self.emit_uninit(pointee_ty);
         self.emit_store_init(slot_addr, got);
-        let slot_borrow = self.emit_begin_mut_borrow_addr(slot_addr, pointee_ty);
         self.pending_writebacks.push(PendingWriteback {
             setter,
             receiver_ty,
@@ -3334,10 +3385,73 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             slot_addr,
             elem_ty: pointee_ty,
         });
-        Some(CallArg {
-            value: slot_borrow,
-            convention: ParamConvention::MutBorrow,
-        })
+        Some(slot_addr)
+    }
+
+    /// `o.member.field = v` where `member` is a value-returning computed
+    /// property (get/set, no `mutating ref`): get the member into a slot,
+    /// store `v` into the slot's `field`, and let the writeback drain call the
+    /// setter — a get→modify→set rewrite. Returns `true` when handled. Without
+    /// this the stored-field assign fell back to mutating a getter temp that
+    /// was then dropped, silently losing the write (#139).
+    pub(crate) fn try_lower_field_assign_through_setter(
+        &mut self,
+        base: HirExprId,
+        base_ty: TyId,
+        field_idx: FieldIdx,
+        rhs: ValueId,
+    ) -> bool {
+        let Some((receiver_expr, index_args, member, _)) = self.accessor_member_prelude(base)
+        else {
+            return false;
+        };
+        let Some(slot_addr) =
+            self.fabricate_setter_writeback_slot(base, receiver_expr, &index_args, member)
+        else {
+            return false;
+        };
+        // Store the new field value directly into the slot (no intermediate
+        // borrow → no conflict with the drain's `take` of the same slot). The
+        // slot field already holds the gotten value, so store_assign drops it.
+        let field_addr = self.emit_field_addr(slot_addr, base_ty, field_idx);
+        self.emit_store_assign(field_addr, rhs);
+        // The pending writeback drains at the owning statement boundary,
+        // calling `member`'s setter with the mutated slot.
+        true
+    }
+
+    /// Resolve an accessor-backed member expression (`x(i)`, `x.first`,
+    /// `o.proxy`) to its prelude: `(receiver_expr, index_args, member,
+    /// is_static)`. `None` when the expression isn't a Subscript/Field member
+    /// call (so not an accessor place).
+    fn accessor_member_prelude(
+        &mut self,
+        expr_id: HirExprId,
+    ) -> Option<(HirExprId, Vec<kestrel_hir::body::HirCallArg>, kestrel_hecs::Entity, bool)> {
+        let expr = self.hir.exprs[expr_id].clone();
+        let (receiver_expr, index_args): (HirExprId, Vec<kestrel_hir::body::HirCallArg>) = match &expr
+        {
+            HirExpr::Call { callee, args, .. } => (*callee, args.clone()),
+            HirExpr::Field { base, .. } => (*base, Vec::new()),
+            _ => return None,
+        };
+        let member = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.resolutions.get(&expr_id))
+            .copied()?;
+        if !matches!(
+            self.ctx.world.get::<kestrel_ast_builder::NodeKind>(member),
+            Some(kestrel_ast_builder::NodeKind::Subscript | kestrel_ast_builder::NodeKind::Field)
+        ) {
+            return None;
+        }
+        let is_static = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::Static>(member)
+            .is_some();
+        Some((receiver_expr, index_args, member, is_static))
     }
 
     /// Drain writebacks pushed at or above `watermark`: take the mutated
