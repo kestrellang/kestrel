@@ -315,10 +315,13 @@ impl OssaBodyCtx<'_, '_> {
                 // Classify before lowering `value` (which consumes it): in a
                 // failable init, a failure `return` (`return null`/`throw`/`try`)
                 // must drop already-initialized `self` fields, whereas an early
-                // success `return` (`.Some`/`.Ok`) must not. No-op elsewhere
-                // because `init_field_flags` is empty.
-                let is_failure_return =
-                    !self.init_field_flags.is_empty() && self.is_init_failure_return(value);
+                // success `return` (`.Some`/`.Ok`) must not. `init_field_flags`
+                // is now populated for plain inits too (for reassignment drops),
+                // so this MUST gate on `is_failable_init`: a plain init's
+                // `return ()` is not a failure and must not partial-drop.
+                let is_failure_return = self.is_failable_init()
+                    && !self.init_field_flags.is_empty()
+                    && self.is_init_failure_return(value);
                 let ret_val = if let Some(v) = value {
                     if self.ret_borrow {
                         // ret_borrow returns a place — borrow path keeps the
@@ -953,17 +956,9 @@ impl OssaBodyCtx<'_, '_> {
 
                 if let Some(base_addr) = self.try_field_addr_chain(base) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-                    // In init bodies, self fields are uninitialized — use store_init.
                     let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
-                        self.emit_store_init(field_addr, rhs);
-                        // Failable init: mark this field live so a later failure
-                        // `return` flag-guard-drops it. (Reassigning a field within
-                        // one init still `store_init`s over the old value — a
-                        // pre-existing leak independent of this flag; not handled.)
-                        if let Some(flag) = self.init_field_flag(field_idx) {
-                            self.store_drop_flag(flag, true);
-                        }
+                        self.store_init_self_field(field_idx, field_addr, rhs);
                     } else {
                         self.emit_store_assign(field_addr, rhs);
                     }

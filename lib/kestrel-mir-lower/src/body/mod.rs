@@ -10,7 +10,6 @@ pub mod stmt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use kestrel_ast_builder::InitEffect;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirBlock, HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId as HirLocalId;
@@ -176,6 +175,12 @@ pub(crate) struct ScopeSnapshot {
     pub scopes: Vec<Vec<ScopeEntry>>,
     pub local_map: HashMap<HirLocalId, LocalBinding>,
     pub tracker: LiveTracker,
+    /// Init-body `self`-field definite-init states (see `field_inits`). Saved/
+    /// restored with the scope so each branch arm re-derives from the pre-branch
+    /// state; the merge then joins the arms via `fold_field_inits`. Without this
+    /// a then-arm's `DefInit` would leak into the else-arm and turn its first
+    /// `store_init` into a `store_assign` over uninitialized memory (#154).
+    pub field_inits: Vec<(FieldIdx, VarInit)>,
 }
 
 /// Tracks a fixed set of @owned values across control flow merges.
@@ -283,6 +288,9 @@ pub(crate) struct ArmExit {
     /// Static init-state of each in-scope `var` (by HIR local) at this arm's exit,
     /// for drop-flag reconciliation at the merge.
     pub var_inits: Vec<(HirLocalId, VarInit)>,
+    /// Static init-state of each tracked `self` field (init bodies only) at this
+    /// arm's exit, joined by `fold_field_inits` at the merge (#154).
+    pub field_inits: Vec<(FieldIdx, VarInit)>,
 }
 
 pub(crate) struct OssaBodyCtx<'a, 'w> {
@@ -313,13 +321,22 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// receiver. Whole-local captures use `local_map` instead. Saved/restored
     /// across nested closure bodies like `local_map`.
     pub(crate) place_capture_map: HashMap<PlaceKey, ValueId>,
-    /// Failable-init partial-drop tracking: one entry per droppable stored field
-    /// of `self`, as `(field index, substituted field type, drop-flag pointer)`.
-    /// Populated only in a failable/throwing init body (see
-    /// `setup_init_field_flags`); the flag is set `true` when `self.f = v` runs
-    /// and consulted to flag-guard-drop the field at a failure `return`. Empty
-    /// in all other bodies.
+    /// Per-droppable-`self`-field drop-flag tracking in an init body: one entry
+    /// per droppable stored field, as `(field index, substituted field type,
+    /// drop-flag pointer)`. Populated for EVERY init with droppable fields (see
+    /// `setup_init_field_flags`). The flag is set `true` when `self.f = v` runs;
+    /// it is consulted both to flag-guard-drop the field at a failable-init
+    /// failure `return` AND to drop the old value on a `MaybeUninit`
+    /// reassignment. Empty in non-init bodies.
     pub(crate) init_field_flags: Vec<(FieldIdx, TyId, ValueId)>,
+    /// Compile-time definite-initialization state of each droppable `self` field
+    /// in an init body (the `VarInit` lattice, mirroring `var` slots): `DefUninit`
+    /// until first assigned, `DefInit` after a definite assignment, `MaybeUninit`
+    /// where reaching edges disagree (joined by `fold_field_inits` at merges).
+    /// Drives the `self.f = v` store: `DefUninit` → `store_init`; `DefInit` →
+    /// `store_assign` (drops the old value, #154); `MaybeUninit` → flag-guarded
+    /// drop + `store_init`. Empty outside init bodies / for non-droppable fields.
+    pub(crate) field_inits: Vec<(FieldIdx, VarInit)>,
     /// Maps an original ValueId to its current SSA representative after a
     /// block-boundary rebind. A call-argument value materialized *before* a
     /// control-flow sibling arg (`if`/`try`/`match`) is threaded through the
@@ -425,6 +442,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             current_span: None,
             local_use_counts: HashMap::new(),
             init_field_flags: Vec::new(),
+            field_inits: Vec::new(),
             value_forwarding: HashMap::new(),
             ret_borrow: false,
             ref_results: std::collections::HashSet::new(),
@@ -1076,16 +1094,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // on a `return null` / `throw` exit). See `init_field_flags`.
     // ----------------------------------------------------------------
 
-    /// In a failable/throwing init body, allocate a `false`-initialized drop
-    /// flag in the entry block for each droppable stored field of `self`, and
-    /// record `(field_idx, substituted field type, flag)` in `init_field_flags`.
-    /// No-op for plain inits and every non-init body, so `init_field_flags` stays
-    /// empty and the `return`/assign hooks below do nothing.
+    /// In an init body, allocate a `false`-initialized drop flag in the entry
+    /// block for each droppable stored field of `self`, record
+    /// `(field_idx, substituted field type, flag)` in `init_field_flags`, and
+    /// seed its `field_inits` state to `DefUninit`. The flag serves two roles:
+    /// flag-guarded partial-drop at a failable-init failure `return`, and
+    /// dropping the old value on a `MaybeUninit` reassignment (#154). No-op for
+    /// every non-init body (no `init_self_addr`), so both vecs stay empty.
     fn setup_init_field_flags(&mut self) {
-        // Only failable/throwing inits can fail partway and abandon `self`.
-        if self.ctx.world.get::<InitEffect>(self.func_entity).is_none() {
-            return;
-        }
         let Some(self_addr) = self.body_context.init_self_addr() else {
             return;
         };
@@ -1133,7 +1149,76 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             if droppable {
                 let flag = self.alloc_drop_flag(false);
                 self.init_field_flags.push((field_idx, field_ty, flag));
+                self.field_inits.push((field_idx, VarInit::DefUninit));
             }
+        }
+    }
+
+    /// Compile-time init state of a droppable `self` field in an init body, or
+    /// `None` for a non-droppable / untracked field (→ plain `store_init`).
+    pub fn field_init(&self, field: FieldIdx) -> Option<VarInit> {
+        self.field_inits
+            .iter()
+            .find(|(idx, _)| *idx == field)
+            .map(|(_, state)| *state)
+    }
+
+    /// Set the compile-time init state of a tracked `self` field (no-op if the
+    /// field isn't tracked).
+    pub fn set_field_init(&mut self, field: FieldIdx, new_state: VarInit) {
+        if let Some((_, state)) = self.field_inits.iter_mut().find(|(idx, _)| *idx == field) {
+            *state = new_state;
+        }
+    }
+
+    /// Snapshot the current `field_inits` (for save/restore around loops).
+    pub fn snapshot_field_inits(&self) -> Vec<(FieldIdx, VarInit)> {
+        self.field_inits.clone()
+    }
+
+    /// Store `rhs` into a `self` field inside an init body, dropping the old
+    /// value when the field is already initialized (definite-initialization
+    /// driven, mirroring `var`-slot assignment — #154):
+    /// - untracked / non-droppable → plain `store_init`;
+    /// - `DefUninit` → `store_init` (first assignment, nothing to drop);
+    /// - `DefInit` → `store_assign` (straight-line reassignment drops the old
+    ///   value via expand — no runtime flag needed);
+    /// - `MaybeUninit` → flag-guarded drop + `store_init` (reaching edges
+    ///   disagree, or inside a loop where the store re-executes).
+    /// Afterwards the field is `DefInit` and its drop flag is set.
+    fn store_init_self_field(&mut self, field_idx: FieldIdx, field_addr: ValueId, rhs: ValueId) {
+        let Some(state) = self.field_init(field_idx) else {
+            // Non-droppable / untracked field: no prior value to drop.
+            self.emit_store_init(field_addr, rhs);
+            return;
+        };
+        // Inside a loop, a `DefUninit` field's store re-executes on later
+        // iterations where the field IS initialized — promote to the
+        // flag-guarded path so the prior iteration's value is dropped, sound
+        // regardless of trip count. `DefInit`/`MaybeUninit` already drop.
+        let effective = if state == VarInit::DefUninit && !self.loop_stack.is_empty() {
+            VarInit::MaybeUninit
+        } else {
+            state
+        };
+        match effective {
+            VarInit::DefUninit => self.emit_store_init(field_addr, rhs),
+            VarInit::DefInit => self.emit_store_assign(field_addr, rhs),
+            VarInit::MaybeUninit => {
+                let (field_ty, flag) = self
+                    .init_field_flags
+                    .iter()
+                    .find(|(idx, _, _)| *idx == field_idx)
+                    .map(|(_, ty, f)| (*ty, *f))
+                    .expect("tracked field has a drop flag");
+                // Guard threads `rhs` + `field_addr` through the diamond.
+                let remapped = self.emit_guarded_destroy(flag, field_addr, field_ty, &[rhs, field_addr]);
+                self.emit_store_init(remapped[1], remapped[0]);
+            },
+        }
+        self.set_field_init(field_idx, VarInit::DefInit);
+        if let Some(flag) = self.init_field_flag(field_idx) {
+            self.store_drop_flag(flag, true);
         }
     }
 
@@ -1144,6 +1229,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .iter()
             .find(|(idx, _, _)| *idx == field)
             .map(|(_, _, flag)| *flag)
+    }
+
+    /// Is the current body a failable/throwing init (one that can fail partway
+    /// and abandon a partially-initialized `self`)? Only such inits run the
+    /// failure-return partial-drop. Distinguishes them from plain inits now that
+    /// `init_field_flags` is populated for ALL inits (reassignment tracking) —
+    /// without this gate a plain init's `return ()` would be misclassified as a
+    /// failure and wrongly drop its initialized fields (double-free).
+    pub fn is_failable_init(&self) -> bool {
+        self.ctx
+            .world
+            .get::<kestrel_ast_builder::InitEffect>(self.func_entity)
+            .is_some()
     }
 
     /// Classify a failable-init `return` value as a FAILURE exit (must drop the
@@ -1434,6 +1532,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             scopes: self.scope_stack.iter().map(|s| s.entries.clone()).collect(),
             local_map: self.local_map.clone(),
             tracker: self.tracker.clone(),
+            field_inits: self.field_inits.clone(),
         }
     }
 
@@ -1457,6 +1556,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         self.local_map = snapshot.local_map.clone();
         self.tracker = snapshot.tracker.clone();
+        self.field_inits = snapshot.field_inits.clone();
     }
 
     /// Replace scope-tracked values when entering a new block.
@@ -1612,6 +1712,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             result,
             slots: self.tracker.slot_states(),
             var_inits: self.scope_var_inits(),
+            field_inits: self.field_inits.clone(),
         })
     }
 

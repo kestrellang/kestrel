@@ -7,7 +7,7 @@
 
 use kestrel_hir::body::{HirBlock, HirExprId};
 use kestrel_mir::value::Ownership;
-use kestrel_mir::{BlockId, Immediate, TyId, ValueId};
+use kestrel_mir::{BlockId, FieldIdx, Immediate, TyId, ValueId};
 
 use super::{ArmExit, LoopInfo, OssaBodyCtx};
 
@@ -193,6 +193,30 @@ impl OssaBodyCtx<'_, '_> {
                 self.set_var_init(local, j);
             }
         }
+        self.fold_field_inits(reaching);
+    }
+
+    /// Join per-arm `self`-field init-states over the reaching edges (the same
+    /// `VarInit::join` lattice as vars) and write the result onto `field_inits`.
+    /// A field assigned on some-but-not-all edges becomes `MaybeUninit`, so a
+    /// later reassignment flag-guards its drop (#154). Only meaningful in an
+    /// init body; `field_inits` is empty elsewhere.
+    pub(crate) fn fold_field_inits(&mut self, reaching: &[&ArmExit]) {
+        let fields: Vec<FieldIdx> = self.field_inits.iter().map(|(f, _)| *f).collect();
+        for field in fields {
+            let mut joined: Option<super::VarInit> = None;
+            for exit in reaching {
+                if let Some((_, fi)) = exit.field_inits.iter().find(|(f, _)| *f == field) {
+                    joined = Some(match joined {
+                        None => *fi,
+                        Some(j) => j.join(*fi),
+                    });
+                }
+            }
+            if let Some(j) = joined {
+                self.set_field_init(field, j);
+            }
+        }
     }
 
     // ================================================================
@@ -248,8 +272,19 @@ impl OssaBodyCtx<'_, '_> {
             tracker_len: self.tracker.len(),
         });
 
+        // Init-body `self`-field state across the loop: a field can only become
+        // MORE initialized in the body (no field move-out), so the post-loop
+        // state is `pre.join(body_end)` — a field first-assigned inside the loop
+        // is `MaybeUninit` after (the loop may run zero times). In-body stores of
+        // a `DefUninit` field already take the flag-guarded path (see
+        // `store_init_self_field`'s loop check), sound for any trip count.
+        let pre_field_inits = self.snapshot_field_inits();
+
         self.push_scope();
         let _ = self.lower_hir_block(body);
+        // Capture body-end field states BEFORE the exit `restore_scope` resets
+        // `field_inits` to the pre-loop snapshot.
+        let post_field_inits = self.snapshot_field_inits();
 
         if !self.is_terminated() {
             let back_edge_vals = self.tracker.values();
@@ -271,6 +306,15 @@ impl OssaBodyCtx<'_, '_> {
         self.rebind_scope_values(&initial_args, &exit_params);
         self.tracker = saved_tracker;
         self.tracker.rebind(&initial_args, &exit_params);
+        // Reconcile init-body field states: join the pre-loop state with the
+        // body-end state (see `pre_field_inits`). `restore_scope` above reset
+        // `field_inits` to the pre-loop snapshot, so join against the captured
+        // `post_field_inits` rather than the current (restored) state.
+        for (field, pre) in pre_field_inits {
+            if let Some((_, post)) = post_field_inits.iter().find(|(f, _)| *f == field) {
+                self.set_field_init(field, pre.join(*post));
+            }
+        }
         self.emit_literal(Immediate::unit())
     }
 
