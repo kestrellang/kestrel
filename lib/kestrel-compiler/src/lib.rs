@@ -269,6 +269,37 @@ impl Compiler {
         (mir, errors)
     }
 
+    /// A failed build must not emit an object or binary. MIR lowering can
+    /// accumulate hard errors directly to the diagnostic context — e.g. the
+    /// move-out-of-borrow `E503` backstop in `kestrel-mir-lower` — while still
+    /// returning a structurally-complete `MirModule` (`lower_to_mir` returns
+    /// `Ok`). Those must gate codegen exactly like a front-end error; otherwise
+    /// the binary is written and `rc=1` only lands *after* it is on disk (#152).
+    /// On the CLI driver's main build path the pre-codegen gate (`src/main.rs`)
+    /// already returned before reaching here if a front-end error existed, so
+    /// the only error-severity diagnostics present came from lowering. Other
+    /// callers (test harness, library embedders) have no such gate, so a
+    /// pre-existing error would also be counted here — which is conservative:
+    /// it only ever *tightens* (refuses to emit a binary), never relaxes. Lives
+    /// on the codegen path only — `dump mir` / the test harness still inspect a
+    /// module that lowered with errors.
+    #[allow(clippy::result_large_err)]
+    fn ensure_no_lowering_errors(
+        &self,
+    ) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
+        let errors = self
+            .diagnostics()
+            .iter()
+            .filter(|d| d.severity >= Severity::Error)
+            .count();
+        if errors > 0 {
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(format!(
+                "compilation failed with {errors} error(s)"
+            )));
+        }
+        Ok(())
+    }
+
     /// Lower to MIR, monomorphize, expand, compile, and link to an executable.
     #[allow(clippy::result_large_err)]
     pub fn compile_and_link(
@@ -277,6 +308,7 @@ impl Compiler {
         options: &kestrel_codegen_cranelift::CodegenOptions,
     ) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
         let mir = self.lower_to_mir()?;
+        self.ensure_no_lowering_errors()?;
         let mono = self.monomorphize_mir(mir)?;
         let target = kestrel_codegen::TargetConfig::host();
         kestrel_codegen_cranelift::compile_and_link(&mono, &target, options, output_path)
@@ -295,6 +327,7 @@ impl Compiler {
             kestrel_codegen_llvm::CodegenError::Unsupported(e.to_string())
         };
         let mir = self.lower_to_mir().map_err(to_llvm)?;
+        self.ensure_no_lowering_errors().map_err(to_llvm)?;
         let mono = self.monomorphize_mir(mir).map_err(to_llvm)?;
         let target = kestrel_codegen::TargetConfig::host();
         kestrel_codegen_llvm::compile_and_link(&mono, &target, options, output_path)

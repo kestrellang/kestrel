@@ -78,7 +78,84 @@ impl OssaBodyCtx<'_, '_> {
                 return self.apply_promotion(expr_id, v);
             }
         }
+        // Move a non-Copyable field out of an OWNED struct receiver (the
+        // `consuming self` case): `consuming func f() -> Res { self.inner }`.
+        // Must MOVE `inner` out, not borrow-then-copy it while the whole self
+        // is still dropped (the E503 backstop + double-drop of #145/#152).
+        if let Some(field_val) = self.try_move_field_out_of_owned(expr_id) {
+            return self.apply_promotion(expr_id, field_val);
+        }
         self.lower_expr(expr_id)
+    }
+
+    /// Move-out of a non-Copyable field from an OWNED struct local in a
+    /// consuming/return position. Per `copy-semantics.md`, extracting a field
+    /// from a *consuming* receiver is legal (`consuming func f() -> Res
+    /// { self.inner }` is the documented idiom). The generic member-access path
+    /// would `begin_borrow self → struct_extract (@guaranteed) → copy out`,
+    /// hitting the move-out-of-borrow backstop (false E503) AND leaving the
+    /// whole `self` to be dropped — double-freeing the moved field (#145/#152).
+    ///
+    /// Fix mirrors the enum move-out path (`emit_moveout` →
+    /// `emit_destructure_enum`): destructure the owned struct, which CONSUMES it
+    /// (so no whole-self destroy), hand back the wanted field as @owned, and
+    /// leave the sibling fields tracked-owned so scope exit drops exactly those.
+    ///
+    /// Returns `None` — falling through to the borrow/copy path — unless the
+    /// base is a directly-owned struct local AND the field is non-Copyable: a
+    /// Copyable field copies out without consuming self (and self must still
+    /// drop), and a borrowed self (normal method) is not ours to consume.
+    fn try_move_field_out_of_owned(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        let HirExpr::Field { base, name, .. } = &self.hir.exprs[expr_id] else {
+            return None;
+        };
+        let base = *base;
+        let field_name = name.as_str_or_empty().to_string();
+        // Base must be a directly-owned local: `consuming self` / an
+        // owned-by-value local binds as `Ssa(@owned)`. A borrowed self (normal
+        // method, bound @guaranteed) or a `var` slot is not ours to consume.
+        let HirExpr::Local(base_local, _) = &self.hir.exprs[base] else {
+            return None;
+        };
+        let base_val = match self.local_map.get(base_local) {
+            Some(super::LocalBinding::Ssa(v)) => *v,
+            _ => return None,
+        };
+        if self.body.value(base_val).ownership != kestrel_mir::value::Ownership::Owned {
+            return None;
+        }
+        let base_ty = self.body.value(base_val).ty;
+        let entity = match self.ctx.module.ty_arena.get(base_ty) {
+            MirTy::Named { entity, .. } => *entity,
+            _ => return None,
+        };
+        // Structs only — enum field-moves go through `match self`, tuples are a
+        // separate projection arm.
+        if !self.ctx.module.structs.contains_key(&entity) {
+            return None;
+        }
+        // Only MOVE a non-Copyable field: a Copyable field copies out fine and
+        // must NOT consume self (self stays usable and must still drop). A
+        // mono-dependent field (a bare type param / conditionally-Copyable
+        // container) is ALSO moved: pre-mono its copy behavior is unknown, and
+        // the borrow+`copy_value` fallback bitwise-aliases storage that is
+        // unsound once the param resolves non-Copyable — the same #141 hazard
+        // the var-read path guards (mod.rs `is_non_copyable || mono_dependent`).
+        // Destructuring is equivalent to copy-out when it resolves Copyable.
+        let result_ty = self.resolve_expr_type(expr_id);
+        if !self.is_non_copyable(result_ty) && !self.copy_behavior_is_mono_dependent(result_ty) {
+            return None;
+        }
+        let field_idx = self.ctx.resolve_field_idx(entity, &field_name)?;
+        let field_tys = self.struct_field_tys(base_ty);
+        if field_idx.index() >= field_tys.len() {
+            return None;
+        }
+        // Destructure consumes `base_val` (no whole-self destroy) and tracks
+        // every field as @owned; the return path keeps the wanted field (its
+        // `keep` set) and drops the siblings at scope exit.
+        let results = self.emit_destructure_struct(base_val, &field_tys);
+        Some(results[field_idx.index()])
     }
 
     /// Apply a recorded `FromValue.from(value)` promotion if type-infer
