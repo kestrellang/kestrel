@@ -357,6 +357,12 @@ impl Compiler {
         // CopyValue/DestroyValue into real clone()/drop calls. The lowering copies
         // every @owned value (emit_value_use) by design and defers cleanup to here.
         kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+        // Cross-block twin: collapse a copy whose operand is threaded by a jump
+        // into a single-predecessor block that only drops it (the block-local
+        // pass bails because the operand is used in the terminator). Fixes the
+        // mono-dependent `consuming` value cloned-then-double-dropped class
+        // (#127: array literals via `RcBox.init`).
+        kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
         // Recover zero-copy aggregate moves: flip provably-safe Takes to aliasing
         // before expand/codegen turn them into memcpys (#219).
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
@@ -425,6 +431,7 @@ impl Compiler {
         }
 
         kestrel_mir::passes::copy_propagation::eliminate_redundant_copies(&mut mono);
+        kestrel_mir::passes::copy_propagation::eliminate_cross_block_copies(&mut mono);
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
         if stop == kestrel_mir::passes::Stage::CopyProp {
             return Ok((mono, Vec::new()));

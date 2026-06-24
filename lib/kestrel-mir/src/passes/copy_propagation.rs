@@ -165,6 +165,218 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
 }
 
 // ============================================================================
+// eliminate_cross_block_copies
+// ============================================================================
+
+/// Cross-block extension of [`eliminate_redundant_copies`]: collapse a
+/// `CopyValue X → Y` whose operand `X` is then THREADED (via a `Jump`) into a
+/// SINGLE-PREDECESSOR successor block where the matching block param is ONLY
+/// destroyed. The block-local pass bails on such a copy because `X` is used in
+/// the terminator (the jump arg); but when the value merely rides one edge to a
+/// block that drops it, the copy + thread + drop IS the redundant copy+destroy
+/// pair, just split across the edge.
+///
+/// This matters for a `consuming` param of a MONO-DEPENDENT type (a bare type
+/// param): the lowering copies it (deferring cleanup to copy-prop), and at mono
+/// a Cloneable instantiation expands the SURVIVING `CopyValue` into a real
+/// CLONE while the threaded original is still dropped — double-freeing the
+/// cloned-in resource for a non-Copyable element. #127: `[Res(..)]` →
+/// `Array.init` → `CowBox`/`RcBox.init(consuming value)` cloned the consuming
+/// `ArrayStorage` value into the heap and dropped the original (deferred to the
+/// post-`if let` block), so each element deinited twice.
+///
+/// Safe because the successor `S` has exactly one predecessor (this block), so
+/// removing its param breaks no other edge; `X`'s only use in this block is the
+/// copy (a borrow would count as a use); `P`'s only use in `S` is the single
+/// `DestroyValue`. Converting `CopyValue → MoveValue` consumes `X`; the jump
+/// arg, the now-unused param, and the destroy are removed together, keeping
+/// args and params aligned.
+pub fn eliminate_cross_block_copies(mono: &mut MonoModule) {
+    let debug = std::env::var("KESTREL_DEBUG_COPYPROP").is_ok();
+    let mut total = 0usize;
+    for func in mono.functions.iter_mut() {
+        let Some(body) = &mut func.body else { continue };
+        if body.blocks.len() < 2 {
+            continue;
+        }
+        total += optimize_cross_block(body);
+    }
+    if debug && total > 0 {
+        eprintln!("[copy_prop] cross-block: {total} copies converted to moves");
+    }
+}
+
+struct CrossRewrite {
+    /// Block holding the `CopyValue`.
+    b: usize,
+    /// Index of the `CopyValue` in `b`'s insts.
+    copy_i: usize,
+    /// Single-predecessor successor receiving the threaded operand.
+    s: usize,
+    /// Arg/param position of the threaded operand (jump arg index == param index).
+    k: usize,
+    /// Index of the sole `DestroyValue` of the param in `s`'s insts.
+    destroy_j: usize,
+}
+
+fn optimize_cross_block(body: &mut OssaBody) -> usize {
+    use crate::terminator::TerminatorKind;
+
+    // Predecessor count per block (by successor index).
+    let mut pred_count = vec![0u32; body.blocks.len()];
+    for block in &body.blocks {
+        for succ in block.terminator.kind.successors() {
+            if succ.index() < pred_count.len() {
+                pred_count[succ.index()] += 1;
+            }
+        }
+    }
+
+    let mut rewrites: Vec<CrossRewrite> = Vec::new();
+    for bi in 0..body.blocks.len() {
+        let block = &body.blocks[bi];
+        // Only a plain `Jump` (single successor) — the operand rides one edge.
+        let (target, args) = match &block.terminator.kind {
+            TerminatorKind::Jump { target, args } => (target.index(), args.clone()),
+            _ => continue,
+        };
+        // Skip self-loops, out-of-range, and any block with another predecessor.
+        // The entry block is excluded too: its "params" are the function's ABI
+        // parameters, so removing one (on a loop-back-to-entry edge that makes it
+        // single-predecessor) would misalign every caller's arguments.
+        if target == bi
+            || target == body.entry.index()
+            || target >= body.blocks.len()
+            || pred_count[target] != 1
+        {
+            continue;
+        }
+
+        // A borrow of an @owned value can enter `b` as a @guaranteed block param
+        // (the BeginBorrow lives in a predecessor; its EndBorrow here references
+        // the BORROW result, not the source, so it would not show up in
+        // `inst_use` below). Moving such a source out from under a live borrow is
+        // a use-after-free. Collect the still-borrowed sources and refuse to move
+        // them — the cross-block analogue of the block-local `frozen_at` guard.
+        let borrowed_in: FxHashSet<ValueId> = block
+            .params
+            .iter()
+            .filter(|p| p.ownership == Ownership::Guaranteed)
+            .filter_map(|p| body.value(p.value).borrow_source)
+            .collect();
+
+        // How many times each value is used by an instruction operand in `b`.
+        let mut inst_use: FxHashMap<ValueId, usize> = FxHashMap::default();
+        for inst in &block.insts {
+            for op in inst.kind.operands() {
+                *inst_use.entry(op).or_default() += 1;
+            }
+        }
+
+        let succ = &body.blocks[target];
+        let succ_term_uses: FxHashSet<ValueId> =
+            succ.terminator.kind.operands().into_iter().collect();
+
+        for (ci, inst) in block.insts.iter().enumerate() {
+            let InstKind::CopyValue { operand: x, .. } = &inst.kind else {
+                continue;
+            };
+            let x = *x;
+            if body.value(x).ownership != Ownership::Owned {
+                continue;
+            }
+            // `X`'s ONLY instruction use in this block must be this copy (so no
+            // in-block borrow or second consumer is in flight — both count as a
+            // use), and it must not be borrowed via an incoming @guaranteed param.
+            if inst_use.get(&x).copied().unwrap_or(0) != 1 || borrowed_in.contains(&x) {
+                continue;
+            }
+            // `X` appears in the jump args exactly once → one threaded position.
+            let mut positions = args.iter().enumerate().filter(|(_, a)| **a == x);
+            let Some((k, _)) = positions.next() else {
+                continue;
+            };
+            if positions.next().is_some() || k >= succ.params.len() {
+                continue;
+            }
+            let p = succ.params[k].value;
+            if succ_term_uses.contains(&p) {
+                continue;
+            }
+            // `P`'s only use in `S` is a single `DestroyValue { operand: p }`.
+            let mut destroy_j = None;
+            let mut blocked = false;
+            for (j, sinst) in succ.insts.iter().enumerate() {
+                if !sinst.kind.operands().contains(&p) {
+                    continue;
+                }
+                match &sinst.kind {
+                    InstKind::DestroyValue { operand } if *operand == p && destroy_j.is_none() => {
+                        destroy_j = Some(j);
+                    },
+                    _ => {
+                        blocked = true;
+                        break;
+                    },
+                }
+            }
+            if blocked {
+                continue;
+            }
+            let Some(destroy_j) = destroy_j else {
+                continue;
+            };
+            rewrites.push(CrossRewrite {
+                b: bi,
+                copy_i: ci,
+                s: target,
+                k,
+                destroy_j,
+            });
+        }
+    }
+
+    if rewrites.is_empty() {
+        return 0;
+    }
+    let count = rewrites.len();
+
+    // Apply. Each `S` is single-predecessor, so all rewrites targeting a given
+    // `S` come from the same `b`; remove args/params/destroys at descending
+    // indices so lower positions stay valid.
+    use std::collections::BTreeSet;
+    let mut jump_rm: FxHashMap<usize, BTreeSet<usize>> = FxHashMap::default();
+    let mut param_rm: FxHashMap<usize, BTreeSet<usize>> = FxHashMap::default();
+    let mut destroy_rm: FxHashMap<usize, BTreeSet<usize>> = FxHashMap::default();
+    for r in &rewrites {
+        if let InstKind::CopyValue { result, operand } = body.blocks[r.b].insts[r.copy_i].kind {
+            body.blocks[r.b].insts[r.copy_i].kind = InstKind::MoveValue { result, operand };
+        }
+        jump_rm.entry(r.b).or_default().insert(r.k);
+        param_rm.entry(r.s).or_default().insert(r.k);
+        destroy_rm.entry(r.s).or_default().insert(r.destroy_j);
+    }
+    for (b, ks) in &jump_rm {
+        if let TerminatorKind::Jump { args, .. } = &mut body.blocks[*b].terminator.kind {
+            for &k in ks.iter().rev() {
+                args.remove(k);
+            }
+        }
+    }
+    for (s, ks) in &param_rm {
+        for &k in ks.iter().rev() {
+            body.blocks[*s].params.remove(k);
+        }
+    }
+    for (s, js) in &destroy_rm {
+        for &j in js.iter().rev() {
+            body.blocks[*s].insts.remove(j);
+        }
+    }
+    count
+}
+
+// ============================================================================
 // mark_independent_takes
 // ============================================================================
 
