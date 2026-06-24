@@ -435,46 +435,22 @@ public struct Int16:
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-    // TODO: requires overflow-detecting intrinsics for proper implementation
     /// Wrapping addition that returns `None` instead of overflowing.
     public func addChecked(other: Int16) -> Int16? {
-        // Simplified check - detect if signs are same and result sign differs
-        let result = self.add(other);
-        if self.isPositive and other.isPositive and result.isNegative {
-            return .None
-        };
-        if self.isNegative and other.isNegative and result.isPositive {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i16_signed_add_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.add(other))
     }
 
     /// Wrapping subtraction that returns `None` instead of overflowing.
     public func subtractChecked(other: Int16) -> Int16? {
-        // Simplified check
-        let result = self.subtract(other);
-        if self.isPositive and other.isNegative and result.isNegative {
-            return .None
-        };
-        if self.isNegative and other.isPositive and result.isPositive {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i16_signed_sub_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.subtract(other))
     }
 
     /// Wrapping multiplication that returns `None` instead of overflowing.
-    /// Implemented by multiplying then dividing back; replace with an
-    /// overflow-detecting intrinsic when one is available.
     public func multiplyChecked(other: Int16) -> Int16? {
-        if other == Int16.zero {
-            return .Some(Int16.zero)
-        };
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i16_signed_mul_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.multiply(other))
     }
 
     /// Division that returns `None` for divide-by-zero or for the

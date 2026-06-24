@@ -812,6 +812,35 @@ fn mask_shift_amount<'ctx>(
     builder.build_and(amt, mask, "shamt").unwrap()
 }
 
+/// Compute whether `lhs OP rhs` overflows, as a Bool, via the LLVM
+/// `llvm.{s,u}{add,sub,mul}.with.overflow` intrinsics (which return `{iN, i1}`);
+/// extract the overflow bit. Backs the `*Checked` helpers. (Cranelift has no such
+/// intrinsic and uses a widening check instead — see its twin.)
+fn emit_overflow_check<'ctx>(
+    fc: &FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    sign: Signedness,
+    kind: &str,
+    lhs: IntValue<'ctx>,
+    rhs: IntValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, CodegenError> {
+    let cx = fc.ctx.cx;
+    let prefix = if matches!(sign, Signedness::Signed) {
+        "s"
+    } else {
+        "u"
+    };
+    let name = format!("llvm.{prefix}{kind}.with.overflow");
+    let ty: BasicTypeEnum = lhs.get_type().into();
+    let agg = call_intrinsic(&fc.ctx.llmod, builder, &name, &[ty], &[lhs.into(), rhs.into()])?
+        .into_struct_value();
+    let bit = builder
+        .build_extract_value(agg, 1, "ovf")
+        .unwrap()
+        .into_int_value();
+    Ok(cmp_to_bool(cx, builder, bit))
+}
+
 fn compile_op2<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
@@ -869,6 +898,9 @@ fn compile_op2<'ctx>(
             .unwrap()
             .into()
         },
+        Op::AddOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "add", li(), ri())?,
+        Op::SubOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "sub", li(), ri())?,
+        Op::MulOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "mul", li(), ri())?,
         Op::FAdd(_) => builder.build_float_add(lf(), rf(), "fadd").unwrap().into(),
         Op::FSub(_) => builder.build_float_sub(lf(), rf(), "fsub").unwrap().into(),
         Op::FMul(_) => builder.build_float_mul(lf(), rf(), "fmul").unwrap().into(),

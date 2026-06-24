@@ -83,6 +83,14 @@ pub enum Op {
     Rem(IntBits, Signedness),
     Neg(IntBits),
 
+    // Overflow predicates: `true` if the corresponding wrapping op overflows the
+    // type. Result is a Bool (like the comparison ops). Back the `*Checked`
+    // stdlib helpers, which can't detect overflow reliably from the wrapped
+    // result alone (e.g. `minValue * -1`).
+    AddOverflows(IntBits, Signedness),
+    SubOverflows(IntBits, Signedness),
+    MulOverflows(IntBits, Signedness),
+
     FAdd(FloatBits),
     FSub(FloatBits),
     FMul(FloatBits),

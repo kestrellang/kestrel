@@ -660,6 +660,58 @@ fn signed_div_overflow_guard(
     builder.ins().select(is_overflow, one, rhs)
 }
 
+#[derive(Clone, Copy)]
+enum OverflowKind {
+    Add,
+    Sub,
+    Mul,
+}
+
+/// Compute whether `lhs OP rhs` overflows the `bits`-wide integer, as a Bool.
+/// Cranelift has no overflow intrinsic, so do the op in the next-wider type and
+/// check whether truncating back loses information (the wide result differs from
+/// the sign/zero-extension of the narrow result). Backs the `*Checked` helpers.
+fn emit_overflow_check(
+    builder: &mut FunctionBuilder,
+    bits: IntBits,
+    sign: Signedness,
+    kind: OverflowKind,
+    lhs: Value,
+    rhs: Value,
+) -> Value {
+    let narrow = builder.func.dfg.value_type(lhs);
+    let wide = match bits {
+        IntBits::I8 => ir::types::I16,
+        IntBits::I16 => ir::types::I32,
+        IntBits::I32 => ir::types::I64,
+        IntBits::I64 => ir::types::I128,
+    };
+    let signed = matches!(sign, Signedness::Signed);
+    let lw = if signed {
+        builder.ins().sextend(wide, lhs)
+    } else {
+        builder.ins().uextend(wide, lhs)
+    };
+    let rw = if signed {
+        builder.ins().sextend(wide, rhs)
+    } else {
+        builder.ins().uextend(wide, rhs)
+    };
+    let wide_res = match kind {
+        OverflowKind::Add => builder.ins().iadd(lw, rw),
+        OverflowKind::Sub => builder.ins().isub(lw, rw),
+        OverflowKind::Mul => builder.ins().imul(lw, rw),
+    };
+    let narrow_res = builder.ins().ireduce(narrow, wide_res);
+    let re_wide = if signed {
+        builder.ins().sextend(wide, narrow_res)
+    } else {
+        builder.ins().uextend(wide, narrow_res)
+    };
+    let neq = builder.ins().icmp(IntCC::NotEqual, wide_res, re_wide);
+    cmp_to_bool(builder, neq)
+}
+
 fn compile_op2(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -689,6 +741,15 @@ fn compile_op2(
             builder.ins().srem(lhs, safe)
         },
         Op::Rem(_, Signedness::Unsigned) => builder.ins().urem(lhs, rhs),
+        Op::AddOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Add, lhs, rhs)
+        },
+        Op::SubOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Sub, lhs, rhs)
+        },
+        Op::MulOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Mul, lhs, rhs)
+        },
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
         Op::FMul(_) => builder.ins().fmul(lhs, rhs),

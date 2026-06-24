@@ -350,6 +350,20 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
             );
         }
 
+        // Overflow predicates: signed/unsigned add/sub/mul, return i1 (true if
+        // the wrapping op overflows the type). Back the `*Checked` stdlib helpers.
+        for sign in ["signed", "unsigned"] {
+            for op in ["add", "sub", "mul"] {
+                seed_fn(
+                    world,
+                    lang,
+                    &format!("{ty_name}_{sign}_{op}_overflows"),
+                    &[("a", ty.clone()), ("b", ty.clone())],
+                    i1.clone(),
+                );
+            }
+        }
+
         // Unary ops returning same type
         for op in ["neg", "not", "popcount", "clz", "ctz", "bswap"] {
             seed_fn(

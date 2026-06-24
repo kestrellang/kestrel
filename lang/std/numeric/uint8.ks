@@ -430,39 +430,22 @@ public struct UInt8:
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-    // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` on overflow. For unsigned types
-    /// overflow is detected via `result < self`.
+    /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: UInt8) -> UInt8? {
-        let result = self.add(other);
-        // For unsigned, overflow if result < either operand
-        if result < self {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i8_unsigned_add_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.add(other))
     }
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: UInt8) -> UInt8? {
-        // For unsigned, underflow if other > self
-        if other > self {
-            return .None
-        };
+        if Bool(boolLiteral: lang.i8_unsigned_sub_overflows(self.raw, other.raw)) { return .None };
         .Some(self.subtract(other))
     }
 
-    /// Wrapping multiplication that returns `None` on overflow. Implemented
-    /// by multiplying then dividing back.
+    /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: UInt8) -> UInt8? {
-        if other == UInt8.zero {
-            return .Some(UInt8.zero)
-        };
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i8_unsigned_mul_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.multiply(other))
     }
 
     /// Division that returns `None` for divide-by-zero.

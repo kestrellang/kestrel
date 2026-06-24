@@ -224,47 +224,28 @@ def generate_byte_swap(type_name: str, bits: int, lang_type: str) -> str:
 
 def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
     """Generate checked arithmetic methods that return Optional."""
+    # Overflow-detecting intrinsics (lang.iN_{signed,unsigned}_{add,sub,mul}_overflows)
+    # return true exactly when the wrapping op overflows the type. They are the
+    # single source of truth for `*Checked` — detecting overflow from the wrapped
+    # result alone is unreliable (e.g. signed `minValue * -1`, #160).
+    ovf = f"lang.{lang_type}_{'signed' if signed else 'unsigned'}"
     if signed:
-        return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` instead of overflowing.
+        return f'''    /// Wrapping addition that returns `None` instead of overflowing.
     public func addChecked(other: {type_name}) -> {type_name}? {{
-        // Simplified check - detect if signs are same and result sign differs
-        let result = self.add(other);
-        if self.isPositive and other.isPositive and result.isNegative {{
-            return .None
-        }};
-        if self.isNegative and other.isNegative and result.isPositive {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_add_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.add(other))
     }}
 
     /// Wrapping subtraction that returns `None` instead of overflowing.
     public func subtractChecked(other: {type_name}) -> {type_name}? {{
-        // Simplified check
-        let result = self.subtract(other);
-        if self.isPositive and other.isNegative and result.isNegative {{
-            return .None
-        }};
-        if self.isNegative and other.isPositive and result.isPositive {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_sub_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.subtract(other))
     }}
 
     /// Wrapping multiplication that returns `None` instead of overflowing.
-    /// Implemented by multiplying then dividing back; replace with an
-    /// overflow-detecting intrinsic when one is available.
     public func multiplyChecked(other: {type_name}) -> {type_name}? {{
-        if other == {type_name}.zero {{
-            return .Some({type_name}.zero)
-        }};
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_mul_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.multiply(other))
     }}
 
     /// Division that returns `None` for divide-by-zero or for the
@@ -299,39 +280,22 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
 
 '''
     else:
-        return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` on overflow. For unsigned types
-    /// overflow is detected via `result < self`.
+        return f'''    /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: {type_name}) -> {type_name}? {{
-        let result = self.add(other);
-        // For unsigned, overflow if result < either operand
-        if result < self {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_add_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.add(other))
     }}
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: {type_name}) -> {type_name}? {{
-        // For unsigned, underflow if other > self
-        if other > self {{
-            return .None
-        }};
+        if Bool(boolLiteral: {ovf}_sub_overflows(self.raw, other.raw)) {{ return .None }};
         .Some(self.subtract(other))
     }}
 
-    /// Wrapping multiplication that returns `None` on overflow. Implemented
-    /// by multiplying then dividing back.
+    /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: {type_name}) -> {type_name}? {{
-        if other == {type_name}.zero {{
-            return .Some({type_name}.zero)
-        }};
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_mul_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.multiply(other))
     }}
 
     /// Division that returns `None` for divide-by-zero.

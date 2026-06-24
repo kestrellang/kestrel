@@ -52,6 +52,36 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "i8_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I8, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i8_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I8, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i8_signed_div",
         op: Op::Div(IntBits::I8, Signedness::Signed),
         arity: 2,
@@ -189,6 +219,36 @@ static TABLE: &[IntrinsicEntry] = &[
     IntrinsicEntry {
         name: "i16_mul",
         op: Op::Mul(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I16, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I16, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i16_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I16, Signedness::Unsigned),
         arity: 2,
     },
     IntrinsicEntry {
@@ -337,6 +397,36 @@ static TABLE: &[IntrinsicEntry] = &[
         arity: 2,
     },
     IntrinsicEntry {
+        name: "i32_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I32, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i32_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I32, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
         name: "i32_signed_div",
         op: Op::Div(IntBits::I32, Signedness::Signed),
         arity: 2,
@@ -479,6 +569,36 @@ static TABLE: &[IntrinsicEntry] = &[
     IntrinsicEntry {
         name: "i64_mul",
         op: Op::Mul(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_add_overflows",
+        op: Op::AddOverflows(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_add_overflows",
+        op: Op::AddOverflows(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_sub_overflows",
+        op: Op::SubOverflows(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_sub_overflows",
+        op: Op::SubOverflows(IntBits::I64, Signedness::Unsigned),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_signed_mul_overflows",
+        op: Op::MulOverflows(IntBits::I64, Signedness::Signed),
+        arity: 2,
+    },
+    IntrinsicEntry {
+        name: "i64_unsigned_mul_overflows",
+        op: Op::MulOverflows(IntBits::I64, Signedness::Unsigned),
         arity: 2,
     },
     IntrinsicEntry {
