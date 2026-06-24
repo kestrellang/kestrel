@@ -21,8 +21,8 @@ use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::value::Ownership;
 use kestrel_mir::{
-    FieldIdx, FloatMathKind, FloatPredicateKind, Layout, MirTy, Op, ParamConvention, Signedness,
-    StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    FieldIdx, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, Op, ParamConvention,
+    Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -747,6 +747,71 @@ fn compile_op1<'ctx>(
     })
 }
 
+/// Div-by-zero guard: if `divisor == 0`, branch to a trap block; else continue.
+/// Leaves the builder positioned at the continuation block so the caller's
+/// division emits into the non-zero path. (Cranelift gets this from native
+/// `sdiv`/`udiv` zero-trapping; LLVM's are UB, so we make it explicit.)
+fn emit_div_by_zero_trap<'ctx>(
+    fc: &FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    divisor: IntValue<'ctx>,
+) {
+    let cx = fc.ctx.cx;
+    let zero = divisor.get_type().const_zero();
+    let is_zero = builder
+        .build_int_compare(IntPredicate::EQ, divisor, zero, "divzero")
+        .unwrap();
+    let trap_bb = cx.append_basic_block(fc.fn_value, "divzero.trap");
+    let cont_bb = cx.append_basic_block(fc.fn_value, "divzero.cont");
+    builder
+        .build_conditional_branch(is_zero, trap_bb, cont_bb)
+        .unwrap();
+    builder.position_at_end(trap_bb);
+    crate::terminator::emit_trap(fc, builder);
+    builder.position_at_end(cont_bb);
+}
+
+/// Twin of the Cranelift helper: swap the divisor -1 → 1 exactly on signed
+/// `minValue / -1` so the native op wraps (min/1=min, min%1=0) rather than being
+/// UB. Unsigned divisors are returned unchanged (no overflow case).
+fn signed_div_overflow_guard<'ctx>(
+    builder: &Builder<'ctx>,
+    bits: IntBits,
+    sign: Signedness,
+    lhs: IntValue<'ctx>,
+    rhs: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    if matches!(sign, Signedness::Unsigned) {
+        return rhs;
+    }
+    let ty = rhs.get_type();
+    let neg_one = ty.const_all_ones();
+    let min = ty.const_int(1u64 << (bits.bit_width() - 1), false);
+    let one = ty.const_int(1, false);
+    let is_neg_one = builder
+        .build_int_compare(IntPredicate::EQ, rhs, neg_one, "isneg1")
+        .unwrap();
+    let is_min = builder
+        .build_int_compare(IntPredicate::EQ, lhs, min, "ismin")
+        .unwrap();
+    let is_of = builder.build_and(is_neg_one, is_min, "isof").unwrap();
+    builder
+        .build_select(is_of, one, rhs, "safediv")
+        .unwrap()
+        .into_int_value()
+}
+
+/// Mask a shift amount to `amt & (bitWidth-1)` so over-shifts are defined
+/// (poison-free) and match Cranelift's native masking.
+fn mask_shift_amount<'ctx>(
+    builder: &Builder<'ctx>,
+    bits: IntBits,
+    amt: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let mask = amt.get_type().const_int((bits.bit_width() - 1) as u64, false);
+    builder.build_and(amt, mask, "shamt").unwrap()
+}
+
 fn compile_op2<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
@@ -778,22 +843,32 @@ fn compile_op2<'ctx>(
         Op::Add(_, _) => builder.build_int_add(li(), ri(), "add").unwrap().into(),
         Op::Sub(_, _) => builder.build_int_sub(li(), ri(), "sub").unwrap().into(),
         Op::Mul(_, _) => builder.build_int_mul(li(), ri(), "mul").unwrap().into(),
-        Op::Div(_, Signedness::Signed) => builder
-            .build_int_signed_div(li(), ri(), "sdiv")
+        // div/rem: LLVM `sdiv`/`udiv`/`srem`/`urem` are UB on a zero divisor (and
+        // signed on `minValue / -1`). The spec (int64.ks docs) is: trap on
+        // div-by-zero, wrap on `minValue / -1` (div→min, rem→0). Emit an explicit
+        // div-by-zero trap, and for signed swap the divisor -1→1 exactly on the
+        // overflow case (min/1=min, min%1=0). Mirrors the Cranelift backend, which
+        // gets the zero-trap and shift-mask for free from native semantics.
+        Op::Div(bits, sign) => {
+            emit_div_by_zero_trap(fc, builder, ri());
+            let d = signed_div_overflow_guard(builder, bits, sign, li(), ri());
+            match sign {
+                Signedness::Signed => builder.build_int_signed_div(li(), d, "sdiv"),
+                Signedness::Unsigned => builder.build_int_unsigned_div(li(), d, "udiv"),
+            }
             .unwrap()
-            .into(),
-        Op::Div(_, Signedness::Unsigned) => builder
-            .build_int_unsigned_div(li(), ri(), "udiv")
+            .into()
+        },
+        Op::Rem(bits, sign) => {
+            emit_div_by_zero_trap(fc, builder, ri());
+            let d = signed_div_overflow_guard(builder, bits, sign, li(), ri());
+            match sign {
+                Signedness::Signed => builder.build_int_signed_rem(li(), d, "srem"),
+                Signedness::Unsigned => builder.build_int_unsigned_rem(li(), d, "urem"),
+            }
             .unwrap()
-            .into(),
-        Op::Rem(_, Signedness::Signed) => builder
-            .build_int_signed_rem(li(), ri(), "srem")
-            .unwrap()
-            .into(),
-        Op::Rem(_, Signedness::Unsigned) => builder
-            .build_int_unsigned_rem(li(), ri(), "urem")
-            .unwrap()
-            .into(),
+            .into()
+        },
         Op::FAdd(_) => builder.build_float_add(lf(), rf(), "fadd").unwrap().into(),
         Op::FSub(_) => builder.build_float_sub(lf(), rf(), "fsub").unwrap().into(),
         Op::FMul(_) => builder.build_float_mul(lf(), rf(), "fmul").unwrap().into(),
@@ -801,15 +876,20 @@ fn compile_op2<'ctx>(
         Op::And(_) => builder.build_and(li(), ri(), "and").unwrap().into(),
         Op::Or(_) => builder.build_or(li(), ri(), "or").unwrap().into(),
         Op::Xor(_) => builder.build_xor(li(), ri(), "xor").unwrap().into(),
-        Op::Shl(_) => builder.build_left_shift(li(), ri(), "shl").unwrap().into(),
-        Op::Shr(_, Signedness::Signed) => builder
-            .build_right_shift(li(), ri(), true, "ashr")
-            .unwrap()
-            .into(),
-        Op::Shr(_, Signedness::Unsigned) => builder
-            .build_right_shift(li(), ri(), false, "lshr")
-            .unwrap()
-            .into(),
+        // Shifts: LLVM `shl`/`ashr`/`lshr` are poison when the amount >= bit width.
+        // Spec: mask the amount mod bit width (`amt & (width-1)`) — matches
+        // Cranelift's native masking. Without this, an opaque over-shift miscompiles.
+        Op::Shl(bits) => {
+            let amt = mask_shift_amount(builder, bits, ri());
+            builder.build_left_shift(li(), amt, "shl").unwrap().into()
+        },
+        Op::Shr(bits, sign) => {
+            let amt = mask_shift_amount(builder, bits, ri());
+            builder
+                .build_right_shift(li(), amt, matches!(sign, Signedness::Signed), "shr")
+                .unwrap()
+                .into()
+        },
         Op::Eq(_) => icmp(IntPredicate::EQ, builder),
         Op::Ne(_) => icmp(IntPredicate::NE, builder),
         Op::Lt(_, Signedness::Signed) => icmp(IntPredicate::SLT, builder),

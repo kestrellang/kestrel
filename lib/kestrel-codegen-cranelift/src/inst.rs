@@ -8,7 +8,7 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::{
-    FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, Layout, MirTy, MonoFuncId, Op,
+    FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, MonoFuncId, Op,
     ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
@@ -639,6 +639,27 @@ fn compile_op1(
     })
 }
 
+/// Return a divisor safe to feed to native `sdiv`/`srem`: `1` when the operation
+/// would be the overflowing `minValue / -1` (so the native op yields `min/1=min`
+/// and `min%1=0`, matching the spec's wrap), otherwise the original divisor. A
+/// zero divisor is left untouched so the native op still traps on div-by-zero.
+fn signed_div_overflow_guard(
+    builder: &mut FunctionBuilder,
+    bits: IntBits,
+    lhs: Value,
+    rhs: Value,
+) -> Value {
+    let ty = builder.func.dfg.value_type(rhs);
+    let min = -(1i128 << (bits.bit_width() - 1)) as i64;
+    let neg_one = builder.ins().iconst(ty, -1);
+    let min_v = builder.ins().iconst(ty, min);
+    let one = builder.ins().iconst(ty, 1);
+    let is_neg_one = builder.ins().icmp(IntCC::Equal, rhs, neg_one);
+    let is_min = builder.ins().icmp(IntCC::Equal, lhs, min_v);
+    let is_overflow = builder.ins().band(is_neg_one, is_min);
+    builder.ins().select(is_overflow, one, rhs)
+}
+
 fn compile_op2(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -652,9 +673,21 @@ fn compile_op2(
         Op::Add(_, _) => builder.ins().iadd(lhs, rhs),
         Op::Sub(_, _) => builder.ins().isub(lhs, rhs),
         Op::Mul(_, _) => builder.ins().imul(lhs, rhs),
-        Op::Div(_, Signedness::Signed) => builder.ins().sdiv(lhs, rhs),
+        // Signed div/rem: `minValue / -1` overflows. Cranelift `sdiv`/`srem` TRAP
+        // on it, but the spec (int64.ks docs) says it WRAPS (div→minValue, rem→0).
+        // Swap the divisor -1→1 exactly in that case so the native op produces
+        // min/1=min and min%1=0 — no trap, correct wrap. Division-by-zero still
+        // traps natively (the swap leaves a 0 divisor untouched). Mirrored in the
+        // LLVM backend (which additionally needs an explicit div-by-zero trap).
+        Op::Div(bits, Signedness::Signed) => {
+            let safe = signed_div_overflow_guard(builder, bits, lhs, rhs);
+            builder.ins().sdiv(lhs, safe)
+        },
         Op::Div(_, Signedness::Unsigned) => builder.ins().udiv(lhs, rhs),
-        Op::Rem(_, Signedness::Signed) => builder.ins().srem(lhs, rhs),
+        Op::Rem(bits, Signedness::Signed) => {
+            let safe = signed_div_overflow_guard(builder, bits, lhs, rhs);
+            builder.ins().srem(lhs, safe)
+        },
         Op::Rem(_, Signedness::Unsigned) => builder.ins().urem(lhs, rhs),
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
