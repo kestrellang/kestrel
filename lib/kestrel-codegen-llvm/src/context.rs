@@ -352,41 +352,13 @@ impl<'ctx> CodegenCtx<'ctx> {
             }
         }
 
+        // A function that fails codegen/verification is a miscompile: emitting a
+        // trap stub and continuing produces a clean-looking build (exit 0, binary
+        // written) that SIGILLs at runtime when the function is called. Abort the
+        // build instead — no object is emitted, no binary is linked — and report
+        // every failure so the user can act on all of them at once (#151/#149).
         if !errors.is_empty() {
-            let body_count = self
-                .module
-                .functions
-                .iter()
-                .filter(|f| f.body.is_some())
-                .count();
-            eprintln!(
-                "warning: {} of {} functions failed to compile (skipped):",
-                errors.len(),
-                body_count
-            );
-            let mut by_cat: HashMap<String, usize> = HashMap::new();
-            for (_, err) in &errors {
-                let cat = if err.contains("verification") {
-                    "verify"
-                } else if err.contains("unsupported") {
-                    "unsupported"
-                } else if err.contains("panic") {
-                    "panic"
-                } else if err.contains("ICE") {
-                    "ICE"
-                } else {
-                    "other"
-                };
-                *by_cat.entry(cat.to_string()).or_default() += 1;
-            }
-            for (cat, count) in by_cat.iter() {
-                eprintln!("  {count:>5} {cat}");
-            }
-            if std::env::var("KESTREL_VERBOSE_CODEGEN").is_ok() {
-                for (name, err) in &errors {
-                    eprintln!("    {name}: {err}");
-                }
-            }
+            return Err(CodegenError::CompilationFailed(errors));
         }
         Ok(())
     }

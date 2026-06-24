@@ -1313,6 +1313,13 @@ impl OssaBodyCtx<'_, '_> {
                 let v = self.lower_expr(a.value);
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
+            // NOTE: like the setter path below, omitted defaulted index args are
+            // not yet materialized here — a `mutating ref` subscript accessor with
+            // a defaulted index called as `x() = v` would hit the same arg-count
+            // mismatch (#151/#149 twin). No repro exists for ref-accessor subscripts
+            // with defaults yet; add the equivalent `expand_default_args` here when
+            // one surfaces (the ref accessor's params are the index params only — no
+            // trailing `newValue` — so it'd expand against the full param list).
             return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
         }
 
@@ -1333,6 +1340,10 @@ impl OssaBodyCtx<'_, '_> {
                 .into_iter()
                 .map(|v| self.prepare_call_arg(v, ParamConvention::Borrow))
                 .collect();
+            // Fill omitted defaulted index params (`c() = v`). `newValue` has no
+            // default so it is skipped here and pushed last. Without this the
+            // call is built with too few args and fails codegen verification.
+            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0);
             call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
@@ -1348,6 +1359,11 @@ impl OssaBodyCtx<'_, '_> {
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
+            // Fill omitted defaulted index params (`c() = v`) before the trailing
+            // `newValue` (which has no default and is pushed last). `expand_default_args`
+            // appends to the end, so call it after the explicit index args and before
+            // `rhs` to preserve the `[self, idx.., default(idx), newValue]` ABI order.
+            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0);
             call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
 
             if let Some(protocol) = self.ctx.is_protocol_method(setter) {

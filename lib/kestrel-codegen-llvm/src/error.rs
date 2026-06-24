@@ -16,6 +16,10 @@ pub enum CodegenError {
     IoError(std::io::Error),
     Unsupported(String),
     DataSection(String),
+    /// One or more functions failed codegen/verification. The build is aborted
+    /// (no object emitted, no binary linked) rather than shipping trap stubs that
+    /// SIGILL at runtime. Carries every failure so the user sees them all at once.
+    CompilationFailed(Vec<(String, String)>),
 }
 
 impl fmt::Display for CodegenError {
@@ -33,6 +37,13 @@ impl fmt::Display for CodegenError {
             Self::IoError(e) => write!(f, "I/O error: {e}"),
             Self::Unsupported(msg) => write!(f, "unsupported: {msg}"),
             Self::DataSection(msg) => write!(f, "data section error: {msg}"),
+            Self::CompilationFailed(failures) => {
+                writeln!(f, "{} function(s) failed to compile:", failures.len())?;
+                for (name, err) in failures {
+                    writeln!(f, "  {name}: {err}")?;
+                }
+                Ok(())
+            },
         }
     }
 }

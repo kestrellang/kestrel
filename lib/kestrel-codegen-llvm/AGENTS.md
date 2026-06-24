@@ -85,12 +85,18 @@ The `Builder` is **threaded as a separate `&Builder` argument**, never stored in
 references that outlive the context, so `func`/`body` borrows are independent of
 the `&mut ctx` borrow (copy the ref into a local first).
 
-## Fault tolerance
+## Failure handling
 
-Each function body is built inside `catch_unwind` and then `verify()`ed; failure
-→ `reset_to_trap_stub` (an `llvm.trap` + `unreachable`). One bad function must
-never sink the whole module. Categorized warnings print to stderr;
-`KESTREL_VERBOSE_CODEGEN=1` prints per-function LLVM verify errors.
+Each function body is built inside `catch_unwind` and then `verify()`ed.
+`define_all_functions` collects EVERY function that fails (compile error, LLVM
+verify failure, or panic) and then returns `CodegenError::CompilationFailed` —
+the build aborts, no object is emitted, no binary is linked (exit non-zero), and
+the error lists every failing function by name. A codegen failure is a miscompile;
+shipping a trap-stubbed binary that SIGILLs at runtime (the old warn-and-continue
+behavior) hid real bugs (#151/#149). `reset_to_trap_stub` is still called in-loop
+but the stubs are never serialized (`finish()` is skipped on the error path).
+`KESTREL_VERBOSE_CODEGEN=1` additionally dumps the full broken LLVM function body
+for context.
 
 ## inkwell 0.9 gotchas
 
@@ -107,7 +113,8 @@ never sink the whole module. Categorized warnings print to stderr;
 A new `InstKind` / `Op` / `TerminatorKind` / `ImmediateKind` variant must be
 handled in BOTH backends. Update the matching module here AND in
 `kestrel-codegen-cranelift`, or this backend's exhaustive `match` won't compile
-(good) / will emit `CodegenError::Unsupported` (logged, trap-stubbed).
+(good) / will emit `CodegenError::Unsupported`, which now aborts the build (see
+Failure handling above) rather than trap-stubbing.
 
 ## Testing
 
