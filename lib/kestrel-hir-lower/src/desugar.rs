@@ -945,11 +945,11 @@ impl LowerCtx<'_> {
         let dsi_local = self.define_local("$dsi", true, span.clone());
         let dsi_type_ref = self.alloc_expr(HirExpr::Def(dsi_struct, Vec::new(), span.clone()));
         let lit_cap = self.alloc_expr(HirExpr::Literal {
-            value: HirLiteral::Integer(literal_capacity),
+            value: HirLiteral::Integer(literal_capacity as i128),
             span: span.clone(),
         });
         let interp_count = self.alloc_expr(HirExpr::Literal {
-            value: HirLiteral::Integer(interpolation_count),
+            value: HirLiteral::Integer(interpolation_count as i128),
             span: span.clone(),
         });
         let init_call = self.alloc_expr(HirExpr::Call {
@@ -1122,7 +1122,7 @@ impl LowerCtx<'_> {
         // width: Int64? — only if specified
         if let Some(w) = parsed.width {
             let int_lit = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(w as i64),
+                value: HirLiteral::Integer(w as i128),
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
@@ -1139,7 +1139,7 @@ impl LowerCtx<'_> {
         // precision: Int64? — only if specified
         if let Some(p) = parsed.precision {
             let int_lit = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(p as i64),
+                value: HirLiteral::Integer(p as i128),
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
@@ -1186,7 +1186,7 @@ impl LowerCtx<'_> {
         };
         if radix != 10 {
             let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(radix),
+                value: HirLiteral::Integer(radix as i128),
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "radix", val);

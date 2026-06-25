@@ -32,3 +32,6 @@ pub mod refutable_pattern;
 
 // Literal/lexing checks (E700-E799)
 pub mod string_escape;
+
+// Integer-literal range check (E121)
+pub mod integer_literal_range;

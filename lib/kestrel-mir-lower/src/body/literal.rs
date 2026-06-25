@@ -91,10 +91,10 @@ impl OssaBodyCtx<'_, '_> {
     fn lower_literal_primitive(&mut self, lit: &HirLiteral, target_ty: TyId) -> ValueId {
         let imm = match lit {
             HirLiteral::Integer(v) => match self.ctx.module.ty_arena.get(target_ty) {
-                MirTy::I8 => Immediate::i8(*v as i128),
-                MirTy::I16 => Immediate::i16(*v as i128),
-                MirTy::I32 => Immediate::i32(*v as i128),
-                _ => Immediate::i64(*v as i128),
+                MirTy::I8 => Immediate::i8(*v),
+                MirTy::I16 => Immediate::i16(*v),
+                MirTy::I32 => Immediate::i32(*v),
+                _ => Immediate::i64(*v),
             },
             HirLiteral::Float(v) => match self.ctx.module.ty_arena.get(target_ty) {
                 MirTy::F32 => Immediate::f32(*v),

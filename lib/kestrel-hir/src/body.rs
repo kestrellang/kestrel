@@ -435,7 +435,13 @@ pub enum HirPat {
 /// HIR literals have been parsed into their concrete types.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HirLiteral {
-    Integer(i64),
+    /// Integer literal magnitude as `i128` so every valid target value
+    /// round-trips losslessly: `UInt64.maxValue` (2^64-1) stays a positive
+    /// magnitude, and the `2^63`/`i64::MIN` collision that hid out-of-range
+    /// `Int64` literals can no longer occur. Negation is applied by the
+    /// `negate` operator, not folded here. The range check lives in the
+    /// integer-literal-range analyzer (E121).
+    Integer(i128),
     Float(f64),
     /// Decoded string value plus any escape-sequence errors discovered during
     /// lowering. Errors are data on the node — a separate analyzer turns them
