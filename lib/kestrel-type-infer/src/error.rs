@@ -39,8 +39,14 @@ pub enum InferError {
     },
 
     /// Multiple candidates for a member — ambiguous.
+    ///
+    /// `receiver` is `None` for a receiver-less ambiguity (an overloaded
+    /// module-level function call, `f(…)`, which has no receiver type) and
+    /// `Some(tv)` for a genuine member ambiguity on a value of that type.
+    /// Without the distinction, the free-function case rendered the synthetic
+    /// result/placeholder TyVar as `Error` ("Error.f ambiguous", #210).
     AmbiguousMember {
-        receiver: TyVar,
+        receiver: Option<TyVar>,
         name: String,
         span: Span,
     },

@@ -2890,8 +2890,11 @@ fn solve_overloaded_call(
                     span,
                 }),
                 1 => emit_resolved_call(ctx, compatible[0], &type_args, args, result, expr, span),
+                // Receiver-less: an overloaded module-level function call has
+                // no receiver type — `result` is the call result, not a
+                // receiver, so don't render it (#210).
                 _ => SolveResult::Error(InferError::AmbiguousMember {
-                    receiver: result,
+                    receiver: None,
                     name: overload_name,
                     span,
                 }),
@@ -3557,7 +3560,7 @@ fn solve_member(
                     },
                     Err(_) => {
                         return SolveResult::Error(InferError::AmbiguousMember {
-                            receiver,
+                            receiver: Some(receiver),
                             name: name.to_string(),
                             span,
                         });
@@ -3565,7 +3568,7 @@ fn solve_member(
                 }
             } else {
                 return SolveResult::Error(InferError::AmbiguousMember {
-                    receiver,
+                    receiver: Some(receiver),
                     name: name.to_string(),
                     span,
                 });

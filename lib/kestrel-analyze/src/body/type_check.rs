@@ -97,10 +97,15 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
                 format!("'{}' not found", name)
             },
         ),
-        InferError::AmbiguousMember { name, .. } => (
-            format!("ambiguous member '{}': {}", name, detail),
-            "multiple candidates".into(),
-        ),
+        InferError::AmbiguousMember { receiver, name, .. } => {
+            // Receiver-less (overloaded free-function call) is a "call", not a
+            // "member" (#210). `detail` already avoids the synthetic receiver.
+            let kind = if receiver.is_some() { "member" } else { "call to" };
+            (
+                format!("ambiguous {} '{}': {}", kind, name, detail),
+                "multiple candidates".into(),
+            )
+        },
         InferError::MemberNotVisible {
             name, visibility, ..
         } => {

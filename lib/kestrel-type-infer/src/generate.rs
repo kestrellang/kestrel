@@ -135,9 +135,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // Overloaded function reference — can only appear as callee of Call
         HirExpr::OverloadSet { span, .. } => {
-            let recv = ctx.fresh();
+            // A receiver-less overload reference used as a bare value.
             ctx.report_error(InferError::AmbiguousMember {
-                receiver: recv,
+                receiver: None,
                 name: "<overloaded function>".into(),
                 span: span.clone(),
             })

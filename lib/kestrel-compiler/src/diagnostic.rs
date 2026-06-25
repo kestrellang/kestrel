@@ -98,9 +98,19 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_message(detail)
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
-            InferError::AmbiguousMember { name, .. } => Diagnostic::error()
-                .with_message(format!("ambiguous member '{name}'"))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+            InferError::AmbiguousMember { receiver, name, .. } => {
+                // Receiver-less (overloaded free-function call) reads as a
+                // "call", not a "member" — and its detail must not leak the
+                // synthetic `Error` placeholder (#210).
+                let msg = if receiver.is_some() {
+                    format!("ambiguous member '{name}'")
+                } else {
+                    format!("ambiguous call to '{name}'")
+                };
+                Diagnostic::error()
+                    .with_message(msg)
+                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
+            },
 
             InferError::MemberNotVisible {
                 name, visibility, ..
