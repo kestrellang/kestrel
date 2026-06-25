@@ -130,6 +130,17 @@ impl CompilationCheck for ExtensionConflictAnalyzer {
                         continue;
                     }
 
+                    // Distinct self-type specializations: `extend Box[Int64]`
+                    // and `extend Box[String]` both target the nominal `Box`,
+                    // but on DISJOINT concrete instantiations — a `Box[Int64]`
+                    // and a `Box[String]` are different types, so same-named
+                    // methods are not duplicates. (Type parameters compare as
+                    // wildcards, so `Box[T]` and `Box[U]` — both fully generic —
+                    // remain a conflict.) (#165)
+                    if !same_target_instantiation(cx, *ext_i, *ext_j) {
+                        continue;
+                    }
+
                     // Check if extensions have same specificity
                     let spec_i = extension_specificity(cx, *ext_i);
                     let spec_j = extension_specificity(cx, *ext_j);
@@ -253,6 +264,131 @@ fn extension_specificity(cx: &CompilationContext<'_>, extension: Entity) -> usiz
                 .count()
         })
         .unwrap_or(0)
+}
+
+/// True when `ext_i` and `ext_j` target the *same* instantiation of their
+/// nominal — their lowered self-type arguments match structurally (modulo
+/// spans), with type parameters treated as wildcards so two fully-generic
+/// targets (`Box[T]` / `Box[U]`) match while concrete instantiations
+/// (`Box[Int64]` / `Box[String]`) do not.
+fn same_target_instantiation(
+    cx: &CompilationContext<'_>,
+    ext_i: Entity,
+    ext_j: Entity,
+) -> bool {
+    use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
+
+    let args = |ext| {
+        cx.query
+            .query(LowerExtensionTargetTypeArgs {
+                extension: ext,
+                root: cx.root,
+            })
+            .unwrap_or_default()
+    };
+    let (ai, aj) = (args(ext_i), args(ext_j));
+    ai.len() == aj.len() && ai.iter().zip(aj.iter()).all(|(x, y)| hir_ty_eq(x, y))
+}
+
+/// Structural equality of two `HirTy`s, ignoring spans. Type parameters and
+/// inferred slots are wildcards (equal to each other but not to a concrete
+/// type), so `Box[T]` and `Box[U]` compare equal while `Box[Int64]` and
+/// `Box[String]` do not.
+fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let list_eq = |xs: &[HirTy], ys: &[HirTy]| {
+        xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| hir_ty_eq(x, y))
+    };
+    match (a, b) {
+        (
+            HirTy::Struct {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::Struct {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        )
+        | (
+            HirTy::Enum {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::Enum {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        )
+        | (
+            HirTy::Protocol {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::Protocol {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        )
+        | (
+            HirTy::AliasUse {
+                entity: ea,
+                args: aa,
+                ..
+            },
+            HirTy::AliasUse {
+                entity: eb,
+                args: ab,
+                ..
+            },
+        ) => ea == eb && list_eq(aa, ab),
+        (HirTy::Tuple(xa, _), HirTy::Tuple(xb, _)) => list_eq(xa, xb),
+        (
+            HirTy::Function {
+                params: pa, ret: ra, ..
+            },
+            HirTy::Function {
+                params: pb, ret: rb, ..
+            },
+        ) => list_eq(pa, pb) && hir_ty_eq(ra, rb),
+        (
+            HirTy::AssocProjection {
+                base: ba, assoc: sa, ..
+            },
+            HirTy::AssocProjection {
+                base: bb, assoc: sb, ..
+            },
+        ) => sa == sb && hir_ty_eq(ba, bb),
+        (HirTy::Opaque { bounds: ba, .. }, HirTy::Opaque { bounds: bb, .. }) => list_eq(ba, bb),
+        (
+            HirTy::Ref {
+                inner: ia,
+                mutating: ma,
+                ..
+            },
+            HirTy::Ref {
+                inner: ib,
+                mutating: mb,
+                ..
+            },
+        ) => ma == mb && hir_ty_eq(ia, ib),
+        (HirTy::SelfType(ea, _), HirTy::SelfType(eb, _)) => ea == eb,
+        // Type parameters / inferred slots are wildcards: equal to one another,
+        // never to a concrete type.
+        (
+            HirTy::Param(..) | HirTy::Infer(..),
+            HirTy::Param(..) | HirTy::Infer(..),
+        ) => true,
+        (HirTy::Never(_), HirTy::Never(_)) => true,
+        (HirTy::Error(_), HirTy::Error(_)) => true,
+        _ => false,
+    }
 }
 
 /// True when `ext_i` and `ext_j` both declare conformance to the *same*
