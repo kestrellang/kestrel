@@ -3078,6 +3078,8 @@ fn emit_resolved_call(
                     ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
                 }
             },
+            // `T.Assoc: P` projection bounds are handled at body setup.
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 
@@ -3949,6 +3951,9 @@ fn solve_member(
                     }
                 }
             },
+            // `T.Assoc: P` projection bounds are body-inference facts; the
+            // member-resolution path doesn't re-emit them.
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 
@@ -5024,6 +5029,8 @@ fn emit_type_alias_where_clauses(
             crate::resolve::WhereClause::DirectEquality { .. } => {
                 // Direct equality on TypeAlias — rare, skip for now
             },
+            // `Assoc.Inner: P` projection bounds on a TypeAlias — not emitted here.
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }

@@ -60,20 +60,37 @@ pub fn resolve_where_clauses(
                 WhereConstraint::Bound {
                     subject, protocols, ..
                 } => {
-                    let Some(param) = resolve_type_entity(ctx, subject, entity, root) else {
-                        continue;
+                    // A projection subject (`T.Assoc: P`) must keep its base —
+                    // `resolve_type_entity` would collapse `T.Assoc` to `Assoc`,
+                    // losing the receiver. Prefer the projection form.
+                    let projection = resolve_projection_subject(ctx, subject, entity, root);
+                    let param = match projection {
+                        Some(_) => None,
+                        None => resolve_type_entity(ctx, subject, entity, root),
                     };
+                    if projection.is_none() && param.is_none() {
+                        continue;
+                    }
                     for protocol_ty in protocols {
-                        if let Some(protocol) = resolve_type_entity(ctx, protocol_ty, entity, root)
-                        {
-                            let protocol_type_args =
-                                extract_protocol_type_args(ctx, entity, root, protocol_ty);
-                            result.push(WhereClause::Bound {
-                                param,
+                        let Some(protocol) = resolve_type_entity(ctx, protocol_ty, entity, root)
+                        else {
+                            continue;
+                        };
+                        let protocol_type_args =
+                            extract_protocol_type_args(ctx, entity, root, protocol_ty);
+                        result.push(match projection {
+                            Some((base, assoc)) => WhereClause::ProjectionBound {
+                                base,
+                                assoc,
                                 protocol,
                                 protocol_type_args,
-                            });
-                        }
+                            },
+                            None => WhereClause::Bound {
+                                param: param.unwrap(),
+                                protocol,
+                                protocol_type_args,
+                            },
+                        });
                     }
                 },
                 WhereConstraint::Equality { lhs, rhs, .. } => {
@@ -249,6 +266,49 @@ fn inject_implicit_static_bounds(
             });
         }
     }
+}
+
+/// If `ast_ty` is a `Base.Assoc` projection whose `Base` resolves to a type
+/// parameter and `Assoc` to an associated type reachable from it, return
+/// `(base_param_entity, assoc_entity)`. Returns `None` for a plain type/param
+/// subject (handled by `resolve_type_entity`) or any deeper/unsupported shape.
+fn resolve_projection_subject(
+    ctx: &QueryContext<'_>,
+    ast_ty: &AstType,
+    entity: Entity,
+    root: Entity,
+) -> Option<(Entity, Entity)> {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return None;
+    };
+    // Only the depth-1 `T.Assoc` shape for now (covers the assoc-bound cases);
+    // deeper chains fall through to the collapsing path.
+    if segments.len() != 2 {
+        return None;
+    }
+    let base = match ctx.query(ResolveTypePath {
+        segments: vec![segments[0].name.clone()],
+        context: entity,
+        root,
+    }) {
+        TypeResolution::Found(e) => e,
+        _ => return None,
+    };
+    if ctx.get::<kestrel_ast_builder::NodeKind>(base)
+        != Some(&kestrel_ast_builder::NodeKind::TypeParameter)
+    {
+        return None;
+    }
+    // Resolve the whole `T.Assoc` to the associated-type entity.
+    let assoc = match ctx.query(ResolveTypePath {
+        segments: segments.iter().map(|s| s.name.clone()).collect(),
+        context: entity,
+        root,
+    }) {
+        TypeResolution::Found(e) => e,
+        _ => return None,
+    };
+    Some((base, assoc))
 }
 
 fn resolve_type_entity(

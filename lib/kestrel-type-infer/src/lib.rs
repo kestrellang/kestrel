@@ -325,6 +325,21 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
                 &parent_type_params,
                 &span,
             ),
+            resolve::WhereClause::ProjectionBound {
+                base,
+                assoc,
+                protocol,
+                protocol_type_args,
+            } => emit_method_projection_bound_constraint(
+                ctx,
+                base,
+                assoc,
+                protocol,
+                &protocol_type_args,
+                &type_params,
+                &parent_type_params,
+                &span,
+            ),
             resolve::WhereClause::TypeEquality {
                 param,
                 assoc_name,
@@ -399,6 +414,39 @@ fn emit_method_bound_constraint(
         .collect();
     if !arg_tvs.is_empty() {
         ctx.record_witness_args(tv, protocol, arg_tvs);
+    }
+}
+
+/// Emit a `T.Assoc: Protocol` bound: constrain the PROJECTION
+/// `AssocProjection{base: T, Assoc}` to conform, and register it in
+/// `where_clause_assoc_subs` so the body's own `T.Assoc` uses (`x.produce()`
+/// resolving to `T.Item`) reuse the same projection TyVar. Registering the bare
+/// `Assoc` param instead (the pre-fix collapse) made those uses resolve to a
+/// baseless `Param(Assoc)` that leaked past monomorphization (#184).
+#[allow(clippy::too_many_arguments)]
+fn emit_method_projection_bound_constraint(
+    ctx: &mut InferCtx<'_>,
+    base: Entity,
+    assoc: Entity,
+    protocol: Entity,
+    protocol_type_args: &[kestrel_hir::ty::HirTy],
+    type_params: &[Entity],
+    parent_type_params: &[Entity],
+    span: &Span,
+) {
+    let base_tv = ctx.param(base);
+    let proj_tv = ctx.assoc_projection(base_tv, assoc);
+    ctx.conforms_typearg(proj_tv, protocol, span.clone());
+    // The body's `T.Assoc` projections reuse this TyVar (preserving the base).
+    ctx.where_clause_assoc_subs.push((assoc, proj_tv));
+
+    let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
+    let arg_tvs: Vec<ty::TyVar> = protocol_type_args
+        .iter()
+        .map(|hir_ty| generate::lower_hir_ty_with_subs(ctx, hir_ty, &subs))
+        .collect();
+    if !arg_tvs.is_empty() {
+        ctx.record_witness_args(proj_tv, protocol, arg_tvs);
     }
 }
 
@@ -733,6 +781,9 @@ fn emit_container_where_clauses(
                     ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
                 }
             },
+            // `T.Assoc: P` on an extension — handled at body setup via the
+            // member path; no extra emission needed here yet (#185 follow-up).
+            resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -878,6 +929,7 @@ fn emit_protocol_assoc_type_where_clauses(
                     }
                 },
                 resolve::WhereClause::DirectEquality { .. } => {},
+                resolve::WhereClause::ProjectionBound { .. } => {},
             }
         }
     }

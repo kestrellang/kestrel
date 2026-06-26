@@ -42,7 +42,9 @@ pub fn constraint_entailed_by(
         // no structural equality. Reject conservatively until a real
         // caller demands proper handling — matches prior behavior in
         // `conformance_completeness::extension_where_clauses_satisfied`.
-        WhereClause::TypeEquality { .. } | WhereClause::DirectEquality { .. } => false,
+        WhereClause::ProjectionBound { .. }
+        | WhereClause::TypeEquality { .. }
+        | WhereClause::DirectEquality { .. } => false,
     }
 }
 

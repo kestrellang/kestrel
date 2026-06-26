@@ -1876,6 +1876,10 @@ fn emit_where_clause_constraints_with_subs(
                     ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
                 }
             },
+            // Projection bounds (`T.Assoc: P`) are body-inference facts emitted
+            // at body setup; nothing to do at this call-site path (the assoc
+            // entity isn't a call type-arg here).
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }

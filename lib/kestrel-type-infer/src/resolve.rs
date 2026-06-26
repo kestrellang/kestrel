@@ -125,6 +125,17 @@ pub enum WhereClause {
         /// Empty for non-generic protocols.
         protocol_type_args: Vec<HirTy>,
     },
+    /// `T.Assoc: Protocol` — a bound whose subject is an associated-type
+    /// PROJECTION off a type param, not the bare param. Kept distinct from
+    /// `Bound` so the base (`T`) survives: collapsing the subject to the assoc
+    /// entity (`Assoc`) loses the receiver and makes a method returning
+    /// `T.Assoc` resolve to a bare `Param(Assoc)` that leaks past mono (#184).
+    ProjectionBound {
+        base: Entity,
+        assoc: Entity,
+        protocol: Entity,
+        protocol_type_args: Vec<HirTy>,
+    },
     /// `T.Item = SomeType` (associated type equality)
     TypeEquality {
         param: Entity,
