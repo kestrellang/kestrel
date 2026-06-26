@@ -13,7 +13,8 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::terminator::{SwitchArm, SwitchCase};
 use kestrel_mir::{
-    FieldIdx, Immediate, MirTy, Op, Ownership, ParamConvention, TyId, ValueId, VariantIdx,
+    FieldIdx, Immediate, IntBits, MirTy, Op, Ownership, ParamConvention, Signedness, TyId, ValueId,
+    VariantIdx,
 };
 use kestrel_pattern_matching::constructor::Constructor;
 use kestrel_pattern_matching::decision_tree::{Binding, DecisionTree, PathElement};
@@ -615,6 +616,20 @@ impl OssaBodyCtx<'_, '_> {
                         self.apply_access_path(borrow, scrutinee_ty, path).0,
                         Some(borrow),
                     )
+                };
+                // An array switch dispatches on element COUNT, not the
+                // aggregate's (meaningless) discriminant. Compute the length
+                // via the `ArrayMatchable.matchLength()` witness; the array
+                // cases were mapped to int-literal/range cases against it
+                // (`constructor_to_switch_case`).
+                let is_array_switch = cases
+                    .iter()
+                    .any(|(c, _)| matches!(c, Constructor::Array { .. }));
+                let disc_operand = if is_array_switch {
+                    let array_ty = lower_resolved_ty(self.ctx, ty);
+                    self.emit_array_match_length(disc_operand, array_ty)
+                } else {
+                    disc_operand
                 };
                 let discriminant = self.emit_discriminant(disc_operand);
                 if let Some(borrow) = borrow_to_end {
@@ -1423,6 +1438,15 @@ impl OssaBodyCtx<'_, '_> {
                         );
                         current = self.emit_enum_payload(current, variant_idx, field_idx, field_ty);
                         current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
+                    } else if self.is_array_matchable_ty(current_ty) {
+                        // Array prefix element: runtime `matchGet(i)`, not an
+                        // aggregate field-extract (an array is a heap buffer,
+                        // not a flat aggregate). The length switch already
+                        // proved `i < matchLength()`.
+                        let elem_ty = self.array_element_ty(current_ty);
+                        let raw = self.emit_literal(Immediate::i64(*i as i128));
+                        current = self.emit_array_match_get(current, current_ty, raw);
+                        current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
                         current = self.emit_tuple_extract(current, *i as u32, elem_ty);
@@ -1436,7 +1460,23 @@ impl OssaBodyCtx<'_, '_> {
                         .unwrap_or(VariantIdx::new(0));
                     pending_downcast = Some((variant_name.clone(), variant_idx));
                 },
-                PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => {},
+                // Array suffix element accessed from the end (`[.., z]`):
+                // `matchGet(matchLength() - offset)`.
+                PathElement::IndexFromEnd(offset) => {
+                    let elem_ty = self.array_element_ty(current_ty);
+                    let raw = self.emit_array_index_from_end(current, current_ty, *offset);
+                    current = self.emit_array_match_get(current, current_ty, raw);
+                    current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
+                },
+                // `..rest` binding: `matchSlice(prefix, matchLength() - suffix)`.
+                PathElement::RestSlice {
+                    prefix_len,
+                    suffix_len,
+                } => {
+                    current =
+                        self.emit_array_match_slice(current, current_ty, *prefix_len, *suffix_len);
+                    current_ty = self.body.value(current).ty;
+                },
             }
         }
         (current, current_ty)
@@ -1491,6 +1531,232 @@ impl OssaBodyCtx<'_, '_> {
         let scrutinee_arg = self.prepare_call_arg(scrutinee, ParamConvention::Borrow);
         let lit_arg = self.prepare_call_arg(lit_val, ParamConvention::Borrow);
         self.emit_call_returning(callee, vec![scrutinee_arg, lit_arg], bool_ty)
+    }
+
+    // ================================================================
+    // ArrayMatchable — array-pattern length test and element access
+    // ================================================================
+
+    /// Resolve the `ArrayMatchable` protocol entity (registering its name),
+    /// or `None` if the stdlib doesn't define it.
+    fn array_matchable_protocol(&mut self) -> Option<Entity> {
+        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        })?;
+        self.ctx.register_name(proto);
+        Some(proto)
+    }
+
+    /// Emit a call to an `ArrayMatchable` builtin method on `array` (passed
+    /// by borrow), with `extra_args` (already correctly typed) following
+    /// `self`. The method key is derived from the builtin method entity so it
+    /// matches the witness table exactly. `result_ty` is the method's concrete
+    /// return type at this call site (the caller substitutes the element type).
+    fn emit_array_matchable_call(
+        &mut self,
+        proto: Entity,
+        method_builtin: kestrel_hir::Builtin,
+        array: ValueId,
+        array_ty: TyId,
+        extra_args: Vec<ValueId>,
+        result_ty: TyId,
+    ) -> ValueId {
+        let method = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: method_builtin,
+                root: self.ctx.root,
+            })
+            .map(|e| self.ctx.witness_method_key(e))
+            .unwrap_or_else(|| WitnessMethodKey::simple("matchLength"));
+        let callee = Callee::Witness {
+            protocol: proto,
+            method,
+            self_type: array_ty,
+            method_type_args: vec![],
+        };
+        let mut call_args = vec![self.prepare_call_arg(array, ParamConvention::Borrow)];
+        for arg in extra_args {
+            call_args.push(self.prepare_call_arg(arg, ParamConvention::Borrow));
+        }
+        self.emit_call_returning(callee, call_args, result_ty)
+    }
+
+    /// Emit `array.matchLength()` — the element count as a stdlib `Int64`.
+    /// Used as the discriminant of an array-pattern switch.
+    pub fn emit_array_match_length(&mut self, array: ValueId, array_ty: TyId) -> ValueId {
+        let Some(proto) = self.array_matchable_protocol() else {
+            // No ArrayMatchable in the stdlib — degenerate to zero so the
+            // match stays well-formed (only reachable if stdlib is broken).
+            return self.emit_literal(Immediate::i64(0));
+        };
+        let result_ty = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ArrayMatchableMatchLength,
+                root: self.ctx.root,
+            })
+            .map(|e| crate::ty::resolve_callable_return_type(self.ctx, e))
+            .unwrap_or_else(|| self.ctx.module.ty_arena.i64());
+        self.emit_array_matchable_call(
+            proto,
+            kestrel_hir::Builtin::ArrayMatchableMatchLength,
+            array,
+            array_ty,
+            vec![],
+            result_ty,
+        )
+    }
+
+    /// Is `ty` a canonical `ArrayMatchable` conformer — the builtin `Array`
+    /// or `ArraySlice` struct? Element navigation of these goes through
+    /// `matchGet`/`matchSlice` (runtime, length-checked) rather than the
+    /// aggregate field-extract used for tuples and enum payloads.
+    fn is_array_matchable_ty(&mut self, ty: TyId) -> bool {
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(ty) else {
+            return false;
+        };
+        let entity = *entity;
+        [
+            kestrel_hir::Builtin::ArrayStruct,
+            kestrel_hir::Builtin::SliceStruct,
+        ]
+        .into_iter()
+        .any(|b| {
+            self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+                builtin: b,
+                root: self.ctx.root,
+            }) == Some(entity)
+        })
+    }
+
+    /// Element type of an `ArrayMatchable` type (its first type argument).
+    fn array_element_ty(&self, array_ty: TyId) -> TyId {
+        match self.ctx.module.ty_arena.get(array_ty) {
+            MirTy::Named { type_args, .. } if !type_args.is_empty() => type_args[0],
+            _ => array_ty,
+        }
+    }
+
+    /// The stdlib `Int64` type — the index/length type of `ArrayMatchable`,
+    /// taken from `matchLength`'s concrete return type.
+    fn array_match_int64_ty(&mut self) -> TyId {
+        self.ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::ArrayMatchableMatchLength,
+                root: self.ctx.root,
+            })
+            .map(|e| crate::ty::resolve_callable_return_type(self.ctx, e))
+            .unwrap_or_else(|| self.ctx.module.ty_arena.i64())
+    }
+
+    /// Wrap a raw `lang.i64` value into a stdlib `Int64` via its `intLiteral`
+    /// init (the `matchGet`/`matchSlice` bounds are `Int64`-typed).
+    fn emit_int64_wrap(&mut self, raw: ValueId, int64_ty: TyId) -> ValueId {
+        let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(int64_ty) else {
+            return raw;
+        };
+        let entity = *entity;
+        if let Some(init) = self.find_literal_init(
+            entity,
+            kestrel_hir::Builtin::ExpressibleByIntegerLiteral,
+            "intLiteral",
+        ) {
+            self.ctx.register_name(init);
+            let callee = Callee::direct_with_args(init, vec![], None);
+            return self.emit_init_literal_call(callee, vec![raw], int64_ty);
+        }
+        raw
+    }
+
+    /// Emit `array.matchGet(index)` where `raw_index` is a raw `lang.i64`.
+    /// The compiler guarantees `0 <= index < matchLength()`, so the conformer
+    /// skips bounds checks. Returns the (owned) element.
+    fn emit_array_match_get(
+        &mut self,
+        array: ValueId,
+        array_ty: TyId,
+        raw_index: ValueId,
+    ) -> ValueId {
+        let Some(proto) = self.array_matchable_protocol() else {
+            return raw_index;
+        };
+        let int64_ty = self.array_match_int64_ty();
+        let index = self.emit_int64_wrap(raw_index, int64_ty);
+        let elem_ty = self.array_element_ty(array_ty);
+        self.emit_array_matchable_call(
+            proto,
+            kestrel_hir::Builtin::ArrayMatchableMatchGet,
+            array,
+            array_ty,
+            vec![index],
+            elem_ty,
+        )
+    }
+
+    /// Raw `lang.i64` index of a suffix element `offset` positions from the
+    /// end: `matchLength() - offset` (offset is 1-based, 1 = last).
+    fn emit_array_index_from_end(
+        &mut self,
+        array: ValueId,
+        array_ty: TyId,
+        offset: usize,
+    ) -> ValueId {
+        let int64_ty = self.array_match_int64_ty();
+        let len = self.emit_array_match_length(array, array_ty);
+        let (raw_field, raw_ty) = self.resolve_struct_field(int64_ty, "raw");
+        let raw_len = self.emit_struct_extract(len, raw_field, raw_ty);
+        let off_lit = self.emit_literal(Immediate::i64(offset as i128));
+        self.emit_op2(
+            Op::Sub(IntBits::I64, Signedness::Signed),
+            raw_len,
+            off_lit,
+            raw_ty,
+        )
+    }
+
+    /// Emit `array.matchSlice(prefix, matchLength() - suffix)` — the rest
+    /// slice bound by `..rest`. Returns an `ArraySlice[Element]`. The compiler
+    /// guarantees `0 <= from <= to <= matchLength()`.
+    fn emit_array_match_slice(
+        &mut self,
+        array: ValueId,
+        array_ty: TyId,
+        prefix_len: usize,
+        suffix_len: usize,
+    ) -> ValueId {
+        let Some(proto) = self.array_matchable_protocol() else {
+            return array;
+        };
+        let int64_ty = self.array_match_int64_ty();
+        let from_raw = self.emit_literal(Immediate::i64(prefix_len as i128));
+        let from = self.emit_int64_wrap(from_raw, int64_ty);
+        // `to = matchLength() - suffix_len` (the slice ends before the fixed
+        // suffix elements; `suffix_len == 0` gives the whole tail).
+        let to_raw = self.emit_array_index_from_end(array, array_ty, suffix_len);
+        let to = self.emit_int64_wrap(to_raw, int64_ty);
+        let elem_ty = self.array_element_ty(array_ty);
+        let result_ty = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ResolveBuiltin {
+                builtin: kestrel_hir::Builtin::SliceStruct,
+                root: self.ctx.root,
+            })
+            .map(|e| self.ctx.module.ty_arena.named(e, vec![elem_ty]))
+            .unwrap_or(array_ty);
+        self.emit_array_matchable_call(
+            proto,
+            kestrel_hir::Builtin::ArrayMatchableMatchSlice,
+            array,
+            array_ty,
+            vec![from, to],
+            result_ty,
+        )
     }
 
     /// Emit an `EnumPayload` instruction to extract a field from an enum
@@ -1719,11 +1985,32 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
             start: start.map(|c| c as u32),
             end: end.map(|c| c as u32),
         },
+        // An array pattern dispatches on `matchLength()` (the switch
+        // discriminant is the length, see `array_length_discriminant`). A
+        // fixed-length pattern (`[a, b]`) needs an EXACT length; a
+        // rest-bearing one (`[a, ..]`) matches any length `>= prefix+suffix`.
+        // Source-ordered arms + the codegen's first-match chain make an exact
+        // case correctly shadow an overlapping `>=` case (e.g. `[a]` before
+        // `[a, ..]`).
+        Constructor::Array {
+            prefix_len,
+            suffix_len,
+            has_rest,
+        } => {
+            let min = (prefix_len + suffix_len) as i64;
+            if *has_rest {
+                SwitchCase::IntRange {
+                    start: Some(min),
+                    end: None,
+                }
+            } else {
+                SwitchCase::IntLiteral(min)
+            }
+        },
         Constructor::Wildcard
         | Constructor::Tuple { .. }
         | Constructor::Struct { .. }
         | Constructor::Unit
-        | Constructor::Array { .. }
         | Constructor::NonExhaustive
         | Constructor::Missing
         | Constructor::StringLiteral(_) => SwitchCase::Wildcard,

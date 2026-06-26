@@ -425,7 +425,7 @@ impl OssaBodyCtx<'_, '_> {
         )
     }
 
-    fn find_literal_init(
+    pub(crate) fn find_literal_init(
         &self,
         struct_entity: Entity,
         protocol: kestrel_hir::Builtin,

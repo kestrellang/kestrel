@@ -572,12 +572,18 @@ fn classify_by_conformances(
 
     // Literal types have infinite value spaces. ExpressibleByArrayLiteral is
     // a stdlib wrapper that inherits from InternalExpressibleByArrayLiteral,
-    // so checking the internal protocol suffices.
+    // so checking the internal protocol suffices. `ArrayMatchable` covers the
+    // deconstruction side: a type matchable with array patterns (e.g.
+    // `ArraySlice`, the `..rest` binding type) likewise has infinite length, so
+    // a recursive `[a, ..rest] | []` over a slice is exhaustive (without it the
+    // slice fell through to a single-constructor Struct and falsely tripped
+    // E305).
     if conforms_to(Builtin::ExpressibleByIntegerLiteral)
         || conforms_to(Builtin::ExpressibleByFloatLiteral)
         || conforms_to(Builtin::ExpressibleByCharLiteral)
         || conforms_to(Builtin::ExpressibleByStringLiteral)
         || conforms_to(Builtin::InternalExpressibleByArrayLiteral)
+        || conforms_to(Builtin::ArrayMatchable)
     {
         return Some(TypeShape::Infinite);
     }
@@ -611,14 +617,20 @@ fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> boo
     if query.has::<Intrinsic>(*entity) {
         return false;
     }
-    // ExpressibleByArrayLiteral inherits from _ExpressibleByArrayLiteral, so
-    // ConformingProtocols surfaces the internal protocol for any conforming type.
-    conforms_to_builtin(
-        query,
-        root,
-        *entity,
-        Builtin::InternalExpressibleByArrayLiteral,
-    )
+    // Array PATTERNS apply to any `ArrayMatchable` conformer — that protocol
+    // (matchLength/matchGet/matchSlice) is what the matcher lowers to. This is
+    // the deconstruction capability and the correct criterion for exhaustiveness
+    // (e.g. `ArraySlice`, which is matchable but not array-literal-expressible,
+    // so a recursive `[a, ..rest] | []` over a slice is exhaustive). The
+    // ExpressibleByArrayLiteral check stays for back-compat: it covers the
+    // construction side (`[1, 2, 3]`) and every literal type conforms to both.
+    conforms_to_builtin(query, root, *entity, Builtin::ArrayMatchable)
+        || conforms_to_builtin(
+            query,
+            root,
+            *entity,
+            Builtin::InternalExpressibleByArrayLiteral,
+        )
 }
 
 /// Collect Field children of an entity, in declaration order.
