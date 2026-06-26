@@ -783,7 +783,20 @@ pub fn expr_parser<'tokens>()
                 ExprVariant::Unary(tok, span, mutating, Box::new(operand))
             });
 
-        let condition_non_assignment = condition_unary.or(condition_postfix.clone());
+        // `try expr` in condition position (e.g. `if try f() { ... }`). Mirrors
+        // the full grammar's `try_expr`: `try` binds high, wrapping a postfix
+        // expression. Without this, `try` was absent from the restricted
+        // condition grammar and rejected even though `if (try f())` parsed.
+        let condition_try = control::try_keyword_parser()
+            .then(condition_postfix.clone())
+            .map(|(try_span, operand)| ExprVariant::Try {
+                try_span,
+                operand: Box::new(operand),
+            });
+
+        let condition_non_assignment = condition_try
+            .or(condition_unary)
+            .or(condition_postfix.clone());
 
         let condition_binary = condition_non_assignment
             .clone()
