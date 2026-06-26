@@ -5,7 +5,7 @@
 use inkwell::IntPredicate;
 use inkwell::builder::Builder;
 use inkwell::intrinsics::Intrinsic;
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicTypeEnum, IntType};
 use inkwell::values::{BasicValue, BasicValueEnum, IntValue};
 
 use kestrel_mir::terminator::{SwitchCase, Terminator, TerminatorKind};
@@ -231,6 +231,27 @@ fn compile_branch<'ctx>(
     Ok(())
 }
 
+/// Combine the (already-built) lower/upper bound comparisons of a range
+/// pattern, skipping any open bound. Both-open is a vacuous always-true match.
+fn combine_range_bounds<'ctx>(
+    builder: &Builder<'ctx>,
+    cmp_ty: IntType<'ctx>,
+    lo: Option<IntValue<'ctx>>,
+    hi: Option<IntValue<'ctx>>,
+) -> IntValue<'ctx> {
+    match (lo, hi) {
+        (Some(lo), Some(hi)) => builder.build_and(lo, hi, "range").unwrap(),
+        (Some(lo), None) => lo,
+        (None, Some(hi)) => hi,
+        (None, None) => {
+            let z = cmp_ty.const_zero();
+            builder
+                .build_int_compare(IntPredicate::EQ, z, z, "true")
+                .unwrap()
+        },
+    }
+}
+
 fn compile_switch<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
@@ -326,43 +347,54 @@ fn compile_switch<'ctx>(
                     "case",
                 )
                 .unwrap(),
+            // Open bounds (`None`) are left untested — filling them with a
+            // sentinel truncates under the discriminant width and always fails
+            // (#186). Both-open is a vacuous always-true match.
             SwitchCase::IntRange { start, end } => {
-                let ge = builder
-                    .build_int_compare(
-                        IntPredicate::SGE,
-                        disc_val,
-                        cmp_ty.const_int(*start as u64, true),
-                        "ge",
-                    )
-                    .unwrap();
-                let le = builder
-                    .build_int_compare(
-                        IntPredicate::SLE,
-                        disc_val,
-                        cmp_ty.const_int(*end as u64, true),
-                        "le",
-                    )
-                    .unwrap();
-                builder.build_and(ge, le, "range").unwrap()
+                let lo = start.map(|s| {
+                    builder
+                        .build_int_compare(
+                            IntPredicate::SGE,
+                            disc_val,
+                            cmp_ty.const_int(s as u64, true),
+                            "ge",
+                        )
+                        .unwrap()
+                });
+                let hi = end.map(|e| {
+                    builder
+                        .build_int_compare(
+                            IntPredicate::SLE,
+                            disc_val,
+                            cmp_ty.const_int(e as u64, true),
+                            "le",
+                        )
+                        .unwrap()
+                });
+                combine_range_bounds(builder, cmp_ty, lo, hi)
             },
             SwitchCase::CharRange { start, end } => {
-                let ge = builder
-                    .build_int_compare(
-                        IntPredicate::UGE,
-                        disc_val,
-                        cmp_ty.const_int(*start as u64, false),
-                        "ge",
-                    )
-                    .unwrap();
-                let le = builder
-                    .build_int_compare(
-                        IntPredicate::ULE,
-                        disc_val,
-                        cmp_ty.const_int(*end as u64, false),
-                        "le",
-                    )
-                    .unwrap();
-                builder.build_and(ge, le, "range").unwrap()
+                let lo = start.map(|s| {
+                    builder
+                        .build_int_compare(
+                            IntPredicate::UGE,
+                            disc_val,
+                            cmp_ty.const_int(s as u64, false),
+                            "ge",
+                        )
+                        .unwrap()
+                });
+                let hi = end.map(|e| {
+                    builder
+                        .build_int_compare(
+                            IntPredicate::ULE,
+                            disc_val,
+                            cmp_ty.const_int(e as u64, false),
+                            "le",
+                        )
+                        .unwrap()
+                });
+                combine_range_bounds(builder, cmp_ty, lo, hi)
             },
             SwitchCase::Wildcard => unreachable!(),
         };

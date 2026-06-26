@@ -1707,14 +1707,17 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
             SwitchCase::Variant(idx)
         },
         Constructor::IntLiteral(v) => SwitchCase::IntLiteral(*v),
+        // Keep open ends as `None` — they must be left untested rather than
+        // filled with a sentinel that truncates under the switch discriminant
+        // width (#186).
         Constructor::IntRange { start, end } => SwitchCase::IntRange {
-            start: start.unwrap_or(i64::MIN),
-            end: end.unwrap_or(i64::MAX),
+            start: *start,
+            end: *end,
         },
         Constructor::CharLiteral(c) => SwitchCase::CharLiteral(*c as u32),
         Constructor::CharRange { start, end } => SwitchCase::CharRange {
-            start: start.map(|c| c as u32).unwrap_or(0),
-            end: end.map(|c| c as u32).unwrap_or(u32::MAX),
+            start: start.map(|c| c as u32),
+            end: end.map(|c| c as u32),
         },
         Constructor::Wildcard
         | Constructor::Tuple { .. }

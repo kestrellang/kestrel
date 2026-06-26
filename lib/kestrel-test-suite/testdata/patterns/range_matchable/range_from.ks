@@ -1,6 +1,5 @@
 // test: diagnostics
 // stdlib: true
-// ignore: Open-ended ranges need exhaustiveness checking updates
 
 module Test
 
