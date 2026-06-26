@@ -85,17 +85,19 @@ fn lower_witnesses_for_type(
         } else {
             None
         };
-        // Prefer the source extension's own method impls when EITHER the
-        // implementing type is specialized (`extend Box[lang.i64]`) OR the
-        // PROTOCOL args are concrete (`extend S: Producer[Int64]`). The latter
-        // keeps each witness of a type that conforms to the same parameterized
-        // protocol more than once bound to its own instantiation's method —
-        // otherwise both collapse to the first `produce` found via the merged
-        // type-member discovery (which matches on params, not return type).
-        let proto_args_concrete = proto_type_args
-            .iter()
-            .any(|t| !matches!(ctx.module.ty_arena.get(*t), MirTy::TypeParam(_)));
-        let prefer_source = concrete_args.is_some() || proto_args_concrete;
+        // Prefer the source extension's OWN method impls. An extension's
+        // conformance is witnessed by the methods in that extension's body, so
+        // binding from its own children is the correct default — not the merged
+        // type-member discovery, which picks the first same-named impl across
+        // ALL extensions and so collapses overlapping conformances
+        // (`extend Box[T]: Tag` and `extend Box[T]: Tag where T: Show`, or a type
+        // conforming to the same parameterized protocol twice) onto one method
+        // (#182). When the source extension has no own impl of the requirement
+        // (an empty `extend T: P {}` relying on a default or another extension's
+        // member — e.g. #213), `bind_witness_methods` falls through to discovery.
+        let source_is_extension =
+            matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension));
+        let prefer_source = source_is_extension;
         let witness_impl_ty = match &concrete_args {
             Some(args) => ctx.module.ty_arena.named(type_entity, args.clone()),
             None => impl_ty,
@@ -133,6 +135,20 @@ fn lower_witnesses_for_type(
         let mut witness = WitnessDef::new(*protocol, witness_impl_ty);
         witness.proto_type_args = proto_type_args.clone();
         ctx.register_name(*protocol);
+
+        // Carry the supplying extension's `where` clauses onto the witness so
+        // the mono selector can (a) reject a constrained witness whose bound
+        // doesn't hold for the concrete self and (b) prefer it over an
+        // overlapping unconstrained witness when it does (#182).
+        if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension))
+            && let Some(ast_wc) = ctx.world.get::<kestrel_ast_builder::WhereClause>(*source).cloned()
+        {
+            let mut wc = kestrel_mir::item::function::WhereClause::new();
+            for ast_constraint in &ast_wc.0 {
+                crate::items::function_sig::lower_where_constraint(ctx, ast_constraint, *source, &mut wc);
+            }
+            witness.constraints = wc.constraints;
+        }
 
         // Build substitution map for protocol type params
         let proto_tp_entities = protocol_type_param_entities(ctx, *protocol);

@@ -315,7 +315,7 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
     }
 }
 
-fn lower_where_constraint(
+pub(crate) fn lower_where_constraint(
     ctx: &mut LowerCtx,
     constraint: &AstWhereConstraint,
     context: Entity,
