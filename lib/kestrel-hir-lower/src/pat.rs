@@ -249,10 +249,29 @@ impl LowerCtx<'_> {
             },
 
             AstPat::Or { alternatives, span } => {
-                let lowered: Vec<HirPatId> = alternatives
-                    .iter()
-                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
-                    .collect();
+                // Lower the first alternative normally, then make every later
+                // alternative reuse the locals it created (per binding name) so
+                // all alternatives — and the arm body — share one local per
+                // name. Without this, each `.A(x) or .B(x)` alternative gets a
+                // distinct `x`; the body reads the last-defined one while each
+                // leaf binds its own → an undefined-local OSSA ICE (#187).
+                let mut lowered: Vec<HirPatId> = Vec::with_capacity(alternatives.len());
+                let mut iter = alternatives.iter();
+                if let Some(&first_id) = iter.next() {
+                    let before = self.current_scope_bindings();
+                    lowered.push(self.lower_pat_inner(body, first_id, force_mut));
+                    let after = self.current_scope_bindings();
+                    // Names the first alternative (re)bound → reuse for the rest.
+                    let reuse: std::collections::HashMap<String, _> = after
+                        .into_iter()
+                        .filter(|(name, local)| before.get(name) != Some(local))
+                        .collect();
+                    let prev = self.set_or_reuse(Some(reuse));
+                    for &id in iter {
+                        lowered.push(self.lower_pat_inner(body, id, force_mut));
+                    }
+                    self.set_or_reuse(prev);
+                }
                 self.alloc_pat(HirPat::Or {
                     alternatives: lowered,
                     span: span.clone(),

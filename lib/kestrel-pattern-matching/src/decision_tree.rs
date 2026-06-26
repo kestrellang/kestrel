@@ -222,12 +222,14 @@ fn compile_leaf(
         return DecisionTree::Failure;
     };
 
-    // Collect bindings from the ORIGINAL HirPat (not the flattened one)
+    // Collect bindings from the ORIGINAL HirPat (not the flattened one).
+    // `row.matched` is the constructor trail this leaf was reached through, so
+    // an or-pattern picks the alternative that actually matched (#187).
     let bindings = arm_pat_ids
         .get(row.arm_index)
         .map(|&pat_id| {
             let mut bindings = Vec::new();
-            collect_bindings(hir, query, pat_id, &vec![], &mut bindings);
+            collect_bindings(hir, query, pat_id, &vec![], &row.matched, &mut bindings);
             bindings
         })
         .unwrap_or_default();
@@ -347,6 +349,7 @@ fn collect_bindings(
     query: &QueryContext<'_>,
     pat_id: HirPatId,
     path: &AccessPath,
+    matched: &[Constructor],
     bindings: &mut Vec<Binding>,
 ) {
     match &hir.pats[pat_id] {
@@ -376,7 +379,7 @@ fn collect_bindings(
                 ty: ResolvedTy::Error,
                 path: path.clone(),
             });
-            collect_bindings(hir, query, *subpattern, path, bindings);
+            collect_bindings(hir, query, *subpattern, path, matched, bindings);
         },
 
         HirPat::Tuple { prefix, suffix, .. } => {
@@ -384,14 +387,14 @@ fn collect_bindings(
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
             }
             // Suffix elements: actual indices depend on tuple arity (set during flattening)
             // For now, use placeholder indices — codegen will resolve from the decision tree
             for (j, &elem) in suffix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(prefix.len() + j));
-                collect_bindings(hir, query, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
             }
         },
 
@@ -408,7 +411,7 @@ fn collect_bindings(
                 let mut arg_path = path.clone();
                 arg_path.push(PathElement::Downcast(case_name.clone()));
                 arg_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, arg.pattern, &arg_path, bindings);
+                collect_bindings(hir, query, arg.pattern, &arg_path, matched, bindings);
             }
         },
 
@@ -422,7 +425,7 @@ fn collect_bindings(
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
             }
             // Suffix: when a rest is present, suffix elements are positioned
             // from the end (runtime `len - offset`); without a rest the
@@ -436,7 +439,7 @@ fn collect_bindings(
                 } else {
                     elem_path.push(PathElement::Index(prefix.len() + j));
                 }
-                collect_bindings(hir, query, elem, &elem_path, bindings);
+                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
             }
             // Named rest binding → Slice[T] extracted via matchSlice.
             if let Some(Some(local)) = rest {
@@ -464,15 +467,28 @@ fn collect_bindings(
                     field_path.push(PathElement::Field(
                         field.field_name.as_str_or_empty().to_string(),
                     ));
-                    collect_bindings(hir, query, pat, &field_path, bindings);
+                    collect_bindings(hir, query, pat, &field_path, matched, bindings);
                 }
             }
         },
 
         HirPat::Or { alternatives, .. } => {
-            // Use first alternative's bindings (type checker ensures consistency)
-            if let Some(&first) = alternatives.first() {
-                collect_bindings(hir, query, first, path, bindings);
+            // The matrix expands an or-pattern into one row per alternative, so
+            // each alternative reaches its OWN leaf. Collect bindings from the
+            // alternative this leaf matched — identified by the constructor trail
+            // `matched` — because the binding's access path (which downcast /
+            // field index) is the matched alternative's. Using the first
+            // alternative unconditionally extracts via the wrong path on the
+            // others (#187). The type checker guarantees every alternative binds
+            // the same names, so falling back to the first when no head matches
+            // (e.g. literal alternatives, which bind nothing) is sound.
+            let chosen = alternatives
+                .iter()
+                .copied()
+                .find(|&alt| or_alternative_matches(hir, query, alt, matched))
+                .or_else(|| alternatives.first().copied());
+            if let Some(alt) = chosen {
+                collect_bindings(hir, query, alt, path, matched, bindings);
             }
         },
 
@@ -482,5 +498,46 @@ fn collect_bindings(
         | HirPat::Error { .. } => {
             // No bindings
         },
+    }
+}
+
+/// Does this or-alternative's head constructor appear in the matched-constructor
+/// trail of the leaf? Identifies which alternative an or-pattern matched.
+/// Compares variants by entity-name and booleans by value (the same identities
+/// the matrix specialized on); looks through `@` / nested heads.
+fn or_alternative_matches(
+    hir: &HirBody,
+    query: &QueryContext<'_>,
+    alt: HirPatId,
+    matched: &[Constructor],
+) -> bool {
+    let variant_name = |entity: Entity| query.get::<Name>(entity).map(|n| n.0.clone());
+    let matched_variant_name = |c: &Constructor| match c {
+        Constructor::Variant { entity, .. } => variant_name(*entity),
+        _ => None,
+    };
+    match &hir.pats[alt] {
+        HirPat::Variant { entity, .. } => {
+            let name = variant_name(*entity);
+            name.is_some() && matched.iter().any(|c| matched_variant_name(c) == name)
+        },
+        HirPat::ImplicitVariant { name, .. } => {
+            let n = name.as_str_or_empty();
+            !n.is_empty()
+                && matched
+                    .iter()
+                    .any(|c| matched_variant_name(c).as_deref() == Some(n))
+        },
+        HirPat::Literal {
+            value: HirLiteral::Bool(b),
+            ..
+        } => matched.iter().any(|c| {
+            matches!(
+                (c, b),
+                (Constructor::True, true) | (Constructor::False, false)
+            )
+        }),
+        HirPat::At { subpattern, .. } => or_alternative_matches(hir, query, *subpattern, matched),
+        _ => false,
     }
 }
