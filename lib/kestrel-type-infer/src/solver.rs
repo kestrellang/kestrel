@@ -23,9 +23,9 @@ use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness,
-    StaticLayer, StaticRequirement, Staticness, TypeParamCopyRequirement,
-    TypeParamStaticRequirement, instance_is_static,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, StaticLayer,
+    StaticRequirement, Staticness, TypeParamCopyRequirement, TypeParamStaticRequirement,
+    instance_is_static,
 };
 use kestrel_span::Span;
 
@@ -460,9 +460,7 @@ fn find_ref_violation(
             .iter()
             .chain(std::iter::once(&ret))
             .find_map(|&p| find_ref_violation(ctx, p, RefPos::InFn, seen)),
-        TyKind::AssocProjection { base, .. } => {
-            find_ref_violation(ctx, base, RefPos::Nested, seen)
-        },
+        TyKind::AssocProjection { base, .. } => find_ref_violation(ctx, base, RefPos::Nested, seen),
         TyKind::Opaque {
             bounds,
             origin_args,
@@ -609,14 +607,10 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 let v_err = ctx.is_error(ctx.resolve(value));
                 let t_err = ctx.is_error(ctx.resolve(target));
                 if v_err || t_err {
-                    if v_err
-                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
-                    {
+                    if v_err && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
                         ctx.poison(target);
                     }
-                    if t_err
-                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
-                    {
+                    if t_err && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. }) {
                         ctx.poison(value);
                     }
                     continue;
@@ -638,14 +632,10 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 let v_err = ctx.is_error(ctx.resolve(value));
                 let t_err = ctx.is_error(ctx.resolve(target));
                 if v_err || t_err {
-                    if v_err
-                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
-                    {
+                    if v_err && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
                         ctx.poison(target);
                     }
-                    if t_err
-                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
-                    {
+                    if t_err && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. }) {
                         ctx.poison(value);
                     }
                     continue;
@@ -2346,7 +2336,9 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
                 root: ctx.root,
             }) == StaticRequirement::RequiresStatic
         },
-        TyKind::Tuple(elems) => elems.iter().all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
+        TyKind::Tuple(elems) => elems
+            .iter()
+            .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
         // Function types are Static in 2a. TODO(static-2c): the capture-
         // derived Static bit on function types.
         // Protocol / opaque / alias / assoc-projection / Never / Error:
@@ -3623,6 +3615,25 @@ fn solve_member(
         }
     }
 
+    // A member resolved THROUGH a protocol (the multi-match collapse in
+    // `try_resolve_through_protocol`, which merges several same-requirement
+    // extension methods) carries no single `from_extension`, so the check above
+    // can't catch it. Verify the receiver genuinely conforms to that protocol
+    // for THIS instantiation — not merely by nominal. `Box(0).show()` over
+    // `extend Box[lang.i64]: Show` + `extend Box[lang.i32]: Show` resolves `show`
+    // via `Show`, but neither extension applies to `Box[Int64]`; without this it
+    // type-checked and only failed (post-fix: cleanly) at mono.
+    if let Some(proto) = resolution.via_protocol
+        && !receiver_conforms_to_protocol_concretely(ctx, &recv_kind, proto)
+    {
+        return SolveResult::Error(InferError::NoMember {
+            receiver,
+            name: name.to_string(),
+            is_call,
+            span,
+        });
+    }
+
     // Field/property used as a call → field access + call on the field value.
     // Handles both function-typed fields (e.g., `self.transform(item)`, `self.separator()`)
     // and subscriptable fields (e.g., `self.data(unchecked: i)` where data is Array[T]).
@@ -3668,7 +3679,10 @@ fn solve_member(
         if is_call && args.is_empty() {
             let resolved = ctx.resolve(field_tv);
             if ctx.is_concrete(resolved)
-                && !matches!(ctx.slot(resolved), TySlot::Resolved(TyKind::Function { .. }))
+                && !matches!(
+                    ctx.slot(resolved),
+                    TySlot::Resolved(TyKind::Function { .. })
+                )
             {
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
@@ -4341,6 +4355,44 @@ fn solve_tuple_rest_pat(
 
 /// Check if an extension's explicit type args are compatible with the receiver's type args.
 /// Returns false only when we can definitively prove incompatibility.
+/// Does `recv_kind` genuinely conform to `protocol` for its concrete
+/// instantiation — i.e. is the conformance declared on the type body, or
+/// provided by an extension whose self-type args are compatible with the
+/// receiver? A purely nominal conformance (e.g. `Box` declares `Show` only via
+/// `extend Box[lang.i64]`) does NOT apply to a differently-specialized receiver
+/// (`Box[Int64]`). Mirrors the per-extension check mono uses for witnesses.
+fn receiver_conforms_to_protocol_concretely(
+    ctx: &InferCtx<'_>,
+    recv_kind: &TyKind,
+    protocol: Entity,
+) -> bool {
+    let Some(nominal) = recv_kind.entity() else {
+        return true; // structural / non-nominal — don't second-guess
+    };
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity: nominal,
+            root: ctx.root,
+        });
+    let mut saw_provider = false;
+    for (proto, source, _args) in &insts {
+        if *proto != protocol {
+            continue;
+        }
+        saw_provider = true;
+        // Conformance on the type body (source == the type) applies to every
+        // instantiation. An extension applies only if its self-type args match.
+        if *source == nominal || extension_type_args_compatible(ctx, *source, recv_kind) {
+            return true;
+        }
+    }
+    // No provider at all: defer (inheritance/refinement/blanket sources the
+    // instantiation query may not enumerate — stay permissive, the witness
+    // backstop catches a genuine miss). Providers existed but none applied: reject.
+    !saw_provider
+}
+
 fn extension_type_args_compatible(
     ctx: &InferCtx<'_>,
     extension: Entity,
@@ -5115,7 +5167,10 @@ fn emit_static_wellformedness(
         root: ctx.root,
     });
     for clause in where_clauses {
-        let crate::resolve::WhereClause::Bound { param, protocol, .. } = clause else {
+        let crate::resolve::WhereClause::Bound {
+            param, protocol, ..
+        } = clause
+        else {
             continue;
         };
         if protocol != static_proto {

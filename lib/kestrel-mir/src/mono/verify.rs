@@ -18,6 +18,11 @@ pub struct MonoVerifyError {
     pub message: String,
     /// Source span from the instruction, if available.
     pub span: Option<Span>,
+    /// `true` when this is a recoverable USER error surfaced late (a front-end
+    /// soundness gap — e.g. an unresolved conformance witness — that should have
+    /// been a clean diagnostic) rather than a true malformed-MIR ICE. Rendered
+    /// as a plain build error, not "internal compiler error / file a bug".
+    pub user_facing: bool,
 }
 
 #[derive(Debug)]
@@ -45,6 +50,7 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
     for s in module.structs.values() {
         if s.type_info.layout.is_none() {
             errors.push(MonoVerifyError {
+                user_facing: false,
                 func_idx: 0,
                 block: None,
                 inst: None,
@@ -61,6 +67,7 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
     for e in module.enums.values() {
         if e.type_info.layout.is_none() {
             errors.push(MonoVerifyError {
+                user_facing: false,
                 func_idx: 0,
                 block: None,
                 inst: None,
@@ -108,6 +115,7 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
         for f in &s.fields {
             if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
                 errors.push(MonoVerifyError {
+                    user_facing: false,
                     func_idx: 0,
                     block: None,
                     inst: None,
@@ -130,7 +138,7 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
         for case in &e.cases {
             for f in &case.payload_fields {
                 if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
-                    errors.push(MonoVerifyError {
+                    errors.push(MonoVerifyError { user_facing: false,
                         func_idx: 0,
                         block: None,
                         inst: None,
@@ -155,6 +163,7 @@ fn verify_function(
     // Body must be present unless extern
     if func.body.is_none() && func.extern_info.is_none() {
         errors.push(MonoVerifyError {
+            user_facing: false,
             func_idx: fi,
             block: None,
             inst: None,
@@ -369,6 +378,7 @@ fn check_callee(
                 .map(|t| describe_mono_ty(module, t))
                 .unwrap_or_else(|| "None".into());
             errors.push(MonoVerifyError {
+                user_facing: false,
                 func_idx: fi,
                 block: Some(block),
                 inst: Some(ii),
@@ -380,18 +390,39 @@ fn check_callee(
                 span: span.cloned(),
             });
         },
-        Callee::Witness { .. } => {
+        Callee::Witness {
+            protocol,
+            method,
+            self_type,
+            ..
+        } => {
+            // A surviving witness call means no conformance witness existed for
+            // the concrete receiver — a front-end gap (it accepted a member call
+            // mono can't dispatch). Surface it as a clean build error, not an
+            // ICE: the program is at fault, not the compiler.
+            let proto = module
+                .entity_names
+                .get(protocol)
+                .cloned()
+                .unwrap_or_else(|| format!("{protocol:?}"));
+            let ty = describe_mono_ty(module, *self_type);
             errors.push(MonoVerifyError {
+                user_facing: true,
                 func_idx: fi,
                 block: Some(block),
                 inst: Some(ii),
-                message: "Callee::Witness not resolved".into(),
+                message: format!(
+                    "type '{ty}' does not implement '{}' required by '{proto}' \
+                     (no matching conformance for this instantiation)",
+                    method.name
+                ),
                 span: span.cloned(),
             });
         },
         Callee::Resolved(id) => {
             if id.index() >= func_count {
                 errors.push(MonoVerifyError {
+                    user_facing: false,
                     func_idx: fi,
                     block: Some(block),
                     inst: Some(ii),
@@ -468,6 +499,7 @@ fn check_literal(
     match kind {
         ImmediateKind::FunctionRef { .. } => {
             errors.push(MonoVerifyError {
+                user_facing: false,
                 func_idx: fi,
                 block: Some(block),
                 inst: Some(ii),
@@ -478,6 +510,7 @@ fn check_literal(
         ImmediateKind::MonoFunctionRef(id) => {
             if id.index() >= func_count {
                 errors.push(MonoVerifyError {
+                    user_facing: false,
                     func_idx: fi,
                     block: Some(block),
                     inst: Some(ii),
@@ -519,6 +552,7 @@ fn check_type_concrete(
     match module.ty_arena.get(ty) {
         MirTy::TypeParam(e) => {
             errors.push(MonoVerifyError {
+                user_facing: false,
                 func_idx: fi,
                 block,
                 inst,
@@ -528,6 +562,7 @@ fn check_type_concrete(
         },
         MirTy::AssociatedProjection { .. } => {
             errors.push(MonoVerifyError {
+                user_facing: false,
                 func_idx: fi,
                 block,
                 inst,
