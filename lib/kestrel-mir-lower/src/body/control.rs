@@ -7,7 +7,7 @@
 
 use kestrel_hir::body::{HirBlock, HirExprId};
 use kestrel_mir::value::Ownership;
-use kestrel_mir::{BlockId, FieldIdx, Immediate, TyId, ValueId};
+use kestrel_mir::{FieldIdx, Immediate, TyId, ValueId};
 
 use super::{ArmExit, LoopInfo, OssaBodyCtx};
 
@@ -348,10 +348,22 @@ impl OssaBodyCtx<'_, '_> {
         if let Some(info) = self.find_loop(label) {
             let header = info.header_block;
             let depth = info.scope_depth;
-            let header_param_vals = self.header_param_values(header);
-            self.destroy_scopes_to_depth(depth, &header_param_vals);
-            let current_vals = self.collect_current_for_values(&header_param_vals);
-            self.emit_jump(header, current_vals);
+            let tracker_len = info.tracker_len;
+            // Mirror `lower_break`: the loop's header and exit blocks share the
+            // same parameter descriptors, so the back-edge to the header takes
+            // the same values break threads to the exit — the loop's tracked
+            // values, which by the positional tracker contract are the first N
+            // slots of the (possibly nested) active tracker. Fishing the
+            // header's own param values instead (the old code) misaligns when a
+            // labeled `continue` crosses an INNER loop, whose `lower_loop`
+            // replaced the active tracker — producing an OSSA "consumed more
+            // than once" ICE (#201).
+            let all_vals = self.tracker.values();
+            let header_vals: Vec<ValueId> = all_vals[..tracker_len.min(all_vals.len())].to_vec();
+            // Destroy the crossed scopes (inner loop bodies + nested ones),
+            // keeping the values threaded back to the header.
+            self.destroy_scopes_to_depth(depth, &header_vals);
+            self.emit_jump(header, header_vals);
         }
         self.emit_literal(Immediate::unit())
     }
@@ -371,28 +383,4 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    fn collect_current_for_values(&self, expected: &[ValueId]) -> Vec<ValueId> {
-        let all_tracked = self.all_live_tracked();
-        if all_tracked.len() >= expected.len() {
-            all_tracked[..expected.len()]
-                .iter()
-                .map(|&(v, _, _)| v)
-                .collect()
-        } else {
-            let mut vals: Vec<_> = all_tracked.iter().map(|&(v, _, _)| v).collect();
-            while vals.len() < expected.len() {
-                vals.push(expected[vals.len()]);
-            }
-            vals
-        }
-    }
-
-    fn header_param_values(&self, header: BlockId) -> Vec<ValueId> {
-        self.body
-            .block(header)
-            .params
-            .iter()
-            .map(|p| p.value)
-            .collect()
-    }
 }
