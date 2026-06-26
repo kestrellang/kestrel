@@ -273,11 +273,28 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
                     panic!("ICE: opaque type origin {:?} has no concrete type", origin)
                 });
 
-            let type_params = ctx
+            // `origin_args` is built parallel to the opaque origin's
+            // substitution list: the origin's OWN type params first, then the
+            // params of its enclosing container(s). For a free function the own
+            // params suffice, but a method's `some P` underlier can mention the
+            // ENCLOSING type's params (`Factory[T].makeOne() -> some Counter {
+            // self.proto }`, underlier `T`). Collecting only the method's own
+            // params left `T` unsubstituted, leaking a `TypeParam` past mono
+            // (#183). Walk origin → ancestors so the zip covers the container
+            // params too; the by-index substitute ignores any trailing params
+            // that `origin_args` doesn't carry.
+            let mut type_params: Vec<Entity> = ctx
                 .world
                 .get::<TypeParams>(*origin)
                 .map(|tp| tp.0.clone())
                 .unwrap_or_default();
+            let mut ancestor = ctx.world.parent_of(*origin);
+            while let Some(p) = ancestor {
+                if let Some(tp) = ctx.world.get::<TypeParams>(p) {
+                    type_params.extend(tp.0.iter().copied());
+                }
+                ancestor = ctx.world.parent_of(p);
+            }
 
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
             let result = lower_resolved_ty_preserving(ctx, &substituted);
