@@ -28,7 +28,7 @@
 //!
 //! Multi-column support is built in (works on any column, not just column 0).
 
-use kestrel_hecs::QueryContext;
+use kestrel_hecs::{Entity, QueryContext};
 use kestrel_type_infer::result::ResolvedTy;
 
 use super::constructor::Constructor;
@@ -130,10 +130,11 @@ impl PatternMatrix {
     pub fn specialize(
         &self,
         query: &QueryContext<'_>,
+        root: Entity,
         col: usize,
         ctor: &Constructor,
     ) -> PatternMatrix {
-        let field_types = ctor.field_types(query, &self.col_types[col]);
+        let field_types = ctor.field_types(query, root, &self.col_types[col]);
         let arity = ctor.arity();
 
         // New column types: [..col] + field_types + [col+1..]

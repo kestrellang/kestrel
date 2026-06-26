@@ -177,7 +177,7 @@ fn compile_matrix(
     // Build cases
     let mut cases = Vec::new();
     for ctor in &head_ctors {
-        let specialized = matrix.specialize(query, col, ctor);
+        let specialized = matrix.specialize(query, root, col, ctor);
         let new_paths = build_specialized_paths(col_paths, col, ctor, query);
         let subtree = compile_matrix(hir, query, root, &specialized, &new_paths, arm_pat_ids);
         cases.push((ctor.clone(), subtree));

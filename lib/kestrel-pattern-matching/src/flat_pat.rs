@@ -17,7 +17,7 @@
 //!
 //! ## Key Functions
 //!
-//! - `flatten(hir, query, pat_id, scrutinee_ty)` — convert HirPat → FlatPat
+//! - `flatten(hir, query, root, pat_id, scrutinee_ty)` — convert HirPat → FlatPat
 //! - `FlatPat::decompose(ctor, arity)` — extract sub-patterns for specialization
 //!   (the SINGLE decomposition function used by both matrix and decision tree)
 //! - `FlatPat::is_wildcard_like()` — does this pattern match anything?
@@ -205,6 +205,7 @@ fn decompose_array(
 pub fn flatten(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     pat_id: HirPatId,
     scrutinee_ty: &ResolvedTy,
 ) -> FlatPat {
@@ -242,7 +243,7 @@ pub fn flatten(
                 .enumerate()
                 .map(|(i, &elem_id)| {
                     let elem_ty = elem_types.get(i).unwrap_or(&ResolvedTy::Error);
-                    flatten(hir, query, elem_id, elem_ty)
+                    flatten(hir, query, root, elem_id, elem_ty)
                 })
                 .collect();
 
@@ -260,7 +261,7 @@ pub fn flatten(
                 let elem_ty = elem_types
                     .get(suffix_start + j)
                     .unwrap_or(&ResolvedTy::Error);
-                children.push(flatten(hir, query, elem_id, elem_ty));
+                children.push(flatten(hir, query, root, elem_id, elem_ty));
             }
 
             FlatPat::Ctor {
@@ -274,13 +275,13 @@ pub fn flatten(
         // Fully resolved variant (entity known from name resolution)
         HirPat::Variant { entity, args, .. } => {
             let arity = args.len();
-            let field_types = resolve_variant_field_types(query, *entity, scrutinee_ty);
+            let field_types = resolve_variant_field_types(query, root, *entity, scrutinee_ty);
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
                     let arg_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
-                    flatten(hir, query, arg.pattern, arg_ty)
+                    flatten(hir, query, root, arg.pattern, arg_ty)
                 })
                 .collect();
 
@@ -296,13 +297,13 @@ pub fn flatten(
         // Implicit variant — resolve entity from scrutinee type's enum cases
         HirPat::ImplicitVariant { name, args, .. } => {
             let (entity, field_types) =
-                resolve_implicit_variant(query, name.as_str_or_empty(), args.len(), scrutinee_ty);
+                resolve_implicit_variant(query, root, name.as_str_or_empty(), args.len(), scrutinee_ty);
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
                     let arg_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
-                    flatten(hir, query, arg.pattern, arg_ty)
+                    flatten(hir, query, root, arg.pattern, arg_ty)
                 })
                 .collect();
 
@@ -328,7 +329,7 @@ pub fn flatten(
                 entity: *entity,
                 arity: all_fields.len(),
             };
-            let field_types = struct_ctor.field_types(query, scrutinee_ty);
+            let field_types = struct_ctor.field_types(query, root, scrutinee_ty);
 
             let children: Vec<_> = all_fields
                 .iter()
@@ -344,7 +345,7 @@ pub fn flatten(
                         .iter()
                         .find(|f| f.field_name.as_str() == Some(field_name));
                     match matched.and_then(|f| f.pattern) {
-                        Some(pat_id) => flatten(hir, query, pat_id, field_ty),
+                        Some(pat_id) => flatten(hir, query, root, pat_id, field_ty),
                         None => FlatPat::Wildcard,
                     }
                 })
@@ -376,12 +377,12 @@ pub fn flatten(
             let has_rest = rest.is_some();
             let mut children: Vec<_> = prefix
                 .iter()
-                .map(|&id| flatten(hir, query, id, &elem_ty))
+                .map(|&id| flatten(hir, query, root, id, &elem_ty))
                 .collect();
             if has_rest {
                 children.push(FlatPat::Wildcard); // rest slot
             }
-            children.extend(suffix.iter().map(|&id| flatten(hir, query, id, &elem_ty)));
+            children.extend(suffix.iter().map(|&id| flatten(hir, query, root, id, &elem_ty)));
 
             FlatPat::Ctor {
                 ctor: Constructor::Array {
@@ -396,14 +397,14 @@ pub fn flatten(
         HirPat::Or { alternatives, .. } => {
             let alts: Vec<_> = alternatives
                 .iter()
-                .map(|&alt_id| flatten(hir, query, alt_id, scrutinee_ty))
+                .map(|&alt_id| flatten(hir, query, root, alt_id, scrutinee_ty))
                 .collect();
             FlatPat::Or(alts)
         },
 
         // At-pattern: the binding is irrelevant to the matrix algorithm,
         // only the subpattern determines constructor structure
-        HirPat::At { subpattern, .. } => flatten(hir, query, *subpattern, scrutinee_ty),
+        HirPat::At { subpattern, .. } => flatten(hir, query, root, *subpattern, scrutinee_ty),
     }
 }
 
@@ -477,6 +478,7 @@ fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive
 /// to reuse the shared type resolution logic.
 fn resolve_variant_field_types(
     query: &QueryContext<'_>,
+    root: Entity,
     case_entity: Entity,
     scrutinee_ty: &ResolvedTy,
 ) -> Vec<ResolvedTy> {
@@ -488,12 +490,13 @@ fn resolve_variant_field_types(
         entity: case_entity,
         arity,
     };
-    ctor.field_types(query, scrutinee_ty)
+    ctor.field_types(query, root, scrutinee_ty)
 }
 
 /// Resolve an implicit variant name to its entity, searching the scrutinee type's cases.
 fn resolve_implicit_variant(
     query: &QueryContext<'_>,
+    root: Entity,
     name: &str,
     arity: usize,
     scrutinee_ty: &ResolvedTy,
@@ -503,7 +506,7 @@ fn resolve_implicit_variant(
             if matches!(query.get::<NodeKind>(child), Some(NodeKind::EnumCase))
                 && query.get::<Name>(child).is_some_and(|n| n.0 == name)
             {
-                let field_types = resolve_variant_field_types(query, child, scrutinee_ty);
+                let field_types = resolve_variant_field_types(query, root, child, scrutinee_ty);
                 return (child, field_types);
             }
         }

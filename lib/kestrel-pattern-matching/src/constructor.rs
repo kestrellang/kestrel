@@ -33,7 +33,7 @@ use std::collections::HashSet;
 use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
-use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_type_infer::result::ResolvedTy;
 
 use super::witness::Witness;
@@ -187,7 +187,12 @@ impl Constructor {
     ///
     /// For example, `Variant("Some", 1)` on `Optional[Int]` returns `[Int]`.
     /// This is the SINGLE implementation — no duplicates elsewhere.
-    pub fn field_types(&self, query: &QueryContext<'_>, parent_ty: &ResolvedTy) -> Vec<ResolvedTy> {
+    pub fn field_types(
+        &self,
+        query: &QueryContext<'_>,
+        root: Entity,
+        parent_ty: &ResolvedTy,
+    ) -> Vec<ResolvedTy> {
         match (self, parent_ty) {
             (Constructor::Tuple { .. }, ResolvedTy::Tuple(elems)) => elems.clone(),
 
@@ -205,7 +210,7 @@ impl Constructor {
                         .iter()
                         .map(|p| {
                             // Resolve the parameter type with the enum's type args
-                            resolve_case_param_type(query, *enum_entity, args, p)
+                            resolve_case_param_type(query, root, *enum_entity, args, p)
                         })
                         .collect();
                 }
@@ -218,7 +223,9 @@ impl Constructor {
                 if fields.len() == *arity {
                     fields
                         .iter()
-                        .map(|field_entity| resolve_field_type(query, *field_entity, *entity, args))
+                        .map(|field_entity| {
+                            resolve_field_type(query, root, *field_entity, *entity, args)
+                        })
                         .collect()
                 } else {
                     vec![parent_ty.clone(); *arity]
@@ -632,24 +639,26 @@ pub(super) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<En
 /// to the raw AstType resolution.
 fn resolve_case_param_type(
     query: &QueryContext<'_>,
+    root: Entity,
     enum_entity: Entity,
     type_args: &[ResolvedTy],
     param: &kestrel_ast_builder::AstParam,
 ) -> ResolvedTy {
     let subs = build_type_param_subs(query, enum_entity, type_args);
-    resolve_ast_type_with_subs(query, param.ty.as_ref(), &subs, enum_entity)
+    resolve_ast_type_with_subs(query, root, param.ty.as_ref(), &subs, enum_entity)
 }
 
 /// Resolve a field's type with the parent struct's type arguments.
 fn resolve_field_type(
     query: &QueryContext<'_>,
+    root: Entity,
     field_entity: Entity,
     parent_entity: Entity,
     type_args: &[ResolvedTy],
 ) -> ResolvedTy {
     let subs = build_type_param_subs(query, parent_entity, type_args);
     let ast_ty = query.get::<TypeAnnotation>(field_entity).map(|ta| &ta.0);
-    resolve_ast_type_with_subs(query, ast_ty, &subs, parent_entity)
+    resolve_ast_type_with_subs(query, root, ast_ty, &subs, parent_entity)
 }
 
 /// Build a mapping from type parameter names to their concrete types.
@@ -681,6 +690,7 @@ fn build_type_param_subs(
 /// `scope_entity` is used to walk up the parent chain for name resolution.
 fn resolve_ast_type_with_subs(
     query: &QueryContext<'_>,
+    root: Entity,
     ast_ty: Option<&kestrel_ast::AstType>,
     subs: &[(String, ResolvedTy)],
     scope_entity: Entity,
@@ -693,29 +703,44 @@ fn resolve_ast_type_with_subs(
 
     match ty {
         AstType::Named { segments, .. } => {
+            // A bare single-segment name may be a type parameter — substitute it.
             if segments.len() == 1 && segments[0].type_args.is_empty() {
                 let name = &segments[0].name;
-                // Try type parameter substitution first
                 if let Some((_, resolved)) = subs.iter().find(|(n, _)| n == name) {
                     return resolved.clone();
                 }
-                // Try resolving as a sibling type in the parent scope
-                if let Some(entity) = resolve_name_in_scope(query, name, scope_entity) {
-                    // Recurse to resolve type args on the segments
-                    return ResolvedTy::Named {
-                        entity,
-                        args: vec![],
-                    };
-                }
             }
-            // Multi-segment or unresolved — conservative fallback
-            ResolvedTy::Error
+            // Resolve the path to its type entity via the canonical resolver
+            // (handles builtins like `Bool`/`Int64`, stdlib types, and generic
+            // instantiations like `Optional[Int64]` — the hand-rolled
+            // sibling-scope lookup could not, leaving such payload/field types
+            // as `Error` and breaking nested pattern matching, #189/#190).
+            let path: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+            let entity = match query.query(ResolveTypePath {
+                segments: path,
+                context: scope_entity,
+                root,
+            }) {
+                TypeResolution::Found(entity) => entity,
+                _ => return ResolvedTy::Error,
+            };
+            // Recursively resolve the trailing segment's type arguments.
+            let args: Vec<ResolvedTy> = segments
+                .last()
+                .map(|seg| {
+                    seg.type_args
+                        .iter()
+                        .map(|a| resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity))
+                        .collect()
+                })
+                .unwrap_or_default();
+            ResolvedTy::Named { entity, args }
         },
 
         AstType::Tuple(elems, _) => {
             let resolved: Vec<_> = elems
                 .iter()
-                .map(|e| resolve_ast_type_with_subs(query, Some(e), subs, scope_entity))
+                .map(|e| resolve_ast_type_with_subs(query, root, Some(e), subs, scope_entity))
                 .collect();
             ResolvedTy::Tuple(resolved)
         },
@@ -724,35 +749,10 @@ fn resolve_ast_type_with_subs(
 
         AstType::Never(_) => ResolvedTy::Never,
 
-        // For Optional, Array, etc. we'd need the builtin entities to construct
-        // Named types. Fall back to Error — these rarely appear as enum case
-        // params or struct fields in practice.
         _ => ResolvedTy::Error,
     }
 }
 
-/// Resolve a single-segment name by searching up the parent chain.
-/// Looks for structs/enums with the given name among siblings of scope_entity's ancestors.
-fn resolve_name_in_scope(
-    query: &QueryContext<'_>,
-    name: &str,
-    scope_entity: Entity,
-) -> Option<Entity> {
-    // Walk up the parent chain looking for a child with this name
-    let mut current = Some(scope_entity);
-    while let Some(parent) = current {
-        for &child in query.children_of(parent) {
-            if query.get::<Name>(child).is_some_and(|n| n.0 == name) {
-                let kind = query.get::<NodeKind>(child);
-                if matches!(kind, Some(NodeKind::Struct | NodeKind::Enum)) {
-                    return Some(child);
-                }
-            }
-        }
-        current = query.parent_of(parent);
-    }
-    None
-}
 
 /// Check if two optional i64 ranges overlap.
 fn ranges_overlap_i64(s1: Option<i64>, e1: Option<i64>, s2: Option<i64>, e2: Option<i64>) -> bool {
