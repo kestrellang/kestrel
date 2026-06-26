@@ -51,6 +51,7 @@ use kestrel_name_res::{
 use kestrel_type_infer::compare::{
     AssocBinding, TypeCompareEnv, TypeCompareResult, compare_hir_types,
 };
+use kestrel_type_infer::conformance::type_satisfies;
 use kestrel_type_infer::entailment::constraint_entailed_by;
 use kestrel_type_infer::resolve::WhereClause as ResolvedWhereClause;
 use kestrel_type_infer::result::ResolvedTy;
@@ -1547,6 +1548,30 @@ fn collect_provided_members_for_conformance(
     }
 }
 
+/// Convert a `ResolvedTy` to a `HirTy` for a bound-aware conformance check
+/// (`type_satisfies`). Spans are irrelevant to the check, so a dummy is used.
+/// Concrete nominals/tuples/refs are reproduced faithfully (so a real violation
+/// can be disproven); abstract positions (`Param`/`SelfType`/projections/opaque/
+/// functions) collapse to `Infer`, which `type_satisfies` permits — matching its
+/// conservative "reject only on a provable concrete violation" contract.
+fn resolved_ty_to_hir(ty: &ResolvedTy) -> kestrel_hir::ty::HirTy {
+    use kestrel_hir::ty::HirTy;
+    let sp = kestrel_span::Span::new(0, 0..0);
+    match ty {
+        // `Struct` vs `Enum` doesn't matter: `nominal_satisfies` keys off the
+        // entity's own NodeKind, not the HirTy variant.
+        ResolvedTy::Named { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: args.iter().map(resolved_ty_to_hir).collect(),
+            span: sp,
+        },
+        ResolvedTy::Tuple(elems) => {
+            HirTy::Tuple(elems.iter().map(resolved_ty_to_hir).collect(), sp)
+        },
+        _ => HirTy::Infer(sp),
+    }
+}
+
 /// True if every where clause on `extension` (substituted via `proto_subs`
 /// from the protocol's type params to the conforming type's bindings) is
 /// entailed by `context_clauses`. Empty extension clauses always entail.
@@ -1561,9 +1586,21 @@ fn extension_clauses_entailed(
         root: cx.root,
     });
     ext_clauses.iter().all(|c| {
+        // A bound whose param maps to a CONCRETE type can't be discharged by
+        // param-to-param entailment — it needs a real conforms-to check
+        // (`Int64: Equatable`). `extend Container[T] where T: Equatable`
+        // provides `isEqual` to `BoxC: Container[Int64]` exactly when Int64
+        // genuinely satisfies Equatable. This is the constrained-protocol-
+        // extension witness the stdlib's own Array/Slice idiom relies on (#213).
+        if let ResolvedWhereClause::Bound { param, protocol, .. } = c
+            && let Some(binding) = proto_subs.get(param)
+            && !matches!(binding, ResolvedTy::Param { .. })
+        {
+            return type_satisfies(cx.query, &resolved_ty_to_hir(binding), *protocol, cx.root);
+        }
+        // Param-to-param (or unsubstituted) bound: discharge by entailment from
+        // the conformance context's own where clauses.
         let Some(substituted) = substitute_clause(c, proto_subs) else {
-            // Substitution failed (e.g., bound to a concrete type — would
-            // need a full conforms-to query to verify). Reject.
             return false;
         };
         constraint_entailed_by(cx.query, cx.root, &substituted, context_clauses)

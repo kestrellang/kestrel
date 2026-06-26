@@ -415,15 +415,32 @@ fn protocol_ext_default_type_args(
     supplied_protocol: Entity,
     supplying_ext: Entity,
 ) -> Option<Vec<TyId>> {
-    let ext_params = ctx.world.get::<TypeParams>(supplying_ext).map(|t| t.0.clone())?;
-    if ext_params.is_empty() {
-        return None;
-    }
-    // The extension's target args (`[T]` in `extend Slice[T]`), in ext vocabulary.
+    // The extension's target args (`[T]` in `extend Slice[T]` / `Container[T]`),
+    // in the extension's vocabulary.
     let ext_target_args = ctx.query.query(LowerExtensionTargetTypeArgs {
         extension: supplying_ext,
         root: ctx.root,
     })?;
+    // The extension's own free type params, in declaration order. A param
+    // introduced by a conformance RHS (`extend Int64: SeqIndex[T]`) lands in the
+    // `TypeParams` component; a param introduced only by the target LHS
+    // (`extend Container[T] where T: Equatable`, no conformance RHS) is NOT
+    // registered there, so recover those from the target args directly. Without
+    // this, the witness loses the supplying extension's leading type arg and
+    // mono reports a type-arg arity mismatch (#213).
+    let ext_params: Vec<Entity> = match ctx.world.get::<TypeParams>(supplying_ext) {
+        Some(t) if !t.0.is_empty() => t.0.clone(),
+        _ => ext_target_args
+            .iter()
+            .filter_map(|t| match t {
+                HirTy::Param(e, _) => Some(*e),
+                _ => None,
+            })
+            .collect(),
+    };
+    if ext_params.is_empty() {
+        return None;
+    }
     // The implementing type's conformance args to `supplied_protocol`, in impl vocabulary.
     let instantiations = ctx.query.query(ConformingProtocolInstantiations {
         entity: type_entity,
