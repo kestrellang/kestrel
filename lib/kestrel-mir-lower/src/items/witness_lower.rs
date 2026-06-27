@@ -383,18 +383,32 @@ fn bind_witness_methods(
         // Stored INSTANCE var witnessing a `var { get [set] }` property: same
         // gap as the static case, but the accessor takes `self`. Synthesize an
         // instance getter (clone `self.field`) and, if settable, a setter
-        // (`self.field = value`). Scoped to NON-generic conformers: a generic
-        // getter would need type params (and that case also hits a separate
-        // frontend property-type-match gap), so leave generics to fall through.
-        let conformer_is_generic = ctx
-            .world
-            .get::<TypeParams>(type_entity)
-            .is_some_and(|tp| !tp.0.is_empty());
-        if !conformer_is_generic
-            && let Some(field_idx) = ctx.resolve_field_idx(type_entity, lookup_name)
+        // (`self.field = value`). For a GENERIC conformer (`Box[T]`) the accessor
+        // carries the conformer's type params and is bound with the conformer's
+        // type args (`impl_type_arg_tys`), so mono substitutes `T` per
+        // instantiation — the same vocabulary the generic field types are in.
+        if let Some(field_idx) = ctx.resolve_field_idx(type_entity, lookup_name)
             && let Some(field_ty) = ctx.resolve_field_ty(type_entity, field_idx)
         {
             let self_ty = witness.implementing_type;
+            let acc_type_params: Vec<TypeParamDef> = ctx
+                .world
+                .get::<TypeParams>(type_entity)
+                .map(|tp| {
+                    tp.0
+                        .iter()
+                        .map(|&e| {
+                            ctx.register_name(e);
+                            let n = ctx
+                                .world
+                                .get::<Name>(e)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_default();
+                            TypeParamDef::new(e, n)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let is_setter = method_name.ends_with(".set");
             let accessor = ctx.next_synthetic_entity();
             let acc_name = format!("__i{}${lookup_name}", if is_setter { "set" } else { "get" });
@@ -403,6 +417,7 @@ fn bind_witness_methods(
                 let unit_ty = ctx.module.ty_arena.unit();
                 let mut def = FunctionDef::new(accessor, &acc_name, unit_ty);
                 def.kind = FunctionKind::Free;
+                def.type_params = acc_type_params;
                 def.params = vec![
                     ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::MutBorrow),
                     ParamDef::new("value", ValueId::new(1), field_ty, ParamConvention::Consuming),
@@ -414,6 +429,7 @@ fn bind_witness_methods(
             } else {
                 let mut def = FunctionDef::new(accessor, &acc_name, field_ty);
                 def.kind = FunctionKind::Free;
+                def.type_params = acc_type_params;
                 def.params =
                     vec![ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::Borrow)];
                 ctx.module.add_function(def);
@@ -421,7 +437,11 @@ fn bind_witness_methods(
                     ctx, accessor, self_ty, field_idx, field_ty,
                 );
             }
-            witness.add_method(WitnessMethodBinding::new(method_key.clone(), accessor, vec![]));
+            witness.add_method(WitnessMethodBinding::new(
+                method_key.clone(),
+                accessor,
+                impl_type_arg_tys.to_vec(),
+            ));
             continue;
         }
 

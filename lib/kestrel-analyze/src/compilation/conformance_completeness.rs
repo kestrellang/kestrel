@@ -432,35 +432,38 @@ fn check_protocol_requirements(
                             notes: vec![],
                         });
                     }
-                    // Compare types by resolving TypeAnnotation on both
-                    let proto_ty = cx.query.get::<TypeAnnotation>(child);
-                    let impl_ty = cx.query.get::<TypeAnnotation>(field_entity);
-                    if let (Some(proto_ann), Some(impl_ann)) = (proto_ty, impl_ty) {
-                        // Resolve protocol side with Self → conforming type
-                        let proto_resolved = resolve_type_entity_with_self(
-                            cx,
-                            &proto_ann.0,
-                            protocol,
-                            Some(type_entity),
-                        );
-                        let impl_resolved = resolve_type_entity(cx, &impl_ann.0, type_entity);
-                        if proto_resolved != impl_resolved || proto_resolved.is_none() {
-                            let field_span = util::entity_span(cx.query, field_entity);
-                            diags.push(AnalyzeDiagnostic {
-                                descriptor_id: DESCRIPTORS[2].id,
-                                severity: DESCRIPTORS[2].default_severity,
-                                message: format!(
-                                    "property '{}' has wrong type for protocol '{}'",
-                                    name, proto_name,
-                                ),
-                                labels: vec![DiagLabel {
-                                    span: field_span,
-                                    message: "type does not match protocol requirement".to_string(),
-                                    is_primary: true,
-                                }],
-                                notes: vec![],
-                            });
-                        }
+                    // Compare the property types through the full conformance
+                    // env (Self → conforming type, protocol params → conformer
+                    // params, AND associated-type bindings) — same machinery as
+                    // the method-return check. The crude entity-equality compare
+                    // this replaced couldn't resolve an assoc-typed requirement
+                    // (`var item: Item` witnessed by `var item: T` where
+                    // `type Item = T`) → false E456 on generic conformers.
+                    if !property_type_compare(
+                        cx,
+                        child,
+                        field_entity,
+                        type_entity,
+                        protocol,
+                        proto_param_subs,
+                    )
+                    .is_equal_or_unknown()
+                    {
+                        let field_span = util::entity_span(cx.query, field_entity);
+                        diags.push(AnalyzeDiagnostic {
+                            descriptor_id: DESCRIPTORS[2].id,
+                            severity: DESCRIPTORS[2].default_severity,
+                            message: format!(
+                                "property '{}' has wrong type for protocol '{}'",
+                                name, proto_name,
+                            ),
+                            labels: vec![DiagLabel {
+                                span: field_span,
+                                message: "type does not match protocol requirement".to_string(),
+                                is_primary: true,
+                            }],
+                            notes: vec![],
+                        });
                     }
                 }
             },
@@ -911,6 +914,37 @@ fn method_return_type_matches(
 /// The full compare result, so the E458 reporter can inspect the normalized
 /// shapes (the ref-return note needs to know a `&T`/`T` or `&`/`&mutating`
 /// mismatch from an ordinary type mismatch).
+/// Compare a protocol property requirement's type against the witness field's
+/// type through the conformance env (Self → conformer, protocol params →
+/// conformer params, associated-type bindings). Mirrors
+/// [`method_return_type_compare`] for properties; a property has no method-level
+/// type params. `Unknown` (unresolvable) is treated as a match by the caller.
+fn property_type_compare(
+    cx: &CompilationContext<'_>,
+    proto_field: Entity,
+    impl_field: Entity,
+    type_entity: Entity,
+    protocol: Entity,
+    proto_param_subs: &[(Entity, ResolvedTy)],
+) -> TypeCompareResult {
+    let expected = cx.query.query(LowerTypeAnnotation {
+        entity: proto_field,
+        root: cx.root,
+    });
+    let actual = cx.query.query(LowerTypeAnnotation {
+        entity: impl_field,
+        root: cx.root,
+    });
+    let (Some(expected), Some(actual)) = (expected, actual) else {
+        return TypeCompareResult::Unknown;
+    };
+    let mut env = type_compare_env_for_conformance(cx, type_entity, protocol);
+    for (entity, ty) in proto_param_subs {
+        env.param_subs.push((*entity, ty.clone()));
+    }
+    compare_hir_types(cx.query, cx.root, &expected, &actual, &env)
+}
+
 fn method_return_type_compare(
     cx: &CompilationContext<'_>,
     proto_method: Entity,
