@@ -479,12 +479,28 @@ fn analyze_expr(
                 HirExpr::Def(entity, _, _) => Some(*entity),
                 _ => mcx.cx.typed.resolutions.get(callee).copied(),
             };
-            if constructs_aggregate(mcx, callee_entity, id) {
-                // Struct memberwise/explicit init or enum-case construction:
-                // every operand is stored by value into the new aggregate, so a
-                // non-Copyable bare local is moved into it (#162). The callee
-                // names the bare type (NodeKind::Struct) with no Callable, so
-                // this can't route through the consuming-param path below.
+            // An *explicit* initializer call (`Pointer(to: r)`) resolves the
+            // call id to its Initializer entity, whose params carry real
+            // conventions — a plain param borrows (`init(to value: T)` stores
+            // `ptr_to(value)`, not `value`), a `consuming` one moves. Route it
+            // through the normal consuming-param path so a borrowed operand is
+            // not falsely seen as moved.
+            let explicit_init = mcx
+                .cx
+                .typed
+                .resolutions
+                .get(&id)
+                .copied()
+                .filter(|&e| matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::Initializer)));
+            if let Some(init) = explicit_init {
+                apply_call_moves(mcx, init, args, None, &mut state, diags);
+            } else if stores_operands_by_value(mcx, callee_entity, id) {
+                // Memberwise struct construction (bare `Struct` callee, no
+                // explicit init) or an enum-case payload: each operand is stored
+                // by value into the new aggregate, so a non-Copyable bare local
+                // is moved into it (#162). The synthesized constructor's params
+                // are always `is_consuming: false`, so the param path can't see
+                // this — record the operand moves directly.
                 for arg in args {
                     record_operand_move(mcx, &mut state, diags, arg.value);
                 }
@@ -544,14 +560,25 @@ fn analyze_expr(
                 for arg in args {
                     state = analyze_expr(mcx, arg.value, state, false, diags);
                 }
-                // `.Full(r)` resolving to an enum case constructs an aggregate —
-                // its non-Copyable operands are moved (#162).
-                if let Some(&entity) = mcx.cx.typed.resolutions.get(&id)
-                    && is_constructor(mcx, entity)
+                match mcx
+                    .cx
+                    .typed
+                    .resolutions
+                    .get(&id)
+                    .map(|&e| (e, mcx.cx.query.get::<NodeKind>(e)))
                 {
-                    for arg in args {
-                        record_operand_move(mcx, &mut state, diags, arg.value);
-                    }
+                    // `.Full(r)` enum case: payload stored by value → operands
+                    // move (#162).
+                    Some((_, Some(NodeKind::EnumCase))) => {
+                        for arg in args {
+                            record_operand_move(mcx, &mut state, diags, arg.value);
+                        }
+                    },
+                    // `.init(…)` explicit initializer: respect param conventions.
+                    Some((init, Some(NodeKind::Initializer))) => {
+                        apply_call_moves(mcx, init, args, None, &mut state, diags);
+                    },
+                    _ => {},
                 }
             }
         },
@@ -617,15 +644,16 @@ fn apply_call_moves(
     }
 }
 
-/// Whether a `Call` constructs an aggregate value (struct memberwise/explicit
-/// init or enum-case payload). Two shapes reach the move checker:
-///   - user code: the callee names the bare type, resolving to the `Struct`
-///     (or `EnumCase`) entity, with no resolution on the call id;
-///   - already-analyzed (stdlib) bodies: the call id resolves to the
-///     `Initializer`/`EnumCase` entity directly.
-/// Either way the operands are stored by value, so non-Copyable bare locals are
-/// moved into the result (#162).
-fn constructs_aggregate(
+/// Whether a `Call` constructs an aggregate that stores each operand BY VALUE —
+/// memberwise struct construction or an enum-case payload — so a non-Copyable
+/// bare-local operand is moved into the result (#162). Explicit initializers are
+/// handled separately (their params carry real borrow/consuming conventions);
+/// they are excluded here. The two shapes that reach this:
+///   - memberwise construction: the callee names the bare `Struct`, with no
+///     resolution on the call id (the synthesized init isn't recorded);
+///   - an enum case: the callee (or call id) resolves to the `EnumCase` entity,
+///     whose synthesized payload params are always non-consuming.
+fn stores_operands_by_value(
     mcx: &MoveCtx<'_>,
     callee_entity: Option<Entity>,
     call_id: HirExprId,
@@ -635,21 +663,13 @@ fn constructs_aggregate(
         .typed
         .resolutions
         .get(&call_id)
-        .is_some_and(|&e| is_constructor(mcx, e))
+        .is_some_and(|&e| matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::EnumCase)))
     {
         return true;
     }
     matches!(
         callee_entity.and_then(|e| mcx.cx.query.get::<NodeKind>(e)),
         Some(NodeKind::Struct | NodeKind::EnumCase)
-    )
-}
-
-/// True if `entity` is a constructor node (struct init or enum case).
-fn is_constructor(mcx: &MoveCtx<'_>, entity: Entity) -> bool {
-    matches!(
-        mcx.cx.query.get::<NodeKind>(entity),
-        Some(NodeKind::Initializer | NodeKind::EnumCase)
     )
 }
 
