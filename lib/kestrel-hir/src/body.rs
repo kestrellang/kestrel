@@ -45,6 +45,26 @@ pub struct HirBody {
     pub while_conditions: Vec<HirExprId>,
 }
 
+impl HirBody {
+    /// An empty body — no exprs/pats/stmts/locals/params. Used as the (unused)
+    /// HIR backing when hand-synthesizing a MIR body that drives the OSSA emit
+    /// helpers directly (e.g. stored-var witness accessors) rather than lowering
+    /// from an AST body.
+    pub fn empty() -> Self {
+        Self {
+            exprs: Arena::default(),
+            pats: Arena::default(),
+            stmts: Arena::default(),
+            locals: Arena::default(),
+            params: Vec::new(),
+            statements: Vec::new(),
+            tail_expr: None,
+            guard_stmts: Vec::new(),
+            while_conditions: Vec::new(),
+        }
+    }
+}
+
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
 /// analyzers skip desugared matches (for-loop bodies, if-let wildcards) that
 /// would otherwise produce false-positive unreachable / irrefutable warnings.

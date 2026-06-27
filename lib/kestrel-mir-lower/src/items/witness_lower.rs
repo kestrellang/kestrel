@@ -2,13 +2,16 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, Name, NodeKind, Settable, Subscript as SubscriptMarker, TypeParams,
+    Callable, Computed, Name, NodeKind, Settable, Static, Subscript as SubscriptMarker, TypeParams,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
+use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir::item::witness::{WitnessDef, WitnessMethodBinding};
-use kestrel_mir::{MirTy, SubstMap, TyId, TypeParamDef, WitnessMethodKey, substitute};
+use kestrel_mir::{
+    MirTy, ParamConvention, SubstMap, TyId, TypeParamDef, ValueId, WitnessMethodKey, substitute,
+};
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
 use kestrel_name_res::extensions::ExtensionsFor;
 use kestrel_name_res::{
@@ -341,6 +344,44 @@ fn bind_witness_methods(
             continue;
         }
 
+        // Stored `static var` witnessing a `static var { get [set] }` property:
+        // a stored var has no accessor function for witness dispatch to bind
+        // (#147), so synthesize a getter (clones the global) and, for a settable
+        // requirement, a setter (stores into the global). Only STATIC stored
+        // vars are handled here — static types are never generic (E416), so the
+        // accessors need no type params; stored *instance* vars as property
+        // witnesses are a separate (unhandled) case.
+        if let Some(field) = find_stored_static_field(ctx, type_entity, lookup_name) {
+            let field_ty = resolve_type_annotation(ctx, field);
+            let is_setter = method_name.ends_with(".set");
+            let accessor = ctx.next_synthetic_entity();
+            let acc_name = format!(
+                "__{}${lookup_name}",
+                if is_setter { "set" } else { "get" }
+            );
+            ctx.module.register_name(accessor, acc_name.clone());
+            if is_setter {
+                let unit_ty = ctx.module.ty_arena.unit();
+                let mut def = FunctionDef::new(accessor, &acc_name, unit_ty);
+                def.kind = FunctionKind::Free;
+                def.params = vec![ParamDef::new(
+                    "value",
+                    ValueId::new(0),
+                    field_ty,
+                    ParamConvention::Consuming,
+                )];
+                ctx.module.add_function(def);
+                crate::body::synthesize_static_var_setter(ctx, accessor, field, field_ty);
+            } else {
+                let mut def = FunctionDef::new(accessor, &acc_name, field_ty);
+                def.kind = FunctionKind::Free;
+                ctx.module.add_function(def);
+                crate::body::synthesize_static_var_getter(ctx, accessor, field, field_ty);
+            }
+            witness.add_method(WitnessMethodBinding::new(method_key.clone(), accessor, vec![]));
+            continue;
+        }
+
         // Conformance-providing protocol extension: when a blanket like
         // `extend Equatable: NotEqual[Self]` provides the conformance,
         // search the extension's children for the method implementation.
@@ -567,6 +608,29 @@ fn find_impl_among(
         .iter()
         .find(|&&c| matches_candidate(ctx, c, method_name, required_labels, None))
         .copied()
+}
+
+/// A stored (non-computed) `static var` named `name` on `type_entity`, if any —
+/// the witness for a `static var { get [set] }` property requirement when no
+/// accessor function exists. Stored = `Field` + `Static` + no `Callable`.
+fn find_stored_static_field(ctx: &LowerCtx, type_entity: Entity, name: &str) -> Option<Entity> {
+    let candidates = ctx.query.query(TypeMembersByName {
+        type_entity,
+        name: name.to_string(),
+        context: type_entity,
+        root: ctx.root,
+    });
+    candidates.iter().find_map(|tm| {
+        let e = tm.entity;
+        // Stored = Field + Static, and NOT computed (a `static var x { … }`
+        // accessor carries `Computed`, with its getter `Callable` on a child —
+        // so check `Computed` too, not just `Callable` on the field itself).
+        (ctx.world.get::<NodeKind>(e) == Some(&NodeKind::Field)
+            && ctx.world.get::<Static>(e).is_some()
+            && ctx.world.get::<Callable>(e).is_none()
+            && ctx.world.get::<Computed>(e).is_none())
+        .then_some(e)
+    })
 }
 
 fn find_setter_among(ctx: &LowerCtx, candidates: &[Entity]) -> Option<Entity> {

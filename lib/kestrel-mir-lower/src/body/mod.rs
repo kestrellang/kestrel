@@ -3705,6 +3705,71 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 }
 
+/// Synthesize the MIR body of a getter for a stored `static var` that witnesses
+/// a protocol `static var { get }` requirement. A stored static var has no
+/// accessor function, so witness dispatch (`T.field` through a type param) has
+/// nothing to bind (#147). The body is `return <clone of the global>` — mirrors
+/// the direct static-read lowering (global_ref + copy_addr, which clones so the
+/// global retains ownership). Drives the OSSA emit helpers directly off an empty
+/// HIR body. The FunctionDef (entity, name, ret = field type, no params) must
+/// already exist in the module.
+pub(crate) fn synthesize_static_var_getter(
+    ctx: &mut LowerCtx,
+    getter_entity: Entity,
+    field_entity: Entity,
+    field_ty: TyId,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, getter_entity, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    let addr = bctx.emit_global_ref(field_entity);
+    let result = bctx.emit_copy_addr(addr, field_ty);
+    bctx.emit_destroy_value(addr);
+    bctx.emit_ret(result);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&getter_entity) {
+        f.body = Some(body);
+    }
+}
+
+/// Synthesize the MIR body of a setter for a stored `static var` witnessing a
+/// protocol `static var { set }` requirement (twin of
+/// [`synthesize_static_var_getter`]). The body is `global = value` — a
+/// `StoreAssign` (drops the old value, stores the consumed param). The
+/// FunctionDef must already exist with one consuming `value` param at
+/// `ValueId(0)` and a unit return type.
+pub(crate) fn synthesize_static_var_setter(
+    ctx: &mut LowerCtx,
+    setter_entity: Entity,
+    field_entity: Entity,
+    field_ty: TyId,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, setter_entity, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    // The incoming `value` param is ValueId(0) (matches the FunctionDef's
+    // param). `param_count` seeds the verifier's defined-on-entry set.
+    bctx.body.param_count = 1;
+    let value = bctx.body.alloc_value(ValueDef::owned(field_ty));
+    let addr = bctx.emit_global_ref(field_entity);
+    bctx.emit_store_assign(addr, value);
+    bctx.emit_destroy_value(addr);
+    let unit = bctx.emit_literal(kestrel_mir::Immediate::unit());
+    bctx.emit_ret(unit);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&setter_entity) {
+        f.body = Some(body);
+    }
+}
+
 /// Span of the value-producing expression: descends through `Block` wrappers
 /// to the tail expression, so an arm `=> { ...; expr }` diagnoses at `expr`.
 /// Used to point arm-value decay diagnostics (E503 on a NotCopyable copy-out
