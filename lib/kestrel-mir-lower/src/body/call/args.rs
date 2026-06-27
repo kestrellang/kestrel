@@ -76,6 +76,7 @@ impl OssaBodyCtx<'_, '_> {
         callee_entity: Entity,
         conventions: &[ParamConvention],
         conv_offset: usize,
+        callee_type_args: &[TyId],
     ) -> Vec<CallArg> {
         // Snapshot the parameter shape (owned) so the world borrow is released
         // before we lower any argument expressions.
@@ -108,6 +109,7 @@ impl OssaBodyCtx<'_, '_> {
                     args.len(),
                     conventions,
                     conv_offset,
+                    callee_type_args,
                 );
                 return ca;
             },
@@ -149,7 +151,8 @@ impl OssaBodyCtx<'_, '_> {
                         continue; // required-but-missing: impossible post-typecheck
                     };
                     let param_ty = resolve_type_annotation(self.ctx, default_entity);
-                    let default_val = self.lower_default_arg_inline(default_entity, param_ty);
+                    let default_val =
+                        self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
                     let conv = conventions
                         .get(conv_offset + pi)
                         .copied()
@@ -184,6 +187,7 @@ impl OssaBodyCtx<'_, '_> {
         explicit_count: usize,
         conventions: &[ParamConvention],
         conv_offset: usize,
+        callee_type_args: &[TyId],
     ) {
         let Some(callable) = self.ctx.world.get::<Callable>(callee_entity) else {
             return;
@@ -199,7 +203,8 @@ impl OssaBodyCtx<'_, '_> {
 
         for (di, default_entity) in defaults.into_iter().enumerate() {
             let param_ty = resolve_type_annotation(self.ctx, default_entity);
-            let default_val = self.lower_default_arg_inline(default_entity, param_ty);
+            let default_val =
+                self.lower_default_arg_inline(default_entity, param_ty, callee_type_args);
             let conv = conventions
                 .get(conv_offset + explicit_count + di)
                 .copied()
@@ -209,7 +214,35 @@ impl OssaBodyCtx<'_, '_> {
         }
     }
 
-    fn lower_default_arg_inline(&mut self, default_entity: Entity, _param_ty: TyId) -> ValueId {
+    /// Build the type substitution (#148) mapping the callee's type params to a
+    /// call site's concrete type args, for inline-lowering a default-argument
+    /// expression. `default_entity` is the defaulted PARAM; its parent is the
+    /// callee, whose `TypeParams` are zipped positionally with `callee_type_args`.
+    /// Returns `None` (no substitution) when the callee is non-generic or no
+    /// args were supplied.
+    fn default_arg_subst_map(
+        &self,
+        default_entity: Entity,
+        callee_type_args: &[TyId],
+    ) -> Option<kestrel_mir::SubstMap> {
+        if callee_type_args.is_empty() {
+            return None;
+        }
+        let callee = self.ctx.world.parent_of(default_entity)?;
+        let tps = self.ctx.world.get::<kestrel_ast_builder::TypeParams>(callee)?;
+        let mut subst = kestrel_mir::SubstMap::new();
+        for (&tp, &arg) in tps.0.iter().zip(callee_type_args.iter()) {
+            subst.type_params.insert(tp, arg);
+        }
+        (!subst.type_params.is_empty()).then_some(subst)
+    }
+
+    fn lower_default_arg_inline(
+        &mut self,
+        default_entity: Entity,
+        _param_ty: TyId,
+        callee_type_args: &[TyId],
+    ) -> ValueId {
         let Some(default_hir) = self.ctx.query.query(LowerBody {
             entity: default_entity,
             root: self.ctx.root,
@@ -244,6 +277,15 @@ impl OssaBodyCtx<'_, '_> {
         let saved_hir = std::mem::replace(&mut self.hir, HirRef::Owned(default_hir));
         let saved_typed = std::mem::replace(&mut self.typed, default_typed.map(TypedRef::Owned));
         let saved_local_map = std::mem::take(&mut self.local_map);
+        // The default body was inferred against the callee's generic type params;
+        // substitute them to this call's concrete args so the callee's TypeParam
+        // doesn't leak into the caller's body (#148). Nested default lowering is
+        // not possible (a default expr can't itself call with defaults mid-lower
+        // in a way that re-enters here before restore), so a plain save/restore
+        // of the scalar field is sufficient.
+        let saved_subst = self
+            .default_arg_subst
+            .replace(self.default_arg_subst_map(default_entity, callee_type_args).unwrap_or_default());
 
         // Create values for the default body's HIR locals
         let default_locals: Vec<_> = self
@@ -268,6 +310,7 @@ impl OssaBodyCtx<'_, '_> {
         self.hir = saved_hir;
         self.typed = saved_typed;
         self.local_map = saved_local_map;
+        self.default_arg_subst = saved_subst;
 
         result
     }

@@ -1484,7 +1484,7 @@ impl OssaBodyCtx<'_, '_> {
             // Fill omitted defaulted index params (`c() = v`). `newValue` has no
             // default so it is skipped here and pushed last. Without this the
             // call is built with too few args and fails codegen verification.
-            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0);
+            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0, &[]);
             call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
@@ -1504,7 +1504,7 @@ impl OssaBodyCtx<'_, '_> {
             // `newValue` (which has no default and is pushed last). `expand_default_args`
             // appends to the end, so call it after the explicit index args and before
             // `rhs` to preserve the `[self, idx.., default(idx), newValue]` ABI order.
-            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0);
+            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0, &[]);
             call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
 
             if let Some(protocol) = self.ctx.is_protocol_method(setter) {

@@ -388,6 +388,14 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// returned borrow still chains to it is a verify consume-while-borrowed
     /// ICE (and E498 would blame the temp instead of the real storage).
     pub(crate) addr_anchors: HashMap<ValueId, ValueId>,
+    /// Active while inline-lowering a default-argument expression (#148): maps
+    /// the callee's type params to the call site's concrete type args. The
+    /// default body was inferred against the callee's *generic* params, so every
+    /// type it produces (`resolve_expr_type`/`resolve_type_args`/
+    /// `resolve_local_type`) is substituted through this map — otherwise the
+    /// callee's `TypeParam` leaks into the (possibly non-generic) caller's body
+    /// and survives to the mangler. `None` outside default-arg lowering.
+    pub(crate) default_arg_subst: Option<kestrel_mir::SubstMap>,
 }
 
 /// One deferred get→op→set writeback (see `pending_writebacks`).
@@ -451,7 +459,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             ref_binding_reads: std::collections::HashSet::new(),
             pending_writebacks: Vec::new(),
             addr_anchors: HashMap::new(),
+            default_arg_subst: None,
         }
+    }
+
+    /// Apply the active default-argument type substitution (#148) to a lowered
+    /// type, if any. A no-op outside default-arg inline lowering.
+    fn subst_default_arg_ty(&mut self, ty: TyId) -> TyId {
+        let Some(subst) = self.default_arg_subst.clone() else {
+            return ty;
+        };
+        if subst.type_params.is_empty() {
+            return ty;
+        }
+        kestrel_mir::substitute(&mut self.ctx.module.ty_arena, ty, &subst)
     }
 
     // ================================================================
@@ -739,7 +760,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(typed) = self.typed.as_ref()
             && let Some(resolved) = typed.expr_types.get(&expr_id)
         {
-            return lower_resolved_ty(self.ctx, resolved);
+            let ty = lower_resolved_ty(self.ctx, resolved);
+            return self.subst_default_arg_ty(ty);
         }
         self.ctx.module.ty_arena.error()
     }
@@ -748,7 +770,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         if let Some(typed) = self.typed.as_ref()
             && let Some(resolved) = typed.local_types.get(&hir_id)
         {
-            return lower_resolved_ty(self.ctx, resolved);
+            let ty = lower_resolved_ty(self.ctx, resolved);
+            return self.subst_default_arg_ty(ty);
         }
         self.ctx.module.ty_arena.error()
     }
@@ -3646,18 +3669,26 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     pub fn resolve_type_args(&mut self, expr_id: HirExprId) -> Vec<TyId> {
-        if let Some(typed) = self.typed.as_ref()
-            && let Some(resolved_args) = typed.type_args.get(&expr_id)
-        {
-            // Type-side position: a `&T` type argument (stage 2b) is the
-            // type itself, not an expression value — never peel it, or
-            // `(Optional, [&T])` collapses into `(Optional, [T])`.
-            return resolved_args
-                .iter()
-                .map(|ty| lower_resolved_ty_preserving(self.ctx, ty))
-                .collect();
-        }
-        Vec::new()
+        // Clone the resolved args so the `self.typed` borrow is released before
+        // the `self.ctx` / `self.subst_default_arg_ty` mutable borrows below.
+        let Some(resolved_args) = self
+            .typed
+            .as_ref()
+            .and_then(|t| t.type_args.get(&expr_id))
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        // Type-side position: a `&T` type argument (stage 2b) is the type
+        // itself, not an expression value — never peel it, or `(Optional, [&T])`
+        // collapses into `(Optional, [T])`.
+        resolved_args
+            .iter()
+            .map(|ty| {
+                let t = lower_resolved_ty_preserving(self.ctx, ty);
+                self.subst_default_arg_ty(t)
+            })
+            .collect()
     }
 
     pub fn prepend_receiver_type_args(
@@ -3681,9 +3712,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         use kestrel_hir::body::HirExpr;
         let expr = &self.hir.exprs[expr_id];
         if let HirExpr::Def(entity, hir_args, _) = expr {
+            let entity = *entity;
             let args: Vec<TyId> = hir_args.iter().map(|a| lower_type(self.ctx, a)).collect();
-            self.ctx.register_name(*entity);
-            crate::ty::lower_named_type(self.ctx, *entity, args)
+            self.ctx.register_name(entity);
+            let ty = crate::ty::lower_named_type(self.ctx, entity, args);
+            self.subst_default_arg_ty(ty)
         } else {
             self.resolve_expr_type(expr_id)
         }

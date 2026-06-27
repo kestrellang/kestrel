@@ -159,7 +159,7 @@ impl OssaBodyCtx<'_, '_> {
         // `x(i).mutate()`) drain right after the call — watermark-scoped.
         let wb_mark = self.pending_writebacks.len();
         let mut call_args = if is_static {
-            self.lower_call_args_bound(args, resolved, &conventions, 0)
+            self.lower_call_args_bound(args, resolved, &conventions, 0, &method_type_args)
         } else {
             let recv_conv = conventions
                 .first()
@@ -183,7 +183,7 @@ impl OssaBodyCtx<'_, '_> {
                 self.prepare_call_arg_for_expr(receiver_expr, recv_conv)
             };
             let mut a = vec![receiver_arg];
-            a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1));
+            a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1, &method_type_args));
             a
         };
 
@@ -484,7 +484,13 @@ impl OssaBodyCtx<'_, '_> {
         // Bind+fill against the concrete method entity when known (so defaults can
         // be skipped anywhere); otherwise fall back to positional source order.
         if let Some(method_entity) = self.find_protocol_method_entity(protocol, &method_key) {
-            call_args.extend(self.lower_call_args_bound(args, method_entity, &conventions, 1));
+            call_args.extend(self.lower_call_args_bound(
+                args,
+                method_entity,
+                &conventions,
+                1,
+                &method_type_args,
+            ));
         } else {
             call_args.extend(self.lower_call_args(args, &conventions, 1));
         }
@@ -590,6 +596,11 @@ impl OssaBodyCtx<'_, '_> {
             .get::<Callable>(entity)
             .is_some_and(|c| c.receiver.is_some());
 
+        // Copy the call's type args before they're moved into the callee — used
+        // to substitute the callee's type params into any inline-lowered default
+        // argument (#148).
+        let default_args = type_args.clone();
+
         // Resolve conventions and build callee before lowering args
         let (conventions, callee) = if let Some(protocol) = self.ctx.is_protocol_method(entity) {
             self.ctx.register_name(protocol);
@@ -635,7 +646,8 @@ impl OssaBodyCtx<'_, '_> {
         // call — watermark-scoped.
         let wb_mark = self.pending_writebacks.len();
         let conv_offset = if has_receiver { 1 } else { 0 };
-        let mut call_args = self.lower_call_args_bound(args, entity, &conventions, conv_offset);
+        let mut call_args =
+            self.lower_call_args_bound(args, entity, &conventions, conv_offset, &default_args);
         if has_receiver {
             let recv_conv = conventions
                 .first()
@@ -748,7 +760,9 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1));
+        // Init defaults referencing the init's own type params (rare) aren't
+        // substituted here — pass no args (#148 covers the common free-fn case).
+        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
 
         self.emit_call_void(callee, call_args);
         let ownership = self.ownership_for(result_ty);
@@ -837,7 +851,7 @@ impl OssaBodyCtx<'_, '_> {
             value: self_addr,
             convention: ParamConvention::MutBorrow,
         }];
-        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1));
+        call_args.extend(self.lower_call_args_bound(args, entity, &conventions, 1, &[]));
 
         // Call returns Optional[()] or Result[(), E]
         let init_ret = self.emit_call_returning(callee, call_args, init_ret_ty);
