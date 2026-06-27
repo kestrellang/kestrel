@@ -2291,6 +2291,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 operand: borrow,
                 index,
             });
+            if self.is_non_copyable(result_ty) {
+                // A non-Copyable element can't be duplicated — hand back the
+                // @guaranteed view (the borrow stays open, ended at scope exit
+                // via the tracker), exactly as `emit_struct_extract` does. This
+                // makes `t.0.field` reading a Copyable field through a
+                // non-Copyable tuple element a borrow, not a false
+                // move-out-of-borrow (#164).
+                return elem_ref;
+            }
             let result = self.emit_copy_value(elem_ref);
             self.emit_end_borrow(borrow);
             result
