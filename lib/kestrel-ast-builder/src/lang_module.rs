@@ -320,6 +320,17 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 ty.clone(),
             );
         }
+        // Unchecked signed div/rem: same signature, no safety guards (UB on
+        // divide-by-zero / min/-1). Back `divideUnchecked`/`moduloUnchecked`.
+        for op in ["div", "rem"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_signed_{op}_unchecked"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
         for op in ["lt", "le", "gt", "ge"] {
             seed_fn(
                 world,
@@ -336,6 +347,16 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 world,
                 lang,
                 &format!("{ty_name}_unsigned_{op}"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
+        // Unchecked unsigned div/rem (only the divide-by-zero check differs).
+        for op in ["div", "rem"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_unsigned_{op}_unchecked"),
                 &[("a", ty.clone()), ("b", ty.clone())],
                 ty.clone(),
             );
@@ -548,6 +569,17 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         world,
         lang,
         "ptr_read",
+        &[("ptr", ptr_t.clone())],
+        t.clone(),
+    );
+    // Consuming bitwise move-out of the pointee (`Pointer.take`). Lowers to a
+    // MIR `Take`, which produces an @owned value with no `Copyable` requirement
+    // — unlike `ptr_read` (a @guaranteed view). Caller owns the result and must
+    // not read/drop the pointee again until it is re-initialised.
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_take",
         &[("ptr", ptr_t.clone())],
         t.clone(),
     );

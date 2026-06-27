@@ -21,8 +21,8 @@ use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::value::Ownership;
 use kestrel_mir::{
-    FieldIdx, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, Op, ParamConvention,
-    Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    DivGuard, FieldIdx, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, Op,
+    ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -878,9 +878,15 @@ fn compile_op2<'ctx>(
         // div-by-zero trap, and for signed swap the divisor -1→1 exactly on the
         // overflow case (min/1=min, min%1=0). Mirrors the Cranelift backend, which
         // gets the zero-trap and shift-mask for free from native semantics.
-        Op::Div(bits, sign) => {
-            emit_div_by_zero_trap(fc, builder, ri());
-            let d = signed_div_overflow_guard(builder, bits, sign, li(), ri());
+        Op::Div(bits, sign, guard) => {
+            // Unchecked skips both the zero-trap and the min/-1 overflow guard,
+            // emitting the bare divide (UB on those edges, like C).
+            let d = if guard == DivGuard::Checked {
+                emit_div_by_zero_trap(fc, builder, ri());
+                signed_div_overflow_guard(builder, bits, sign, li(), ri())
+            } else {
+                ri()
+            };
             match sign {
                 Signedness::Signed => builder.build_int_signed_div(li(), d, "sdiv"),
                 Signedness::Unsigned => builder.build_int_unsigned_div(li(), d, "udiv"),
@@ -888,9 +894,13 @@ fn compile_op2<'ctx>(
             .unwrap()
             .into()
         },
-        Op::Rem(bits, sign) => {
-            emit_div_by_zero_trap(fc, builder, ri());
-            let d = signed_div_overflow_guard(builder, bits, sign, li(), ri());
+        Op::Rem(bits, sign, guard) => {
+            let d = if guard == DivGuard::Checked {
+                emit_div_by_zero_trap(fc, builder, ri());
+                signed_div_overflow_guard(builder, bits, sign, li(), ri())
+            } else {
+                ri()
+            };
             match sign {
                 Signedness::Signed => builder.build_int_signed_rem(li(), d, "srem"),
                 Signedness::Unsigned => builder.build_int_unsigned_rem(li(), d, "urem"),

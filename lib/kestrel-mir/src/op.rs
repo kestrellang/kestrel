@@ -59,6 +59,17 @@ pub enum Signedness {
     Unsigned,
 }
 
+/// Whether a signed `Div`/`Rem` carries its safety guards (divide-by-zero trap
+/// and the `Int.MIN / -1` overflow guard). `Unchecked` skips both, emitting the
+/// bare hardware divide — undefined behaviour on those edges, like C. Backs the
+/// `divideUnchecked`/`moduloUnchecked` stdlib methods for hot loops where the
+/// caller guarantees a valid divisor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DivGuard {
+    Checked,
+    Unchecked,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FloatPredicateKind {
     IsNan,
@@ -79,8 +90,8 @@ pub enum Op {
     Add(IntBits, Signedness),
     Sub(IntBits, Signedness),
     Mul(IntBits, Signedness),
-    Div(IntBits, Signedness),
-    Rem(IntBits, Signedness),
+    Div(IntBits, Signedness, DivGuard),
+    Rem(IntBits, Signedness, DivGuard),
     Neg(IntBits),
 
     // Overflow predicates: `true` if the corresponding wrapping op overflows the

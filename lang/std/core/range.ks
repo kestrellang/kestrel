@@ -122,42 +122,47 @@ public struct Range[T]: Equatable, Iterable where T: Steppable, T: Comparable {
     }
 }
 
-/// Iterator over a `ClosedRange[T]`. Differs from `RangeIterator` in
-/// that it yields `end` and uses an extra `finished` bit so it can
-/// terminate after emitting the upper bound.
+/// Iterator over a `ClosedRange[T]`. Unlike `RangeIterator` it must yield
+/// the upper bound `end`, which can't be expressed as "stop before a
+/// sentinel" without overflowing at `T.maxValue`. Rather than carry a
+/// boolean "finished" flag, it carries a `remaining` element *counter*.
+///
+/// The counter is what keeps `for x in a..=b` fast: a count that decrements
+/// by one each step is an induction variable the optimizer can analyze (so
+/// the loop unrolls/vectorizes), whereas a flag set inside the loop is not —
+/// it defeats trip-count analysis and blocks unrolling. The count is
+/// computed once via `Steppable.distance` (`O(1)`).
 ///
 /// # Representation
 ///
-/// `current`, `end`, and a one-bit `finished` flag.
+/// `current` (next value to yield) and `remaining` (elements left).
 public struct ClosedRangeIterator[T]: Iterator where T: Steppable, T: Comparable {
     type Item = T
 
     private var current: T
-    private var end: T
-    private var finished: Bool
+    private var remaining: Int64
 
     /// @name From Bounds
-    /// Builds an iterator yielding `current` through `end` inclusive.
-    /// Pass `finished: true` to construct an already-exhausted iterator.
-    public init(current current: T, end end: T, finished finished: Bool) {
+    /// Builds an iterator yielding `current` for the next `remaining`
+    /// steps. A `remaining <= 0` value produces an already-exhausted
+    /// iterator.
+    public init(current current: T, remaining remaining: Int64) {
         self.current = current;
-        self.end = end;
-        self.finished = finished;
+        self.remaining = remaining;
     }
 
-    /// Yields the next value, or `.None` when past `end`.
+    /// Yields the next value, or `.None` once `remaining` reaches zero.
     public mutating func next() -> T? {
-        if self.finished {
+        if self.remaining <= 0 {
             .None
-        } else if self.current == self.end {
-            self.finished = true;
-            .Some(self.current)
-        } else if self.current < self.end {
-            let value = self.current;
-            self.current = self.current.successor();
-            .Some(value)
         } else {
-            .None
+            let value = self.current;
+            self.remaining = self.remaining - 1;
+            // Advance only while more values remain, so `successor()` is never
+            // called on the final element — that's what makes `a..=T.maxValue`
+            // overflow-safe (the old `finished` flag's job).
+            if self.remaining > 0 { self.current = self.current.successor(); }
+            .Some(value)
         }
     }
 }
@@ -206,9 +211,11 @@ public struct ClosedRange[T]: Equatable, Iterable where T: Steppable, T: Compara
         self.start == other.start and self.end == other.end
     }
 
-    /// Returns a fresh iterator over the range.
+    /// Returns a fresh iterator over the range. The element count is
+    /// `distance(start, end) + 1`; an empty range (`start > end`) yields a
+    /// non-positive count and so produces nothing.
     public func iter() -> ClosedRangeIterator[T] {
-        ClosedRangeIterator(current: self.start, end: self.end, finished: false)
+        ClosedRangeIterator(current: self.start, remaining: self.start.distance(to: self.end) + 1)
     }
 }
 

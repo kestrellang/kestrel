@@ -334,6 +334,13 @@ public struct UInt32:
     /// Predecessor — `self - 1`. Wraps at `minValue`.
     public func predecessor() -> UInt32 { self.subtract(UInt32.one) }
 
+    /// Number of `successor()` steps from `self` to `other` — `other - self`
+    /// widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+    /// ranges iterate with a counter instead of a "finished" flag.
+    public func distance(to other: UInt32) -> Int64 {
+        Int64(raw: lang.i64_sub(lang.cast_u32_i64(other.raw), lang.cast_u32_i64(self.raw)))
+    }
+
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
     public func exclusiveRange(to end: UInt32) -> Range[UInt32] {
         Range[UInt32](self, end)
@@ -422,6 +429,26 @@ public struct UInt32:
     ///
     /// Traps on division by zero, like `divide`.
     public consuming func modulo(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem(self.raw, other.raw)) }
+
+    /// `self / other` without the divide-by-zero and `minValue / -1` guards —
+    /// the bare hardware divide. Faster in hot loops, but **undefined
+    /// behaviour** if `other == 0` or (for signed types) `self == minValue and
+    /// other == -1`. The caller must guarantee a valid divisor. Prefer
+    /// `divide` everywhere correctness matters; this is the `arr(unchecked:)`
+    /// of arithmetic.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue / -1`.
+    public consuming func divideUnchecked(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_div_unchecked(self.raw, other.raw)) }
+
+    /// `self % other` without the divide-by-zero and `minValue % -1` guards.
+    /// Same safety contract as `divideUnchecked`.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue % -1`.
+    public consuming func moduloUnchecked(consuming other: UInt32) -> UInt32 { UInt32(raw: lang.i32_unsigned_rem_unchecked(self.raw, other.raw)) }
 
     
     

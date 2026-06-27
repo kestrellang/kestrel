@@ -333,6 +333,13 @@ public struct Int8:
     /// Predecessor — `self - 1`. Wraps at `minValue`.
     public func predecessor() -> Int8 { self.subtract(Int8.one) }
 
+    /// Number of `successor()` steps from `self` to `other` — `other - self`
+    /// widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+    /// ranges iterate with a counter instead of a "finished" flag.
+    public func distance(to other: Int8) -> Int64 {
+        Int64(raw: lang.i64_sub(lang.cast_i8_i64(other.raw), lang.cast_i8_i64(self.raw)))
+    }
+
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
     public func exclusiveRange(to end: Int8) -> Range[Int8] {
         Range[Int8](self, end)
@@ -421,6 +428,26 @@ public struct Int8:
     ///
     /// Traps on division by zero, like `divide`.
     public consuming func modulo(consuming other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem(self.raw, other.raw)) }
+
+    /// `self / other` without the divide-by-zero and `minValue / -1` guards —
+    /// the bare hardware divide. Faster in hot loops, but **undefined
+    /// behaviour** if `other == 0` or (for signed types) `self == minValue and
+    /// other == -1`. The caller must guarantee a valid divisor. Prefer
+    /// `divide` everywhere correctness matters; this is the `arr(unchecked:)`
+    /// of arithmetic.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue / -1`.
+    public consuming func divideUnchecked(consuming other: Int8) -> Int8 { Int8(raw: lang.i8_signed_div_unchecked(self.raw, other.raw)) }
+
+    /// `self % other` without the divide-by-zero and `minValue % -1` guards.
+    /// Same safety contract as `divideUnchecked`.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue % -1`.
+    public consuming func moduloUnchecked(consuming other: Int8) -> Int8 { Int8(raw: lang.i8_signed_rem_unchecked(self.raw, other.raw)) }
 
     /// Two's-complement negation. Wraps at the minimum value:
     /// `Int8.minValue.negate() == Int8.minValue`. Use

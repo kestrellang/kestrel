@@ -197,6 +197,25 @@ def generate_count_ones(type_name: str, bits: int, lang_type: str) -> str:
         return f"Int64(raw: lang.cast_i{bits}_i64(lang.{lang_type}_popcount(self.raw)))"
 
 
+def generate_step_distance(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
+    """Generate the Steppable.distance(to:) body: (other - self) widened to i64.
+
+    For 64-bit types the raws are already lang.i64, so subtract directly (this
+    reinterprets a UInt64 bit-pattern as i64, which is exact for any span that
+    fits in Int64 and only wraps for never-terminating near-full-width ranges).
+    For narrower types, widen both operands to i64 first — sign-extending signed
+    types, zero-extending unsigned — so the subtraction never overflows.
+    """
+    if bits == 64:
+        return "Int64(raw: lang.i64_sub(other.raw, self.raw))"
+    prefix = "i" if signed else "u"
+    return (
+        f"Int64(raw: lang.i64_sub("
+        f"lang.cast_{prefix}{bits}_i64(other.raw), "
+        f"lang.cast_{prefix}{bits}_i64(self.raw)))"
+    )
+
+
 def generate_leading_zeros(type_name: str, bits: int, lang_type: str) -> str:
     """Generate leadingZeros implementation using clz intrinsic."""
     if bits == 64:
@@ -1098,6 +1117,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate isPowerOfTwo
     is_power_of_two = generate_is_power_of_two(type_name, signed, lang_type)
 
+    # Generate Steppable.distance(to:)
+    step_distance_impl = generate_step_distance(type_name, bits, signed, lang_type)
+
     # Generate bit counting operations using intrinsics
     count_ones_impl = generate_count_ones(type_name, bits, lang_type)
     leading_zeros_impl = generate_leading_zeros(type_name, bits, lang_type)
@@ -1142,6 +1164,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{BYTE_CONVERSION}}", byte_conversion)
     result = result.replace("{{SIGN_PROPERTIES}}", sign_properties)
     result = result.replace("{{IS_POWER_OF_TWO}}", is_power_of_two)
+    result = result.replace("{{STEP_DISTANCE_IMPL}}", step_distance_impl)
     result = result.replace("{{COUNT_ONES_IMPL}}", count_ones_impl)
     result = result.replace("{{LEADING_ZEROS_IMPL}}", leading_zeros_impl)
     result = result.replace("{{TRAILING_ZEROS_IMPL}}", trailing_zeros_impl)

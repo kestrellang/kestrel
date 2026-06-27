@@ -3,7 +3,7 @@ use kestrel_hecs::Entity;
 use kestrel_hir::body::{HirCallArg, HirExprId};
 use kestrel_mir::inst::InstKind;
 use kestrel_mir::{
-    FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op,
+    DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, Immediate, ImmediateKind, IntBits, Op,
     Signedness, ValueId,
 };
 
@@ -83,22 +83,22 @@ static TABLE: &[IntrinsicEntry] = &[
     },
     IntrinsicEntry {
         name: "i8_signed_div",
-        op: Op::Div(IntBits::I8, Signedness::Signed),
+        op: Op::Div(IntBits::I8, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i8_signed_rem",
-        op: Op::Rem(IntBits::I8, Signedness::Signed),
+        op: Op::Rem(IntBits::I8, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i8_unsigned_div",
-        op: Op::Div(IntBits::I8, Signedness::Unsigned),
+        op: Op::Div(IntBits::I8, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i8_unsigned_rem",
-        op: Op::Rem(IntBits::I8, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I8, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -253,22 +253,22 @@ static TABLE: &[IntrinsicEntry] = &[
     },
     IntrinsicEntry {
         name: "i16_signed_div",
-        op: Op::Div(IntBits::I16, Signedness::Signed),
+        op: Op::Div(IntBits::I16, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i16_signed_rem",
-        op: Op::Rem(IntBits::I16, Signedness::Signed),
+        op: Op::Rem(IntBits::I16, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i16_unsigned_div",
-        op: Op::Div(IntBits::I16, Signedness::Unsigned),
+        op: Op::Div(IntBits::I16, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i16_unsigned_rem",
-        op: Op::Rem(IntBits::I16, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I16, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -428,22 +428,22 @@ static TABLE: &[IntrinsicEntry] = &[
     },
     IntrinsicEntry {
         name: "i32_signed_div",
-        op: Op::Div(IntBits::I32, Signedness::Signed),
+        op: Op::Div(IntBits::I32, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i32_signed_rem",
-        op: Op::Rem(IntBits::I32, Signedness::Signed),
+        op: Op::Rem(IntBits::I32, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i32_unsigned_div",
-        op: Op::Div(IntBits::I32, Signedness::Unsigned),
+        op: Op::Div(IntBits::I32, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i32_unsigned_rem",
-        op: Op::Rem(IntBits::I32, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I32, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -603,22 +603,22 @@ static TABLE: &[IntrinsicEntry] = &[
     },
     IntrinsicEntry {
         name: "i64_signed_div",
-        op: Op::Div(IntBits::I64, Signedness::Signed),
+        op: Op::Div(IntBits::I64, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i64_signed_rem",
-        op: Op::Rem(IntBits::I64, Signedness::Signed),
+        op: Op::Rem(IntBits::I64, Signedness::Signed, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i64_unsigned_div",
-        op: Op::Div(IntBits::I64, Signedness::Unsigned),
+        op: Op::Div(IntBits::I64, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
         name: "i64_unsigned_rem",
-        op: Op::Rem(IntBits::I64, Signedness::Unsigned),
+        op: Op::Rem(IntBits::I64, Signedness::Unsigned, DivGuard::Checked),
         arity: 2,
     },
     IntrinsicEntry {
@@ -1251,6 +1251,14 @@ pub(crate) fn try_intrinsic(
             bctx.track_borrow(view);
             return Some(view);
         },
+        "ptr_take" => {
+            // Consuming move-out of the pointee → a MIR `Take` (owned, memcpy
+            // into a fresh slot). Emitted at lowering, after the move checker,
+            // so producing an @owned non-Copyable value here is legal (no E503).
+            let ty_arg = *type_args.first()?;
+            let arg = bctx.lower_expr(args.first()?.value);
+            return Some(bctx.emit_take(arg, ty_arg));
+        },
         "ptr_mut_borrow" => {
             // Mutable by-reference view of the pointee. Lowered exactly like
             // `ptr_read`: a @guaranteed `Op1(PtrRead)` whose result "represents
@@ -1333,24 +1341,40 @@ pub(crate) fn try_intrinsic(
         _ => {},
     }
 
-    let entry = TABLE.iter().find(|e| e.name == name)?;
+    // `<base>_unchecked` reuses the base div/rem entry but drops its guards.
+    // Handled here (rather than 16 extra table rows) so it stays in lockstep
+    // with the checked entries.
+    let (lookup_name, unchecked) = match name.strip_suffix("_unchecked") {
+        Some(base) => (base, true),
+        None => (name.as_str(), false),
+    };
+    let entry = TABLE.iter().find(|e| e.name == lookup_name)?;
+    let op = if unchecked {
+        match entry.op {
+            Op::Div(b, s, _) => Op::Div(b, s, DivGuard::Unchecked),
+            Op::Rem(b, s, _) => Op::Rem(b, s, DivGuard::Unchecked),
+            other => other,
+        }
+    } else {
+        entry.op
+    };
     let result_ty = bctx.resolve_expr_type(expr_id);
 
     match entry.arity {
         1 => {
             let arg = bctx.lower_expr(args.first()?.value);
-            Some(bctx.emit_op1(entry.op, arg, result_ty))
+            Some(bctx.emit_op1(op, arg, result_ty))
         },
         2 => {
             let lhs = bctx.lower_expr(args.first()?.value);
             let rhs = bctx.lower_expr(args.get(1)?.value);
-            Some(bctx.emit_op2(entry.op, lhs, rhs, result_ty))
+            Some(bctx.emit_op2(op, lhs, rhs, result_ty))
         },
         3 => {
             let a = bctx.lower_expr(args.first()?.value);
             let b = bctx.lower_expr(args.get(1)?.value);
             let c = bctx.lower_expr(args.get(2)?.value);
-            Some(bctx.emit_op3(entry.op, a, b, c, result_ty))
+            Some(bctx.emit_op3(op, a, b, c, result_ty))
         },
         _ => None,
     }

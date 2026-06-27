@@ -8,8 +8,8 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::{
-    FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, MonoFuncId, Op,
-    ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    DivGuard, FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy,
+    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -731,16 +731,26 @@ fn compile_op2(
         // min/1=min and min%1=0 — no trap, correct wrap. Division-by-zero still
         // traps natively (the swap leaves a 0 divisor untouched). Mirrored in the
         // LLVM backend (which additionally needs an explicit div-by-zero trap).
-        Op::Div(bits, Signedness::Signed) => {
-            let safe = signed_div_overflow_guard(builder, bits, lhs, rhs);
+        Op::Div(bits, Signedness::Signed, guard) => {
+            // Unchecked drops the min/-1 swap (native sdiv then traps on that edge
+            // and on div-by-zero — UB-equivalent). The user guarantees validity.
+            let safe = if guard == DivGuard::Checked {
+                signed_div_overflow_guard(builder, bits, lhs, rhs)
+            } else {
+                rhs
+            };
             builder.ins().sdiv(lhs, safe)
         },
-        Op::Div(_, Signedness::Unsigned) => builder.ins().udiv(lhs, rhs),
-        Op::Rem(bits, Signedness::Signed) => {
-            let safe = signed_div_overflow_guard(builder, bits, lhs, rhs);
+        Op::Div(_, Signedness::Unsigned, _) => builder.ins().udiv(lhs, rhs),
+        Op::Rem(bits, Signedness::Signed, guard) => {
+            let safe = if guard == DivGuard::Checked {
+                signed_div_overflow_guard(builder, bits, lhs, rhs)
+            } else {
+                rhs
+            };
             builder.ins().srem(lhs, safe)
         },
-        Op::Rem(_, Signedness::Unsigned) => builder.ins().urem(lhs, rhs),
+        Op::Rem(_, Signedness::Unsigned, _) => builder.ins().urem(lhs, rhs),
         Op::AddOverflows(bits, sign) => {
             emit_overflow_check(builder, bits, sign, OverflowKind::Add, lhs, rhs)
         },

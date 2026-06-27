@@ -24,8 +24,21 @@ struct Grid: Cloneable {
         yy * w + xx
     }
 
+    // Reads a cell with toroidal wrap. Every caller passes coordinates at most
+    // one step outside the grid (neighbour offsets are -1..1; the self-read and
+    // renderer pass in-bounds coordinates), so a single add/subtract wraps each
+    // axis — far cheaper than `index`'s general `%` in the per-cell hot loop,
+    // where a signed modulo also drags in divide-by-zero / minValue-÷-1 guards.
     func cellAt(x x: Int64, y y: Int64) -> Bool {
-        self.cells(self.index(x: x, y: y))
+        let w = self.width;
+        let h = self.height;
+        var xx = x; if xx < 0 { xx = xx + w; } else { if xx >= w { xx = xx - w; } }
+        var yy = y; if yy < 0 { yy = yy + h; } else { if yy >= h { yy = yy - h; } }
+        // Safety: the wrap above leaves `xx` in `[0, w)` and `yy` in `[0, h)`
+        // (callers are at most one step out, so a single add/subtract suffices),
+        // so `yy * w + xx` is always in `[0, w*h)` — the bounds check would be
+        // redundant. `unchecked:` skips it; this is the hot per-cell read.
+        self.cells(unchecked: yy * w + xx)
     }
 
     mutating func setCell(x x: Int64, y y: Int64, alive alive: Bool) {
@@ -53,7 +66,10 @@ struct Grid: Cloneable {
                 // B3/S23: birth on exactly 3 live neighbours; an already-live
                 // cell survives with 2 or 3.
                 let nextAlive = if alive { n == 2 or n == 3 } else { n == 3 };
-                self.next(self.index(x: x, y: y)) = nextAlive;
+                // x,y are in-bounds here (loop bounds `0..<width`/`0..<height`),
+                // so the index is direct — no wrap — and provably in `[0, w*h)`,
+                // making the bounds check redundant. `unchecked:` skips it.
+                self.next(unchecked: y * self.width + x) = nextAlive;
             }
         }
         let tmp = self.cells;
