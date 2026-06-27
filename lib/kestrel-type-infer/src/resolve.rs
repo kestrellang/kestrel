@@ -664,23 +664,21 @@ impl TypeResolver for WorldResolver<'_> {
                 // Concrete type — search children for a TypeAlias with matching name,
                 // then extensions (e.g. Dictionary's `type Key = K` lives on an
                 // `extend Dictionary[K, V, H]: _ExpressibleByDictionaryLiteral` block).
-                if let Some(res) = self.find_associated_type_in_entity(*entity, name) {
-                    return Some(res);
-                }
-                let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
-                    target: *entity,
-                    root: self.root,
-                });
-                for ext in &extensions {
-                    if let Some(mut res) = self.find_associated_type_in_entity(*ext, name) {
-                        // Record the source extension so solve_associated can
-                        // substitute the extension's free TypeParams with the
-                        // call-site's protocol args.
-                        res.source_extension = Some(*ext);
-                        return Some(res);
-                    }
-                }
-                None
+                self.find_associated_type_in_entity_and_extensions(*entity, name)
+            },
+            // Structural singletons (`()` / `!`) resolve assoc types via their
+            // synthetic `lang` entities, so `().Mark` finds a binding declared in
+            // `extend (): Marked { type Mark = … }` (#215) — mirrors the member
+            // and conformance lookups in `resolve_member` / `conforms_to`.
+            TyKind::Tuple(elems) if elems.is_empty() => {
+                let entity =
+                    kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "()")?;
+                self.find_associated_type_in_entity_and_extensions(entity, name)
+            },
+            TyKind::Never => {
+                let entity =
+                    kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "!")?;
+                self.find_associated_type_in_entity_and_extensions(entity, name)
             },
             TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => {
                 self.find_associated_type_in_protocol(*entity, name)
@@ -1065,6 +1063,31 @@ impl WorldResolver<'_> {
         for &ext in extensions {
             if let Some(hit) = probe(ext) {
                 return Some(hit);
+            }
+        }
+        None
+    }
+
+    /// Search a concrete type entity's children, then its conforming extensions,
+    /// for an associated-type binding named `name` (records the source extension
+    /// so `solve_associated` can substitute the extension's free TypeParams).
+    /// Shared by the nominal (Struct/Enum) and structural (`()`/`!`) cases.
+    fn find_associated_type_in_entity_and_extensions(
+        &self,
+        entity: Entity,
+        name: &str,
+    ) -> Option<AssociatedTypeResolution> {
+        if let Some(res) = self.find_associated_type_in_entity(entity, name) {
+            return Some(res);
+        }
+        let extensions = self.ctx.query(kestrel_name_res::ExtensionsFor {
+            target: entity,
+            root: self.root,
+        });
+        for ext in &extensions {
+            if let Some(mut res) = self.find_associated_type_in_entity(*ext, name) {
+                res.source_extension = Some(*ext);
+                return Some(res);
             }
         }
         None

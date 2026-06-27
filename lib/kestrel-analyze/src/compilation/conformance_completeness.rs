@@ -1057,6 +1057,20 @@ fn type_compare_env_for_conformance(
 }
 
 fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> ResolvedTy {
+    // Structural conformers (`extend (): P`, `extend !: P`) target the synthetic
+    // `lang.()` / `lang.!` entity, but `Self` must normalize to the STRUCTURAL
+    // ResolvedTy (`Tuple([])` / `Never`) — a witness spelling `()`/`!` directly
+    // lowers to that, so a `Named(lang.())` self would never compare equal and a
+    // `-> Self` requirement false-fires E458 (#215).
+    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "()")
+        == Some(type_entity)
+    {
+        return ResolvedTy::Tuple(Vec::new());
+    }
+    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "!") == Some(type_entity)
+    {
+        return ResolvedTy::Never;
+    }
     let args = cx
         .query
         .get::<TypeParams>(type_entity)
