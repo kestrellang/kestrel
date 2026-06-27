@@ -433,7 +433,16 @@ fn analyze_expr(
                 HirExpr::Def(entity, _, _) => Some(*entity),
                 _ => mcx.cx.typed.resolutions.get(callee).copied(),
             };
-            if let Some(entity) = callee_entity {
+            if constructs_aggregate(mcx, callee_entity, id) {
+                // Struct memberwise/explicit init or enum-case construction:
+                // every operand is stored by value into the new aggregate, so a
+                // non-Copyable bare local is moved into it (#162). The callee
+                // names the bare type (NodeKind::Struct) with no Callable, so
+                // this can't route through the consuming-param path below.
+                for arg in args {
+                    record_operand_move(mcx, &mut state, diags, arg.value);
+                }
+            } else if let Some(entity) = callee_entity {
                 apply_call_moves(mcx, entity, args, None, &mut state, diags);
             }
         },
@@ -468,9 +477,14 @@ fn analyze_expr(
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             state = analyze_expr(mcx, *base, state, false, diags);
         },
+        // A tuple/array literal stores each element by value — a non-Copyable
+        // bare-local element is moved into the aggregate (#162). Record the move
+        // right after the read-check so a repeated element (`[r, r]`) still
+        // flags the second use.
         HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
             for &e in elements {
                 state = analyze_expr(mcx, e, state, false, diags);
+                record_operand_move(mcx, &mut state, diags, e);
             }
         },
         HirExpr::Dict { entries, .. } => {
@@ -483,6 +497,15 @@ fn analyze_expr(
             if let Some(args) = args {
                 for arg in args {
                     state = analyze_expr(mcx, arg.value, state, false, diags);
+                }
+                // `.Full(r)` resolving to an enum case constructs an aggregate —
+                // its non-Copyable operands are moved (#162).
+                if let Some(&entity) = mcx.cx.typed.resolutions.get(&id)
+                    && is_constructor(mcx, entity)
+                {
+                    for arg in args {
+                        record_operand_move(mcx, &mut state, diags, arg.value);
+                    }
                 }
             }
         },
@@ -544,11 +567,58 @@ fn apply_call_moves(
         if !param.is_consuming {
             continue;
         }
-        if let Some(src) = rhs_local(mcx.cx.hir, arg.value)
-            && local_is_non_copyable(mcx, src)
-        {
-            record_move(mcx, state, diags, src, arg.value);
-        }
+        record_operand_move(mcx, state, diags, arg.value);
+    }
+}
+
+/// Whether a `Call` constructs an aggregate value (struct memberwise/explicit
+/// init or enum-case payload). Two shapes reach the move checker:
+///   - user code: the callee names the bare type, resolving to the `Struct`
+///     (or `EnumCase`) entity, with no resolution on the call id;
+///   - already-analyzed (stdlib) bodies: the call id resolves to the
+///     `Initializer`/`EnumCase` entity directly.
+/// Either way the operands are stored by value, so non-Copyable bare locals are
+/// moved into the result (#162).
+fn constructs_aggregate(
+    mcx: &MoveCtx<'_>,
+    callee_entity: Option<Entity>,
+    call_id: HirExprId,
+) -> bool {
+    if mcx
+        .cx
+        .typed
+        .resolutions
+        .get(&call_id)
+        .is_some_and(|&e| is_constructor(mcx, e))
+    {
+        return true;
+    }
+    matches!(
+        callee_entity.and_then(|e| mcx.cx.query.get::<NodeKind>(e)),
+        Some(NodeKind::Struct | NodeKind::EnumCase)
+    )
+}
+
+/// True if `entity` is a constructor node (struct init or enum case).
+fn is_constructor(mcx: &MoveCtx<'_>, entity: Entity) -> bool {
+    matches!(
+        mcx.cx.query.get::<NodeKind>(entity),
+        Some(NodeKind::Initializer | NodeKind::EnumCase)
+    )
+}
+
+/// Record the move of an aggregate/consuming operand: if it is a bare
+/// non-Copyable local, it is moved at `operand`'s site.
+fn record_operand_move(
+    mcx: &MoveCtx<'_>,
+    state: &mut State,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+    operand: HirExprId,
+) {
+    if let Some(src) = rhs_local(mcx.cx.hir, operand)
+        && local_is_non_copyable(mcx, src)
+    {
+        record_move(mcx, state, diags, src, operand);
     }
 }
 
