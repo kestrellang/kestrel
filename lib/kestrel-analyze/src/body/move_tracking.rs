@@ -682,12 +682,68 @@ fn local_is_owned_place(cx: &BodyContext<'_>, local: LocalId) -> bool {
     };
     let name = cx.hir.locals[local].name.as_str();
     if name == "self" {
-        return matches!(callable.receiver, Some(ReceiverKind::Consuming));
+        return matches!(callable.receiver, Some(ReceiverKind::Consuming))
+            // A method may witness a `consuming` protocol requirement while
+            // writing its receiver plainly (`func tryExtract()` satisfying
+            // `consuming func tryExtract()`). Callers pass ownership, so `self`
+            // is owned and the body may move payloads out of it; treat it so,
+            // or moving a matched payload into a call/aggregate falsely reads as
+            // a move-out-of-borrow.
+            || self_witnesses_consuming_requirement(cx);
     }
     match callable.params.iter().find(|p| p.name == name) {
         Some(p) => p.is_consuming,
         None => true,
     }
+}
+
+/// Whether the body owner is a method satisfying a protocol requirement whose
+/// receiver is `consuming` (so its `self` is effectively owned even if written
+/// plainly). Resolves the method's self-type (its parent, or an extension's
+/// target), then scans every conformed protocol for a same-named requirement
+/// with a consuming receiver.
+fn self_witnesses_consuming_requirement(cx: &BodyContext<'_>) -> bool {
+    use kestrel_ast_builder::Name;
+    use kestrel_name_res::{ConformingProtocols, ExtensionTargetEntity, ProtocolMembersByName};
+
+    let Some(method_name) = cx.query.get::<Name>(cx.entity).map(|n| n.0.clone()) else {
+        return false;
+    };
+    let Some(parent) = cx.query.parent_of(cx.entity) else {
+        return false;
+    };
+    // The self-type the method is attached to: a type body's parent directly,
+    // or the target of an extension.
+    let self_type = match cx.query.get::<NodeKind>(parent) {
+        Some(NodeKind::Extension) => cx.query.query(ExtensionTargetEntity {
+            extension: parent,
+            root: cx.root,
+        }),
+        _ => Some(parent),
+    };
+    let Some(self_type) = self_type else {
+        return false;
+    };
+    let protocols = cx.query.query(ConformingProtocols {
+        entity: self_type,
+        root: cx.root,
+    });
+    protocols.iter().any(|&protocol| {
+        cx.query
+            .query(ProtocolMembersByName {
+                protocol,
+                name: method_name.clone(),
+                context: cx.entity,
+                root: cx.root,
+            })
+            .iter()
+            .any(|m| {
+                matches!(
+                    cx.query.get::<Callable>(m.entity).and_then(|c| c.receiver.as_ref()),
+                    Some(ReceiverKind::Consuming)
+                )
+            })
+    })
 }
 
 /// Collect every binding local introduced by a pattern (recursing through
