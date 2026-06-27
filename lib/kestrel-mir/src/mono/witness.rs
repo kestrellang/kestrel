@@ -473,9 +473,16 @@ pub fn resolve_witness_call(
     let needs_self = if let Some(func) = concrete_func {
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
-        func.params.first().is_some_and(
-            |p| matches!(arena.get(p.ty), MirTy::TypeParam(e) if !known_tps.contains(e)),
-        )
+        let mentions_outer_tp =
+            |ty: TyId| matches!(arena.get(ty), MirTy::TypeParam(e) if !known_tps.contains(e));
+        // A protocol-extension default depends on `Self` — a TypeParam of the
+        // protocol, not one of the function's own type params. Instance
+        // defaults expose it as the receiver (first param), but a STATIC
+        // default (`static func make() -> Self { Self() }`) has no receiver,
+        // so it must also be detected via the return type or any other param;
+        // otherwise self_type is dropped from the instantiation key and `Self`
+        // leaks unsubstituted to the mangler (#146 init facet).
+        func.params.iter().any(|p| mentions_outer_tp(p.ty)) || mentions_outer_tp(func.ret)
     } else {
         false
     };
