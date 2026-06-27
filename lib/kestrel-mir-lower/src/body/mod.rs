@@ -3803,6 +3803,84 @@ pub(crate) fn synthesize_static_var_setter(
     }
 }
 
+/// Synthesize the MIR body of a getter for a stored INSTANCE var that witnesses
+/// a protocol `var { get }` requirement (the instance analogue of
+/// [`synthesize_static_var_getter`]). The body is `return <clone of self.field>`
+/// — extract the field from the (borrowed) `self` param, then CopyValue to an
+/// @owned result. The FunctionDef must already exist with one borrowed `self`
+/// param at `ValueId(0)` and the field type as its return type.
+pub(crate) fn synthesize_instance_var_getter(
+    ctx: &mut LowerCtx,
+    getter_entity: Entity,
+    self_ty: TyId,
+    field_idx: FieldIdx,
+    field_ty: TyId,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, getter_entity, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    bctx.body.param_count = 1;
+    let self_val = bctx.body.alloc_value(ValueDef {
+        ty: self_ty,
+        ownership: Ownership::Guaranteed,
+        borrow_source: None,
+        root: RootProvenance::Param(0),
+        span: None,
+    });
+    let field_view = bctx.emit_struct_extract(self_val, field_idx, field_ty);
+    let result = bctx.emit_copy_value(field_view);
+    bctx.emit_ret(result);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&getter_entity) {
+        f.body = Some(body);
+    }
+}
+
+/// Synthesize the MIR body of a setter for a stored INSTANCE var witnessing a
+/// protocol `var { set }` requirement. The body is `self.field = value` — a
+/// `StoreAssign` through the field address of the (mutably-borrowed) `self`. The
+/// FunctionDef must already exist with a mutating `self` param at `ValueId(0)`,
+/// a consuming `value` param at `ValueId(1)`, and a unit return type.
+pub(crate) fn synthesize_instance_var_setter(
+    ctx: &mut LowerCtx,
+    setter_entity: Entity,
+    self_ty: TyId,
+    field_idx: FieldIdx,
+    field_ty: TyId,
+) {
+    let empty = HirBody::empty();
+    let captures = Arc::new(ClosureCaptureMap::default());
+    let mut bctx = OssaBodyCtx::new(ctx, &empty, None, captures, setter_entity, false);
+    let entry = bctx.new_block();
+    bctx.body.entry = entry;
+    bctx.current_block = Some(entry);
+    bctx.push_scope();
+    bctx.body.param_count = 2;
+    // self: mutating borrow — an address usable by emit_field_addr (ValueId 0).
+    let self_val = bctx.body.alloc_value(ValueDef {
+        ty: self_ty,
+        ownership: Ownership::Guaranteed,
+        borrow_source: None,
+        root: RootProvenance::Param(0),
+        span: None,
+    });
+    // value: consuming param (ValueId 1).
+    let value = bctx.body.alloc_value(ValueDef::owned(field_ty));
+    let field_addr = bctx.emit_field_addr(self_val, self_ty, field_idx);
+    bctx.emit_store_assign(field_addr, value);
+    bctx.emit_destroy_value(field_addr); // consume the @owned field pointer
+    let unit = bctx.emit_literal(kestrel_mir::Immediate::unit());
+    bctx.emit_ret(unit);
+    let body = bctx.body;
+    if let Some(f) = ctx.module.functions.get_mut(&setter_entity) {
+        f.body = Some(body);
+    }
+}
+
 /// Span of the value-producing expression: descends through `Block` wrappers
 /// to the tail expression, so an arm `=> { ...; expr }` diagnoses at `expr`.
 /// Used to point arm-value decay diagnostics (E503 on a NotCopyable copy-out

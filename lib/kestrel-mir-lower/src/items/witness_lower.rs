@@ -347,10 +347,8 @@ fn bind_witness_methods(
         // Stored `static var` witnessing a `static var { get [set] }` property:
         // a stored var has no accessor function for witness dispatch to bind
         // (#147), so synthesize a getter (clones the global) and, for a settable
-        // requirement, a setter (stores into the global). Only STATIC stored
-        // vars are handled here — static types are never generic (E416), so the
-        // accessors need no type params; stored *instance* vars as property
-        // witnesses are a separate (unhandled) case.
+        // requirement, a setter (stores into the global). Static types are never
+        // generic (E416), so the accessors need no type params.
         if let Some(field) = find_stored_static_field(ctx, type_entity, lookup_name) {
             let field_ty = resolve_type_annotation(ctx, field);
             let is_setter = method_name.ends_with(".set");
@@ -377,6 +375,51 @@ fn bind_witness_methods(
                 def.kind = FunctionKind::Free;
                 ctx.module.add_function(def);
                 crate::body::synthesize_static_var_getter(ctx, accessor, field, field_ty);
+            }
+            witness.add_method(WitnessMethodBinding::new(method_key.clone(), accessor, vec![]));
+            continue;
+        }
+
+        // Stored INSTANCE var witnessing a `var { get [set] }` property: same
+        // gap as the static case, but the accessor takes `self`. Synthesize an
+        // instance getter (clone `self.field`) and, if settable, a setter
+        // (`self.field = value`). Scoped to NON-generic conformers: a generic
+        // getter would need type params (and that case also hits a separate
+        // frontend property-type-match gap), so leave generics to fall through.
+        let conformer_is_generic = ctx
+            .world
+            .get::<TypeParams>(type_entity)
+            .is_some_and(|tp| !tp.0.is_empty());
+        if !conformer_is_generic
+            && let Some(field_idx) = ctx.resolve_field_idx(type_entity, lookup_name)
+            && let Some(field_ty) = ctx.resolve_field_ty(type_entity, field_idx)
+        {
+            let self_ty = witness.implementing_type;
+            let is_setter = method_name.ends_with(".set");
+            let accessor = ctx.next_synthetic_entity();
+            let acc_name = format!("__i{}${lookup_name}", if is_setter { "set" } else { "get" });
+            ctx.module.register_name(accessor, acc_name.clone());
+            if is_setter {
+                let unit_ty = ctx.module.ty_arena.unit();
+                let mut def = FunctionDef::new(accessor, &acc_name, unit_ty);
+                def.kind = FunctionKind::Free;
+                def.params = vec![
+                    ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::MutBorrow),
+                    ParamDef::new("value", ValueId::new(1), field_ty, ParamConvention::Consuming),
+                ];
+                ctx.module.add_function(def);
+                crate::body::synthesize_instance_var_setter(
+                    ctx, accessor, self_ty, field_idx, field_ty,
+                );
+            } else {
+                let mut def = FunctionDef::new(accessor, &acc_name, field_ty);
+                def.kind = FunctionKind::Free;
+                def.params =
+                    vec![ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::Borrow)];
+                ctx.module.add_function(def);
+                crate::body::synthesize_instance_var_getter(
+                    ctx, accessor, self_ty, field_idx, field_ty,
+                );
             }
             witness.add_method(WitnessMethodBinding::new(method_key.clone(), accessor, vec![]));
             continue;
