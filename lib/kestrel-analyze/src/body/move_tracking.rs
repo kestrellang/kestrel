@@ -362,8 +362,55 @@ fn analyze_expr(
             let pre = state.clone();
             let body_state = analyze_block(mcx, &body.stmts, body.tail_expr, pre.clone(), diags);
 
+            let conditional = loop_is_conditional(hir, body);
+
+            // Back-edge re-use (#163): a value moved in the body and carried in
+            // from outside the loop is (maybe-)moved on the next iteration. If
+            // the body can complete without diverging (`!body_state.diverged`,
+            // so the back edge is actually taken — unlike `loop { …; break }`,
+            // which exits on iteration 1), re-analyze the body with those moves
+            // seeded so an in-body read of such a local is flagged at its real
+            // site. Carry `reported` so first-pass in-body diagnostics aren't
+            // doubled; the seeded re-read is then the single diagnostic for that
+            // local (one error per variable), so a later post-loop read stays
+            // silent.
+            let mut reported_after = body_state.reported.clone();
+            if !body_state.diverged {
+                // Locals bound *inside* the body (let statements, while-let /
+                // match-arm patterns) are fresh each iteration — not carried
+                // across the back edge — so they must not be seeded as moved.
+                let mut body_bound = HashSet::new();
+                collect_block_bound_locals(hir, body, &mut body_bound);
+
+                let mut back_edge = pre.clone();
+                back_edge.reported = body_state.reported.clone();
+                let mut seeded = false;
+                for (local, info) in body_state.moves.iter() {
+                    if pre.moves.contains_key(local) || body_bound.contains(local) {
+                        continue;
+                    }
+                    let kind = if conditional {
+                        MoveKind::Maybe
+                    } else {
+                        MoveKind::Definite
+                    };
+                    back_edge.moves.insert(
+                        *local,
+                        MoveInfo {
+                            kind,
+                            site: info.site,
+                        },
+                    );
+                    seeded = true;
+                }
+                if seeded {
+                    let s2 = analyze_block(mcx, &body.stmts, body.tail_expr, back_edge, diags);
+                    reported_after = s2.reported;
+                }
+            }
+
             // Propagate reported-set so diagnostics aren't duplicated post-loop.
-            state.reported.extend(body_state.reported.iter().copied());
+            state.reported.extend(reported_after.iter().copied());
 
             // Loops that always run to completion without break diverge.
             if body_state.diverged && !block_contains_break(hir, body) {
@@ -377,7 +424,6 @@ fn analyze_expr(
             // - Unconditional `loop { … }`: body runs at least once, and if
             //   the move site is reachable before any `break`, a second
             //   iteration would re-read the moved value. Mark Definite.
-            let conditional = loop_is_conditional(hir, body);
             for (local, info) in body_state.moves.iter() {
                 if pre.moves.contains_key(local) {
                     continue;
@@ -744,6 +790,124 @@ fn self_witnesses_consuming_requirement(cx: &BodyContext<'_>) -> bool {
                 )
             })
     })
+}
+
+/// Collect every local introduced *within* `block` — `let` bindings and pattern
+/// bindings (match arms, desugared while-let / for) — recursing through nested
+/// control flow but stopping at closures (their own scope). Used to exclude
+/// per-iteration fresh bindings from loop back-edge re-use seeding (#163).
+fn collect_block_bound_locals(hir: &HirBody, block: &HirBlock, out: &mut HashSet<LocalId>) {
+    for &sid in &block.stmts {
+        match &hir.stmts[sid] {
+            HirStmt::Let { local, value, .. } => {
+                out.insert(*local);
+                if let Some(v) = value {
+                    collect_expr_bound_locals(hir, *v, out);
+                }
+            },
+            HirStmt::Expr { expr, .. } => collect_expr_bound_locals(hir, *expr, out),
+            HirStmt::Deinit { .. } => {},
+        }
+    }
+    if let Some(t) = block.tail_expr {
+        collect_expr_bound_locals(hir, t, out);
+    }
+}
+
+/// Recurse through an expression collecting bindings introduced under it (see
+/// [`collect_block_bound_locals`]). Walks every sub-expression so a `match`
+/// nested in any position (e.g. a call argument) still contributes its arm
+/// bindings; stops at closure boundaries.
+fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<LocalId>) {
+    match &hir.exprs[id] {
+        HirExpr::If {
+            condition,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_expr_bound_locals(hir, *condition, out);
+            collect_block_bound_locals(hir, then_body, out);
+            if let Some(e) = else_body {
+                collect_block_bound_locals(hir, e, out);
+            }
+        },
+        HirExpr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_expr_bound_locals(hir, *scrutinee, out);
+            for arm in arms {
+                collect_pattern_bindings(hir, arm.pattern, out);
+                if let Some(g) = arm.guard {
+                    collect_expr_bound_locals(hir, g, out);
+                }
+                collect_expr_bound_locals(hir, arm.body, out);
+            }
+        },
+        HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
+            collect_block_bound_locals(hir, body, out)
+        },
+        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => {
+            collect_expr_bound_locals(hir, *inner, out)
+        },
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+            collect_expr_bound_locals(hir, *base, out)
+        },
+        HirExpr::Assign { target, value, .. } => {
+            collect_expr_bound_locals(hir, *target, out);
+            collect_expr_bound_locals(hir, *value, out);
+        },
+        HirExpr::Return { value, .. } => {
+            if let Some(v) = value {
+                collect_expr_bound_locals(hir, *v, out);
+            }
+        },
+        HirExpr::Tuple { elements, .. } | HirExpr::Array { elements, .. } => {
+            for &e in elements {
+                collect_expr_bound_locals(hir, e, out);
+            }
+        },
+        HirExpr::Dict { entries, .. } => {
+            for entry in entries {
+                collect_expr_bound_locals(hir, entry.key, out);
+                collect_expr_bound_locals(hir, entry.value, out);
+            }
+        },
+        HirExpr::Call { callee, args, .. } => {
+            collect_expr_bound_locals(hir, *callee, out);
+            for arg in args {
+                collect_expr_bound_locals(hir, arg.value, out);
+            }
+        },
+        HirExpr::MethodCall { receiver, args, .. } => {
+            collect_expr_bound_locals(hir, *receiver, out);
+            for arg in args {
+                collect_expr_bound_locals(hir, arg.value, out);
+            }
+        },
+        HirExpr::ProtocolCall { receiver, args, .. } => {
+            collect_expr_bound_locals(hir, *receiver, out);
+            for arg in args {
+                collect_expr_bound_locals(hir, arg.value, out);
+            }
+        },
+        HirExpr::ImplicitMember { args, .. } => {
+            if let Some(args) = args {
+                for arg in args {
+                    collect_expr_bound_locals(hir, arg.value, out);
+                }
+            }
+        },
+        // Closures introduce a separate scope; leaves bind nothing.
+        HirExpr::Closure { .. }
+        | HirExpr::Local(..)
+        | HirExpr::Literal { .. }
+        | HirExpr::Def(..)
+        | HirExpr::OverloadSet { .. }
+        | HirExpr::Break { .. }
+        | HirExpr::Continue { .. }
+        | HirExpr::Error { .. } => {},
+    }
 }
 
 /// Collect every binding local introduced by a pattern (recursing through
