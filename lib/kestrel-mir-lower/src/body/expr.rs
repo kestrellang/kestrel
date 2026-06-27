@@ -783,6 +783,36 @@ impl OssaBodyCtx<'_, '_> {
                 self.emit_enum_variant(ty, variant_idx, vec![])
             },
             Some(NodeKind::Field) => {
+                // A protocol property requirement referenced as a bare Def:
+                // `Self.prop` inside a protocol-extension default body collapses
+                // to `Def(requirement)` (the receiver is implicit). Dispatch the
+                // getter through the witness with the protocol's `Self` (mono
+                // substitutes it to the conformer) — treating it as a computed
+                // getter (direct call to the bodyless requirement) or a stored
+                // global (a GlobalRef to the requirement, which is not a real
+                // static — "global entity not found in statics") is wrong (#146
+                // computed-static-property facet).
+                if let Some(protocol) = self.ctx.world.parent_of(entity)
+                    && self.ctx.world.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)
+                {
+                    let field_name = self
+                        .ctx
+                        .world
+                        .get::<kestrel_ast_builder::Name>(entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_default();
+                    self.ctx.register_name(protocol);
+                    let self_type = crate::ty::build_self_type(self.ctx, protocol);
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let method_type_args = self.resolve_type_args(expr_id);
+                    let callee = Callee::Witness {
+                        protocol,
+                        method: WitnessMethodKey::simple(field_name),
+                        self_type,
+                        method_type_args,
+                    };
+                    return self.emit_call_returning(callee, vec![], result_ty);
+                }
                 if self.ctx.world.get::<Callable>(entity).is_some() {
                     // Computed property getter call (no receiver)
                     let result_ty = self.resolve_expr_type(expr_id);
@@ -1329,6 +1359,40 @@ impl OssaBodyCtx<'_, '_> {
         value_id: HirExprId,
         entity: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
+        // `Self.prop = v` inside a protocol-extension default body: the property
+        // requirement collapses to a bare `Def`, so witness-dispatch the setter
+        // with the protocol's `Self` (mono substitutes it to the conformer).
+        // The Field twin lives in `try_lower_field_setter`; without this the
+        // assignment falls to the stored-global path and emits a GlobalRef to
+        // the requirement ("global entity not found in statics", #146).
+        if let Some(protocol) = self.ctx.world.parent_of(entity)
+            && self.ctx.world.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)
+            && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Field)
+            && self.ctx.world.get::<Callable>(entity).is_none()
+            && self.ctx.world.get::<Settable>(entity).is_some()
+        {
+            let field_name = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Name>(entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            self.ctx.register_name(protocol);
+            let self_type = crate::ty::build_self_type(self.ctx, protocol);
+            let rhs = self.lower_expr(value_id);
+            let method_type_args = self.resolve_type_args(target_id);
+            let method = WitnessMethodKey::simple(format!("{field_name}.set"));
+            let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+            let callee = Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                method_type_args,
+            };
+            self.emit_call_void(callee, vec![rhs_arg]);
+            return Some(self.emit_literal(Immediate::unit()));
+        }
+
         // Stage 1.5: `mutating ref` write provider (global member — no receiver).
         if let Some(accessor) = self.ctx.find_ref_accessor_child(entity, true) {
             self.ctx.register_name(accessor);

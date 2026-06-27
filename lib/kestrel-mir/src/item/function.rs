@@ -184,6 +184,13 @@ pub struct FunctionDef {
     /// the codegen backend (entry selection + C `main` export). Replaces the
     /// old discover-by-name (`name == "main"`) scheme.
     pub is_main: bool,
+    /// True when this function is a method/initializer defined in a protocol
+    /// EXTENSION (`extend SomeProtocol { ... }`) — a protocol default. Such a
+    /// body may reference `Self` (TypeParam(protocol)) anywhere, including only
+    /// in its body (`Self.staticProp`), so witness resolution must always
+    /// propagate `self_type` to it, not just when `Self` appears in the
+    /// signature (#146). Set during MIR sig lowering (`function_sig.rs`).
+    pub provides_protocol_default: bool,
 }
 
 impl FunctionDef {
@@ -221,6 +228,7 @@ impl FunctionDef {
             body: None,
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         }
     }
 }

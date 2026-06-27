@@ -471,18 +471,20 @@ pub fn resolve_witness_call(
     // Detect by checking if the first param is a TypeParam not in the
     // function's type_params list.
     let needs_self = if let Some(func) = concrete_func {
+        // A protocol-extension default depends on `Self` (a TypeParam of the
+        // protocol, not one of the function's own type params), so witness
+        // resolution must propagate self_type to it — otherwise `Self` leaks
+        // unsubstituted to the mangler / inner witness calls (#146). `Self` can
+        // appear ONLY in the body (`static func add() { Self.total = ... }`),
+        // so the structural `provides_protocol_default` flag is authoritative;
+        // the signature scan is a fallback for any default not carrying it.
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
         let mentions_outer_tp =
             |ty: TyId| matches!(arena.get(ty), MirTy::TypeParam(e) if !known_tps.contains(e));
-        // A protocol-extension default depends on `Self` — a TypeParam of the
-        // protocol, not one of the function's own type params. Instance
-        // defaults expose it as the receiver (first param), but a STATIC
-        // default (`static func make() -> Self { Self() }`) has no receiver,
-        // so it must also be detected via the return type or any other param;
-        // otherwise self_type is dropped from the instantiation key and `Self`
-        // leaks unsubstituted to the mangler (#146 init facet).
-        func.params.iter().any(|p| mentions_outer_tp(p.ty)) || mentions_outer_tp(func.ret)
+        func.provides_protocol_default
+            || func.params.iter().any(|p| mentions_outer_tp(p.ty))
+            || mentions_outer_tp(func.ret)
     } else {
         false
     };
