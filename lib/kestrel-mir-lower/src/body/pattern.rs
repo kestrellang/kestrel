@@ -1611,34 +1611,109 @@ impl OssaBodyCtx<'_, '_> {
         )
     }
 
-    /// Is `ty` a canonical `ArrayMatchable` conformer — the builtin `Array`
-    /// or `ArraySlice` struct? Element navigation of these goes through
-    /// `matchGet`/`matchSlice` (runtime, length-checked) rather than the
-    /// aggregate field-extract used for tuples and enum payloads.
+    /// Is `ty` an `ArrayMatchable` conformer? Element navigation of these goes
+    /// through `matchGet`/`matchSlice` (runtime, length-checked) rather than
+    /// the aggregate field-extract used for tuples and enum payloads. Driven by
+    /// the conformance, so `Array`/`ArraySlice` and any custom conformer are
+    /// treated uniformly.
     fn is_array_matchable_ty(&mut self, ty: TyId) -> bool {
         let MirTy::Named { entity, .. } = self.ctx.module.ty_arena.get(ty) else {
             return false;
         };
         let entity = *entity;
-        [
-            kestrel_hir::Builtin::ArrayStruct,
-            kestrel_hir::Builtin::SliceStruct,
-        ]
-        .into_iter()
-        .any(|b| {
-            self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
-                builtin: b,
+        let Some(proto) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        }) else {
+            return false;
+        };
+        self.ctx
+            .query
+            .query(kestrel_name_res::conformances::ConformingProtocols {
+                entity,
                 root: self.ctx.root,
-            }) == Some(entity)
-        })
+            })
+            .contains(&proto)
     }
 
-    /// Element type of an `ArrayMatchable` type (its first type argument).
-    fn array_element_ty(&self, array_ty: TyId) -> TyId {
-        match self.ctx.module.ty_arena.get(array_ty) {
-            MirTy::Named { type_args, .. } if !type_args.is_empty() => type_args[0],
-            _ => array_ty,
+    /// Element type of an `ArrayMatchable` conformer — its `Element` associated
+    /// type, resolved from the conformance and substituted with the
+    /// conformer's type args. For a generic conformer (`Array[Int64]`) the
+    /// binding `type Element = T` substitutes `T → Int64`; for a non-generic
+    /// one (`Trio` with `type Element = Int64`) the binding is concrete.
+    fn array_element_ty(&mut self, array_ty: TyId) -> TyId {
+        let MirTy::Named { entity, type_args } =
+            self.ctx.module.ty_arena.get(array_ty).clone()
+        else {
+            return array_ty;
+        };
+        let Some((binding, owner)) = self.resolve_array_element_binding(entity) else {
+            // Binding lookup failed (broken stdlib / missing protocol) — fall
+            // back to the first type arg so generic conformers still work.
+            return type_args.first().copied().unwrap_or(array_ty);
+        };
+        if type_args.is_empty() {
+            return binding;
         }
+        // Substitute the conformer's type args into the binding. The binding's
+        // `T` may resolve to EITHER the target type's own param (the common
+        // case, `type Element = T` in `extend Bag[T]` reads as the struct's
+        // param) OR the extension's binder — both align positionally with the
+        // scrutinee's type args, so map both entities' params to `type_args`.
+        let mut subst = kestrel_mir::SubstMap::new();
+        for params_owner in [entity, owner] {
+            if let Some(tp) = self.ctx.world.get::<kestrel_ast_builder::TypeParams>(params_owner) {
+                for (&param, &arg) in tp.0.iter().zip(type_args.iter()) {
+                    subst.type_params.insert(param, arg);
+                }
+            }
+        }
+        kestrel_mir::substitute(&mut self.ctx.module.ty_arena, binding, &subst)
+    }
+
+    /// Find the `type Element = ...` binding for an `ArrayMatchable` conformer,
+    /// returning the (unsubstituted) binding type and the entity that OWNS it
+    /// (the type body, or the conforming extension) — the owner provides the
+    /// type params for substitution.
+    fn resolve_array_element_binding(&mut self, type_entity: Entity) -> Option<(TyId, Entity)> {
+        let proto = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ArrayMatchable,
+            root: self.ctx.root,
+        })?;
+        let elem_member = self
+            .ctx
+            .query
+            .query(kestrel_name_res::ProtocolAssociatedTypes {
+                protocol: proto,
+                root: self.ctx.root,
+            })
+            .into_iter()
+            .find(|m| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(m.entity)
+                    .map(|n| n.0.as_str())
+                    == Some("Element")
+            })?
+            .entity;
+        // Binding in the type body, then in a conforming extension.
+        if let Some(ty) =
+            crate::items::witness_lower::find_associated_type(self.ctx, type_entity, elem_member)
+        {
+            return Some((ty, type_entity));
+        }
+        let extensions = self.ctx.query.query(kestrel_name_res::extensions::ExtensionsFor {
+            target: type_entity,
+            root: self.ctx.root,
+        });
+        for ext in extensions {
+            if let Some(ty) =
+                crate::items::witness_lower::find_associated_type(self.ctx, ext, elem_member)
+            {
+                return Some((ty, ext));
+            }
+        }
+        None
     }
 
     /// The stdlib `Int64` type — the index/length type of `ArrayMatchable`,

@@ -28,7 +28,7 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
-use super::constructor::{Constructor, collect_fields};
+use super::constructor::{Constructor, array_element_ty, collect_fields};
 
 /// A normalized pattern for matrix operations.
 ///
@@ -366,13 +366,10 @@ pub fn flatten(
             suffix,
             ..
         } => {
-            // Extract element type from scrutinee (Array[T] or Slice[T] → T)
-            let elem_ty = match scrutinee_ty {
-                ResolvedTy::Named { args, .. } => {
-                    args.first().cloned().unwrap_or(ResolvedTy::Error)
-                },
-                _ => ResolvedTy::Error,
-            };
+            // Element type from the scrutinee's `ArrayMatchable.Element`
+            // conformance binding (works for any conformer, not just
+            // `Array[T]`/`Slice[T]` where Element == the first type arg).
+            let elem_ty = array_element_ty(query, root, scrutinee_ty);
 
             let has_rest = rest.is_some();
             let mut children: Vec<_> = prefix

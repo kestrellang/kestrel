@@ -33,7 +33,9 @@ use std::collections::HashSet;
 use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
-use kestrel_name_res::{ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{
+    ConformingProtocols, ResolveBuiltin, ResolveTypePath, TypeResolution, extensions::ExtensionsFor,
+};
 use kestrel_type_infer::result::ResolvedTy;
 
 use super::witness::Witness;
@@ -232,19 +234,21 @@ impl Constructor {
                 }
             },
 
-            // Array[T] — element type from type args
+            // ArrayMatchable conformer — element type from the `Element`
+            // associated type of the conformance (handles non-generic
+            // conformers, not just `Array[T]` where Element == first type arg).
             (
                 Constructor::Array {
                     prefix_len,
                     suffix_len,
                     has_rest,
                 },
-                ResolvedTy::Named { args, .. },
+                ResolvedTy::Named { .. },
             ) => {
-                let elem_ty = args.first().cloned().unwrap_or(ResolvedTy::Error);
+                let elem_ty = array_element_ty(query, root, parent_ty);
                 let mut types = vec![elem_ty.clone(); *prefix_len];
                 if *has_rest {
-                    types.push(parent_ty.clone()); // rest is the array type
+                    types.push(parent_ty.clone()); // rest slot (Wildcard; inert)
                 }
                 types.extend(vec![elem_ty; *suffix_len]);
                 types
@@ -671,6 +675,68 @@ fn resolve_field_type(
     let subs = build_type_param_subs(query, parent_entity, type_args);
     let ast_ty = query.get::<TypeAnnotation>(field_entity).map(|ta| &ta.0);
     resolve_ast_type_with_subs(query, root, ast_ty, &subs, parent_entity)
+}
+
+/// Element type of an `ArrayMatchable` conformer — its `Element` associated
+/// type, resolved from the conformance and substituted with the conformer's
+/// type args. Drives array-pattern element typing for ANY conformer, so a
+/// non-generic conformer (`Trio` with `type Element = Int64`) and a generic
+/// one (`Array[Int64]` / `Bag[Int64]` with `type Element = T`) are handled
+/// uniformly — the previous "first type arg" shortcut only worked when
+/// `Element == the first type param`. Falls back to the first type arg if the
+/// binding can't be found.
+pub(super) fn array_element_ty(
+    query: &QueryContext<'_>,
+    root: Entity,
+    array_ty: &ResolvedTy,
+) -> ResolvedTy {
+    let ResolvedTy::Named { entity, args } = array_ty else {
+        return ResolvedTy::Error;
+    };
+    let fallback = || args.first().cloned().unwrap_or(ResolvedTy::Error);
+    let Some((alias, owner)) = find_element_alias(query, root, *entity) else {
+        return fallback();
+    };
+    let Some(ast_ty) = query.get::<TypeAnnotation>(alias).map(|ta| ta.0.clone()) else {
+        return fallback();
+    };
+    // The binding's `T` may name either the target type's own param or the
+    // conforming extension's binder; both align positionally with the
+    // scrutinee's args, so include both (resolve_ast_type_with_subs matches by
+    // name, so duplicate names are harmless).
+    let mut subs = build_type_param_subs(query, *entity, args);
+    subs.extend(build_type_param_subs(query, owner, args));
+    resolve_ast_type_with_subs(query, root, Some(&ast_ty), &subs, owner)
+}
+
+/// Find the `type Element = ...` alias of an `ArrayMatchable` conformer,
+/// returning the alias entity and its OWNER (the type body or the conforming
+/// extension — the owner scopes name resolution and provides type params).
+fn find_element_alias(
+    query: &QueryContext<'_>,
+    root: Entity,
+    type_entity: Entity,
+) -> Option<(Entity, Entity)> {
+    if let Some(alias) = find_type_alias_named(query, type_entity, "Element") {
+        return Some((alias, type_entity));
+    }
+    for ext in query.query(ExtensionsFor {
+        target: type_entity,
+        root,
+    }) {
+        if let Some(alias) = find_type_alias_named(query, ext, "Element") {
+            return Some((alias, ext));
+        }
+    }
+    None
+}
+
+/// Find a `NodeKind::TypeAlias` child of `parent` with the given name.
+fn find_type_alias_named(query: &QueryContext<'_>, parent: Entity, name: &str) -> Option<Entity> {
+    query.children_of(parent).iter().copied().find(|&child| {
+        query.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+            && query.get::<Name>(child).map(|n| n.0.as_str()) == Some(name)
+    })
 }
 
 /// Build a mapping from type parameter names to their concrete types.

@@ -1062,41 +1062,19 @@ fn gen_pat(
             suffix,
             span,
         } => {
-            // Array patterns accept both `Array[T]` and `Slice[T]` scrutinees.
-            // If the scrutinee is already resolved to `Slice[T]`, take the
-            // element type from there; otherwise default to equating with
-            // `Array[elem_tv]` (preserves existing behavior for generic /
-            // unresolved scrutinees).
-            let slice_entity = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct);
-            let elem_tv = {
-                let already_slice = if let Some(slice_ent) = slice_entity {
-                    matches!(
-                        ctx.slot(scrutinee_tv),
-                        TySlot::Resolved(k) if k.entity() == Some(slice_ent)
-                    )
-                } else {
-                    false
-                };
-
-                if already_slice {
-                    // Reuse the scrutinee's element type arg directly.
-                    let first_arg = match ctx.slot(scrutinee_tv) {
-                        TySlot::Resolved(k) => k.args().first().copied(),
-                        _ => unreachable!(),
-                    };
-                    first_arg.unwrap_or_else(|| ctx.fresh())
-                } else {
-                    let elem_tv = ctx.fresh();
-                    if let Some(array_entity) = ctx
-                        .resolver
-                        .builtin(kestrel_hir::Builtin::DefaultArrayLiteralType)
-                    {
-                        let array_tv = ctx.named(array_entity, vec![elem_tv]);
-                        ctx.equal(scrutinee_tv, array_tv, span.clone());
-                    }
-                    elem_tv
-                }
-            };
+            // Array patterns work on ANY `ArrayMatchable` conformer (the
+            // protocol the matcher lowers to: matchLength/matchGet/matchSlice).
+            // `Array[T]` and `ArraySlice[T]` are just two conformers — no
+            // type-specific branch. Require the scrutinee conforms, and take
+            // the element type from its `ArrayMatchable.Element` associated
+            // type (the solver substitutes type args: `Array[Int64].Element`
+            // → `Int64`, a custom `Trio.Element` → its binding, an abstract
+            // `T: ArrayMatchable` → the projection `T.Element`).
+            let elem_tv = ctx.fresh();
+            if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
+                ctx.conforms(scrutinee_tv, proto, span.clone());
+                ctx.associated(scrutinee_tv, "Element", elem_tv, span.clone());
+            }
 
             // Equate each prefix/suffix element pattern against elem_tv
             for &elem_pat in prefix.iter().chain(suffix.iter()) {
@@ -1105,9 +1083,11 @@ fn gen_pat(
                 gen_pat(ctx, hir, elem_pat, pat_tv, source);
             }
 
-            // Named rest binding → `Slice[elem_tv]` local.
+            // Named rest binding → `ArraySlice[elem_tv]` local. This is
+            // `matchSlice`'s protocol-fixed return type (the same for every
+            // conformer), not scrutinee special-casing.
             if let Some(Some(local)) = rest {
-                if let Some(slice_ent) = slice_entity {
+                if let Some(slice_ent) = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct) {
                     let slice_tv = ctx.named(slice_ent, vec![elem_tv]);
                     ctx.local_types.insert(*local, slice_tv);
                 } else {
