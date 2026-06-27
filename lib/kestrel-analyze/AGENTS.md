@@ -172,7 +172,9 @@ Current allocations:
   claims E459. Pre-existing; resolve before allocating near it.
 - E454–E458, E460, E462–E465: conformance completeness + indirect-enum
   checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
-  this list is stale for that range; **next free E4xx is E466**.
+  this list is stale for that range.
+- E466: `some_in_field_type` (decl/field.rs) — `some P` rejected in field
+  position (#168). **Next free E4xx is E467.**
   E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
   a witness's reference return must match the requirement EXACTLY in
   shape and mutability (`-> T` never witnesses `-> &T` and vice versa —
