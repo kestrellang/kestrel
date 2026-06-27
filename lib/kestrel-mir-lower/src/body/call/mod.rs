@@ -597,6 +597,15 @@ impl OssaBodyCtx<'_, '_> {
             let convs = self.collect_witness_conventions(protocol, &key);
             let self_type = if key.name == "init" {
                 result_ty
+            } else if self.ctx.world.get::<Static>(entity).is_some() {
+                // `Self.staticReq()` inside a protocol-extension default body
+                // collapses to a bare `Def(requirement)` with no receiver
+                // expression, so the base type is lost. The witness self_type
+                // is the protocol's `Self` (a TypeParam that mono substitutes
+                // to the conformer) — NOT `resolve_expr_type(callee_expr)`,
+                // which yields the requirement's *function* type and leaves the
+                // witness unresolvable at mono (#146).
+                crate::ty::build_self_type(self.ctx, protocol)
             } else {
                 self.resolve_expr_type(callee_expr)
             };
