@@ -82,6 +82,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E506",
+        name: "move_captured_out_of_closure",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct MoveTrackingAnalyzer;
@@ -119,6 +125,7 @@ impl BodyCheck for MoveTrackingAnalyzer {
             copyable: copyable_entity,
             borrow_bound: compute_borrow_bound(cx),
             captures,
+            captured_borrow: HashSet::new(),
         };
         let mut diags = Vec::new();
         let state = State::empty();
@@ -186,6 +193,11 @@ struct MoveCtx<'a> {
     /// Per-closure place-based capture plan. A whole-local Read capture of a
     /// non-Copyable value is a move of the root into the closure environment.
     captures: Arc<ClosureCaptureMap>,
+    /// Captured non-Copyable roots being analyzed *inside the current closure
+    /// body*. Moving one OUT of the body (return/consume/rebind-and-escape) is
+    /// E506 — a closure may be called more than once but owns a single
+    /// non-Copyable value. Empty for the top-level (non-closure) analysis.
+    captured_borrow: HashSet<LocalId>,
 }
 
 // ===== Walker (shape modelled on definite_assignment.rs) =====
@@ -477,28 +489,55 @@ fn analyze_expr(
         // ===== Break / Continue (divergence handled below via Never) =====
         HirExpr::Break { .. } | HirExpr::Continue { .. } => {},
 
-        // ===== Closures: analyze body in isolation; don't leak inner moves =====
+        // ===== Closures =====
         HirExpr::Closure { body, .. } => {
-            let inner = State::empty();
-            let _ = analyze_block(mcx, &body.stmts, body.tail_expr, inner, diags);
+            // Whole-local Read captures of a non-Copyable type: captured BY
+            // VALUE, i.e. MOVED into the closure environment (cannot be copied).
+            // A Copyable read is by-copy; a captured Copyable sub-place of a
+            // non-Copyable value (`self.cap`, an Int64) is its own non-whole
+            // place — neither moves. Write captures are by-reference. Partial
+            // (projected) non-Copyable captures are left to MIR (the checker has
+            // no partial-move model — see `rhs_local`).
+            let captured_nc: HashSet<LocalId> = mcx
+                .captures
+                .get(id)
+                .iter()
+                .filter(|cap| {
+                    cap.kind == CaptureKind::Read
+                        && cap.key.is_whole()
+                        && local_is_non_copyable(mcx, cap.key.root)
+                })
+                .map(|cap| cap.key.root)
+                .collect();
 
-            // A non-Copyable value captured BY VALUE is MOVED into the closure
-            // environment — it cannot be copied. Record that move in the
-            // ENCLOSING scope so a later use of the root is a clean
-            // use-after-move (E500/E503) instead of slipping past the checker
-            // and ICEing in OSSA (#177). Only whole-local Read captures of a
-            // non-Copyable type move: a Copyable read is by-copy, and a captured
-            // Copyable sub-place of a non-Copyable value (`self.cap`, an Int64)
-            // is its own non-whole place — neither moves. Write captures are
-            // by-reference. Partial (projected) non-Copyable captures are left
-            // to MIR (the checker has no partial-move model — `rhs_local`).
-            for cap in mcx.captures.get(id) {
-                if cap.kind == CaptureKind::Read
-                    && cap.key.is_whole()
-                    && local_is_non_copyable(mcx, cap.key.root)
-                {
-                    record_move(mcx, &mut state, diags, cap.key.root, id);
-                }
+            // Analyze the body with those roots marked `captured_borrow`, so any
+            // move-OUT of one (return/consume/rebind) is rejected as E506: the
+            // closure may be called more than once but owns a single value
+            // (#177 capture-dup double-deinit). Borrowing a captured value
+            // across calls stays legal (a borrow records no move).
+            let inner_mcx = MoveCtx {
+                cx: mcx.cx,
+                copyable: mcx.copyable,
+                borrow_bound: mcx.borrow_bound.clone(),
+                captures: Arc::clone(&mcx.captures),
+                captured_borrow: captured_nc.clone(),
+            };
+            let mut inner = analyze_block(&inner_mcx, &body.stmts, body.tail_expr, State::empty(), diags);
+            // A bare-local tail (`{ () in r }`) is the closure's return value but
+            // is not a `record_move` site (a tail `Local` read records no move),
+            // so flag it explicitly.
+            if let Some(tail) = body.tail_expr
+                && let Some(root) = rhs_local(mcx.cx.hir, tail)
+                && captured_nc.contains(&root)
+            {
+                record_move(&inner_mcx, &mut inner, diags, root, tail);
+            }
+
+            // Record the capture moves in the ENCLOSING scope so a later use of
+            // a moved-into-closure root is a clean use-after-move (E500) instead
+            // of slipping past the checker and ICEing in OSSA.
+            for &root in &captured_nc {
+                record_move(mcx, &mut state, diags, root, id);
             }
         },
 
@@ -1030,7 +1069,32 @@ fn record_move(
     src: LocalId,
     site: HirExprId,
 ) {
-    if mcx.borrow_bound.contains(&src) && state.reported.insert(src) {
+    if mcx.captured_borrow.contains(&src) {
+        // Moving a captured non-Copyable value OUT of a closure body (#177):
+        // the closure owns the single value and may be called more than once,
+        // so returning/consuming it would duplicate it (double-deinit). Borrow
+        // it instead. Distinct from E503 (move-out-of-borrowed-scrutinee).
+        if state.reported.insert(src) {
+            let name = mcx.cx.hir.locals[src].name.clone();
+            let span = util::expr_span(mcx.cx.hir, site);
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[3].id,
+                severity: DESCRIPTORS[3].default_severity,
+                message: format!("cannot move captured value '{name}' out of a closure"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "non-copyable captured value moved out here".into(),
+                    is_primary: true,
+                }],
+                notes: vec![
+                    "a closure may be called more than once but owns a single \
+                     non-copyable value; borrow the captured value instead of \
+                     returning or consuming it"
+                        .into(),
+                ],
+            });
+        }
+    } else if mcx.borrow_bound.contains(&src) && state.reported.insert(src) {
         let name = mcx.cx.hir.locals[src].name.clone();
         let span = util::expr_span(mcx.cx.hir, site);
         diags.push(AnalyzeDiagnostic {
