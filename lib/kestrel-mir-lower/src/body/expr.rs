@@ -1023,7 +1023,18 @@ impl OssaBodyCtx<'_, '_> {
                         _ => {
                             let raw = self.local_map[&hir_local].value();
                             let addr = self.whole_slot_addr(raw);
-                            self.emit_store_assign(addr, rhs);
+                            // A whole-self store (`self = expr`) that is the FIRST
+                            // initialization of `self` in an init body must be a
+                            // StoreInit, not a StoreAssign: self is uninitialized,
+                            // and StoreAssign's drop-of-the-old would free garbage
+                            // field pointers (heap corruption). After it, all
+                            // fields are live.
+                            if self.is_uninit_whole_self(hir_local) {
+                                self.emit_store_init(addr, rhs);
+                                self.mark_whole_self_init();
+                            } else {
+                                self.emit_store_assign(addr, rhs);
+                            }
                         },
                     }
                 } else {

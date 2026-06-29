@@ -1245,6 +1245,42 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
     }
 
+    /// True if `local` is the receiver of the current init body and `self` is
+    /// still FULLY uninitialized — no tracked droppable field has been stored.
+    /// A whole-self store (`self = expr`) at this point is the first
+    /// initialization of `self` and must lower to `StoreInit`: a `StoreAssign`
+    /// would drop the uninitialized `self` (garbage field pointers → heap
+    /// corruption → SIGBUS on the next read). Init `self` is bound as a
+    /// `LocalBinding::Var` but deliberately not enrolled in `var_init` tracking
+    /// (its fields are tracked individually), so the whole-self store path would
+    /// otherwise fall to the `StoreAssign` arm.
+    pub fn is_uninit_whole_self(&self, local: HirLocalId) -> bool {
+        let Some(self_addr) = self.body_context.init_self_addr() else {
+            return false;
+        };
+        if self.local_map.get(&local).map(|b| b.value()) != Some(self_addr) {
+            return false;
+        }
+        self.field_inits
+            .iter()
+            .all(|(_, s)| *s == VarInit::DefUninit)
+    }
+
+    /// Mark every tracked `self` field initialized after a whole-self store
+    /// (`self = expr` initializes them all at once): set `field_inits` to
+    /// `DefInit` and raise each drop flag, so a later field reassignment drops
+    /// the old value and a failable-init failure return drops the now-live
+    /// fields. Mirrors the per-field bookkeeping in `store_init_self_field`.
+    pub fn mark_whole_self_init(&mut self) {
+        let fields: Vec<FieldIdx> = self.field_inits.iter().map(|(idx, _)| *idx).collect();
+        for idx in fields {
+            self.set_field_init(idx, VarInit::DefInit);
+            if let Some(flag) = self.init_field_flag(idx) {
+                self.store_drop_flag(flag, true);
+            }
+        }
+    }
+
     /// The drop flag for a stored `self` field, if this is a failable init and
     /// the field is droppable. Used by field-assign to mark the field live.
     pub fn init_field_flag(&self, field: FieldIdx) -> Option<ValueId> {
