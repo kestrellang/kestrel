@@ -1775,6 +1775,20 @@ fn solve_coerce(
         });
     }
 
+    // #178: a closure literal coerced to an expected function type
+    // (`let f: (mutating T) -> () = { (x) in … }`) upgrades its param
+    // conventions exactly like a call argument does (reconcile_fn_convention at
+    // the call site). `unify` ignores conventions, so without this the closure
+    // keeps its default `Consuming` convention and a `mutating`-requiring body
+    // is falsely rejected with E201. Only fires once both sides resolve to
+    // Functions (else it no-ops and the unify below defers, re-running coerce).
+    if ctx.closure_literal_exprs.contains(&expr)
+        && let Some(err) = reconcile_closure_conventions(ctx, from, to, expr, &span)
+    {
+        ctx.errored_coerce_exprs.insert(expr);
+        return SolveResult::Error(err);
+    }
+
     // Try unification first (handles the common case)
     match unify::unify(ctx, from, to) {
         Ok(()) => return SolveResult::Solved,
@@ -2592,20 +2606,42 @@ fn reconcile_fn_convention(
     param: TyVar,
     span: &Span,
 ) -> Option<InferError> {
+    reconcile_closure_conventions(ctx, arg.ty, param, arg.value, span)
+}
+
+/// Reconcile a closure/function value's param conventions against an expected
+/// function type. For a closure *literal*, a non-`MutBorrow` param is upgraded
+/// in place to `MutBorrow` when the expected type demands it — this is what lets
+/// `arr.modify { it.len += 1 }` (call arg) AND `let f: (mutating T) -> () = {…}`
+/// (annotated binding) infer the convention without an explicit `mutating` on
+/// the param. Passing a `MutBorrow` closure where a non-mutating param is
+/// expected is a hard error. Returns `Some(err)` only on that mismatch; the
+/// upgrade is an in-place side effect on `actual_ty`'s resolved slot.
+///
+/// `value_expr` identifies the closure literal expression (so the upgrade only
+/// applies to literals we lower — never to an opaque function value whose
+/// convention is fixed).
+fn reconcile_closure_conventions(
+    ctx: &mut InferCtx<'_>,
+    actual_ty: TyVar,
+    expected_ty: TyVar,
+    value_expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<InferError> {
     use kestrel_ast::ParamConvention::MutBorrow;
 
-    // Expected per-param conventions come from the parameter's function type.
-    let expected = match ctx.slot(param) {
+    // Expected per-param conventions come from the expected function type.
+    let expected = match ctx.slot(expected_ty) {
         TySlot::Resolved(TyKind::Function { conventions, .. }) => conventions.clone(),
         _ => return None,
     };
-    // Actual conventions from the argument's (closure/function) type.
-    let actual = match ctx.slot(arg.ty) {
+    // Actual conventions from the value's (closure/function) type.
+    let actual = match ctx.slot(actual_ty) {
         TySlot::Resolved(TyKind::Function { conventions, .. }) => conventions.clone(),
         _ => return None,
     };
 
-    let is_literal = ctx.closure_literal_exprs.contains(&arg.value);
+    let is_literal = ctx.closure_literal_exprs.contains(&value_expr);
     let mut upgraded = actual.clone();
     let mut changed = false;
     for j in 0..expected.len().min(actual.len()) {
@@ -2622,7 +2658,7 @@ fn reconcile_fn_convention(
         }
     }
     if changed {
-        ctx.set_function_conventions(arg.ty, upgraded);
+        ctx.set_function_conventions(actual_ty, upgraded);
     }
     None
 }

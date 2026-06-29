@@ -304,29 +304,15 @@ fn check_closure_type(
     let actual_count = params.len();
     let expected_count = expected_params.len();
 
-    // Check if this is an implicit `it` closure (zero explicit params but
-    // the body references a local named "it"). This is the E600 check.
-    if actual_count == 0 && expected_count != 1 {
-        // Check if any local in the body is named "it"
-        let uses_it = cx.hir.locals.iter().any(|(_, local)| local.name == "it");
-        if uses_it {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
-                message: format!(
-                    "implicit 'it' parameter used in closure expecting {} parameters",
-                    expected_count
-                ),
-                labels: vec![DiagLabel {
-                    span: util::expr_span(cx.hir, expr_id),
-                    message: "'it' requires exactly 1 parameter".into(),
-                    is_primary: true,
-                }],
-                notes: vec![],
-            });
-            return;
-        }
-    }
+    // NOTE: the implicit-`it` wrong-arity check (E600) deliberately lives in the
+    // type-inference solver (`InferError::ItWrongArity`), NOT here. The AST
+    // builder injects `it` as an explicit param whenever a closure body uses it,
+    // so a real `it`-closure reaches this point with `actual_count == 1`; the
+    // solver keys its check on that specific closure literal's TyVar
+    // (`closure_it`). A whole-function `locals.iter()…name == "it"` scan here
+    // (as a prior version did) false-flagged every zero-param closure that merely
+    // had a *sibling* `it`-closure in the same body. Single source of truth: the
+    // solver.
 
     // Arity mismatch (E601)
     if actual_count != expected_count && actual_count > 0 {
