@@ -55,6 +55,8 @@ use kestrel_semantics::{
     NominalCopySemantics, TypeParamCopyRequirement,
 };
 use kestrel_type_infer::result::ResolvedTy;
+use kestrel_type_infer::{CaptureKind, ClosureCaptureMap, ClosureCaptures};
+use std::sync::Arc;
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -104,10 +106,19 @@ impl BodyCheck for MoveTrackingAnalyzer {
             root: cx.root,
         });
 
+        // Place-based capture plan (single source of truth, post-inference).
+        // The move checker uses it to model a non-Copyable value captured BY
+        // VALUE into a closure as a move of the root (see the Closure arm).
+        let captures = cx.query.query(ClosureCaptures {
+            entity: cx.entity,
+            root: cx.root,
+        });
+
         let mcx = MoveCtx {
             cx,
             copyable: copyable_entity,
             borrow_bound: compute_borrow_bound(cx),
+            captures,
         };
         let mut diags = Vec::new();
         let state = State::empty();
@@ -172,6 +183,9 @@ struct MoveCtx<'a> {
     /// function of the binding's pattern, not the dataflow), so it's computed
     /// once up front rather than threaded through `State`.
     borrow_bound: HashSet<LocalId>,
+    /// Per-closure place-based capture plan. A whole-local Read capture of a
+    /// non-Copyable value is a move of the root into the closure environment.
+    captures: Arc<ClosureCaptureMap>,
 }
 
 // ===== Walker (shape modelled on definite_assignment.rs) =====
@@ -463,10 +477,29 @@ fn analyze_expr(
         // ===== Break / Continue (divergence handled below via Never) =====
         HirExpr::Break { .. } | HirExpr::Continue { .. } => {},
 
-        // ===== Closures: analyze body in isolation; don't leak moves =====
+        // ===== Closures: analyze body in isolation; don't leak inner moves =====
         HirExpr::Closure { body, .. } => {
             let inner = State::empty();
             let _ = analyze_block(mcx, &body.stmts, body.tail_expr, inner, diags);
+
+            // A non-Copyable value captured BY VALUE is MOVED into the closure
+            // environment — it cannot be copied. Record that move in the
+            // ENCLOSING scope so a later use of the root is a clean
+            // use-after-move (E500/E503) instead of slipping past the checker
+            // and ICEing in OSSA (#177). Only whole-local Read captures of a
+            // non-Copyable type move: a Copyable read is by-copy, and a captured
+            // Copyable sub-place of a non-Copyable value (`self.cap`, an Int64)
+            // is its own non-whole place — neither moves. Write captures are
+            // by-reference. Partial (projected) non-Copyable captures are left
+            // to MIR (the checker has no partial-move model — `rhs_local`).
+            for cap in mcx.captures.get(id) {
+                if cap.kind == CaptureKind::Read
+                    && cap.key.is_whole()
+                    && local_is_non_copyable(mcx, cap.key.root)
+                {
+                    record_move(mcx, &mut state, diags, cap.key.root, id);
+                }
+            }
         },
 
         // ===== Calls — consuming args and consuming receivers move =====

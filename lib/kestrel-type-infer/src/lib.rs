@@ -38,7 +38,7 @@ use ctx::InferCtx;
 use resolve::WorldResolver;
 use result::TypedBody;
 
-pub use captures::ClosureCaptures;
+pub use captures::{CaptureKind, CapturedPlace, ClosureCaptureMap, ClosureCaptures, PlaceKey};
 pub use conformance::{extension_bounds_hold, type_satisfies};
 
 /// Resolve the logical enclosing container for a function-like entity.
