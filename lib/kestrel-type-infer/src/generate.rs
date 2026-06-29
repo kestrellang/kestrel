@@ -606,6 +606,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 let val_tv = gen_expr(ctx, hir, *val);
+                // A `return e;` statement is a value position, identical to the
+                // return-tail: a ref-returning call decays to the pointee when
+                // the declared return type is non-ref (#194). When the return
+                // type IS `&T`, leave the ref intact (return-position borrow /
+                // ref-to-ref pass-through handle it in solve_coerce).
+                if !matches!(
+                    ctx.slot(ctx.resolve(ctx.return_ty)),
+                    TySlot::Resolved(TyKind::Ref { .. })
+                ) {
+                    mark_arm_value(ctx, hir, *val);
+                }
                 ctx.coerce(val_tv, ctx.return_ty, *val, span.clone());
             } else {
                 // Bare return — coerce unit against return type so
@@ -627,6 +638,14 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ctx.assign_target_exprs.insert(*target);
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
+            // The RHS is a copy-out value position: a ref-returning call decays
+            // to the pointee, whether the target is a plain place (`x = b.peek()`)
+            // or a ref place written through (`arr.mutableAt(0) = arr.at(1)`).
+            // Without this, `bind_call_result` binds the call result to the raw
+            // `&T` before the assignment coerce can decay it, manufacturing a
+            // bogus "expected T got &T" (#194). A non-call RHS (e.g. `&x`) is
+            // inert to the decay set, so rebind-style stores are unaffected.
+            mark_arm_value(ctx, hir, *value);
             // A LOCAL target keeps its raw type (a `&mutating` binding's
             // local type IS the ref) and may resolve late (pattern-payload
             // bindings) — route through AssignTarget, which picks
@@ -1498,6 +1517,15 @@ fn gen_closure(
 
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
+
+    // A closure's tail is a value (return) position and refs do not cross the
+    // closure boundary (stage-1) — a ref-returning tail call decays to the
+    // pointee (#195). Without this the raw `&T` becomes the closure's return
+    // type, mismatching a `() -> T` expectation (or reaching MIR as a non-
+    // ret_borrow `@guaranteed` return → OSSA ICE).
+    if let Some(tail) = body.tail_expr {
+        mark_arm_value(ctx, hir, tail);
+    }
 
     // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
     // otherwise `Consuming` (the default, matching ordinary closures). The
