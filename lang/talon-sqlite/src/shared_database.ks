@@ -7,13 +7,13 @@
 module talon.sqlite.shared_database
 
 import talon.sqlite.ffi
-import talon.sqlite.connection.(executeOnDb, queryOnDb, execRawOnDb, lastInsertRowIdOnDb)
+import talon.sqlite.connection.(executeCachedOnDb, queryCachedOnDb, execRawOnDb, lastInsertRowIdOnDb, finalizeCachedStmts)
 import talon.sqlite.transaction.(Transaction)
 import talon.sqlite.executor.(SqliteExecutor)
 import talon.sqlite.error.(SqliteError)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(FromRow)
-import std.memory.(Layout, Pointer, RawPointer, SystemAllocator)
+import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox)
 import std.core.(fatalError)
 
 // Heap-allocated storage: refcount + sqlite3* handle.
@@ -32,6 +32,10 @@ struct SharedDbStorage {
 /// `Cloneable` context (e.g. a Perch `AppCtx`).
 public struct SharedDatabase: Cloneable, SqliteExecutor {
     private var ptr: Pointer[SharedDbStorage]
+    // Prepared-statement cache, shared across clones (one sqlite3* handle ⇒ one
+    // cache). Its RcBox refcount tracks clones in lockstep with the manual
+    // `refCount` in storage, so the last drop finalizes the statements.
+    private var cache: RcBox[Dictionary[String, RawPointer]]
 
     /// Opens or creates a SQLite database at the given path.
     public init(path: String) throws SqliteError {
@@ -53,30 +57,33 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
         if let .Some(p) = rawPtr {
             self.ptr = p.cast[SharedDbStorage]();
             self.ptr.write(SharedDbStorage(refCount: 1, db: dbRaw));
+            self.cache = RcBox(Dictionary[String, RawPointer]());
         } else {
              ffi.sqlite3_close(dbRaw);
             fatalError("SharedDatabase allocation failed")
         }
     }
 
-    // Adopts an existing storage pointer (refcount already bumped by clone).
-    private init(inner inner: Pointer[SharedDbStorage]) {
+    // Adopts an existing storage pointer (refcount already bumped by clone)
+    // and a clone of the shared statement cache.
+    private init(inner inner: Pointer[SharedDbStorage], cache cache: RcBox[Dictionary[String, RawPointer]]) {
         self.ptr = inner;
+        self.cache = cache;
     }
 
     public func clone() -> SharedDatabase {
         var storage = self.ptr.read();
         storage.refCount = storage.refCount + 1;
         self.ptr.write(storage);
-        SharedDatabase(inner: self.ptr)
+        SharedDatabase(inner: self.ptr, cache: self.cache.clone())
     }
 
     public func execute(sql: SQL) -> () throws SqliteError {
-        executeOnDb(self.ptr.read().db, sql)
+        executeCachedOnDb(self.ptr.read().db, self.cache, sql)
     }
 
     public func query[R](sql: SQL) -> Array[R] throws SqliteError where R: FromRow {
-        queryOnDb[R](self.ptr.read().db, sql)
+        queryCachedOnDb[R](self.ptr.read().db, self.cache, sql)
     }
 
     public func lastInsertRowId() -> Int64 {
@@ -101,6 +108,9 @@ public struct SharedDatabase: Cloneable, SqliteExecutor {
         storage.refCount = storage.refCount - 1;
 
         if storage.refCount == 0 {
+            // Statements must be finalized before the handle is closed, while
+            // the cache is still alive (its RcBox field drops after this body).
+            finalizeCachedStmts(self.cache);
             if not storage.db.isNull {
                  ffi.sqlite3_close(storage.db);
             }

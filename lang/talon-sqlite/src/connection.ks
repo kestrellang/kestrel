@@ -11,6 +11,7 @@ import talon.sqlite.value.(SqliteValue)
 import talon.sqlite.sql.(SQL)
 import talon.sqlite.row.(Row, FromRow)
 import std.core.Copyable
+import std.memory.(RcBox)
 
 // SQLITE_TRANSIENT tells sqlite3 to copy bound string data immediately
 func SQLITE_TRANSIENT() -> RawPointer {
@@ -113,6 +114,102 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
     }
      ffi.sqlite3_finalize(stmtRaw);
     results
+}
+
+// ---- Prepared-statement cache --------------------------------------------
+// Re-preparing identical SQL on every execute/query dominates the write path
+// (a `sqlite3_prepare_v2` compile + a CString alloc per call). These cached
+// variants keep each prepared statement alive in an RcBox'd Dictionary keyed by
+// the SQL template, `reset()`-ing it for reuse instead of `finalize()`-ing it.
+// The owner finalizes the whole cache exactly once, before `sqlite3_close`
+// (`finalizeCachedStmts`). Bindings are re-set on every call (same SQL ⇒ same
+// parameter count), so no `clear_bindings` is needed after a reset.
+
+// Returns a prepared statement for `template`, reset and ready to bind —
+// reusing a cached one or preparing+caching a fresh one.
+func getCachedStmt(
+    db: RawPointer,
+    cache: RcBox[Dictionary[String, RawPointer]],
+    template: String
+) -> RawPointer throws SqliteError {
+    let cached = cache.valuePtr().with { (d) in d(template) };
+    match cached {
+        .Some(stmt) => {
+             ffi.sqlite3_reset(stmt);
+            .Ok(stmt)
+        },
+        .None => {
+            var stmtRaw = RawPointer.nullPointer();
+            let ctemplate = template.toCString();
+            let prepResult = ffi.sqlite3_prepare_v2(
+                db,
+                ctemplate.raw.asRaw(),
+                Int32(from: -1),
+                Pointer(to: stmtRaw).asRaw(),
+                RawPointer.nullPointer()
+            );
+            ctemplate.free();
+            if prepResult != ffi.SQLITE_OK() {
+                throw SqliteError.Error(errorMessage(db));
+            }
+            cache.modify { (mutating d) in let _ = d.insert(template, stmtRaw); };
+            .Ok(stmtRaw)
+        }
+    }
+}
+
+// Cached counterpart to executeOnDb: prepare-once + bind + step + reset.
+func executeCachedOnDb(
+    db: RawPointer,
+    cache: RcBox[Dictionary[String, RawPointer]],
+    sql: SQL
+) -> () throws SqliteError {
+    let stmt = try getCachedStmt(db, cache, sql.template);
+    try bindParams(stmt, sql.bindings);
+    let stepResult = ffi.sqlite3_step(stmt);
+    if stepResult != ffi.SQLITE_OK() and stepResult != ffi.SQLITE_DONE() and stepResult != ffi.SQLITE_ROW() {
+        let msg = errorMessage(db);
+         ffi.sqlite3_reset(stmt);
+        throw SqliteError.Error(msg);
+    }
+     ffi.sqlite3_reset(stmt);
+    .Ok(())
+}
+
+// Cached counterpart to queryOnDb: prepare-once + bind + step-loop + reset.
+func queryCachedOnDb[R](
+    db: RawPointer,
+    cache: RcBox[Dictionary[String, RawPointer]],
+    sql: SQL
+) -> Array[R] throws SqliteError where R: FromRow {
+    let stmt = try getCachedStmt(db, cache, sql.template);
+    try bindParams(stmt, sql.bindings);
+    var results = Array[R]();
+    loop {
+        let stepResult = ffi.sqlite3_step(stmt);
+        if stepResult == ffi.SQLITE_ROW() {
+            let row = readRow(stmt);
+            results.append(try R.fromRow(row));
+        } else if stepResult == ffi.SQLITE_DONE() {
+            break
+        } else {
+            let msg = errorMessage(db);
+             ffi.sqlite3_reset(stmt);
+            throw SqliteError.Error(msg);
+        }
+    };
+     ffi.sqlite3_reset(stmt);
+    results
+}
+
+// Finalizes every cached statement. Call once, before `sqlite3_close` (open
+// statements make `sqlite3_close` fail and leak the handle).
+func finalizeCachedStmts(cache: RcBox[Dictionary[String, RawPointer]]) {
+    cache.valuePtr().with { (d) in
+        for entry in d.iter() {
+             ffi.sqlite3_finalize(entry.1);
+        }
+    };
 }
 
 // Helper: run a raw SQL string (for BEGIN/COMMIT/ROLLBACK)
