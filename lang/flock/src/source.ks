@@ -152,6 +152,40 @@ public func joinPath(base base: String, rel rel: String) -> String {
     result
 }
 
+/// Returns flock's home directory (`~/.flock`), performing a one-time migration
+/// from the legacy `~/.kestrel` location.
+///
+/// flock owns this directory — the package cache, credentials, registry config,
+/// and installed binaries all live under it; the compiler toolchain lives under
+/// `~/.jessup`. This mirrors Rust's `~/.cargo` (package manager) vs `~/.rustup`
+/// (toolchains) split.
+///
+/// Migration: if `~/.flock` is absent but `~/.kestrel` exists, the old directory
+/// is renamed in place (a one-time move). If the rename fails, the legacy path is
+/// returned so existing data stays reachable.
+public func flockHome() -> String {
+    match getenv("HOME") {
+        .None => ".flock",
+        .Some(home) => {
+            let flockDir = joinPath(base: home, rel: ".flock");
+            // ~/.flock already present (post-migration, or fresh) — use it.
+            if isDirectory(flockDir) {
+                return flockDir
+            }
+            // One-time move of the legacy ~/.kestrel home.
+            let kestrelDir = joinPath(base: home, rel: ".kestrel");
+            if isDirectory(kestrelDir) {
+                match rename(kestrelDir, flockDir) {
+                    .Ok(_) => flockDir,
+                    .Err(_) => kestrelDir
+                }
+            } else {
+                flockDir
+            }
+        }
+    }
+}
+
 /// Splits a path on "/" characters.
 func splitOnSlash(s: String) -> Array[String] {
     var result = Array[String]();

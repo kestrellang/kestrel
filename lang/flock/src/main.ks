@@ -15,11 +15,12 @@ import clutch.matches.(ArgumentMatches)
 import clutch.error.(ParseError)
 import flock.error.(FlockError)
 import flock.manifest.(Manifest, BuildConfig, parseManifest)
-import flock.source.(ResolvedPackage, PathSource, joinPath)
+import flock.source.(ResolvedPackage, PathSource, joinPath, flockHome)
 import flock.graph.(DepNode, buildGraph, topologicalSort)
-import flock.discover.(discoverSources)
+import flock.discover.(discoverSources, discoverBins, BinTarget)
 import flock.compiler.(invokeCompiler)
-import flock.version.(Version)
+import flock.version.(Version, parseVersion, VersionConstraint)
+import flock.dependency.(DependencySpec)
 import flock.registry.(RegistryConfig, resolveRegistryUrl, isRegistryName)
 import flock.registry_source.(RegistrySource)
 import flock.lock.(LockFile, LockEntry, parseLockFile, generateLockFile)
@@ -35,37 +36,69 @@ func main() -> lang.i32 {
     var cmd = Command("flock");
     cmd = cmd.about("Package manager for Kestrel");
     cmd = cmd.version("0.1.0");
-    cmd = cmd.subcommand(Command("build").about("Build the current package")
-        .argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)"));
-    cmd = cmd.subcommand(Command("run").about("Build and run the current package")
-        .argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)"));
+    var buildCmd = Command("build").about("Build the current package");
+    buildCmd = buildCmd.argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)");
+    buildCmd = buildCmd.argument("bin", about: "Build only the named binary target");
+    cmd = cmd.subcommand(buildCmd);
+    var runCmd = Command("run").about("Build and run the current package");
+    runCmd = runCmd.argument(flag: "release", about: "Build optimized (passes -O 2 to the compiler)");
+    runCmd = runCmd.argument("bin", about: "Run only the named binary target");
+    cmd = cmd.subcommand(runCmd);
     cmd = cmd.subcommand(Command("check").about("Type-check the current package"));
-    cmd = cmd.subcommand(Command("init").about("Create a new flock.toml in the current directory"));
+    var initCmd = Command("init").about("Create a new flock.toml in the current directory");
+    initCmd = initCmd.argument(flag: "lib", about: "Create a library package (src/lib.ks) instead of a binary (src/main.ks)");
+    cmd = cmd.subcommand(initCmd);
     cmd = cmd.subcommand(Command("publish").about("Publish a package to the registry"));
     cmd = cmd.subcommand(Command("update").about("Update dependencies (re-resolve and rewrite flock.lock)"));
+    var installCmd = Command("install").about("Build and install a package's binaries into ~/.flock/bin");
+    installCmd = installCmd.argument(Argument(positional: "package", about: "Registry <org>/<pkg>[@version] or a local path; omit for the current package").optional());
+    installCmd = installCmd.argument("bin", about: "Install only the named binary target");
+    installCmd = installCmd.argument(flag: "force", about: "Overwrite an existing installed binary");
+    installCmd = installCmd.argument(flag: "debug", about: "Build unoptimized (default is optimized)");
+    cmd = cmd.subcommand(installCmd);
 
     match cmd.parse(from: argv) {
         .Ok(matches) => {
             match matches.subcommand {
                 .Some(sub) => {
                     // The subcommand's own flags live in submatches[0]; `--release`
-                    // turns on optimized codegen for build/run.
+                    // turns on optimized codegen for build/run, `--bin` selects a
+                    // single binary target.
                     var release = false;
+                    var binFlag: Optional[String] = .None;
                     if matches.submatches.count > 0 {
-                        release = matches.submatches(unchecked: 0).hasFlag("release")
+                        let sm = matches.submatches(unchecked: 0);
+                        release = sm.hasFlag("release");
+                        binFlag = sm.value(of: "bin")
                     }
                     if sub == "build" {
-                        handleBuild(release: release)
+                        handleBuild(release: release, binFlag: binFlag.clone())
                     } else if sub == "run" {
-                        handleRun(release: release)
+                        handleRun(release: release, binFlag: binFlag.clone())
                     } else if sub == "check" {
                         handleCheck()
                     } else if sub == "init" {
-                        handleInit()
+                        var lib = false;
+                        if matches.submatches.count > 0 {
+                            lib = matches.submatches(unchecked: 0).hasFlag("lib")
+                        }
+                        handleInit(lib: lib)
                     } else if sub == "publish" {
                         handlePublish()
                     } else if sub == "update" {
                         handleUpdate()
+                    } else if sub == "install" {
+                        // install defaults to an optimized build; --debug opts out.
+                        var force = false;
+                        var pkg: Optional[String] = .None;
+                        var instRelease = true;
+                        if matches.submatches.count > 0 {
+                            let sm2 = matches.submatches(unchecked: 0);
+                            force = sm2.hasFlag("force");
+                            pkg = sm2.value(of: "package");
+                            instRelease = not sm2.hasFlag("debug")
+                        }
+                        handleInstall(target: pkg, binFlag: binFlag.clone(), force: force, release: instRelease)
                     } else {
                         0
                     }
@@ -93,33 +126,47 @@ func main() -> lang.i32 {
 // COMMAND HANDLERS
 // ============================================================================
 
-func handleBuild(release release: Bool) -> lang.i32 {
+func handleBuild(release release: Bool, binFlag binFlag: Optional[String]) -> lang.i32 {
     match resolveAndDiscover() {
         .Err(e) => {  eprintln(e.description()); 1 },
-        .Ok(info) => {
-            var msg = String(); msg.append("Building "); msg.append(info.name);
-            if release { msg.append(" (release)") };
-            msg.append("...");
-             println(msg);
-            match invokeCompiler(mode: "build", sources: info.sources, output: .Some(info.name), linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
-                .Ok(_) => {
-                    var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(info.name); doneMsg.append(" successfully");
-                     println(doneMsg);
-                    0
-                },
-                .Err(e) => {  eprintln(e.description()); 1 }
+        .Ok(built) => {
+            match selectBin(bins: built.bins, binFlag: binFlag, packageName: built.name) {
+                .Err(e) => {  eprintln(e.description()); 1 },
+                .Ok(bin) => {
+                    var sources = built.shared.clone();
+                    sources.append(bin.entry.clone());
+                    var msg = String(); msg.append("Building "); msg.append(bin.name.clone());
+                    if release { msg.append(" (release)") };
+                    msg.append("...");
+                     println(msg);
+                    match invokeCompiler(mode: "build", sources: sources, output: .Some(bin.name.clone()), linkLibs: built.linkLibs, linkPaths: built.linkPaths, frameworks: built.frameworks, release: release) {
+                        .Ok(_) => {
+                            var doneMsg = String(); doneMsg.append("Built "); doneMsg.append(bin.name); doneMsg.append(" successfully");
+                             println(doneMsg);
+                            0
+                        },
+                        .Err(e) => {  eprintln(e.description()); 1 }
+                    }
+                }
             }
         }
     }
 }
 
-func handleRun(release release: Bool) -> lang.i32 {
+func handleRun(release release: Bool, binFlag binFlag: Optional[String]) -> lang.i32 {
     match resolveAndDiscover() {
         .Err(e) => {  eprintln(e.description()); 1 },
-        .Ok(info) => {
-            match invokeCompiler(mode: "run", sources: info.sources, output: .None, linkLibs: info.linkLibs, linkPaths: info.linkPaths, frameworks: info.frameworks, release: release) {
-                .Ok(_) => 0,
-                .Err(e) => {  eprintln(e.description()); 1 }
+        .Ok(built) => {
+            match selectBin(bins: built.bins, binFlag: binFlag, packageName: built.name) {
+                .Err(e) => {  eprintln(e.description()); 1 },
+                .Ok(bin) => {
+                    var sources = built.shared.clone();
+                    sources.append(bin.entry.clone());
+                    match invokeCompiler(mode: "run", sources: sources, output: .None, linkLibs: built.linkLibs, linkPaths: built.linkPaths, frameworks: built.frameworks, release: release) {
+                        .Ok(_) => 0,
+                        .Err(e) => {  eprintln(e.description()); 1 }
+                    }
+                }
             }
         }
     }
@@ -128,10 +175,17 @@ func handleRun(release release: Bool) -> lang.i32 {
 func handleCheck() -> lang.i32 {
     match resolveAndDiscover() {
         .Err(e) => {  eprintln(e.description()); 1 },
-        .Ok(info) => {
-            var msg = String(); msg.append("Checking "); msg.append(info.name); msg.append("...");
+        .Ok(built) => {
+            // Check the whole package: shared sources plus every bin entry.
+            var sources = built.shared.clone();
+            var i: Int64 = 0;
+            while i < built.bins.count {
+                sources.append(built.bins(unchecked: i).entry.clone());
+                i = i + 1
+            }
+            var msg = String(); msg.append("Checking "); msg.append(built.name); msg.append("...");
              println(msg);
-            match invokeCompiler(mode: "check", sources: info.sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String](), release: false) {
+            match invokeCompiler(mode: "check", sources: sources, output: .None, linkLibs: Array[String](), linkPaths: Array[String](), frameworks: Array[String](), release: false) {
                 .Ok(_) => {  println("Check passed"); 0 },
                 .Err(e) => {  eprintln(e.description()); 1 }
             }
@@ -139,7 +193,7 @@ func handleCheck() -> lang.i32 {
     }
 }
 
-func handleInit() -> lang.i32 {
+func handleInit(lib lib: Bool) -> lang.i32 {
     let cwd = getcwd();
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
@@ -152,7 +206,7 @@ func handleInit() -> lang.i32 {
     let dirName = lastPathComponent(cwd);
 
     var content = String();
-    content.append("[package]\nname = \""); content.append(dirName); content.append("\"\nversion = \"0.1.0\"\norg = \"\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
+    content.append("[package]\nname = \""); content.append(dirName.clone()); content.append("\"\nversion = \"0.1.0\"\norg = \"\"\ndescription = \"\"\nauthor = \"\"\nlicense = \"\"\nrepository = \"\"\nwebsite = \"\"\ndocumentation = \"\"\n\n[dependencies]\n");
 
     match writeFileString(manifestPath, content) {
         .Ok(_) => {  println("Created flock.toml"); },
@@ -165,11 +219,57 @@ func handleInit() -> lang.i32 {
     // Create src/ directory
     let srcDir = joinPath(base: cwd, rel: "src");
     if not isDirectory( srcDir) {
-        var mkdirCmd = String(); mkdirCmd.append("mkdir -p "); mkdirCmd.append(srcDir);
+        var mkdirCmd = String(); mkdirCmd.append("mkdir -p "); mkdirCmd.append(srcDir.clone());
          spawn(mkdirCmd);
          println("Created src/");
     }
+
+    // Scaffold an entry source so the package has a target out of the box:
+    // a binary (src/main.ks) by default, or a library (src/lib.ks) with --lib.
+    let modName = sanitizeModuleName(name: dirName.clone());
+    if lib {
+        let libPath = joinPath(base: srcDir, rel: "lib.ks");
+        if not fileExists(libPath) {
+            var c = String();
+            c.append("module "); c.append(modName); c.append(".lib\n\n/// Returns a friendly greeting.\npublic func greeting() -> String {\n    \"Hello from "); c.append(dirName); c.append("\"\n}\n");
+            match writeFileString(libPath, c) {
+                .Ok(_) => {  println("Created src/lib.ks"); },
+                .Err(_) => {}
+            }
+        }
+    } else {
+        let mainPath = joinPath(base: srcDir, rel: "main.ks");
+        if not fileExists(mainPath) {
+            var c = String();
+            c.append("module "); c.append(modName); c.append(".main\n\n@main\nfunc main() -> lang.i32 {\n    println(\"Hello from "); c.append(dirName); c.append("!\");\n    0\n}\n");
+            match writeFileString(mainPath, c) {
+                .Ok(_) => {  println("Created src/main.ks"); },
+                .Err(_) => {}
+            }
+        }
+    }
     0
+}
+
+/// Turns a package/directory name into a valid module-name segment by replacing
+/// any non-identifier byte with `_` (e.g. "my-tool" -> "my_tool").
+func sanitizeModuleName(name name: String) -> String {
+    var result = String();
+    var i: Int64 = 0;
+    while i < name.byteCount {
+        let b = name.bytes(unchecked: i);
+        let ok = (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or (b >= 48 and b <= 57) or b == 95;
+        if ok {
+            result.append(name.asSlice().subslice(from: i, to: i + 1).toOwned())
+        } else {
+            result.append("_")
+        }
+        i = i + 1
+    }
+    if result.byteCount == 0 {
+        result.append("pkg")
+    }
+    result
 }
 
 func handlePublish() -> lang.i32 {
@@ -227,17 +327,12 @@ func handlePublish() -> lang.i32 {
         return 1
     }
 
-    // Read token from ~/.kestrel/credentials
+    // Read token from ~/.flock/credentials
     var token = "";
-    match getenv("HOME") {
-        .Some(home) => {
-            let credPath = joinPath(base: home, rel: ".kestrel/credentials");
-            match readFileString(credPath) {
-                .Ok(contents) => token = trimWhitespace(contents),
-                .Err(_) => {}
-            }
-        },
-        .None => {}
+    let credPath = joinPath(base: flockHome(), rel: "credentials");
+    match readFileString(credPath) {
+        .Ok(contents) => token = trimWhitespace(contents),
+        .Err(_) => {}
     }
 
     // Fall back to FLOCK_TOKEN env var
@@ -246,7 +341,7 @@ func handlePublish() -> lang.i32 {
             .Some(t) => token = t,
             .None => {
                  eprintln("No auth token found.");
-                 eprintln("Set FLOCK_TOKEN or save your token to ~/.kestrel/credentials");
+                 eprintln("Set FLOCK_TOKEN or save your token to ~/.flock/credentials");
                 return 1
             }
         }
@@ -320,36 +415,175 @@ func handleUpdate() -> lang.i32 {
     // Re-resolve everything
     match resolveAndDiscover() {
         .Err(e) => {  eprintln(e.description()); 1 },
-        .Ok(info) => {
-            var msg = String(); msg.append("Dependencies updated for "); msg.append(info.name);
+        .Ok(built) => {
+            var msg = String(); msg.append("Dependencies updated for "); msg.append(built.name);
              println(msg);
             0
         }
     }
 }
 
+func handleInstall(target target: Optional[String], binFlag binFlag: Optional[String], force force: Bool, release release: Bool) -> lang.i32 {
+    match resolveInstallRoot(target: target) {
+        .Err(e) => {  eprintln(e.description()); 1 },
+        .Ok(root) => {
+            let pkgName = root.manifest.package.name.clone();
+            match collectBuild(root: root) {
+                .Err(e) => {  eprintln(e.description()); 1 },
+                .Ok(built) => {
+                    if built.bins.count == 0 {
+                         eprintln(FlockError.NoBinaryTargets(pkgName).description());
+                        return 1
+                    }
+
+                    // Select targets: --bin narrows to one, otherwise install all.
+                    var targets = Array[BinTarget]();
+                    match binFlag {
+                        .Some(name) => {
+                            match selectBin(bins: built.bins, binFlag: .Some(name.clone()), packageName: pkgName.clone()) {
+                                .Ok(b) => targets.append(b),
+                                .Err(e) => {  eprintln(e.description()); return 1 }
+                            }
+                        },
+                        .None => {
+                            var i: Int64 = 0;
+                            while i < built.bins.count {
+                                targets.append(built.bins(unchecked: i).clone());
+                                i = i + 1
+                            }
+                        }
+                    }
+
+                    // Ensure ~/.flock/bin exists.
+                    let binDir = joinPath(base: flockHome(), rel: "bin");
+                    match mkdirAll(binDir) {
+                        .Ok(_) => {},
+                        .Err(_) => {  eprintln("failed to create ~/.flock/bin"); return 1 }
+                    }
+
+                    // Build + install each target.
+                    var i: Int64 = 0;
+                    while i < targets.count {
+                        let bin = targets(unchecked: i);
+                        i = i + 1;
+                        match installOne(bin: bin, built: built, binDir: binDir, force: force, release: release) {
+                            .Ok(_) => {},
+                            .Err(e) => {  eprintln(e.description()); return 1 }
+                        }
+                    }
+
+                    printPathHintIfNeeded(binDir: binDir);
+                    0
+                }
+            }
+        }
+    }
+}
+
+/// Resolves the package to install: the current directory (no target), a
+/// registry package `<org>/<pkg>[@version]`, or a local directory path.
+func resolveInstallRoot(target target: Optional[String]) -> Result[ResolvedPackage, FlockError] {
+    match target {
+        .None => loadLocalPackage(rootDir: getcwd()),
+        .Some(t) => {
+            if not isRegistryName(name: t) {
+                // A bare (non-`org/pkg`) target is treated as a local path.
+                return loadLocalPackage(rootDir: t)
+            }
+            // Split `<org>/<pkg>@<version>` into the name and an optional pin.
+            var name = t.clone();
+            var verOpt: Optional[String] = .None;
+            var i: Int64 = 0;
+            while i < t.byteCount {
+                if t.bytes(unchecked: i) == 64 { // '@'
+                    name = t.asSlice().subslice(from: 0, to: i).toOwned();
+                    verOpt = .Some(t.asSlice().subslice(from: i + 1, to: t.byteCount).toOwned());
+                    break
+                }
+                i = i + 1
+            }
+            // Bare name => latest stable (.Any); `@x.y.z` => exact pin.
+            var constraint = VersionConstraint.Any;
+            match verOpt {
+                .Some(v) => {
+                    match parseVersion(s: v) {
+                        .Ok(ver) => constraint = VersionConstraint.Exact(ver),
+                        .Err(e) => return .Err(e)
+                    }
+                },
+                .None => {}
+            }
+            let regUrl = resolveRegistryUrl(projectUrl: .None);
+            let regSrc = RegistrySource(config: RegistryConfig(url: regUrl));
+            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: getcwd())
+        }
+    }
+}
+
+/// Builds one binary target to a temp file, then atomically moves it into
+/// `~/.flock/bin`. Refuses toolchain names and won't clobber without `force`.
+func installOne(bin bin: BinTarget, built built: ResolvedBuild, binDir binDir: String, force force: Bool, release release: Bool) -> Result[(), FlockError] {
+    if bin.name == "flock" or bin.name == "kestrel" or bin.name == "jessup" {
+        var m = String(); m.append("refusing to install a binary named '"); m.append(bin.name.clone()); m.append("' (would shadow the toolchain)");
+        return .Err(FlockError.IoError(m))
+    }
+
+    let dest = joinPath(base: binDir, rel: bin.name);
+    if fileExists(dest) and not force {
+        return .Err(FlockError.BinaryExists(bin.name.clone()))
+    }
+
+    var tmp = String(); tmp.append(dest); tmp.append(".tmp");
+    var sources = built.shared.clone();
+    sources.append(bin.entry.clone());
+    match invokeCompiler(mode: "build", sources: sources, output: .Some(tmp.clone()), linkLibs: built.linkLibs.clone(), linkPaths: built.linkPaths.clone(), frameworks: built.frameworks.clone(), release: release) {
+        .Err(e) => return .Err(e),
+        .Ok(_) => {}
+    }
+
+    match rename(tmp, dest.clone()) {
+        .Ok(_) => {},
+        .Err(_) => {
+            var m = String(); m.append("failed to move binary into "); m.append(binDir.clone());
+            return .Err(FlockError.IoError(m))
+        }
+    }
+
+    var msg = String(); msg.append("Installed "); msg.append(bin.name.clone()); msg.append(" -> "); msg.append(dest);
+     println(msg);
+    .Ok(())
+}
+
 // ============================================================================
-// BUILD INFO
+// RESOLVED BUILD
 // ============================================================================
 
-/// Collected information for a build/run/check operation.
-struct BuildInfo: Cloneable {
+/// Everything needed to build a package's binaries: the shared compile set
+/// (all dependency + package sources EXCEPT every package's bin entries), the
+/// package's own binary targets, the collected link flags, and the resolved
+/// dependency nodes (for lock-file generation). `build`, `run`, and `install`
+/// all compile `shared + [one bin entry]`.
+struct ResolvedBuild: Cloneable {
     var name: String
-    var sources: Array[String]
+    var shared: Array[String]
+    var bins: Array[BinTarget]
     var linkLibs: Array[String]
     var linkPaths: Array[String]
     var frameworks: Array[String]
+    var nodes: Array[DepNode]
 
-    init(name name: String, sources sources: Array[String], linkLibs linkLibs: Array[String], linkPaths linkPaths: Array[String], frameworks frameworks: Array[String]) {
+    init(name name: String, shared shared: Array[String], bins bins: Array[BinTarget], linkLibs linkLibs: Array[String], linkPaths linkPaths: Array[String], frameworks frameworks: Array[String], nodes nodes: Array[DepNode]) {
         self.name = name;
-        self.sources = sources;
+        self.shared = shared;
+        self.bins = bins;
         self.linkLibs = linkLibs;
         self.linkPaths = linkPaths;
         self.frameworks = frameworks;
+        self.nodes = nodes;
     }
 
-    func clone() -> BuildInfo {
-        BuildInfo(name: self.name.clone(), sources: self.sources.clone(), linkLibs: self.linkLibs.clone(), linkPaths: self.linkPaths.clone(), frameworks: self.frameworks.clone())
+    func clone() -> ResolvedBuild {
+        ResolvedBuild(name: self.name.clone(), shared: self.shared.clone(), bins: self.bins.clone(), linkLibs: self.linkLibs.clone(), linkPaths: self.linkPaths.clone(), frameworks: self.frameworks.clone(), nodes: self.nodes.clone())
     }
 }
 
@@ -357,53 +591,34 @@ struct BuildInfo: Cloneable {
 // CORE LOGIC
 // ============================================================================
 
-/// Reads the manifest, resolves all dependencies, discovers sources,
-/// and returns them in build order.
-func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
-    let cwd = getcwd();
-    let manifestPath = joinPath(base: cwd, rel: "flock.toml");
-
-    if not fileExists( manifestPath) {
+/// Reads and parses `<rootDir>/flock.toml` into a ResolvedPackage.
+func loadLocalPackage(rootDir rootDir: String) -> Result[ResolvedPackage, FlockError] {
+    let manifestPath = joinPath(base: rootDir, rel: "flock.toml");
+    if not fileExists(manifestPath) {
         return .Err(FlockError.ManifestNotFound(manifestPath))
     }
-
-    // Read and parse manifest
-    var manifest: Manifest = Manifest(
-        package: flock.manifest.PackageInfo(
-            name: "",
-            version: Version(major: 0, minor: 0, patch: 0),
-            description: .None,
-            source: "src"
-        ),
-        dependencies: Array[flock.dependency.Dependency]()
-    );
-
     match readFileString(manifestPath) {
         .Err(e) => {
             var msg = String(); msg.append("cannot read "); msg.append(manifestPath);
-            return .Err(FlockError.IoError(msg))
+            .Err(FlockError.IoError(msg))
         },
         .Ok(source) => {
             match parseManifest(source: source) {
-                .Err(e) => return .Err(e),
-                .Ok(m) => manifest = m
+                .Err(e) => .Err(e),
+                .Ok(m) => .Ok(ResolvedPackage(name: m.package.name, version: m.package.version, rootDir: rootDir, manifest: m))
             }
         }
     }
+}
 
-    // Create root package
-    let root = ResolvedPackage(
-        name: manifest.package.name,
-        version: manifest.package.version,
-        rootDir: cwd,
-        manifest: manifest
-    );
-
-    // Build dependency graph with both path and registry sources
+/// Resolves `root`'s dependency graph, discovers sources (excluding each
+/// package's own bin entries so a dependency's `@main` can't leak in), compiles
+/// C, and collects link flags. Returns the shared compile set plus `root`'s
+/// binary targets. Does NOT write the lock file.
+func collectBuild(root root: ResolvedPackage) -> Result[ResolvedBuild, FlockError] {
     let pathSrc = PathSource();
-    let regUrl = resolveRegistryUrl(projectUrl: manifest.registryUrl);
-    let regConfig = RegistryConfig(url: regUrl);
-    let regSrc = RegistrySource(config: regConfig);
+    let regUrl = resolveRegistryUrl(projectUrl: root.manifest.registryUrl);
+    let regSrc = RegistrySource(config: RegistryConfig(url: regUrl));
 
     var nodes = Array[DepNode]();
     match buildGraph(root: root, pathSource: pathSrc, registrySource: regSrc) {
@@ -429,13 +644,37 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         let node = sorted(unchecked: i);
         let build = node.build;
 
-        // Discover .ks sources
+        // Discover .ks sources, then exclude this package's own bin entries so
+        // a dependency's @main never leaks into the shared compile.
         let srcDir = joinPath(base: node.rootDir, rel: node.sourceDir);
         let sources = discoverSources(rootDir: srcDir);
+        var nodeEntries = Array[String]();
+        match discoverBins(rootDir: node.rootDir, sourceDir: node.sourceDir, packageName: node.name, bins: node.bins) {
+            .Err(e) => return .Err(e),
+            .Ok(targets) => {
+                var t: Int64 = 0;
+                while t < targets.count {
+                    nodeEntries.append(targets(unchecked: t).entry.clone());
+                    t = t + 1
+                }
+            }
+        }
         var j: Int64 = 0;
+        var nodeLibCount: Int64 = 0;
         while j < sources.count {
-            allSources.append(sources(unchecked: j));
+            let s = sources(unchecked: j);
+            if not containsString(arr: nodeEntries, value: s) {
+                allSources.append(s);
+                nodeLibCount = nodeLibCount + 1
+            }
             j = j + 1
+        }
+
+        // Cargo strategy: a dependency must expose a library (≥1 non-bin source).
+        // A bin-only package can't be depended on. The root is exempt — you
+        // build/install ITS binaries.
+        if node.rootDir != root.rootDir and nodeLibCount == 0 {
+            return .Err(FlockError.NoLibraryTarget(node.name))
         }
 
         // Resolve dynamic C flags if c-flags-cmd is set
@@ -534,13 +773,24 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         i = i + 1
     }
 
-    // Generate lock file from resolved dependencies
+    // Discover the package's own binary targets.
+    var bins = Array[BinTarget]();
+    match discoverBins(rootDir: root.rootDir, sourceDir: root.manifest.package.source, packageName: root.manifest.package.name, bins: root.manifest.bins) {
+        .Err(e) => return .Err(e),
+        .Ok(b) => bins = b
+    }
+
+    .Ok(ResolvedBuild(name: root.manifest.package.name, shared: allSources, bins: bins, linkLibs: allLinkLibs, linkPaths: allLinkPaths, frameworks: allFrameworks, nodes: sorted))
+}
+
+/// Writes flock.lock from the resolved dependency nodes (skips the root).
+func writeLockFile(cwd cwd: String, rootName rootName: String, nodes nodes: Array[DepNode]) {
     var lockEntries = Array[LockEntry]();
-    i = 0;
-    while i < sorted.count {
-        let node = sorted(unchecked: i);
+    var i: Int64 = 0;
+    while i < nodes.count {
+        let node = nodes(unchecked: i);
         // Skip the root package itself
-        if node.name != manifest.package.name {
+        if node.name != rootName {
             let isRegistry = isRegistryDep(name: node.name);
             let src = if isRegistry { "registry" } else { "path" };
             var entryPath: Optional[String] = .None;
@@ -565,13 +815,120 @@ func resolveAndDiscover() -> Result[BuildInfo, FlockError] {
         .Ok(_) => {},
         .Err(_) => {}
     }
+}
 
-    .Ok(BuildInfo(name: manifest.package.name, sources: allSources, linkLibs: allLinkLibs, linkPaths: allLinkPaths, frameworks: allFrameworks))
+/// Reads the current package, resolves + discovers everything, writes the lock
+/// file, and returns the build set (shared sources + binary targets).
+func resolveAndDiscover() -> Result[ResolvedBuild, FlockError] {
+    let cwd = getcwd();
+    match loadLocalPackage(rootDir: cwd) {
+        .Err(e) => .Err(e),
+        .Ok(root) => {
+            let rootName = root.name.clone();
+            match collectBuild(root: root) {
+                .Err(e) => .Err(e),
+                .Ok(built) => {
+                    writeLockFile(cwd: cwd, rootName: rootName, nodes: built.nodes);
+                    .Ok(built)
+                }
+            }
+        }
+    }
+}
+
+/// Selects which binary target to build. With `--bin`, the named target (or
+/// BinNotFound). Otherwise the sole target, else the package-named default
+/// (src/main.ks), else AmbiguousBinary listing the candidates.
+func selectBin(bins bins: Array[BinTarget], binFlag binFlag: Optional[String], packageName packageName: String) -> Result[BinTarget, FlockError] {
+    if bins.count == 0 {
+        return .Err(FlockError.NoBinaryTargets(packageName))
+    }
+    match binFlag {
+        .Some(name) => {
+            var i: Int64 = 0;
+            while i < bins.count {
+                if bins(unchecked: i).name == name {
+                    return .Ok(bins(unchecked: i).clone())
+                }
+                i = i + 1
+            }
+            .Err(FlockError.BinNotFound(name))
+        },
+        .None => {
+            if bins.count == 1 {
+                return .Ok(bins(unchecked: 0).clone())
+            }
+            // Prefer the package-named default (src/main.ks).
+            var i: Int64 = 0;
+            while i < bins.count {
+                if bins(unchecked: i).name == packageName {
+                    return .Ok(bins(unchecked: i).clone())
+                }
+                i = i + 1
+            }
+            // Ambiguous — list the candidate names.
+            var names = String();
+            i = 0;
+            while i < bins.count {
+                if i > 0 { names.append(", ") };
+                names.append(bins(unchecked: i).name.clone());
+                i = i + 1
+            }
+            .Err(FlockError.AmbiguousBinary(names))
+        }
+    }
 }
 
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+/// Prints a hint to add `binDir` to PATH when it isn't already there.
+func printPathHintIfNeeded(binDir binDir: String) {
+    let path = match getenv("PATH") {
+        .Some(p) => p,
+        .None => return
+    };
+    if pathContains(path: path, dir: binDir) {
+        return
+    }
+     println("");
+    var m = String(); m.append("note: "); m.append(binDir.clone()); m.append(" is not on your PATH. Add it with:");
+     println(m);
+     println("    export PATH=\"$HOME/.flock/bin:$PATH\"");
+}
+
+/// True if the `:`-separated `path` contains a segment equal to `dir`.
+func pathContains(path path: String, dir dir: String) -> Bool {
+    var start: Int64 = 0;
+    var i: Int64 = 0;
+    let len = path.byteCount;
+    while i <= len {
+        if i == len or path.bytes(unchecked: i) == 58 { // ':'
+            if i > start {
+                let seg = path.asSlice().subslice(from: start, to: i).toOwned();
+                if seg == dir {
+                    return true
+                }
+            }
+            start = i + 1
+        }
+        i = i + 1
+    }
+    false
+}
+
+/// True if `arr` contains a string equal to `value`.
+func containsString(arr arr: Array[String], value value: String) -> Bool {
+    var i: Int64 = 0;
+    while i < arr.count {
+        if arr(unchecked: i) == value {
+            return true
+        }
+        i = i + 1
+    }
+    false
+}
 
 /// Splits a string on whitespace into individual tokens.
 func splitWhitespace(s: String) -> Array[String] {

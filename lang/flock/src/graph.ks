@@ -5,7 +5,7 @@ module flock.graph
 import flock.error.(FlockError)
 import flock.source.(ResolvedPackage, PathSource)
 import flock.dependency.(Dependency, DependencySpec)
-import flock.manifest.(BuildConfig)
+import flock.manifest.(BuildConfig, BinDecl)
 import flock.registry_source.(RegistrySource)
 
 // ============================================================================
@@ -21,17 +21,22 @@ public struct DepNode: Cloneable {
     public var depNames: Array[String]
     /// Build configuration (C sources, link flags, etc.).
     public var build: BuildConfig
+    /// `[[bin]]` declarations for this package, carried so per-package binary
+    /// entries can be excluded from the shared compile (a dependency's own
+    /// bin entries must never be pulled into a dependent's build).
+    public var bins: Array[BinDecl]
 
-    public init(name name: String, rootDir rootDir: String, sourceDir sourceDir: String, depNames depNames: Array[String], build build: BuildConfig) {
+    public init(name name: String, rootDir rootDir: String, sourceDir sourceDir: String, depNames depNames: Array[String], build build: BuildConfig, bins bins: Array[BinDecl]) {
         self.name = name;
         self.rootDir = rootDir;
         self.sourceDir = sourceDir;
         self.depNames = depNames;
         self.build = build;
+        self.bins = bins;
     }
 
     public func clone() -> DepNode {
-        DepNode(name: self.name.clone(), rootDir: self.rootDir.clone(), sourceDir: self.sourceDir.clone(), depNames: self.depNames.clone(), build: self.build.clone())
+        DepNode(name: self.name.clone(), rootDir: self.rootDir.clone(), sourceDir: self.sourceDir.clone(), depNames: self.depNames.clone(), build: self.build.clone(), bins: self.bins.clone())
     }
 }
 
@@ -86,7 +91,8 @@ public func buildGraph(
             rootDir: current.rootDir,
             sourceDir: current.manifest.package.source,
             depNames: depNames,
-            build: current.manifest.build
+            build: current.manifest.build,
+            bins: current.manifest.bins
         ))
     }
 

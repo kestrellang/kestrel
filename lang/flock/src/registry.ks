@@ -4,7 +4,7 @@ module flock.registry
 
 import quill.toml.parser.(parseToml)
 import flock.error.(FlockError)
-import flock.source.(joinPath)
+import flock.source.(joinPath, flockHome)
 
 // ============================================================================
 // REGISTRY CONFIG
@@ -29,7 +29,7 @@ public struct RegistryConfig: Cloneable {
 
 /// Resolves the registry URL using three-tier lookup:
 /// 1. Project-level override (from flock.toml [registry] section)
-/// 2. Global config (~/.kestrel/config.toml)
+/// 2. Global config (~/.flock/config.toml)
 /// 3. Hardcoded default
 public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> String {
     // 1. Project-level override
@@ -38,38 +38,33 @@ public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> Strin
         .None => {}
     }
 
-    // 2. Global config
-    match getenv("HOME") {
-        .Some(home) => {
-            let configPath = joinPath(base: home, rel: ".kestrel/config.toml");
-            if fileExists(configPath) {
-                match readFileString(configPath) {
-                    .Ok(source) => {
-                        match parseToml(source) {
-                            .Ok(root) => {
-                                match root.value(forKey: "registry") {
-                                    .Some(regVal) => {
-                                        match regVal.value(forKey: "url") {
-                                            .Some(urlVal) => {
-                                                match urlVal.asString() {
-                                                    .Some(url) => return url,
-                                                    .None => {}
-                                                }
-                                            },
+    // 2. Global config (~/.flock/config.toml)
+    let configPath = joinPath(base: flockHome(), rel: "config.toml");
+    if fileExists(configPath) {
+        match readFileString(configPath) {
+            .Ok(source) => {
+                match parseToml(source) {
+                    .Ok(root) => {
+                        match root.value(forKey: "registry") {
+                            .Some(regVal) => {
+                                match regVal.value(forKey: "url") {
+                                    .Some(urlVal) => {
+                                        match urlVal.asString() {
+                                            .Some(url) => return url,
                                             .None => {}
                                         }
                                     },
                                     .None => {}
                                 }
                             },
-                            .Err(_) => {}
+                            .None => {}
                         }
                     },
                     .Err(_) => {}
                 }
-            }
-        },
-        .None => {}
+            },
+            .Err(_) => {}
+        }
     }
 
     // 3. Hardcoded default
