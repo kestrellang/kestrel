@@ -179,6 +179,22 @@ impl TyArena {
             _ => false,
         }
     }
+    /// Does this type carry a closure (`FuncThick`) by value? Drives the
+    /// owned-return escape check for capturing closures: a closure's
+    /// environment is stack-allocated in the defining frame, so a returned
+    /// closure that captured a local cannot outlive the call (#174). Mirror of
+    /// `contains_ref`'s shape — `FuncThin` (a bare function pointer, no env) is
+    /// NOT a closure and never taints. Like `contains_ref`, `Named` walks only
+    /// type args (an over-approximation that a self-rooted value passes), not
+    /// stored fields.
+    pub fn contains_closure(&self, id: TyId) -> bool {
+        match self.get(id) {
+            MirTy::FuncThick { .. } => true,
+            MirTy::Tuple(elems) => elems.iter().any(|&e| self.contains_closure(e)),
+            MirTy::Named { type_args, .. } => type_args.iter().any(|&a| self.contains_closure(a)),
+            _ => false,
+        }
+    }
     /// Like `contains_ref`, but true only when a `&mutating T` is carried —
     /// feeds the E495 (mutable-root) variant of the owned-return check.
     /// A shared `&T` wrapper still recurses (its pointee type may carry a

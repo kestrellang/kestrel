@@ -1245,7 +1245,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
     //   always returnable.
     enum EscapeMode {
         RefBorrow { mutating: bool },
-        Carrier { mutating: bool },
+        Carrier { mutating: bool, closure: bool },
     }
 
     let mut errors = Vec::new();
@@ -1258,6 +1258,16 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             RetConvention::RefBorrow { mutating } => EscapeMode::RefBorrow { mutating },
             _ if module.ty_arena.contains_ref(func.ret) => EscapeMode::Carrier {
                 mutating: module.ty_arena.contains_mutating_ref(func.ret),
+                closure: false,
+            },
+            // A returned closure carries its captured environment by value;
+            // capturing a local makes it frame-bound, exactly like a ref-bearing
+            // aggregate (#174). The returned value's root is the join over its
+            // captures (stamped in `emit_apply_partial`), so the same self-root
+            // skip + Local-root rule applies.
+            _ if module.ty_arena.contains_closure(func.ret) => EscapeMode::Carrier {
+                mutating: false,
+                closure: true,
             },
             _ => continue,
         };
@@ -1267,15 +1277,15 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 continue;
             };
             let vd = body.value(*v);
-            let (carrier, mutating) = match mode {
+            let (carrier, mutating, is_closure) = match mode {
                 EscapeMode::RefBorrow { mutating } => {
                     if vd.ownership != Ownership::Guaranteed {
                         // verify_terminator's hardening reports this as an ICE.
                         continue;
                     }
-                    (false, mutating)
+                    (false, mutating, false)
                 },
-                EscapeMode::Carrier { mutating } => {
+                EscapeMode::Carrier { mutating, closure } => {
                     if vd.ownership != Ownership::Owned
                         // Hand-built bodies may bypass alloc_value.
                         || vd.root.is_derived_placeholder()
@@ -1284,7 +1294,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                     {
                         continue;
                     }
-                    (true, mutating)
+                    (true, mutating, closure)
                 },
             };
             let mut push = |code: &'static str,
@@ -1312,8 +1322,10 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 // with no known definition. (Carrier mode skipped these.)
                 root = RootProvenance::Local(*v);
             }
-            // Carrier-mode wordings name the VALUE (the ref rides inside it).
-            let what = if carrier {
+            // Carrier-mode wordings name the VALUE (the ref/env rides inside it).
+            let what = if is_closure {
+                "this closure: it captures"
+            } else if carrier {
                 "this value: it carries a reference that borrows"
             } else {
                 "this reference: it borrows"

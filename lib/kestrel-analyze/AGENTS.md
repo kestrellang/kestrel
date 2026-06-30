@@ -228,7 +228,14 @@ Current allocations:
   - E494: returned ref roots at a local — escape error (mir verify::check_escapes).
     Since 2b also the owned-return CARRIER variant: a ref-BEARING aggregate
     return (`-> Optional[&T]`) whose taint roots at a local ("cannot return
-    this value: it carries a reference that borrows local …")
+    this value: it carries a reference that borrows local …"). Since #174 also
+    the CLOSURE variant: a returned capturing closure (gate on
+    `contains_closure(ret)`) is rooted at the join over its captures in
+    `emit_apply_partial` (stack-allocated env ⇒ frame-bound), so the same
+    local-root rule rejects it through every escape route — `return {literal}`,
+    `let f = {..}; f`, etc. ("cannot return this closure: it captures local …").
+    This SUBSUMES and replaces the old syntactic E605 analyze check (retired),
+    which only saw the closure literal in return position
   - E495: `-> &mutating` without a mutable root (mir verify::check_escapes;
     2b carrier variant: a return TYPE carrying `&mutating` demands a mutable root)
   - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes;

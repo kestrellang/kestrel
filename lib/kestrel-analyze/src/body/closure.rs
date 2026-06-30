@@ -239,46 +239,19 @@ impl BodyCheck for ClosureAnalyzer {
             }
 
             // E603: check for assignments to captured variables
-            let diag_count_before = diags.len();
             if !captures.is_empty() {
                 let capture_set: HashSet<LocalId> = captures.iter().copied().collect();
                 check_capture_assignments(cx, body, &capture_set, &mut diags);
             }
-            let has_capture_mutation = diags.len() > diag_count_before;
 
-            // E605: capturing closure cannot escape its defining scope.
-            // Skip if we already reported capture mutation (E603) — avoid double errors.
-            if !captures.is_empty() && !has_capture_mutation {
-                // Check if this closure is in return position of the function
-                let is_func_tail = cx.hir.tail_expr == Some(expr_id);
-                let is_returned = cx.hir.exprs.iter().any(
-                    |(_, e)| matches!(e, HirExpr::Return { value: Some(v), .. } if *v == expr_id),
-                );
-                // Check if this closure is in return position of another closure
-                let is_closure_tail = cx.hir.exprs.iter().any(|(_, e)| {
-                    matches!(e, HirExpr::Closure { body: b, .. } if b.tail_expr == Some(expr_id))
-                });
-                if is_func_tail || is_returned || is_closure_tail {
-                    let captured_names: Vec<String> = captures
-                        .iter()
-                        .map(|id| cx.hir.locals[*id].name.clone())
-                        .collect();
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[5].id,
-                        severity: DESCRIPTORS[5].default_severity,
-                        message: "cannot return a closure that captures variables".into(),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, expr_id),
-                            message: format!("captures: {}", captured_names.join(", ")),
-                            is_primary: true,
-                        }],
-                        notes: vec![
-                            "closures that capture variables cannot escape their defining function"
-                                .into(),
-                        ],
-                    });
-                }
-            }
+            // NOTE: the capturing-closure escape check (formerly E605, a
+            // syntactic "is the literal in return position" test that missed
+            // laundering through `let`/aggregates) now lives in the MIR escape
+            // checker (`kestrel_mir::verify::check_escapes`, E494). A capturing
+            // closure's value is rooted at the join over its captures
+            // (`emit_apply_partial`); the same root-provenance rule that rejects
+            // returning a `&local` rejects returning a frame-bound closure,
+            // through every escape route. Single source of truth (#174).
         }
 
         diags

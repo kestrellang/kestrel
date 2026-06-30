@@ -1850,13 +1850,19 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// Copy the operand's provenance root onto `result` when the operand is
-    /// a TAINTED ref-bearing value (root differs from its own self-root).
+    /// a TAINTED escape-carrying value (root differs from its own self-root).
+    /// Covers ref-bearing aggregates AND closures: a bit-copy of a capturing
+    /// closure (`let f = {..}; f`) still points at the same stack env, so the
+    /// copy inherits the env taint — otherwise the laundered escape (#174) slips
+    /// past the return check as a fresh self-rooted value.
     fn carry_ref_taint(&mut self, result: ValueId, operand: ValueId) {
         let (ty, root) = {
             let d = self.body.value(operand);
             (d.ty, d.root)
         };
-        if root != RootProvenance::Local(operand) && self.ctx.module.ty_arena.contains_ref(ty) {
+        let carries = self.ctx.module.ty_arena.contains_ref(ty)
+            || self.ctx.module.ty_arena.contains_closure(ty);
+        if root != RootProvenance::Local(operand) && carries {
             self.stamp_root(result, root);
         }
     }
@@ -2648,6 +2654,28 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         result_ty: TyId,
     ) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);
+
+        // Escape provenance (#174): a capturing closure's environment is
+        // stack-allocated in THIS frame (codegen `alloc_stack_slot`), so the
+        // closure value points into the frame and cannot outlive it — exactly
+        // like a `&local`. Root it at the join over its captures: today every
+        // captured value's storage moves into the stack env, so each
+        // contributes `Local(cap)` and any capture makes the closure
+        // frame-bound. A no-capture closure is a bare function pointer (`Static`,
+        // returnable). FUTURE (heap-owned env): swap `Local(cap)` for the
+        // capture's OWN root — by-value copies become self-rooted (returnable),
+        // and only `&local` captures keep tainting. The escape check never
+        // changes; only this stamp does.
+        if let Some((&first, rest)) = captures.split_first() {
+            let convs = self.current_param_convs();
+            let root = rest.iter().fold(RootProvenance::Local(first), |acc, &c| {
+                acc.join(RootProvenance::Local(c), &convs)
+            });
+            self.stamp_root(result, root);
+        } else {
+            self.stamp_root(result, RootProvenance::Static);
+        }
+
         for &v in &captures {
             self.consume(v);
         }
