@@ -515,6 +515,18 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let result_ty = self.resolve_expr_type(expr_id);
 
+        // When the callee is ITSELF a call/method-call (`s.mk()()`, `fs(0)()`,
+        // `p(0)()`), its result is a closure VALUE to be invoked indirectly. The
+        // resolution recorded on that inner call is the INNER call's own callee
+        // (the method `mk`, the `Slice.subscript`, the user `subscript`), NOT the
+        // value the outer `()` calls — so the `callee_expr` resolution fallback
+        // below must skip it, or the outer call re-dispatches to the inner
+        // callee (#175 re-calls the method with the closure as self; #176
+        // emits a Slice/user subscript witness on the FuncThick) (#175/#176).
+        let callee_is_call = matches!(
+            &self.hir.exprs[callee_expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+        );
         let entity = if let Some(&resolved) = self
             .typed
             .as_ref()
@@ -524,6 +536,7 @@ impl OssaBodyCtx<'_, '_> {
         } else if let Some(&resolved) = self
             .typed
             .as_ref()
+            .filter(|_| !callee_is_call)
             .and_then(|t| t.resolutions.get(&callee_expr))
         {
             resolved
@@ -1011,7 +1024,13 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {
-        if let Some(&resolved) = self
+        // A call/method-call callee_expr produces a closure VALUE — its
+        // resolution is the inner call's own callee, not an entity the outer
+        // call dispatches to. Don't surface it (mirrors emit_resolved_call).
+        if !matches!(
+            &self.hir.exprs[callee_expr],
+            HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+        ) && let Some(&resolved) = self
             .typed
             .as_ref()
             .and_then(|t| t.resolutions.get(&callee_expr))
