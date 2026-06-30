@@ -1515,17 +1515,48 @@ fn gen_closure(
         })
         .collect();
 
+    // A closure has its OWN return type: a `return e` inside the body returns
+    // from the CLOSURE (closure-local return, Swift-style), checked against the
+    // closure's return type — NOT the enclosing function's. Without this swap,
+    // returns coerce against the enclosing `ctx.return_ty`, the closure types as
+    // `() -> Never`, its body lowers to a trap, and generic-callee inference
+    // collapses the param to the Never-typed return (#199).
+    let closure_ret_tv = ctx.fresh();
+    let saved_return_ty = ctx.return_ty;
+    ctx.return_ty = closure_ret_tv;
+
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
 
+    // Reconcile the body's fall-through value with the closure's return type,
+    // mirroring `generate()` for a function body. `return` statements already
+    // coerced to `closure_ret_tv` via the swapped `ctx.return_ty` above.
+    //
     // A closure's tail is a value (return) position and refs do not cross the
     // closure boundary (stage-1) — a ref-returning tail call decays to the
     // pointee (#195). Without this the raw `&T` becomes the closure's return
     // type, mismatching a `() -> T` expectation (or reaching MIR as a non-
     // ret_borrow `@guaranteed` return → OSSA ICE).
-    if let Some(tail) = body.tail_expr {
-        mark_arm_value(ctx, hir, tail);
+    match body.tail_expr {
+        Some(tail) => {
+            mark_arm_value(ctx, hir, tail);
+            // A value tail flows to the return type; a diverging tail
+            // (`return e`) is Never and the coerce is a well-defined no-op
+            // (it does not pin `closure_ret_tv` to Never).
+            if tail_is_exhaustive(hir, tail) {
+                let span = expr_span(hir, tail);
+                ctx.coerce(body_tv, closure_ret_tv, tail, span);
+            }
+        },
+        // No tail that falls through to unit pins the return type to unit; a
+        // body that diverges via `return` statements is constrained by those.
+        None if !block_diverges(hir, &body.stmts) => {
+            let _ = unify::unify(ctx, body_tv, closure_ret_tv);
+        },
+        None => {},
     }
+
+    ctx.return_ty = saved_return_ty;
 
     // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
     // otherwise `Consuming` (the default, matching ordinary closures). The
@@ -1542,8 +1573,11 @@ fn gen_closure(
         })
         .collect();
 
-    // Build function type and track closure flexibility
-    let fn_tv = ctx.function_conv(param_tvs, conventions, body_tv);
+    // Build function type and track closure flexibility. The return type is the
+    // closure-local `closure_ret_tv` (unifying the tail value and every
+    // `return` in the body), never the raw `body_tv` (which is Never when the
+    // tail diverges via `return`).
+    let fn_tv = ctx.function_conv(param_tvs, conventions, closure_ret_tv);
 
     if params.is_empty() {
         // No explicit params, no `it` — adapts to any expected arity
