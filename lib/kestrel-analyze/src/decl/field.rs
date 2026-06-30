@@ -45,12 +45,52 @@
 //!   - Message: "static stored property in generic type '{type_name}'"
 //!
 //! **Notes:** (none)
+//!
+//! ### E466 -- `some_in_field_type` (Error, Correctness)
+//!
+//! **Message:** "'some' (opaque type) is not allowed in a field type"
+//!
+//! `some P` is only valid as a function return type (opaque) or a parameter
+//! type (generic sugar). In a stored/computed field it has no return-position
+//! origin body, so it cannot be reified — mir-lower would panic resolving the
+//! opaque origin (#168). Reject it at the front end with a clean diagnostic.
+//!
+//! **Labels:**
+//! - Primary: the `some` annotation
+//!   - Message: "opaque types can only appear in return position"
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Computed, FieldMutability, NodeKind, Static, TypeParams};
+use kestrel_ast::AstType;
+use kestrel_ast_builder::{Computed, FieldMutability, NodeKind, Static, TypeAnnotation, TypeParams};
+
+/// Span of the first `some` (opaque) type found anywhere in `ty`, or `None`.
+/// Opaque is legal only in return position; a field annotation containing it
+/// (top-level or nested, e.g. `[some P]`) is rejected.
+fn opaque_span(ty: &AstType) -> Option<kestrel_span::Span> {
+    match ty {
+        AstType::Some { span, .. } => Some(span.clone()),
+        AstType::Array(inner, _) | AstType::Optional(inner, _) => opaque_span(inner),
+        AstType::Dictionary(k, v, _) => opaque_span(k).or_else(|| opaque_span(v)),
+        AstType::Result { ok, err, .. } => opaque_span(ok).or_else(|| opaque_span(err)),
+        AstType::Tuple(elems, _) => elems.iter().find_map(opaque_span),
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => params
+            .iter()
+            .find_map(opaque_span)
+            .or_else(|| opaque_span(return_type)),
+        AstType::Ref { inner, .. } => opaque_span(inner),
+        AstType::Named { .. }
+        | AstType::Unit(_)
+        | AstType::Never(_)
+        | AstType::Inferred(_) => None,
+    }
+}
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -77,6 +117,12 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E466",
+        name: "some_in_field_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
 
 pub struct FieldAnalyzer;
@@ -98,6 +144,25 @@ impl DeclCheck for FieldAnalyzer {
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
         let span = util::entity_span(cx.query, cx.entity);
+
+        // `some P` (opaque) is only valid in return/parameter position; in a
+        // field type it has no origin body and would panic mir-lower (#168).
+        if let Some(TypeAnnotation(ty)) = cx.query.get::<TypeAnnotation>(cx.entity)
+            && let Some(opaque) = opaque_span(ty)
+        {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[4].id,
+                severity: DESCRIPTORS[4].default_severity,
+                message: "'some' (opaque type) is not allowed in a field type".into(),
+                labels: vec![DiagLabel {
+                    span: opaque,
+                    message: "opaque types can only appear in return position".into(),
+                    is_primary: true,
+                }],
+                notes: vec![],
+            });
+            return diags;
+        }
 
         let is_static = cx.query.get::<Static>(cx.entity).is_some();
 

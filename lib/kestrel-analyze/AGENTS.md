@@ -172,7 +172,9 @@ Current allocations:
   claims E459. Pre-existing; resolve before allocating near it.
 - E454–E458, E460, E462–E465: conformance completeness + indirect-enum
   checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
-  this list is stale for that range; **next free E4xx is E466**.
+  this list is stale for that range.
+- E466: `some_in_field_type` (decl/field.rs) — `some P` rejected in field
+  position (#168). **Next free E4xx is E467.**
   E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
   a witness's reference return must match the requirement EXACTLY in
   shape and mutability (`-> T` never witnesses `-> &T` and vice versa —
@@ -226,7 +228,14 @@ Current allocations:
   - E494: returned ref roots at a local — escape error (mir verify::check_escapes).
     Since 2b also the owned-return CARRIER variant: a ref-BEARING aggregate
     return (`-> Optional[&T]`) whose taint roots at a local ("cannot return
-    this value: it carries a reference that borrows local …")
+    this value: it carries a reference that borrows local …"). Since #174 also
+    the CLOSURE variant: a returned capturing closure (gate on
+    `contains_closure(ret)`) is rooted at the join over its captures in
+    `emit_apply_partial` (stack-allocated env ⇒ frame-bound), so the same
+    local-root rule rejects it through every escape route — `return {literal}`,
+    `let f = {..}; f`, etc. ("cannot return this closure: it captures local …").
+    This SUBSUMES and replaces the old syntactic E605 analyze check (retired),
+    which only saw the closure literal in return position
   - E495: `-> &mutating` without a mutable root (mir verify::check_escapes;
     2b carrier variant: a return TYPE carrying `&mutating` demands a mutable root)
   - E496: ref rooted at a consuming param/receiver (mir verify::check_escapes;
@@ -260,6 +269,7 @@ Current allocations:
 - E503: `move_out_of_borrow` (body/move_tracking.rs) — moving a non-Copyable value bound from a borrowed scrutinee; backstopped in MIR lowering by `emit_copy_value` (kestrel-mir-lower `body/mod.rs`), which emits the same code E503 for shapes the front-end can't see (e.g. binding decay of a ref to a NotCopyable pointee)
 - E504: `dangling_pointer_ref` (body/dangle_ref.rs) — WARNING: ref-returning body returns `Pointer(to: <same-fn local>).value`/`.mutatingValue` (traced through single-assignment `let` pointers); the storage dies at return. Claims nothing beyond that shape (references-gaps.md §10.3). Wrapper recognition shares `kestrel_type_infer::RetRefPointerDerived` (moved there from mir-lower so both can reach it)
 - E505: `static_requires_static_type` (decl/static_value_type.rs) — references 2a: a module-level value decl or `static` member whose type is non-Static (globals live for the whole program; only reference-free types may be stored). Selection mirrors MIR `lower_static` (module-parent Field without Callable, or `Static`-marked member); Computed skipped; inert without the Static builtin. Predicate = `kestrel_semantics::hir_type_is_static` (the staticness kernel — single source of truth; solver + analyze mirrors route through `instance_is_static`)
+- E506: `move_captured_out_of_closure` (body/move_tracking.rs) — #177: a closure captures a non-Copyable value BY VALUE (whole-local Read capture, moved into the env since it can't be copied) and then moves it OUT of the body (return/tail/consume/rebind-and-escape). A closure may be called more than once but owns a single value, so this would double-deinit. Borrowing a captured value across calls is fine (a borrow records no move). The capture itself is recorded as a move of the root in the *enclosing* scope (so later use of the root is a clean E500, not an OSSA ICE). Capture plan from `kestrel_type_infer::ClosureCaptures` (place-based, single source of truth)
 - E615: `main_not_free_function` (compilation/entry_point.rs) — `@main` must be a free (module-level) function
 - E616: `invalid_main_return_type` (compilation/entry_point.rs) — `@main` must return `()` or a `lang` primitive integer (i8/i16/i32/i64), not a stdlib `IntN` struct
 - E617: `multiple_main` (compilation/entry_point.rs) — more than one `@main` in the build

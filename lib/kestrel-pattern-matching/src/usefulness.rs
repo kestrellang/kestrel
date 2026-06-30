@@ -100,7 +100,7 @@ pub fn check_match(
     // Convert all arm patterns to FlatPat
     let flat_pats: Vec<FlatPat> = arms
         .iter()
-        .map(|arm| flat_pat::flatten(hir, query, arm.pattern, scrutinee_ty))
+        .map(|arm| flat_pat::flatten(hir, query, root, arm.pattern, scrutinee_ty))
         .collect();
 
     // Build matrix and check each arm for redundancy
@@ -347,7 +347,7 @@ fn is_constructor_useful(
     ctx: &QueryContext<'_>,
 ) -> UsefulnessResult {
     // Specialize matrix and query for this constructor
-    let specialized = matrix.specialize(ctx, col, ctor);
+    let specialized = matrix.specialize(ctx, root, col, ctor);
 
     // Build specialized query row: [..col] + sub_pats + [col+1..]
     let arity = ctor.arity();

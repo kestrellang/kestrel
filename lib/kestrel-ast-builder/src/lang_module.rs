@@ -320,6 +320,17 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 ty.clone(),
             );
         }
+        // Unchecked signed div/rem: same signature, no safety guards (UB on
+        // divide-by-zero / min/-1). Back `divideUnchecked`/`moduloUnchecked`.
+        for op in ["div", "rem"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_signed_{op}_unchecked"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
         for op in ["lt", "le", "gt", "ge"] {
             seed_fn(
                 world,
@@ -340,6 +351,16 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 ty.clone(),
             );
         }
+        // Unchecked unsigned div/rem (only the divide-by-zero check differs).
+        for op in ["div", "rem"] {
+            seed_fn(
+                world,
+                lang,
+                &format!("{ty_name}_unsigned_{op}_unchecked"),
+                &[("a", ty.clone()), ("b", ty.clone())],
+                ty.clone(),
+            );
+        }
         for op in ["lt", "le", "gt", "ge"] {
             seed_fn(
                 world,
@@ -348,6 +369,20 @@ fn seed_integer_ops(world: &mut World, lang: Entity) {
                 &[("a", ty.clone()), ("b", ty.clone())],
                 i1.clone(),
             );
+        }
+
+        // Overflow predicates: signed/unsigned add/sub/mul, return i1 (true if
+        // the wrapping op overflows the type). Back the `*Checked` stdlib helpers.
+        for sign in ["signed", "unsigned"] {
+            for op in ["add", "sub", "mul"] {
+                seed_fn(
+                    world,
+                    lang,
+                    &format!("{ty_name}_{sign}_{op}_overflows"),
+                    &[("a", ty.clone()), ("b", ty.clone())],
+                    i1.clone(),
+                );
+            }
         }
 
         // Unary ops returning same type
@@ -446,6 +481,27 @@ fn seed_float_ops(world: &mut World, lang: Entity) {
             &[("a", ty.clone()), ("b", ty.clone())],
             ty.clone(),
         );
+
+        // Bit reinterpretation: float ↔ same-width integer (exact, no value
+        // conversion). f64 ↔ i64, f32 ↔ i32. Used for IEEE-754 decomposition.
+        let int_ty = lang_ty(match ty_name {
+            "f32" => "i32",
+            _ => "i64",
+        });
+        seed_fn(
+            world,
+            lang,
+            &format!("{ty_name}_to_bits"),
+            &[("a", ty.clone())],
+            int_ty.clone(),
+        );
+        seed_fn(
+            world,
+            lang,
+            &format!("{ty_name}_from_bits"),
+            &[("a", int_ty.clone())],
+            ty.clone(),
+        );
     }
 }
 
@@ -513,6 +569,17 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         world,
         lang,
         "ptr_read",
+        &[("ptr", ptr_t.clone())],
+        t.clone(),
+    );
+    // Consuming bitwise move-out of the pointee (`Pointer.take`). Lowers to a
+    // MIR `Take`, which produces an @owned value with no `Copyable` requirement
+    // — unlike `ptr_read` (a @guaranteed view). Caller owns the result and must
+    // not read/drop the pointee again until it is re-initialised.
+    seed_generic_fn(
+        world,
+        lang,
+        "ptr_take",
         &[("ptr", ptr_t.clone())],
         t.clone(),
     );
@@ -606,15 +673,11 @@ fn seed_string_ops(world: &mut World, lang: Entity) {
 fn seed_misc_ops(world: &mut World, lang: Entity) {
     let str_ty = lang_ty("str");
 
-    // panic(message) → Never (diverging function)
+    // panic() → Never (diverging bare trap). Takes no message: the stdlib
+    // caller (`fatalError`) prints the message via the normal I/O path before
+    // invoking the trap, so the intrinsic itself is argument-free.
     let never = AstType::Never(Span::synthetic(0));
-    seed_fn(
-        world,
-        lang,
-        "panic",
-        &[("message", str_ty.clone())],
-        never.clone(),
-    );
+    seed_fn(world, lang, "panic", &[], never.clone());
     seed_fn(world, lang, "panic_unwind", &[("message", str_ty)], never);
 
     // Atomic ops — generic over value type

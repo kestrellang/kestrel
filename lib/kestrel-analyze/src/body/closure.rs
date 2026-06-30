@@ -239,46 +239,19 @@ impl BodyCheck for ClosureAnalyzer {
             }
 
             // E603: check for assignments to captured variables
-            let diag_count_before = diags.len();
             if !captures.is_empty() {
                 let capture_set: HashSet<LocalId> = captures.iter().copied().collect();
                 check_capture_assignments(cx, body, &capture_set, &mut diags);
             }
-            let has_capture_mutation = diags.len() > diag_count_before;
 
-            // E605: capturing closure cannot escape its defining scope.
-            // Skip if we already reported capture mutation (E603) — avoid double errors.
-            if !captures.is_empty() && !has_capture_mutation {
-                // Check if this closure is in return position of the function
-                let is_func_tail = cx.hir.tail_expr == Some(expr_id);
-                let is_returned = cx.hir.exprs.iter().any(
-                    |(_, e)| matches!(e, HirExpr::Return { value: Some(v), .. } if *v == expr_id),
-                );
-                // Check if this closure is in return position of another closure
-                let is_closure_tail = cx.hir.exprs.iter().any(|(_, e)| {
-                    matches!(e, HirExpr::Closure { body: b, .. } if b.tail_expr == Some(expr_id))
-                });
-                if is_func_tail || is_returned || is_closure_tail {
-                    let captured_names: Vec<String> = captures
-                        .iter()
-                        .map(|id| cx.hir.locals[*id].name.clone())
-                        .collect();
-                    diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[5].id,
-                        severity: DESCRIPTORS[5].default_severity,
-                        message: "cannot return a closure that captures variables".into(),
-                        labels: vec![DiagLabel {
-                            span: util::expr_span(cx.hir, expr_id),
-                            message: format!("captures: {}", captured_names.join(", ")),
-                            is_primary: true,
-                        }],
-                        notes: vec![
-                            "closures that capture variables cannot escape their defining function"
-                                .into(),
-                        ],
-                    });
-                }
-            }
+            // NOTE: the capturing-closure escape check (formerly E605, a
+            // syntactic "is the literal in return position" test that missed
+            // laundering through `let`/aggregates) now lives in the MIR escape
+            // checker (`kestrel_mir::verify::check_escapes`, E494). A capturing
+            // closure's value is rooted at the join over its captures
+            // (`emit_apply_partial`); the same root-provenance rule that rejects
+            // returning a `&local` rejects returning a frame-bound closure,
+            // through every escape route. Single source of truth (#174).
         }
 
         diags
@@ -304,29 +277,15 @@ fn check_closure_type(
     let actual_count = params.len();
     let expected_count = expected_params.len();
 
-    // Check if this is an implicit `it` closure (zero explicit params but
-    // the body references a local named "it"). This is the E600 check.
-    if actual_count == 0 && expected_count != 1 {
-        // Check if any local in the body is named "it"
-        let uses_it = cx.hir.locals.iter().any(|(_, local)| local.name == "it");
-        if uses_it {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
-                message: format!(
-                    "implicit 'it' parameter used in closure expecting {} parameters",
-                    expected_count
-                ),
-                labels: vec![DiagLabel {
-                    span: util::expr_span(cx.hir, expr_id),
-                    message: "'it' requires exactly 1 parameter".into(),
-                    is_primary: true,
-                }],
-                notes: vec![],
-            });
-            return;
-        }
-    }
+    // NOTE: the implicit-`it` wrong-arity check (E600) deliberately lives in the
+    // type-inference solver (`InferError::ItWrongArity`), NOT here. The AST
+    // builder injects `it` as an explicit param whenever a closure body uses it,
+    // so a real `it`-closure reaches this point with `actual_count == 1`; the
+    // solver keys its check on that specific closure literal's TyVar
+    // (`closure_it`). A whole-function `locals.iter()…name == "it"` scan here
+    // (as a prior version did) false-flagged every zero-param closure that merely
+    // had a *sibling* `it`-closure in the same body. Single source of truth: the
+    // solver.
 
     // Arity mismatch (E601)
     if actual_count != expected_count && actual_count > 0 {

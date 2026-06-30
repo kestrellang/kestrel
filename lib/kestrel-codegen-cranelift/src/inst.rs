@@ -8,8 +8,8 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::{
-    FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, Layout, MirTy, MonoFuncId, Op,
-    ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    DivGuard, FieldIdx, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy,
+    MonoFuncId, Op, ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -172,11 +172,34 @@ pub fn compile_inst(
             result,
             address,
             ty,
+            independent,
         } => {
             let addr = fc.resolve_scalar(builder, *address);
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
-            fc.map_value(builder, *result, val);
+            match repr {
+                // A Take is a destructive *move-out*: the result must be an
+                // independent @owned value. An aggregate is carried by address,
+                // so `load_from_repr` would alias the source storage — and if
+                // that storage is reinitialized before the moved value is
+                // consumed (the `let old = self; self = new` take/replace shape,
+                // or `var x = agg; …; x = new`), the moved value is clobbered.
+                // Memcpy the bytes into a fresh temp slot so the move is truly
+                // independent (a byte-copy of an abandoned source, not a clone —
+                // no double-ownership). When `mark_independent_takes` has proven
+                // the source slot is not reinitialized while this value is live,
+                // `independent` is false and we alias (zero-copy). Scalars load
+                // by value and never alias.
+                TypeRepr::Aggregate { size, align } if *independent => {
+                    let ptr_ty = fc.ctx.ptr_ty;
+                    let slot = mem::alloc_stack_slot(builder, size, align, ptr_ty);
+                    mem::copy_aggregate(builder, size, slot, addr);
+                    fc.map_value(builder, *result, slot);
+                },
+                _ => {
+                    let val = mem::load_from_repr(builder, repr, addr, fc.ctx.ptr_ty);
+                    fc.map_value(builder, *result, val);
+                },
+            }
         },
 
         // address: ADDR, value: VALUE → writes value to address
@@ -423,13 +446,27 @@ pub fn compile_inst(
             field,
         } => {
             let base_val = fc.get_value(builder, *base);
-            let offset = struct_field_offset(
-                *ty,
-                *field,
-                &fc.ctx.module.ty_arena,
-                fc.ctx.module,
-                &fc.ctx.tc,
-            );
+            // Tuple container: positional element offset (mirrors
+            // `compile_tuple_extract`); structs use the layout's field_offsets.
+            let offset = if let MirTy::Tuple(elems) = fc.ctx.module.ty_arena.get(*ty) {
+                let elems = elems.clone();
+                tuple_elem_offset(
+                    &mut fc.ctx.tc,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &elems,
+                    field.index() as u32,
+                )
+                .0
+            } else {
+                struct_field_offset(
+                    *ty,
+                    *field,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &fc.ctx.tc,
+                )
+            };
             let addr = if offset != 0 {
                 builder.ins().iadd_imm(base_val, offset as i64)
             } else {
@@ -526,6 +563,15 @@ fn compile_op1(
         Op::IntTruncate(_, to) => builder.ins().ireduce(int_bits_to_cl(to), arg),
         Op::IntToFloat(_, fb) => builder.ins().fcvt_from_sint(float_bits_to_cl(fb), arg),
         Op::FloatToInt(_, ib) => builder.ins().fcvt_to_sint_sat(int_bits_to_cl(ib), arg),
+        // Pure bitcast (no value conversion): float ↔ same-width integer.
+        Op::FloatToBits(fb) => {
+            let int_ty = match fb {
+                kestrel_mir::FloatBits::F32 => ir::types::I32,
+                _ => ir::types::I64,
+            };
+            builder.ins().bitcast(int_ty, MemFlags::new(), arg)
+        },
+        Op::BitsToFloat(fb) => builder.ins().bitcast(float_bits_to_cl(fb), MemFlags::new(), arg),
         Op::FloatWiden(_, to) => builder.ins().fpromote(float_bits_to_cl(to), arg),
         Op::FloatTruncate(_, to) => builder.ins().fdemote(float_bits_to_cl(to), arg),
         Op::RefToImmut => arg,
@@ -593,6 +639,79 @@ fn compile_op1(
     })
 }
 
+/// Return a divisor safe to feed to native `sdiv`/`srem`: `1` when the operation
+/// would be the overflowing `minValue / -1` (so the native op yields `min/1=min`
+/// and `min%1=0`, matching the spec's wrap), otherwise the original divisor. A
+/// zero divisor is left untouched so the native op still traps on div-by-zero.
+fn signed_div_overflow_guard(
+    builder: &mut FunctionBuilder,
+    bits: IntBits,
+    lhs: Value,
+    rhs: Value,
+) -> Value {
+    let ty = builder.func.dfg.value_type(rhs);
+    let min = -(1i128 << (bits.bit_width() - 1)) as i64;
+    let neg_one = builder.ins().iconst(ty, -1);
+    let min_v = builder.ins().iconst(ty, min);
+    let one = builder.ins().iconst(ty, 1);
+    let is_neg_one = builder.ins().icmp(IntCC::Equal, rhs, neg_one);
+    let is_min = builder.ins().icmp(IntCC::Equal, lhs, min_v);
+    let is_overflow = builder.ins().band(is_neg_one, is_min);
+    builder.ins().select(is_overflow, one, rhs)
+}
+
+#[derive(Clone, Copy)]
+enum OverflowKind {
+    Add,
+    Sub,
+    Mul,
+}
+
+/// Compute whether `lhs OP rhs` overflows the `bits`-wide integer, as a Bool.
+/// Cranelift has no overflow intrinsic, so do the op in the next-wider type and
+/// check whether truncating back loses information (the wide result differs from
+/// the sign/zero-extension of the narrow result). Backs the `*Checked` helpers.
+fn emit_overflow_check(
+    builder: &mut FunctionBuilder,
+    bits: IntBits,
+    sign: Signedness,
+    kind: OverflowKind,
+    lhs: Value,
+    rhs: Value,
+) -> Value {
+    let narrow = builder.func.dfg.value_type(lhs);
+    let wide = match bits {
+        IntBits::I8 => ir::types::I16,
+        IntBits::I16 => ir::types::I32,
+        IntBits::I32 => ir::types::I64,
+        IntBits::I64 => ir::types::I128,
+    };
+    let signed = matches!(sign, Signedness::Signed);
+    let lw = if signed {
+        builder.ins().sextend(wide, lhs)
+    } else {
+        builder.ins().uextend(wide, lhs)
+    };
+    let rw = if signed {
+        builder.ins().sextend(wide, rhs)
+    } else {
+        builder.ins().uextend(wide, rhs)
+    };
+    let wide_res = match kind {
+        OverflowKind::Add => builder.ins().iadd(lw, rw),
+        OverflowKind::Sub => builder.ins().isub(lw, rw),
+        OverflowKind::Mul => builder.ins().imul(lw, rw),
+    };
+    let narrow_res = builder.ins().ireduce(narrow, wide_res);
+    let re_wide = if signed {
+        builder.ins().sextend(wide, narrow_res)
+    } else {
+        builder.ins().uextend(wide, narrow_res)
+    };
+    let neq = builder.ins().icmp(IntCC::NotEqual, wide_res, re_wide);
+    cmp_to_bool(builder, neq)
+}
+
 fn compile_op2(
     fc: &mut FuncCompiler<'_, '_>,
     builder: &mut FunctionBuilder,
@@ -606,10 +725,41 @@ fn compile_op2(
         Op::Add(_, _) => builder.ins().iadd(lhs, rhs),
         Op::Sub(_, _) => builder.ins().isub(lhs, rhs),
         Op::Mul(_, _) => builder.ins().imul(lhs, rhs),
-        Op::Div(_, Signedness::Signed) => builder.ins().sdiv(lhs, rhs),
-        Op::Div(_, Signedness::Unsigned) => builder.ins().udiv(lhs, rhs),
-        Op::Rem(_, Signedness::Signed) => builder.ins().srem(lhs, rhs),
-        Op::Rem(_, Signedness::Unsigned) => builder.ins().urem(lhs, rhs),
+        // Signed div/rem: `minValue / -1` overflows. Cranelift `sdiv`/`srem` TRAP
+        // on it, but the spec (int64.ks docs) says it WRAPS (div→minValue, rem→0).
+        // Swap the divisor -1→1 exactly in that case so the native op produces
+        // min/1=min and min%1=0 — no trap, correct wrap. Division-by-zero still
+        // traps natively (the swap leaves a 0 divisor untouched). Mirrored in the
+        // LLVM backend (which additionally needs an explicit div-by-zero trap).
+        Op::Div(bits, Signedness::Signed, guard) => {
+            // Unchecked drops the min/-1 swap (native sdiv then traps on that edge
+            // and on div-by-zero — UB-equivalent). The user guarantees validity.
+            let safe = if guard == DivGuard::Checked {
+                signed_div_overflow_guard(builder, bits, lhs, rhs)
+            } else {
+                rhs
+            };
+            builder.ins().sdiv(lhs, safe)
+        },
+        Op::Div(_, Signedness::Unsigned, _) => builder.ins().udiv(lhs, rhs),
+        Op::Rem(bits, Signedness::Signed, guard) => {
+            let safe = if guard == DivGuard::Checked {
+                signed_div_overflow_guard(builder, bits, lhs, rhs)
+            } else {
+                rhs
+            };
+            builder.ins().srem(lhs, safe)
+        },
+        Op::Rem(_, Signedness::Unsigned, _) => builder.ins().urem(lhs, rhs),
+        Op::AddOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Add, lhs, rhs)
+        },
+        Op::SubOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Sub, lhs, rhs)
+        },
+        Op::MulOverflows(bits, sign) => {
+            emit_overflow_check(builder, bits, sign, OverflowKind::Mul, lhs, rhs)
+        },
         Op::FAdd(_) => builder.ins().fadd(lhs, rhs),
         Op::FSub(_) => builder.ins().fsub(lhs, rhs),
         Op::FMul(_) => builder.ins().fmul(lhs, rhs),

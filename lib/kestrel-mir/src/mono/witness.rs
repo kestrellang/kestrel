@@ -5,7 +5,7 @@ use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
 use crate::TyId;
-use crate::item::function::FunctionDef;
+use crate::item::function::{FunctionDef, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
 use crate::item::witness::WitnessDef;
 use crate::item::witness::WitnessMethodKey;
@@ -241,7 +241,9 @@ pub fn find_witness_with_method(
             continue;
         }
         let mut bindings = HashMap::new();
-        if match_pattern(arena, witness.implementing_type, self_type, &mut bindings) {
+        if match_pattern(arena, witness.implementing_type, self_type, &mut bindings)
+            && witness_constraints_hold(arena, witnesses, witness, &bindings, 0)
+        {
             candidates.push((i, bindings));
         }
     }
@@ -315,7 +317,72 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
     let mut ba = HashMap::new();
     let b_is_instance_of_a =
         match_pattern(arena, a.implementing_type, b.implementing_type, &mut ba);
-    a_is_instance_of_b && !b_is_instance_of_a
+    // A strictly narrower implementing type wins.
+    if a_is_instance_of_b != b_is_instance_of_a {
+        return a_is_instance_of_b;
+    }
+    // Equal implementing-type specificity (same pattern, or genuinely
+    // incomparable): the witness carrying MORE `where` constraints is more
+    // specific. Candidates only reach selection after `witness_constraints_hold`
+    // confirmed their bounds are satisfied, so `extend Box[T] where T: Show`
+    // (1 constraint) beats `extend Box[T]` (0) for a `Box[Int64]` self when
+    // `Int64: Show` — order-independently (#182).
+    a.constraints.len() > b.constraints.len()
+}
+
+/// Do all of `witness`'s `where` constraints hold for the concrete self, given
+/// the `bindings` produced by matching its implementing type against that self?
+/// A constraint on a param the pattern didn't bind can't be disproven, so it's
+/// permitted (the conservative rule shared with the front end).
+fn witness_constraints_hold(
+    arena: &TyArena,
+    witnesses: &[WitnessDef],
+    witness: &WitnessDef,
+    bindings: &HashMap<Entity, TyId>,
+    depth: u32,
+) -> bool {
+    // Guard against pathological conformance cycles; deep nests permit (the
+    // conservative rule — never reject on incompleteness).
+    if depth > 16 {
+        return true;
+    }
+    witness.constraints.iter().all(|c| match c {
+        WhereConstraint::Implements {
+            type_param,
+            protocol,
+            ..
+        } => match bindings.get(type_param) {
+            Some(&concrete) => type_conforms_at_mono(arena, witnesses, *protocol, concrete, depth),
+            None => true,
+        },
+        WhereConstraint::NotImplements {
+            type_param,
+            protocol,
+        } => match bindings.get(type_param) {
+            Some(&concrete) => !type_conforms_at_mono(arena, witnesses, *protocol, concrete, depth),
+            None => true,
+        },
+    })
+}
+
+/// Does concrete type `ty` conform to `protocol` at mono — i.e. is there a
+/// witness for `protocol` whose implementing type structurally matches `ty`
+/// (with its own bounds satisfied)? Used to evaluate a witness's `where` bounds.
+fn type_conforms_at_mono(
+    arena: &TyArena,
+    witnesses: &[WitnessDef],
+    protocol: Entity,
+    ty: TyId,
+    depth: u32,
+) -> bool {
+    witnesses.iter().any(|w| {
+        if w.protocol != protocol {
+            return false;
+        }
+        let mut b = HashMap::new();
+        match_pattern(arena, w.implementing_type, ty, &mut b)
+            && witness_constraints_hold(arena, witnesses, w, &b, depth + 1)
+    })
 }
 
 /// Check whether a witness's protocol type args match the expected concrete
@@ -404,11 +471,20 @@ pub fn resolve_witness_call(
     // Detect by checking if the first param is a TypeParam not in the
     // function's type_params list.
     let needs_self = if let Some(func) = concrete_func {
+        // A protocol-extension default depends on `Self` (a TypeParam of the
+        // protocol, not one of the function's own type params), so witness
+        // resolution must propagate self_type to it — otherwise `Self` leaks
+        // unsubstituted to the mangler / inner witness calls (#146). `Self` can
+        // appear ONLY in the body (`static func add() { Self.total = ... }`),
+        // so the structural `provides_protocol_default` flag is authoritative;
+        // the signature scan is a fallback for any default not carrying it.
         let known_tps: std::collections::HashSet<Entity> =
             func.type_params.iter().map(|tp| tp.entity).collect();
-        func.params.first().is_some_and(
-            |p| matches!(arena.get(p.ty), MirTy::TypeParam(e) if !known_tps.contains(e)),
-        )
+        let mentions_outer_tp =
+            |ty: TyId| matches!(arena.get(ty), MirTy::TypeParam(e) if !known_tps.contains(e));
+        func.provides_protocol_default
+            || func.params.iter().any(|p| mentions_outer_tp(p.ty))
+            || mentions_outer_tp(func.ret)
     } else {
         false
     };

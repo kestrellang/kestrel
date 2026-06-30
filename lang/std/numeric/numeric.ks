@@ -14,6 +14,19 @@ public protocol Steppable {
     func successor() -> Self
     /// The previous value in the sequence. For integers this is `self - 1`.
     func predecessor() -> Self
+    /// The number of `successor()` steps from `self` to `other` (negative
+    /// when `other` precedes `self`). For integers this is `other - self`.
+    ///
+    /// This is the `O(1)` stride distance — it lets range iterators carry a
+    /// remaining-element *counter* instead of a boolean "finished" flag,
+    /// which is what keeps `for x in a..=b` unrollable (a counter is an
+    /// induction variable the optimizer can reason about; a flag is not).
+    ///
+    /// The result must fit in `Int64`. For spans wider than `Int64` (only
+    /// reachable via near-full-width ranges, which never terminate in
+    /// practice) the value wraps, following the same edge rule as
+    /// `successor`/`predecessor`.
+    func distance(to other: Self) -> Int64
 }
 
 /// Marker protocol for signed integer types. The `abs()` requirement is

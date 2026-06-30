@@ -4,7 +4,7 @@
 module Main
 
 func makeAdder(n: lang.i64) -> (lang.i64) -> lang.i64 {
-    { lang.i64_add(it, n) } // ERROR: cannot return a closure that captures variables
+    { lang.i64_add(it, n) } // ERROR(E494)
 }
 
 func test() -> lang.i64 {

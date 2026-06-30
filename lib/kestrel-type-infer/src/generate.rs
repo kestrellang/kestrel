@@ -135,9 +135,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // Overloaded function reference — can only appear as callee of Call
         HirExpr::OverloadSet { span, .. } => {
-            let recv = ctx.fresh();
+            // A receiver-less overload reference used as a bare value.
             ctx.report_error(InferError::AmbiguousMember {
-                receiver: recv,
+                receiver: None,
                 name: "<overloaded function>".into(),
                 span: span.clone(),
             })
@@ -606,6 +606,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         HirExpr::Return { value, span } => {
             if let Some(val) = value {
                 let val_tv = gen_expr(ctx, hir, *val);
+                // A `return e;` statement is a value position, identical to the
+                // return-tail: a ref-returning call decays to the pointee when
+                // the declared return type is non-ref (#194). When the return
+                // type IS `&T`, leave the ref intact (return-position borrow /
+                // ref-to-ref pass-through handle it in solve_coerce).
+                if !matches!(
+                    ctx.slot(ctx.resolve(ctx.return_ty)),
+                    TySlot::Resolved(TyKind::Ref { .. })
+                ) {
+                    mark_arm_value(ctx, hir, *val);
+                }
                 ctx.coerce(val_tv, ctx.return_ty, *val, span.clone());
             } else {
                 // Bare return — coerce unit against return type so
@@ -627,12 +638,30 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ctx.assign_target_exprs.insert(*target);
             let target_tv = gen_expr(ctx, hir, *target);
             let value_tv = gen_expr(ctx, hir, *value);
-            // A LOCAL target keeps its raw type (a `&mutating` binding's
-            // local type IS the ref) and may resolve late (pattern-payload
-            // bindings) — route through AssignTarget, which picks
-            // store-through vs plain coerce once the target resolves.
-            // Field/call targets already type as the pointee (see above).
-            if matches!(hir.exprs[*target], HirExpr::Local(..)) {
+            // The RHS is a copy-out value position: a ref-returning call decays
+            // to the pointee, whether the target is a plain place (`x = b.peek()`)
+            // or a ref place written through (`arr.mutableAt(0) = arr.at(1)`).
+            // Without this, `bind_call_result` binds the call result to the raw
+            // `&T` before the assignment coerce can decay it, manufacturing a
+            // bogus "expected T got &T" (#194). A non-call RHS (e.g. `&x`) is
+            // inert to the decay set, so rebind-style stores are unaffected.
+            mark_arm_value(ctx, hir, *value);
+            // Route through AssignTarget, which picks store-through vs plain
+            // coerce once the target resolves — and crucially DEFERS while the
+            // target is still unresolved. A LOCAL target may resolve late
+            // (pattern-payload bindings); a subscript/accessor CALL target's
+            // result var is bound asynchronously by `solve_member` to the
+            // setter's place type (e.g. a Dictionary subscript's `V?`), so an
+            // eager coerce would pin it to the RHS type first and then hard-fail
+            // when the place type arrives (#179). Deferral lets the place type
+            // win, so `d("a") = 3` coerces `Int64 -> Optional[Int64]`.
+            // A ref-returning call target is already decayed to its pointee by
+            // bind_call_result, so it takes the plain-coerce branch unchanged (#194).
+            let route_via_assign_target = matches!(
+                hir.exprs[*target],
+                HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+            );
+            if route_via_assign_target {
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
                 ctx.coerce(value_tv, target_tv, *value, span.clone());
@@ -1062,41 +1091,19 @@ fn gen_pat(
             suffix,
             span,
         } => {
-            // Array patterns accept both `Array[T]` and `Slice[T]` scrutinees.
-            // If the scrutinee is already resolved to `Slice[T]`, take the
-            // element type from there; otherwise default to equating with
-            // `Array[elem_tv]` (preserves existing behavior for generic /
-            // unresolved scrutinees).
-            let slice_entity = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct);
-            let elem_tv = {
-                let already_slice = if let Some(slice_ent) = slice_entity {
-                    matches!(
-                        ctx.slot(scrutinee_tv),
-                        TySlot::Resolved(k) if k.entity() == Some(slice_ent)
-                    )
-                } else {
-                    false
-                };
-
-                if already_slice {
-                    // Reuse the scrutinee's element type arg directly.
-                    let first_arg = match ctx.slot(scrutinee_tv) {
-                        TySlot::Resolved(k) => k.args().first().copied(),
-                        _ => unreachable!(),
-                    };
-                    first_arg.unwrap_or_else(|| ctx.fresh())
-                } else {
-                    let elem_tv = ctx.fresh();
-                    if let Some(array_entity) = ctx
-                        .resolver
-                        .builtin(kestrel_hir::Builtin::DefaultArrayLiteralType)
-                    {
-                        let array_tv = ctx.named(array_entity, vec![elem_tv]);
-                        ctx.equal(scrutinee_tv, array_tv, span.clone());
-                    }
-                    elem_tv
-                }
-            };
+            // Array patterns work on ANY `ArrayMatchable` conformer (the
+            // protocol the matcher lowers to: matchLength/matchGet/matchSlice).
+            // `Array[T]` and `ArraySlice[T]` are just two conformers — no
+            // type-specific branch. Require the scrutinee conforms, and take
+            // the element type from its `ArrayMatchable.Element` associated
+            // type (the solver substitutes type args: `Array[Int64].Element`
+            // → `Int64`, a custom `Trio.Element` → its binding, an abstract
+            // `T: ArrayMatchable` → the projection `T.Element`).
+            let elem_tv = ctx.fresh();
+            if let Some(proto) = ctx.resolver.builtin(kestrel_hir::Builtin::ArrayMatchable) {
+                ctx.conforms(scrutinee_tv, proto, span.clone());
+                ctx.associated(scrutinee_tv, "Element", elem_tv, span.clone());
+            }
 
             // Equate each prefix/suffix element pattern against elem_tv
             for &elem_pat in prefix.iter().chain(suffix.iter()) {
@@ -1105,9 +1112,11 @@ fn gen_pat(
                 gen_pat(ctx, hir, elem_pat, pat_tv, source);
             }
 
-            // Named rest binding → `Slice[elem_tv]` local.
+            // Named rest binding → `ArraySlice[elem_tv]` local. This is
+            // `matchSlice`'s protocol-fixed return type (the same for every
+            // conformer), not scrutinee special-casing.
             if let Some(Some(local)) = rest {
-                if let Some(slice_ent) = slice_entity {
+                if let Some(slice_ent) = ctx.resolver.builtin(kestrel_hir::Builtin::SliceStruct) {
                     let slice_tv = ctx.named(slice_ent, vec![elem_tv]);
                     ctx.local_types.insert(*local, slice_tv);
                 } else {
@@ -1295,13 +1304,16 @@ fn gen_struct_init(
         }
     } else {
         // Memberwise init: match args against stored field types (in order).
-        // `NodeKind::Field` also covers computed properties, so filter them
-        // out via the `Computed` marker — memberwise init only takes storage.
+        // `NodeKind::Field` also covers computed properties and static stored
+        // vars, neither of which is an instance field — filter them out via the
+        // `Computed`/`Static` markers so the synthesized init takes only
+        // instance storage (mirrors the layout collection in struct_lower.rs).
         let fields: Vec<Entity> = children
             .iter()
             .filter(|&&c| {
                 qctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
                     && qctx.get::<kestrel_ast_builder::Computed>(c).is_none()
+                    && qctx.get::<kestrel_ast_builder::Static>(c).is_none()
             })
             .copied()
             .collect();
@@ -1513,8 +1525,48 @@ fn gen_closure(
         })
         .collect();
 
+    // A closure has its OWN return type: a `return e` inside the body returns
+    // from the CLOSURE (closure-local return, Swift-style), checked against the
+    // closure's return type — NOT the enclosing function's. Without this swap,
+    // returns coerce against the enclosing `ctx.return_ty`, the closure types as
+    // `() -> Never`, its body lowers to a trap, and generic-callee inference
+    // collapses the param to the Never-typed return (#199).
+    let closure_ret_tv = ctx.fresh();
+    let saved_return_ty = ctx.return_ty;
+    ctx.return_ty = closure_ret_tv;
+
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
+
+    // Reconcile the body's fall-through value with the closure's return type,
+    // mirroring `generate()` for a function body. `return` statements already
+    // coerced to `closure_ret_tv` via the swapped `ctx.return_ty` above.
+    //
+    // A closure's tail is a value (return) position and refs do not cross the
+    // closure boundary (stage-1) — a ref-returning tail call decays to the
+    // pointee (#195). Without this the raw `&T` becomes the closure's return
+    // type, mismatching a `() -> T` expectation (or reaching MIR as a non-
+    // ret_borrow `@guaranteed` return → OSSA ICE).
+    match body.tail_expr {
+        Some(tail) => {
+            mark_arm_value(ctx, hir, tail);
+            // A value tail flows to the return type; a diverging tail
+            // (`return e`) is Never and the coerce is a well-defined no-op
+            // (it does not pin `closure_ret_tv` to Never).
+            if tail_is_exhaustive(hir, tail) {
+                let span = expr_span(hir, tail);
+                ctx.coerce(body_tv, closure_ret_tv, tail, span);
+            }
+        },
+        // No tail that falls through to unit pins the return type to unit; a
+        // body that diverges via `return` statements is constrained by those.
+        None if !block_diverges(hir, &body.stmts) => {
+            let _ = unify::unify(ctx, body_tv, closure_ret_tv);
+        },
+        None => {},
+    }
+
+    ctx.return_ty = saved_return_ty;
 
     // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
     // otherwise `Consuming` (the default, matching ordinary closures). The
@@ -1531,8 +1583,11 @@ fn gen_closure(
         })
         .collect();
 
-    // Build function type and track closure flexibility
-    let fn_tv = ctx.function_conv(param_tvs, conventions, body_tv);
+    // Build function type and track closure flexibility. The return type is the
+    // closure-local `closure_ret_tv` (unifying the tail value and every
+    // `return` in the body), never the raw `body_tv` (which is Never when the
+    // tail diverges via `return`).
+    let fn_tv = ctx.function_conv(param_tvs, conventions, closure_ret_tv);
 
     if params.is_empty() {
         // No explicit params, no `it` — adapts to any expected arity
@@ -1876,6 +1931,10 @@ fn emit_where_clause_constraints_with_subs(
                     ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
                 }
             },
+            // Projection bounds (`T.Assoc: P`) are body-inference facts emitted
+            // at body setup; nothing to do at this call-site path (the assoc
+            // entity isn't a call type-arg here).
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }

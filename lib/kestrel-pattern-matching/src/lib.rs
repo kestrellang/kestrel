@@ -102,7 +102,7 @@ pub fn is_irrefutable(
     pat_id: HirPatId,
     ty: &ResolvedTy,
 ) -> bool {
-    let flat = flat_pat::flatten(hir, query, pat_id, ty);
+    let flat = flat_pat::flatten(hir, query, root, pat_id, ty);
     check_irrefutable(&flat, query, root, ty)
 }
 
@@ -143,7 +143,7 @@ fn check_irrefutable(
             }
 
             // Constructor is sole — check all children recursively
-            let field_types = ctor.field_types(query, ty);
+            let field_types = ctor.field_types(query, root, ty);
             children.iter().enumerate().all(|(i, child)| {
                 let child_ty = field_types.get(i).unwrap_or(&ResolvedTy::Error);
                 check_irrefutable(child, query, root, child_ty)
@@ -167,7 +167,7 @@ pub fn compile_decision_tree(
 ) -> DecisionTree {
     let flat_pats: Vec<_> = arms
         .iter()
-        .map(|arm| flat_pat::flatten(hir, query, arm.pattern, scrutinee_ty))
+        .map(|arm| flat_pat::flatten(hir, query, root, arm.pattern, scrutinee_ty))
         .collect();
     let arm_pat_ids: Vec<_> = arms.iter().map(|arm| arm.pattern).collect();
     let has_guards: Vec<_> = arms.iter().map(|arm| arm.guard.is_some()).collect();

@@ -34,6 +34,7 @@ pub enum AnalyzerId {
     MatchPattern,
     Exhaustiveness,
     StringEscape,
+    IntegerLiteralRange,
 
     // Decl checks
     FunctionBody,
@@ -99,6 +100,7 @@ impl AnalyzerId {
             AnalyzerId::MatchPattern => "match_pattern",
             AnalyzerId::Exhaustiveness => "exhaustiveness",
             AnalyzerId::StringEscape => "string_escape",
+            AnalyzerId::IntegerLiteralRange => "integer_literal_range",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",

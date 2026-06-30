@@ -520,8 +520,12 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 describe_tyvar(ctx, *receiver)
             )
         },
-        InferError::AmbiguousMember { receiver, name, .. } => {
-            format!("{}.{} ambiguous", describe_tyvar(ctx, *receiver), name)
+        InferError::AmbiguousMember { receiver, name, .. } => match receiver {
+            Some(recv) => format!("{}.{} ambiguous", describe_tyvar(ctx, *recv), name),
+            // Receiver-less (overloaded free-function call): no receiver type to
+            // name — rendering the synthetic placeholder produced "Error.f
+            // ambiguous" (#210).
+            None => format!("multiple candidates for '{}'", name),
         },
         InferError::MemberNotVisible { receiver, name, .. } => {
             format!("{}.{} not visible", describe_tyvar(ctx, *receiver), name)

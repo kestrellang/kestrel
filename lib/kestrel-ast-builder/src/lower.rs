@@ -72,6 +72,13 @@ struct LowerCtx {
     pats: Arena<AstPat>,
     stmts: Arena<AstStmt>,
     file_id: usize,
+    /// Byte offset added to every span produced while lowering. Non-zero only
+    /// while re-lowering a `\(...)` interpolation hole, whose sub-expression
+    /// is re-lexed/re-parsed against a substring — the resulting CST spans are
+    /// relative to that substring (offset 0), so without rebasing they would
+    /// point at the file start (#166). The offset re-anchors them to the
+    /// hole's true position in the original file.
+    span_offset: usize,
 }
 
 impl LowerCtx {
@@ -81,11 +88,20 @@ impl LowerCtx {
             pats: Arena::new(),
             stmts: Arena::new(),
             file_id,
+            span_offset: 0,
         }
     }
 
     fn span(&self, node: &SyntaxNode) -> Span {
-        get_node_span(node, self.file_id)
+        self.rebase(get_node_span(node, self.file_id))
+    }
+
+    /// Shift a substring-relative span into original-file coordinates by the
+    /// active interpolation-hole offset (a no-op when `span_offset` is 0).
+    fn rebase(&self, mut span: Span) -> Span {
+        span.start += self.span_offset;
+        span.end += self.span_offset;
+        span
     }
 
     fn alloc_expr(&mut self, expr: AstExpr) -> ExprId {
@@ -305,24 +321,7 @@ impl LowerCtx {
             // Literals
             SyntaxKind::ExprInteger => self.lower_literal(&node, AstLiteral::Integer),
             SyntaxKind::ExprFloat => self.lower_literal(&node, AstLiteral::Float),
-            SyntaxKind::ExprString => {
-                // Parser only promotes top-level strings to ExprInterpolatedString.
-                // Re-check here so nested strings (inside calls etc.) get caught.
-                // The body span depends on whether this is single-line `"..."`
-                // or multi-line `"""..."""`, so route through `classify`.
-                if let Some(text) = first_token_text(&node) {
-                    let form = crate::string_token::classify_string_token(&text);
-                    if form.body_end > form.body_start
-                        && string_contains_interpolation(&text[form.body_start..form.body_end])
-                    {
-                        self.lower_interpolated_string_from_token(&text, &node)
-                    } else {
-                        self.lower_literal(&node, AstLiteral::String)
-                    }
-                } else {
-                    self.lower_literal(&node, AstLiteral::String)
-                }
-            },
+            SyntaxKind::ExprString => self.lower_string_token(&node),
             SyntaxKind::ExprRawString => self.lower_literal(&node, AstLiteral::RawString),
             SyntaxKind::ExprChar => self.lower_literal(&node, AstLiteral::Char),
             SyntaxKind::ExprBool => {
@@ -348,7 +347,7 @@ impl LowerCtx {
                     span,
                 })
             },
-            SyntaxKind::ExprInterpolatedString => self.lower_interpolated_string(&node),
+            SyntaxKind::ExprInterpolatedString => self.lower_string_token(&node),
 
             // Collections
             SyntaxKind::ExprArray => self.lower_array(&node),
@@ -427,56 +426,31 @@ impl LowerCtx {
 
     // ----- Interpolated String -----
 
-    fn lower_interpolated_string(&mut self, node: &SyntaxNode) -> ExprId {
-        let span = self.span(node);
-        let mut parts = Vec::new();
-
-        for child in node.children() {
-            match child.kind() {
-                SyntaxKind::StringLiteralPart => {
-                    let text = child
-                        .children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .map(|t| t.text().to_string())
-                        .collect::<Vec<_>>()
-                        .join("");
-                    parts.push(StringPart::Literal(text));
-                },
-                SyntaxKind::StringInterpolation => {
-                    // Contains an expression child, optional FormatSpecifier
-                    let expr = child
-                        .children()
-                        .find(|c| c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
-                        .map(|c| self.lower_expr(&c))
-                        .unwrap_or_else(|| {
-                            self.alloc_expr(AstExpr::Error {
-                                span: self.span(&child),
-                            })
-                        });
-
-                    let format = find_child(&child, SyntaxKind::FormatSpecifier).map(|fs| {
-                        fs.children_with_tokens()
-                            .filter_map(|e| e.into_token())
-                            .map(|t| t.text().to_string())
-                            .collect::<Vec<_>>()
-                            .join("")
-                    });
-
-                    parts.push(StringPart::Interpolation { expr, format });
-                },
-                _ => {},
-            }
-        }
-
-        // If no structured children, the interpolated string is a raw token —
-        // treat entire text as a literal part
-        if parts.is_empty()
-            && let Some(text) = first_token_text(node)
+    /// Lower a String-token-bearing node — both `ExprString` and
+    /// `ExprInterpolatedString` carry the literal as a single raw `String` token
+    /// (the parser never emits structured `StringLiteralPart`/`StringInterpolation`
+    /// children), so they lower identically: parse the token for `\(...)` holes
+    /// if the body contains interpolation, else emit a plain string literal.
+    ///
+    /// This is the single source of truth for string lowering. The parser only
+    /// promotes *top-level* strings to `ExprInterpolatedString`; nested strings
+    /// (inside calls, and reparsed interpolation holes) arrive as `ExprString`.
+    /// Both must take this path so nested `\(...)` holes are lowered rather than
+    /// dumped verbatim (#197).
+    fn lower_string_token(&mut self, node: &SyntaxNode) -> ExprId {
+        let Some(text) = first_token_text(node) else {
+            return self.lower_literal(node, AstLiteral::String);
+        };
+        // The body span depends on whether this is single-line `"..."` or
+        // multi-line `"""..."""`, so route through `classify`.
+        let form = crate::string_token::classify_string_token(&text);
+        if form.body_end > form.body_start
+            && string_contains_interpolation(&text[form.body_start..form.body_end])
         {
-            parts.push(StringPart::Literal(text));
+            self.lower_interpolated_string_from_token(&text, node)
+        } else {
+            self.lower_literal(node, AstLiteral::String)
         }
-
-        self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
 
     /// Parse a string token (e.g. `"hello \(name)!"` or
@@ -491,6 +465,14 @@ impl LowerCtx {
         let span = self.span(node);
         let form = crate::string_token::classify_string_token(token_text);
         let body = &token_text[form.body_start..form.body_end];
+        // File offset of the start of `inner` (the unescaped body). For
+        // single-line strings `inner == body`, so a byte offset `k` within
+        // `inner` maps to file offset `span.start + form.body_start + k`.
+        // Multi-line bodies are re-processed (indent-stripped / CRLF
+        // normalized) into a fresh buffer whose offsets no longer line up, so
+        // we fall back to anchoring holes at the string token start rather
+        // than risk a wrong offset.
+        let inner_file_base = span.start + form.body_start;
 
         // Multi-line cooked: indent-strip + `\r\n` normalize, then split.
         // We swallow indent errors here for now — the non-interpolated path
@@ -519,12 +501,24 @@ impl LowerCtx {
                             parts.push(StringPart::Literal(std::mem::take(&mut literal)));
                         }
 
-                        // Extract expression text + optional format spec
+                        // Extract expression text + optional format spec.
+                        // `i + 2` is the byte offset of the hole expression
+                        // within `inner` (past the `\(`).
                         let (expr_text, format_spec, _interp_end) =
                             extract_interpolation(&mut chars, inner, i + 2);
 
+                        // Rebase hole-expression spans onto the original file.
+                        // Single-line: precise; multi-line: anchor at the
+                        // string token start (see `inner_file_base`).
+                        let hole_offset = if form.is_multiline {
+                            span.start
+                        } else {
+                            inner_file_base + i + 2
+                        };
+
                         // Re-lex and re-parse the expression
-                        let expr = self.reparse_interpolation_expr(&expr_text, &span);
+                        let expr =
+                            self.reparse_interpolation_expr(&expr_text, &span, hole_offset);
                         parts.push(StringPart::Interpolation {
                             expr,
                             format: format_spec,
@@ -547,8 +541,16 @@ impl LowerCtx {
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
 
-    /// Re-lex, re-parse, and lower a sub-expression extracted from inside `\(...)`.
-    fn reparse_interpolation_expr(&mut self, expr_text: &str, parent_span: &Span) -> ExprId {
+    /// Re-lex, re-parse, and lower a sub-expression extracted from inside
+    /// `\(...)`. `hole_offset` is the byte offset of `expr_text` in the
+    /// original file; it rebases the substring-relative spans the re-parse
+    /// produces back onto the file (#166).
+    fn reparse_interpolation_expr(
+        &mut self,
+        expr_text: &str,
+        parent_span: &Span,
+        hole_offset: usize,
+    ) -> ExprId {
         let file_id = self.file_id;
 
         let tokens: Vec<_> = kestrel_lexer::lex(expr_text, file_id)
@@ -564,15 +566,19 @@ impl LowerCtx {
 
         let parsed = kestrel_parser::parse_expr_from_source(expr_text, tokens.into_iter());
 
-        // The parsed Expression wraps a root SyntaxNode; its first child is
-        // the actual expression node.
-        if let Some(expr_node) = parsed.syntax.children().next() {
+        // Lower the hole's expression with spans rebased to file coordinates.
+        // Save/restore so nested interpolation holes compose correctly.
+        let prev_offset = self.span_offset;
+        self.span_offset = hole_offset;
+        let result = if let Some(expr_node) = parsed.syntax.children().next() {
             self.lower_expr(&expr_node)
         } else {
             self.alloc_expr(AstExpr::Error {
                 span: parent_span.clone(),
             })
-        }
+        };
+        self.span_offset = prev_offset;
+        result
     }
 
     // ----- Collections -----
@@ -666,7 +672,7 @@ impl LowerCtx {
             if let Some(token) = elem.as_token() {
                 if token.kind() == SyntaxKind::Identifier {
                     let name = token.text().to_string();
-                    let tok_span = Span::new(self.file_id, token.text_range().into());
+                    let tok_span = self.rebase(Span::new(self.file_id, token.text_range().into()));
 
                     // Check for type arguments following this identifier
                     let type_args = elements

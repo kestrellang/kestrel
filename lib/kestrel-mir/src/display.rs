@@ -384,11 +384,13 @@ fn fmt_inst(
             result,
             address,
             ty,
+            independent,
         } => {
             write!(
                 out,
-                "{} = take {}, {}",
+                "{} = take{} {}, {}",
                 fmt_value(*result),
+                if *independent { "" } else { " [alias]" },
                 fmt_value(*address),
                 fmt_ty(*ty, arena, module),
             )
@@ -972,7 +974,11 @@ fn fmt_switch_case(case: &SwitchCase) -> String {
         SwitchCase::Variant(idx) => format!("variant {}", idx.index()),
         SwitchCase::Bool(b) => format!("{}", b),
         SwitchCase::IntLiteral(v) => format!("{}", v),
-        SwitchCase::IntRange { start, end } => format!("{}..={}", start, end),
+        SwitchCase::IntRange { start, end } => {
+            let s = start.map_or(String::new(), |v| v.to_string());
+            let e = end.map_or(String::new(), |v| v.to_string());
+            format!("{}..={}", s, e)
+        },
         SwitchCase::CharLiteral(c) => {
             if let Some(ch) = char::from_u32(*c) {
                 format!("'{}'", ch.escape_default())
@@ -981,14 +987,14 @@ fn fmt_switch_case(case: &SwitchCase) -> String {
             }
         },
         SwitchCase::CharRange { start, end } => {
-            let s = char::from_u32(*start).map_or_else(
-                || format!("\\u{{{:X}}}", start),
-                |ch| format!("'{}'", ch.escape_default()),
-            );
-            let e = char::from_u32(*end).map_or_else(
-                || format!("\\u{{{:X}}}", end),
-                |ch| format!("'{}'", ch.escape_default()),
-            );
+            let render = |c: u32| {
+                char::from_u32(c).map_or_else(
+                    || format!("\\u{{{:X}}}", c),
+                    |ch| format!("'{}'", ch.escape_default()),
+                )
+            };
+            let s = start.map_or(String::new(), render);
+            let e = end.map_or(String::new(), render);
             format!("{}..={}", s, e)
         },
     }

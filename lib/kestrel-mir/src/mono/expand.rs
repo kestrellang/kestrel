@@ -681,6 +681,7 @@ fn expand_function(
                                             result: tmp,
                                             address,
                                             ty,
+                                            independent: true,
                                         },
                                         span: span.clone(),
                                     });
@@ -709,6 +710,7 @@ fn expand_function(
                                         result: tmp,
                                         address,
                                         ty,
+                                        independent: true,
                                     },
                                     span: span.clone(),
                                 });
@@ -740,33 +742,65 @@ fn expand_function(
                     let mut expanded = false;
                     if let MirTy::Pointer(pointee) = ty_arena.get(addr_ty) {
                         let pointee = *pointee;
-                        if let MirTy::Named { entity, type_args } = ty_arena.get(pointee)
-                            && !is_drop_self(skip_self, *entity, type_args)
-                        {
-                            let key = (*entity, type_args.clone());
-                            if let Some(&shim_id) = shim_lookup.get(&key) {
+                        match ty_arena.get(pointee) {
+                            MirTy::Named { entity, type_args }
+                                if !is_drop_self(skip_self, *entity, type_args) =>
+                            {
+                                let key = (*entity, type_args.clone());
+                                if let Some(&shim_id) = shim_lookup.get(&key) {
+                                    let tmp = body.alloc_value(ValueDef::owned(pointee));
+                                    new_insts.push(Instruction {
+                                        kind: InstKind::Take {
+                                            result: tmp,
+                                            address,
+                                            ty: pointee,
+                                            independent: true,
+                                        },
+                                        span: span.clone(),
+                                    });
+                                    new_insts.push(Instruction {
+                                        kind: InstKind::Call {
+                                            result: None,
+                                            callee: Callee::Resolved(shim_id),
+                                            args: vec![CallArg {
+                                                value: tmp,
+                                                convention: ParamConvention::Consuming,
+                                            }],
+                                        },
+                                        span: span.clone(),
+                                    });
+                                    expanded = true;
+                                }
+                            },
+                            // Tuple pointee: drop the old tuple's members before
+                            // the overwrite (mirrors the DestroyAddr tuple arm).
+                            // Without this, `t.0 = v` / `s.tupleField = v` into a
+                            // tuple element holding non-Copyable members leaked
+                            // the old value (StoreAssign only knew Named shims).
+                            MirTy::Tuple(_) if ty_needs_drop(ty_arena, shim_lookup, pointee) => {
                                 let tmp = body.alloc_value(ValueDef::owned(pointee));
                                 new_insts.push(Instruction {
                                     kind: InstKind::Take {
                                         result: tmp,
                                         address,
                                         ty: pointee,
+                                        independent: true,
                                     },
                                     span: span.clone(),
                                 });
-                                new_insts.push(Instruction {
-                                    kind: InstKind::Call {
-                                        result: None,
-                                        callee: Callee::Resolved(shim_id),
-                                        args: vec![CallArg {
-                                            value: tmp,
-                                            convention: ParamConvention::Consuming,
-                                        }],
-                                    },
-                                    span: span.clone(),
-                                });
+                                emit_destroy_recursive(
+                                    body,
+                                    ty_arena,
+                                    shim_lookup,
+                                    skip_self,
+                                    tmp,
+                                    pointee,
+                                    &span,
+                                    &mut new_insts,
+                                );
                                 expanded = true;
-                            }
+                            },
+                            _ => {},
                         }
                     }
                     new_insts.push(Instruction {

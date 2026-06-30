@@ -298,13 +298,14 @@ fn compile_switch(
                 emit_case_branch(builder, cmp, target, &target_args, is_last, &wildcard_info);
             },
             SwitchCase::IntRange { start, end } => {
-                let ge = builder
-                    .ins()
-                    .icmp_imm(IntCC::SignedGreaterThanOrEqual, disc_val, *start);
-                let le = builder
-                    .ins()
-                    .icmp_imm(IntCC::SignedLessThanOrEqual, disc_val, *end);
-                let in_range = builder.ins().band(ge, le);
+                let in_range = range_predicate(
+                    builder,
+                    disc_val,
+                    *start,
+                    *end,
+                    IntCC::SignedGreaterThanOrEqual,
+                    IntCC::SignedLessThanOrEqual,
+                );
                 emit_case_branch(
                     builder,
                     in_range,
@@ -315,16 +316,14 @@ fn compile_switch(
                 );
             },
             SwitchCase::CharRange { start, end } => {
-                let ge = builder.ins().icmp_imm(
-                    IntCC::UnsignedGreaterThanOrEqual,
+                let in_range = range_predicate(
+                    builder,
                     disc_val,
-                    *start as i64,
+                    start.map(|c| c as i64),
+                    end.map(|c| c as i64),
+                    IntCC::UnsignedGreaterThanOrEqual,
+                    IntCC::UnsignedLessThanOrEqual,
                 );
-                let le =
-                    builder
-                        .ins()
-                        .icmp_imm(IntCC::UnsignedLessThanOrEqual, disc_val, *end as i64);
-                let in_range = builder.ins().band(ge, le);
                 emit_case_branch(
                     builder,
                     in_range,
@@ -339,6 +338,29 @@ fn compile_switch(
     }
 
     Ok(())
+}
+
+/// Build the in-range boolean for a range pattern, skipping any open bound.
+/// A `None` lower/upper bound is left untested (an open-ended `N..` / `..<N`);
+/// both `None` is a vacuous always-true match.
+fn range_predicate(
+    builder: &mut FunctionBuilder,
+    disc_val: Value,
+    lo: Option<i64>,
+    hi: Option<i64>,
+    ge_cc: IntCC,
+    le_cc: IntCC,
+) -> Value {
+    match (lo, hi) {
+        (Some(lo), Some(hi)) => {
+            let ge = builder.ins().icmp_imm(ge_cc, disc_val, lo);
+            let le = builder.ins().icmp_imm(le_cc, disc_val, hi);
+            builder.ins().band(ge, le)
+        },
+        (Some(lo), None) => builder.ins().icmp_imm(ge_cc, disc_val, lo),
+        (None, Some(hi)) => builder.ins().icmp_imm(le_cc, disc_val, hi),
+        (None, None) => builder.ins().iconst(ir::types::I8, 1),
+    }
 }
 
 fn emit_case_branch(

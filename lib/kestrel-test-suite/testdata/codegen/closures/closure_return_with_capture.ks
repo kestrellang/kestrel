@@ -4,7 +4,7 @@
 module Test
 
 func make_adder(n: std.numeric.Int64) -> (std.numeric.Int64) -> std.numeric.Int64 {
-    { (x) in x + n } // ERROR: cannot return a closure that captures variables
+    { (x) in x + n } // ERROR(E494)
 }
 
 func main() -> lang.i64 {

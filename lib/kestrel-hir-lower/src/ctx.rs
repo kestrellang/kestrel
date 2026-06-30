@@ -63,6 +63,15 @@ pub(crate) struct LowerCtx<'a> {
     /// where `&`/`&mutating` binder patterns are legal (stage 1.5 item 2;
     /// the place-mode lowering needs a pinnable scrutinee place).
     pub ref_patterns_allowed: bool,
+
+    /// While lowering the non-first alternatives of an or-pattern, maps a
+    /// binding name to the local the FIRST alternative already created, so
+    /// every alternative — and the arm body — share ONE local per name. Each
+    /// or-alternative reaches its own match leaf and binds independently; if
+    /// the alternatives used distinct locals, the body (which resolves the
+    /// name to whichever alternative won scope insertion) would read a local
+    /// that other alternatives' leaves never populated (#187).
+    or_reuse: Option<HashMap<String, LocalId>>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -82,7 +91,24 @@ impl<'a> LowerCtx<'a> {
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
             ref_patterns_allowed: false,
+            or_reuse: None,
         }
+    }
+
+    /// Snapshot the innermost scope's name→local bindings. Used to capture
+    /// which locals an or-pattern's first alternative created.
+    pub fn current_scope_bindings(&self) -> HashMap<String, LocalId> {
+        self.scopes.last().cloned().unwrap_or_default()
+    }
+
+    /// Enter "or-alternative reuse" mode: subsequent `define_local` calls for a
+    /// name present in `reuse` return that existing local instead of allocating
+    /// a fresh one. Returns the previous mode to restore via `set_or_reuse`.
+    pub fn set_or_reuse(
+        &mut self,
+        reuse: Option<HashMap<String, LocalId>>,
+    ) -> Option<HashMap<String, LocalId>> {
+        std::mem::replace(&mut self.or_reuse, reuse)
     }
 
     // ===== Scope management =====
@@ -97,6 +123,14 @@ impl<'a> LowerCtx<'a> {
 
     /// Allocate a local variable slot and insert into current scope.
     pub fn define_local(&mut self, name: &str, is_mut: bool, span: Span) -> LocalId {
+        // Or-alternative reuse: a later alternative's binding of `name` aliases
+        // the first alternative's local instead of allocating a new one (#187).
+        if let Some(existing) = self.or_reuse.as_ref().and_then(|m| m.get(name).copied()) {
+            if let Some(scope) = self.scopes.last_mut() {
+                scope.insert(name.to_string(), existing);
+            }
+            return existing;
+        }
         let id = self.locals.alloc(Local {
             name: name.to_string(),
             is_mut,

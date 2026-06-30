@@ -10,11 +10,13 @@ module std.numeric
 import std.ffi.(FFISafe)
 import std.core.(
     Equatable, Comparable, Ordering, Bool,
+    Less, LessOrEqual, Greater, GreaterOrEqual,
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
 import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
-import std.numeric.(Int64, Float64)
+import std.numeric.(Int64, UInt32, Float64)
+import std.collections.Array
 
 /// A 32-bit IEEE 754 single-precision float.
 ///
@@ -53,6 +55,10 @@ import std.numeric.(Int64, Float64)
 public struct Float32:
     Comparable,
     Equatable,
+    Less[Float32],
+    LessOrEqual[Float32],
+    Greater[Float32],
+    GreaterOrEqual[Float32],
     Formattable,
     Addable,
     Subtractable,
@@ -342,6 +348,32 @@ public struct Float32:
         self == 0.0
     }}
 
+    /// The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+    /// (UInt32 for Float32). No value conversion — the bits are
+    /// preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+    /// masking. Inverse of `init(bitPattern:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// (1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+    /// ```
+    public var bitPattern: UInt32 { get {
+        UInt32(raw: lang.f32_to_bits(self.raw))
+    }}
+
+    /// Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+    /// inverse of `bitPattern`). No value conversion — the bits are used directly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Float32(bitPattern: 4607182418800017408);   // 1.0  (Float64)
+    /// ```
+    public init(bitPattern bits: UInt32) {
+        self.raw = lang.f32_from_bits(bits.raw)
+    }
+
     // ========================================================================
     // COMPARISON
     // ========================================================================
@@ -387,6 +419,43 @@ public struct Float32:
     type Multipliable.Output = Float32
     type Divisible.Output = Float32
     type Negatable.Output = Float32
+
+    // Direct IEEE 754 comparisons — override the Comparable blanket so that
+    // NaN operands always produce false (every ordered comparison against NaN
+    // must be false per IEEE 754; the blanket collapses NaN to .Equal and then
+    // uses != .Greater / != .Less, which incorrectly returns true).
+    type Less.Output = Bool
+    type LessOrEqual.Output = Bool
+    type Greater.Output = Bool
+    type GreaterOrEqual.Output = Bool
+
+    // ========================================================================
+    // ORDERED COMPARISONS (IEEE 754 — NaN-safe)
+    // ========================================================================
+
+    /// Returns true if `self < other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func lessThan(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_lt(self.raw, other.raw))
+    }
+
+    /// Returns true if `self <= other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func lessThanOrEqual(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_le(self.raw, other.raw))
+    }
+
+    /// Returns true if `self > other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func greaterThan(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_gt(self.raw, other.raw))
+    }
+
+    /// Returns true if `self >= other` per IEEE 754. Always false when either
+    /// operand is NaN.
+    public func greaterThanOrEqual(other: Float32) -> Bool {
+        Bool(boolLiteral: lang.f32_ge(self.raw, other.raw))
+    }
 
     // ========================================================================
     // ARITHMETIC
@@ -898,34 +967,32 @@ public struct Float32:
             return null
         }
 
-        var integerPart: Float32 = 0.0;
-        var hasIntegerPart = false;
+        // Accumulate every significant digit into the big integer `mantissa`
+        // and count the fractional digits, so value = mantissa * 10^(exp - frac).
+        var mantissa = Array[UInt32]();
+        var hasDigits = false;
+        var fracCount: Int64 = 0;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            let digit = Float32(from: currentByte - 48);
-            integerPart = integerPart * 10.0 + digit;
-            hasIntegerPart = true;
+            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            hasDigits = true;
             index = index + 1;
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index))
             }
         }
 
-        var fractionalPart: Float32 = 0.0;
-        var hasFractionalPart = false;
-
         if index < len and currentByte == 46 {
             index = index + 1;
-            var divisor: Float32 = 10.0;
-
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    let digit = Float32(from: currentByte - 48);
-                    fractionalPart = fractionalPart + digit / divisor;
-                    divisor = divisor * 10.0;
-                    hasFractionalPart = true;
+                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    fracCount = fracCount + 1;
+                    hasDigits = true;
                     index = index + 1;
                     if index < len {
                         currentByte = Int64(from: string.bytes(unchecked: index))
@@ -934,11 +1001,11 @@ public struct Float32:
             }
         }
 
-        if not hasIntegerPart and not hasFractionalPart {
+        if not hasDigits {
             return null
         }
 
-        var result = integerPart + fractionalPart;
+        var expValue: Int64 = 0;
 
         if index < len and (currentByte == 101 or currentByte == 69) {
             index = index + 1;
@@ -967,11 +1034,16 @@ public struct Float32:
                 return null
             }
 
-            var exponent: Int64 = 0;
             var hasExpDigit = false;
 
             while index < len and currentByte >= 48 and currentByte <= 57 {
-                exponent = exponent * 10 + (currentByte - 48);
+                // Cap accumulation far beyond any representable exponent so an
+                // absurdly long exponent can't overflow Int64 and wrap negative
+                // (which would turn an overflow into a spurious 0). |k| > ~400
+                // already saturates to inf / 0.
+                if expValue < 1000000 {
+                    expValue = expValue * 10 + (currentByte - 48)
+                };
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
@@ -983,12 +1055,8 @@ public struct Float32:
                 return null
             }
 
-            let expFloat = Float32(from: exponent);
-            let ten: Float32 = 10.0;
             if expNegative {
-                result = result / ten.pow(expFloat)
-            } else {
-                result = result * ten.pow(expFloat)
+                expValue = expValue.negate()
             }
         }
 
@@ -996,11 +1064,26 @@ public struct Float32:
             return null
         }
 
+        // value = mantissa * 10^k, rounded to the nearest float (round-even).
+        let k = expValue - fracCount;
+        let parts = floatRoundDecimal(mantissa, k, 23, -149, 104);
+        var rawBits = UInt64.zero;
+        if parts.overflow {
+            rawBits = UInt64(from: 255).shiftLeft(by: 23)
+        } else if parts.m == UInt64.zero {
+            rawBits = UInt64.zero
+        } else if parts.m >= UInt64(from: 8388608) {
+            let rawExp = parts.e + 150;
+            rawBits = UInt64(from: rawExp).shiftLeft(by: 23)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: 8388607)))
+        } else {
+            rawBits = parts.m
+        }
         if isNegative {
-            result = result.negate()
+            rawBits = rawBits.bitwiseOr(UInt64.one.shiftLeft(by: 31))
         }
 
-        self.raw = result.raw;
+        self.raw = lang.f32_from_bits(UInt32(from: rawBits).raw);
     }
 
     // ========================================================================
@@ -1009,6 +1092,10 @@ public struct Float32:
 
     /// Formats the float directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements `Formattable`.
+    ///
+    /// Digit generation uses the exact big-integer engine in `float_digits.ks`:
+    /// the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+    /// even on the stored binary value, so printed decimals are correct.
     ///
     /// # Examples
     ///
@@ -1065,147 +1152,60 @@ public struct Float32:
                 style = .Fixed
             }
 
-            if style == .Auto {
-                if precisionProvided == false {
-                    trimTrailingZeros = true
-                }
-                if value.isZero {
-                    style = .Fixed
-                } else {
-                    let expVal = value.log10().floor();
-                    let expInt: Int64 = Int64(raw: lang.cast_f32_i64(expVal.raw));
-                    if expInt < -4 or expInt >= precision {
-                        style = .Scientific
-                    } else {
-                        style = .Fixed
-                    }
-                }
+            // Exact IEEE-754 decomposition of the non-negative `value` into
+            // m * 2^e (m an integer significand, e a binary exponent).
+            let bits = UInt64(from: UInt32(raw: lang.f32_to_bits(value.raw)));
+            let rawExp = Int64(from: bits.shiftRight(by: 23).bitwiseAnd(UInt64(from: 255)));
+            let rawMant = bits.bitwiseAnd(UInt64(from: 8388607));
+            var m = UInt64.zero;
+            var e: Int64 = 0;
+            if rawExp == 0 {
+                m = rawMant;
+                e = -149
+            } else {
+                m = rawMant.bitwiseOr(UInt64(from: 8388608));
+                e = rawExp - 150
             }
 
-            if style == .Scientific or style == .ScientificUpper {
-                var exponent: Int64 = 0;
-                var mantissa = value;
-                if value.isZero == false {
-                    let expVal = value.log10().floor();
-                    exponent = Int64(raw: lang.cast_f32_i64(expVal.raw));
-                    let pow10 = Float32(floatLiteral: 10.0).powi(exponent);
-                    mantissa = value.divide(pow10);
-                }
-
-                let scale = Float32(floatLiteral: 10.0).powi(precision);
-                mantissa = mantissa.multiply(scale).round().divide(scale);
-                if mantissa >= 10.0 {
-                    mantissa = mantissa.divide(10.0);
-                    exponent = exponent + 1
-                }
-
-                let intPart = mantissa.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
+            if precisionProvided == false and suffixPercent == false {
+                // No explicit precision: print the SHORTEST decimal that round-
+                // trips back to this exact value (Dragon4 boundary search). The
+                // lower gap is a half-ulp only at a binade boundary (fraction
+                // zero) above the smallest normal.
+                let lowerGapIsHalf = rawMant == UInt64.zero and rawExp >= 2;
+                let sr = floatShortestDigits(m, e, lowerGapIsHalf);
+                let decExp = sr.decExp;
+                var scientific = false;
+                if style == .Scientific or style == .ScientificUpper {
+                    scientific = true
+                } else if style == .Auto and m != UInt64.zero and (decExp < -4 or decExp >= precision) {
+                    scientific = true
+                };
+                if scientific {
+                    number = floatShortestSciString(sr, style == .ScientificUpper)
                 } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
-
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = mantissa - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: Float32 = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
-                        digitCount = digitCount + 1
-                    }
-                }
-
-                if style == .ScientificUpper {
-                    number.appendByte(69)  // 'E'
-                } else {
-                    number.appendByte(101)  // 'e'
-                }
-
-                var expVal: Int64 = exponent;
-                if expVal < 0 {
-                    number.appendByte(45);  // '-'
-                    expVal = expVal.negate()
-                }
-                if expVal == 0 {
-                    number.appendByte(48)  // '0'
-                } else {
-                    var digits = String();
-                    while expVal > 0 {
-                        let digit: Int64 = expVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        expVal = expVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
+                    number = floatShortestFixedString(sr)
                 }
             } else {
-                let scale = if precision > 0 {
-                    Float32(floatLiteral: 10.0).powi(precision)
-                } else {
-                    Float32(floatLiteral: 1.0)
-                };
-
-                var rounded = value;
-                if precision >= 0 {
-                    rounded = rounded.multiply(scale).round().divide(scale)
+                // Explicit precision (or percent): exact rounding to that many
+                // fractional / mantissa digits.
+                var decExp: Int64 = 0;
+                if m != UInt64.zero {
+                    decExp = floatSigDigits(m, e, 1).decExp
                 }
 
-                let intPart = rounded.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast_f32_i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
-                } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
+                if style == .Auto {
+                    if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
+                        style = .Fixed
+                    } else {
+                        style = .Scientific
                     }
                 }
 
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = rounded - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: Float32 = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast_f32_i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - Float32(raw: lang.cast_i64_f32(digit.raw));
-                        digitCount = digitCount + 1
-                    }
+                if style == .Scientific or style == .ScientificUpper {
+                    number = floatSciString(m, e, precision, style == .ScientificUpper)
+                } else {
+                    number = floatFixedString(m, e, precision)
                 }
             }
 

@@ -334,6 +334,13 @@ public struct UInt8:
     /// Predecessor — `self - 1`. Wraps at `minValue`.
     public func predecessor() -> UInt8 { self.subtract(UInt8.one) }
 
+    /// Number of `successor()` steps from `self` to `other` — `other - self`
+    /// widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+    /// ranges iterate with a counter instead of a "finished" flag.
+    public func distance(to other: UInt8) -> Int64 {
+        Int64(raw: lang.i64_sub(lang.cast_u8_i64(other.raw), lang.cast_u8_i64(self.raw)))
+    }
+
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
     public func exclusiveRange(to end: UInt8) -> Range[UInt8] {
         Range[UInt8](self, end)
@@ -423,6 +430,26 @@ public struct UInt8:
     /// Traps on division by zero, like `divide`.
     public consuming func modulo(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem(self.raw, other.raw)) }
 
+    /// `self / other` without the divide-by-zero and `minValue / -1` guards —
+    /// the bare hardware divide. Faster in hot loops, but **undefined
+    /// behaviour** if `other == 0` or (for signed types) `self == minValue and
+    /// other == -1`. The caller must guarantee a valid divisor. Prefer
+    /// `divide` everywhere correctness matters; this is the `arr(unchecked:)`
+    /// of arithmetic.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue / -1`.
+    public consuming func divideUnchecked(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_div_unchecked(self.raw, other.raw)) }
+
+    /// `self % other` without the divide-by-zero and `minValue % -1` guards.
+    /// Same safety contract as `divideUnchecked`.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue % -1`.
+    public consuming func moduloUnchecked(consuming other: UInt8) -> UInt8 { UInt8(raw: lang.i8_unsigned_rem_unchecked(self.raw, other.raw)) }
+
     
     
 
@@ -430,39 +457,22 @@ public struct UInt8:
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-    // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` on overflow. For unsigned types
-    /// overflow is detected via `result < self`.
+    /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: UInt8) -> UInt8? {
-        let result = self.add(other);
-        // For unsigned, overflow if result < either operand
-        if result < self {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i8_unsigned_add_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.add(other))
     }
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: UInt8) -> UInt8? {
-        // For unsigned, underflow if other > self
-        if other > self {
-            return .None
-        };
+        if Bool(boolLiteral: lang.i8_unsigned_sub_overflows(self.raw, other.raw)) { return .None };
         .Some(self.subtract(other))
     }
 
-    /// Wrapping multiplication that returns `None` on overflow. Implemented
-    /// by multiplying then dividing back.
+    /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: UInt8) -> UInt8? {
-        if other == UInt8.zero {
-            return .Some(UInt8.zero)
-        };
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i8_unsigned_mul_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.multiply(other))
     }
 
     /// Division that returns `None` for divide-by-zero.
@@ -954,20 +964,21 @@ public struct UInt8:
         if n == UInt8.zero {
             digits.appendByte(48)
         } else {
-            let radixVal: UInt8 = UInt8(from: radix);
-            while n != UInt8.zero {
-                let digit: UInt8 = n % radixVal;
-                let digitVal: Int64 = Int64(from: digit);
-                let charCode: Int64 = if digitVal < 10 {
-                    digitVal + 48
-                } else if options.uppercase {
-                    digitVal - 10 + 65
-                } else {
-                    digitVal - 10 + 97
-                };
-                digits.appendByte(UInt8(from: charCode));
-                n = n / radixVal
-            }
+        let radixVal: UInt8 = UInt8(from: radix);
+        var m = n;
+        while m != UInt8.zero {
+            let digit: UInt8 = m % radixVal;
+            let digitVal: Int64 = Int64(from: digit);
+            let charCode: Int64 = if digitVal < 10 {
+                digitVal + 48
+            } else if options.uppercase {
+                digitVal - 10 + 65
+            } else {
+                digitVal - 10 + 97
+            };
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }
         }
 
         // Build content: sign + prefix + reversed digits

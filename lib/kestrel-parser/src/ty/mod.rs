@@ -356,6 +356,11 @@ pub(crate) fn ty_parser<'tokens>()
         #[derive(Clone)]
         enum TypeOperator {
             Optional(Span),
+            // `??` in type position is the double-optional sugar (`T?? == T??`):
+            // the lexer greedily produces one `QuestionQuestion` token (it is the
+            // nil-coalescing operator in expression position), so here we treat it
+            // as two stacked `?` operators rather than a single one.
+            DoubleOptional(Span),
             Throws(Span, TyVariant),
         }
 
@@ -363,6 +368,8 @@ pub(crate) fn ty_parser<'tokens>()
             .ignore_then(
                 just(Token::Question)
                     .map_with(|_, e| TypeOperator::Optional(to_kestrel_span(e.span())))
+                    .or(just(Token::QuestionQuestion)
+                        .map_with(|_, e| TypeOperator::DoubleOptional(to_kestrel_span(e.span()))))
                     .or(just(Token::Throws)
                         .map_with(|_, e| to_kestrel_span(e.span()))
                         .then(ty.clone())
@@ -382,6 +389,18 @@ pub(crate) fn ty_parser<'tokens>()
                     match op {
                         TypeOperator::Optional(question_span) => {
                             result = TyVariant::Optional(Box::new(result), question_span);
+                        },
+                        TypeOperator::DoubleOptional(question_span) => {
+                            // `T??` -> Optional[Optional[T]]; both `?` share the
+                            // `??` span. Chains like `T???` fall out naturally:
+                            // the lexer yields `??` then `?`.
+                            result = TyVariant::Optional(
+                                Box::new(TyVariant::Optional(
+                                    Box::new(result),
+                                    question_span.clone(),
+                                )),
+                                question_span,
+                            );
                         },
                         TypeOperator::Throws(throws_span, error_ty) => {
                             result = TyVariant::Result(

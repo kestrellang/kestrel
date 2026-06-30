@@ -7,8 +7,13 @@ invariants. It is not exhaustive — when you discover a new rule, add it here.
 
 - `kestrel dump mir <file> --std lang/std -f Foo.bar` dumps one function's MIR.
   Use `-f` to filter by substring match on the function name.
-- `KESTREL_VERBOSE_CODEGEN=1` prints the name + error for every function that
-  fails to compile (skipped with a trap stub).
+- A function that fails codegen/verification **aborts the whole build**:
+  `define_all_functions` collects every failure, then returns
+  `CodegenError::CompilationFailed`, so no object is emitted and no binary is
+  linked (exit non-zero). The error lists every failing function by name — there
+  is no warn-and-continue / trap-stub-and-ship path anymore (it produced clean
+  builds that SIGILL'd at runtime; #151/#149). Trap stubs are still emitted
+  in-loop but never serialized (`finish()` is skipped on the error path).
 - There is no per-function CLIF dump yet. To inspect Cranelift IR, add a
   temporary `println!("{}", builder.func.display())` in `func.rs`.
 

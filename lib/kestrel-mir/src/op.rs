@@ -59,6 +59,17 @@ pub enum Signedness {
     Unsigned,
 }
 
+/// Whether a signed `Div`/`Rem` carries its safety guards (divide-by-zero trap
+/// and the `Int.MIN / -1` overflow guard). `Unchecked` skips both, emitting the
+/// bare hardware divide — undefined behaviour on those edges, like C. Backs the
+/// `divideUnchecked`/`moduloUnchecked` stdlib methods for hot loops where the
+/// caller guarantees a valid divisor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DivGuard {
+    Checked,
+    Unchecked,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FloatPredicateKind {
     IsNan,
@@ -79,9 +90,17 @@ pub enum Op {
     Add(IntBits, Signedness),
     Sub(IntBits, Signedness),
     Mul(IntBits, Signedness),
-    Div(IntBits, Signedness),
-    Rem(IntBits, Signedness),
+    Div(IntBits, Signedness, DivGuard),
+    Rem(IntBits, Signedness, DivGuard),
     Neg(IntBits),
+
+    // Overflow predicates: `true` if the corresponding wrapping op overflows the
+    // type. Result is a Bool (like the comparison ops). Back the `*Checked`
+    // stdlib helpers, which can't detect overflow reliably from the wrapped
+    // result alone (e.g. `minValue * -1`).
+    AddOverflows(IntBits, Signedness),
+    SubOverflows(IntBits, Signedness),
+    MulOverflows(IntBits, Signedness),
 
     FAdd(FloatBits),
     FSub(FloatBits),
@@ -154,4 +173,11 @@ pub enum Op {
     FloatMath(FloatBits, FloatMathKind),
     FloatFma(FloatBits),
     FloatCopysign(FloatBits),
+    /// Reinterpret a float's bits as the same-width integer (no value conversion,
+    /// pure bitcast): `f64 -> i64`, `f32 -> i32`. Unlike `FloatToInt`, the bit
+    /// pattern is preserved exactly — used for exact IEEE-754 decomposition.
+    FloatToBits(FloatBits),
+    /// Inverse of `FloatToBits`: reinterpret a same-width integer's bits as a
+    /// float (`i64 -> f64`, `i32 -> f32`).
+    BitsToFloat(FloatBits),
 }

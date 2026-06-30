@@ -78,6 +78,13 @@ pub enum InstKind {
         result: ValueId,
         address: ValueId,
         ty: TyId,
+        /// Whether the moved-out value needs *independent* storage. `true`
+        /// (the safe default) makes codegen memcpy an aggregate into a fresh
+        /// slot; `false` lets it alias the source slot (zero-copy). Only the
+        /// `mark_independent_takes` pass flips this to `false`, and only when
+        /// the source slot is provably not re-initialized while the result is
+        /// live (see passes/copy_propagation.rs). Scalars never alias.
+        independent: bool,
     },
     BeginBorrowAddr {
         result: ValueId,

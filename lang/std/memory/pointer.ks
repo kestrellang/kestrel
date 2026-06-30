@@ -201,6 +201,24 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         lang.ptr_read(self._raw)
     }
 
+    /// Moves `T` out of the address bitwise — a *consuming* read-out. Unlike
+    /// `read()` there is no `Copyable` requirement: ownership of the value
+    /// transfers to the caller, and the pointee is left logically
+    /// uninitialised. `T.deinit` does not run here.
+    ///
+    /// This is the dual of `write(consuming:)` and the building block for
+    /// relocating non-Copyable values (e.g. `swap`).
+    ///
+    /// # Safety
+    ///
+    /// Same validity preconditions as `read()`, and additionally: after the
+    /// take the pointee must not be read or dropped until the slot is
+    /// re-initialised (e.g. via `write`). Taking the same slot twice without
+    /// an intervening write double-owns the value and will double-free.
+    public func take() -> T {
+        lang.ptr_take(self._raw)
+    }
+
     /// Borrows the pointee in place and passes it to `body`. The pointee
     /// is never copied or cloned — `T.deinit` does not run. Use this
     /// to extract fields from heap-allocated structs without triggering
@@ -599,3 +617,33 @@ extend Pointer[T]: MutableIndirection {
 }
 
 
+
+/// Exchanges the contents of two mutable locations without cloning or
+/// dropping either — three bitwise moves, like Rust's `mem::swap`. For a
+/// COW value (`Array`, `String`, `Dictionary`) this swaps the *handles*, so
+/// it never touches the heap buffers: an `O(1)` pointer exchange regardless
+/// of contents.
+///
+/// This is the idiomatic way to rotate double buffers (`swap(a, b)` instead
+/// of the `let tmp = a; a = b; b = tmp` dance, which clones for non-`Copyable`
+/// types).
+///
+/// # Examples
+///
+/// ```
+/// var a = [1, 2, 3];
+/// var b = [9, 8];
+/// swap(a, b);          // a == [9, 8], b == [1, 2, 3] — no element copies
+/// ```
+public func swap[T](mutating a: T, mutating b: T) where T: not Copyable, T: not Static {
+    let pa = Pointer(to: a);
+    let pb = Pointer(to: b);
+    // Self-swap would take the same slot twice (double-owning the value and
+    // leaking the second copy), so short-circuit aliasing locations.
+    if pa.address == pb.address {
+        return
+    }
+    let tmp = pa.take();
+    pa.write(pb.take());
+    pb.write(tmp)
+}

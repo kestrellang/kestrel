@@ -24,6 +24,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
+use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E003",
@@ -58,7 +59,7 @@ impl BodyCheck for GuardDivergenceAnalyzer {
             let Some(else_block) = else_body else {
                 continue;
             };
-            if !block_diverges(cx.hir, else_block) {
+            if !block_diverges(cx.hir, cx.typed, else_block) {
                 let span = non_diverging_span(cx.hir, else_block)
                     .unwrap_or_else(|| util::stmt_span(cx.hir, stmt_id));
                 diags.push(guard_diverge_diagnostic(span));
@@ -74,7 +75,7 @@ impl BodyCheck for GuardDivergenceAnalyzer {
                 ..
             } = expr
                 && let Some(else_arm) = arms.last()
-                && !expr_diverges(cx.hir, else_arm.body)
+                && !expr_diverges(cx.hir, cx.typed, else_arm.body)
             {
                 let arm_span = util::expr_span(cx.hir, else_arm.body);
                 diags.push(guard_diverge_diagnostic(arm_span));
@@ -118,26 +119,34 @@ fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span::S
 // ===== Divergence analysis (private to this analyzer) =====
 
 /// Check if a block definitely diverges.
-fn block_diverges(hir: &HirBody, block: &HirBlock) -> bool {
+fn block_diverges(hir: &HirBody, typed: &TypedBody, block: &HirBlock) -> bool {
     for &stmt_id in &block.stmts {
-        if stmt_diverges(hir, stmt_id) {
+        if stmt_diverges(hir, typed, stmt_id) {
             return true;
         }
     }
     if let Some(tail) = block.tail_expr {
-        return expr_diverges(hir, tail);
+        return expr_diverges(hir, typed, tail);
     }
     false
 }
 
-fn stmt_diverges(hir: &HirBody, id: HirStmtId) -> bool {
+fn stmt_diverges(hir: &HirBody, typed: &TypedBody, id: HirStmtId) -> bool {
     match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_diverges(hir, *expr),
+        HirStmt::Expr { expr, .. } => expr_diverges(hir, typed, *expr),
         _ => false,
     }
 }
 
-fn expr_diverges(hir: &HirBody, id: HirExprId) -> bool {
+fn expr_diverges(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> bool {
+    // Any expression the type system resolved to `!` (Never) diverges — e.g. a
+    // call to `fatalError(...)` or a user `-> !` function. The syntactic forms
+    // below catch divergence that doesn't surface as a Never *type* (an `if`
+    // whose branches both return is typed `()`, not `!`). Mirrors the
+    // never-typed divergence used by exhaustive-return analysis.
+    if matches!(typed.expr_types.get(&id), Some(ResolvedTy::Never)) {
+        return true;
+    }
     match &hir.exprs[id] {
         HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. } => true,
         HirExpr::If {
@@ -145,18 +154,18 @@ fn expr_diverges(hir: &HirBody, id: HirExprId) -> bool {
             else_body,
             ..
         } => {
-            let then_div = block_diverges(hir, then_body);
+            let then_div = block_diverges(hir, typed, then_body);
             match else_body {
-                Some(else_block) => then_div && block_diverges(hir, else_block),
+                Some(else_block) => then_div && block_diverges(hir, typed, else_block),
                 None => false,
             }
         },
         HirExpr::Match { arms, .. } => {
-            !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, arm.body))
+            !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, typed, arm.body))
         },
         // Infinite loop (no break) diverges
         HirExpr::Loop { .. } => true,
-        HirExpr::Block { body, .. } => block_diverges(hir, body),
+        HirExpr::Block { body, .. } => block_diverges(hir, typed, body),
         _ => false,
     }
 }

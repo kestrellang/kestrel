@@ -945,11 +945,11 @@ impl LowerCtx<'_> {
         let dsi_local = self.define_local("$dsi", true, span.clone());
         let dsi_type_ref = self.alloc_expr(HirExpr::Def(dsi_struct, Vec::new(), span.clone()));
         let lit_cap = self.alloc_expr(HirExpr::Literal {
-            value: HirLiteral::Integer(literal_capacity),
+            value: HirLiteral::Integer(literal_capacity as i128),
             span: span.clone(),
         });
         let interp_count = self.alloc_expr(HirExpr::Literal {
-            value: HirLiteral::Integer(interpolation_count),
+            value: HirLiteral::Integer(interpolation_count as i128),
             span: span.clone(),
         });
         let init_call = self.alloc_expr(HirExpr::Call {
@@ -1004,6 +1004,27 @@ impl LowerCtx<'_> {
                     }));
                 },
                 StringPart::Interpolation { expr, format } => {
+                    // A hole whose sub-expression failed to *parse* was lowered
+                    // from an `AstExpr::Error`: the AST builder re-parses the
+                    // `\(...)` substring separately and has no diagnostic
+                    // channel, so the parse error is swallowed. Without a real
+                    // diagnostic the resulting `Error` type slips past the
+                    // `FromHir`-skip in inference and reaches mono as
+                    // `appendInterpolation(type_args=[Error])` — an ICE (#200).
+                    // Emit a diagnostic here so the build fails cleanly. Holes
+                    // that parsed but fail later (undefined name, no-member,
+                    // ...) have a real AST node and are diagnosed normally.
+                    if let AstExpr::Error { span: err_span } = &body.exprs[*expr] {
+                        let err_span = err_span.clone();
+                        self.ctx.accumulate(
+                            Diagnostic::error()
+                                .with_message("invalid expression in string interpolation")
+                                .with_labels(vec![
+                                    Label::primary(err_span.file_id, err_span.range())
+                                        .with_message("could not parse this interpolation"),
+                                ]),
+                        );
+                    }
                     let lowered = self.lower_expr(body, *expr);
 
                     let mut args = vec![HirCallArg {
@@ -1122,7 +1143,7 @@ impl LowerCtx<'_> {
         // width: Int64? — only if specified
         if let Some(w) = parsed.width {
             let int_lit = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(w as i64),
+                value: HirLiteral::Integer(w as i128),
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
@@ -1139,7 +1160,7 @@ impl LowerCtx<'_> {
         // precision: Int64? — only if specified
         if let Some(p) = parsed.precision {
             let int_lit = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(p as i64),
+                value: HirLiteral::Integer(p as i128),
                 span: span.clone(),
             });
             let some_val = self.alloc_expr(HirExpr::ImplicitMember {
@@ -1186,7 +1207,7 @@ impl LowerCtx<'_> {
         };
         if radix != 10 {
             let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Integer(radix),
+                value: HirLiteral::Integer(radix as i128),
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "radix", val);

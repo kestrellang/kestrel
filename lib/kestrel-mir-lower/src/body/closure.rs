@@ -349,6 +349,13 @@ impl OssaBodyCtx<'_, '_> {
         // Lower closure body
         let body_val = self.lower_hir_block(body);
         if !self.is_terminated() {
+            // A closure can never ret_borrow (E491), so a @guaranteed tail
+            // (e.g. a ref-returning call `{ b.peek() }`) must be copied out to
+            // an @owned value — refs do not cross the closure boundary (#195).
+            // `prepare_return_value` performs that copy for non-ret_borrow
+            // bodies (here `self.ret_borrow` is always false — set by the
+            // SavedState mem::replace above).
+            let body_val = self.prepare_return_value(body_val);
             self.destroy_scope_except(&[body_val]);
             self.emit_ret(body_val);
         }

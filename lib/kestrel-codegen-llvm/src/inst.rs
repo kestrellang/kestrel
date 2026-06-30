@@ -21,8 +21,8 @@ use kestrel_mir::inst::{CallArg, InstKind};
 use kestrel_mir::mono::{MonoEnum, MonoModule, MonoStruct};
 use kestrel_mir::value::Ownership;
 use kestrel_mir::{
-    FieldIdx, FloatMathKind, FloatPredicateKind, Layout, MirTy, Op, ParamConvention, Signedness,
-    StructLayout, TyArena, TyId, ValueId, VariantIdx,
+    DivGuard, FieldIdx, FloatMathKind, FloatPredicateKind, IntBits, Layout, MirTy, Op,
+    ParamConvention, Signedness, StructLayout, TyArena, TyId, ValueId, VariantIdx,
 };
 
 use crate::abi::{self, PassMode, ReturnMode};
@@ -179,11 +179,33 @@ pub fn compile_inst<'ctx>(
             result,
             address,
             ty,
+            independent,
         } => {
             let addr = fc.resolve_scalar(builder, *address).into_pointer_value();
             let repr = fc.ctx.tc.repr(*ty, &fc.ctx.module.ty_arena, fc.ctx.module);
-            let val = mem::load_from_repr(cx, builder, ptr_size, repr, addr);
-            fc.map_value(*result, val);
+            match repr {
+                // A Take is a destructive *move-out*: the result must be an
+                // independent @owned value. An aggregate is carried by address,
+                // so `load_from_repr` would alias the source storage — and if
+                // that storage is reinitialized before the moved value is
+                // consumed (`let old = self; self = new` take/replace, or
+                // `var x = agg; …; x = new`), the moved value is clobbered.
+                // Memcpy into a fresh temp so the move is truly independent (a
+                // byte-copy of an abandoned source, not a clone — no
+                // double-ownership). When `mark_independent_takes` has proven
+                // the source slot is not reinitialized while this value is live,
+                // `independent` is false and we alias (zero-copy). Scalars load
+                // by value and never alias.
+                TypeRepr::Aggregate { size, align } if *independent => {
+                    let slot = fc.alloca(size, align);
+                    mem::copy_aggregate(cx, builder, ptr_size, size, slot, addr);
+                    fc.map_value(*result, slot.into());
+                },
+                _ => {
+                    let val = mem::load_from_repr(cx, builder, ptr_size, repr, addr);
+                    fc.map_value(*result, val);
+                },
+            }
         },
 
         // address: ADDR, value: VALUE → writes value to address
@@ -410,7 +432,21 @@ pub fn compile_inst<'ctx>(
             field,
         } => {
             let base_val = fc.get_value(*base).into_pointer_value();
-            let offset = struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module);
+            // Tuple container: positional element offset (mirrors the tuple
+            // arm of TupleExtract); structs use the layout's field_offsets.
+            let offset = if let MirTy::Tuple(elems) = fc.ctx.module.ty_arena.get(*ty) {
+                let elems = elems.clone();
+                tuple_elem_offset(
+                    &mut fc.ctx.tc,
+                    &fc.ctx.module.ty_arena,
+                    fc.ctx.module,
+                    &elems,
+                    field.index() as u32,
+                )
+                .0
+            } else {
+                struct_field_offset(*ty, *field, &fc.ctx.module.ty_arena, fc.ctx.module)
+            };
             let addr = mem::field_gep(cx, builder, base_val, offset);
             fc.map_value(*result, addr.into());
         },
@@ -580,16 +616,34 @@ fn compile_op1<'ctx>(
             )
             .unwrap()
             .into(),
-        // Non-saturating fptosi (cf. Cranelift's saturating variant): out-of-range
-        // or NaN inputs are UB rather than clamped. Acceptable for in-range uses.
-        Op::FloatToInt(_, ib) => builder
-            .build_float_to_signed_int(
-                arg.into_float_value(),
-                int_bits_to_scalar(ib).llvm(cx).into_int_type(),
-                "f2i",
-            )
-            .unwrap()
-            .into(),
+        // Saturating float->int conversion matching Cranelift's fcvt_to_sint_sat:
+        // NaN -> 0, +inf -> INT_MAX, -inf -> INT_MIN, out-of-range clamped.
+        // Uses llvm.fptosi.sat (available since LLVM 13) to avoid UB.
+        Op::FloatToInt(fb, ib) => {
+            let int_ty: BasicTypeEnum = int_bits_to_scalar(ib).llvm(cx).into();
+            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx).into();
+            call_intrinsic(
+                &fc.ctx.llmod,
+                builder,
+                "llvm.fptosi.sat",
+                &[int_ty, float_ty],
+                &[arg.into_float_value().into()],
+            )?
+        },
+        // Pure bitcast (no value conversion): float ↔ same-width integer.
+        Op::FloatToBits(fb) => {
+            let int_ty: BasicTypeEnum = match fb {
+                kestrel_mir::FloatBits::F32 => int_bits_to_scalar(kestrel_mir::IntBits::I32),
+                _ => int_bits_to_scalar(kestrel_mir::IntBits::I64),
+            }
+            .llvm(cx)
+            .into();
+            builder.build_bit_cast(arg, int_ty, "f2bits").unwrap()
+        },
+        Op::BitsToFloat(fb) => {
+            let float_ty: BasicTypeEnum = float_bits_to_scalar(fb).llvm(cx).into();
+            builder.build_bit_cast(arg, float_ty, "bits2f").unwrap()
+        },
         Op::FloatWiden(_, to) => builder
             .build_float_ext(
                 arg.into_float_value(),
@@ -693,6 +747,100 @@ fn compile_op1<'ctx>(
     })
 }
 
+/// Div-by-zero guard: if `divisor == 0`, branch to a trap block; else continue.
+/// Leaves the builder positioned at the continuation block so the caller's
+/// division emits into the non-zero path. (Cranelift gets this from native
+/// `sdiv`/`udiv` zero-trapping; LLVM's are UB, so we make it explicit.)
+fn emit_div_by_zero_trap<'ctx>(
+    fc: &FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    divisor: IntValue<'ctx>,
+) {
+    let cx = fc.ctx.cx;
+    let zero = divisor.get_type().const_zero();
+    let is_zero = builder
+        .build_int_compare(IntPredicate::EQ, divisor, zero, "divzero")
+        .unwrap();
+    let trap_bb = cx.append_basic_block(fc.fn_value, "divzero.trap");
+    let cont_bb = cx.append_basic_block(fc.fn_value, "divzero.cont");
+    builder
+        .build_conditional_branch(is_zero, trap_bb, cont_bb)
+        .unwrap();
+    builder.position_at_end(trap_bb);
+    crate::terminator::emit_trap(fc, builder);
+    builder.position_at_end(cont_bb);
+}
+
+/// Twin of the Cranelift helper: swap the divisor -1 → 1 exactly on signed
+/// `minValue / -1` so the native op wraps (min/1=min, min%1=0) rather than being
+/// UB. Unsigned divisors are returned unchanged (no overflow case).
+fn signed_div_overflow_guard<'ctx>(
+    builder: &Builder<'ctx>,
+    bits: IntBits,
+    sign: Signedness,
+    lhs: IntValue<'ctx>,
+    rhs: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    if matches!(sign, Signedness::Unsigned) {
+        return rhs;
+    }
+    let ty = rhs.get_type();
+    let neg_one = ty.const_all_ones();
+    let min = ty.const_int(1u64 << (bits.bit_width() - 1), false);
+    let one = ty.const_int(1, false);
+    let is_neg_one = builder
+        .build_int_compare(IntPredicate::EQ, rhs, neg_one, "isneg1")
+        .unwrap();
+    let is_min = builder
+        .build_int_compare(IntPredicate::EQ, lhs, min, "ismin")
+        .unwrap();
+    let is_of = builder.build_and(is_neg_one, is_min, "isof").unwrap();
+    builder
+        .build_select(is_of, one, rhs, "safediv")
+        .unwrap()
+        .into_int_value()
+}
+
+/// Mask a shift amount to `amt & (bitWidth-1)` so over-shifts are defined
+/// (poison-free) and match Cranelift's native masking.
+fn mask_shift_amount<'ctx>(
+    builder: &Builder<'ctx>,
+    bits: IntBits,
+    amt: IntValue<'ctx>,
+) -> IntValue<'ctx> {
+    let mask = amt.get_type().const_int((bits.bit_width() - 1) as u64, false);
+    builder.build_and(amt, mask, "shamt").unwrap()
+}
+
+/// Compute whether `lhs OP rhs` overflows, as a Bool, via the LLVM
+/// `llvm.{s,u}{add,sub,mul}.with.overflow` intrinsics (which return `{iN, i1}`);
+/// extract the overflow bit. Backs the `*Checked` helpers. (Cranelift has no such
+/// intrinsic and uses a widening check instead — see its twin.)
+fn emit_overflow_check<'ctx>(
+    fc: &FuncCompiler<'_, 'ctx>,
+    builder: &Builder<'ctx>,
+    sign: Signedness,
+    kind: &str,
+    lhs: IntValue<'ctx>,
+    rhs: IntValue<'ctx>,
+) -> Result<BasicValueEnum<'ctx>, CodegenError> {
+    let cx = fc.ctx.cx;
+    let prefix = if matches!(sign, Signedness::Signed) {
+        "s"
+    } else {
+        "u"
+    };
+    let name = format!("llvm.{prefix}{kind}.with.overflow");
+    let ty: BasicTypeEnum = lhs.get_type().into();
+    let agg = call_intrinsic(&fc.ctx.llmod, builder, &name, &[ty], &[lhs.into(), rhs.into()])?
+        .into_struct_value();
+    let bit = builder
+        .build_extract_value(agg, 1, "ovf")
+        .unwrap()
+        .into_int_value();
+    Ok(cmp_to_bool(cx, builder, bit))
+}
+
 fn compile_op2<'ctx>(
     fc: &mut FuncCompiler<'_, 'ctx>,
     builder: &Builder<'ctx>,
@@ -724,22 +872,45 @@ fn compile_op2<'ctx>(
         Op::Add(_, _) => builder.build_int_add(li(), ri(), "add").unwrap().into(),
         Op::Sub(_, _) => builder.build_int_sub(li(), ri(), "sub").unwrap().into(),
         Op::Mul(_, _) => builder.build_int_mul(li(), ri(), "mul").unwrap().into(),
-        Op::Div(_, Signedness::Signed) => builder
-            .build_int_signed_div(li(), ri(), "sdiv")
+        // div/rem: LLVM `sdiv`/`udiv`/`srem`/`urem` are UB on a zero divisor (and
+        // signed on `minValue / -1`). The spec (int64.ks docs) is: trap on
+        // div-by-zero, wrap on `minValue / -1` (div→min, rem→0). Emit an explicit
+        // div-by-zero trap, and for signed swap the divisor -1→1 exactly on the
+        // overflow case (min/1=min, min%1=0). Mirrors the Cranelift backend, which
+        // gets the zero-trap and shift-mask for free from native semantics.
+        Op::Div(bits, sign, guard) => {
+            // Unchecked skips both the zero-trap and the min/-1 overflow guard,
+            // emitting the bare divide (UB on those edges, like C).
+            let d = if guard == DivGuard::Checked {
+                emit_div_by_zero_trap(fc, builder, ri());
+                signed_div_overflow_guard(builder, bits, sign, li(), ri())
+            } else {
+                ri()
+            };
+            match sign {
+                Signedness::Signed => builder.build_int_signed_div(li(), d, "sdiv"),
+                Signedness::Unsigned => builder.build_int_unsigned_div(li(), d, "udiv"),
+            }
             .unwrap()
-            .into(),
-        Op::Div(_, Signedness::Unsigned) => builder
-            .build_int_unsigned_div(li(), ri(), "udiv")
+            .into()
+        },
+        Op::Rem(bits, sign, guard) => {
+            let d = if guard == DivGuard::Checked {
+                emit_div_by_zero_trap(fc, builder, ri());
+                signed_div_overflow_guard(builder, bits, sign, li(), ri())
+            } else {
+                ri()
+            };
+            match sign {
+                Signedness::Signed => builder.build_int_signed_rem(li(), d, "srem"),
+                Signedness::Unsigned => builder.build_int_unsigned_rem(li(), d, "urem"),
+            }
             .unwrap()
-            .into(),
-        Op::Rem(_, Signedness::Signed) => builder
-            .build_int_signed_rem(li(), ri(), "srem")
-            .unwrap()
-            .into(),
-        Op::Rem(_, Signedness::Unsigned) => builder
-            .build_int_unsigned_rem(li(), ri(), "urem")
-            .unwrap()
-            .into(),
+            .into()
+        },
+        Op::AddOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "add", li(), ri())?,
+        Op::SubOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "sub", li(), ri())?,
+        Op::MulOverflows(_, sign) => emit_overflow_check(fc, builder, sign, "mul", li(), ri())?,
         Op::FAdd(_) => builder.build_float_add(lf(), rf(), "fadd").unwrap().into(),
         Op::FSub(_) => builder.build_float_sub(lf(), rf(), "fsub").unwrap().into(),
         Op::FMul(_) => builder.build_float_mul(lf(), rf(), "fmul").unwrap().into(),
@@ -747,15 +918,20 @@ fn compile_op2<'ctx>(
         Op::And(_) => builder.build_and(li(), ri(), "and").unwrap().into(),
         Op::Or(_) => builder.build_or(li(), ri(), "or").unwrap().into(),
         Op::Xor(_) => builder.build_xor(li(), ri(), "xor").unwrap().into(),
-        Op::Shl(_) => builder.build_left_shift(li(), ri(), "shl").unwrap().into(),
-        Op::Shr(_, Signedness::Signed) => builder
-            .build_right_shift(li(), ri(), true, "ashr")
-            .unwrap()
-            .into(),
-        Op::Shr(_, Signedness::Unsigned) => builder
-            .build_right_shift(li(), ri(), false, "lshr")
-            .unwrap()
-            .into(),
+        // Shifts: LLVM `shl`/`ashr`/`lshr` are poison when the amount >= bit width.
+        // Spec: mask the amount mod bit width (`amt & (width-1)`) — matches
+        // Cranelift's native masking. Without this, an opaque over-shift miscompiles.
+        Op::Shl(bits) => {
+            let amt = mask_shift_amount(builder, bits, ri());
+            builder.build_left_shift(li(), amt, "shl").unwrap().into()
+        },
+        Op::Shr(bits, sign) => {
+            let amt = mask_shift_amount(builder, bits, ri());
+            builder
+                .build_right_shift(li(), amt, matches!(sign, Signedness::Signed), "shr")
+                .unwrap()
+                .into()
+        },
         Op::Eq(_) => icmp(IntPredicate::EQ, builder),
         Op::Ne(_) => icmp(IntPredicate::NE, builder),
         Op::Lt(_, Signedness::Signed) => icmp(IntPredicate::SLT, builder),

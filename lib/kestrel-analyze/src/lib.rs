@@ -64,6 +64,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
     // Literal/lexing checks (E700-E799)
     r.add_body_check(body::string_escape::StringEscapeAnalyzer);
+    r.add_body_check(body::integer_literal_range::IntegerLiteralRangeAnalyzer);
 
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);

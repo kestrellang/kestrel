@@ -2,13 +2,16 @@
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, Name, NodeKind, Settable, Subscript as SubscriptMarker, TypeParams,
+    Callable, Computed, Name, NodeKind, Settable, Static, Subscript as SubscriptMarker, TypeParams,
 };
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
+use kestrel_mir::item::function::{FunctionDef, FunctionKind, ParamDef};
 use kestrel_mir::item::witness::{WitnessDef, WitnessMethodBinding};
-use kestrel_mir::{MirTy, SubstMap, TyId, TypeParamDef, WitnessMethodKey, substitute};
+use kestrel_mir::{
+    MirTy, ParamConvention, SubstMap, TyId, TypeParamDef, ValueId, WitnessMethodKey, substitute,
+};
 use kestrel_name_res::conformances::ConformingProtocolInstantiations;
 use kestrel_name_res::extensions::ExtensionsFor;
 use kestrel_name_res::{
@@ -85,17 +88,19 @@ fn lower_witnesses_for_type(
         } else {
             None
         };
-        // Prefer the source extension's own method impls when EITHER the
-        // implementing type is specialized (`extend Box[lang.i64]`) OR the
-        // PROTOCOL args are concrete (`extend S: Producer[Int64]`). The latter
-        // keeps each witness of a type that conforms to the same parameterized
-        // protocol more than once bound to its own instantiation's method —
-        // otherwise both collapse to the first `produce` found via the merged
-        // type-member discovery (which matches on params, not return type).
-        let proto_args_concrete = proto_type_args
-            .iter()
-            .any(|t| !matches!(ctx.module.ty_arena.get(*t), MirTy::TypeParam(_)));
-        let prefer_source = concrete_args.is_some() || proto_args_concrete;
+        // Prefer the source extension's OWN method impls. An extension's
+        // conformance is witnessed by the methods in that extension's body, so
+        // binding from its own children is the correct default — not the merged
+        // type-member discovery, which picks the first same-named impl across
+        // ALL extensions and so collapses overlapping conformances
+        // (`extend Box[T]: Tag` and `extend Box[T]: Tag where T: Show`, or a type
+        // conforming to the same parameterized protocol twice) onto one method
+        // (#182). When the source extension has no own impl of the requirement
+        // (an empty `extend T: P {}` relying on a default or another extension's
+        // member — e.g. #213), `bind_witness_methods` falls through to discovery.
+        let source_is_extension =
+            matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension));
+        let prefer_source = source_is_extension;
         let witness_impl_ty = match &concrete_args {
             Some(args) => ctx.module.ty_arena.named(type_entity, args.clone()),
             None => impl_ty,
@@ -133,6 +138,20 @@ fn lower_witnesses_for_type(
         let mut witness = WitnessDef::new(*protocol, witness_impl_ty);
         witness.proto_type_args = proto_type_args.clone();
         ctx.register_name(*protocol);
+
+        // Carry the supplying extension's `where` clauses onto the witness so
+        // the mono selector can (a) reject a constrained witness whose bound
+        // doesn't hold for the concrete self and (b) prefer it over an
+        // overlapping unconstrained witness when it does (#182).
+        if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension))
+            && let Some(ast_wc) = ctx.world.get::<kestrel_ast_builder::WhereClause>(*source).cloned()
+        {
+            let mut wc = kestrel_mir::item::function::WhereClause::new();
+            for ast_constraint in &ast_wc.0 {
+                crate::items::function_sig::lower_where_constraint(ctx, ast_constraint, *source, &mut wc);
+            }
+            witness.constraints = wc.constraints;
+        }
 
         // Build substitution map for protocol type params
         let proto_tp_entities = protocol_type_param_entities(ctx, *protocol);
@@ -325,6 +344,107 @@ fn bind_witness_methods(
             continue;
         }
 
+        // Stored `static var` witnessing a `static var { get [set] }` property:
+        // a stored var has no accessor function for witness dispatch to bind
+        // (#147), so synthesize a getter (clones the global) and, for a settable
+        // requirement, a setter (stores into the global). Static types are never
+        // generic (E416), so the accessors need no type params.
+        if let Some(field) = find_stored_static_field(ctx, type_entity, lookup_name) {
+            let field_ty = resolve_type_annotation(ctx, field);
+            let is_setter = method_name.ends_with(".set");
+            let accessor = ctx.next_synthetic_entity();
+            let acc_name = format!(
+                "__{}${lookup_name}",
+                if is_setter { "set" } else { "get" }
+            );
+            ctx.module.register_name(accessor, acc_name.clone());
+            if is_setter {
+                let unit_ty = ctx.module.ty_arena.unit();
+                let mut def = FunctionDef::new(accessor, &acc_name, unit_ty);
+                def.kind = FunctionKind::Free;
+                def.params = vec![ParamDef::new(
+                    "value",
+                    ValueId::new(0),
+                    field_ty,
+                    ParamConvention::Consuming,
+                )];
+                ctx.module.add_function(def);
+                crate::body::synthesize_static_var_setter(ctx, accessor, field, field_ty);
+            } else {
+                let mut def = FunctionDef::new(accessor, &acc_name, field_ty);
+                def.kind = FunctionKind::Free;
+                ctx.module.add_function(def);
+                crate::body::synthesize_static_var_getter(ctx, accessor, field, field_ty);
+            }
+            witness.add_method(WitnessMethodBinding::new(method_key.clone(), accessor, vec![]));
+            continue;
+        }
+
+        // Stored INSTANCE var witnessing a `var { get [set] }` property: same
+        // gap as the static case, but the accessor takes `self`. Synthesize an
+        // instance getter (clone `self.field`) and, if settable, a setter
+        // (`self.field = value`). For a GENERIC conformer (`Box[T]`) the accessor
+        // carries the conformer's type params and is bound with the conformer's
+        // type args (`impl_type_arg_tys`), so mono substitutes `T` per
+        // instantiation — the same vocabulary the generic field types are in.
+        if let Some(field_idx) = ctx.resolve_field_idx(type_entity, lookup_name)
+            && let Some(field_ty) = ctx.resolve_field_ty(type_entity, field_idx)
+        {
+            let self_ty = witness.implementing_type;
+            let acc_type_params: Vec<TypeParamDef> = ctx
+                .world
+                .get::<TypeParams>(type_entity)
+                .map(|tp| {
+                    tp.0
+                        .iter()
+                        .map(|&e| {
+                            ctx.register_name(e);
+                            let n = ctx
+                                .world
+                                .get::<Name>(e)
+                                .map(|n| n.0.clone())
+                                .unwrap_or_default();
+                            TypeParamDef::new(e, n)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let is_setter = method_name.ends_with(".set");
+            let accessor = ctx.next_synthetic_entity();
+            let acc_name = format!("__i{}${lookup_name}", if is_setter { "set" } else { "get" });
+            ctx.module.register_name(accessor, acc_name.clone());
+            if is_setter {
+                let unit_ty = ctx.module.ty_arena.unit();
+                let mut def = FunctionDef::new(accessor, &acc_name, unit_ty);
+                def.kind = FunctionKind::Free;
+                def.type_params = acc_type_params;
+                def.params = vec![
+                    ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::MutBorrow),
+                    ParamDef::new("value", ValueId::new(1), field_ty, ParamConvention::Consuming),
+                ];
+                ctx.module.add_function(def);
+                crate::body::synthesize_instance_var_setter(
+                    ctx, accessor, self_ty, field_idx, field_ty,
+                );
+            } else {
+                let mut def = FunctionDef::new(accessor, &acc_name, field_ty);
+                def.kind = FunctionKind::Free;
+                def.type_params = acc_type_params;
+                def.params =
+                    vec![ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::Borrow)];
+                ctx.module.add_function(def);
+                crate::body::synthesize_instance_var_getter(
+                    ctx, accessor, self_ty, field_idx, field_ty,
+                );
+            }
+            witness.add_method(WitnessMethodBinding::new(
+                method_key.clone(),
+                accessor,
+                impl_type_arg_tys.to_vec(),
+            ));
+            continue;
+        }
+
         // Conformance-providing protocol extension: when a blanket like
         // `extend Equatable: NotEqual[Self]` provides the conformance,
         // search the extension's children for the method implementation.
@@ -415,15 +535,32 @@ fn protocol_ext_default_type_args(
     supplied_protocol: Entity,
     supplying_ext: Entity,
 ) -> Option<Vec<TyId>> {
-    let ext_params = ctx.world.get::<TypeParams>(supplying_ext).map(|t| t.0.clone())?;
-    if ext_params.is_empty() {
-        return None;
-    }
-    // The extension's target args (`[T]` in `extend Slice[T]`), in ext vocabulary.
+    // The extension's target args (`[T]` in `extend Slice[T]` / `Container[T]`),
+    // in the extension's vocabulary.
     let ext_target_args = ctx.query.query(LowerExtensionTargetTypeArgs {
         extension: supplying_ext,
         root: ctx.root,
     })?;
+    // The extension's own free type params, in declaration order. A param
+    // introduced by a conformance RHS (`extend Int64: SeqIndex[T]`) lands in the
+    // `TypeParams` component; a param introduced only by the target LHS
+    // (`extend Container[T] where T: Equatable`, no conformance RHS) is NOT
+    // registered there, so recover those from the target args directly. Without
+    // this, the witness loses the supplying extension's leading type arg and
+    // mono reports a type-arg arity mismatch (#213).
+    let ext_params: Vec<Entity> = match ctx.world.get::<TypeParams>(supplying_ext) {
+        Some(t) if !t.0.is_empty() => t.0.clone(),
+        _ => ext_target_args
+            .iter()
+            .filter_map(|t| match t {
+                HirTy::Param(e, _) => Some(*e),
+                _ => None,
+            })
+            .collect(),
+    };
+    if ext_params.is_empty() {
+        return None;
+    }
     // The implementing type's conformance args to `supplied_protocol`, in impl vocabulary.
     let instantiations = ctx.query.query(ConformingProtocolInstantiations {
         entity: type_entity,
@@ -534,6 +671,29 @@ fn find_impl_among(
         .iter()
         .find(|&&c| matches_candidate(ctx, c, method_name, required_labels, None))
         .copied()
+}
+
+/// A stored (non-computed) `static var` named `name` on `type_entity`, if any —
+/// the witness for a `static var { get [set] }` property requirement when no
+/// accessor function exists. Stored = `Field` + `Static` + no `Callable`.
+fn find_stored_static_field(ctx: &LowerCtx, type_entity: Entity, name: &str) -> Option<Entity> {
+    let candidates = ctx.query.query(TypeMembersByName {
+        type_entity,
+        name: name.to_string(),
+        context: type_entity,
+        root: ctx.root,
+    });
+    candidates.iter().find_map(|tm| {
+        let e = tm.entity;
+        // Stored = Field + Static, and NOT computed (a `static var x { … }`
+        // accessor carries `Computed`, with its getter `Callable` on a child —
+        // so check `Computed` too, not just `Callable` on the field itself).
+        (ctx.world.get::<NodeKind>(e) == Some(&NodeKind::Field)
+            && ctx.world.get::<Static>(e).is_some()
+            && ctx.world.get::<Callable>(e).is_none()
+            && ctx.world.get::<Computed>(e).is_none())
+        .then_some(e)
+    })
 }
 
 fn find_setter_among(ctx: &LowerCtx, candidates: &[Entity]) -> Option<Entity> {

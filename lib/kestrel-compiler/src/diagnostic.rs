@@ -98,9 +98,19 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_message(detail)
                 .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
 
-            InferError::AmbiguousMember { name, .. } => Diagnostic::error()
-                .with_message(format!("ambiguous member '{name}'"))
-                .with_labels(vec![Label::primary(file_id, range).with_message(detail)]),
+            InferError::AmbiguousMember { receiver, name, .. } => {
+                // Receiver-less (overloaded free-function call) reads as a
+                // "call", not a "member" — and its detail must not leak the
+                // synthetic `Error` placeholder (#210).
+                let msg = if receiver.is_some() {
+                    format!("ambiguous member '{name}'")
+                } else {
+                    format!("ambiguous call to '{name}'")
+                };
+                Diagnostic::error()
+                    .with_message(msg)
+                    .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
+            },
 
             InferError::MemberNotVisible {
                 name, visibility, ..
@@ -342,9 +352,7 @@ pub fn mir_verify_error_to_diagnostic(
     if let Some(diag) = &error.diag {
         let mut labels = vec![Label::primary(span.file_id, span.range())];
         if let Some((sec_span, sec_msg)) = &diag.secondary {
-            labels.push(
-                Label::secondary(sec_span.file_id, sec_span.range()).with_message(sec_msg),
-            );
+            labels.push(Label::secondary(sec_span.file_id, sec_span.range()).with_message(sec_msg));
         }
         return Diagnostic::error()
             .with_code(diag.code)
@@ -378,6 +386,17 @@ pub fn mir_mono_verify_error_to_diagnostic(
 ) -> Diagnostic<usize> {
     let func = &module.functions[error.func_idx];
     let span = resolve_span(error.span.as_ref(), func.source, world);
+
+    // A user-facing verify error is a front-end gap surfaced late (e.g. an
+    // unresolved conformance witness) — render it as a plain build error, not
+    // an "internal compiler error / file a bug report" ICE.
+    if error.user_facing {
+        return Diagnostic::error()
+            .with_message(&error.message)
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()).with_message(&error.message),
+            ]);
+    }
 
     let location = match (error.block, error.inst) {
         (Some(b), Some(i)) => format!(" at bb{}[{}]", b.index(), i),

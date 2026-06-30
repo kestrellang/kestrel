@@ -249,10 +249,29 @@ impl LowerCtx<'_> {
             },
 
             AstPat::Or { alternatives, span } => {
-                let lowered: Vec<HirPatId> = alternatives
-                    .iter()
-                    .map(|&id| self.lower_pat_inner(body, id, force_mut))
-                    .collect();
+                // Lower the first alternative normally, then make every later
+                // alternative reuse the locals it created (per binding name) so
+                // all alternatives — and the arm body — share one local per
+                // name. Without this, each `.A(x) or .B(x)` alternative gets a
+                // distinct `x`; the body reads the last-defined one while each
+                // leaf binds its own → an undefined-local OSSA ICE (#187).
+                let mut lowered: Vec<HirPatId> = Vec::with_capacity(alternatives.len());
+                let mut iter = alternatives.iter();
+                if let Some(&first_id) = iter.next() {
+                    let before = self.current_scope_bindings();
+                    lowered.push(self.lower_pat_inner(body, first_id, force_mut));
+                    let after = self.current_scope_bindings();
+                    // Names the first alternative (re)bound → reuse for the rest.
+                    let reuse: std::collections::HashMap<String, _> = after
+                        .into_iter()
+                        .filter(|(name, local)| before.get(name) != Some(local))
+                        .collect();
+                    let prev = self.set_or_reuse(Some(reuse));
+                    for &id in iter {
+                        lowered.push(self.lower_pat_inner(body, id, force_mut));
+                    }
+                    self.set_or_reuse(prev);
+                }
                 self.alloc_pat(HirPat::Or {
                     alternatives: lowered,
                     span: span.clone(),
@@ -526,12 +545,15 @@ fn lower_lit_pat(kind: &LitPatKind, span: &Span) -> HirLiteral {
     }
 }
 
-/// Parse an integer literal string to i64.
+/// Parse an integer literal string to `i128`.
 ///
-/// For values above `i64::MAX` but within `u64::MAX`, parses as `u64` and
-/// reinterprets the bit pattern as `i64` so unsigned literals like
-/// `UInt64.maxValue = 18446744073709551615` round-trip correctly.
-pub(crate) fn parse_int(s: &str) -> i64 {
+/// `i128` holds every valid literal magnitude as a positive value (up to
+/// `UInt64.maxValue = 2^64-1`), so unsigned maxima round-trip and the
+/// `2^63`/`i64::MIN` bit-pattern collision (which used to hide out-of-range
+/// `Int64` literals) cannot occur. Negation is applied separately by the
+/// `negate` operator. Range/overflow checking is the range analyzer's job;
+/// a magnitude beyond `i128` (absurdly long source) degrades to `0`.
+pub(crate) fn parse_int(s: &str) -> i128 {
     let s = s.replace('_', "");
     let (body, radix) = if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         (hex, 16)
@@ -542,9 +564,7 @@ pub(crate) fn parse_int(s: &str) -> i64 {
     } else {
         (s.as_str(), 10)
     };
-    i64::from_str_radix(body, radix)
-        .or_else(|_| u64::from_str_radix(body, radix).map(|u| u as i64))
-        .unwrap_or(0)
+    i128::from_str_radix(body, radix).unwrap_or(0)
 }
 
 /// Parse a float literal string to f64.

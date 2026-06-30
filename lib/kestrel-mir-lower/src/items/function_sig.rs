@@ -27,6 +27,26 @@ pub(crate) fn receiver_convention(kind: &kestrel_ast_builder::ReceiverKind) -> P
     }
 }
 
+/// True when `entity` is a member of an extension whose target is a protocol
+/// (`extend SomeProtocol { ... }`) — a protocol default whose body may use
+/// `Self` even when its signature doesn't, so witness resolution must propagate
+/// `self_type` to it (#146). Mirrors the `in_protocol_extension` check in
+/// `body::lower_function_body`.
+fn is_protocol_extension_member(ctx: &LowerCtx, entity: Entity) -> bool {
+    let Some(parent) = ctx.world.parent_of(entity) else {
+        return false;
+    };
+    if ctx.world.get::<NodeKind>(parent) != Some(&NodeKind::Extension) {
+        return false;
+    }
+    ctx.query
+        .query(kestrel_name_res::ExtensionTargetEntity {
+            extension: parent,
+            root: ctx.root,
+        })
+        .is_some_and(|target| ctx.world.get::<NodeKind>(target) == Some(&NodeKind::Protocol))
+}
+
 /// Lower a function entity into a MIR FunctionDef (signature only, no body).
 pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
@@ -34,6 +54,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
 
     let mut def = FunctionDef::new(entity, &name, ret_ty);
     def.kind = determine_function_kind(ctx, entity);
+    def.provides_protocol_default = is_protocol_extension_member(ctx, entity);
 
     collect_inherited_type_params(ctx, entity, &mut def);
 
@@ -315,7 +336,7 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
     }
 }
 
-fn lower_where_constraint(
+pub(crate) fn lower_where_constraint(
     ctx: &mut LowerCtx,
     constraint: &AstWhereConstraint,
     context: Entity,

@@ -670,16 +670,33 @@ fn has_errors(compiler: &Compiler) -> bool {
         .any(|d| d.severity >= Severity::Error)
 }
 
+/// Select the analyzer diagnostics the CLI should print to stderr.
+///
+/// Errors only, minus E100. The `TypeCheckAnalyzer` re-surfaces every inference
+/// error as an E100 analyzer diagnostic, but those same errors were already
+/// accumulated as codespan diagnostics by the `InferWithDiagnostics` query and
+/// printed by `emit_diagnostics`. Emitting both makes every inference error
+/// render twice — an uncoded codespan copy and a coded `[E100]` copy (#209).
+/// The codespan stream is the canonical renderer for inference errors;
+/// `kestrel dump diagnostics` and the lib test harness (which skips analyzer
+/// E100 for exactly this reason) both rely on it.
+fn cli_emittable_analyze_errors(
+    summary: &kestrel_compiler_driver::AnalyzeSummary,
+) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
+    summary
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
+        .filter(|d| d.descriptor_id != "E100")
+        .collect()
+}
+
 /// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
 fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::AnalyzeSummary) {
     use codespan_reporting::diagnostic::{Diagnostic, Label};
     use kestrel_compiler::diagnostic::WorldFiles;
 
-    let error_diags: Vec<_> = summary
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
-        .collect();
+    let error_diags = cli_emittable_analyze_errors(summary);
 
     if error_diags.is_empty() {
         return;
@@ -709,4 +726,39 @@ fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::A
         .collect();
 
     kestrel_reporting::emit_all(&files, &codespan_diags).ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cli_emittable_analyze_errors;
+    use kestrel_analyze::{AnalyzeDiagnostic, Severity};
+    use kestrel_compiler_driver::AnalyzeSummary;
+
+    fn diag(id: &'static str, sev: Severity) -> AnalyzeDiagnostic {
+        AnalyzeDiagnostic {
+            descriptor_id: id,
+            severity: sev,
+            message: format!("{id} message"),
+            labels: vec![],
+            notes: vec![],
+        }
+    }
+
+    // #209: the CLI must not re-emit E100 analyzer diagnostics — inference
+    // errors are already printed via the canonical codespan stream, so
+    // re-emitting them as E100 prints every inference error twice.
+    #[test]
+    fn cli_skips_e100_keeps_other_errors() {
+        let summary = AnalyzeSummary {
+            diagnostics: vec![
+                diag("E100", Severity::Error),  // inference error — already in codespan stream
+                diag("E412", Severity::Error),  // genuine analyzer error — must emit
+                diag("E316", Severity::Warning), // warning — emitted elsewhere, not here
+            ],
+            ..Default::default()
+        };
+        let emitted = cli_emittable_analyze_errors(&summary);
+        let ids: Vec<&str> = emitted.iter().map(|d| d.descriptor_id).collect();
+        assert_eq!(ids, vec!["E412"], "only the non-E100 error should be CLI-emitted");
+    }
 }

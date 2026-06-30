@@ -227,6 +227,28 @@ impl LowerCtx<'_> {
     }
 
     /// Lower a path expression. Check locals first, then name resolution.
+    /// Chain trailing path segments as `Field` accesses on an already-resolved
+    /// base value. Used when name resolution stops at a VALUE partway through a
+    /// path (an enum case or a field/getter used as an intermediate value) and
+    /// the remaining segments are member accesses on that value — the
+    /// inference solver resolves each `Field` from the base's type. The
+    /// `Local`- and `TypeParameter`-leading paths build the same chain inline.
+    fn lower_trailing_member_segments(
+        &mut self,
+        base: HirExprId,
+        rest: &[ExprPathSegment],
+    ) -> HirExprId {
+        let mut current = base;
+        for seg in rest {
+            current = self.alloc_expr(HirExpr::Field {
+                base: current,
+                name: name_from_ast(seg.name.clone()),
+                span: seg.span.clone(),
+            });
+        }
+        current
+    }
+
     fn lower_path(
         &mut self,
         _body: &AstBody,
@@ -355,13 +377,26 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             },
-            ValueResolution::EnumCaseValue { entity, .. } => self.alloc_expr(HirExpr::Def(
+            ValueResolution::EnumCaseValue {
                 entity,
-                explicit_type_args.clone(),
-                span.clone(),
-            )),
-            ValueResolution::FieldValue { entity, .. } => {
-                self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))
+                resolved_index,
+            } => {
+                let base =
+                    self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()));
+                self.lower_trailing_member_segments(base, &segments[resolved_index + 1..])
+            },
+            ValueResolution::FieldValue {
+                entity,
+                resolved_index,
+            } => {
+                // The path resolved to a VALUE (a field/getter — e.g. the static
+                // computed var in `Money.seven.cents`) at `resolved_index`; the
+                // segments after it are member accesses on that value, not part
+                // of the resolved name. Emitting them as a `Field` chain is what
+                // keeps the `.cents` projection — without it the whole
+                // expression collapsed to `Money.seven` (#214).
+                let base = self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()));
+                self.lower_trailing_member_segments(base, &segments[resolved_index + 1..])
             },
             ValueResolution::AssociatedType { entity, .. } => {
                 self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))

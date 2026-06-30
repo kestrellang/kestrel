@@ -333,6 +333,13 @@ public struct Int32:
     /// Predecessor — `self - 1`. Wraps at `minValue`.
     public func predecessor() -> Int32 { self.subtract(Int32.one) }
 
+    /// Number of `successor()` steps from `self` to `other` — `other - self`
+    /// widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+    /// ranges iterate with a counter instead of a "finished" flag.
+    public func distance(to other: Int32) -> Int64 {
+        Int64(raw: lang.i64_sub(lang.cast_i32_i64(other.raw), lang.cast_i32_i64(self.raw)))
+    }
+
     /// Builds a half-open range `self..<end`. Sugar for the `..<` operator.
     public func exclusiveRange(to end: Int32) -> Range[Int32] {
         Range[Int32](self, end)
@@ -422,6 +429,26 @@ public struct Int32:
     /// Traps on division by zero, like `divide`.
     public consuming func modulo(consuming other: Int32) -> Int32 { Int32(raw: lang.i32_signed_rem(self.raw, other.raw)) }
 
+    /// `self / other` without the divide-by-zero and `minValue / -1` guards —
+    /// the bare hardware divide. Faster in hot loops, but **undefined
+    /// behaviour** if `other == 0` or (for signed types) `self == minValue and
+    /// other == -1`. The caller must guarantee a valid divisor. Prefer
+    /// `divide` everywhere correctness matters; this is the `arr(unchecked:)`
+    /// of arithmetic.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue / -1`.
+    public consuming func divideUnchecked(consuming other: Int32) -> Int32 { Int32(raw: lang.i32_signed_div_unchecked(self.raw, other.raw)) }
+
+    /// `self % other` without the divide-by-zero and `minValue % -1` guards.
+    /// Same safety contract as `divideUnchecked`.
+    ///
+    /// # Safety
+    ///
+    /// UB when `other == 0`, or signed `minValue % -1`.
+    public consuming func moduloUnchecked(consuming other: Int32) -> Int32 { Int32(raw: lang.i32_signed_rem_unchecked(self.raw, other.raw)) }
+
     /// Two's-complement negation. Wraps at the minimum value:
     /// `Int32.minValue.negate() == Int32.minValue`. Use
     /// `negateChecked` to surface the overflow.
@@ -435,46 +462,22 @@ public struct Int32:
     // ARITHMETIC (Checked - Returns Optional)
     // ========================================================================
 
-    // TODO: requires overflow-detecting intrinsics for proper implementation
     /// Wrapping addition that returns `None` instead of overflowing.
     public func addChecked(other: Int32) -> Int32? {
-        // Simplified check - detect if signs are same and result sign differs
-        let result = self.add(other);
-        if self.isPositive and other.isPositive and result.isNegative {
-            return .None
-        };
-        if self.isNegative and other.isNegative and result.isPositive {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i32_signed_add_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.add(other))
     }
 
     /// Wrapping subtraction that returns `None` instead of overflowing.
     public func subtractChecked(other: Int32) -> Int32? {
-        // Simplified check
-        let result = self.subtract(other);
-        if self.isPositive and other.isNegative and result.isNegative {
-            return .None
-        };
-        if self.isNegative and other.isPositive and result.isPositive {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i32_signed_sub_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.subtract(other))
     }
 
     /// Wrapping multiplication that returns `None` instead of overflowing.
-    /// Implemented by multiplying then dividing back; replace with an
-    /// overflow-detecting intrinsic when one is available.
     public func multiplyChecked(other: Int32) -> Int32? {
-        if other == Int32.zero {
-            return .Some(Int32.zero)
-        };
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {
-            return .None
-        };
-        .Some(result)
+        if Bool(boolLiteral: lang.i32_signed_mul_overflows(self.raw, other.raw)) { return .None };
+        .Some(self.multiply(other))
     }
 
     /// Division that returns `None` for divide-by-zero or for the
@@ -875,8 +878,15 @@ public struct Int32:
             return null
         }
 
-        var result: Int64 = 0;
-        let maxBeforeMultiply: Int64 = 922337203685477580;
+        // Accumulate the positive magnitude in UInt64 so that minValue's
+        // magnitude (maxValue+1) is representable; convert + negate at the end.
+        let maxMagnitude: UInt64 = if isNegative {
+            UInt64(from: Int32.maxValue) + 1
+        } else {
+            UInt64(from: Int32.maxValue)
+        };
+
+        var result: UInt64 = 0;
 
         while index < len {
             let byte: UInt8 = string.bytes(unchecked: index);
@@ -887,32 +897,22 @@ public struct Int32:
             }
 
             let digit = byteVal - 48;
+            let digitU: UInt64 = UInt64(from: digit);
 
-            if result > maxBeforeMultiply {
+            if result > (maxMagnitude - digitU) / 10 {
                 return null
             }
-            result = result * 10;
-
-            if result > 9223372036854775807 - digit {
-                return null
-            }
-            result = result + digit;
+            result = result * 10 + digitU;
 
             index = index + 1
         }
 
+        let typedResult = Int32(from: result);
         if isNegative {
-            result = result.negate();
-            if result < Int64(from: Int32.minValue) {
-                return null
-            }
+            self.raw = typedResult.negate().raw
         } else {
-            if result > Int64(from: Int32.maxValue) {
-                return null
-            }
+            self.raw = typedResult.raw
         }
-
-        self.raw = Int32(from: result).raw;
     }
     /// @name Parsing with Radix
     /// Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -1016,9 +1016,6 @@ public struct Int32:
     public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
         var n = self;
         let isNegative = n < 0;
-        if isNegative {
-            n = n.negate()
-        }
 
         var radix: Int64 = options.radix;
         if radix < 2 or radix > 36 {
@@ -1030,20 +1027,28 @@ public struct Int32:
         if n == Int32.zero {
             digits.appendByte(48)
         } else {
-            let radixVal: Int32 = Int32(from: radix);
-            while n != Int32.zero {
-                let digit: Int32 = n % radixVal;
-                let digitVal: Int64 = Int64(from: digit);
-                let charCode: Int64 = if digitVal < 10 {
-                    digitVal + 48
-                } else if options.uppercase {
-                    digitVal - 10 + 65
-                } else {
-                    digitVal - 10 + 97
-                };
-                digits.appendByte(UInt8(from: charCode));
-                n = n / radixVal
-            }
+        // Convert to unsigned magnitude so minValue formats correctly.
+        // negate() overflows on minValue; unsigned subtraction from zero does not.
+        let mag: UInt32 = if isNegative {
+            UInt32.zero - UInt32(from: n)
+        } else {
+            UInt32(from: n)
+        };
+        let radixVal: UInt32 = UInt32(from: radix);
+        var m = mag;
+        while m != UInt32.zero {
+            let digit: UInt32 = m % radixVal;
+            let digitVal: Int64 = Int64(from: digit);
+            let charCode: Int64 = if digitVal < 10 {
+                digitVal + 48
+            } else if options.uppercase {
+                digitVal - 10 + 65
+            } else {
+                digitVal - 10 + 97
+            };
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }
         }
 
         // Build content: sign + prefix + reversed digits

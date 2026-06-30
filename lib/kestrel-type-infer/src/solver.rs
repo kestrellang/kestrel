@@ -23,9 +23,9 @@ use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::{LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_semantics::{
-    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness,
-    StaticLayer, StaticRequirement, Staticness, TypeParamCopyRequirement,
-    TypeParamStaticRequirement, instance_is_static,
+    ConditionalCopyableParams, CopySemantics, NominalCopySemantics, NominalStaticness, StaticLayer,
+    StaticRequirement, Staticness, TypeParamCopyRequirement, TypeParamStaticRequirement,
+    instance_is_static,
 };
 use kestrel_span::Span;
 
@@ -460,9 +460,7 @@ fn find_ref_violation(
             .iter()
             .chain(std::iter::once(&ret))
             .find_map(|&p| find_ref_violation(ctx, p, RefPos::InFn, seen)),
-        TyKind::AssocProjection { base, .. } => {
-            find_ref_violation(ctx, base, RefPos::Nested, seen)
-        },
+        TyKind::AssocProjection { base, .. } => find_ref_violation(ctx, base, RefPos::Nested, seen),
         TyKind::Opaque {
             bounds,
             origin_args,
@@ -609,14 +607,10 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 let v_err = ctx.is_error(ctx.resolve(value));
                 let t_err = ctx.is_error(ctx.resolve(target));
                 if v_err || t_err {
-                    if v_err
-                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
-                    {
+                    if v_err && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
                         ctx.poison(target);
                     }
-                    if t_err
-                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
-                    {
+                    if t_err && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. }) {
                         ctx.poison(value);
                     }
                     continue;
@@ -638,14 +632,10 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 let v_err = ctx.is_error(ctx.resolve(value));
                 let t_err = ctx.is_error(ctx.resolve(target));
                 if v_err || t_err {
-                    if v_err
-                        && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. })
-                    {
+                    if v_err && matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
                         ctx.poison(target);
                     }
-                    if t_err
-                        && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. })
-                    {
+                    if t_err && matches!(ctx.slot(ctx.resolve(value)), TySlot::Unresolved { .. }) {
                         ctx.poison(value);
                     }
                     continue;
@@ -1785,6 +1775,20 @@ fn solve_coerce(
         });
     }
 
+    // #178: a closure literal coerced to an expected function type
+    // (`let f: (mutating T) -> () = { (x) in … }`) upgrades its param
+    // conventions exactly like a call argument does (reconcile_fn_convention at
+    // the call site). `unify` ignores conventions, so without this the closure
+    // keeps its default `Consuming` convention and a `mutating`-requiring body
+    // is falsely rejected with E201. Only fires once both sides resolve to
+    // Functions (else it no-ops and the unify below defers, re-running coerce).
+    if ctx.closure_literal_exprs.contains(&expr)
+        && let Some(err) = reconcile_closure_conventions(ctx, from, to, expr, &span)
+    {
+        ctx.errored_coerce_exprs.insert(expr);
+        return SolveResult::Error(err);
+    }
+
     // Try unification first (handles the common case)
     match unify::unify(ctx, from, to) {
         Ok(()) => return SolveResult::Solved,
@@ -2346,7 +2350,9 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
                 root: ctx.root,
             }) == StaticRequirement::RequiresStatic
         },
-        TyKind::Tuple(elems) => elems.iter().all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
+        TyKind::Tuple(elems) => elems
+            .iter()
+            .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
         // Function types are Static in 2a. TODO(static-2c): the capture-
         // derived Static bit on function types.
         // Protocol / opaque / alias / assoc-projection / Never / Error:
@@ -2600,20 +2606,42 @@ fn reconcile_fn_convention(
     param: TyVar,
     span: &Span,
 ) -> Option<InferError> {
+    reconcile_closure_conventions(ctx, arg.ty, param, arg.value, span)
+}
+
+/// Reconcile a closure/function value's param conventions against an expected
+/// function type. For a closure *literal*, a non-`MutBorrow` param is upgraded
+/// in place to `MutBorrow` when the expected type demands it — this is what lets
+/// `arr.modify { it.len += 1 }` (call arg) AND `let f: (mutating T) -> () = {…}`
+/// (annotated binding) infer the convention without an explicit `mutating` on
+/// the param. Passing a `MutBorrow` closure where a non-mutating param is
+/// expected is a hard error. Returns `Some(err)` only on that mismatch; the
+/// upgrade is an in-place side effect on `actual_ty`'s resolved slot.
+///
+/// `value_expr` identifies the closure literal expression (so the upgrade only
+/// applies to literals we lower — never to an opaque function value whose
+/// convention is fixed).
+fn reconcile_closure_conventions(
+    ctx: &mut InferCtx<'_>,
+    actual_ty: TyVar,
+    expected_ty: TyVar,
+    value_expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<InferError> {
     use kestrel_ast::ParamConvention::MutBorrow;
 
-    // Expected per-param conventions come from the parameter's function type.
-    let expected = match ctx.slot(param) {
+    // Expected per-param conventions come from the expected function type.
+    let expected = match ctx.slot(expected_ty) {
         TySlot::Resolved(TyKind::Function { conventions, .. }) => conventions.clone(),
         _ => return None,
     };
-    // Actual conventions from the argument's (closure/function) type.
-    let actual = match ctx.slot(arg.ty) {
+    // Actual conventions from the value's (closure/function) type.
+    let actual = match ctx.slot(actual_ty) {
         TySlot::Resolved(TyKind::Function { conventions, .. }) => conventions.clone(),
         _ => return None,
     };
 
-    let is_literal = ctx.closure_literal_exprs.contains(&arg.value);
+    let is_literal = ctx.closure_literal_exprs.contains(&value_expr);
     let mut upgraded = actual.clone();
     let mut changed = false;
     for j in 0..expected.len().min(actual.len()) {
@@ -2630,7 +2658,7 @@ fn reconcile_fn_convention(
         }
     }
     if changed {
-        ctx.set_function_conventions(arg.ty, upgraded);
+        ctx.set_function_conventions(actual_ty, upgraded);
     }
     None
 }
@@ -2890,8 +2918,11 @@ fn solve_overloaded_call(
                     span,
                 }),
                 1 => emit_resolved_call(ctx, compatible[0], &type_args, args, result, expr, span),
+                // Receiver-less: an overloaded module-level function call has
+                // no receiver type — `result` is the call result, not a
+                // receiver, so don't render it (#210).
                 _ => SolveResult::Error(InferError::AmbiguousMember {
-                    receiver: result,
+                    receiver: None,
                     name: overload_name,
                     span,
                 }),
@@ -3075,6 +3106,8 @@ fn emit_resolved_call(
                     ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
                 }
             },
+            // `T.Assoc: P` projection bounds are handled at body setup.
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 
@@ -3557,7 +3590,7 @@ fn solve_member(
                     },
                     Err(_) => {
                         return SolveResult::Error(InferError::AmbiguousMember {
-                            receiver,
+                            receiver: Some(receiver),
                             name: name.to_string(),
                             span,
                         });
@@ -3565,7 +3598,7 @@ fn solve_member(
                 }
             } else {
                 return SolveResult::Error(InferError::AmbiguousMember {
-                    receiver,
+                    receiver: Some(receiver),
                     name: name.to_string(),
                     span,
                 });
@@ -3618,6 +3651,25 @@ fn solve_member(
         }
     }
 
+    // A member resolved THROUGH a protocol (the multi-match collapse in
+    // `try_resolve_through_protocol`, which merges several same-requirement
+    // extension methods) carries no single `from_extension`, so the check above
+    // can't catch it. Verify the receiver genuinely conforms to that protocol
+    // for THIS instantiation — not merely by nominal. `Box(0).show()` over
+    // `extend Box[lang.i64]: Show` + `extend Box[lang.i32]: Show` resolves `show`
+    // via `Show`, but neither extension applies to `Box[Int64]`; without this it
+    // type-checked and only failed (post-fix: cleanly) at mono.
+    if let Some(proto) = resolution.via_protocol
+        && !receiver_conforms_to_protocol_concretely(ctx, &recv_kind, proto)
+    {
+        return SolveResult::Error(InferError::NoMember {
+            receiver,
+            name: name.to_string(),
+            is_call,
+            span,
+        });
+    }
+
     // Field/property used as a call → field access + call on the field value.
     // Handles both function-typed fields (e.g., `self.transform(item)`, `self.separator()`)
     // and subscriptable fields (e.g., `self.data(unchecked: i)` where data is Array[T]).
@@ -3663,7 +3715,10 @@ fn solve_member(
         if is_call && args.is_empty() {
             let resolved = ctx.resolve(field_tv);
             if ctx.is_concrete(resolved)
-                && !matches!(ctx.slot(resolved), TySlot::Resolved(TyKind::Function { .. }))
+                && !matches!(
+                    ctx.slot(resolved),
+                    TySlot::Resolved(TyKind::Function { .. })
+                )
             {
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
@@ -3946,6 +4001,9 @@ fn solve_member(
                     }
                 }
             },
+            // `T.Assoc: P` projection bounds are body-inference facts; the
+            // member-resolution path doesn't re-emit them.
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 
@@ -4333,6 +4391,44 @@ fn solve_tuple_rest_pat(
 
 /// Check if an extension's explicit type args are compatible with the receiver's type args.
 /// Returns false only when we can definitively prove incompatibility.
+/// Does `recv_kind` genuinely conform to `protocol` for its concrete
+/// instantiation — i.e. is the conformance declared on the type body, or
+/// provided by an extension whose self-type args are compatible with the
+/// receiver? A purely nominal conformance (e.g. `Box` declares `Show` only via
+/// `extend Box[lang.i64]`) does NOT apply to a differently-specialized receiver
+/// (`Box[Int64]`). Mirrors the per-extension check mono uses for witnesses.
+fn receiver_conforms_to_protocol_concretely(
+    ctx: &InferCtx<'_>,
+    recv_kind: &TyKind,
+    protocol: Entity,
+) -> bool {
+    let Some(nominal) = recv_kind.entity() else {
+        return true; // structural / non-nominal — don't second-guess
+    };
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity: nominal,
+            root: ctx.root,
+        });
+    let mut saw_provider = false;
+    for (proto, source, _args) in &insts {
+        if *proto != protocol {
+            continue;
+        }
+        saw_provider = true;
+        // Conformance on the type body (source == the type) applies to every
+        // instantiation. An extension applies only if its self-type args match.
+        if *source == nominal || extension_type_args_compatible(ctx, *source, recv_kind) {
+            return true;
+        }
+    }
+    // No provider at all: defer (inheritance/refinement/blanket sources the
+    // instantiation query may not enumerate — stay permissive, the witness
+    // backstop catches a genuine miss). Providers existed but none applied: reject.
+    !saw_provider
+}
+
 fn extension_type_args_compatible(
     ctx: &InferCtx<'_>,
     extension: Entity,
@@ -5021,6 +5117,8 @@ fn emit_type_alias_where_clauses(
             crate::resolve::WhereClause::DirectEquality { .. } => {
                 // Direct equality on TypeAlias — rare, skip for now
             },
+            // `Assoc.Inner: P` projection bounds on a TypeAlias — not emitted here.
+            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -5105,7 +5203,10 @@ fn emit_static_wellformedness(
         root: ctx.root,
     });
     for clause in where_clauses {
-        let crate::resolve::WhereClause::Bound { param, protocol, .. } = clause else {
+        let crate::resolve::WhereClause::Bound {
+            param, protocol, ..
+        } = clause
+        else {
             continue;
         };
         if protocol != static_proto {

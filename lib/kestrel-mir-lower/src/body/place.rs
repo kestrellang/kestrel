@@ -93,8 +93,121 @@ impl OssaBodyCtx<'_, '_> {
                 let field_name = name.as_str_or_empty().to_string();
                 self.lower_field_place(expr_id, base, &field_name, views)
             },
+            HirExpr::TupleIndex { base, index, .. } => {
+                self.lower_tuple_place(expr_id, base, index, views)
+            },
+            // Module-level global / `static var`: the GlobalRef IS the
+            // storage address (same shape `lower_assign`'s Def arm stores
+            // through). Resolving it as an Addr place lets a `&mutating`
+            // borrow — and so the `g += 1` compound-assign receiver — write
+            // through the real global instead of `lower_expr`'s loaded
+            // snapshot, which stranded the mutation on a throwaway copy
+            // (#140). Non-global Defs (functions, enum cases) aren't storage
+            // → None, falling back to value lowering.
+            // Module-level global / `static var`: the GlobalRef IS the storage
+            // address (same shape `lower_assign`'s Def arm stores through).
+            // Resolving it as an Addr place lets a `&mutating` borrow — and so
+            // the `g += 1` compound-assign receiver — write through the real
+            // global instead of `lower_expr`'s loaded snapshot, which stranded
+            // the mutation on a throwaway copy (#140). See `is_stored_global_def`
+            // for why the criterion is by AST shape, not `module.statics`.
+            HirExpr::Def(entity, _, _) => {
+                if !self.is_stored_global_def(entity) {
+                    return None;
+                }
+                self.ctx.register_name(entity);
+                let addr = self.emit_global_ref(entity);
+                let pointee = self.resolve_expr_type(expr_id);
+                Some(Place {
+                    repr: PlaceRepr::Addr(addr),
+                    pointee,
+                })
+            },
             _ => None,
         }
+    }
+
+    /// The `TupleIndex` arm of `lower_place`: positional element of a tuple,
+    /// the structural analogue of `lower_field_place` (tuples have no computed
+    /// or static members, so the plain-stored guard is unnecessary).
+    fn lower_tuple_place(
+        &mut self,
+        expr_id: HirExprId,
+        base: HirExprId,
+        index: u32,
+        views: FieldViews,
+    ) -> Option<Place> {
+        let base_ty = self.resolve_expr_type(base);
+        let field_idx = FieldIdx::new(index as usize);
+
+        // Ref-typed element: the place is the POINTEE the slot points at —
+        // extract the ref (a load of the stored address); the @guaranteed
+        // result IS the place view (see the Field arm).
+        let slot_tys = self.tuple_elem_tys(base_ty);
+        if let Some(&slot_ty) = slot_tys.get(index as usize)
+            && matches!(self.ctx.module.ty_arena.get(slot_ty), MirTy::Ref { .. })
+        {
+            let base_val = self.lower_expr_for_borrow(base);
+            let v = self.emit_tuple_extract(base_val, index, slot_ty);
+            let pointee = self.body.value(v).ty;
+            return Some(Place {
+                repr: PlaceRepr::View(v),
+                pointee,
+            });
+        }
+
+        // Address route: project the element's address off an addressable base.
+        if let Some(base_place) = self.lower_place(base, views) {
+            match base_place.repr {
+                PlaceRepr::Addr(base_addr) => {
+                    let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    let pointee = match self.ctx.module.ty_arena.get(self.body.value(elem_addr).ty) {
+                        MirTy::Pointer(inner) => *inner,
+                        _ => unreachable!("FieldAddr result must be Pointer-typed"),
+                    };
+                    return Some(Place {
+                        repr: PlaceRepr::Addr(elem_addr),
+                        pointee,
+                    });
+                },
+                PlaceRepr::View(base_val) if views == FieldViews::Allow => {
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let v = self.extract_tuple_view(base_val, index, result_ty);
+                    return Some(Place {
+                        repr: PlaceRepr::View(v),
+                        pointee: result_ty,
+                    });
+                },
+                PlaceRepr::View(_) => return None,
+            }
+        }
+        if views == FieldViews::Allow {
+            let base_val = self.lower_expr_for_borrow(base);
+            let result_ty = self.resolve_expr_type(expr_id);
+            let v = self.extract_tuple_view(base_val, index, result_ty);
+            return Some(Place {
+                repr: PlaceRepr::View(v),
+                pointee: result_ty,
+            });
+        }
+        None
+    }
+
+    /// Tuple analogue of `extract_field_view`: borrow an owned base in place
+    /// and `TupleExtract` a @guaranteed view (never a Copyable snapshot).
+    fn extract_tuple_view(&mut self, base_val: ValueId, index: u32, result_ty: TyId) -> ValueId {
+        let base_ref = if self.body.value(base_val).ownership == Ownership::Owned {
+            self.emit_begin_borrow(base_val)
+        } else {
+            base_val
+        };
+        let result = self.alloc_guaranteed(result_ty, base_ref);
+        self.push_inst(InstKind::TupleExtract {
+            result,
+            operand: base_ref,
+            index,
+        });
+        result
     }
 
     /// The `Field` arm of `lower_place`: plain stored fields only.
@@ -258,6 +371,19 @@ impl OssaBodyCtx<'_, '_> {
                     return None;
                 }
                 Some(self.emit_field_addr(base_addr, base_ty, field_idx))
+            },
+            // Tuple element through a var-rooted chain (`t.0 = v`,
+            // `t.0.1 = v`): same FieldAddr projection as a stored field,
+            // FieldIdx = the positional index. Ref-typed elements stop here
+            // (their storage is the pointee, not the slot — see the Field arm).
+            HirExpr::TupleIndex { base, index, .. } => {
+                let base_addr = self.try_field_addr_chain(base)?;
+                let base_ty = self.resolve_expr_type(base);
+                let slot_tys = self.tuple_elem_tys(base_ty);
+                if self.slot_is_ref(&slot_tys, index as usize) {
+                    return None;
+                }
+                Some(self.emit_field_addr(base_addr, base_ty, FieldIdx::new(index as usize)))
             },
             _ => None,
         }

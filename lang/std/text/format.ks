@@ -393,6 +393,12 @@ extend Formattable {
 
 /// Writes `content` into `writer` with width/alignment/fill padding applied.
 /// Used by String, integer, and float `format(into:)` implementations.
+///
+/// When `fill == '0'` and padding goes on the left (right-align / center),
+/// any sign character (`-`, `+`, ` `) or radix prefix (`0b`, `0o`, `0x`,
+/// `0X`) that appears at the start of `content` is emitted *before* the
+/// zero-padding so the result matches the C `printf` "%08d" convention,
+/// e.g. `-5` with width 8 → `-0000005` rather than `000000-5`.
 public func _writePadded(mutating into writer: StringBuilder, content: String, options: FormatOptions) {
     if let .Some(width) = options.width {
         let currentLen = content.chars.count;
@@ -408,6 +414,40 @@ public func _writePadded(mutating into writer: StringBuilder, content: String, o
             } else {
                 padLeft = padding / 2;
                 padRight = padding - padLeft
+            }
+
+            // When zero-filling and padding on the left, emit any sign/prefix
+            // before the zeros so we get "-0000005" rather than "000000-5".
+            if padLeft > 0 and options.fill == '0' and content.byteCount > 0 {
+                // Detect sign character: '-' (45), '+' (43), ' ' (32)
+                let firstByte = Int64(from: content.bytes(unchecked: 0));
+                var prefixLen: Int64 = 0;
+                if firstByte == 45 or firstByte == 43 or firstByte == 32 {
+                    prefixLen = 1
+                }
+                // Detect radix prefix: "0b", "0o", "0x", "0X" after optional sign
+                if content.byteCount > prefixLen + 1 {
+                    let p0 = Int64(from: content.bytes(unchecked: prefixLen));
+                    let p1 = Int64(from: content.bytes(unchecked: prefixLen + 1));
+                    // p0 == '0' (48), p1 == 'b'(98)/'o'(111)/'x'(120)/'X'(88)
+                    if p0 == 48 and (p1 == 98 or p1 == 111 or p1 == 120 or p1 == 88) {
+                        prefixLen = prefixLen + 2
+                    }
+                }
+                if prefixLen > 0 {
+                    // Emit sign+prefix first, then zeros, then the numeric digits
+                    writer.append(content.substringBytes(from: 0, to: prefixLen));
+                    while padLeft > 0 {
+                        writer.append(char: options.fill);
+                        padLeft = padLeft - 1
+                    }
+                    writer.append(content.substringBytes(from: prefixLen, to: content.byteCount));
+                    while padRight > 0 {
+                        writer.append(char: options.fill);
+                        padRight = padRight - 1
+                    }
+                    return
+                }
             }
 
             while padLeft > 0 {

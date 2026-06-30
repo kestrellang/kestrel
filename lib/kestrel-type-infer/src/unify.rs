@@ -89,14 +89,30 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         (TySlot::Resolved(TyKind::Never), _) | (_, TySlot::Resolved(TyKind::Never)) => Ok(()),
 
         // Both unresolved: link them, merge literal markers.
-        // If both have different literal kinds, that's a mismatch
-        // (e.g., integer literal vs string literal in if/else branches).
         (TySlot::Unresolved { literal: lit_a }, TySlot::Unresolved { literal: lit_b }) => {
-            if let (Some(a_kind), Some(b_kind)) = (lit_a, lit_b)
-                && a_kind != b_kind
-            {
-                return Err(UnifyError::Mismatch);
-            }
+            // Merge the two literal markers. Two *different* literal kinds are
+            // normally a mismatch (e.g. integer vs string in
+            // `if c {1} else {"x"}`), EXCEPT the integer/float pair: an integer
+            // literal adapts to a float type, so the pair unifies to a Float
+            // literal. Applying this int→float relaxation here — rather than
+            // only on the Coerce path that call arguments take — makes array
+            // elements and if/else branches behave identically to call args:
+            // `[1, 2.5]` and `if c {1} else {2.5}` both unify to Float, just
+            // like `pick(1, 2.5)` already did.
+            let merged = match (lit_a, lit_b) {
+                (Some(x), Some(y)) if x != y => {
+                    if matches!(
+                        (x, y),
+                        (LiteralKind::Integer, LiteralKind::Float)
+                            | (LiteralKind::Float, LiteralKind::Integer)
+                    ) {
+                        Some(LiteralKind::Float)
+                    } else {
+                        return Err(UnifyError::Mismatch);
+                    }
+                },
+                _ => lit_a.or(*lit_b),
+            };
             // Propagate wildcard status: if either side is a wildcard, the root
             // (b, since a redirects to b) must also be a wildcard so that
             // report_unresolved_slots skips it.
@@ -104,7 +120,6 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
                 ctx.wildcard_tvars.insert(a);
                 ctx.wildcard_tvars.insert(b);
             }
-            let merged = lit_a.or(*lit_b);
             ctx.types[a.0 as usize] = TySlot::Redirect(b);
             if merged.is_some() {
                 ctx.types[b.0 as usize] = TySlot::Unresolved { literal: merged };

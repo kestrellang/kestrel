@@ -197,6 +197,25 @@ def generate_count_ones(type_name: str, bits: int, lang_type: str) -> str:
         return f"Int64(raw: lang.cast_i{bits}_i64(lang.{lang_type}_popcount(self.raw)))"
 
 
+def generate_step_distance(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
+    """Generate the Steppable.distance(to:) body: (other - self) widened to i64.
+
+    For 64-bit types the raws are already lang.i64, so subtract directly (this
+    reinterprets a UInt64 bit-pattern as i64, which is exact for any span that
+    fits in Int64 and only wraps for never-terminating near-full-width ranges).
+    For narrower types, widen both operands to i64 first — sign-extending signed
+    types, zero-extending unsigned — so the subtraction never overflows.
+    """
+    if bits == 64:
+        return "Int64(raw: lang.i64_sub(other.raw, self.raw))"
+    prefix = "i" if signed else "u"
+    return (
+        f"Int64(raw: lang.i64_sub("
+        f"lang.cast_{prefix}{bits}_i64(other.raw), "
+        f"lang.cast_{prefix}{bits}_i64(self.raw)))"
+    )
+
+
 def generate_leading_zeros(type_name: str, bits: int, lang_type: str) -> str:
     """Generate leadingZeros implementation using clz intrinsic."""
     if bits == 64:
@@ -224,47 +243,28 @@ def generate_byte_swap(type_name: str, bits: int, lang_type: str) -> str:
 
 def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_type: str) -> str:
     """Generate checked arithmetic methods that return Optional."""
+    # Overflow-detecting intrinsics (lang.iN_{signed,unsigned}_{add,sub,mul}_overflows)
+    # return true exactly when the wrapping op overflows the type. They are the
+    # single source of truth for `*Checked` — detecting overflow from the wrapped
+    # result alone is unreliable (e.g. signed `minValue * -1`, #160).
+    ovf = f"lang.{lang_type}_{'signed' if signed else 'unsigned'}"
     if signed:
-        return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` instead of overflowing.
+        return f'''    /// Wrapping addition that returns `None` instead of overflowing.
     public func addChecked(other: {type_name}) -> {type_name}? {{
-        // Simplified check - detect if signs are same and result sign differs
-        let result = self.add(other);
-        if self.isPositive and other.isPositive and result.isNegative {{
-            return .None
-        }};
-        if self.isNegative and other.isNegative and result.isPositive {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_add_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.add(other))
     }}
 
     /// Wrapping subtraction that returns `None` instead of overflowing.
     public func subtractChecked(other: {type_name}) -> {type_name}? {{
-        // Simplified check
-        let result = self.subtract(other);
-        if self.isPositive and other.isNegative and result.isNegative {{
-            return .None
-        }};
-        if self.isNegative and other.isPositive and result.isPositive {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_sub_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.subtract(other))
     }}
 
     /// Wrapping multiplication that returns `None` instead of overflowing.
-    /// Implemented by multiplying then dividing back; replace with an
-    /// overflow-detecting intrinsic when one is available.
     public func multiplyChecked(other: {type_name}) -> {type_name}? {{
-        if other == {type_name}.zero {{
-            return .Some({type_name}.zero)
-        }};
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_mul_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.multiply(other))
     }}
 
     /// Division that returns `None` for divide-by-zero or for the
@@ -299,39 +299,22 @@ def generate_checked_arithmetic(type_name: str, bits: int, signed: bool, lang_ty
 
 '''
     else:
-        return f'''    // TODO: requires overflow-detecting intrinsics for proper implementation
-    /// Wrapping addition that returns `None` on overflow. For unsigned types
-    /// overflow is detected via `result < self`.
+        return f'''    /// Wrapping addition that returns `None` on overflow.
     public func addChecked(other: {type_name}) -> {type_name}? {{
-        let result = self.add(other);
-        // For unsigned, overflow if result < either operand
-        if result < self {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_add_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.add(other))
     }}
 
     /// Subtraction that returns `None` on underflow (`other > self`).
     public func subtractChecked(other: {type_name}) -> {type_name}? {{
-        // For unsigned, underflow if other > self
-        if other > self {{
-            return .None
-        }};
+        if Bool(boolLiteral: {ovf}_sub_overflows(self.raw, other.raw)) {{ return .None }};
         .Some(self.subtract(other))
     }}
 
-    /// Wrapping multiplication that returns `None` on overflow. Implemented
-    /// by multiplying then dividing back.
+    /// Wrapping multiplication that returns `None` on overflow.
     public func multiplyChecked(other: {type_name}) -> {type_name}? {{
-        if other == {type_name}.zero {{
-            return .Some({type_name}.zero)
-        }};
-        let result = self.multiply(other);
-        // Check by dividing back
-        if result.divide(other) != self {{
-            return .None
-        }};
-        .Some(result)
+        if Bool(boolLiteral: {ovf}_mul_overflows(self.raw, other.raw)) {{ return .None }};
+        .Some(self.multiply(other))
     }}
 
     /// Division that returns `None` for divide-by-zero.
@@ -434,23 +417,14 @@ def generate_saturating_arithmetic(type_name: str, bits: int, signed: bool, lang
 def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> str:
     """Generate the format(into:) method for integer types."""
 
-    # For converting values between types
-    if bits == 64 and signed:
-        digit_as_i64 = "digit"
-        radix_as_type = "radix"
-    elif bits == 64:
-        digit_as_i64 = "Int64(from: digit)"
-        radix_as_type = "UInt64(from: radix)"
-    else:
-        digit_as_i64 = f"Int64(from: digit)"
-        radix_as_type = f"{type_name}(from: radix)"
-
     if signed:
+        # For signed types, extract digits via the same-width unsigned type.
+        # This correctly handles minValue: negate() overflows back to minValue,
+        # but `UIntN.zero - UIntN(from: n)` gives the correct magnitude for all
+        # values including minValue (two's-complement unsigned wraparound).
+        uint_name = f"UInt{bits}"
         sign_handling = f'''
-        let isNegative = n < 0;
-        if isNegative {{
-            n = n.negate()
-        }}'''
+        let isNegative = n < 0;'''
         sign_prefix = '''
         if isNegative {
             result.append(char: '-')
@@ -459,7 +433,32 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         } else if options.sign == .Space {
             result.append(char: ' ')
         }'''
+        digit_body = f'''
+        // Convert to unsigned magnitude so minValue formats correctly.
+        // negate() overflows on minValue; unsigned subtraction from zero does not.
+        let mag: {uint_name} = if isNegative {{
+            {uint_name}.zero - {uint_name}(from: n)
+        }} else {{
+            {uint_name}(from: n)
+        }};
+        let radixVal: {uint_name} = {uint_name}(from: radix);
+        var m = mag;
+        while m != {uint_name}.zero {{
+            let digit: {uint_name} = m % radixVal;
+            let digitVal: Int64 = Int64(from: digit);
+            let charCode: Int64 = if digitVal < 10 {{
+                digitVal + 48
+            }} else if options.uppercase {{
+                digitVal - 10 + 65
+            }} else {{
+                digitVal - 10 + 97
+            }};
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }}'''
     else:
+        # For unsigned types no sign handling is needed; loop directly over self.
+        uint_name = type_name
         sign_handling = '''
         let isNegative = false;'''
         sign_prefix = '''
@@ -468,6 +467,28 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         } else if options.sign == .Space {
             result.append(char: ' ')
         }'''
+        if bits == 64:
+            radix_as_type = "UInt64(from: radix)"
+            digit_as_i64 = "Int64(from: digit)"
+        else:
+            radix_as_type = f"{type_name}(from: radix)"
+            digit_as_i64 = "Int64(from: digit)"
+        digit_body = f'''
+        let radixVal: {type_name} = {radix_as_type};
+        var m = n;
+        while m != {type_name}.zero {{
+            let digit: {type_name} = m % radixVal;
+            let digitVal: Int64 = {digit_as_i64};
+            let charCode: Int64 = if digitVal < 10 {{
+                digitVal + 48
+            }} else if options.uppercase {{
+                digitVal - 10 + 65
+            }} else {{
+                digitVal - 10 + 97
+            }};
+            digits.appendByte(UInt8(from: charCode));
+            m = m / radixVal
+        }}'''
 
     return f'''    // Formattable
     /// Formats the integer directly into `writer`, honouring the supplied
@@ -496,21 +517,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
         var digits = String();
         if n == {type_name}.zero {{
             digits.appendByte(48)
-        }} else {{
-            let radixVal: {type_name} = {radix_as_type};
-            while n != {type_name}.zero {{
-                let digit: {type_name} = n % radixVal;
-                let digitVal: Int64 = {digit_as_i64};
-                let charCode: Int64 = if digitVal < 10 {{
-                    digitVal + 48
-                }} else if options.uppercase {{
-                    digitVal - 10 + 65
-                }} else {{
-                    digitVal - 10 + 97
-                }};
-                digits.appendByte(UInt8(from: charCode));
-                n = n / radixVal
-            }}
+        }} else {{{digit_body}
         }}
 
         // Build content: sign + prefix + reversed digits
@@ -570,6 +577,11 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
     # For signed types, handle negative numbers
     if signed:
+        # Per-type magnitude bounds for the UInt64 accumulator. The magnitude of
+        # minValue is maxValue+1, which a signed accumulator cannot hold, so both
+        # parse inits accumulate the positive magnitude in UInt64 and convert+negate.
+        pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
+        neg_max_expr = f"UInt64(from: {type_name}.maxValue) + 1"
         base_parse = f'''    /// @name Parsing
     /// Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
     /// Returns `null` for an empty string, a non-digit character,
@@ -604,8 +616,15 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             return null
         }}
 
-        var result: Int64 = 0;
-        let maxBeforeMultiply: Int64 = 922337203685477580;
+        // Accumulate the positive magnitude in UInt64 so that minValue's
+        // magnitude (maxValue+1) is representable; convert + negate at the end.
+        let maxMagnitude: UInt64 = if isNegative {{
+            {neg_max_expr}
+        }} else {{
+            {pos_max_expr}
+        }};
+
+        var result: UInt64 = 0;
 
         while index < len {{
             let byte: UInt8 = string.bytes(unchecked: index);
@@ -616,40 +635,23 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             }}
 
             let digit = byteVal - 48;
+            let digitU: UInt64 = UInt64(from: digit);
 
-            if result > maxBeforeMultiply {{
+            if result > (maxMagnitude - digitU) / 10 {{
                 return null
             }}
-            result = result * 10;
-
-            if result > 9223372036854775807 - digit {{
-                return null
-            }}
-            result = result + digit;
+            result = result * 10 + digitU;
 
             index = index + 1
         }}
 
+        let typedResult = {type_name}(from: result);
         if isNegative {{
-            result = result.negate();
-            if result < {min_val_expr} {{
-                return null
-            }}
+            self.raw = typedResult.negate().raw
         }} else {{
-            if result > {max_val_expr} {{
-                return null
-            }}
+            self.raw = typedResult.raw
         }}
-
-        self.raw = {return_expr}.raw;
     }}'''
-        # Per-type magnitude bounds for the UInt64 accumulator.
-        if type_name == "Int64":
-            pos_max_expr = "UInt64(from: Int64.maxValue)"
-            neg_max_expr = "UInt64(from: Int64.maxValue) + 1"
-        else:
-            pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
-            neg_max_expr = f"UInt64(from: {type_name}.maxValue) + 1"
         radix_parse = f'''
     /// @name Parsing with Radix
     /// Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
@@ -1110,6 +1112,9 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     # Generate isPowerOfTwo
     is_power_of_two = generate_is_power_of_two(type_name, signed, lang_type)
 
+    # Generate Steppable.distance(to:)
+    step_distance_impl = generate_step_distance(type_name, bits, signed, lang_type)
+
     # Generate bit counting operations using intrinsics
     count_ones_impl = generate_count_ones(type_name, bits, lang_type)
     leading_zeros_impl = generate_leading_zeros(type_name, bits, lang_type)
@@ -1154,6 +1159,7 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
     result = result.replace("{{BYTE_CONVERSION}}", byte_conversion)
     result = result.replace("{{SIGN_PROPERTIES}}", sign_properties)
     result = result.replace("{{IS_POWER_OF_TWO}}", is_power_of_two)
+    result = result.replace("{{STEP_DISTANCE_IMPL}}", step_distance_impl)
     result = result.replace("{{COUNT_ONES_IMPL}}", count_ones_impl)
     result = result.replace("{{LEADING_ZEROS_IMPL}}", leading_zeros_impl)
     result = result.replace("{{TRAILING_ZEROS_IMPL}}", trailing_zeros_impl)
@@ -1175,8 +1181,35 @@ def generate_integer(type_name: str, bits: int, signed: bool, is_default: bool) 
 
 
 def generate_float_parse_method(type_name: str, bits: int) -> str:
-    """Generate the parse() method for float types."""
+    """Generate the parse() method for float types.
+
+    Digits are accumulated into a big integer and converted to the correctly-
+    rounded float by `floatRoundDecimal` (float_digits.ks). The old code did
+    `result * 10.pow(exp)` in float arithmetic, which lost precision and
+    overflowed `10^k` to infinity for large exponents -> 0 (issue #216).
+    """
     lang_type = f"f{bits}"
+
+    if bits == 64:
+        sig_bits = 52
+        min_e = -1074
+        max_e = 971
+        exp_bias_add = 1075     # rawExp = e + exp_bias_add
+        exp_mask = 2047
+        hidden_bit = 1 << 52
+        mant_mask = (1 << 52) - 1
+        sign_shift = 63
+        from_bits = "lang.f64_from_bits(rawBits.raw)"
+    else:
+        sig_bits = 23
+        min_e = -149
+        max_e = 104
+        exp_bias_add = 150
+        exp_mask = 255
+        hidden_bit = 1 << 23
+        mant_mask = (1 << 23) - 1
+        sign_shift = 31
+        from_bits = "lang.f32_from_bits(UInt32(from: rawBits).raw)"
 
     method = '''    /// @name Parsing
     /// Parses a `__TYPE_NAME__` from a string. Recognises decimal
@@ -1295,34 +1328,32 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             return null
         }
 
-        var integerPart: __TYPE_NAME__ = 0.0;
-        var hasIntegerPart = false;
+        // Accumulate every significant digit into the big integer `mantissa`
+        // and count the fractional digits, so value = mantissa * 10^(exp - frac).
+        var mantissa = Array[UInt32]();
+        var hasDigits = false;
+        var fracCount: Int64 = 0;
         var currentByte: Int64 = Int64(from: string.bytes(unchecked: index));
 
         while index < len and currentByte >= 48 and currentByte <= 57 {
-            let digit = __TYPE_NAME__(from: currentByte - 48);
-            integerPart = integerPart * 10.0 + digit;
-            hasIntegerPart = true;
+            mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+            mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+            hasDigits = true;
             index = index + 1;
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index))
             }
         }
 
-        var fractionalPart: __TYPE_NAME__ = 0.0;
-        var hasFractionalPart = false;
-
         if index < len and currentByte == 46 {
             index = index + 1;
-            var divisor: __TYPE_NAME__ = 10.0;
-
             if index < len {
                 currentByte = Int64(from: string.bytes(unchecked: index));
                 while index < len and currentByte >= 48 and currentByte <= 57 {
-                    let digit = __TYPE_NAME__(from: currentByte - 48);
-                    fractionalPart = fractionalPart + digit / divisor;
-                    divisor = divisor * 10.0;
-                    hasFractionalPart = true;
+                    mantissa = bnMulSmall(mantissa, UInt32(from: 10));
+                    mantissa = bnAddSmall(mantissa, UInt64(from: currentByte - 48));
+                    fracCount = fracCount + 1;
+                    hasDigits = true;
                     index = index + 1;
                     if index < len {
                         currentByte = Int64(from: string.bytes(unchecked: index))
@@ -1331,11 +1362,11 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             }
         }
 
-        if not hasIntegerPart and not hasFractionalPart {
+        if not hasDigits {
             return null
         }
 
-        var result = integerPart + fractionalPart;
+        var expValue: Int64 = 0;
 
         if index < len and (currentByte == 101 or currentByte == 69) {
             index = index + 1;
@@ -1364,11 +1395,16 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                 return null
             }
 
-            var exponent: Int64 = 0;
             var hasExpDigit = false;
 
             while index < len and currentByte >= 48 and currentByte <= 57 {
-                exponent = exponent * 10 + (currentByte - 48);
+                // Cap accumulation far beyond any representable exponent so an
+                // absurdly long exponent can't overflow Int64 and wrap negative
+                // (which would turn an overflow into a spurious 0). |k| > ~400
+                // already saturates to inf / 0.
+                if expValue < 1000000 {
+                    expValue = expValue * 10 + (currentByte - 48)
+                };
                 hasExpDigit = true;
                 index = index + 1;
                 if index < len {
@@ -1380,12 +1416,8 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
                 return null
             }
 
-            let expFloat = __TYPE_NAME__(from: exponent);
-            let ten: __TYPE_NAME__ = 10.0;
             if expNegative {
-                result = result / ten.pow(expFloat)
-            } else {
-                result = result * ten.pow(expFloat)
+                expValue = expValue.negate()
             }
         }
 
@@ -1393,22 +1425,76 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
             return null
         }
 
+        // value = mantissa * 10^k, rounded to the nearest float (round-even).
+        let k = expValue - fracCount;
+        let parts = floatRoundDecimal(mantissa, k, __SIG_BITS__, __MIN_E__, __MAX_E__);
+        var rawBits = UInt64.zero;
+        if parts.overflow {
+            rawBits = UInt64(from: __EXP_MASK__).shiftLeft(by: __SIG_BITS__)
+        } else if parts.m == UInt64.zero {
+            rawBits = UInt64.zero
+        } else if parts.m >= UInt64(from: __HIDDEN_BIT__) {
+            let rawExp = parts.e + __EXP_BIAS_ADD__;
+            rawBits = UInt64(from: rawExp).shiftLeft(by: __SIG_BITS__)
+                .bitwiseOr(parts.m.bitwiseAnd(UInt64(from: __MANT_MASK__)))
+        } else {
+            rawBits = parts.m
+        }
         if isNegative {
-            result = result.negate()
+            rawBits = rawBits.bitwiseOr(UInt64.one.shiftLeft(by: __SIGN_SHIFT__))
         }
 
-        self.raw = result.raw;
+        self.raw = __FROM_BITS__;
     }'''
 
-    return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
+    return (
+        method.replace("__SIG_BITS__", str(sig_bits))
+        .replace("__MIN_E__", str(min_e))
+        .replace("__MAX_E__", str(max_e))
+        .replace("__EXP_BIAS_ADD__", str(exp_bias_add))
+        .replace("__EXP_MASK__", str(exp_mask))
+        .replace("__HIDDEN_BIT__", str(hidden_bit))
+        .replace("__MANT_MASK__", str(mant_mask))
+        .replace("__SIGN_SHIFT__", str(sign_shift))
+        .replace("__FROM_BITS__", from_bits)
+        .replace("__TYPE_NAME__", type_name)
+        .replace("__LANG_TYPE__", lang_type)
+    )
 
 
 def generate_float_format_method(type_name: str, bits: int) -> str:
-    """Generate the format() method for float types."""
+    """Generate the format() method for float types.
+
+    Digit generation is delegated to the exact integer/big-integer engine in
+    `float_digits.ks` (shared by Float32/Float64). The value is decomposed into
+    `m * 2^e` and all decimal digits are produced by big-integer arithmetic, so
+    rounding is round-to-nearest-even of the stored binary value — fixing the
+    float-arithmetic double-rounding of the old pipeline (#161, #216).
+    """
     lang_type = f"f{bits}"
+
+    if bits == 64:
+        p = 52
+        exp_bits = 11
+        bias = 1023
+        bits_expr = "UInt64(raw: lang.f64_to_bits(value.raw))"
+    else:
+        p = 23
+        exp_bits = 8
+        bias = 127
+        bits_expr = "UInt64(from: UInt32(raw: lang.f32_to_bits(value.raw)))"
+    exp_mask = (1 << exp_bits) - 1
+    mant_mask = (1 << p) - 1
+    hidden_bit = 1 << p
+    bias_p = bias + p           # normal:  e = rawExp - (bias + p)
+    e_sub = 1 - bias - p        # subnormal exponent
 
     method = '''    /// Formats the float directly into `writer`, honouring the supplied
     /// `FormatOptions`. Implements `Formattable`.
+    ///
+    /// Digit generation uses the exact big-integer engine in `float_digits.ks`:
+    /// the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+    /// even on the stored binary value, so printed decimals are correct.
     ///
     /// # Examples
     ///
@@ -1465,147 +1551,60 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
                 style = .Fixed
             }
 
-            if style == .Auto {
-                if precisionProvided == false {
-                    trimTrailingZeros = true
-                }
-                if value.isZero {
-                    style = .Fixed
-                } else {
-                    let expVal = value.log10().floor();
-                    let expInt: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(expVal.raw));
-                    if expInt < -4 or expInt >= precision {
-                        style = .Scientific
-                    } else {
-                        style = .Fixed
-                    }
-                }
+            // Exact IEEE-754 decomposition of the non-negative `value` into
+            // m * 2^e (m an integer significand, e a binary exponent).
+            let bits = __BITS_EXPR__;
+            let rawExp = Int64(from: bits.shiftRight(by: __PSHIFT__).bitwiseAnd(UInt64(from: __EXP_MASK__)));
+            let rawMant = bits.bitwiseAnd(UInt64(from: __MANT_MASK__));
+            var m = UInt64.zero;
+            var e: Int64 = 0;
+            if rawExp == 0 {
+                m = rawMant;
+                e = __E_SUB__
+            } else {
+                m = rawMant.bitwiseOr(UInt64(from: __HIDDEN_BIT__));
+                e = rawExp - __BIAS_P__
             }
 
-            if style == .Scientific or style == .ScientificUpper {
-                var exponent: Int64 = 0;
-                var mantissa = value;
-                if value.isZero == false {
-                    let expVal = value.log10().floor();
-                    exponent = Int64(raw: lang.cast___LANG_TYPE___i64(expVal.raw));
-                    let pow10 = __TYPE_NAME__(floatLiteral: 10.0).powi(exponent);
-                    mantissa = value.divide(pow10);
-                }
-
-                let scale = __TYPE_NAME__(floatLiteral: 10.0).powi(precision);
-                mantissa = mantissa.multiply(scale).round().divide(scale);
-                if mantissa >= 10.0 {
-                    mantissa = mantissa.divide(10.0);
-                    exponent = exponent + 1
-                }
-
-                let intPart = mantissa.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
+            if precisionProvided == false and suffixPercent == false {
+                // No explicit precision: print the SHORTEST decimal that round-
+                // trips back to this exact value (Dragon4 boundary search). The
+                // lower gap is a half-ulp only at a binade boundary (fraction
+                // zero) above the smallest normal.
+                let lowerGapIsHalf = rawMant == UInt64.zero and rawExp >= 2;
+                let sr = floatShortestDigits(m, e, lowerGapIsHalf);
+                let decExp = sr.decExp;
+                var scientific = false;
+                if style == .Scientific or style == .ScientificUpper {
+                    scientific = true
+                } else if style == .Auto and m != UInt64.zero and (decExp < -4 or decExp >= precision) {
+                    scientific = true
+                };
+                if scientific {
+                    number = floatShortestSciString(sr, style == .ScientificUpper)
                 } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
-                }
-
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = mantissa - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: __TYPE_NAME__ = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - __TYPE_NAME__(raw: lang.cast_i64___LANG_TYPE__(digit.raw));
-                        digitCount = digitCount + 1
-                    }
-                }
-
-                if style == .ScientificUpper {
-                    number.appendByte(69)  // 'E'
-                } else {
-                    number.appendByte(101)  // 'e'
-                }
-
-                var expVal: Int64 = exponent;
-                if expVal < 0 {
-                    number.appendByte(45);  // '-'
-                    expVal = expVal.negate()
-                }
-                if expVal == 0 {
-                    number.appendByte(48)  // '0'
-                } else {
-                    var digits = String();
-                    while expVal > 0 {
-                        let digit: Int64 = expVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        expVal = expVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
-                    }
+                    number = floatShortestFixedString(sr)
                 }
             } else {
-                let scale = if precision > 0 {
-                    __TYPE_NAME__(floatLiteral: 10.0).powi(precision)
-                } else {
-                    __TYPE_NAME__(floatLiteral: 1.0)
-                };
-
-                var rounded = value;
-                if precision >= 0 {
-                    rounded = rounded.multiply(scale).round().divide(scale)
+                // Explicit precision (or percent): exact rounding to that many
+                // fractional / mantissa digits.
+                var decExp: Int64 = 0;
+                if m != UInt64.zero {
+                    decExp = floatSigDigits(m, e, 1).decExp
                 }
 
-                let intPart = rounded.trunc();
-                var intVal: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(intPart.raw));
-
-                if intVal == 0 {
-                    number.appendByte(48)
-                } else {
-                    var digits = String();
-                    while intVal > 0 {
-                        let digit: Int64 = intVal % 10;
-                        let charCode: Int64 = digit + 48;
-                        digits.appendByte(UInt8(from: charCode));
-                        intVal = intVal / 10
-                    }
-                    var i = digits.byteCount - 1;
-                    while i >= 0 {
-                        number.appendByte(digits.bytes(unchecked: i));
-                        i = i - 1
+                if style == .Auto {
+                    if m == UInt64.zero or (decExp >= -4 and decExp < precision) {
+                        style = .Fixed
+                    } else {
+                        style = .Scientific
                     }
                 }
 
-                if precision > 0 {
-                    number.appendByte(46);
-                    var fracPart = rounded - intPart;
-                    var digitCount: Int64 = 0;
-                    let ten: __TYPE_NAME__ = 10.0;
-                    while digitCount < precision {
-                        fracPart = fracPart * ten;
-                        let digit: Int64 = Int64(raw: lang.cast___LANG_TYPE___i64(fracPart.trunc().raw));
-                        let charCode: Int64 = digit + 48;
-                        number.appendByte(UInt8(from: charCode));
-                        fracPart = fracPart - __TYPE_NAME__(raw: lang.cast_i64___LANG_TYPE__(digit.raw));
-                        digitCount = digitCount + 1
-                    }
+                if style == .Scientific or style == .ScientificUpper {
+                    number = floatSciString(m, e, precision, style == .ScientificUpper)
+                } else {
+                    number = floatFixedString(m, e, precision)
                 }
             }
 
@@ -1676,7 +1675,17 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
         _writePadded(into: writer, result, options)
     }'''
 
-    return method.replace("__TYPE_NAME__", type_name).replace("__LANG_TYPE__", lang_type)
+    return (
+        method.replace("__BITS_EXPR__", bits_expr)
+        .replace("__PSHIFT__", str(p))
+        .replace("__EXP_MASK__", str(exp_mask))
+        .replace("__MANT_MASK__", str(mant_mask))
+        .replace("__HIDDEN_BIT__", str(hidden_bit))
+        .replace("__BIAS_P__", str(bias_p))
+        .replace("__E_SUB__", str(e_sub))
+        .replace("__TYPE_NAME__", type_name)
+        .replace("__LANG_TYPE__", lang_type)
+    )
 
 
 def generate_float(type_name: str, bits: int, is_default: bool) -> str:
@@ -1685,6 +1694,7 @@ def generate_float(type_name: str, bits: int, is_default: bool) -> str:
     lang_type = f"f{bits}"
     other_float = "Float32" if bits == 64 else "Float64"
     other_lang_type = "f32" if bits == 64 else "f64"
+    uint_type = "UInt64" if bits == 64 else "UInt32"
 
     # Float literal init - need to cast from f64 for f32
     if bits == 64:
@@ -1755,6 +1765,7 @@ public type Float = {type_name}"""
     result = result.replace("{{LANG_TYPE}}", lang_type)
     result = result.replace("{{OTHER_FLOAT}}", other_float)
     result = result.replace("{{OTHER_LANG_TYPE}}", other_lang_type)
+    result = result.replace("{{UINT_TYPE}}", uint_type)
     result = result.replace("{{FLOAT_LITERAL_INIT}}", float_literal_init)
     result = result.replace("{{ZERO_LITERAL}}", zero_literal)
     result = result.replace("{{TYPE_ALIAS}}", type_alias)

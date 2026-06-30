@@ -78,7 +78,84 @@ impl OssaBodyCtx<'_, '_> {
                 return self.apply_promotion(expr_id, v);
             }
         }
+        // Move a non-Copyable field out of an OWNED struct receiver (the
+        // `consuming self` case): `consuming func f() -> Res { self.inner }`.
+        // Must MOVE `inner` out, not borrow-then-copy it while the whole self
+        // is still dropped (the E503 backstop + double-drop of #145/#152).
+        if let Some(field_val) = self.try_move_field_out_of_owned(expr_id) {
+            return self.apply_promotion(expr_id, field_val);
+        }
         self.lower_expr(expr_id)
+    }
+
+    /// Move-out of a non-Copyable field from an OWNED struct local in a
+    /// consuming/return position. Per `copy-semantics.md`, extracting a field
+    /// from a *consuming* receiver is legal (`consuming func f() -> Res
+    /// { self.inner }` is the documented idiom). The generic member-access path
+    /// would `begin_borrow self → struct_extract (@guaranteed) → copy out`,
+    /// hitting the move-out-of-borrow backstop (false E503) AND leaving the
+    /// whole `self` to be dropped — double-freeing the moved field (#145/#152).
+    ///
+    /// Fix mirrors the enum move-out path (`emit_moveout` →
+    /// `emit_destructure_enum`): destructure the owned struct, which CONSUMES it
+    /// (so no whole-self destroy), hand back the wanted field as @owned, and
+    /// leave the sibling fields tracked-owned so scope exit drops exactly those.
+    ///
+    /// Returns `None` — falling through to the borrow/copy path — unless the
+    /// base is a directly-owned struct local AND the field is non-Copyable: a
+    /// Copyable field copies out without consuming self (and self must still
+    /// drop), and a borrowed self (normal method) is not ours to consume.
+    fn try_move_field_out_of_owned(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        let HirExpr::Field { base, name, .. } = &self.hir.exprs[expr_id] else {
+            return None;
+        };
+        let base = *base;
+        let field_name = name.as_str_or_empty().to_string();
+        // Base must be a directly-owned local: `consuming self` / an
+        // owned-by-value local binds as `Ssa(@owned)`. A borrowed self (normal
+        // method, bound @guaranteed) or a `var` slot is not ours to consume.
+        let HirExpr::Local(base_local, _) = &self.hir.exprs[base] else {
+            return None;
+        };
+        let base_val = match self.local_map.get(base_local) {
+            Some(super::LocalBinding::Ssa(v)) => *v,
+            _ => return None,
+        };
+        if self.body.value(base_val).ownership != kestrel_mir::value::Ownership::Owned {
+            return None;
+        }
+        let base_ty = self.body.value(base_val).ty;
+        let entity = match self.ctx.module.ty_arena.get(base_ty) {
+            MirTy::Named { entity, .. } => *entity,
+            _ => return None,
+        };
+        // Structs only — enum field-moves go through `match self`, tuples are a
+        // separate projection arm.
+        if !self.ctx.module.structs.contains_key(&entity) {
+            return None;
+        }
+        // Only MOVE a non-Copyable field: a Copyable field copies out fine and
+        // must NOT consume self (self stays usable and must still drop). A
+        // mono-dependent field (a bare type param / conditionally-Copyable
+        // container) is ALSO moved: pre-mono its copy behavior is unknown, and
+        // the borrow+`copy_value` fallback bitwise-aliases storage that is
+        // unsound once the param resolves non-Copyable — the same #141 hazard
+        // the var-read path guards (mod.rs `is_non_copyable || mono_dependent`).
+        // Destructuring is equivalent to copy-out when it resolves Copyable.
+        let result_ty = self.resolve_expr_type(expr_id);
+        if !self.is_non_copyable(result_ty) && !self.copy_behavior_is_mono_dependent(result_ty) {
+            return None;
+        }
+        let field_idx = self.ctx.resolve_field_idx(entity, &field_name)?;
+        let field_tys = self.struct_field_tys(base_ty);
+        if field_idx.index() >= field_tys.len() {
+            return None;
+        }
+        // Destructure consumes `base_val` (no whole-self destroy) and tracks
+        // every field as @owned; the return path keeps the wanted field (its
+        // `keep` set) and drops the siblings at scope exit.
+        let results = self.emit_destructure_struct(base_val, &field_tys);
+        Some(results[field_idx.index()])
     }
 
     /// Apply a recorded `FromValue.from(value)` promotion if type-infer
@@ -127,9 +204,17 @@ impl OssaBodyCtx<'_, '_> {
 
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(hir_local) {
-                    let addr = self.map_local(*hir_local);
+                    let raw_addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
                     let ownership = self.ownership_for(ty);
+                    // Whole-slot read of a `mutating self` (@guaranteed inout
+                    // pointer): normalize to `Pointer[T]` so Take/Load operate on
+                    // the address, not load-through it. Identity for a normal
+                    // @owned var slot. (Reads through `ownership != Owned` below
+                    // pass the *type* ownership, not the addr's, so a @guaranteed
+                    // self with a non-Owned ty would still want the address —
+                    // hence the normalization happens on `addr` for both arms.)
+                    let addr = self.whole_slot_addr(raw_addr);
                     if ownership != kestrel_mir::value::Ownership::Owned {
                         return self.emit_load(addr, ty);
                     }
@@ -139,7 +224,17 @@ impl OssaBodyCtx<'_, '_> {
                     // uses never reach here (they route through
                     // lower_expr_for_borrow / prepare_call_arg_for_expr). Copyable
                     // vars still snapshot via copy_addr.
-                    if self.is_non_copyable(ty) {
+                    //
+                    // Mono-dependent copy types (a conditionally-Copyable
+                    // container over a bare type param — `Optional[T]`/`Result`,
+                    // self in their `take`/`replace` bodies) are ALSO moved here:
+                    // pre-mono their copy behavior is unknown, and a `copy_value`
+                    // (clone) is unsound when the param resolves non-Copyable (it
+                    // bitwise-aliases storage the subsequent `self = .None`
+                    // StoreAssign then drops — `Optional.take()` returned freed
+                    // bits). Moving + init-tracking is correct for the reassign
+                    // shape; mirrors the same guard in pattern.rs. (#141 cluster.)
+                    if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
                             "consuming read of an already-moved var — frontend should reject use-after-move"
@@ -297,10 +392,13 @@ impl OssaBodyCtx<'_, '_> {
                 // Classify before lowering `value` (which consumes it): in a
                 // failable init, a failure `return` (`return null`/`throw`/`try`)
                 // must drop already-initialized `self` fields, whereas an early
-                // success `return` (`.Some`/`.Ok`) must not. No-op elsewhere
-                // because `init_field_flags` is empty.
-                let is_failure_return =
-                    !self.init_field_flags.is_empty() && self.is_init_failure_return(value);
+                // success `return` (`.Some`/`.Ok`) must not. `init_field_flags`
+                // is now populated for plain inits too (for reassignment drops),
+                // so this MUST gate on `is_failable_init`: a plain init's
+                // `return ()` is not a failure and must not partial-drop.
+                let is_failure_return = self.is_failable_init()
+                    && !self.init_field_flags.is_empty()
+                    && self.is_init_failure_return(value);
                 let ret_val = if let Some(v) = value {
                     if self.ret_borrow {
                         // ret_borrow returns a place — borrow path keeps the
@@ -685,6 +783,36 @@ impl OssaBodyCtx<'_, '_> {
                 self.emit_enum_variant(ty, variant_idx, vec![])
             },
             Some(NodeKind::Field) => {
+                // A protocol property requirement referenced as a bare Def:
+                // `Self.prop` inside a protocol-extension default body collapses
+                // to `Def(requirement)` (the receiver is implicit). Dispatch the
+                // getter through the witness with the protocol's `Self` (mono
+                // substitutes it to the conformer) — treating it as a computed
+                // getter (direct call to the bodyless requirement) or a stored
+                // global (a GlobalRef to the requirement, which is not a real
+                // static — "global entity not found in statics") is wrong (#146
+                // computed-static-property facet).
+                if let Some(protocol) = self.ctx.world.parent_of(entity)
+                    && self.ctx.world.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)
+                {
+                    let field_name = self
+                        .ctx
+                        .world
+                        .get::<kestrel_ast_builder::Name>(entity)
+                        .map(|n| n.0.clone())
+                        .unwrap_or_default();
+                    self.ctx.register_name(protocol);
+                    let self_type = crate::ty::build_self_type(self.ctx, protocol);
+                    let result_ty = self.resolve_expr_type(expr_id);
+                    let method_type_args = self.resolve_type_args(expr_id);
+                    let callee = Callee::Witness {
+                        protocol,
+                        method: WitnessMethodKey::simple(field_name),
+                        self_type,
+                        method_type_args,
+                    };
+                    return self.emit_call_returning(callee, vec![], result_ty);
+                }
                 if self.ctx.world.get::<Callable>(entity).is_some() {
                     // Computed property getter call (no receiver)
                     let result_ty = self.resolve_expr_type(expr_id);
@@ -752,42 +880,48 @@ impl OssaBodyCtx<'_, '_> {
             self.emit_enum_variant(result_ty, variant_idx, payload)
         } else {
             // Static method call (e.g., .fromResidual)
+            // Determine callee + conventions BEFORE lowering args so that
+            // consuming params (e.g. `fromResidual(consuming residual:)`) receive
+            // @owned values instead of borrows — a borrow causes the call to clone
+            // then drop the original, giving a double-deinit for non-Copyable payloads.
             let resolved_entity = resolved.unwrap();
             self.ctx.register_name(resolved_entity);
-            let call_args: Vec<CallArg> = args
-                .map(|a| {
-                    a.iter()
-                        .map(|arg| {
-                            let val = self.lower_expr(arg.value);
-                            self.prepare_call_arg(val, ParamConvention::Borrow)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
 
-            if let Some(protocol) = self.ctx.is_protocol_method(resolved_entity) {
-                self.ctx.register_name(protocol);
-                let key = self.ctx.witness_method_key(resolved_entity);
-                let type_args = self.resolve_type_args(expr_id);
-                let callee = Callee::Witness {
-                    protocol,
-                    method: key,
-                    self_type: result_ty,
-                    method_type_args: type_args,
-                };
-                self.emit_call_returning(callee, call_args, result_ty)
-            } else {
-                let mut type_args = self.resolve_type_args(expr_id);
-                // Static methods on generic types need the parent's type args
-                type_args = self.prepend_receiver_type_args(result_ty, type_args);
-                let self_type = if !type_args.is_empty() {
-                    Some(result_ty)
+            let (callee, conventions) =
+                if let Some(protocol) = self.ctx.is_protocol_method(resolved_entity) {
+                    self.ctx.register_name(protocol);
+                    let key = self.ctx.witness_method_key(resolved_entity);
+                    let convs = self.collect_witness_conventions(protocol, &key);
+                    let type_args = self.resolve_type_args(expr_id);
+                    let c = Callee::Witness {
+                        protocol,
+                        method: key,
+                        self_type: result_ty,
+                        method_type_args: type_args,
+                    };
+                    (c, convs)
                 } else {
-                    None
+                    let mut type_args = self.resolve_type_args(expr_id);
+                    // Static methods on generic types need the parent's type args
+                    type_args = self.prepend_receiver_type_args(result_ty, type_args);
+                    let self_type = if !type_args.is_empty() {
+                        Some(result_ty)
+                    } else {
+                        None
+                    };
+                    let convs = self.collect_conventions(resolved_entity);
+                    let c = Callee::direct_with_args(resolved_entity, type_args, self_type);
+                    (c, convs)
                 };
-                let callee = Callee::direct_with_args(resolved_entity, type_args, self_type);
-                self.emit_call_returning(callee, call_args, result_ty)
-            }
+
+            // Lower args with the actual per-param conventions (no receiver slot — offset 0).
+            let call_args = self.lower_call_args(
+                args.unwrap_or(&[]),
+                &conventions,
+                0,
+            );
+
+            self.emit_call_returning(callee, call_args, result_ty)
         }
     }
 
@@ -843,8 +977,14 @@ impl OssaBodyCtx<'_, '_> {
                     // `rhs` is lowered above (rhs-first) so `x = f(x)` is correct.
                     match self.var_init(hir_local) {
                         // Moved-out on all paths: slot is empty, just StoreInit.
+                        // `whole_slot_addr` normalizes a @guaranteed inout-self
+                        // address to `Pointer[T]` (identity for a normal var slot);
+                        // this is the `self = n` after `let old = self` (Optional
+                        // .take/replace) path — StoreInit, no drop of the moved-out
+                        // slot (#141).
                         Some(super::VarInit::DefUninit) => {
-                            let addr = self.local_map[&hir_local].value();
+                            let raw = self.local_map[&hir_local].value();
+                            let addr = self.whole_slot_addr(raw);
                             self.emit_store_init(addr, rhs);
                             self.set_var_init(hir_local, super::VarInit::DefInit);
                         },
@@ -856,18 +996,45 @@ impl OssaBodyCtx<'_, '_> {
                             let flag = self
                                 .var_flag(hir_local)
                                 .expect("MaybeUninit var must have a drop flag");
-                            let addr = self.local_map[&hir_local].value();
-                            let remapped = self.emit_guarded_destroy(flag, addr, ty, &[rhs]);
+                            let raw = self.local_map[&hir_local].value();
+                            let addr = self.whole_slot_addr(raw);
+                            // Thread `addr` through the guarded-destroy merge so a
+                            // var-slot address rebound at the merge stays valid
+                            // (the @guaranteed inout PtrTo result is stable, but
+                            // threading it is harmless: it's just forwarded).
+                            let remapped = self.emit_guarded_destroy(flag, addr, ty, &[rhs, addr]);
                             let rhs = remapped[0];
-                            let addr = self.local_map[&hir_local].value();
+                            let addr = remapped[1];
                             self.emit_store_init(addr, rhs);
                             self.store_drop_flag(flag, true);
                             self.set_var_init(hir_local, super::VarInit::DefInit);
                         },
                         // Definitely initialized: StoreAssign drops the old value.
+                        // A MutBorrow param (`mutating self`) is bound as
+                        // LocalBinding::Var but its value has type `T` @guaranteed
+                        // (the inout pointer to the caller's storage), NOT
+                        // `Pointer[T]` @owned like a regular var slot. The expand
+                        // pass's StoreAssign drop-prefix check expects `Pointer[T]`
+                        // and silently skips the drop for a raw `T`-typed address,
+                        // leaking the old value. `whole_slot_addr` materialises the
+                        // canonical `Pointer[T]` (identity for an @owned var slot),
+                        // so the drop fires for both `self = newVal` in a mutating
+                        // method and plain `var x = v; x = w`.
                         _ => {
-                            let addr = self.local_map[&hir_local].value();
-                            self.emit_store_assign(addr, rhs);
+                            let raw = self.local_map[&hir_local].value();
+                            let addr = self.whole_slot_addr(raw);
+                            // A whole-self store (`self = expr`) that is the FIRST
+                            // initialization of `self` in an init body must be a
+                            // StoreInit, not a StoreAssign: self is uninitialized,
+                            // and StoreAssign's drop-of-the-old would free garbage
+                            // field pointers (heap corruption). After it, all
+                            // fields are live.
+                            if self.is_uninit_whole_self(hir_local) {
+                                self.emit_store_init(addr, rhs);
+                                self.mark_whole_self_init();
+                            } else {
+                                self.emit_store_assign(addr, rhs);
+                            }
                         },
                     }
                 } else {
@@ -907,20 +1074,15 @@ impl OssaBodyCtx<'_, '_> {
 
                 if let Some(base_addr) = self.try_field_addr_chain(base) {
                     let field_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
-                    // In init bodies, self fields are uninitialized — use store_init.
                     let is_init_self = self.body_context.init_self_addr() == Some(base_addr);
                     if is_init_self {
-                        self.emit_store_init(field_addr, rhs);
-                        // Failable init: mark this field live so a later failure
-                        // `return` flag-guard-drops it. (Reassigning a field within
-                        // one init still `store_init`s over the old value — a
-                        // pre-existing leak independent of this flag; not handled.)
-                        if let Some(flag) = self.init_field_flag(field_idx) {
-                            self.store_drop_flag(flag, true);
-                        }
+                        self.store_init_self_field(field_idx, field_addr, rhs);
                     } else {
                         self.emit_store_assign(field_addr, rhs);
                     }
+                } else if self.try_lower_field_assign_through_setter(base, base_ty, field_idx, rhs) {
+                    // `o.proxy.field = v` through a get/set computed property:
+                    // handled by a get→modify→set rewrite (#139).
                 } else {
                     let base_val = self.lower_expr(base);
                     let base_addr = self.emit_begin_mut_borrow(base_val);
@@ -929,16 +1091,31 @@ impl OssaBodyCtx<'_, '_> {
                     self.emit_end_mut_borrow(base_addr);
                 }
             },
+            HirExpr::TupleIndex { base, index, .. } => {
+                // Tuple-element store (`t.0 = v`, `t.0.1 = v`, `t.0 += v`):
+                // the structural twin of the stored-field arm. Tuples are
+                // never `self`, so there is no init-self / store_init case.
+                // Without this arm the target fell into `_ => {}` below and
+                // the RHS was computed then silently dropped (#198, #143).
+                let base_ty = self.resolve_expr_type(base);
+                let field_idx = kestrel_mir::FieldIdx::new(index as usize);
+                if let Some(base_addr) = self.try_field_addr_chain(base) {
+                    let elem_addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(elem_addr, rhs);
+                } else {
+                    let base_val = self.lower_expr(base);
+                    let base_addr = self.emit_begin_mut_borrow(base_val);
+                    let addr = self.emit_field_addr(base_addr, base_ty, field_idx);
+                    self.emit_store_assign(addr, rhs);
+                    self.emit_end_mut_borrow(base_addr);
+                }
+            },
             HirExpr::Def(entity, _, _) => {
-                // Static/global stored field: covers both `static var` members
-                // and module-level globals (which lack the Static component).
-                let is_global = self
-                    .ctx
-                    .world
-                    .get::<kestrel_ast_builder::Static>(entity)
-                    .is_some()
-                    || self.ctx.module.statics.contains_key(&entity);
-                if is_global {
+                // Static/global stored field: `static var` members and
+                // module-level globals (see `is_stored_global_def` — the
+                // timing-independent criterion that also fixes assignment to a
+                // forward-referenced global, #140).
+                if self.is_stored_global_def(entity) {
                     self.ctx.register_name(entity);
                     let addr = self.emit_global_ref(entity);
                     self.emit_store_assign(addr, rhs);
@@ -1193,6 +1370,40 @@ impl OssaBodyCtx<'_, '_> {
         value_id: HirExprId,
         entity: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
+        // `Self.prop = v` inside a protocol-extension default body: the property
+        // requirement collapses to a bare `Def`, so witness-dispatch the setter
+        // with the protocol's `Self` (mono substitutes it to the conformer).
+        // The Field twin lives in `try_lower_field_setter`; without this the
+        // assignment falls to the stored-global path and emits a GlobalRef to
+        // the requirement ("global entity not found in statics", #146).
+        if let Some(protocol) = self.ctx.world.parent_of(entity)
+            && self.ctx.world.get::<NodeKind>(protocol) == Some(&NodeKind::Protocol)
+            && self.ctx.world.get::<NodeKind>(entity) == Some(&NodeKind::Field)
+            && self.ctx.world.get::<Callable>(entity).is_none()
+            && self.ctx.world.get::<Settable>(entity).is_some()
+        {
+            let field_name = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::Name>(entity)
+                .map(|n| n.0.clone())
+                .unwrap_or_default();
+            self.ctx.register_name(protocol);
+            let self_type = crate::ty::build_self_type(self.ctx, protocol);
+            let rhs = self.lower_expr(value_id);
+            let method_type_args = self.resolve_type_args(target_id);
+            let method = WitnessMethodKey::simple(format!("{field_name}.set"));
+            let rhs_arg = self.prepare_call_arg(rhs, ParamConvention::Borrow);
+            let callee = Callee::Witness {
+                protocol,
+                method,
+                self_type,
+                method_type_args,
+            };
+            self.emit_call_void(callee, vec![rhs_arg]);
+            return Some(self.emit_literal(Immediate::unit()));
+        }
+
         // Stage 1.5: `mutating ref` write provider (global member — no receiver).
         if let Some(accessor) = self.ctx.find_ref_accessor_child(entity, true) {
             self.ctx.register_name(accessor);
@@ -1254,6 +1465,13 @@ impl OssaBodyCtx<'_, '_> {
                 let v = self.lower_expr(a.value);
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
+            // NOTE: like the setter path below, omitted defaulted index args are
+            // not yet materialized here — a `mutating ref` subscript accessor with
+            // a defaulted index called as `x() = v` would hit the same arg-count
+            // mismatch (#151/#149 twin). No repro exists for ref-accessor subscripts
+            // with defaults yet; add the equivalent `expand_default_args` here when
+            // one surfaces (the ref accessor's params are the index params only — no
+            // trailing `newValue` — so it'd expand against the full param list).
             return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
         }
 
@@ -1274,6 +1492,10 @@ impl OssaBodyCtx<'_, '_> {
                 .into_iter()
                 .map(|v| self.prepare_call_arg(v, ParamConvention::Borrow))
                 .collect();
+            // Fill omitted defaulted index params (`c() = v`). `newValue` has no
+            // default so it is skipped here and pushed last. Without this the
+            // call is built with too few args and fails codegen verification.
+            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0, &[]);
             call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
             let callee = Callee::direct_with_args(setter, type_args, None);
             self.emit_call_void(callee, call_args);
@@ -1289,6 +1511,11 @@ impl OssaBodyCtx<'_, '_> {
             for v in subscript_args {
                 call_args.push(self.prepare_call_arg(v, ParamConvention::Borrow));
             }
+            // Fill omitted defaulted index params (`c() = v`) before the trailing
+            // `newValue` (which has no default and is pushed last). `expand_default_args`
+            // appends to the end, so call it after the explicit index args and before
+            // `rhs` to preserve the `[self, idx.., default(idx), newValue]` ABI order.
+            self.expand_default_args(&mut call_args, setter, args.len(), &[], 0, &[]);
             call_args.push(self.prepare_call_arg(rhs, ParamConvention::Borrow));
 
             if let Some(protocol) = self.ctx.is_protocol_method(setter) {

@@ -1245,7 +1245,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
     //   always returnable.
     enum EscapeMode {
         RefBorrow { mutating: bool },
-        Carrier { mutating: bool },
+        Carrier { mutating: bool, closure: bool },
     }
 
     let mut errors = Vec::new();
@@ -1256,10 +1256,31 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
         }
         let mode = match ret_convention(&module.ty_arena, func.ret) {
             RetConvention::RefBorrow { mutating } => EscapeMode::RefBorrow { mutating },
-            _ if module.ty_arena.contains_ref(func.ret) => EscapeMode::Carrier {
-                mutating: module.ty_arena.contains_mutating_ref(func.ret),
+            _ => {
+                // Deep escape-carry: a ref OR a capturing closure carried by
+                // value — including through a nominal STORED FIELD (a `&Int64`
+                // or closure field), which the shallow type-arg-only
+                // `contains_ref`/`contains_closure` miss (#174 struct-field
+                // laundering). The returned value's root is the join over its
+                // ref/closure components (stamped at construction /
+                // `emit_apply_partial`), so the same self-root skip + Local-root
+                // rule applies. Ref takes precedence (carries the mutating bit
+                // for E495); a pure-closure carrier uses the closure wording.
+                let carry = module.escape_carry(func.ret);
+                if carry.any_ref {
+                    EscapeMode::Carrier {
+                        mutating: carry.mutating_ref,
+                        closure: false,
+                    }
+                } else if carry.closure {
+                    EscapeMode::Carrier {
+                        mutating: false,
+                        closure: true,
+                    }
+                } else {
+                    continue;
+                }
             },
-            _ => continue,
         };
 
         for (block_idx, block) in body.blocks.iter().enumerate() {
@@ -1267,15 +1288,15 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 continue;
             };
             let vd = body.value(*v);
-            let (carrier, mutating) = match mode {
+            let (carrier, mutating, is_closure) = match mode {
                 EscapeMode::RefBorrow { mutating } => {
                     if vd.ownership != Ownership::Guaranteed {
                         // verify_terminator's hardening reports this as an ICE.
                         continue;
                     }
-                    (false, mutating)
+                    (false, mutating, false)
                 },
-                EscapeMode::Carrier { mutating } => {
+                EscapeMode::Carrier { mutating, closure } => {
                     if vd.ownership != Ownership::Owned
                         // Hand-built bodies may bypass alloc_value.
                         || vd.root.is_derived_placeholder()
@@ -1284,7 +1305,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                     {
                         continue;
                     }
-                    (true, mutating)
+                    (true, mutating, closure)
                 },
             };
             let mut push = |code: &'static str,
@@ -1312,8 +1333,16 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 // with no known definition. (Carrier mode skipped these.)
                 root = RootProvenance::Local(*v);
             }
-            // Carrier-mode wordings name the VALUE (the ref rides inside it).
-            let what = if carrier {
+            // Carrier-mode wordings name the VALUE (the ref/env rides inside it).
+            // A directly-returned closure says "this closure"; a struct/tuple
+            // that merely carries one says "this value: it carries a closure".
+            let what = if is_closure {
+                if matches!(module.ty_arena.get(func.ret), crate::ty::MirTy::FuncThick { .. }) {
+                    "this closure: it captures"
+                } else {
+                    "this value: it carries a closure that captures"
+                }
+            } else if carrier {
                 "this value: it carries a reference that borrows"
             } else {
                 "this reference: it borrows"

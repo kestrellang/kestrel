@@ -45,6 +45,26 @@ pub struct HirBody {
     pub while_conditions: Vec<HirExprId>,
 }
 
+impl HirBody {
+    /// An empty body — no exprs/pats/stmts/locals/params. Used as the (unused)
+    /// HIR backing when hand-synthesizing a MIR body that drives the OSSA emit
+    /// helpers directly (e.g. stored-var witness accessors) rather than lowering
+    /// from an AST body.
+    pub fn empty() -> Self {
+        Self {
+            exprs: Arena::default(),
+            pats: Arena::default(),
+            stmts: Arena::default(),
+            locals: Arena::default(),
+            params: Vec::new(),
+            statements: Vec::new(),
+            tail_expr: None,
+            guard_stmts: Vec::new(),
+            while_conditions: Vec::new(),
+        }
+    }
+}
+
 /// Where a `HirExpr::Match` came from. Drives diagnostic phrasing and lets
 /// analyzers skip desugared matches (for-loop bodies, if-let wildcards) that
 /// would otherwise produce false-positive unreachable / irrefutable warnings.
@@ -435,7 +455,13 @@ pub enum HirPat {
 /// HIR literals have been parsed into their concrete types.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HirLiteral {
-    Integer(i64),
+    /// Integer literal magnitude as `i128` so every valid target value
+    /// round-trips losslessly: `UInt64.maxValue` (2^64-1) stays a positive
+    /// magnitude, and the `2^63`/`i64::MIN` collision that hid out-of-range
+    /// `Int64` literals can no longer occur. Negation is applied by the
+    /// `negate` operator, not folded here. The range check lives in the
+    /// integer-literal-range analyzer (E121).
+    Integer(i128),
     Float(f64),
     /// Decoded string value plus any escape-sequence errors discovered during
     /// lowering. Errors are data on the node — a separate analyzer turns them
