@@ -1860,10 +1860,43 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             let d = self.body.value(operand);
             (d.ty, d.root)
         };
-        let carries = self.ctx.module.ty_arena.contains_ref(ty)
-            || self.ctx.module.ty_arena.contains_closure(ty);
-        if root != RootProvenance::Local(operand) && carries {
+        // Deep carry (through nominal fields) so copying an escape-bearing
+        // struct (`let h = Holder(r: &local); let h2 = h`) keeps the field taint.
+        if root != RootProvenance::Local(operand) && self.ctx.module.escape_carry(ty).any() {
             self.stamp_root(result, root);
+        }
+    }
+
+    /// Join a by-value aggregate ELEMENT's escape taint into the aggregate's
+    /// running taint, for the non-ref-slot path of `emit_struct`/`emit_tuple`.
+    /// A field/element that carries an escape root (a captured closure, or a
+    /// nested ref-bearing aggregate) and is itself TAINTED (its root is not its
+    /// own self-root) makes the whole aggregate frame-bound — returning it would
+    /// let the element's frame-bound storage escape (#174). Ref *slots* are
+    /// handled separately by `prep_ref_slot_element`; this covers everything a
+    /// ref slot is not (closures, nested structs/tuples carrying refs/closures).
+    fn collect_by_value_escape_taint(
+        &mut self,
+        v: ValueId,
+        slot_ty: Option<TyId>,
+        taint: &mut Option<RootProvenance>,
+    ) {
+        let (vroot, vty) = {
+            let d = self.body.value(v);
+            (d.root, d.ty)
+        };
+        if vroot == RootProvenance::Local(v) || vroot.is_derived_placeholder() {
+            return; // untainted (self-rooted) — nothing to carry
+        }
+        // Use the slot's declared type when known (the field type), else the
+        // value's own type. Only carry when that type actually carries an escape.
+        let ty = slot_ty.unwrap_or(vty);
+        if self.ctx.module.escape_carry(ty).any() {
+            let convs = self.current_param_convs();
+            *taint = Some(match *taint {
+                None => vroot,
+                Some(t) => t.join(vroot, &convs),
+            });
         }
     }
 
@@ -2158,6 +2191,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.slot_is_ref(&slot_tys, idx.index()) {
                     (idx, self.prep_ref_slot_element(v, &mut taint, &mut end_after))
                 } else {
+                    // A by-value field carrying an escape root — a captured
+                    // closure or a nested ref-bearing aggregate — taints the
+                    // whole struct: returning it would let the field's
+                    // frame-bound storage escape (#174 struct-field laundering).
+                    self.collect_by_value_escape_taint(v, slot_tys.get(idx.index()).copied(), &mut taint);
                     (idx, self.own_aggregate_element(v))
                 }
             })
@@ -2191,6 +2229,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 if self.slot_is_ref(&slot_tys, i) {
                     self.prep_ref_slot_element(v, &mut taint, &mut end_after)
                 } else {
+                    // By-value escape-carrying element taints the tuple (#174).
+                    self.collect_by_value_escape_taint(v, slot_tys.get(i).copied(), &mut taint);
                     self.own_aggregate_element(v)
                 }
             })
