@@ -245,8 +245,11 @@ fn generate_struct_shim(
 
     // 3. Destroy all fields — droppable fields trigger transitive drop shims,
     //    non-droppable fields must still be consumed since all values are @owned.
+    //    Fields drop in REVERSE declaration order (docs/memory-model/drop-semantics.md);
+    //    DestructureStruct results stay positional, only the destroy order reverses.
+    //    This matches the init-failure partial-drop path (mir-lower emit_init_partial_drops).
     let droppable_set: std::collections::HashSet<FieldIdx> = fields.iter().copied().collect();
-    for (i, fv) in field_vals.iter().enumerate() {
+    for (i, fv) in field_vals.iter().enumerate().rev() {
         let fi = FieldIdx::new(i);
         let field_ty = struct_def.fields[i].ty;
         insts.push(Instruction::new(InstKind::DestroyValue { operand: *fv }));
@@ -440,7 +443,8 @@ fn generate_enum_shim(
 
         // Destroy all payload fields — droppable fields trigger transitive shims,
         // non-droppable fields must still be consumed since all values are @owned.
-        for (i, pv) in payload_vals.iter().enumerate() {
+        // Reverse declaration order, matching struct fields (drop-semantics.md).
+        for (i, pv) in payload_vals.iter().enumerate().rev() {
             let fi = FieldIdx::new(i);
             let field_ty = case_def.payload_fields[i].ty;
             variant_insts.push(Instruction::new(InstKind::DestroyValue { operand: *pv }));
