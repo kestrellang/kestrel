@@ -646,12 +646,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // bogus "expected T got &T" (#194). A non-call RHS (e.g. `&x`) is
             // inert to the decay set, so rebind-style stores are unaffected.
             mark_arm_value(ctx, hir, *value);
-            // A LOCAL target keeps its raw type (a `&mutating` binding's
-            // local type IS the ref) and may resolve late (pattern-payload
-            // bindings) — route through AssignTarget, which picks
-            // store-through vs plain coerce once the target resolves.
-            // Field/call targets already type as the pointee (see above).
-            if matches!(hir.exprs[*target], HirExpr::Local(..)) {
+            // Route through AssignTarget, which picks store-through vs plain
+            // coerce once the target resolves — and crucially DEFERS while the
+            // target is still unresolved. A LOCAL target may resolve late
+            // (pattern-payload bindings); a subscript/accessor CALL target's
+            // result var is bound asynchronously by `solve_member` to the
+            // setter's place type (e.g. a Dictionary subscript's `V?`), so an
+            // eager coerce would pin it to the RHS type first and then hard-fail
+            // when the place type arrives (#179). Deferral lets the place type
+            // win, so `d("a") = 3` coerces `Int64 -> Optional[Int64]`.
+            // A ref-returning call target is already decayed to its pointee by
+            // bind_call_result, so it takes the plain-coerce branch unchanged (#194).
+            let route_via_assign_target = matches!(
+                hir.exprs[*target],
+                HirExpr::Local(..) | HirExpr::Call { .. } | HirExpr::MethodCall { .. }
+            );
+            if route_via_assign_target {
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
                 ctx.coerce(value_tv, target_tv, *value, span.clone());
