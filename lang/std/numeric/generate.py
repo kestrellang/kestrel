@@ -577,6 +577,11 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
 
     # For signed types, handle negative numbers
     if signed:
+        # Per-type magnitude bounds for the UInt64 accumulator. The magnitude of
+        # minValue is maxValue+1, which a signed accumulator cannot hold, so both
+        # parse inits accumulate the positive magnitude in UInt64 and convert+negate.
+        pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
+        neg_max_expr = f"UInt64(from: {type_name}.maxValue) + 1"
         base_parse = f'''    /// @name Parsing
     /// Parses a base-10 integer literal, optionally prefixed with `+` or `-`.
     /// Returns `null` for an empty string, a non-digit character,
@@ -611,8 +616,15 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             return null
         }}
 
-        var result: Int64 = 0;
-        let maxBeforeMultiply: Int64 = 922337203685477580;
+        // Accumulate the positive magnitude in UInt64 so that minValue's
+        // magnitude (maxValue+1) is representable; convert + negate at the end.
+        let maxMagnitude: UInt64 = if isNegative {{
+            {neg_max_expr}
+        }} else {{
+            {pos_max_expr}
+        }};
+
+        var result: UInt64 = 0;
 
         while index < len {{
             let byte: UInt8 = string.bytes(unchecked: index);
@@ -623,40 +635,23 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             }}
 
             let digit = byteVal - 48;
+            let digitU: UInt64 = UInt64(from: digit);
 
-            if result > maxBeforeMultiply {{
+            if result > (maxMagnitude - digitU) / 10 {{
                 return null
             }}
-            result = result * 10;
-
-            if result > 9223372036854775807 - digit {{
-                return null
-            }}
-            result = result + digit;
+            result = result * 10 + digitU;
 
             index = index + 1
         }}
 
+        let typedResult = {type_name}(from: result);
         if isNegative {{
-            result = result.negate();
-            if result < {min_val_expr} {{
-                return null
-            }}
+            self.raw = typedResult.negate().raw
         }} else {{
-            if result > {max_val_expr} {{
-                return null
-            }}
+            self.raw = typedResult.raw
         }}
-
-        self.raw = {return_expr}.raw;
     }}'''
-        # Per-type magnitude bounds for the UInt64 accumulator.
-        if type_name == "Int64":
-            pos_max_expr = "UInt64(from: Int64.maxValue)"
-            neg_max_expr = "UInt64(from: Int64.maxValue) + 1"
-        else:
-            pos_max_expr = f"UInt64(from: {type_name}.maxValue)"
-            neg_max_expr = f"UInt64(from: {type_name}.maxValue) + 1"
         radix_parse = f'''
     /// @name Parsing with Radix
     /// Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are

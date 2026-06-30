@@ -878,8 +878,15 @@ public struct Int32:
             return null
         }
 
-        var result: Int64 = 0;
-        let maxBeforeMultiply: Int64 = 922337203685477580;
+        // Accumulate the positive magnitude in UInt64 so that minValue's
+        // magnitude (maxValue+1) is representable; convert + negate at the end.
+        let maxMagnitude: UInt64 = if isNegative {
+            UInt64(from: Int32.maxValue) + 1
+        } else {
+            UInt64(from: Int32.maxValue)
+        };
+
+        var result: UInt64 = 0;
 
         while index < len {
             let byte: UInt8 = string.bytes(unchecked: index);
@@ -890,32 +897,22 @@ public struct Int32:
             }
 
             let digit = byteVal - 48;
+            let digitU: UInt64 = UInt64(from: digit);
 
-            if result > maxBeforeMultiply {
+            if result > (maxMagnitude - digitU) / 10 {
                 return null
             }
-            result = result * 10;
-
-            if result > 9223372036854775807 - digit {
-                return null
-            }
-            result = result + digit;
+            result = result * 10 + digitU;
 
             index = index + 1
         }
 
+        let typedResult = Int32(from: result);
         if isNegative {
-            result = result.negate();
-            if result < Int64(from: Int32.minValue) {
-                return null
-            }
+            self.raw = typedResult.negate().raw
         } else {
-            if result > Int64(from: Int32.maxValue) {
-                return null
-            }
+            self.raw = typedResult.raw
         }
-
-        self.raw = Int32(from: result).raw;
     }
     /// @name Parsing with Radix
     /// Parses an integer in `radix` (base 2-36 inclusive). Letters a-z are
