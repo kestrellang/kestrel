@@ -18,7 +18,6 @@ impl OssaBodyCtx<'_, '_> {
 
         match &stmt {
             HirStmt::Let { local, value, .. } => {
-                let is_var = self.hir.locals[*local].is_mut;
                 let name = self.hir.locals[*local].name.clone();
                 // Named ref binding (`let r = &expr;`): the binding HOLDS the
                 // place — register the @guaranteed value as multi-use
@@ -52,23 +51,25 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         init_val
                     };
-                    if is_var {
-                        let ty = self.resolve_local_type(*local);
-                        let addr = self.emit_uninit(ty);
-                        self.emit_store_init(addr, init_val);
-                        self.body.value_names.insert(addr, name);
-                        self.local_map
-                            .insert(*local, super::LocalBinding::Var(addr));
-                        let flag = self.maybe_alloc_var_flag(ty);
-                        self.track_var(addr, ty, Some(*local), flag);
-                    } else {
-                        // Diagnostics-only: escape errors name the binding the
-                        // returned borrow roots at ("borrows local `x`").
-                        self.body.value_names.insert(init_val, name);
-                        self.local_map
-                            .insert(*local, super::LocalBinding::Ssa(init_val));
-                    }
-                } else if is_var {
+                    // Uniform binding lowering (#107): `let` and `var` both
+                    // live at a stack address with init-state + drop-flag
+                    // tracking. An SSA-bound `let` threads through every
+                    // if/match merge, where a conditional move forces an
+                    // eager destroy at the merge instead of lexical scope
+                    // exit; the slot + flag machinery gets that right.
+                    // (Immutability stays a frontend rule — MIR never sees
+                    // an assignment to a `let`.)
+                    let ty = self.resolve_local_type(*local);
+                    let addr = self.emit_uninit(ty);
+                    self.emit_store_init(addr, init_val);
+                    self.body.value_names.insert(addr, name);
+                    self.local_map
+                        .insert(*local, super::LocalBinding::Var(addr));
+                    let flag = self.maybe_alloc_var_flag(ty);
+                    self.track_var(addr, ty, Some(*local), flag);
+                } else {
+                    // No-initializer declaration (deferred definite-init):
+                    // same slot, first assignment StoreInits it.
                     let ty = self.resolve_local_type(*local);
                     let addr = self.emit_uninit(ty);
                     self.body.value_names.insert(addr, name);
@@ -89,6 +90,12 @@ impl OssaBodyCtx<'_, '_> {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
                     self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr { address: addr, ty });
+                    // The slot no longer owns a value: record it (state +
+                    // in-memory flag) so scope exit doesn't destroy again.
+                    self.set_var_init(*hir_local, super::VarInit::DefUninit);
+                    if let Some(flag) = self.var_flag(*hir_local) {
+                        self.store_drop_flag(flag, false);
+                    }
                 } else {
                     let val = self.map_local(*hir_local);
                     self.emit_destroy_value(val);

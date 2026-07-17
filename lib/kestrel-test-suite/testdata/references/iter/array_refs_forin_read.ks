@@ -21,7 +21,7 @@ func main() -> lang.i64 {
     let words = ["alpha", "beta"];
     var letters = 0;
     for w in words.refs() {
-        letters = letters + w.byteCount;
+        letters = letters + w.bytes.count;
     }
     if letters != 9 { return 2; }
     0

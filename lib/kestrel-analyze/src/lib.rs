@@ -85,6 +85,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::cloneable_field::CloneableFieldAnalyzer);
     r.add_decl_check(decl::duplicate_symbol::DuplicateSymbolAnalyzer);
     r.add_decl_check(decl::duplicate_callable::DuplicateCallableAnalyzer);
+    r.add_decl_check(decl::field_method_collision::FieldMethodCollisionAnalyzer);
     r.add_decl_check(decl::extension_conflict::ExtensionConflictAnalyzer);
     r.add_decl_check(decl::extension_validation::ExtensionValidationAnalyzer);
     r.add_decl_check(decl::recursive_enum::RecursiveEnumAnalyzer);

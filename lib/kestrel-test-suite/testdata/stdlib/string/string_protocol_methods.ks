@@ -25,8 +25,8 @@ module Test
             // clone is COW - mutating clone doesn't affect original
             var mClone = original.clone();
             mClone.append(" world");
-            if original.byteCount != 5 { return 5 }
-            if mClone.byteCount != 11 { return 6 }
+            if original.bytes.count != 5 { return 5 }
+            if mClone.bytes.count != 11 { return 6 }
 
             // ---- add() ----
             let s1: std.text.String = "hello";
@@ -34,8 +34,8 @@ module Test
             let combined = s1.add(s2);
             if combined.isEqual(to: "hello world") == false { return 7 }
             // Originals unchanged
-            if s1.byteCount != 5 { return 8 }
-            if s2.byteCount != 6 { return 9 }
+            if s1.bytes.count != 5 { return 8 }
+            if s2.bytes.count != 6 { return 9 }
 
             0
         }

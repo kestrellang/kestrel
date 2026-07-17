@@ -12,14 +12,14 @@
 module Test
 
 func consume(s: String) -> Int64 {
-    s.byteCount
+    s.bytes.count
 }
 
 @main
 func main() -> lang.i64 {
     // Direct binding round-trips through codegen.
     let raw = #"hello"#;
-    if raw.byteCount != 5 { return 1 }
+    if raw.bytes.count != 5 { return 1 }
 
     // Passing a raw literal as an argument was the original failure shape.
     if consume(#"hello"#) != 5 { return 2 }
@@ -29,7 +29,7 @@ func main() -> lang.i64 {
 
     // Empty raw string has zero bytes (and isn't mistaken for a null pointer).
     let empty = #""#;
-    if empty.byteCount != 0 { return 4 }
+    if empty.bytes.count != 0 { return 4 }
     if not empty.isEmpty { return 5 }
 
     0

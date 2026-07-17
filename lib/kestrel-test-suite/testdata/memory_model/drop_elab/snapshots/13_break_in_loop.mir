@@ -2,13 +2,20 @@
 bb0:
     %v0 = literal i64 1  // @owned Int64
     %v1 = struct Test.Handle { .0: %v0 }  // @owned Test.Handle
-    jump bb1(%v1)
+    %v2 = uninit Test.Handle  // @owned Pointer[Test.Handle]
+    store_init %v2, %v1
+    %v3 = uninit Bool  // @owned Pointer[Bool]
+    %v4 = literal true  // @owned Bool
+    store_init %v3, %v4
+    jump bb1(%v2, %v3)
 
-bb1(%v2: @owned Test.Handle):
-    jump bb2(%v2)
+bb1(%v5: @owned Pointer[Test.Handle], %v6: @owned Pointer[Bool]):
+    jump bb2(%v5, %v6)
 
-bb2(%v3: @owned Test.Handle):
-    %v6 = literal ()  // @owned ()
-    destroy_value %v3
-    return %v6
+bb2(%v7: @owned Pointer[Test.Handle], %v8: @owned Pointer[Bool]):
+    %v11 = literal ()  // @owned ()
+    destroy_addr %v2, Test.Handle
+    destroy_value %v8
+    destroy_value %v7
+    return %v11
 

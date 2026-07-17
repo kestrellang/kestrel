@@ -3,7 +3,10 @@ bb0:
     %v0 = literal i64 1  // @owned Int64
     %v1 = literal i64 2  // @owned Int64
     %v2 = struct Test.Point { .0: %v0, .1: %v1 }  // @owned Test.Point
-    %v3 = literal ()  // @owned ()
-    destroy_value %v2
-    return %v3
+    %v3 = uninit Test.Point  // @owned Pointer[Test.Point]
+    store_init %v3, %v2
+    %v4 = literal ()  // @owned ()
+    destroy_addr %v3, Test.Point
+    destroy_value %v3
+    return %v4
 

@@ -289,6 +289,12 @@ impl OssaBodyCtx<'_, '_> {
         if !self.is_terminated() {
             let back_edge_vals = self.tracker.values();
             self.destroy_scope_except(&back_edge_vals);
+            // A guarded destroy in the scope exit renames threaded values —
+            // resolve to their current names before the back-edge jump.
+            let back_edge_vals: Vec<ValueId> = back_edge_vals
+                .iter()
+                .map(|v| self.resolve_value(*v))
+                .collect();
             self.pop_scope();
             for &v in &back_edge_vals {
                 self.pop_owned_from_scope(v);
@@ -335,6 +341,9 @@ impl OssaBodyCtx<'_, '_> {
             // Destroy inner scopes (loop body + any nested ones),
             // keeping the values we're threading to the exit block.
             self.destroy_scopes_to_depth(depth, &exit_vals);
+            // A guarded destroy in the exit renames threaded values.
+            let exit_vals: Vec<ValueId> =
+                exit_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(exit, exit_vals);
         }
         self.emit_literal(Immediate::unit())
@@ -363,6 +372,9 @@ impl OssaBodyCtx<'_, '_> {
             // Destroy the crossed scopes (inner loop bodies + nested ones),
             // keeping the values threaded back to the header.
             self.destroy_scopes_to_depth(depth, &header_vals);
+            // A guarded destroy in the exit renames threaded values.
+            let header_vals: Vec<ValueId> =
+                header_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(header, header_vals);
         }
         self.emit_literal(Immediate::unit())

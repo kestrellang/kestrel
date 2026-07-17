@@ -139,6 +139,7 @@ IDs follow the pattern `E<NNN>`:
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)
 - E002: `unreachable_code` (dead_code.rs)
+- E121: `integer_literal_out_of_range` (body/integer_literal_range.rs) — post-inference range check on integer literals against their resolved fixed-width type; a unary-`negate` over a literal is checked as the negated value (so `Int8` accepts `-128` but rejects `-129`)
 - E301: `refutable_for_loop_pattern` (for_loop_pattern.rs)
 - E302: `irrefutable_if_let` (exhaustiveness.rs)
 - E303: `irrefutable_match_arm` (exhaustiveness.rs) — reserved; currently not emitted (E306 subsumes)

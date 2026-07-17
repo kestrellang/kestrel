@@ -26,7 +26,7 @@ use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
 use crate::inst::InstKind;
 use crate::item::enum_def::EnumDef;
-use crate::item::function::{FunctionDef, FunctionKind};
+use crate::item::function::{FunctionDef, FunctionKind, WhereConstraint};
 use crate::item::protocol::ProtocolDef;
 use crate::item::struct_def::StructDef;
 use crate::item::witness::WitnessDef;
@@ -120,6 +120,38 @@ pub fn monomorphize(
 
     for (i, key) in instantiations.iter().enumerate() {
         let body_result = &mono_bodies[i];
+
+        // #127 backstop: an instantiation that violates an explicit
+        // `T: Copyable` where-bound with a non-Copyable concrete type slipped
+        // through the frontend (the Copyable-default substitution hole) — its
+        // body bit-copies a move-only value, a double-free. Poison the body
+        // with a Panic instead of hard-failing the build: such instantiations
+        // are often statically reachable yet never executed (Array[T]'s clone
+        // shim reaches `Pointer.read[T]`), so only actually running one traps.
+        let poisoned_body = functions.get(&key.func_entity).and_then(|func| {
+            let violation = violated_copyable_bound(
+                func,
+                key,
+                &mut mono_module.ty_arena,
+                &protocols,
+                &witnesses,
+                &mono_structs,
+                &mono_enums,
+            )?;
+            let ty = describe_ty(&mono_module.ty_arena, &entity_names, violation);
+            let fname = entity_names
+                .get(&key.func_entity)
+                .map(|s| s.as_str())
+                .unwrap_or("<unknown>");
+            Some(poison_body(
+                body_result.body.as_ref()?,
+                format!(
+                    "cannot copy non-Copyable type '{ty}': '{fname}' requires \
+                     'Copyable' (bound not satisfied by this instantiation)"
+                ),
+            ))
+        });
+
         let func_name = entity_names
             .get(&key.func_entity)
             .map(|s| s.as_str())
@@ -189,7 +221,7 @@ pub fn monomorphize(
             self_type: resolved_self,
             params: body_result.params.clone(),
             ret: body_result.ret,
-            body: body_result.body.clone(),
+            body: poisoned_body.or_else(|| body_result.body.clone()),
             extern_info: body_result.extern_info.clone(),
             is_main: body_result.is_main,
             ret_borrow,
@@ -206,6 +238,141 @@ pub fn monomorphize(
     }
 
     Ok(mono_module)
+}
+
+// -- #127 Copyable-bound backstop -------------------------------------------
+
+/// Concrete type violating one of `func`'s explicit `T: Copyable` where-bounds
+/// in this instantiation, if any. Copy class is read from the post-mono
+/// `type_info` (the per-instantiation authority, same as `mono::audit`).
+#[allow(clippy::too_many_arguments)]
+fn violated_copyable_bound(
+    func: &FunctionDef,
+    key: &InstantiationKey,
+    arena: &mut TyArena,
+    protocols: &IndexMap<Entity, ProtocolDef>,
+    witnesses: &[WitnessDef],
+    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+) -> Option<TyId> {
+    let wc = func.where_clause.as_ref()?;
+    let copyable_bounds: Vec<Entity> = wc
+        .constraints
+        .iter()
+        .filter_map(|c| match c {
+            WhereConstraint::Implements {
+                type_param,
+                protocol,
+                ..
+            } if protocols
+                .get(protocol)
+                .is_some_and(|p| p.name.ends_with("Copyable")) =>
+            {
+                Some(*type_param)
+            },
+            _ => None,
+        })
+        .collect();
+    if copyable_bounds.is_empty() {
+        return None;
+    }
+    let subst = collect::build_subst(
+        func,
+        &key.type_args,
+        key.self_type,
+        arena,
+        protocols,
+        witnesses,
+    );
+    for tp in copyable_bounds {
+        let Some(&concrete) = subst.type_params.get(&tp) else {
+            continue;
+        };
+        if mono_copy_is_none(arena, mono_structs, mono_enums, concrete) {
+            return Some(concrete);
+        }
+    }
+    None
+}
+
+/// True when `ty`'s resolved per-instantiation copy class is `None`
+/// (move-only). Unknown/never-instantiated types conservatively read as
+/// copyable — the backstop only fires on a certain violation.
+fn mono_copy_is_none(
+    arena: &TyArena,
+    mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
+    mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+    ty: TyId,
+) -> bool {
+    match arena.get(ty) {
+        MirTy::Tuple(elems) => {
+            let elems = elems.clone();
+            elems
+                .iter()
+                .any(|&e| mono_copy_is_none(arena, mono_structs, mono_enums, e))
+        },
+        MirTy::Named { entity, type_args } => {
+            let key = (*entity, type_args.clone());
+            mono_structs
+                .get(&key)
+                .map(|s| s.type_info.copy == CopyBehavior::None)
+                .or_else(|| {
+                    mono_enums
+                        .get(&key)
+                        .map(|e| e.type_info.copy == CopyBehavior::None)
+                })
+                .unwrap_or(false)
+        },
+        _ => false,
+    }
+}
+
+/// Replace a poisoned instantiation's body with a single Panic block, keeping
+/// the parameter value slots (codegen binds arguments to values
+/// `0..param_count`) so the signature stays ABI-valid.
+fn poison_body(original: &OssaBody, message: String) -> OssaBody {
+    let mut block = crate::block::BasicBlock::new();
+    block.terminator =
+        crate::terminator::Terminator::new(crate::terminator::TerminatorKind::Panic(message));
+    OssaBody {
+        values: original.values[..original.param_count].to_vec(),
+        blocks: vec![block],
+        entry: crate::BlockId::new(0),
+        param_count: original.param_count,
+        value_names: Default::default(),
+    }
+}
+
+/// Minimal type rendering for the poison message (phase 5 has no assembled
+/// MonoModule yet, so `verify::describe_mono_ty` isn't usable here).
+fn describe_ty(arena: &TyArena, entity_names: &IndexMap<Entity, String>, ty: TyId) -> String {
+    match arena.get(ty) {
+        MirTy::Named { entity, type_args } => {
+            let name = entity_names
+                .get(entity)
+                .cloned()
+                .unwrap_or_else(|| format!("{entity:?}"));
+            if type_args.is_empty() {
+                name
+            } else {
+                let args: Vec<String> = type_args
+                    .clone()
+                    .iter()
+                    .map(|&a| describe_ty(arena, entity_names, a))
+                    .collect();
+                format!("{}[{}]", name, args.join(", "))
+            }
+        },
+        MirTy::Tuple(elems) => {
+            let parts: Vec<String> = elems
+                .clone()
+                .iter()
+                .map(|&e| describe_ty(arena, entity_names, e))
+                .collect();
+            format!("({})", parts.join(", "))
+        },
+        other => format!("{other:?}"),
+    }
 }
 
 // -- Phase 2: Body monomorphization --

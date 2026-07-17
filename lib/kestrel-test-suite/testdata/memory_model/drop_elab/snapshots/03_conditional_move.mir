@@ -2,20 +2,40 @@
 bb0:
     %v1 = literal i64 1  // @owned Int64
     %v2 = struct Test.Handle { .0: %v1 }  // @owned Test.Handle
-    branch %v0, bb1(%v2), bb2(%v2)
+    %v3 = uninit Test.Handle  // @owned Pointer[Test.Handle]
+    store_init %v3, %v2
+    %v4 = uninit Bool  // @owned Pointer[Bool]
+    %v5 = literal true  // @owned Bool
+    store_init %v4, %v5
+    branch %v0, bb1(%v3, %v4), bb2(%v3, %v4)
 
-bb1(%v3: @owned Test.Handle):
-    %v5 = move_value %v3  // @owned Test.Handle
-    %v6 = call Test.consume(%v5)  // @owned ()
-    %v7 = literal ()  // @owned ()
-    destroy_value %v6
-    jump bb3(%v7)
+bb1(%v6: @owned Pointer[Test.Handle], %v7: @owned Pointer[Bool]):
+    %v10 = take %v6, Test.Handle  // @owned Test.Handle
+    %v11 = literal false  // @owned Bool
+    store_assign %v4, %v11
+    %v12 = call Test.consume(%v10)  // @owned ()
+    %v13 = literal ()  // @owned ()
+    destroy_value %v12
+    jump bb3(%v13, %v6, %v7)
 
-bb2(%v4: @owned Test.Handle):
-    %v8 = literal ()  // @owned ()
-    destroy_value %v4
-    jump bb3(%v8)
+bb2(%v8: @owned Pointer[Test.Handle], %v9: @owned Pointer[Bool]):
+    %v14 = literal ()  // @owned ()
+    jump bb3(%v14, %v8, %v9)
 
-bb3(%v9: @owned ()):
-    return %v9
+bb3(%v15: @owned (), %v16: @owned Pointer[Test.Handle], %v17: @owned Pointer[Bool]):
+    %v18 = load %v4  // @owned Bool
+    branch %v18, bb4(%v16, %v17, %v15, %v18), bb5(%v16, %v17, %v15, %v18)
+
+bb4(%v19: @owned Pointer[Test.Handle], %v20: @owned Pointer[Bool], %v21: @owned (), %v22: @owned Bool):
+    destroy_addr %v3, Test.Handle
+    jump bb6(%v19, %v20, %v21, %v22)
+
+bb5(%v23: @owned Pointer[Test.Handle], %v24: @owned Pointer[Bool], %v25: @owned (), %v26: @owned Bool):
+    jump bb6(%v23, %v24, %v25, %v26)
+
+bb6(%v27: @owned Pointer[Test.Handle], %v28: @owned Pointer[Bool], %v29: @owned (), %v30: @owned Bool):
+    destroy_value %v30
+    destroy_value %v28
+    destroy_value %v27
+    return %v29
 

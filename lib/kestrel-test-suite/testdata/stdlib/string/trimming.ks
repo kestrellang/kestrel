@@ -40,7 +40,7 @@ module Test
             let ts = s7.trimmedStart();
             if ts.toOwned().isEqual(to: "hello  ") == false { return 7 }
             // Original unchanged
-            if s7.byteCount != 9 { return 8 }
+            if s7.bytes.count != 9 { return 8 }
 
             // ---- Non-mutating trimmedEnd() ----
             let s8: std.text.String = "  hello  ";

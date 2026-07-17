@@ -111,20 +111,39 @@ impl OssaBodyCtx<'_, '_> {
         };
         let base = *base;
         let field_name = name.as_str_or_empty().to_string();
-        // Base must be a directly-owned local: `consuming self` / an
-        // owned-by-value local binds as `Ssa(@owned)`. A borrowed self (normal
-        // method, bound @guaranteed) or a `var` slot is not ours to consume.
+        // Base must be a directly-owned local: `consuming self` binds as
+        // `Ssa(@owned)`; a let/var binds as `Var` over an @owned slot it
+        // solely owns (a MutBorrow param's slot is @guaranteed — the
+        // caller's storage, not ours to consume). A borrowed self (normal
+        // method, bound @guaranteed `Ssa`) is rejected by the ownership
+        // check below.
         let HirExpr::Local(base_local, _) = &self.hir.exprs[base] else {
             return None;
         };
-        let base_val = match self.local_map.get(base_local) {
-            Some(super::LocalBinding::Ssa(v)) => *v,
-            _ => return None,
-        };
-        if self.body.value(base_val).ownership != kestrel_mir::value::Ownership::Owned {
-            return None;
+        let base_local = *base_local;
+        enum BaseSrc {
+            Ssa(ValueId),
+            Slot(ValueId),
         }
-        let base_ty = self.body.value(base_val).ty;
+        let (base_src, base_ty) = match self.local_map.get(&base_local) {
+            Some(super::LocalBinding::Ssa(v)) => {
+                let v = *v;
+                if self.body.value(v).ownership != kestrel_mir::value::Ownership::Owned {
+                    return None;
+                }
+                (BaseSrc::Ssa(v), self.body.value(v).ty)
+            },
+            Some(super::LocalBinding::Var(addr)) => {
+                let addr = *addr;
+                if self.body.value(addr).ownership != kestrel_mir::value::Ownership::Owned
+                    || self.var_init(base_local) == Some(super::VarInit::DefUninit)
+                {
+                    return None;
+                }
+                (BaseSrc::Slot(addr), self.resolve_local_type(base_local))
+            },
+            None => return None,
+        };
         let entity = match self.ctx.module.ty_arena.get(base_ty) {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
@@ -151,6 +170,20 @@ impl OssaBodyCtx<'_, '_> {
         if field_idx.index() >= field_tys.len() {
             return None;
         }
+        // Materialize the whole base as @owned. A slot-bound local is taken
+        // out (Swift `load [take]`) and marked moved so scope exit doesn't
+        // destroy the vacated slot.
+        let base_val = match base_src {
+            BaseSrc::Ssa(v) => v,
+            BaseSrc::Slot(addr) => {
+                let v = self.emit_take(addr, base_ty);
+                self.set_var_init(base_local, super::VarInit::DefUninit);
+                if let Some(flag) = self.var_flag(base_local) {
+                    self.store_drop_flag(flag, false);
+                }
+                v
+            },
+        };
         // Destructure consumes `base_val` (no whole-self destroy) and tracks
         // every field as @owned; the return path keeps the wanted field (its
         // `keep` set) and drops the siblings at scope exit.
@@ -418,6 +451,8 @@ impl OssaBodyCtx<'_, '_> {
                 };
                 self.drain_deferred_borrows();
                 self.destroy_scopes_to_depth(0, &[ret_val]);
+                // A guarded destroy in the exit renames threaded values.
+                let ret_val = self.resolve_value(ret_val);
                 self.emit_ret(ret_val);
                 self.emit_literal(Immediate::unit())
             },
@@ -946,7 +981,13 @@ impl OssaBodyCtx<'_, '_> {
         }
 
         // Setter dispatch: computed properties, subscripts, field-subscripts
+        let wb_mark = self.pending_writebacks.len();
         if let Some(result) = self.try_lower_setter_assign(target, value) {
+            // The assignment is a complete effect: writebacks fabricated for
+            // its target (dotted chained subscripts, #129) must land now — a
+            // tail-position assignment never reaches the statement-boundary
+            // drain, which would silently drop the write.
+            self.drain_writebacks(wb_mark);
             return result;
         }
 

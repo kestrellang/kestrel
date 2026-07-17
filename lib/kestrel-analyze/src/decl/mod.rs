@@ -16,6 +16,7 @@ pub mod extension_conflict;
 pub mod extension_validation;
 pub mod extern_ffi_safe;
 pub mod field;
+pub mod field_method_collision;
 pub mod function_body;
 pub mod generics;
 pub mod indirect_enum;

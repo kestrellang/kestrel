@@ -2,7 +2,7 @@
 
 module std.result
 
-import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, fatalError)
+import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, Coalesce, fatalError)
 import std.text.(String, StringBuilder, Formattable, FormatOptions)
 import std.result.(Optional)
 
@@ -324,6 +324,27 @@ extend Result[T, E]: FromValue[T] {
     /// `.Ok` (no clone-and-leak of a borrowed original).
     public static func from(consuming value: T) -> Result[T, E] {
         .Ok(value)
+    }
+}
+
+/// `Coalesce` — backs the `??` operator with lazy default evaluation,
+/// discarding the error on `.Err`.
+///
+/// # Examples
+///
+/// ```
+/// let port = parsePort(input) ?? 8080;
+/// ```
+extend Result[T, E]: Coalesce[T] {
+    type Coalesce.Output = T
+
+    /// Returns the `.Ok` value or evaluates `default()`. The default is
+    /// only invoked on `.Err`; the error value is dropped.
+    public func coalesce(default: () -> T) -> T {
+        match self {
+            .Ok(value) => value,
+            .Err(_) => default()
+        }
     }
 }
 

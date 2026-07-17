@@ -1403,6 +1403,14 @@ impl WorldResolver<'_> {
             if c == method {
                 continue;
             }
+            // A non-callable stored field can never implement a callable
+            // protocol requirement — its empty param shape trivially
+            // "matches" a zero-arg method, silently absorbing the field and
+            // binding every access to the (recursive) method (#130). Reject
+            // the collapse so the caller reports a genuine ambiguity.
+            if self.ctx.get::<Callable>(c).is_none() && self.ctx.get::<Callable>(method).is_some() {
+                return None;
+            }
             let concrete_param_tys = self.param_type_shapes(c);
             if !param_shapes_compatible(&proto_param_tys, &concrete_param_tys) {
                 return None;

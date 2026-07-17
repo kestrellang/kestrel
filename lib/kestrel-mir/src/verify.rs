@@ -423,6 +423,36 @@ impl<'a> BlockVerifier<'a> {
         }
     }
 
+    /// Slot-form of the consume-while-borrowed gate: a `Take` from `addr`
+    /// while a borrow whose source is `addr` is live. Mirrors the value-form
+    /// check in `try_consume_exempting` (E498 when a live `&T` chains to the
+    /// slot; unattributable conflicts stay an ICE — a lowering bug). Does
+    /// NOT touch owned-state: the address value itself stays live (it is
+    /// consumed later by its own destroy).
+    fn check_take_while_borrowed(&mut self, addr: ValueId, inst: Option<u32>) {
+        let blocking: Vec<ValueId> = self
+            .borrows
+            .iter()
+            .filter(|(_, info)| info.source == addr)
+            .map(|(borrow_val, _)| *borrow_val)
+            .collect();
+        if blocking.is_empty() {
+            return;
+        }
+        if let Some(ref_val) = self.live_ref_rooted_at(addr) {
+            self.err_consume_while_ref_live(addr, inst, ref_val);
+        } else {
+            self.err_val(
+                inst,
+                addr,
+                format!(
+                    "cannot take from {:?}: active borrow(s) {:?} depend on it",
+                    addr, blocking,
+                ),
+            );
+        }
+    }
+
     /// Find a live reference (@guaranteed call result) whose borrow-source
     /// chain reaches `v`. Walks `borrows` from the ref's immediate source;
     /// the chain is acyclic (each borrow's source precedes it), but the walk
@@ -759,6 +789,13 @@ impl<'a> BlockVerifier<'a> {
                 result: _, address, ..
             } => {
                 self.addr_require_init(*address, idx);
+                // Taking the contents while a borrow into the slot is live
+                // leaves the borrow dangling — the slot-form of the
+                // consume-while-borrowed conflict (`let`/`var` locals live
+                // at addresses, so `eat(b)` takes b's slot while `b.peek()`
+                // is still borrowed from it). Attributed to a live `&T`
+                // chaining to the slot (E498); otherwise a lowering bug.
+                self.check_take_while_borrowed(*address, idx);
                 self.addr_set_uninit(*address, idx);
                 if let Some(r) = kind.result()
                     && self.body.value(r).ownership == Ownership::Owned

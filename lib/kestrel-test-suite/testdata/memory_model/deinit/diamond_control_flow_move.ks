@@ -1,7 +1,6 @@
 // test: execution
 // stdlib: true
 // expect-exit: 0
-// skip: conditionally-moved `let` drops at if-merge, not lexical scope exit (drop-timing); folded into non-Copyable-let-via-address WIP
 
 module Test
 

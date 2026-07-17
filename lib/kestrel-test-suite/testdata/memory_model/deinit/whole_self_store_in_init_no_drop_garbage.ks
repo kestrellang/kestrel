@@ -26,7 +26,7 @@ func main() -> lang.i64 {
     let cs = original.toCString();
     let back = String(from: cs);              // self = fromBytesUnchecked(...)
     if back != "Lovelace" { return 1; }       // USE the value (reads heap bytes)
-    if back.byteCount != 8 { return 2; }
+    if back.bytes.count != 8 { return 2; }
 
     // stress the heap: repeated round-trips must each yield a valid String
     var i: Int64 = 0;

@@ -357,6 +357,8 @@ impl OssaBodyCtx<'_, '_> {
             // SavedState mem::replace above).
             let body_val = self.prepare_return_value(body_val);
             self.destroy_scope_except(&[body_val]);
+            // A guarded destroy in the exit renames threaded values.
+            let body_val = self.resolve_value(body_val);
             self.emit_ret(body_val);
         }
 
@@ -536,8 +538,25 @@ impl OssaBodyCtx<'_, '_> {
             let one = self.emit_literal(Immediate::i64(1));
             let addr = self.emit_op1(Op::StackAlloc(cap_ty), one, ptr_ty);
             if self.is_var_local(&root) {
-                let value = self.emit_copy_addr(mir_val, cap_ty);
-                self.emit_store_init(addr, value);
+                // A non-Copyable local in an @owned slot (every let/var,
+                // #107) is MOVED into the env — the frontend records the
+                // capture as a move of the outer local (E500 on later use).
+                // Take + mark the slot empty; a bitwise `copy_addr` would
+                // leave the slot's scope-exit destroy live and double-free.
+                // A @guaranteed slot (`mutating self`) or a protocol-Self
+                // capture still snapshots the bits.
+                let slot_owned = self.body.value(mir_val).ownership == Ownership::Owned;
+                if slot_owned && self.is_non_copyable(cap_ty) {
+                    let value = self.emit_take(mir_val, cap_ty);
+                    self.set_var_init(root, super::VarInit::DefUninit);
+                    if let Some(flag) = self.var_flag(root) {
+                        self.store_drop_flag(flag, false);
+                    }
+                    self.emit_store_init(addr, value);
+                } else {
+                    let value = self.emit_copy_addr(mir_val, cap_ty);
+                    self.emit_store_init(addr, value);
+                }
             } else if self.body.value(mir_val).ownership == Ownership::Owned {
                 let value = self.emit_move_value(mir_val);
                 self.emit_store_init(addr, value);

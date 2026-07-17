@@ -8,7 +8,7 @@ func main() -> lang.i64 {
     // Verify extend Str methods work on StringSlice
     let s: std.text.String = "hello";
     let slice = s.asSlice();
-    if slice.byteCount != 5 { return 99 }
+    if slice.bytes.count != 5 { return 99 }
 
     // ---- SplitView via Str protocol (separator) ----
     let csv: std.text.String = "a,b,c";

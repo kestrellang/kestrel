@@ -7,9 +7,9 @@
 //! name and shows just `label: Type` (or just `Type` for unlabeled).
 
 use kestrel_ast_builder::{
-    AstParam, AstType, Callable, Computed, CstNode, ExtensionTarget, FieldMutability, IsIndirect,
-    MutatingAccessor, Name, NodeKind, ReceiverKind, Static, TypeAnnotation, TypeParams, Vis,
-    WhereClause, WhereConstraint,
+    AstParam, AstType, Callable, Computed, ConformanceItem, Conformances, CstNode,
+    ExtensionTarget, FieldMutability, IsIndirect, MutatingAccessor, Name, NodeKind, ReceiverKind,
+    Static, TypeAnnotation, TypeParams, Vis, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxKind;
@@ -174,11 +174,34 @@ fn build_type_decl(world: &World, entity: Entity, keyword: &str) -> String {
     s.push(' ');
     s.push_str(&name_of(world, entity));
     s.push_str(&type_params_str(world, entity));
+    s.push_str(&negative_conformances_str(world, entity));
     s.push_str(&where_clause_str(world, entity));
     if keyword == "struct" {
         s.push_str(" { /* private fields */ }");
     }
     s
+}
+
+/// Render a type's negative conformances (`: not Copyable`) inline in the
+/// header. Positive conformances are surfaced as `Implements` member groups,
+/// but negative ones have no group to land in and change the type's
+/// copy/usage semantics, so the header is the only place they can appear.
+fn negative_conformances_str(world: &World, entity: Entity) -> String {
+    let Some(conformances) = world.get::<Conformances>(entity) else {
+        return String::new();
+    };
+    let parts: Vec<String> = conformances
+        .0
+        .iter()
+        .filter_map(|item| match item {
+            ConformanceItem::Negative(t, _) => Some(format!("not {}", ty(t))),
+            ConformanceItem::Positive(..) => None,
+        })
+        .collect();
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!(": {}", parts.join(", "))
 }
 
 fn build_enum(world: &World, entity: Entity) -> String {
@@ -190,6 +213,7 @@ fn build_enum(world: &World, entity: Entity) -> String {
     s.push_str("enum ");
     s.push_str(&name_of(world, entity));
     s.push_str(&type_params_str(world, entity));
+    s.push_str(&negative_conformances_str(world, entity));
     s.push_str(&where_clause_str(world, entity));
     s
 }

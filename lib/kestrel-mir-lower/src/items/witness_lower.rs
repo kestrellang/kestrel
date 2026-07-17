@@ -832,7 +832,7 @@ fn bind_associated_types(
         if source != type_entity
             && let Some(ty) = find_associated_type(ctx, source, member.entity)
         {
-            let ty = replace_self_type(ctx, ty, impl_ty, protocol);
+            let ty = replace_self_type(ctx, ty, impl_ty, protocol, source);
             witness.add_type_binding(member.entity, ty);
         }
     }
@@ -864,8 +864,26 @@ pub(crate) fn find_associated_type(
 /// Replace the protocol's Self type with the implementing type in a witness binding.
 ///
 /// Protocol Self is `TypeParam(protocol_entity)`. We substitute it with `impl_ty`.
-fn replace_self_type(ctx: &mut LowerCtx, ty: TyId, impl_ty: TyId, protocol: Entity) -> TyId {
+/// In a protocol-target blanket extension (`extend Iterator: Iterable`), bare `Self`
+/// in the extension body lowers to a TypeParam keyed on the extension's *target*
+/// protocol, not the protocol being witnessed — substitute that key too (#132).
+fn replace_self_type(
+    ctx: &mut LowerCtx,
+    ty: TyId,
+    impl_ty: TyId,
+    protocol: Entity,
+    source: Entity,
+) -> TyId {
     let mut subst = SubstMap::new();
     subst.type_params.insert(protocol, impl_ty);
+    if matches!(ctx.world.get::<NodeKind>(source), Some(NodeKind::Extension))
+        && let Some(target) = ctx.query.query(ExtensionTargetEntity {
+            extension: source,
+            root: ctx.root,
+        })
+        && matches!(ctx.world.get::<NodeKind>(target), Some(NodeKind::Protocol))
+    {
+        subst.type_params.insert(target, impl_ty);
+    }
     substitute(&mut ctx.module.ty_arena, ty, &subst)
 }

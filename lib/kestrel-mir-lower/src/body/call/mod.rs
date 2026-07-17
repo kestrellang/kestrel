@@ -331,6 +331,8 @@ impl OssaBodyCtx<'_, '_> {
         let ret_val = self.emit_init_partial_drops(ret_val);
         self.drain_deferred_borrows();
         self.destroy_scopes_to_depth(0, &[ret_val]);
+        // A guarded destroy in the exit renames threaded values.
+        let ret_val = self.resolve_value(ret_val);
         self.emit_ret(ret_val);
 
         // -- Success: continue the body with `result` (.Some/.Ok). --

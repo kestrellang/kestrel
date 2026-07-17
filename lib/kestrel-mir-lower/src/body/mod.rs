@@ -398,6 +398,15 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     pub(crate) default_arg_subst: Option<kestrel_mir::SubstMap>,
 }
 
+/// Receiver of an accessor-backed member expression (`accessor_member_prelude`).
+/// Usually a real HIR expression; a dotted subscript on a stored field
+/// (`x.field(i)`, HIR MethodCall) has no expression for `x.field` itself, so
+/// the field is carried as base + name and its place fabricated on demand (#129).
+pub(crate) enum AccessorReceiver {
+    Expr(HirExprId),
+    FieldOf { base: HirExprId, name: String },
+}
+
 /// One deferred get→op→set writeback (see `pending_writebacks`).
 pub(crate) struct PendingWriteback {
     /// The member's setter child (concrete) — witness-dispatched when the
@@ -683,12 +692,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     self.drain_deferred_borrows();
                     let prev = self.current_span.replace(tail_span);
                     self.destroy_scopes_to_depth(0, &[value]);
+                    // A guarded destroy in the exit renames threaded values.
+                    let value = self.resolve_value(value);
                     self.set_terminator(TerminatorKind::Return(value));
                     self.current_span = prev;
                 }
             } else {
                 let unit = self.emit_literal(Immediate::unit());
                 self.destroy_scopes_to_depth(0, &[unit]);
+                let unit = self.resolve_value(unit);
                 self.set_terminator(TerminatorKind::Return(unit));
             }
         }
@@ -1096,10 +1108,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         flag
     }
 
-    /// Allocate a drop flag for a non-Copyable var (which may be conditionally
-    /// moved); `None` for Copyable vars (never moved, never need a flag).
+    /// Allocate a drop flag for a var that may be conditionally moved:
+    /// non-Copyable, or mono-dependent (a bare type param / conditionally-
+    /// Copyable container — the consuming read path takes those out of the
+    /// slot too, and the scope-exit guarded destroy needs the flag). `None`
+    /// for definitely-Copyable vars (never moved, never need a flag).
     pub fn maybe_alloc_var_flag(&mut self, ty: TyId) -> Option<ValueId> {
-        if self.is_non_copyable(ty) {
+        if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
             Some(self.alloc_var_flag())
         } else {
             None
@@ -1467,7 +1482,69 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.scope_stack.pop();
     }
 
+    /// Emit `if flag { destroy_addr(slot) }` for every conditionally-moved
+    /// (`MaybeUninit`, flagged) var slot in scopes `[target_depth..]`,
+    /// innermost first. This is the scope-exit half of the drop-flag design
+    /// (#107): a slot moved out on only some paths can't be destroyed
+    /// statically — before this, terminating exits destroyed it
+    /// unconditionally (double-free on the moved path) and fallthrough exits
+    /// skipped it (leak on the kept path), so nothing can depend on the old
+    /// behavior. Runs before the callers' destroy snapshots: each diamond
+    /// threads the still-live owned set through block params, renaming it.
+    /// Scope entries are NOT marked `DefUninit` here — exits don't pop
+    /// scopes, and sibling paths still need the pre-exit state.
+    fn emit_guarded_destroys_from_depth(&mut self, target_depth: usize) {
+        if self.is_terminated() {
+            return;
+        }
+        let pending: Vec<(ValueId, ValueId, TyId)> = self.scope_stack[target_depth..]
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.entries.iter().rev())
+            .filter_map(|e| match e {
+                ScopeEntry::Var {
+                    init: VarInit::MaybeUninit,
+                    flag: Some(flag),
+                    addr,
+                    ty,
+                    borrowed: false,
+                    ..
+                } => Some((*flag, *addr, *ty)),
+                _ => None,
+            })
+            .collect();
+        for (flag, addr, ty) in pending {
+            // Flag and slot are read through their original pointers — valid
+            // in any later block (see `alloc_var_flag`'s design note).
+            self.emit_guarded_destroy(flag, addr, ty, &[]);
+        }
+    }
+
     pub fn destroy_scope_except(&mut self, keep: &[ValueId]) {
+        // End borrows first — they may reference values we're about to
+        // destroy — and drop their entries so the guarded-destroy diamonds
+        // below don't thread an already-ended borrow through block params.
+        if let Some(scope) = self.scope_stack.last_mut() {
+            let borrows: Vec<ValueId> = scope
+                .entries
+                .iter()
+                .rev()
+                .filter_map(|e| match e {
+                    ScopeEntry::Borrow(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            scope.entries.retain(|e| !matches!(e, ScopeEntry::Borrow(_)));
+            for v in borrows {
+                self.push_inst(InstKind::EndBorrow { operand: v });
+            }
+        }
+        // Flag-guarded destroys for this scope's conditionally-moved slots.
+        // Must precede the snapshot below: each diamond threads the live
+        // owned set through block params, renaming it.
+        let last_frame = self.scope_stack.len().saturating_sub(1);
+        self.emit_guarded_destroys_from_depth(last_frame);
+        let keep: Vec<ValueId> = keep.iter().map(|k| self.resolve_value(*k)).collect();
         if let Some(scope) = self.scope_stack.last_mut() {
             // Snapshot in reverse declaration order before mutating the scope, so
             // owned temporaries and scope-local vars are dropped innermost-first.
@@ -1477,12 +1554,6 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 ScopeEntry::Var { .. } => true,
                 ScopeEntry::Borrow(_) => false,
             });
-            // End borrows first — they may reference values we're about to destroy.
-            for entry in &entries {
-                if let ScopeEntry::Borrow(v) = entry {
-                    self.push_inst(InstKind::EndBorrow { operand: *v });
-                }
-            }
             for entry in &entries {
                 match entry {
                     ScopeEntry::Owned(v) if !keep.contains(v) => {
@@ -1493,10 +1564,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     // this is the only cleanup the normal arm-exit / loop-back-edge
                     // fallthrough runs (terminating exits go through
                     // `destroy_scopes_to_depth`). DefInit → drop. DefUninit → moved
-                    // out, nothing to drop. MaybeUninit (conditional move) → skip:
-                    // an unconditional DestroyAddr would double-free on the moved
-                    // path; the flag-guarded destroy is deferred, so this stays a
-                    // possible leak — never a double-free.
+                    // out, nothing to drop. MaybeUninit (conditional move) → its
+                    // flag-guarded destroy was emitted above (flagless slots stay
+                    // a possible leak — never a double-free).
                     ScopeEntry::Var {
                         init: VarInit::DefInit,
                         addr,
@@ -1516,32 +1586,46 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn destroy_scopes_to_depth(&mut self, target_depth: usize, keep: &[ValueId]) {
+        // End borrows first — they may reference values we're about to
+        // destroy. `emit_end_borrow` also removes the scope entry, so the
+        // terminator that follows every destroy site doesn't end the same
+        // borrow a second time (and the guarded-destroy diamonds below don't
+        // thread an already-ended borrow). References are deliberately left
+        // tracked: `set_terminator` owns their endgame (the E497 check on
+        // inside-fn jumps and the ret_borrow return carve-out) — EXCEPT named
+        // binding borrows at a FUNCTION exit (depth 0): their lexical scope
+        // ends right here, and the end must precede the destroys below (the
+        // borrowed var slot dies in the same exit; a slot consume under an
+        // open borrow is the verify error the machinery exists to catch).
+        // `keep` exempts a returned borrow (ret_borrow of the binding).
+        let borrow_entries: Vec<ValueId> = self.scope_stack[target_depth..]
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.entries.iter().rev())
+            .filter_map(|e| match e {
+                ScopeEntry::Borrow(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        for v in borrow_entries {
+            let binding_at_exit = target_depth == 0
+                && self.ref_binding_vals.contains_key(&v)
+                && !keep.contains(&v);
+            if !self.ref_results.contains(&v) || binding_at_exit {
+                self.emit_end_borrow(v);
+            }
+        }
+        // Flag-guarded destroys for conditionally-moved slots in the exited
+        // scopes. Must precede the snapshot below: each diamond threads the
+        // live owned set through block params, renaming it — the snapshot
+        // has to read the post-diamond names.
+        self.emit_guarded_destroys_from_depth(target_depth);
+        let keep: Vec<ValueId> = keep.iter().map(|k| self.resolve_value(*k)).collect();
         let entries: Vec<ScopeEntry> = self.scope_stack[target_depth..]
             .iter()
             .rev()
             .flat_map(|scope| scope.entries.iter().rev().cloned())
             .collect();
-        // End borrows first — they may reference values we're about to
-        // destroy. `emit_end_borrow` also removes the scope entry, so the
-        // terminator that follows every destroy site doesn't end the same
-        // borrow a second time. References are deliberately left tracked:
-        // `set_terminator` owns their endgame (the E497 check on inside-fn
-        // jumps and the ret_borrow return carve-out) — EXCEPT named binding
-        // borrows at a FUNCTION exit (depth 0): their lexical scope ends
-        // right here, and the end must precede the destroys below (the
-        // borrowed var slot dies in the same exit; a slot consume under an
-        // open borrow is the verify error the machinery exists to catch).
-        // `keep` exempts a returned borrow (ret_borrow of the binding).
-        for entry in &entries {
-            if let ScopeEntry::Borrow(v) = entry {
-                let binding_at_exit = target_depth == 0
-                    && self.ref_binding_vals.contains_key(v)
-                    && !keep.contains(v);
-                if !self.ref_results.contains(v) || binding_at_exit {
-                    self.emit_end_borrow(*v);
-                }
-            }
-        }
         for entry in &entries {
             match entry {
                 ScopeEntry::Owned(v) if !keep.contains(v) => {
@@ -1549,9 +1633,15 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 },
                 // DefUninit: the slot was moved out (Swift `load [take]`) and owns
                 // nothing — emitting DestroyAddr would double-free. Skip it.
+                // MaybeUninit: the flag-guarded destroy was emitted above
+                // (flagless slots stay a possible leak — never a double-free).
                 // borrowed: inout self/arg — the caller owns the storage. Skip it.
                 ScopeEntry::Var {
                     init: VarInit::DefUninit,
+                    ..
+                }
+                | ScopeEntry::Var {
+                    init: VarInit::MaybeUninit,
                     ..
                 }
                 | ScopeEntry::Var { borrowed: true, .. } => {},
@@ -1765,6 +1855,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let mut keep = vec![result];
         keep.extend(self.tracker.values());
         self.destroy_scope_except(&keep);
+        // A guarded destroy in the arm exit renames threaded values; the
+        // tracker was rebound in place, but `result` is ours to chase.
+        let result = self.resolve_value(result);
         let block = self.current_block.expect("arm has a current block");
         Some(ArmExit {
             block,
@@ -2585,12 +2678,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// the taint through memory. Param-rooted stores keep slots (and their
     /// loads) returnable: the cursor-in-a-var flagship is unaffected.
     fn taint_slot_from_store(&mut self, address: ValueId, value: ValueId) {
-        let (v_root, v_ty) = {
-            let d = self.body.value(value);
-            (d.root, d.ty)
-        };
-        if v_root == RootProvenance::Local(value) || !self.ctx.module.ty_arena.contains_ref(v_ty)
-        {
+        let v_root = self.body.value(value).root;
+        // Any non-self root is provenance worth keeping: ref-bearing values
+        // (the original G1 case) AND stack-env closures (root = join of
+        // captures, #174). With lets living at addresses (#107), a tainted
+        // value routinely round-trips through a slot — dropping the root
+        // here would launder the escape (`let f = { closure }; f`).
+        if v_root == RootProvenance::Local(value) {
             return;
         }
         let slot_root = self.body.value(address).root;
@@ -2603,13 +2697,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.stamp_root(address, new_root);
     }
 
-    /// The load half of the G1 closure: a load of a ref-bearing type from
-    /// a tainted slot carries the slot's root.
-    fn inherit_slot_taint(&mut self, result: ValueId, address: ValueId, ty: TyId) {
+    /// The load half of the G1 closure: a load/take from a tainted slot
+    /// carries the slot's root. Not gated on `contains_ref` — the slot only
+    /// carries a non-self root when `taint_slot_from_store` stamped one
+    /// (refs AND stack-env closures), and both must survive the round-trip.
+    fn inherit_slot_taint(&mut self, result: ValueId, address: ValueId, _ty: TyId) {
         let slot_root = self.body.value(address).root;
-        if slot_root != RootProvenance::Local(address)
-            && self.ctx.module.ty_arena.contains_ref(ty)
-        {
+        if slot_root != RootProvenance::Local(address) {
             self.stamp_root(result, slot_root);
         }
     }
@@ -3465,21 +3559,22 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// `mutating ref` accessor (get/set members keep today's behavior until
     /// the writeback fallback lands).
     fn try_lower_accessor_place_mut(&mut self, expr_id: HirExprId) -> Option<CallArg> {
-        let (receiver_expr, index_args, member, is_static) =
-            self.accessor_member_prelude(expr_id)?;
+        let (receiver, index_args, member, is_static) = self.accessor_member_prelude(expr_id)?;
         let pointee_ty = self.resolve_expr_type(expr_id);
 
         if let Some(accessor) = self.ctx.find_ref_accessor_child(member, true) {
             self.ctx.register_name(accessor);
             let mut call_args: Vec<CallArg> = Vec::new();
             let type_args = if is_static {
+                let AccessorReceiver::Expr(receiver_expr) = receiver else {
+                    return None;
+                };
                 let self_type = self.type_from_type_ref(receiver_expr);
                 self.prepend_receiver_type_args(self_type, vec![])
             } else {
-                let receiver_ty = self.resolve_expr_type(receiver_expr);
+                let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(&receiver)?;
                 let ta = self.resolve_type_args(expr_id);
-                call_args
-                    .push(self.prepare_call_arg_for_expr(receiver_expr, ParamConvention::MutBorrow));
+                call_args.push(recv_arg);
                 self.prepend_receiver_type_args(receiver_ty, ta)
             };
             for a in &index_args {
@@ -3500,7 +3595,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         // emitter (or the statement-boundary drain) writes the slot back
         // through `set`. The slot-borrow IS the by-reference receiver arg.
         let slot_addr =
-            self.fabricate_setter_writeback_slot(expr_id, receiver_expr, &index_args, member)?;
+            self.fabricate_setter_writeback_slot(expr_id, &receiver, &index_args, member)?;
         let slot_borrow = self.emit_begin_mut_borrow_addr(slot_addr, pointee_ty);
         Some(CallArg {
             value: slot_borrow,
@@ -3520,7 +3615,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     fn fabricate_setter_writeback_slot(
         &mut self,
         expr_id: HirExprId,
-        receiver_expr: HirExprId,
+        receiver: &AccessorReceiver,
         index_args: &[kestrel_hir::body::HirCallArg],
         member: kestrel_hecs::Entity,
     ) -> Option<ValueId> {
@@ -3563,15 +3658,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         }
         self.ctx.register_name(setter);
 
-        let receiver_ty = self.resolve_expr_type(receiver_expr);
-        let type_args = self.resolve_type_args(expr_id);
         // Receiver place evaluated ONCE; the get call below uses a
         // sub-borrow so the place survives the call (emit_call_inner ends
         // arg borrows after non-ret_borrow calls), and the setter consumes
         // the place itself as its MutBorrow receiver at drain time.
-        let recv_place = self
-            .prepare_call_arg_for_expr(receiver_expr, ParamConvention::MutBorrow)
-            .value;
+        let (recv_arg, receiver_ty) = self.accessor_receiver_mut_arg(receiver)?;
+        let recv_place = recv_arg.value;
+        let type_args = self.resolve_type_args(expr_id);
         let index_vals: Vec<ValueId> = index_args
             .iter()
             .map(|a| self.lower_expr(a.value))
@@ -3638,12 +3731,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         field_idx: FieldIdx,
         rhs: ValueId,
     ) -> bool {
-        let Some((receiver_expr, index_args, member, _)) = self.accessor_member_prelude(base)
-        else {
+        let Some((receiver, index_args, member, _)) = self.accessor_member_prelude(base) else {
             return false;
         };
         let Some(slot_addr) =
-            self.fabricate_setter_writeback_slot(base, receiver_expr, &index_args, member)
+            self.fabricate_setter_writeback_slot(base, &receiver, &index_args, member)
         else {
             return false;
         };
@@ -3664,14 +3756,39 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     fn accessor_member_prelude(
         &mut self,
         expr_id: HirExprId,
-    ) -> Option<(HirExprId, Vec<kestrel_hir::body::HirCallArg>, kestrel_hecs::Entity, bool)> {
+    ) -> Option<(
+        AccessorReceiver,
+        Vec<kestrel_hir::body::HirCallArg>,
+        kestrel_hecs::Entity,
+        bool,
+    )> {
         let expr = self.hir.exprs[expr_id].clone();
-        let (receiver_expr, index_args): (HirExprId, Vec<kestrel_hir::body::HirCallArg>) = match &expr
-        {
-            HirExpr::Call { callee, args, .. } => (*callee, args.clone()),
-            HirExpr::Field { base, .. } => (*base, Vec::new()),
-            _ => return None,
-        };
+        let (receiver, index_args): (AccessorReceiver, Vec<kestrel_hir::body::HirCallArg>) =
+            match &expr {
+                HirExpr::Call { callee, args, .. } => {
+                    (AccessorReceiver::Expr(*callee), args.clone())
+                },
+                // Dotted subscript on a stored field (`x.field(i)`) parses as
+                // MethodCall; the NodeKind gate below keeps real method calls
+                // out, and the subscript's receiver is the FIELD, which has no
+                // HirExprId of its own (#129).
+                HirExpr::MethodCall {
+                    receiver, method, args, ..
+                } => {
+                    let kestrel_hir::body::HirName::Name(name) = method else {
+                        return None;
+                    };
+                    (
+                        AccessorReceiver::FieldOf {
+                            base: *receiver,
+                            name: name.clone(),
+                        },
+                        args.clone(),
+                    )
+                },
+                HirExpr::Field { base, .. } => (AccessorReceiver::Expr(*base), Vec::new()),
+                _ => return None,
+            };
         let member = self
             .typed
             .as_ref()
@@ -3688,7 +3805,61 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .world
             .get::<kestrel_ast_builder::Static>(member)
             .is_some();
-        Some((receiver_expr, index_args, member, is_static))
+        Some((receiver, index_args, member, is_static))
+    }
+
+    /// Mut-borrow receiver arg + receiver type for an accessor prelude.
+    /// `FieldOf` fabricates the stored field's address from the base's var
+    /// address (mirrors `try_lower_method_call_setter`'s field-addr path);
+    /// None when the base has no address or the member isn't a stored field —
+    /// callers fall back to prior behavior.
+    fn accessor_receiver_mut_arg(&mut self, recv: &AccessorReceiver) -> Option<(CallArg, TyId)> {
+        match recv {
+            AccessorReceiver::Expr(e) => {
+                let ty = self.resolve_expr_type(*e);
+                Some((
+                    self.prepare_call_arg_for_expr(*e, ParamConvention::MutBorrow),
+                    ty,
+                ))
+            },
+            AccessorReceiver::FieldOf { base, name } => {
+                let base_ty = self.resolve_expr_type(*base);
+                let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(base_ty)
+                else {
+                    return None;
+                };
+                let (entity, type_args) = (*entity, type_args.clone());
+                let field_idx = self.ctx.resolve_field_idx(entity, name)?;
+                let mut field_ty = self
+                    .ctx
+                    .module
+                    .structs
+                    .get(&entity)
+                    .and_then(|s| s.fields.get(field_idx.index()))
+                    .map(|f| f.ty)?;
+                // Substitute struct type params → the base's concrete type args.
+                if let Some(sdef) = self.ctx.module.structs.get(&entity) {
+                    let mut subst = kestrel_mir::SubstMap::new();
+                    for (tp, &arg) in sdef.type_params.iter().zip(type_args.iter()) {
+                        subst.type_params.insert(tp.entity, arg);
+                    }
+                    field_ty =
+                        kestrel_mir::substitute(&mut self.ctx.module.ty_arena, field_ty, &subst);
+                }
+                // Field addr through the base's var address (not a shallow
+                // copy) so the writeback's setter mutates the real storage.
+                let recv_addr = self.try_var_addr(*base)?;
+                let field_addr = self.emit_field_addr(recv_addr, base_ty, field_idx);
+                let borrow = self.emit_begin_mut_borrow_addr(field_addr, field_ty);
+                Some((
+                    CallArg {
+                        value: borrow,
+                        convention: ParamConvention::MutBorrow,
+                    },
+                    field_ty,
+                ))
+            },
+        }
     }
 
     /// Drain writebacks pushed at or above `watermark`: take the mutated
