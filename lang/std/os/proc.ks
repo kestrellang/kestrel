@@ -125,7 +125,7 @@ public func exit(code: Int32) {
 /// returning. Local helper rather than a `String.trimmedEnd`
 /// dependency to keep `std.os.proc` light.
 func trimEnd(s: String) -> String {
-    var end = s.byteCount;
+    var end = s.bytes.count;
     while end > 0 {
         let b = s.bytes(unchecked: end - 1);
         if b == 32 or b == 9 or b == 10 or b == 13 {

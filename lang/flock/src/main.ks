@@ -256,7 +256,7 @@ func handleInit(lib lib: Bool) -> lang.i32 {
 func sanitizeModuleName(name name: String) -> String {
     var result = String();
     var i: Int64 = 0;
-    while i < name.byteCount {
+    while i < name.bytes.count {
         let b = name.bytes(unchecked: i);
         let ok = (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or (b >= 48 and b <= 57) or b == 95;
         if ok {
@@ -266,7 +266,7 @@ func sanitizeModuleName(name name: String) -> String {
         }
         i = i + 1
     }
-    if result.byteCount == 0 {
+    if result.bytes.count == 0 {
         result.append("pkg")
     }
     result
@@ -322,7 +322,7 @@ func handlePublish() -> lang.i32 {
         .Some(o) => org = o,
         .None => {}
     }
-    if org.byteCount == 0 {
+    if org.bytes.count == 0 {
         let _ = eprintln("No org specified. Add `org = \"myorg\"` under [package] in flock.toml, or set FLOCK_ORG.");
         return 1
     }
@@ -336,7 +336,7 @@ func handlePublish() -> lang.i32 {
     }
 
     // Fall back to FLOCK_TOKEN env var
-    if token.byteCount == 0 {
+    if token.bytes.count == 0 {
         match getenv("FLOCK_TOKEN") {
             .Some(t) => token = t,
             .None => {
@@ -494,10 +494,10 @@ func resolveInstallRoot(target target: Optional[String]) -> Result[ResolvedPacka
             var name = t.clone();
             var verOpt: Optional[String] = .None;
             var i: Int64 = 0;
-            while i < t.byteCount {
+            while i < t.bytes.count {
                 if t.bytes(unchecked: i) == 64 { // '@'
                     name = t.asSlice().subslice(from: 0, to: i).toOwned();
-                    verOpt = .Some(t.asSlice().subslice(from: i + 1, to: t.byteCount).toOwned());
+                    verOpt = .Some(t.asSlice().subslice(from: i + 1, to: t.bytes.count).toOwned());
                     break
                 }
                 i = i + 1
@@ -735,9 +735,9 @@ func collectBuild(root root: ResolvedPackage) -> Result[ResolvedBuild, FlockErro
                     let flag = flags(unchecked: j);
                     // Parse -l, -L, and -framework flags from command output
                     if flag.starts(with: "-l") {
-                        allLinkLibs.append(flag.asSlice().subslice(from: 2, to: flag.byteCount).toOwned())
+                        allLinkLibs.append(flag.asSlice().subslice(from: 2, to: flag.bytes.count).toOwned())
                     } else if flag.starts(with: "-L") {
-                        allLinkPaths.append(flag.asSlice().subslice(from: 2, to: flag.byteCount).toOwned())
+                        allLinkPaths.append(flag.asSlice().subslice(from: 2, to: flag.bytes.count).toOwned())
                     } else if flag.starts(with: "-framework") {
                         // -framework is usually followed by the name as next arg
                         // but sometimes it's -framework<Name>
@@ -902,7 +902,7 @@ func printPathHintIfNeeded(binDir binDir: String) {
 func pathContains(path path: String, dir dir: String) -> Bool {
     var start: Int64 = 0;
     var i: Int64 = 0;
-    let len = path.byteCount;
+    let len = path.bytes.count;
     while i <= len {
         if i == len or path.bytes(unchecked: i) == 58 { // ':'
             if i > start {
@@ -935,7 +935,7 @@ func splitWhitespace(s: String) -> Array[String] {
     var result = Array[String]();
     var start: Int64 = -1;
     var i: Int64 = 0;
-    let len = s.byteCount;
+    let len = s.bytes.count;
 
     while i < len {
         let b = s.bytes(unchecked: i);
@@ -963,7 +963,7 @@ func splitWhitespace(s: String) -> Array[String] {
 /// Quotes a shell argument if it contains spaces.
 func quoteArg(s: String) -> String {
     var i: Int64 = 0;
-    while i < s.byteCount {
+    while i < s.bytes.count {
         if s.bytes(unchecked: i) == 32 {
             var q = String(); q.append("\""); q.append(s); q.append("\"");
             return q
@@ -980,7 +980,7 @@ func isRegistryDep(name name: String) -> Bool {
 
 /// Extracts the last component of a path.
 func lastPathComponent(path: String) -> String {
-    let len = path.byteCount;
+    let len = path.bytes.count;
     // Skip trailing slash
     var end = len;
     if end > 0 and path.bytes(unchecked: end - 1) == 47 {
@@ -1001,7 +1001,7 @@ func lastPathComponent(path: String) -> String {
 
 /// Trims leading and trailing whitespace (spaces, tabs, newlines) from a string.
 func trimWhitespace(s: String) -> String {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var start: Int64 = 0;
     while start < len {
         let b = s.bytes(unchecked: start);

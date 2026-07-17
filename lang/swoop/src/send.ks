@@ -237,7 +237,7 @@ func readResponse[S](stream: S) -> Result[Response, SwoopError] where S: Readabl
 /// Sends all bytes of a string over a stream.
 func sendAllString[S](stream: S, s: String) -> Result[(), IoError] where S: Writable {
     var mutStream = stream;
-    if s.byteCount == 0 {
+    if s.bytes.count == 0 {
         return .Ok(())
     }
     sendAllBytes(mutStream, stringToBytes(s))

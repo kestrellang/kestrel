@@ -3,7 +3,7 @@
 ## struct `File`
 
 ```kestrel
-public struct File { /* private fields */ }
+public struct File: not Copyable { /* private fields */ }
 ```
 
 RAII-owned POSIX file handle.

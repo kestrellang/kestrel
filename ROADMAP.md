@@ -76,11 +76,18 @@ Parser rewrite, symbol-mangling refactor, the deferred-resolution inference engi
 
 # Preview 2: Types & Expressiveness (0.16 → 0.23)
 
-This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), conditional conformance, and the class runtime. Each version is a 3-week train cycle.
+This preview rounds out the type system surface — opaque and existential types, attribute-driven derives, expression sugar that's been deferred, the property model (lazy / observed / `mutating get`), conditional conformance, and the class runtime. Each version is a 3-week train cycle. 0.16 has shipped; development is on 0.17.
 
-## 0.16 — Opaque types & language gaps
+## 0.16 — Opaque types & language gaps *(shipped)*
 
-`some Protocol` opaque return types, plus the long-tail of small language gaps that have been collecting: computed properties allowed in protocol extensions, name-collision rules between methods and computed properties, keywords usable as labels, `some` patterns, null patterns, chained guards, normal guard, `Self` constructors, prefix/suffix half-open ranges (`..n`, `n..`), and optional / throwing constructors.
+Shipped `some Protocol` opaque return types, plus the long-tail of small language gaps that had been collecting: computed properties allowed in protocol extensions, name-collision rules between methods and computed properties, keywords usable as labels, `some` patterns, null patterns, chained guards, normal guard, `Self` constructors, prefix/suffix half-open ranges (`..n`, `n..`), and optional / throwing constructors.
+
+Beyond the original scope, this cycle also landed:
+
+- **References (`&T`)** — borrowed views of a value with compile-time *escape checking* (provenance-based; no lifetime annotations, and none planned). Includes reference conformances (`extend &T: P`), `Optional[&T]` comparison, and reference-yielding iteration. Shipped 2026-06-18.
+- **Explicit entry points** — `@main` replaces name-based `main`; entry functions may return `ExitCode`, integer types, `()`, `!`, or a throwing `Result` via the `Exitable` protocol.
+- **A second backend** — LLVM 18 codegen, selectable with `kestrel build --backend llvm` (Cranelift remains the default).
+- **Optimized builds & tool installs** — `kestrel build -O 0|1|2`, and `flock install`, which builds optimized binaries into `~/.flock/bin` by default.
 
 ## 0.17 — Boxing & existentials
 
@@ -134,7 +141,7 @@ The rest of the preview is shaped by real-world usage: language features informe
 
 # Release Candidate
 
-LLVM backend, WebAssembly target, `const` compile-time evaluation, `unsafe` blocks and escape hatches, and standard-library stabilization.
+WebAssembly target, `const` compile-time evaluation, `unsafe` blocks and escape hatches, and standard-library stabilization. The LLVM backend itself already exists (shipped alongside 0.16, selectable via `--backend llvm`); what remains here is hardening it to full parity with Cranelift and deciding whether it becomes the default for optimized builds.
 
 ---
 

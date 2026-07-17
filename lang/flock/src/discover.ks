@@ -58,7 +58,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
             } else {
                 let full = joinPath(base: binDir, rel: entry);
                 if not isDirectory(full) {
-                    let stem = entry.asSlice().subslice(from: 0, to: entry.byteCount - 3).toOwned();
+                    let stem = entry.asSlice().subslice(from: 0, to: entry.bytes.count - 3).toOwned();
                     result.append(BinTarget(name: stem, entry: full))
                 }
             }

@@ -188,7 +188,7 @@ func writeIndent(mutating buf: String, count: Int64) {
 func emitString(s: String, mutating buf: String) {
     buf.append("\"");
     var i: Int64 = 0;
-    let len = s.byteCount;
+    let len = s.bytes.count;
     while i < len {
         let b = s.bytes(unchecked: i);
         if b == 34 {
@@ -237,7 +237,7 @@ func emitFloat(f: Float64, mutating buf: String) {
     // If not, append ".0" to distinguish from integers
     var hasDot = false;
     var i: Int64 = 0;
-    let len = s.byteCount;
+    let len = s.bytes.count;
     while i < len {
         let b = s.bytes(unchecked: i);
         let dot: UInt8 = 46;

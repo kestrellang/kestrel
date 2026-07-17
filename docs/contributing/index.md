@@ -2,8 +2,6 @@
 
 Welcome. This guide orients new contributors to the Kestrel compiler — the active codebase lives in `lib/` and is organized as a hierarchical entity-component system (hECS) with memoized queries.
 
-> The older `lib/` tree is legacy. All new work targets `lib/`.
-
 ## Where to start
 
 | Goal | Read |
@@ -32,15 +30,19 @@ kestrel/
 │   ├── kestrel-hir-lower/              # AST body → HIR body
 │   ├── kestrel-type-infer/             # Constraint-based inference
 │   ├── kestrel-semantics/              # Higher-level semantic queries
+│   ├── kestrel-copy-fold/              # Copyable/Cloneable/NotCopyable decision kernel
 │   ├── kestrel-analyze/                # Roslyn-style analyzers
 │   ├── kestrel-pattern-matching/       # Exhaustiveness checking
-│   ├── kestrel-mir/                    # MIR types
+│   ├── kestrel-mir/                    # MIR types, passes, mono, layout, mangling
 │   ├── kestrel-mir-lower/              # Entities → MIR
-│   ├── kestrel-codegen/                # Layout, mangling (backend-agnostic)
+│   ├── kestrel-codegen/                # Backend-agnostic target configuration
 │   ├── kestrel-codegen-cranelift/      # Cranelift backend
+│   ├── kestrel-codegen-llvm/           # LLVM backend (inkwell / LLVM 18)
 │   ├── kestrel-compiler/               # Query engine / World owner
 │   ├── kestrel-compiler-driver/        # High-level orchestration
 │   ├── kestrel-debug/                  # Introspection helpers
+│   ├── kestrel-doc/                    # Stdlib/API doc extraction (JSON)
+│   ├── kestrel-lsp/                    # Language server (LSP over stdio)
 │   ├── kestrel-reporting/              # Diagnostic formatting
 │   ├── kestrel-span/                   # Source locations
 │   ├── kestrel-test-suite/             # .ks-file test runner

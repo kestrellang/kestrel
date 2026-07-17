@@ -93,7 +93,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     curlCmd.append("curl -sL ");
     match getenv("GITHUB_TOKEN") {
         .Some(token) => {
-            if token.byteCount > 0 {
+            if token.bytes.count > 0 {
                 curlCmd.append("-H 'Authorization: Bearer ");
                 curlCmd.append(token);
                 curlCmd.append("' -H 'Accept: application/octet-stream' ");
@@ -336,7 +336,7 @@ public func listToolchains() -> Result[(), JessupError] {
     while i < entries.count {
         let name = entries(unchecked: i);
         // Skip hidden files
-        if name.byteCount > 0 and name.bytes(unchecked: 0) != 46 {
+        if name.bytes.count > 0 and name.bytes(unchecked: 0) != 46 {
             if name == activeChannel {
                 var activeMsg = String();
                 activeMsg.append("  ");
@@ -594,7 +594,7 @@ public func selfUpdate() -> Result[(), JessupError] {
     curlCmd.append("curl -sL ");
     match getenv("GITHUB_TOKEN") {
         .Some(selfToken) => {
-            if selfToken.byteCount > 0 {
+            if selfToken.bytes.count > 0 {
                 curlCmd.append("-H 'Authorization: Bearer ");
                 curlCmd.append(selfToken);
                 curlCmd.append("' -H 'Accept: application/octet-stream' ");
@@ -706,15 +706,15 @@ func toolchainDirName(channel channel: String, tag tag: String) -> String {
 
 /// Strips a single leading 'v' (byte 118) from a tag, if present.
 func stripLeadingV(tag tag: String) -> String {
-    if tag.byteCount > 0 and tag.bytes(unchecked: 0) == 118 {
-        tag.asSlice().subslice(from: 1, to: tag.byteCount).toOwned()
+    if tag.bytes.count > 0 and tag.bytes(unchecked: 0) == 118 {
+        tag.asSlice().subslice(from: 1, to: tag.bytes.count).toOwned()
     } else {
         tag
     }
 }
 
 func trimTrailingNewline(s: String) -> String {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var end = len;
     while end > 0 {
         let b = s.bytes(unchecked: end - 1);

@@ -134,21 +134,21 @@ public struct Buffer[T, A]: not Copyable where A: Allocator {
     // public func copy(from source: Pointer[T], count: Int64) {
     //     let copyCount = if count < self.cap { count } else { self.cap };
     //     let elementSize = Int64(intLiteral: lang.sizeof[T]());
-    //     let byteCount: Int64 = copyCount * elementSize;
-    //     memcpy(self.ptr.asRaw().raw, source.asRaw().raw, byteCount.raw);
+    //     let byteLen: Int64 = copyCount * elementSize;
+    //     memcpy(self.ptr.asRaw().raw, source.asRaw().raw, byteLen.raw);
     // }
 
     // public func move(from source: Pointer[T], count: Int64) {
     //     let moveCount = if count < self.cap { count } else { self.cap };
     //     let elementSize = Int64(intLiteral: lang.sizeof[T]());
-    //     let byteCount: Int64 = moveCount * elementSize;
-    //     memmove(self.ptr.asRaw().raw, source.asRaw().raw, byteCount.raw);
+    //     let byteLen: Int64 = moveCount * elementSize;
+    //     memmove(self.ptr.asRaw().raw, source.asRaw().raw, byteLen.raw);
     // }
 
     // public func zeroFill() {
     //     let elementSize = Int64(intLiteral: lang.sizeof[T]());
-    //     let byteCount: Int64 = self.cap * elementSize;
-    //     memset(self.ptr.asRaw().raw, 0, byteCount.raw);
+    //     let byteLen: Int64 = self.cap * elementSize;
+    //     memset(self.ptr.asRaw().raw, 0, byteLen.raw);
     // }
 
     /// Grows or shrinks the storage to hold `newCapacity` elements via

@@ -4,10 +4,10 @@ module wordle.util
 
 public func splitGuesses(s: String) -> Array[String] {
     var out = Array[String]();
-    if s.byteCount == 0 { return out };
+    if s.bytes.count == 0 { return out };
     var start: Int64 = 0;
     var i: Int64 = 0;
-    while i < s.byteCount {
+    while i < s.bytes.count {
         if s.bytes(unchecked: i) == 44 {
             // ',' separator
             if i > start {
@@ -53,7 +53,7 @@ public func nextSeed(prev: Int64) -> Int64 {
 /// Validate and normalize a guess: must be 5 ASCII letters; returns
 /// uppercase form, or empty string on rejection.
 public func normalizeGuess(raw: String) -> String {
-    if raw.byteCount != 5 { return "" };
+    if raw.bytes.count != 5 { return "" };
     var i: Int64 = 0;
     while i < 5 {
         let b = raw.bytes(unchecked: i);

@@ -30,7 +30,7 @@ Clean syntax. Powerful types. Deterministic memory.
 
 ## What is Kestrel?
 
-Kestrel is a compiled programming language with deterministic memory management — no garbage collector, no borrow checker. It compiles to native code via Cranelift and ships with a full ecosystem: package manager, web framework, HTTP client, VS Code extension, and more — many written in Kestrel itself.
+Kestrel is a compiled programming language with deterministic memory management — no garbage collector, no borrow checker. It compiles to native code via Cranelift (default) or LLVM and ships with a full ecosystem: package manager, web framework, HTTP client, VS Code extension, and more — many written in Kestrel itself.
 
 Currently in its first preview release, Kestrel can be used to write 2D games, CLI tools, and web apps.
 
@@ -89,6 +89,7 @@ struct Order {
     }
 }
 
+@main
 func main() {
     let orders = [
         Order(drink: "Cortado", roast: .Dark, shots: 2),
@@ -111,6 +112,7 @@ func main() {
 ### Memory Model
 
 - **Value semantics** — copy-on-assignment, `not Copyable` for move-only types
+- **References** — `&T` borrowed views with compile-time escape checking — no lifetime annotations, ever
 - **Copy-on-write collections** — Array, Dictionary, Set
 - **RAII** — deterministic cleanup via `deinit`
 - **No GC, no borrow checker** — ownership is simple and predictable
@@ -123,6 +125,7 @@ func main() {
 - **Iterators** — `for`-`in` loops with 20+ adapters (map, filter, zip, scan, take, ...)
 - **C interop** — `@extern(.C)` for calling C functions and linking native libraries
 - **Parameter labels** — named parameters for readable call sites
+- **Flexible entry points** — mark any function `@main`; return `ExitCode`, an integer, `()`, or a throwing `Result` via the `Exitable` protocol
 
 ## Ecosystem
 
@@ -132,6 +135,15 @@ Kestrel ships with **Flock**, a package manager written in Kestrel:
 mkdir myproject && cd myproject
 flock init && flock run
 ```
+
+Install tools globally with `flock install` — it builds optimized binaries (pass `--debug` to opt out) and drops them into `~/.flock/bin`:
+
+```bash
+flock install <org>/<pkg>   # install from the registry
+flock install               # install the current package's binaries
+```
+
+See the [Flock README](lang/flock/README.md) for the full command reference.
 
 Available packages:
 
@@ -187,7 +199,8 @@ All public stdlib types are auto-imported — no `import` statements needed. See
 Kestrel is in early preview — expect breaking changes between releases.
 
 - **macOS** is the primary platform; **Linux** is supported but less tested
-- **No optimized release profile** yet — binaries are unoptimized
+- **Two codegen backends** — Cranelift (default, fast compiles) and LLVM 18 (`kestrel build --backend llvm`)
+- **Optimized builds** — `kestrel build -O 2` for release binaries; `flock install` builds optimized by default
 - **Windows** is not currently supported
 
 ## Building from Source

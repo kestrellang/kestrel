@@ -52,7 +52,7 @@ public func parseCommand(
 
         // Long flags: --key or --key=value
         if token.starts(with: "--") {
-            let restSlice = token.asSlice().subslice(from: 2, to: token.byteCount);
+            let restSlice = token.asSlice().subslice(from: 2, to: token.bytes.count);
 
             match restSlice.firstIndex(of: "=") {
                 .Some(eqPos) => {
@@ -91,10 +91,10 @@ public func parseCommand(
         }
 
         // Short flags: -v, -vvv, -abc, -o value, -ovalue
-        if token.starts(with: "-") and token.byteCount > 1 {
+        if token.starts(with: "-") and token.bytes.count > 1 {
             let tokenSlice = token.asSlice();
             var charPos: Int64 = 1;
-            while charPos < token.byteCount {
+            while charPos < token.bytes.count {
                 let flagChar = tokenSlice.subslice(from: charPos, to: charPos + 1).toOwned();
                 let argDef = try findByShort(arguments, flagChar);
 
@@ -102,10 +102,10 @@ public func parseCommand(
                     matches.setFlag(name: argDef.name);
                     charPos = charPos + 1
                 } else {
-                    if charPos + 1 < token.byteCount {
+                    if charPos + 1 < token.bytes.count {
                         let value = tokenSlice.subslice(from: charPos + 1, to: tokenSlice.end).toOwned();
                         matches.setValue(name: argDef.name, value: value);
-                        charPos = token.byteCount
+                        charPos = token.bytes.count
                     } else {
                         pos = pos + 1;
                         if pos >= tokens.count {
@@ -115,7 +115,7 @@ public func parseCommand(
                             return .Err(ParseError.MissingValue(msg))
                         }
                         matches.setValue(name: argDef.name, value: tokens(unchecked: pos));
-                        charPos = token.byteCount
+                        charPos = token.bytes.count
                     }
                 }
             }

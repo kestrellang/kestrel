@@ -34,7 +34,7 @@ import std.text.(decodeUtf8)
 /// # Representation
 ///
 /// Three fields: `source` (the full input string, retained for slicing),
-/// `pos` (current byte offset), and `len` (cached `source.byteCount`).
+/// `pos` (current byte offset), and `len` (cached `source.bytes.count`).
 struct JsonCursor: Cloneable {
     var source: String
     var pos: Int64
@@ -45,7 +45,7 @@ struct JsonCursor: Cloneable {
     init(source: String) {
         self.source = source;
         self.pos = 0;
-        self.len = source.byteCount;
+        self.len = source.bytes.count;
     }
 
     /// Returns a deep copy of the cursor (clones the source string).
@@ -118,7 +118,7 @@ struct JsonCursor: Cloneable {
     /// of the source string.
     mutating func expectStr(expected: String) -> Result[(), JsonParseError] {
         let startPos = self.pos;
-        let expectedLen = expected.byteCount;
+        let expectedLen = expected.bytes.count;
         if self.len - self.pos < expectedLen {
             return .Err(JsonParseError("expected '" + expected + "'", startPos))
         }

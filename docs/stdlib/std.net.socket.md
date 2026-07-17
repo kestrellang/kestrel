@@ -140,13 +140,15 @@ var stream = match TcpStream.connect("example.com", 80) {
 
 ### Representation
 
-A single `Int32` field holding the file descriptor; `-1` means
+A single `RcBox[Int32]` holding the file descriptor; `-1` means
 "detached, do not close on drop".
 
 ### Memory Model
 
-Owns its fd. Cloning is not provided — duplicate explicitly via
-`dup(2)` if you need it.
+Reference-counted shared ownership of the fd. Cloning is a refcount
+bump (the same socket), and `close(2)` runs exactly once — when the
+last handle drops. This is a shared handle, not a `dup(2)`; use
+`dup(2)` explicitly if you need an independent fd.
 
 _Defined in `lang/std/net/socket.ks`._
 
@@ -208,18 +210,10 @@ public mutating func detachFd() -> Int32
 
 Releases ownership of the fd and returns it.
 
-Sets the internal fd to `-1` so the deinit becomes a no-op.
-The caller takes responsibility for closing the returned fd.
-Use this when handing the fd to another owner (e.g. an event
-loop or a child process).
-
-_Defined in `lang/std/net/socket.ks`._
-
-#### field `fd`
-
-```kestrel
-var fd: Int32
-```
+Stores the `-1` sentinel so the deinit becomes a no-op for every
+handle sharing this socket. The caller takes responsibility for
+closing the returned fd. Use this when handing the fd to another
+owner (e.g. an event loop, a child process, or a TLS stream).
 
 _Defined in `lang/std/net/socket.ks`._
 
@@ -288,6 +282,16 @@ protocol.
 
 Returns `Err(IoError)` from the captured `errno` if `send`
 returns `-1`.
+
+_Defined in `lang/std/net/socket.ks`._
+
+### Implements `Cloneable`
+
+#### function `clone`
+
+```kestrel
+public func clone() -> TcpStream
+```
 
 _Defined in `lang/std/net/socket.ks`._
 

@@ -45,7 +45,7 @@ func githubClient() -> Swoop {
     client = client.header("User-Agent", "jessup/0.1.0");
     match getenv("GITHUB_TOKEN") {
         .Some(token) => {
-            if token.byteCount > 0 {
+            if token.bytes.count > 0 {
                 var auth = String();
                 auth.append("Bearer ");
                 auth.append(token);
@@ -419,8 +419,8 @@ func tagMatchesChannel(tag tag: String, channel channel: String) -> Bool {
 
 /// Checks if haystack contains needle (simple byte search).
 func stringContains(haystack haystack: String, needle needle: String) -> Bool {
-    let hLen = haystack.byteCount;
-    let nLen = needle.byteCount;
+    let hLen = haystack.bytes.count;
+    let nLen = needle.bytes.count;
     if nLen > hLen {
         return false
     }

@@ -31,7 +31,7 @@ public struct JsonBody: Content, Cloneable {
     }
 
     public func toBytes() -> Array[UInt8] = stringToBytes(self.raw)
-    public func byteCount() -> Int64 = self.raw.byteCount
+    public func byteCount() -> Int64 = self.raw.bytes.count
     public func contentType() -> String? = .Some("application/json")
 
     public func clone() -> JsonBody = JsonBody(fromString: self.raw.clone())

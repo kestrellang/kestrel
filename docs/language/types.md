@@ -6,65 +6,75 @@ Kestrel has a static type system with primitive types, composite types, and user
 
 ## Primitive Types
 
-Kestrel provides built-in primitive types for common data representations.
+The user-facing primitive types are defined by the standard library and are always in scope — no import needed. (Internally they wrap compiler primitives in the `lang` namespace, such as `lang.i64`; you should never need to name those directly.)
 
 ### Integer Types
 
-Integers are signed and come in multiple bit widths:
+Integers come in signed and unsigned variants at four bit widths:
 
-| Type | Internal Name | Bit Width | Range |
-|------|---------------|-----------|-------|
-| `lang.i8` | I8 | 8 bits | -128 to 127 |
-| `lang.i16` | I16 | 16 bits | -32,768 to 32,767 |
-| `lang.i32` | I32 | 32 bits | -2,147,483,648 to 2,147,483,647 |
-| `lang.i64` | I64 | 64 bits | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
+| Type | Bit Width | Range |
+|------|-----------|-------|
+| `Int8` | 8 bits | -128 to 127 |
+| `Int16` | 16 bits | -32,768 to 32,767 |
+| `Int32` | 32 bits | -2,147,483,648 to 2,147,483,647 |
+| `Int64` | 64 bits | -2⁶³ to 2⁶³-1 |
+| `UInt8` | 8 bits | 0 to 255 |
+| `UInt16` | 16 bits | 0 to 65,535 |
+| `UInt32` | 32 bits | 0 to 4,294,967,295 |
+| `UInt64` | 64 bits | 0 to 2⁶⁴-1 |
+
+`Int` is an alias for `Int64` (the platform-sized signed integer).
 
 ```kestrel
-let small: lang.i8 = 127;
-let medium: lang.i32 = 1000000;
-let large: lang.i64 = 9223372036854775807;
+let small: Int8 = 127;
+let medium: Int32 = 1000000;
+let large: Int64 = 9223372036854775807;
+let unsigned: UInt64 = 18446744073709551615;
+let n: Int = 42;  // Int == Int64
 ```
 
-**Default:** Integer literals without explicit type annotation default to `lang.i64`.
+**Default:** Integer literals without explicit type annotation default to `Int64`.
+
+**Range checking:** An integer literal that doesn't fit its type is a compile error (E121) — it is never silently truncated or wrapped:
+
+```kestrel
+let a: Int8 = 200;   // error[E121]: 200 is not in the range -128...127
+let b: UInt8 = -1;   // error[E121]: out of range for UInt8
+```
 
 ### Floating-Point Types
 
-Floating-point types represent real numbers:
-
-| Type | Internal Name | Bit Width | Precision |
-|------|---------------|-----------|-----------|
-| `lang.f16` | F16 | 16 bits | Half precision |
-| `lang.f32` | F32 | 32 bits | Single precision |
-| `lang.f64` | F64 | 64 bits | Double precision |
+| Type | Bit Width | Precision |
+|------|-----------|-----------|
+| `Float32` | 32 bits | Single precision |
+| `Float64` | 64 bits | Double precision |
 
 ```kestrel
-let half: lang.f16 = 3.14;
-let single: lang.f32 = 3.14159;
-let double: lang.f64 = 3.141592653589793;
+let single: Float32 = 3.14159;
+let double: Float64 = 3.141592653589793;
 ```
 
-**Default:** Float literals without explicit type annotation default to `lang.f64`.
+**Default:** Float literals without explicit type annotation default to `Float64`.
 
 ### Boolean Type
 
-The boolean type represents truth values:
-
 ```kestrel
-let flag: lang.i1 = true;
-let condition: lang.i1 = false;
+let flag: Bool = true;
+let condition: Bool = false;
 ```
 
-**Internal Name:** `lang.i1` (1-bit integer internally)
+### String and Character Types
 
-### String Type
-
-Strings represent UTF-8 encoded text:
+`String` represents UTF-8 encoded text; `Char` represents a single Unicode scalar value:
 
 ```kestrel
-let message: lang.str = "Hello, world!";
-let empty: lang.str = "";
-let multiline: lang.str = "Line 1\nLine 2";
+let message: String = "Hello, world!";
+let empty: String = "";
+let multiline: String = "Line 1\nLine 2";
+let letter: Char = 'k';
 ```
+
+Strings support interpolation with `\(expr)` — see [String Interpolation](string-interpolation.md).
 
 ### Unit Type
 
@@ -75,7 +85,7 @@ func doSomething() -> () {
     // Returns unit
 }
 
-let unit_value: () = ();
+let unitValue: () = ();
 ```
 
 The unit type is used for:
@@ -88,11 +98,11 @@ The unit type is used for:
 The never type `!` represents computations that never return normally:
 
 ```kestrel
-func panic() -> ! {
-    lang.panic_unwind("error");
+func crash() -> ! {
+    fatalError("error");
 }
 
-func loop_forever() -> ! {
+func loopForever() -> ! {
     loop { }
 }
 ```
@@ -100,15 +110,15 @@ func loop_forever() -> ! {
 The never type is the **bottom type** and is assignable to any other type. It's used for:
 - Functions that panic
 - Infinite loops
-- Early returns (break, continue, return)
+- Early exits (break, continue, return)
 
 ```kestrel
 // Never is assignable to any type
-func example() -> lang.i64 {
+func example(condition: Bool) -> Int64 {
     if condition {
         return 42;
     } else {
-        panic();  // panic() returns !, which is assignable to lang.i64
+        crash();  // crash() returns !, which is assignable to Int64
     }
 }
 ```
@@ -121,23 +131,19 @@ Tuples are ordered, fixed-size collections of values with potentially different 
 
 ```kestrel
 // Two-element tuple
-let point: (lang.i64, lang.i64) = (10, 20);
+let point: (Int64, Int64) = (10, 20);
 
 // Three-element tuple with mixed types
-let record: (lang.str, lang.i64, lang.i1) = ("Alice", 30, true);
-
-// Single-element tuple (requires trailing comma)
-let single: (lang.i64,) = (42,);
+let record: (String, Int64, Bool) = ("Alice", 30, true);
 
 // Nested tuples
-let nested: ((lang.i64, lang.i64), lang.str) = ((1, 2), "pair");
+let nested: ((Int64, Int64), String) = ((1, 2), "pair");
 ```
 
 ### Properties
 
 - **Structural typing:** Two tuple types are equal if they have the same number of elements with the same types in the same order
-- **Immutable by default:** Elements are accessed by position but cannot be modified unless wrapped in a mutable container
-- **Zero-indexed:** First element is at position 0
+- **Positional access:** Elements are accessed by position (`pair.0`, `pair.1`), zero-indexed
 
 ### Unit as Empty Tuple
 
@@ -149,22 +155,22 @@ let unit: () = ();  // Empty tuple
 
 ## Array Types
 
-Arrays are homogeneous, dynamically-sized collections of elements.
+Arrays are homogeneous, dynamically-sized collections. `[T]` is syntactic sugar for `Array[T]`.
 
 ### Syntax
 
 ```kestrel
 // Array of integers
-let numbers: [lang.i64] = [1, 2, 3, 4, 5];
+let numbers: [Int64] = [1, 2, 3, 4, 5];
 
 // Empty array (type must be specified)
-let empty: [lang.str] = [];
+let empty: [String] = [];
 
 // Nested arrays (2D array)
-let matrix: [[lang.i64]] = [[1, 2], [3, 4]];
+let matrix: [[Int64]] = [[1, 2], [3, 4]];
 
 // Array of tuples
-let points: [(lang.i64, lang.i64)] = [(0, 0), (1, 1), (2, 4)];
+let points: [(Int64, Int64)] = [(0, 0), (1, 1), (2, 4)];
 ```
 
 ### Properties
@@ -180,6 +186,15 @@ let points: [(lang.i64, lang.i64)] = [(0, 0), (1, 1), (2, 4)];
 let invalid = [1, "hello", true];  // Type error
 ```
 
+## Dictionary Types
+
+`[K: V]` is syntactic sugar for `Dictionary[K, V]`:
+
+```kestrel
+let ages: [String: Int64] = [:];        // empty dictionary
+let scores: [String: Int64] = ["a": 1, "b": 2];
+```
+
 ## Function Types
 
 Function types represent callable functions with parameter and return types.
@@ -187,20 +202,17 @@ Function types represent callable functions with parameter and return types.
 ### Syntax
 
 ```kestrel
-// Function taking no parameters, returning lang.i64
-let producer: () -> lang.i64;
+// Function taking no parameters, returning Int64
+let producer: () -> Int64 = { 42 };
 
 // Function taking one parameter
-let increment: (lang.i64) -> lang.i64;
+let increment: (Int64) -> Int64 = { it + 1 };
 
 // Function taking multiple parameters
-let add: (lang.i64, lang.i64) -> lang.i64;
+let add: (Int64, Int64) -> Int64 = { (a, b) in a + b };
 
 // Function returning unit (void-like)
-let action: (lang.str) -> ();
-
-// Higher-order function (function taking and returning functions)
-let transform: ((lang.i64) -> lang.i64) -> (lang.i64) -> lang.i64;
+let action: (String) -> () = { (s) in println(s); };
 ```
 
 ### Properties
@@ -210,64 +222,52 @@ let transform: ((lang.i64) -> lang.i64) -> (lang.i64) -> lang.i64;
 - **Parameter labels not part of type:** Labels are for call-site clarity, not type identity
 
 ```kestrel
-// These two functions have the same type: (lang.i64, lang.i64) -> lang.i64
-func add(a: lang.i64, b: lang.i64) -> lang.i64 { a + b }
-func multiply(x: lang.i64, y: lang.i64) -> lang.i64 { x * y }
+// These two functions have the same type: (Int64, Int64) -> Int64
+func add(a: Int64, b: Int64) -> Int64 { a + b }
+func multiply(x: Int64, y: Int64) -> Int64 { x * y }
 ```
 
 ## Optional Types
 
-Optional types represent values that may or may not be present. `T?` is syntactic sugar for `Optional[T]`.
+Optional types represent values that may or may not be present. `T?` is syntactic sugar for `Optional[T]`, an enum with cases `.Some(T)` and `.None`.
 
 ```kestrel
-let maybeNumber: lang.i64? = null;
-let definiteNumber: lang.i64? = 42;
+let maybeNumber: Int64? = .None;
+let definiteNumber: Int64? = .Some(42);
+let coalesced = maybeNumber ?? 0;   // null-coalescing operator
 ```
+
+Doubled optionals are supported directly in type position — `T??` parses as `Optional[Optional[T]]`:
+
+```kestrel
+let nested: Int64?? = .Some(.None);  // outer Some, inner None
+
+match nested {
+    .Some(.Some(v)) => v,
+    .Some(.None) => -1,
+    .None => -2
+}
+```
+
+## Reference Types
+
+`&T` is a borrowed reference to a value of type `T`. References let functions and subscripts hand out views of stored data without copying it. See [References](references.md) for the full model, including `&mutating` references and escape rules.
 
 ## Pointer Types
 
-Pointer types represent raw memory addresses. They are unsafe and should be used sparingly.
-
-### Syntax
+Raw pointers are provided by the standard library's `Pointer[T]` type (`std.memory`). They bypass Kestrel's safety guarantees and are intended for FFI and low-level data structures — prefer references (`&T`) for ordinary borrowing.
 
 ```kestrel
-struct Wrapper {
-    var ptr: lang.ptr[lang.i64];
-}
-
-func allocate() -> lang.ptr[lang.i64] {
-    lang.ptr_null[lang.i64]();
-}
-
-// Nested pointers (pointer to pointer)
-func double_indirection() -> lang.ptr[lang.ptr[lang.i64]] {
-    lang.ptr_null[lang.ptr[lang.i64]]();
-}
-
-// Pointer to tuple
-func tuple_ptr() -> lang.ptr[(lang.i64, lang.i1)] {
-    lang.ptr_null[(lang.i64, lang.i1)]();
-}
+var value: Int64 = 42;
+let p = Pointer(to: value);   // pointer to a stored value
 ```
-
-### Built-in Pointer Operations
-
-Kestrel provides intrinsic functions for working with pointers:
-
-| Function | Description |
-|----------|-------------|
-| `lang.ptr_null[T]()` | Create null pointer of type `T` |
-| `lang.ptr_read(ptr)` | Read value from pointer |
-| `lang.ptr_write(ptr, value)` | Write value to pointer |
-| `lang.ptr_is_null(ptr)` | Check if pointer is null |
-| `lang.ptr_cast[From, To](ptr)` | Cast pointer from one type to another |
 
 ### Safety
 
 Pointers bypass Kestrel's memory safety guarantees. Use with caution:
-- Dereferencing null or invalid pointers causes undefined behavior
-- Type casting can lead to type confusion
-- Manual memory management is required
+- Dereferencing invalid pointers causes undefined behavior
+- Reads/writes through pointers are not lifetime-checked
+- Manual memory management is required when allocating
 
 ## Type Aliases
 
@@ -277,31 +277,31 @@ Type aliases create alternative names for existing types.
 
 ```kestrel
 // Simple alias
-type ID = lang.str;
+type ID = String;
 
 // Alias for complex type
-type Point = (lang.i64, lang.i64);
+type Point = (Int64, Int64);
 
 // Alias for function type
-type Handler = (lang.str) -> lang.i64;
+type Handler = (String) -> Int64;
 
 // Using the alias
-let user_id: ID = "user_123";
+let userId: ID = "user_123";
 let origin: Point = (0, 0);
 ```
 
-### Generic Type Aliases
+The standard library uses this itself: `Int` is declared as `public type Int = Int64`.
 
-Type aliases can be generic:
+### Generic Type Aliases *(Future)*
+
+Generic type alias declarations parse, and can be referenced from other aliases:
 
 ```kestrel
 type Pair[T] = (T, T);
-type Result[T, E] = (T, E);  // Simplified result type
-
-// Using generic aliases
-let numbers: Pair[lang.i64] = (1, 2);
-let strings: Pair[lang.str] = ("hello", "world");
+type IntPair = Pair[Int64];
 ```
+
+However, using an instantiated generic alias to annotate a value (e.g. `let p: Pair[Int64] = (1, 2);`) is not yet supported by the type checker.
 
 ### Properties
 
@@ -317,11 +317,11 @@ Nominal types are user-defined types identified by their declaration name.
 
 ```kestrel
 struct Point {
-    var x: lang.i64;
-    var y: lang.i64;
+    var x: Int64;
+    var y: Int64;
 }
 
-let p: Point = Point { x: 10, y: 20 };
+let p: Point = Point(x: 10, y: 20);
 ```
 
 ### Enum Types
@@ -340,11 +340,11 @@ let color: Color = .Red;
 
 ```kestrel
 protocol Drawable {
-    func draw() -> ();
+    func draw()
 }
 
 // Protocol types are used as constraints, not values
-func render[T: Drawable](item: T) {
+func render[T](item: T) where T: Drawable {
     item.draw();
 }
 ```
@@ -377,13 +377,13 @@ struct Pair[A, B] {
 
 ### Type Arguments
 
-Instantiate generic types by providing type arguments:
+Instantiate generic types by providing type arguments (or let inference fill them in):
 
 ```kestrel
-let int_box: Box[lang.i64] = Box { value: 42 };
-let str_box: Box[lang.str] = Box { value: "hello" };
+let intBox: Box[Int64] = Box(value: 42);
+let strBox = Box(value: "hello");        // inferred as Box[String]
 
-let pair: Pair[lang.i64, lang.str] = Pair { first: 1, second: "one" };
+let pair = Pair(first: 1, second: "one"); // inferred as Pair[Int64, String]
 ```
 
 ### Constraints
@@ -392,12 +392,12 @@ Generic parameters can be constrained with protocol bounds:
 
 ```kestrel
 // T must conform to Comparable
-struct SortedList[T] where T: Comparable[T] {
+struct SortedList[T] where T: Comparable {
     var items: [T];
 }
 
-// Multiple bounds
-struct Container[T] where T: Copyable and Hashable {
+// Non-copyable containers
+struct Holder[T] where T: not Copyable {
     var value: T;
 }
 ```
@@ -412,14 +412,14 @@ See [Generics](generics.md) for detailed information on generic types.
 
 ```kestrel
 struct Counter {
-    var count: lang.i64;
+    var count: Int64;
 
-    func increment() -> Self {
-        Self { count: self.count + 1 }
+    func incremented() -> Self {
+        Self(count: self.count + 1)
     }
 
     static func zero() -> Self {
-        Self { count: 0 }
+        Self(count: 0)
     }
 }
 ```
@@ -427,13 +427,13 @@ struct Counter {
 ### In Protocols
 
 ```kestrel
-protocol Cloneable {
-    func clone() -> Self;
+protocol Defaultable {
+    static func default() -> Self
 }
 
-extend Counter: Cloneable {
-    func clone() -> Self {
-        Self { count: self.count }
+extend Counter: Defaultable {
+    static func default() -> Self {
+        Self(count: 0)
     }
 }
 ```
@@ -451,21 +451,21 @@ Kestrel supports local type inference within function bodies.
 ### Inference from Literals
 
 ```kestrel
-let x = 42;           // Inferred as lang.i64
-let y = 3.14;         // Inferred as lang.f64
-let s = "hello";      // Inferred as lang.str
-let b = true;         // Inferred as lang.i1
+let x = 42;           // Inferred as Int64
+let y = 3.14;         // Inferred as Float64
+let s = "hello";      // Inferred as String
+let b = true;         // Inferred as Bool
 ```
 
 ### Inference from Context
 
 ```kestrel
-func process(x: lang.i64) { }
+func process(x: Int32) { }
 
-process(42);  // Literal 42 inferred as lang.i64
+process(42);  // Literal 42 inferred as Int32
 
 // Array element type inference
-let numbers = [1, 2, 3];  // Inferred as [lang.i64]
+let numbers = [1, 2, 3];  // Inferred as [Int64]
 ```
 
 ### Explicit Type Annotations
@@ -473,8 +473,8 @@ let numbers = [1, 2, 3];  // Inferred as [lang.i64]
 Type annotations are required when inference is ambiguous or for documentation:
 
 ```kestrel
-let empty: [lang.str] = [];  // Cannot infer element type from empty array
-let nullable: lang.i64? = null;  // Cannot infer wrapped type from null
+let empty: [String] = [];      // Cannot infer element type from empty array
+let nothing: Int64? = .None;   // Cannot infer wrapped type from bare .None
 ```
 
 ### Limitations
@@ -485,22 +485,19 @@ let nullable: lang.i64? = null;  // Cannot infer wrapped type from null
 
 ## Type Conversion
 
-Kestrel does not perform implicit type conversions. All conversions must be explicit.
+Kestrel does not perform implicit type conversions between numeric types. Conversions are explicit, via the `init(from:)` initializers each numeric type provides:
+
+```kestrel
+let x: Int64 = 42;
+let y = Float64(from: x);        // Int64 → Float64
+let narrowed = Int32(from: x);   // Int64 → Int32 (narrowing truncates high bits)
+```
 
 ### Explicit Casting *(Future)*
 
 ```kestrel
-let x: lang.i64 = 42;
-let y: lang.f64 = x as lang.f64;  // Explicit cast (Future)
-```
-
-### Integer/Float Conversions
-
-Currently, use intrinsic functions for conversions:
-
-```kestrel
-let i: lang.i64 = 42;
-// Use lang intrinsics for conversion (implementation-specific)
+let x: Int64 = 42;
+let y: Float64 = x as Float64;  // Explicit cast (Future)
 ```
 
 ## Grammar
@@ -510,8 +507,9 @@ Type → UnitType
      | NeverType
      | TupleType
      | ArrayType
+     | DictionaryType
      | FunctionType
-     | PointerType
+     | ReferenceType
      | OptionalType
      | PathType
 
@@ -523,12 +521,13 @@ TupleType → LPAREN Type (COMMA Type)* COMMA? RPAREN
 
 ArrayType → LBRACKET Type RBRACKET
 
+DictionaryType → LBRACKET Type COLON Type RBRACKET
+
 FunctionType → LPAREN TypeList RPAREN ARROW Type
 
-PointerType → PathType LBRACKET Type RBRACKET
-            | PATH "lang.ptr" LBRACKET Type RBRACKET
+ReferenceType → AMP Type
 
-OptionalType → Type QUESTION
+OptionalType → Type QUESTION          // T?? parses as Optional[Optional[T]]
 
 PathType → Identifier (DOT Identifier)* TypeArgumentList?
 
@@ -544,8 +543,10 @@ TypeList → (Type (COMMA Type)* COMMA?)?
 - `BANG` - Exclamation mark `!`
 - `DOT` - Period `.`
 - `COMMA` - Comma `,`
+- `COLON` - Colon `:`
 - `ARROW` - Arrow `->`
 - `QUESTION` - Question mark `?`
+- `AMP` - Ampersand `&`
 
 ## Examples
 
@@ -553,10 +554,12 @@ TypeList → (Type (COMMA Type)* COMMA?)?
 
 ```kestrel
 // Primitives
-let integer: lang.i64 = 42;
-let floating: lang.f64 = 3.14;
-let boolean: lang.i1 = true;
-let text: lang.str = "hello";
+let integer: Int64 = 42;
+let unsigned: UInt32 = 7;
+let floating: Float64 = 3.14;
+let boolean: Bool = true;
+let text: String = "hello";
+let letter: Char = 'k';
 
 // Unit and Never
 let unit: () = ();
@@ -569,17 +572,19 @@ func diverges() -> ! {
 
 ```kestrel
 // Tuples
-let point: (lang.i64, lang.i64) = (10, 20);
-let triple: (lang.str, lang.i64, lang.i1) = ("Alice", 30, true);
+let point: (Int64, Int64) = (10, 20);
+let triple: (String, Int64, Bool) = ("Alice", 30, true);
 
 // Arrays
-let numbers: [lang.i64] = [1, 2, 3, 4, 5];
-let strings: [lang.str] = ["hello", "world"];
-let matrix: [[lang.i64]] = [[1, 2], [3, 4]];
+let numbers: [Int64] = [1, 2, 3, 4, 5];
+let strings: [String] = ["hello", "world"];
+let matrix: [[Int64]] = [[1, 2], [3, 4]];
 
 // Functions
-let add: (lang.i64, lang.i64) -> lang.i64 = { (a, b) in a + b };
-let predicate: (lang.str) -> lang.i1;
+let add: (Int64, Int64) -> Int64 = { (a, b) in a + b };
+
+// Optionals
+let maybe: String? = .Some("present");
 ```
 
 ### User-Defined Types
@@ -587,11 +592,11 @@ let predicate: (lang.str) -> lang.i1;
 ```kestrel
 // Struct
 struct Person {
-    var name: lang.str;
-    var age: lang.i64;
+    var name: String;
+    var age: Int64;
 }
 
-let person: Person = Person { name: "Bob", age: 25 };
+let person = Person(name: "Bob", age: 25);
 
 // Enum
 enum Status {
@@ -607,55 +612,32 @@ struct Box[T] {
     var value: T;
 }
 
-let int_box: Box[lang.i64] = Box { value: 42 };
-let str_box: Box[lang.str] = Box { value: "hello" };
+let intBox = Box(value: 42);       // Box[Int64]
+let strBox = Box(value: "hello");  // Box[String]
 ```
 
 ### Type Aliases
 
 ```kestrel
 // Simple aliases
-type UserID = lang.str;
-type Coordinate = (lang.i64, lang.i64);
+type UserID = String;
+type Coordinate = (Int64, Int64);
 type Callback = () -> ();
-
-// Generic aliases
-type Pair[T] = (T, T);
-type Transform[In, Out] = (In) -> Out;
 
 // Usage
 let id: UserID = "user_123";
 let pos: Coordinate = (10, 20);
-let nums: Pair[lang.i64] = (1, 2);
-```
-
-### Complex Nested Types
-
-```kestrel
-// Array of function types
-let handlers: [(lang.str) -> ()] = [
-    { (msg) in lang.print(msg) },
-    { (msg) in lang.log(msg) }
-];
-
-// Tuple of arrays
-let data: ([lang.i64], [lang.str]) = ([1, 2, 3], ["a", "b"]);
-
-// Function returning function
-let makeAdder: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in
-    { (y) in x + y }
-};
 ```
 
 ## Type Categories Summary
 
 | Category | Examples | Properties |
 |----------|----------|------------|
-| **Primitives** | `lang.i64`, `lang.f64`, `lang.i1`, `lang.str`, `()`, `!` | Built-in, fixed representation |
-| **Composites** | `(A, B)`, `[T]`, `(A, B) -> R` | Constructed from other types, structural |
+| **Primitives** | `Int64`, `UInt8`, `Float64`, `Bool`, `String`, `Char`, `()`, `!` | Stdlib-defined, always in scope |
+| **Composites** | `(A, B)`, `[T]`, `[K: V]`, `(A, B) -> R`, `T?`, `&T` | Constructed from other types, structural |
 | **Nominal** | `struct`, `enum`, `protocol` | User-defined, identified by name |
 | **Generic** | `Box[T]`, `Pair[A, B]` | Parameterized over types |
-| **Special** | `Self`, `_` (infer) | Context-dependent |
+| **Special** | `Self` | Context-dependent |
 
 ## Best Practices
 
@@ -663,6 +645,6 @@ let makeAdder: (lang.i64) -> (lang.i64) -> lang.i64 = { (x) in
 2. **Prefer explicit types** in function signatures for documentation and clarity
 3. **Let inference work** for local variables within function bodies
 4. **Choose appropriate bit widths** for integers and floats based on requirements
-5. **Avoid raw pointers** unless interfacing with unsafe code or foreign functions
+5. **Avoid raw pointers** unless interfacing with unsafe code or foreign functions — prefer references (`&T`)
 6. **Use generic types** to write reusable, type-safe code
 7. **Document type invariants** in comments when types alone cannot express constraints

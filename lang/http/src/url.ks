@@ -108,7 +108,7 @@ public func parseUrl(raw: String) -> ParsedUrl {
 /// ```
 public func parseQueryString(qs: String) -> Array[(String, String)] {
     var result = Array[(String, String)]();
-    if qs.byteCount == 0 {
+    if qs.bytes.count == 0 {
         return result
     }
 
@@ -142,7 +142,7 @@ public func parseQueryString(qs: String) -> Array[(String, String)] {
 /// ```
 public func percentDecode(s: String) -> String {
     let bytes = s.bytes;
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var out = Array[UInt8](capacity: len);
     var i: Int64 = 0;
     while i < len {
@@ -184,7 +184,7 @@ public func percentDecode(s: String) -> String {
 /// ```
 public func percentEncode(s: String) -> String {
     var out = String();
-    for i in 0..<s.byteCount {
+    for i in 0..<s.bytes.count {
         let b = Int64(from: s.bytes(unchecked: i));
         if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57)
             or b == 45 or b == 95 or b == 46 or b == 126 {
@@ -238,7 +238,7 @@ public func encodeQueryString(pairs: Array[(String, String)]) -> String {
 func splitSegments(path: String) -> Array[String] {
     var segments = Array[String]();
     for part in path.split("/") {
-        if part.byteCount > 0 {
+        if part.bytes.count > 0 {
             segments.append(part.toOwned())
         }
     }

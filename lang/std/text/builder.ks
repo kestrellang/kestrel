@@ -85,7 +85,7 @@ public struct StringBuilder: Cloneable {
     /// type conforming to `Str` — `String`, `StringSlice`, etc.
     public mutating func append(other: some Str) {
         let slice = other.asSlice();
-        let otherLen = slice.byteCount;
+        let otherLen = (slice.end - slice.start);
         if otherLen == 0 { return }
         self.grow(self.len + otherLen);
         let srcPtr = slice._rawPtr().offset(by: slice.start);
@@ -147,7 +147,7 @@ public struct StringBuilder: Cloneable {
     // -- Queries -------------------------------------------------------------
 
     /// Number of bytes written so far.
-    public var byteCount: Int64 { self.len }
+    public var count: Int64 { self.len }
 
     /// True when nothing has been written.
     public var isEmpty: Bool { self.len == 0 }

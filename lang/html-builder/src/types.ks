@@ -62,7 +62,7 @@ public struct Document: Addable, Cloneable, Defaultable {
     public func render() -> String {
         var total: Int64 = 0;
         for p in self.parts.iter() {
-            total = total + p.byteCount
+            total = total + p.bytes.count
         };
         var out = String(capacity: total);
         for p in self.parts.iter() {

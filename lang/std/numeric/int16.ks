@@ -857,7 +857,7 @@ public struct Int16:
     /// Int16(parsing: "abc");   // None
     /// ```
     public init(parsing string: String)? {
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -930,7 +930,7 @@ public struct Int16:
             return null
         }
 
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -1072,7 +1072,7 @@ public struct Int16:
             }
         }
 
-        var i = digits.byteCount - 1;
+        var i = digits.bytes.count - 1;
         while i >= 0 {
             result.appendByte(digits.bytes(unchecked: i));
             i = i - 1

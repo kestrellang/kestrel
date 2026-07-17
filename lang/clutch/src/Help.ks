@@ -119,7 +119,7 @@ public func generateHelp(
             let left = formatLeftColumn(arg);
             buf.append(left);
 
-            var pad = padTo - left.byteCount;
+            var pad = padTo - left.bytes.count;
             while pad > 0 {
                 buf.append(" ");
                 pad = pad - 1;
@@ -134,7 +134,7 @@ public func generateHelp(
         buf.append("    ");
         let helpLeft = "-h, --help";
         buf.append(helpLeft);
-        var helpPad = padTo - helpLeft.byteCount;
+        var helpPad = padTo - helpLeft.bytes.count;
         while helpPad > 0 {
             buf.append(" ");
             helpPad = helpPad - 1;
@@ -157,8 +157,8 @@ public func generateHelp(
 
         var maxName: Int64 = 0;
         for arg in arguments {
-            if arg.isPositional and arg.name.byteCount > maxName {
-                maxName = arg.name.byteCount;
+            if arg.isPositional and arg.name.bytes.count > maxName {
+                maxName = arg.name.bytes.count;
             }
         }
         let namePadTo = maxName + 4;
@@ -176,7 +176,7 @@ public func generateHelp(
                 buf.append("]");
             }
 
-            var np = namePadTo - arg.name.byteCount - 2;
+            var np = namePadTo - arg.name.bytes.count - 2;
             while np > 0 {
                 buf.append(" ");
                 np = np - 1;
@@ -197,7 +197,7 @@ public func generateHelp(
 
         var maxSubName: Int64 = 0;
         for sn in subcommandNames {
-            if sn.byteCount > maxSubName { maxSubName = sn.byteCount; }
+            if sn.bytes.count > maxSubName { maxSubName = sn.bytes.count; }
         }
         let subPadTo = maxSubName + 4;
 
@@ -206,7 +206,7 @@ public func generateHelp(
             let sn = subcommandNames(unchecked: i);
             buf.append(sn);
 
-            var sp = subPadTo - sn.byteCount;
+            var sp = subPadTo - sn.bytes.count;
             while sp > 0 {
                 buf.append(" ");
                 sp = sp - 1;
@@ -233,19 +233,19 @@ func leftColumnWidth(argument: Argument) -> Int64 {
     var width: Int64 = 0;
 
     if let .Some(s) = argument.shortFlag {
-        width = width + 1 + s.byteCount;
+        width = width + 1 + s.bytes.count;
     }
 
     if let .Some(l) = argument.longFlag {
         if let .Some(_) = argument.shortFlag {
             width = width + 2;
         }
-        width = width + 2 + l.byteCount;
+        width = width + 2 + l.bytes.count;
     }
 
     if argument.isOption {
         match argument.valueName {
-            .Some(v) => { width = width + 2 + v.byteCount; },
+            .Some(v) => { width = width + 2 + v.bytes.count; },
             .None => { width = width + 8; }
         }
     }

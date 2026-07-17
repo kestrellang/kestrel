@@ -6,7 +6,7 @@ Conventions and idioms used throughout the lib codebase. Follow these by default
 
 | Thing | Convention | Examples |
 |-------|------------|----------|
-| Crate | `kestrel-<role>` (dir name), `kestrel-<role>2` (package name) | `kestrel-hir`, `kestrel-type-infer2` |
+| Crate | `kestrel-<role>` (package name matches the directory name) | `kestrel-hir`, `kestrel-type-infer` |
 | Token | PascalCase matching the keyword | `Module`, `Struct`, `Func`, `Public` |
 | `SyntaxKind` node | `{Feature}Declaration`, `{Feature}Body`, `{Type}Expr`, `{Type}Stmt`, `{Type}Pat` | `StructDeclaration`, `BinaryExpr`, `LetStmt` |
 | Component | Noun describing a capability or fact | `Name`, `Callable`, `TypeAnnotation`, `WhereClause`, `Computed` |

@@ -222,7 +222,7 @@ public func writeByte[W](mutating writer: W, byte: UInt8) -> Result[(), IoError]
 /// per byte (the old path allocated a 1-byte `Array` and issued a syscall
 /// for every character, which dominated raw `Stdout`/`File` output).
 public func writeString[W](mutating writer: W, s: String) -> Result[(), IoError] where W: Writable, W: not Copyable {
-    if s.byteCount == 0 {
+    if s.isEmpty {
         return .Ok(())
     }
     writeAll(writer, from: s.asByteSlice())

@@ -61,7 +61,7 @@ public func findHeaderEnd(buf: Array[UInt8]) -> Int64 {
 /// ```
 public func parseDecimal(s: String) -> Int64 {
     var result: Int64 = 0;
-    for i in 0..<s.byteCount {
+    for i in 0..<s.bytes.count {
         let digit = Int64(from: s.bytes(unchecked: i)) - 48;
         if digit >= 0 and digit <= 9 {
             result = result * 10 + digit

@@ -80,23 +80,25 @@ enum Result[T, E] {
 }
 ```
 
-### Recursive Enums
+### Recursive Enums *(Future)*
 
-Recursive enums require the `indirect` keyword before `enum`. This is a contextual keyword (only special in this position).
+A recursive enum (one whose cases mention the enum itself) is rejected with error E429 unless it is marked `indirect`. However, `indirect` enums themselves are **not yet supported** — declaring one is rejected with error E465 ("indirect enums are not yet supported"). So directly recursive enums are currently unavailable.
 
 ```kestrel
-indirect enum Tree[T] {
-    case Leaf(value: T)
-    case Node(left: Tree[T], right: Tree[T])
+// error[E429]: recursive enum requires `indirect`
+enum Tree {
+    case Leaf(value: Int64)
+    case Node(left: Tree, right: Tree)
 }
 
+// error[E465]: indirect enums are not yet supported
 indirect enum List[T] {
     case Cons(head: T, tail: List[T])
     case Empty
 }
 ```
 
-The `indirect` keyword tells the compiler to use indirection (heap allocation) for recursive references, preventing infinite-size types.
+When implemented, the `indirect` keyword (contextual — only special in this position) will tell the compiler to use indirection (heap allocation) for recursive references, preventing infinite-size types.
 
 ## Instantiation
 
@@ -146,29 +148,36 @@ Note: For valueless cases, both `Color.Red` and `Color.Red()` are valid - empty 
 
 ### Declaration Errors
 
-#### E0404: Recursive enum requires `indirect`
+#### E429: Recursive enum requires `indirect`
 
 ```kestrel
 enum Tree {
-    case Leaf(value: Int)
+    case Leaf(value: Int64)
     case Node(left: Tree, right: Tree)  // error!
 }
 ```
 
 ```
-error[E0404]: recursive enum requires `indirect`
-  --> main.ks:1:1
-   |
- 1 | enum Tree {
-   | ^^^^^^^^^ recursive enum
- 2 |     case Leaf(value: Int)
- 3 |     case Node(left: Tree, right: Tree)
-   |                     ----         ---- recursive references
-   |
-   = help: add `indirect` before `enum`
+error: recursive enum requires `indirect` [E429]
+ = add 'indirect' before the enum declaration to allow recursive cases
 ```
 
-#### E0405: Duplicate case name
+(Adding `indirect` doesn't help yet — see E465 below.)
+
+#### E465: Indirect enums are not yet supported
+
+```kestrel
+indirect enum List {    // error!
+    case Cons(head: Int64)
+    case Empty
+}
+```
+
+```
+error: indirect enums are not yet supported [E465]
+```
+
+#### E427: Duplicate case name
 
 ```kestrel
 enum Color {
@@ -178,125 +187,52 @@ enum Color {
 ```
 
 ```
-error[E0405]: duplicate enum case `Red`
-  --> main.ks:3:5
-   |
+error: duplicate enum case 'Red' [E427]
  2 |     case Red
-   |          --- first definition
+   |     -------- first defined here
  3 |     case Red
-   |          ^^^ duplicate case
+   |     ^^^^^^^^ duplicate case defined here
 ```
 
-#### E0406: Duplicate label in case
+#### E428: Duplicate label in case
 
 ```kestrel
 enum Bad {
-    case Foo(x: Int, x: String)  // error!
+    case Foo(x: Int64, x: String)  // error!
 }
 ```
 
 ```
-error[E0406]: duplicate label `x` in enum case
-  --> main.ks:2:22
-   |
- 2 |     case Foo(x: Int, x: String)
-   |              -       ^ duplicate label
-   |              |
-   |              first use of `x`
+error: duplicate label 'x' in case 'Foo' [E428]
 ```
 
 ### Instantiation Errors
 
-#### E0401: Unknown enum case
+Instantiation mistakes are reported by name resolution and the type checker rather than by enum-specific diagnostic codes:
 
 ```kestrel
-let c = Color.Purple  // error!
-```
+enum Shape {
+    case Circle(radius: Float64)
+    case Point
+}
 
-```
-error[E0401]: unknown enum case `Purple`
-  --> main.ks:1:15
-   |
- 1 | let c = Color.Purple
-   |               ^^^^^^ `Color` has no case `Purple`
-   |
-   = help: available cases: Red, Green, Blue
-```
+// Unknown case
+let c = Color.Purple;
+// error: undefined name 'Color.Purple'
 
-#### E0402: Missing associated value label
+// Missing or wrong associated value label — labels are part of
+// the case's signature, so this reads as a different overload
+let s = Shape.Circle(5.0);
+// error: no matching overload for 'Circle'
 
-```kestrel
-let s = Shape.Circle(5.0)  // error!
-```
+// Shorthand without type context
+let x = .Red;
+// error: implicit member '.Red' not found
+// fix: `let x: Color = .Red` or `Color.Red`
 
-```
-error[E0402]: missing associated value label
-  --> main.ks:1:22
-   |
- 1 | let s = Shape.Circle(5.0)
-   |                      ^^^ expected label `radius:`
-   |
-   = help: use `Shape.Circle(radius: 5.0)`
-```
-
-#### E0402: Wrong associated value label
-
-```kestrel
-let s = Shape.Circle(r: 5.0)  // error!
-```
-
-```
-error[E0402]: wrong associated value label
-  --> main.ks:1:22
-   |
- 1 | let s = Shape.Circle(r: 5.0)
-   |                      ^^ expected `radius:`, found `r:`
-```
-
-#### E0403: Cannot infer enum type for shorthand
-
-```kestrel
-let x = .Red  // error!
-```
-
-```
-error[E0403]: cannot infer enum type for shorthand
-  --> main.ks:1:9
-   |
- 1 | let x = .Red
-   |         ^^^^ type annotation needed
-   |
-   = help: use `let x: Color = .Red` or `Color.Red`
-```
-
-#### E0407: Associated value type mismatch
-
-```kestrel
-let s = Shape.Circle(radius: "big")  // error!
-```
-
-```
-error[E0407]: mismatched types in associated value
-  --> main.ks:1:30
-   |
- 1 | let s = Shape.Circle(radius: "big")
-   |                              ^^^^^ expected `Float`, found `String`
-```
-
-#### E0408: Wrong arity for case
-
-```kestrel
-let s = Shape.Rectangle(width: 5.0)  // error! missing height
-```
-
-```
-error[E0408]: wrong number of associated values
-  --> main.ks:1:9
-   |
- 1 | let s = Shape.Rectangle(width: 5.0)
-   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected 2 values, found 1
-   |
-   = help: missing `height: Float`
+// Associated value type mismatch or wrong arity
+let t = Shape.Circle(radius: "big");
+// error: no matching overload for 'Circle'
 ```
 
 ## Type of Enum Values

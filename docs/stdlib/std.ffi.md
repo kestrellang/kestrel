@@ -24,7 +24,7 @@ the caller must `free()` the result.
 func puts(s: CString) -> Int32
 
 let cstr = "Hello, C!".toCString();
-let _ = puts(cstr);
+ puts(cstr);
 cstr.free();
 ```
 

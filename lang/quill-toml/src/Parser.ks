@@ -36,7 +36,7 @@ import std.text.(decodeUtf8)
 /// # Representation
 ///
 /// Four fields: `source` (the full input), `pos` (current byte offset),
-/// `len` (cached `source.byteCount`), and `line` (1-based line counter).
+/// `len` (cached `source.bytes.count`), and `line` (1-based line counter).
 struct TomlCursor: Cloneable {
     var source: String
     var pos: Int64
@@ -48,7 +48,7 @@ struct TomlCursor: Cloneable {
     init(source: String) {
         self.source = source;
         self.pos = 0;
-        self.len = source.byteCount;
+        self.len = source.bytes.count;
         self.line = 1;
     }
 
@@ -193,8 +193,8 @@ func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), Toml
 
 /// Strips surrounding quotes from a key if present; returns bare keys unchanged.
 func parseKey(s: String) -> String {
-    if s.byteCount >= 2 and s.starts(with: "\"") and s.ends(with: "\"") {
-        return s.asSlice().subslice(from: 1, to: s.byteCount - 1).toOwned()
+    if s.bytes.count >= 2 and s.starts(with: "\"") and s.ends(with: "\"") {
+        return s.asSlice().subslice(from: 1, to: s.bytes.count - 1).toOwned()
     }
     s
 }
@@ -205,7 +205,7 @@ func parseKey(s: String) -> String {
 /// suitable for `subslice(from:to:)` calls.
 func findUnquotedChar(s: String, target: Char) -> Optional[Int64] {
     let bytes = s.bytes;
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var inQuote = false;
     var escaped = false;
     var i: Int64 = 0;
@@ -277,13 +277,13 @@ func parseTomlValue(s: String, lineNum: Int64) -> Result[Value, TomlParseError] 
 
 /// Parses a basic quoted TOML string, processing escape sequences.
 func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError] {
-    if s.byteCount < 2 or not s.ends(with: "\"") {
+    if s.bytes.count < 2 or not s.ends(with: "\"") {
         return .Err(TomlParseError("unterminated string", lineNum))
     }
 
     var result = String();
     let bytes = s.bytes;
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var i: Int64 = 1;
     let end = len - 1;
 
@@ -358,7 +358,7 @@ func parseTomlArray(s: String, lineNum: Int64) -> Result[Value, TomlParseError] 
         return .Err(TomlParseError("unterminated array", lineNum))
     }
 
-    let inner = s.asSlice().subslice(from: 1, to: s.byteCount - 1).trimmed().toOwned();
+    let inner = s.asSlice().subslice(from: 1, to: s.bytes.count - 1).trimmed().toOwned();
     if inner.isEmpty {
         return .Ok(Value.Arr(Array[Value]()))
     }
@@ -384,7 +384,7 @@ func parseInlineTable(s: String, lineNum: Int64) -> Result[Value, TomlParseError
         return .Err(TomlParseError("unterminated inline table", lineNum))
     }
 
-    let inner = s.asSlice().subslice(from: 1, to: s.byteCount - 1).trimmed().toOwned();
+    let inner = s.asSlice().subslice(from: 1, to: s.bytes.count - 1).trimmed().toOwned();
     if inner.isEmpty {
         return .Ok(Value.Obj(Dictionary[String, Value]()))
     }
@@ -413,7 +413,7 @@ func splitTomlItems(s: String) -> Array[String] {
     var start: Int64 = 0;
     var i: Int64 = 0;
     let bytes = s.bytes;
-    let len = s.byteCount;
+    let len = s.bytes.count;
     let slice = s.asSlice();
 
     while i < len {

@@ -3,48 +3,8 @@
 ## enum `Optional`
 
 ```kestrel
-public enum Optional[T]
+public enum Optional[T]: not Copyable where T: not Static
 ```
-
-A type-safe stand-in for nullable references — either `Some(value)` or
-`None`.
-
-`T?` desugars to `Optional[T]`, and the `null` literal constructs
-`.None` for any optional type. The compiler refuses to let you read the
-inner value without handling the `None` case, which is the whole point
-— there is no implicit unwrap. The `try` operator (and the `??`
-coalescing operator) propagate `None` through call chains so you can
-write linear code without nested `match` blocks.
-
-### Examples
-
-```
-func find(id: Int64) -> User? {
-    if let user = users.get(id) { return user };
-    null
-}
-
-match find(42) {
-    .Some(let u) => print(u.name),
-    .None        => print("Not found")
-}
-```
-
-```
-// `try` short-circuits on None
-func combine() -> Int64? {
-    let a = try getA();   // returns None early if getA() is None
-    let b = try getB();
-    a + b
-}
-```
-
-### Representation
-
-A two-case tagged union — one byte (or whatever the backend picks) of
-discriminant plus the payload of `T`. The compiler will use a niche
-when one is available (e.g. a non-zero pointer), so `Optional[Pointer]`
-is the same size as `Pointer`.
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -765,6 +725,14 @@ type Output = T
 
 _Defined in `lang/std/result/optional.ks`._
 
+#### typealias `Output`
+
+```kestrel
+type Output = T
+```
+
+_Defined in `lang/std/result/optional.ks`._
+
 #### typealias `Residual`
 
 ```kestrel
@@ -783,12 +751,32 @@ Drives `try` — `Continue(value)` for `Some`, `Break(())` for `None`.
 
 _Defined in `lang/std/result/optional.ks`._
 
+### Implements `ForceUnwrap`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/force_unwrap.ks`._
+
+#### function `forceUnwrap`
+
+```kestrel
+public consuming func forceUnwrap() -> T
+```
+
+Returns the wrapped value, trapping on `.None`. Backs `value!`.
+
+_Defined in `lang/std/result/optional.ks`._
+
 ### Implements `FromResidual`
 
 #### function `fromResidual`
 
 ```kestrel
-public static func fromResidual(()) -> Optional[T]
+public static func fromResidual(consuming ()) -> Optional[T]
 ```
 
 Builds `.None` from the residual produced by a `try` short-circuit.
@@ -800,11 +788,12 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `from`
 
 ```kestrel
-public static func from(T) -> Optional[T]
+public static func from(consuming T) -> Optional[T]
 ```
 
 Wraps `value` in `.Some`. Called by the compiler at the promotion
-site, not usually by user code.
+site, not usually by user code. `consuming` so `value` is moved into
+`.Some` (no clone-and-leak of a borrowed original).
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -872,22 +861,8 @@ _Defined in `lang/std/result/optional.ks`._
 ## struct `OptionalIterator`
 
 ```kestrel
-public struct OptionalIterator[T] { /* private fields */ }
+public struct OptionalIterator[T] where T: not Static { /* private fields */ }
 ```
-
-Single-shot iterator yielding zero or one elements. Returned by
-`Optional.iter()`.
-
-### Examples
-
-```
-let items: [Int64] = Some(42).iter().collect();   // [42]
-let empty: [Int64] = None.iter().collect();       // []
-```
-
-### Representation
-
-One `Optional[T]` field. `next()` empties it on first call.
 
 _Defined in `lang/std/result/optional.ks`._
 
@@ -1090,7 +1065,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -1107,7 +1082,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -1162,7 +1137,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -1256,7 +1231,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -1296,7 +1271,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -1371,7 +1346,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -1508,7 +1483,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -1546,7 +1521,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -1637,7 +1612,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -1689,7 +1664,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -1767,40 +1742,8 @@ _Defined in `lang/std/result/optional.ks`._
 ## enum `Result`
 
 ```kestrel
-public enum Result[T, E]
+public enum Result[T, E]: not Copyable where T: not Static
 ```
-
-The fallible-operation enum: either `Ok(value)` or `Err(error)`. The
-project's exception-free error story.
-
-`T throws E` desugars to `Result[T, E]`, and the `try` operator
-short-circuits on `Err` so failure propagation reads like normal
-straight-line code. The compiler refuses to let you read the success
-value without first handling the error case.
-
-`Result` composes with `Optional` via `ok()` / `err()`, and with the
-`?` operator via `Tryable`. Pick `Result` when callers should be able
-to inspect *why* something failed; pick `Optional` when "absent" is the
-only failure mode.
-
-### Examples
-
-```
-func parseAndDouble(s: String) -> Int64 throws ParseError {
-    let n = try Int64.parse(s).okOr(ParseError());
-    n * 2
-}
-
-match parseAndDouble("21") {
-    .Ok(let v)  => print("got \{v}"),
-    .Err(let e) => print("failed: \{e}")
-}
-```
-
-### Representation
-
-A two-case tagged union — discriminant plus the larger of `T` / `E`.
-Niche optimisation applies the same way it does to `Optional`.
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -2096,12 +2039,22 @@ conformance list above.
 
 _Defined in `lang/std/result/result.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ### Implements `FromResidual`
 
 #### function `fromResidual`
 
 ```kestrel
-public static func fromResidual(E) -> Result[T, E]
+public static func fromResidual(consuming E) -> Result[T, E]
 ```
 
 Builds `.Err(residual)` from the residual produced by a `try`
@@ -2114,11 +2067,12 @@ _Defined in `lang/std/result/result.ks`._
 #### function `from`
 
 ```kestrel
-public static func from(T) -> Result[T, E]
+public static func from(consuming T) -> Result[T, E]
 ```
 
 Wraps `value` in `.Ok`. Called by the compiler at the promotion
-site, not usually by user code.
+site, not usually by user code. `consuming` so `value` is moved into
+`.Ok` (no clone-and-leak of a borrowed original).
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -2201,17 +2155,8 @@ _Defined in `lang/std/text/format.ks`._
 ## struct `ResultIterator`
 
 ```kestrel
-public struct ResultIterator[T, E] { /* private fields */ }
+public struct ResultIterator[T, E] where T: not Static { /* private fields */ }
 ```
-
-Single-shot iterator yielding zero or one elements (the `Ok` value).
-Returned by `Result.iter()`. Errors are silently skipped — use
-`mapErr` / `match` if you need them.
-
-### Representation
-
-Stores the success value in an `Optional[T]` field; `next()` empties
-it on first call.
 
 _Defined in `lang/std/result/result.ks`._
 

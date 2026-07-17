@@ -157,7 +157,7 @@ public func evocativeDescription(code: Int64) -> String {
 public func formatDateLabel(dateStr: String, idx: Int64) -> String {
     if idx == 0 { return "Today" }
     if idx == 1 { return "Tmrw" }
-    if dateStr.byteCount >= 10 {
+    if dateStr.bytes.count >= 10 {
         return dateStr.asSlice().subslice(from: 5, to: 10).toOwned()
     };
     dateStr
@@ -176,7 +176,7 @@ public func getStringFromArray(arr: Array[Value], idx: Int64) -> String {
 }
 
 public func parseHourFromIso(isoStr: String) -> Int64 {
-    if isoStr.byteCount < 13 { return 0 };
+    if isoStr.bytes.count < 13 { return 0 };
     let hourStr = isoStr.asSlice().subslice(from: 11, to: 13).toOwned();
     match Int64(parsing: hourStr) {
         .Some(n) => n,
@@ -194,7 +194,7 @@ public func formatHourLabel(timeStr: String, idx: Int64) -> String {
 }
 
 public func formatSunTime(isoStr: String) -> String {
-    if isoStr.byteCount < 16 { return "" };
+    if isoStr.bytes.count < 16 { return "" };
     let hourStr = isoStr.asSlice().subslice(from: 11, to: 13).toOwned();
     let minStr = isoStr.asSlice().subslice(from: 14, to: 16).toOwned();
     let hour = match Int64(parsing: hourStr) {

@@ -36,7 +36,7 @@ func bindParams(stmt: RawPointer, bindings: Array[SqliteValue]) -> () throws Sql
             .Real(v) => ffi.sqlite3_bind_double(stmt, paramIndex, v.raw),
             .Text(v) => {
                 let cstr = v.toCString();
-                let byteCount = Int32(from: v.byteCount);
+                let byteCount = Int32(from: v.bytes.count);
                 let r = ffi.sqlite3_bind_text(stmt, paramIndex, cstr.raw.asRaw(), byteCount, SQLITE_TRANSIENT());
                 cstr.free();
                 r

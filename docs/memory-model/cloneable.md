@@ -7,18 +7,22 @@ Kestrel provides a unified copy model where types can customize how they are cop
 | Type | Copy Behavior |
 |------|---------------|
 | Simple struct (all fields Copyable) | Implicit bitwise copy |
-| Struct implementing `Cloneable` | Implicit copy calls `clone()` |
+| Struct that is `Cloneable` | Implicit copy calls `clone()` |
 | `not Copyable` struct | Cannot be copied, only moved |
 
 ## The `Cloneable` Protocol
 
+As declared in the standard library (`lang/std/core/copy.ks`):
+
 ```kestrel
-protocol Cloneable: Copyable {
-    func clone(self) -> Self
+@builtin(.Cloneable)
+public protocol Cloneable: Copyable {
+    @builtin(.Clone)
+    func clone() -> Self
 }
 ```
 
-`Cloneable` extends `Copyable`. If a type is `Cloneable`, it is automatically `Copyable`, but copies go through the custom `clone()` implementation.
+`Cloneable` extends `Copyable`, so cloneable values flow through generic code that asks only for `Copyable` — but every implicit copy goes through `clone()` instead of a bitwise copy. The implementation decides how deep the copy goes: `String` duplicates its buffer, while a refcounted box only bumps the count.
 
 ## Basic Usage
 
@@ -28,316 +32,166 @@ Simple types use compiler-generated bitwise copy:
 
 ```kestrel
 struct Point {
-    var x: Int
-    var y: Int
+    var x: Int64
+    var y: Int64
 }
 
-let a = Point(x: 1, y: 2)
-let b = a  // Bitwise copy
-print(a.x) // 1 - a is still valid
-print(b.x) // 1 - b is independent copy
+let a = Point(x: 1, y: 2);
+let b = a;   // Bitwise copy
+print(a.x);  // 1 - a is still valid
+print(b.x);  // 1 - b is an independent copy
 ```
 
 ### Custom Copy (Cloneable)
 
-Types that manage resources implement `Cloneable`:
+Types that manage resources conform to `Cloneable` and implement `clone()` (methods take no explicit `self` parameter):
 
 ```kestrel
-struct MyString: Cloneable {
-    var buffer: Pointer[Char]
-    var len: Int
-    
-    func clone(self) -> Self {
-        let newBuffer = allocate(self.len)
-        memcpy(newBuffer, self.buffer, self.len)
-        MyString(buffer: newBuffer, len: self.len)
+struct MyBuffer: Cloneable {
+    var data: Pointer[UInt8]
+    var len: Int64
+
+    func clone() -> MyBuffer {
+        let fresh = allocate(self.len);
+        copyBytes(from: self.data, to: fresh, count: self.len);
+        MyBuffer(data: fresh, len: self.len)
     }
-    
+
     deinit {
-        free(self.buffer)
+        free(self.data);
     }
 }
 
-let a = MyString("hello")
-let b = a  // Implicitly calls a.clone() - deep copy
-// Both a and b have independent buffers
+let a = MyBuffer(...);
+let b = a;   // Implicitly calls a.clone() — deep copy
+// Both a and b own independent buffers
 ```
 
-## Implicit Clone Behavior
+## When Does Clone Happen?
 
-When a `Cloneable` type is copied, `clone()` is called automatically:
+Borrowing is the default parameter mode, so cloning does **not** happen on ordinary function calls:
 
 ```kestrel
-func process(s: MyString) {  // s is copied (consuming not specified)
-    print(s)
-}
-
-let original = MyString("hello")
-process(original)  // Implicitly calls original.clone()
-print(original)    // Still valid - original was cloned, not moved
+func process(data: BigData) { }  // Borrows — no clone!
+process(myData);                 // No clone
 ```
 
-This applies to:
-- Assignment: `let b = a`
-- Parameter passing (non-consuming)
-- Return values
-- Storing in collections
+`clone()` is invoked implicitly on:
 
-## Derived Cloneable
-
-If all fields of a struct are `Cloneable` (or simple `Copyable`), the compiler can derive `Cloneable`:
+- **Assignment**: `let b = a;`
+- **`consuming` parameters**: the callee receives the clone; **the original stays valid**
+- **Return of a still-live value** and storing into aggregates/collections
+- **Binding decay of a reference** to a Cloneable pointee (`let s = box.peekString();` clones once)
 
 ```kestrel
-struct Document: Cloneable {
-    var title: MyString
-    var body: MyString
-    
-    // Compiler-derived clone():
-    // func clone(self) -> Self {
-    //     Document(
-    //         title: self.title.clone(),
-    //         body: self.body.clone()
-    //     )
-    // }
+func take(consuming d: Data) { }
+
+let d = Data(value: 42);
+take(d);   // passes d.clone()
+take(d);   // OK — d is still valid; clones again
+```
+
+This mirrors Copyable behavior exactly: `consuming` only *moves* when the type is `not Copyable`. If you want single-owner hand-off semantics, mark the type `not Copyable` — do not rely on `consuming` to move a Cloneable value.
+
+## Derived Cloneable Is Automatic
+
+A struct or enum whose fields are Copyable **except for at least one Cloneable member** is classified Cloneable automatically (the member fold — see [copy-semantics.md](copy-semantics.md)), and the compiler synthesizes a memberwise clone: Copyable fields are bit-copied, Cloneable fields are `clone()`d. No declaration is required:
+
+```kestrel
+struct Document {
+    var title: String   // Cloneable
+    var pages: Int64    // Copyable
+}
+// Document is implicitly Cloneable; `let b = a;` clones `title`, copies `pages`.
+```
+
+Declare the conformance explicitly **only when you want to hand-write `clone()`** — and then you must implement it (a bare `struct Document: Cloneable { ... }` without a `clone()` body is a missing-requirement error, E454):
+
+```kestrel
+struct Snapshot: Cloneable {
+    var name: String
+    var hits: Int64
+
+    func clone() -> Snapshot {
+        // custom behavior: clones reset the counter
+        Snapshot(name: self.name.clone(), hits: 0)
+    }
 }
 ```
 
-**Question**: Should derived `Cloneable` be automatic, or require explicit declaration?
+### Warning: `self` Inside `clone()` Is a Bitwise Copy
 
-Options:
-1. Automatic if all fields are Cloneable
-2. Require `struct Document: Cloneable { ... }` to opt in
-3. Automatic, but allow override
+Inside a hand-written `clone()` body the compiler deliberately suppresses clone-insertion (otherwise `clone()` would recurse forever). Returning `self` — or a payload bound out of `self` — therefore **aliases** every heap field instead of duplicating it, and both values will free the same buffer:
+
+```kestrel
+// WRONG — aliases the String; double-free on drop
+enum Token: Cloneable {
+    case Plain
+    case Literal(String)
+    func clone() -> Token { self }
+}
+
+// RIGHT — deep-clone each heap payload; bare `self` only for payload-less cases
+enum Token: Cloneable {
+    case Plain
+    case Literal(String)
+    func clone() -> Token {
+        match self { .Literal(s) => .Literal(s.clone()), _ => self }
+    }
+}
+```
+
+If you don't need custom behavior, don't declare the conformance — the synthesized memberwise clone is always correct.
 
 ## Cloneable vs not Copyable
 
-These are mutually exclusive:
+These are mutually exclusive; combining them is rejected (E423, `conflicting_copyable_opt_out`):
 
 ```kestrel
-// ERROR: Cannot be both Cloneable and not Copyable
+// ERROR(E423): Cannot be both Cloneable and not Copyable
 struct Invalid: Cloneable, not Copyable {
-    func clone(self) -> Self { ... }
+    func clone() -> Invalid { ... }
 }
 ```
 
-A `not Copyable` type cannot implement `Cloneable`. It can only be moved.
-
-If you want explicit-only copying for a resource type:
+If you want *explicit-only* duplication for a resource type, keep it `not Copyable` and provide an ordinary method:
 
 ```kestrel
 struct Resource: not Copyable {
-    var handle: Int
-    
-    // Not clone() - just a regular method
-    func duplicate(self) -> Resource {
+    var handle: Int64
+
+    // Not clone() — just a regular method
+    func duplicate() -> Resource {
         Resource(handle: duplicateHandle(self.handle))
     }
 }
 
-let a = Resource(...)
-let b = a.duplicate()  // Explicit duplication
-let c = a              // Move, not copy
-// a is now invalid
+let a = Resource(...);
+let b = a.duplicate();  // Explicit duplication
+let c = a;              // Move, not copy — a is now invalid
 ```
 
----
+## Generics
 
-## Potential Issues
-
-### 1. Hidden Performance Costs
-
-Implicit cloning can be expensive:
-
-```kestrel
-struct BigData: Cloneable {
-    var items: Array[Int]  // 1 million elements
-    
-    func clone(self) -> Self {
-        // Copies 1 million integers!
-        BigData(items: self.items.clone())
-    }
-}
-
-let a = BigData(...)
-let b = a  // Silently copies 1 million integers
-```
-
-**Concern**: No visual indication of expensive operation.
-
-**Counterargument**: This is the trade-off for ergonomics. Developers should know their types.
-
-**Mitigation**: Linter warnings for large Cloneable types? Profiling tools?
-
-### 2. When Does Clone Happen?
-
-Borrow is the default parameter mode, so cloning does NOT happen on regular function calls:
-
-```kestrel
-func process(data: BigData) { ... }  // Borrows - no clone!
-
-process(myData)  // No clone, just borrows
-```
-
-Cloning happens on:
-- **Assignment**: `let b = a`
-- **`consuming` parameters**: `func take(consuming data: BigData)`
-- **Escaping closure captures**: when a closure outlives its scope
-- **Storing in data structures**: `array.push(item)`
-
-### 3. Cloneable Fields in Copyable Structs
-
-What if a struct has a mix of simple and Cloneable fields?
-
-```kestrel
-struct Mixed {
-    var x: Int        // Simple copy
-    var s: MyString   // Needs clone()
-}
-
-let a = Mixed(x: 1, s: MyString("hello"))
-let b = a  // Is Mixed Copyable? Cloneable?
-```
-
-**Expected behavior**: `Mixed` is implicitly `Cloneable`. Copy calls `clone()` on the `MyString` field.
-
-### 4. Clone Cycles
-
-Cloneable types with cyclic references:
-
-```kestrel
-struct Node: Cloneable {
-    var value: Int
-    var next: Optional[Box[Node]]
-    
-    func clone(self) -> Self {
-        Node(
-            value: self.value,
-            next: self.next.clone()  // Recursively clones the chain
-        )
-    }
-}
-```
-
-**Concern**: Deep clone of a long chain or cycle could stack overflow or be very slow.
-
-**Mitigation**: Same as any recursive algorithm - developer responsibility.
-
-### 5. Clone in Generic Contexts
-
-How does `Cloneable` interact with generics?
+`Cloneable` participates in bounds like any protocol, and generic copies dispatch through the protocol witness at monomorphization:
 
 ```kestrel
 func duplicate[T](item: T) -> (T, T) {
-    (item, item)  // Two uses - needs copy
-}
+    (item, item)   // T: Copyable is the default bound;
+}                  // if the instantiating type is Cloneable, clone() is called
 
-// If T is Cloneable, clone() is called
-// If T is simple Copyable, bitwise copy
-```
-
-**Expected**: The compiler dispatches to `clone()` if available at monomorphization time.
-
-**Question**: What if you need to *require* Cloneable?
-
-```kestrel
-func deepCopy[T: Cloneable](item: T) -> T {
-    item.clone()  // Explicit clone call
+func deepCopy[T](item: T) -> T where T: Cloneable {
+    item.clone()   // explicit clone requires the Cloneable bound
 }
 ```
 
-### 6. Partial Clone Failures
+A conditionally-Copyable container (e.g. `Optional[T]`) is also conditionally *Cloneable*: `Optional[String]` satisfies a `Cloneable` bound because `String` does, and cloning it deep-clones the payload. See [generics.md](generics.md).
 
-What if `clone()` can fail?
+---
 
-```kestrel
-struct Resource: Cloneable {
-    func clone(self) -> Self {
-        let handle = tryDuplicateHandle(self.handle)
-        if handle == -1 {
-            // What now? Cannot return error from clone()
-            panic("clone failed")
-        }
-        Resource(handle: handle)
-    }
-}
-```
+## Design Notes
 
-**Constraint**: `clone()` must be infallible (returns `Self`, not `Result[Self, Error]`).
-
-**Workaround**: For fallible duplication, use a separate method:
-
-```kestrel
-func tryClone(self) -> Result[Self, Error] { ... }
-```
-
-### 7. Clone and Deinit Symmetry
-
-If a type has `deinit`, it probably needs custom `clone()`:
-
-```kestrel
-struct Handle: Cloneable {
-    var fd: Int
-    
-    func clone(self) -> Self {
-        Handle(fd: duplicate(self.fd))  // Must duplicate, not share!
-    }
-    
-    deinit {
-        close(self.fd)
-    }
-}
-```
-
-**Concern**: Forgetting to implement `clone()` for a type with `deinit` could lead to double-free.
-
-**Mitigation**: 
-- Compiler warning if a type has `deinit` but uses default copy?
-- Require explicit `Cloneable` implementation for types with `deinit`?
-
-### 8. Cloneable Standard Library Types
-
-Which standard library types should be Cloneable?
-
-```kestrel
-// These should be Cloneable:
-struct String: Cloneable { ... }
-struct Array[T: Cloneable]: Cloneable { ... }
-struct HashMap[K, V: Cloneable]: Cloneable { ... }
-
-// These might not be:
-struct File: not Copyable { ... }  // Resource, not cloneable
-```
-
-### 9. Explicit Clone Syntax
-
-Sometimes you want to be explicit about cloning:
-
-```kestrel
-let a = MyString("hello")
-let b = a.clone()  // Explicit - always works for Cloneable types
-let c = a          // Implicit - same behavior
-```
-
-Both should work. Explicit `clone()` call is always available for Cloneable types.
-
-### 10. Cloneable and Consuming
-
-How does Cloneable interact with `consuming`?
-
-```kestrel
-func take(consuming s: MyString) { ... }
-
-let a = MyString("hello")
-take(a)  // Does this clone or move?
-```
-
-**Expected**: `consuming` means transfer ownership. For Cloneable types, this *could* be:
-1. Clone then move the clone (original stays valid)
-2. Move the original (original invalid)
-
-**Recommendation**: `consuming` should move, not clone. If you want the original to stay valid, don't use `consuming`.
-
-```kestrel
-take(a)       // Moves a (a is invalid after)
-take(a.clone()) // Explicit clone, then move the clone
-```
+- **Hidden cost**: `let b = a;` on a Cloneable type can be arbitrarily expensive. This is the accepted trade-off for value semantics; know your types.
+- **`clone()` is infallible** — it returns `Self`, not a `Result`. For fallible duplication provide a separate `tryClone() -> Self throws E` method.
+- **Clone/deinit symmetry**: a type with a `deinit` that releases a resource must either be `not Copyable` or make its duplication safe. Note that types with `deinit` and only-Copyable fields remain bitwise-Copyable — the compiler does not force `Cloneable` on them, so a `deinit` that frees a raw pointer field plus implicit copying is a double-free you must design away (wrap the pointer, or opt out with `not Copyable`).
+- **Explicit clone is always available**: `let b = a.clone();` and `let c = a;` behave identically for Cloneable types.

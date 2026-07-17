@@ -1,183 +1,136 @@
 # Limitations
 
-Kestrel's memory model makes deliberate trade-offs for simplicity. This document describes patterns that are not supported and their workarounds.
+Kestrel's memory model makes deliberate trade-offs for simplicity. This document describes what is supported, what is deliberately restricted, and the workarounds.
 
-## No User-Facing Reference Types
+## References Are Second-Class
 
-Kestrel does not have `&T` or `&mut T` reference types. Borrowing is a calling convention, not a type constructor.
+Kestrel *does* have reference types — `&T` (shared) and `&mutating T` (exclusive) — but they are deliberately **second-class**: they can travel through a computation, not live in one place indefinitely. Safety comes from provenance-based escape checking (E494 family, see [diagnostics.md](diagnostics.md)), not from lifetime annotations.
 
-### What This Prevents
+### What Works
 
-**Returning borrowed data:**
+**Returning borrowed data** (parameter-rooted):
 
 ```kestrel
-// CANNOT EXPRESS: returning a reference to internal data
-func first(list: List[Int]) -> &Int {  // No &Int type
-    &list.items(0)
+struct Person {
+    var age: Int64
+    func ageRef() -> &Int64 { self.age }
+    mutating func ageMut() -> &mutating Int64 { self.age }
+}
+
+var p = Person(age: 42);
+let a = p.ageRef();     // binding a ref-returning CALL decays: `a` is an owned copy
+p.ageMut() = 50;        // ref results are places: assign/compound-assign through them
+```
+
+**Named reference bindings** (`&place` in a `let` initializer names the place; reads see later writes, and bindings thread across `if`/`match` merges):
+
+```kestrel
+var x = 10;
+let r = &x;             // shared view of the place
+x = 20;
+print(r);               // 20
+
+let m = &mutating x;    // exclusive view
+m = m + 1;              // writes the referent (no rebinding spelling exists)
+```
+
+**References in struct fields, tuples, and generic arguments** (the aggregate becomes non-`Static` — it can't outlive the borrow either):
+
+```kestrel
+struct Cursor {
+    var item: &Int64
+    var count: Int64
+}
+
+let opt: Optional[&Int64] = ...;   // Optional[T] declares `where T: not Static`
+```
+
+**Conformances on references** — `extend &T: P` makes `&T` satisfy protocol bounds (e.g. the stdlib's `Equatable`/`Comparable` on `&T` where the pointee conforms):
+
+```kestrel
+extend &T: Probe where T: Probe {
+    public func probe() -> Int64 { self.probe() }
 }
 ```
 
-**Storing references in structs:**
+**Dangling references are rejected, not inexpressible** — the escape checker roots every reference and refuses any that outlives its root:
 
 ```kestrel
-// CANNOT EXPRESS: struct holding a reference
-struct Iterator {
-    var current: &Int  // No reference fields
+func bad() -> &Int64 {
+    let x = 42;
+    x                    // ERROR(E494): `x` dies at return
 }
 ```
 
-### Workarounds
+### What Is Restricted
 
-1. **Return owned data (copy or move):**
+| Restriction | Code |
+|-------------|------|
+| Ref types in **parameter** position — access modes are the only spelling (permanent by design) | E480 |
+| `&x` at a **call site** — borrowing is the callee's convention, never spelled by the caller | E488 |
+| Ref type in a `let`/`var` **annotation** — write `let r = &x;`, not `let r: &Int64 = ...` | E482 |
+| Ref types inside **function types** (params or returns) | E480/E486 |
+| Nested references (`&&T`) | E487 |
+| Refs in **globals / static storage** — long-lived storage requires `Static` types | E505 |
+| Ref-returning functions as **first-class values** | E491/E492 |
+| A ref expression held open **across a control-flow merge** (hoist to a binding first) | E497 |
+| Closures **capturing** a ref binding | E212 |
 
-```kestrel
-func first(list: List[Int]) -> Int {
-    list.items(0)  // Returns a copy
-}
-```
+### When This Still Hurts
 
-2. **Use indices instead of references:**
-
-```kestrel
-struct Iterator {
-    var collection: List[Int]
-    var index: Int
-    
-    func current(self) -> Int {
-        self.collection.items(self.index)
-    }
-}
-```
-
-3. **Use closures for scoped access:**
-
-```kestrel
-func withFirst(list: List[Int], f: (Int) -> Void) {
-    f(list.items(0))
-}
-```
-
-4. **Use reference-counted types (when available):**
-
-```kestrel
-class SharedData {
-    var value: Int
-}
-// Multiple owners can hold the same SharedData
-```
-
-### When This Hurts
-
-- **Zero-copy iteration** - Iterators that yield references to elements
-- **Parser combinators** - Parsers returning slices of input
-- **View types** - String slices, array views without copying
-
-These patterns require either copying data or waiting for `class` types and generalized accessors.
-
----
-
-## No Self-Referential Structs
-
-A struct cannot hold data that refers to its own fields.
-
-### What This Prevents
-
-```kestrel
-// INVALID: self-referential struct
-struct Buffer {
-    var data: Array[Int]
-    var cursor: Int  // OK: index is fine
-    // But cannot have a "pointer" to data[0]
-}
-```
-
-### Why It's Problematic
-
-Self-referential data breaks when the struct is moved:
-
-```kestrel
-var b = Buffer(...)  // imagine cursor "points" to data[0]
-var c = b            // Move b to c
-// The internal "pointer" would still reference the OLD location
-```
-
-### Workarounds
-
-1. **Use indices instead of pointers:**
-
-```kestrel
-struct Buffer {
-    var data: Array[Int]
-    var cursorIndex: Int
-    
-    func current(self) -> Int {
-        self.data(self.cursorIndex)
-    }
-}
-```
-
-2. **Compute derived data on demand:**
-
-```kestrel
-struct Container {
-    var items: Array[Int]
-    
-    func first(self) -> Int {
-        self.items(0)  // No stored reference needed
-    }
-}
-```
-
-### When This Hurts
-
-- **Intrusive data structures** - Linked lists with internal pointers
-- **Cached computations** - Caching references to internal data
-- **Generators/iterators** - Yielding references to internal state
+- **Zero-copy iterators yielding references** — iteration is by value; `for x in xs` copies/clones elements (ref-based iteration composes with accessors, e.g. `&arr(at: i)`, but there is no `Iterator` over `&T` elements in the stdlib's main loop path yet).
+- **Long-lived views** — a struct holding `&T` cannot itself be stored long-term (non-`Static`); views are for passing down and across, not for keeping.
 
 ---
 
 ## No Lifetime Annotations
 
-Kestrel does not have explicit lifetime annotations like Rust's `'a`.
-
-### What This Means
-
-The compiler cannot express complex borrowing relationships:
-
-```kestrel
-// Cannot express: "output lives as long as input a, not b"
-func selectFirst(a: String, b: String) -> String {
-    a  // Must return an owned copy
-}
-```
-
-### Impact
-
-For most application code, this doesn't matter - you work with owned values. For performance-critical code that needs zero-copy access, you must use other patterns (closures, indices, or future reference-counted types).
+Kestrel will never have explicit lifetime annotations (`'a`). The escape checker is intentionally simpler than a full borrow checker: a reference's validity is tied to a single **root**, and multi-source returns (`if c { a.field } else { b.field }`) are rejected rather than given a lifetime union. For most application code this never surfaces; for complex borrow topologies, return owned data instead.
 
 ---
 
-## Limited Polymorphic Ownership
+## No Self-Referential Structs
+
+A struct cannot contain itself by value (E449/E450 at declaration), and a struct cannot hold a reference **into its own storage** — constructing one would root the ref at a local that the escape checker refuses to let escape alongside the struct. Use indices instead:
+
+```kestrel
+struct Buffer {
+    var data: Array[Int64]
+    var cursorIndex: Int64
+
+    func current() -> Int64 {
+        self.data(self.cursorIndex)
+    }
+}
+```
+
+Recursive *enums* are supported via `indirect enum` (heap indirection).
+
+---
+
+## Capturing Closures Cannot Escape
+
+Closure environments are stack-allocated in the creating frame, so a closure that captures anything cannot be returned or stored beyond that frame (E494); capture-free closures are unrestricted. See [closures.md](closures.md). Heap-allocated environments are planned; the by-value capture semantics will not change.
+
+---
+
+## Copyable-by-Default Generics
 
 Generic code assumes `Copyable` by default:
 
 ```kestrel
 func duplicate[T](item: T) -> (T, T) {
-    (item, item)  // Works because T: Copyable is assumed
+    (item, item)
 }
 
-duplicate(myFileHandle)  // ERROR: FileHandle is not Copyable
+duplicate(myFileHandle);  // ERROR: FileHandle !: Copyable
 ```
 
-### Workaround
+Use a `not Copyable` bound for generic code that should accept move-only types (see [generics.md](generics.md)).
 
-Use `not Copyable` bound for generic code that should work with move-only types:
+### Known gap: incomplete instantiation-time enforcement
 
-```kestrel
-func wrap[T: not Copyable](consuming item: T) -> Box[T] {
-    Box(item)
-}
-```
+The default bound is enforced at annotations, generic calls, and container construction, but **not on every inferred instantiation path**. In particular, array literals of non-Copyable elements currently slip through (`[Res(...), Res(...)]` forms an `Array[Res]`), and Copyable-default element access then bit-copies the element, producing a double-deinit at runtime. Until this is closed, keep non-Copyable values out of `Array`.
 
 ---
 
@@ -185,10 +138,11 @@ func wrap[T: not Copyable](consuming item: T) -> Box[T] {
 
 | Limitation | Benefit | Cost |
 |------------|---------|------|
-| No reference types | Simpler mental model, no lifetimes | Some patterns require copies |
+| Second-class references | No lifetime annotations; single-root escape checking | Long-lived views inexpressible |
+| No lifetime annotations | Gentler learning curve | Multi-source borrows must return owned data |
 | No self-referential structs | Move safety, simpler semantics | Must use indices |
-| No lifetime annotations | Gentler learning curve | Complex borrowing inexpressible |
-| Copyable-by-default generics | Application code just works | Library authors must opt-out |
+| Stack-allocated closure environments | Zero-allocation closures | Capturing closures can't escape (yet) |
+| Copyable-by-default generics | Application code just works | Library authors must opt out |
 
 ---
 
@@ -196,10 +150,8 @@ func wrap[T: not Copyable](consuming item: T) -> Box[T] {
 
 These limitations are intentional trade-offs for Kestrel's goals:
 
-1. **Application-first**: Most application code doesn't need zero-copy references
-2. **Gentle learning curve**: No lifetime annotations to learn
+1. **Application-first**: Most application code doesn't need long-lived zero-copy views
+2. **Gentle learning curve**: No lifetime language to learn — the compiler explains escapes in terms of "this value dies at return"
 3. **Value semantics**: Reasoning about code is simpler when values are independent
 
 If you consistently hit these limitations, you may be writing systems-level code that would benefit from Rust's full lifetime system. Kestrel prioritizes the common case over the complex case.
-
-

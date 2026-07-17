@@ -111,7 +111,7 @@ extend CharIndex {
 /// ```
 /// let s = "hello, world";
 /// let slice = s.asSlice();
-/// slice.byteCount;              // 12
+/// slice.bytes.count;             // 12
 /// slice.toOwned();               // "hello, world"
 /// ```
 ///
@@ -142,9 +142,6 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
 
     // -- Size ----------------------------------------------------------------
 
-    /// Number of UTF-8 bytes in this slice. O(1).
-    public var byteCount: Int64 { self.end - self.start }
-
     /// True when the slice covers zero bytes.
     public var isEmpty: Bool { self.start >= self.end }
 
@@ -165,7 +162,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
             return String()
         }
         let ptr = self._rawPtr();
-        String.fromBytesUnchecked(ptr.offset(by: self.start), self.byteCount)
+        String.fromBytesUnchecked(ptr.offset(by: self.start), (self.end - self.start))
     }
 
     // -- Internal helpers ----------------------------------------------------
@@ -183,7 +180,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     /// Iterates code points in this slice.
     public func iter() -> CharsIterator {
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](self._rawPtr().offset(by: self.start).asRaw().raw);
-        CharsIterator(ptr: rawPtr, length: self.byteCount, byteIndex: 0)
+        CharsIterator(ptr: rawPtr, length: (self.end - self.start), byteIndex: 0)
     }
 
     // -- Str conformance -----------------------------------------------------
@@ -198,8 +195,8 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     }
 
     public func isEqual(to other: StringSlice) -> Bool {
-        let myLen = self.byteCount;
-        let otherLen = other.byteCount;
+        let myLen = (self.end - self.start);
+        let otherLen = (other.end - other.start);
         if myLen != otherLen { return false }
         if myLen == 0 { return true }
         _bytesEqual(
@@ -210,8 +207,8 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     }
 
     public func compare(other: StringSlice) -> Ordering {
-        let myLen = self.byteCount;
-        let otherLen = other.byteCount;
+        let myLen = (self.end - self.start);
+        let otherLen = (other.end - other.start);
         let minLen = if myLen < otherLen { myLen } else { otherLen };
         let cmp = _bytesCompare(
             a: self._rawPtr().offset(by: self.start),
@@ -223,7 +220,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
     }
 
     public func hash[H](mutating into hasher: H) where H: Hasher {
-        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: self.byteCount))
+        hasher.write(ArraySlice(pointer: self._rawPtr().offset(by: self.start), count: (self.end - self.start)))
     }
 
     public func clone() -> StringSlice {

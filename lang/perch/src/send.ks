@@ -23,13 +23,13 @@ import std.io.error.(IoError)
 ///  sendResponse(response, to: socketFd);
 /// ```
 public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result[(), IoError] {
-    var resp = String(capacity: 256 + response.bodyContent.byteCount);
+    var resp = String(capacity: 256 + response.bodyContent.bytes.count);
 
     resp.append("HTTP/1.1 \(response.status.code) \(response.status.text())\r\n");
 
     resp.append(response.headers.toWireFormat());
 
-    resp.append("Content-Length: \(response.bodyContent.byteCount)\r\n");
+    resp.append("Content-Length: \(response.bodyContent.bytes.count)\r\n");
 
     resp.append("Connection: close");
     resp.append("\r\n");
@@ -43,7 +43,7 @@ public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result
 
 /// Writes all bytes of a string to a socket, retrying on partial writes.
 func sendAllBytes(fileDescriptor: Int32, content: String) -> Result[(), IoError] {
-    let length = content.byteCount;
+    let length = content.bytes.count;
     if length == 0 {
         return .Ok(())
     }

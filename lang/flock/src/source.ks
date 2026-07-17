@@ -100,7 +100,7 @@ public struct PathSource: PackageSource {
 /// Joins a base path with a relative path.
 /// Handles trailing slashes and normalizes ".." segments.
 public func joinPath(base base: String, rel rel: String) -> String {
-    if rel.byteCount == 0 {
+    if rel.bytes.count == 0 {
         return base
     }
 
@@ -111,8 +111,8 @@ public func joinPath(base base: String, rel rel: String) -> String {
 
     // Strip trailing slash from base
     var cleanBase = base;
-    if cleanBase.byteCount > 1 and cleanBase.ends(with: "/") {
-        cleanBase = cleanBase.asSlice().subslice(from: 0, to: cleanBase.byteCount - 1).toOwned()
+    if cleanBase.bytes.count > 1 and cleanBase.ends(with: "/") {
+        cleanBase = cleanBase.asSlice().subslice(from: 0, to: cleanBase.bytes.count - 1).toOwned()
     }
 
     // Split relative path and process ".." segments
@@ -128,7 +128,7 @@ public func joinPath(base base: String, rel rel: String) -> String {
             }
         } else if part == "." {
             // skip current dir
-        } else if part.byteCount > 0 {
+        } else if part.bytes.count > 0 {
             parts.append(part)
         }
         i = i + 1
@@ -191,7 +191,7 @@ func splitOnSlash(s: String) -> Array[String] {
     var result = Array[String]();
     var start: Int64 = 0;
     var i: Int64 = 0;
-    let len = s.byteCount;
+    let len = s.bytes.count;
 
     while i < len {
         let byte = s.bytes(unchecked: i);

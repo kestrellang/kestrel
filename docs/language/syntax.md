@@ -113,8 +113,10 @@ enum Shape {
 }
 
 // Recursive enum (must be marked indirect) - (Future)
-// enum List[T] {
-//     case Cons(T, indirect List[T])
+// Recursive cases require `indirect` (E429), but indirect enums are
+// not yet supported by the compiler (E465).
+// indirect enum List[T] {
+//     case Cons(head: T, tail: List[T])
 //     case Empty
 // }
 
@@ -270,7 +272,9 @@ private struct C { ... }    // Visible in this file/scope
 ## Expressions and Operators
 
 ```kestrel
-// Ranges (currently only supported in pattern matching contexts)
+// Ranges — usable as values, in for-in loops, and in match arms
+let r = 0..<10;          // half-open range
+for i in 0..=9 { }       // inclusive range
 // In match arms:
 //   0..<10 => "under ten",
 //   10..=100 => "up to hundred",
@@ -283,9 +287,14 @@ let val = optional ?? defaultVal;
 
 // Chaining - (Future)
 // let x = foo?.bar?.baz
+
+// String interpolation — see string-interpolation.md
+let greeting = "Hello, \(name)!";
 ```
 
 ## Error Handling
+
+See [Error Handling](error-handling.md) for the full model (`Result`, the `T throws E` sugar, `throw`, and `try`).
 
 ```kestrel
 // Function returning Result

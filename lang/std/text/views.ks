@@ -123,7 +123,7 @@ public struct BytesView: Iterable, Cloneable {
     public init(slice slice: StringSlice) {
         self.slice = slice;
         self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
-        self.length = slice.byteCount;
+        self.length = (slice.end - slice.start);
     }
 
     public func clone() -> BytesView { BytesView(slice: self.slice.clone()) }
@@ -344,7 +344,7 @@ public struct CharsView: Iterable, Cloneable {
     public init(slice slice: StringSlice) {
         self.slice = slice;
         self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
-        self.length = slice.byteCount;
+        self.length = (slice.end - slice.start);
     }
 
     public func clone() -> CharsView { CharsView(slice: self.slice.clone()) }
@@ -358,12 +358,12 @@ public struct CharsView: Iterable, Cloneable {
 
     /// `true` when the view spans zero bytes (no code points).
     ///
-    /// O(1) — checks `byteCount`, not `count`.
+    /// O(1) — checks the byte length, not `count`.
     public var isEmpty: Bool { self.length == 0 }
 
     /// Number of code points. **O(n)** — walks the buffer counting
     /// UTF-8 leading bytes (those whose top two bits are not `10`). For
-    /// ASCII strings this equals `byteCount`. Cache the result if you
+    /// ASCII strings this equals `bytes.count`. Cache the result if you
     /// need it more than once; each access re-walks the string.
     // TODO: replace lang.i32_*/lang.cast_i8_i32/lang.ptr_* intrinsics in
     // byte-classification code with UInt8/RawPointer wrappers after LLVM switch
@@ -618,7 +618,7 @@ public struct GraphemesView: Iterable, Cloneable {
     public init(slice slice: StringSlice) {
         self.slice = slice;
         self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
-        self.length = slice.byteCount;
+        self.length = (slice.end - slice.start);
     }
 
     public func clone() -> GraphemesView { GraphemesView(slice: self.slice.clone()) }
@@ -630,7 +630,7 @@ public struct GraphemesView: Iterable, Cloneable {
 
     /// `true` when the view spans zero bytes (no graphemes).
     ///
-    /// O(1) — checks `byteCount`, not `count`.
+    /// O(1) — checks the byte length, not `count`.
     public var isEmpty: Bool { self.length == 0 }
 
     /// Number of grapheme clusters. **O(n)** — walks the entire string
@@ -896,7 +896,7 @@ public struct LinesView: Iterable, Cloneable {
     public init(slice slice: StringSlice) {
         self.slice = slice;
         self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
-        self.length = slice.byteCount;
+        self.length = (slice.end - slice.start);
     }
 
     public func clone() -> LinesView { LinesView(slice: self.slice.clone()) }
@@ -908,7 +908,7 @@ public struct LinesView: Iterable, Cloneable {
 
     /// `true` when the view spans zero bytes (no lines).
     ///
-    /// O(1) — checks `byteCount`, not `count`.
+    /// O(1) — checks the byte length, not `count`.
     public var isEmpty: Bool { self.length == 0 }
 
     /// Number of lines in the view. **O(n)** — walks the buffer
@@ -3105,7 +3105,7 @@ extend GraphemeIndex {
     /// ```
     public func advance(by n: Int64, from source: StringSlice) -> GraphemeIndex {
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().offset(by: source.start).asRaw().raw);
-        let length = source.byteCount;
+        let length = (source.end - source.start);
         var offset = self.byteOffset;
         var remaining = n;
 
@@ -3139,7 +3139,7 @@ extend LineIndex {
     /// ```
     public func advance(by n: Int64, from source: StringSlice) -> LineIndex {
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](source._rawPtr().offset(by: source.start).asRaw().raw);
-        let length = source.byteCount;
+        let length = (source.end - source.start);
         var offset = self.byteOffset;
         var remaining = n;
 
@@ -3403,7 +3403,7 @@ public struct ReversedCharsView: Iterable, Cloneable {
     public init(slice slice: StringSlice) {
         self.slice = slice;
         self.ptr = lang.cast_ptr[_, lang.i8](slice._rawPtr().offset(by: slice.start).asRaw().raw);
-        self.length = slice.byteCount;
+        self.length = (slice.end - slice.start);
     }
 
     public func clone() -> ReversedCharsView { ReversedCharsView(slice: self.slice.clone()) }
@@ -3500,7 +3500,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         self.slice = slice;
         self.separator = separator;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
-        self.sourceLen = slice.byteCount;
+        self.sourceLen = (slice.end - slice.start);
         self.index = 0;
         self.done = false;
     }
@@ -3509,7 +3509,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         self.slice = slice;
         self.separator = separator;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
-        self.sourceLen = slice.byteCount;
+        self.sourceLen = (slice.end - slice.start);
         self.index = index;
         self.done = done;
     }
@@ -3522,7 +3522,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         if self.done { return .None }
 
         let start = self.index;
-        let sepLen = self.separator.asSlice().byteCount;
+        let sepLen = self.separator.bytes.count;
 
         if sepLen == 0 {
             // Empty separator — split per code point
@@ -3658,7 +3658,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
-        self.sourceLen = slice.byteCount;
+        self.sourceLen = (slice.end - slice.start);
         self.index = 0;
         self.done = false;
     }
@@ -3667,7 +3667,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
-        self.sourceLen = slice.byteCount;
+        self.sourceLen = (slice.end - slice.start);
         self.index = index;
         self.done = done;
     }

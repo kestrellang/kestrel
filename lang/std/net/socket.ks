@@ -267,16 +267,18 @@ extend TcpStream {
 
         // Null-terminate host and port strings for C
         var hostBuf = Array[UInt8]();
+        let hostLen = host.bytes.count;
         var hci: Int64 = 0;
-        while hci < host.byteCount {
+        while hci < hostLen {
             hostBuf.append(host.bytes(unchecked: hci));
             hci = hci + 1
         }
         hostBuf.append(0);
 
         var portBuf = Array[UInt8]();
+        let portLen = portStr.bytes.count;
         var pci: Int64 = 0;
-        while pci < portStr.byteCount {
+        while pci < portLen {
             portBuf.append(portStr.bytes(unchecked: pci));
             pci = pci + 1
         }

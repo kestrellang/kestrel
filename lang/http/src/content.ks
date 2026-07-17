@@ -39,7 +39,7 @@ public struct Text: Content, Cloneable {
     }
 
     public func toBytes() -> Array[UInt8] = stringToBytes(self.value)
-    public func byteCount() -> Int64 = self.value.byteCount
+    public func byteCount() -> Int64 = self.value.bytes.count
     public func contentType() -> String? = .Some("text/plain; charset=utf-8")
 
     public func clone() -> Text = Text(self.value.clone())
@@ -58,7 +58,7 @@ public struct Html: Content, Cloneable {
     }
 
     public func toBytes() -> Array[UInt8] = stringToBytes(self.value)
-    public func byteCount() -> Int64 = self.value.byteCount
+    public func byteCount() -> Int64 = self.value.bytes.count
     public func contentType() -> String? = .Some("text/html; charset=utf-8")
 
     public func clone() -> Html = Html(self.value.clone())
@@ -97,7 +97,7 @@ public struct Form: Content, Cloneable {
     }
 
     public func toBytes() -> Array[UInt8] = stringToBytes(encodeQueryString(self.pairs))
-    public func byteCount() -> Int64 = encodeQueryString(self.pairs).byteCount
+    public func byteCount() -> Int64 = encodeQueryString(self.pairs).bytes.count
     public func contentType() -> String? = .Some("application/x-www-form-urlencoded")
 
     public func clone() -> Form = Form(self.pairs.clone())

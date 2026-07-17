@@ -109,12 +109,12 @@ public func pageHtml(json: Value, selectedDate: String) -> String {
 
     // Background media: image fills the viewport via object-fit:cover.
     // Video days center an iframe with letterbox.
-    if mediaType == "image" and url.byteCount > 0 {
-        let bgUrl = if hdurl.byteCount > 0 { hdurl } else { url };
+    if mediaType == "image" and url.bytes.count > 0 {
+        let bgUrl = if hdurl.bytes.count > 0 { hdurl } else { url };
         t.put("u", bgUrl);
         t.put("alt", title);
         h.append(t.render("<img class=\"hero-img\" src=\"{u}\" alt=\"{alt}\">"))
-    } else if mediaType == "video" and url.byteCount > 0 {
+    } else if mediaType == "video" and url.bytes.count > 0 {
         t.put("u", url);
         t.put("alt", title);
         h.append(t.render("<div class=\"hero-frame\"><iframe src=\"{u}\" title=\"{alt}\" allow=\"encrypted-media\" allowfullscreen></iframe></div>"))
@@ -136,12 +136,12 @@ public func pageHtml(json: Value, selectedDate: String) -> String {
 
     // Hero meta: overline + big serif title + date chip.
     h.append("<div class=\"hero-meta\"><div class=\"overline\">Astronomy Picture of the Day</div>");
-    if title.byteCount > 0 {
+    if title.bytes.count > 0 {
         t.put("title", title);
         h.append(t.render("<h1 class=\"title\">{title}</h1>"))
     };
-    let chipDate = if date.byteCount > 0 { date } else { selectedDate };
-    if chipDate.byteCount > 0 {
+    let chipDate = if date.bytes.count > 0 { date } else { selectedDate };
+    if chipDate.bytes.count > 0 {
         t.put("d", chipDate);
         h.append(t.render("<div class=\"date-chip\">{d}</div>"))
     };
@@ -158,12 +158,12 @@ public func pageHtml(json: Value, selectedDate: String) -> String {
     h.append("<main class=\"story\" id=\"story\"><div class=\"container\"><div class=\"story-head\">");
 
     // Date picker.
-    let pickerDate = if date.byteCount > 0 { date } else { selectedDate };
+    let pickerDate = if date.bytes.count > 0 { date } else { selectedDate };
     t.setRaw("date", pickerDate);
     h.append(t.render("<form class=\"date-form\" method=\"get\" action=\"/\"><label for=\"d\">Date</label><input id=\"d\" type=\"date\" name=\"date\" value=\"{date}\" min=\"1995-06-16\" onchange=\"this.form.submit()\"></form>"));
 
     // HD link (only when distinct and image).
-    if mediaType == "image" and hdurl.byteCount > 0 and hdurl != url {
+    if mediaType == "image" and hdurl.bytes.count > 0 and hdurl != url {
         t.put("hd", hdurl);
         h.append(t.render("<a class=\"hd-link\" href=\"{hd}\" target=\"_blank\" rel=\"noopener\">View HD &rarr;</a>"))
     };
@@ -171,14 +171,14 @@ public func pageHtml(json: Value, selectedDate: String) -> String {
     h.append("</div>");
 
     // Explanation.
-    if explanation.byteCount > 0 {
+    if explanation.bytes.count > 0 {
         h.append("<div class=\"explanation\"><p>");
         t.put("text", explanation);
         h.append(t.render("{text}"));
         h.append("</p></div>")
     };
 
-    if copyright.byteCount > 0 {
+    if copyright.bytes.count > 0 {
         t.put("c", copyright);
         h.append(t.render("<div class=\"copyright\">&copy; {c}</div>"))
     };

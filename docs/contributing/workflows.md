@@ -115,21 +115,22 @@ To report the error from the solver, call `ctx.report_error(InferError::YourVari
 The standard library is Kestrel source in `lang/std/`, one module per directory.
 
 1. **Implement the method** in the appropriate `.ks` file. Match the patterns in the surrounding code — visibility, mutating annotations, COW conventions.
-2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks`:
+2. **Add an execution test** under `lib/kestrel-test-suite/testdata/stdlib/<type>/<test_name>.ks` (see `testdata/stdlib/array/access_operations.ks` for a real example):
    ```kestrel
-   // test: runs
+   // test: execution
    // stdlib: true
 
    module Main
 
+   @main
    func main() -> lang.i64 {
-       let arr = Array[lang.i64]()
+       var arr = std.collections.Array[std.numeric.Int64]()
        arr.append(5)
        if arr.count != 1 { return 1 }
        0
    }
    ```
-   Non-zero exit codes surface as test failures; each check returns a unique non-zero value so a regression points at the exact assertion.
+   The kind must be spelled `execution` — unknown kinds (e.g. `runs`) silently fall back to `diagnostics`. Non-zero exit codes surface as test failures; each check returns a unique non-zero value so a regression points at the exact assertion.
 3. **Run it:** `triage <test_name>`.
 
 ---

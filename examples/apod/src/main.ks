@@ -45,7 +45,7 @@ func handleIndex(req: Request, ctx: Ctx) -> Response {
     url.append(ctx.apiBase);
     url.append("/planetary/apod?api_key=");
     url.append(ctx.apiKey);
-    if date.byteCount > 0 {
+    if date.bytes.count > 0 {
         url.append("&date=");
         url.append(date)
     };

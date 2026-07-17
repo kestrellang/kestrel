@@ -78,10 +78,10 @@ public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> Strin
 /// Splits "org/pkg" into (org, pkg). Returns None if no slash found.
 public func splitPackageName(name name: String) -> Optional[(String, String)] {
     var i: Int64 = 0;
-    while i < name.byteCount {
+    while i < name.bytes.count {
         if name.bytes(unchecked: i) == 47 {
             let org = name.asSlice().subslice(from: 0, to: i).toOwned();
-            let pkg = name.asSlice().subslice(from: i + 1, to: name.byteCount).toOwned();
+            let pkg = name.asSlice().subslice(from: i + 1, to: name.bytes.count).toOwned();
             return .Some((org, pkg))
         }
         i = i + 1
@@ -92,7 +92,7 @@ public func splitPackageName(name name: String) -> Optional[(String, String)] {
 /// Returns true if the name contains a slash (i.e., is an org/pkg name).
 public func isRegistryName(name name: String) -> Bool {
     var i: Int64 = 0;
-    while i < name.byteCount {
+    while i < name.bytes.count {
         if name.bytes(unchecked: i) == 47 {
             return true
         }

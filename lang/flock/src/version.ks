@@ -141,7 +141,7 @@ public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError
     }
 
     if trimmed.starts(with: "^") {
-        let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.byteCount).toOwned();
+        let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.bytes.count).toOwned();
         match parseVersion(s: versionStr) {
             .Ok(v) => return .Ok(VersionConstraint.Compatible(v)),
             .Err(e) => return .Err(e)
@@ -149,7 +149,7 @@ public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError
     }
 
     if trimmed.starts(with: "~") {
-        let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.byteCount).toOwned();
+        let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.bytes.count).toOwned();
         match parseVersion(s: versionStr) {
             .Ok(v) => return .Ok(VersionConstraint.TildeCompat(v)),
             .Err(e) => return .Err(e)
@@ -172,7 +172,7 @@ func splitOnDot(s: String) -> Array[String] {
     var result = Array[String]();
     var start: Int64 = 0;
     var i: Int64 = 0;
-    let len = s.byteCount;
+    let len = s.bytes.count;
 
     while i < len {
         let byte = s.bytes(unchecked: i);

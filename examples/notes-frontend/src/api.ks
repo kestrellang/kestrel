@@ -9,7 +9,7 @@ import quill.value.(Value)
 func baseUrl() -> String { "http://localhost:8080" }
 
 func client(token: String) -> Swoop {
-    if token.byteCount > 0 {
+    if token.bytes.count > 0 {
         Swoop(baseUrl: baseUrl())
             .header("Authorization", "Bearer \(token)")
     } else {

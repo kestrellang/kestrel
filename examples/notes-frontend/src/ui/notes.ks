@@ -38,7 +38,7 @@ func noteCard(note: Value) -> Document {
     let noteBody = getStr(note, "body");
     let updatedAt = getStr(note, "updatedAt");
 
-    let preview = if noteBody.byteCount > 140 {
+    let preview = if noteBody.bytes.count > 140 {
         noteBody.asSlice().subslice(from: 0, to: 140).toOwned() + "..."
     } else {
         noteBody

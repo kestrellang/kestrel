@@ -1,5 +1,12 @@
 # Version 0.16 Scope: Boxing & Existentials
 
+> **Historical document.** 0.16 has shipped. Of the four features scoped here,
+> only **opaque types** (`some Protocol`) made the release. Existentials,
+> escaping closures, and boxing moved to later versions (see
+> [ROADMAP.md](../ROADMAP.md), 0.17), and **indirect enums did not ship** —
+> the analyzer still rejects `indirect` enums as unsupported. Kept as a
+> point-in-time record of the scoping decisions.
+
 Scoping notes for the four 0.16 features. Captures difficulty, ambiguity, and
 decisions made so far. Each feature still owes a real design doc before
 implementation.

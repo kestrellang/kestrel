@@ -1,5 +1,90 @@
 # std.os
 
+## struct `ExitCode`
+
+```kestrel
+public struct ExitCode { /* private fields */ }
+```
+
+A process exit code.
+
+Conventionally `0` means success and any non-zero value means failure. Only
+the low 8 bits survive on POSIX (`WEXITSTATUS`), so the meaningful range is
+`0`–`255`. The byte is private; build one with `ExitCode(_:)` or use the
+`.success` / `.failure` constants.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Members
+
+#### field `failure`
+
+```kestrel
+public static var failure: ExitCode { get }
+```
+
+The conventional generic-failure code, `1`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(UInt8)
+```
+
+Builds an exit code from a byte. `exit(-1)`-style codes are spelled
+`ExitCode(255)`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+#### field `success`
+
+```kestrel
+public static var success: ExitCode { get }
+```
+
+The conventional success code, `0`.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
+## protocol `Exitable`
+
+```kestrel
+public protocol Exitable
+```
+
+A type that a `@main` function may return: it knows how to produce a process
+exit code.
+
+The compiler synthesizes C `main` as a wrapper that calls `report()` on the
+value `@main` returns. `report()` is `consuming` so move-only conformers
+(e.g. `Result`) can move out their payload.
+
+_Defined in `lang/std/os/exitable.ks`._
+
+### Members
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+Produce the process exit code for this value.
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## function `captureOutput`
 
 ```kestrel

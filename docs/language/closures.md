@@ -9,14 +9,14 @@ Closures are anonymous functions that can capture values from their surrounding 
 The simplest closure has no parameters and no `in` keyword:
 
 ```kestrel
-let f: () -> lang.i64 = { 42 }
+let f: () -> Int64 = { 42 }
 f()  // Returns 42
 ```
 
 With explicit empty parameters and `in` keyword:
 
 ```kestrel
-let f: () -> lang.i64 = { () in 42 }
+let f: () -> Int64 = { () in 42 }
 ```
 
 ### Single Parameter
@@ -24,13 +24,13 @@ let f: () -> lang.i64 = { () in 42 }
 With explicit type annotation:
 
 ```kestrel
-let double: (lang.i64) -> lang.i64 = { (x: lang.i64) in x * 2 }
+let double: (Int64) -> Int64 = { (x: Int64) in x * 2 }
 ```
 
 With inferred type (requires context):
 
 ```kestrel
-let double: (lang.i64) -> lang.i64 = { (x) in x * 2 }
+let double: (Int64) -> Int64 = { (x) in x * 2 }
 ```
 
 ### Multiple Parameters
@@ -38,19 +38,19 @@ let double: (lang.i64) -> lang.i64 = { (x) in x * 2 }
 With explicit types:
 
 ```kestrel
-let add: (lang.i64, lang.i64) -> lang.i64 = { (x: lang.i64, y: lang.i64) in x + y }
+let add: (Int64, Int64) -> Int64 = { (x: Int64, y: Int64) in x + y }
 ```
 
 With inferred types:
 
 ```kestrel
-let add: (lang.i64, lang.i64) -> lang.i64 = { (x, y) in x + y }
+let add: (Int64, Int64) -> Int64 = { (x, y) in x + y }
 ```
 
 Mixed typed and untyped parameters:
 
 ```kestrel
-let f: (lang.i64, lang.str) -> lang.i64 = { (x: lang.i64, y) in x }
+let f: (Int64, String) -> Int64 = { (x: Int64, y) in x }
 ```
 
 ## Implicit `it` Parameter
@@ -58,7 +58,7 @@ let f: (lang.i64, lang.str) -> lang.i64 = { (x: lang.i64, y) in x }
 When a closure has exactly one parameter and the expected type is known, you can use the implicit `it` parameter instead of declaring explicit parameters:
 
 ```kestrel
-func apply(f: (lang.i64) -> lang.i64, x: lang.i64) -> lang.i64 {
+func apply(f: (Int64) -> Int64, x: Int64) -> Int64 {
     f(x)
 }
 
@@ -74,20 +74,20 @@ let result = apply({ it * 2 }, 21)  // Returns 42
 
 ```kestrel
 // ERROR: it used but arity is 0
-let f: () -> lang.i64 = { it }
+let f: () -> Int64 = { it }
 
 // ERROR: it used but arity is 2
-let g: (lang.i64, lang.i64) -> lang.i64 = { it }
+let g: (Int64, Int64) -> Int64 = { it }
 
 // ERROR: it not available with explicit params
-let h: (lang.i64) -> lang.i64 = { (x) in it }
+let h: (Int64) -> Int64 = { (x) in it }
 
 // OK: nested it shadows outer
-func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
+func apply(f: (Int64) -> Int64) -> Int64 {
     f(10)
 }
 
-let f: (lang.i64) -> lang.i64 = {
+let f: (Int64) -> Int64 = {
     let outer = it;
     apply({ it + outer })  // inner `it` is different
 }
@@ -98,7 +98,7 @@ let f: (lang.i64) -> lang.i64 = {
 Closures can contain multiple statements. The last expression is the return value:
 
 ```kestrel
-let compute: (lang.i64, lang.i64) -> lang.i64 = { (x, y) in
+let compute: (Int64, Int64) -> Int64 = { (x, y) in
     let sum = x + y;
     let doubled = sum * 2;
     let result = doubled + 1;
@@ -110,7 +110,7 @@ Closures support all statement types:
 
 ```kestrel
 // With mutable variables
-let process: (lang.i64) -> lang.i64 = { (x) in
+let process: (Int64) -> Int64 = { (x) in
     var acc = 0;
     acc = acc + x;
     acc = acc + x;
@@ -118,7 +118,7 @@ let process: (lang.i64) -> lang.i64 = { (x) in
 }
 
 // With if expressions
-let absolute: (lang.i64) -> lang.i64 = { (x) in
+let absolute: (Int64) -> Int64 = { (x) in
     if x > 0 {
         x
     } else {
@@ -127,7 +127,7 @@ let absolute: (lang.i64) -> lang.i64 = { (x) in
 }
 
 // With while loops
-let sumTo: (lang.i64) -> lang.i64 = { (n) in
+let sumTo: (Int64) -> Int64 = { (n) in
     var i = 0;
     var sum = 0;
     while i < n {
@@ -140,52 +140,96 @@ let sumTo: (lang.i64) -> lang.i64 = { (n) in
 
 ## Capture Semantics
 
-Closures **capture by value** - variables from the enclosing scope are copied into the closure when it's created.
+Closures **capture by value** - for `Copyable` types, variables from the enclosing scope are copied into the closure when it's created. Non-`Copyable` values are *moved* into the closure instead (see below).
 
 ### Basic Captures
 
 ```kestrel
-func makeAdder(n: lang.i64) -> (lang.i64) -> lang.i64 {
-    { (x) in x + n }  // n is captured by value
+func sumWithBase(base: Int64) -> Int64 {
+    let addBase = { (x: Int64) in x + base };  // base captured by value
+    addBase(5) + addBase(10)
 }
-
-let add10 = makeAdder(10);
-add10(5)  // Returns 15
 ```
 
 ### Capture Rules
 
 1. **Immutable captures**: Captured variables are read-only inside the closure
-2. **Capture by value**: The value is copied at closure creation time
+2. **Capture by value**: The value is copied (or moved, if non-`Copyable`) at closure creation time
 3. **Multiple captures**: Closures can capture multiple variables
 4. **No mutation**: You cannot assign to captured variables
+5. **No escape**: A capturing closure cannot outlive the function that created it (see below)
 
 ```kestrel
 // Capture multiple variables
-func makeComplex() -> () -> lang.i64 {
+func complexSum() -> Int64 {
     let a = 1;
     let b = 2;
     let c = 3;
-    { a + b + c }
+    let f = { a + b + c };
+    f()
 }
 
 // ERROR: cannot mutate captured variable
-func test() -> () -> lang.i64 {
+func mutateCapture() {
     var x = 10;
-    {
-        x = 20;  // ERROR: cannot assign to captured variable
+    let f = {
+        x = 20;  // ERROR[E603]: cannot assign to captured variable
         x
-    }
+    };
+    let _ = f;
 }
 
 // Capture by value semantics
-func test() -> () -> lang.i64 {
+func snapshot() -> Int64 {
     var x = 10;
     let f = { x };  // x=10 is captured
     x = 20;         // mutation doesn't affect closure
-    f               // Returns 10, not 20
+    f()             // Returns 10, not 20
 }
 ```
+
+### Capturing Non-Copyable Values
+
+Capturing a non-`Copyable` value can't copy it — it **moves** the value into the closure environment. The original binding is invalid afterwards; using it is a use-after-move error (E500):
+
+```kestrel
+struct Res: not Copyable {
+    var id: Int64;
+    func peek() -> Int64 { self.id }
+    deinit { }
+}
+
+func useAfterCapture() {
+    let r = Res(id: 7);
+    let f = { () in r.peek() };  // r moved into f's environment
+    let x = r.peek();            // ERROR[E500]: use of moved value 'r'
+    let _ = f; let _ = x;
+}
+```
+
+A closure may be called more than once, but it owns exactly one copy of each captured value — so moving a captured non-`Copyable` value *out* of the closure body (returning it, or passing it to a `consuming` parameter) is rejected (E506):
+
+```kestrel
+func moveOut() {
+    let r = Res(id: 1);
+    let f = { () in r };  // ERROR[E506]: cannot move captured value 'r' out of a closure
+    let _ = f;
+}
+```
+
+### Capturing Closures Cannot Escape
+
+A capturing closure's environment lives in the stack frame where the closure was created, so the closure is **escape-checked** (via the same provenance analysis as references): it cannot be returned from the enclosing function, even laundered through a `let` binding or a struct field (E494). Non-capturing closures are unaffected.
+
+```kestrel
+func makeAdder(n: Int64) -> (Int64) -> Int64 {
+    let f = { (x: Int64) in x + n };
+    f  // ERROR[E494]: cannot return this closure: it captures local `n`,
+       //              which does not outlive the call
+}
+```
+
+Capturing closures can still be called locally and passed *down* as arguments — they just can't flow *up* out of their defining frame.
 
 ### Parameter Shadowing
 
@@ -194,7 +238,7 @@ Closure parameters shadow captured variables with the same name:
 ```kestrel
 func test() {
     let x = 100;
-    let f: (lang.i64) -> lang.i64 = { (x) in x + 20 };
+    let f: (Int64) -> Int64 = { (x) in x + 20 };
     f(22)  // Returns 42, uses parameter x (22), not captured x (100)
 }
 ```
@@ -206,7 +250,7 @@ When a closure is the last argument to a function, it can be written outside the
 ### Only Argument
 
 ```kestrel
-func apply(f: () -> lang.i64) -> lang.i64 {
+func apply(f: () -> Int64) -> Int64 {
     f()
 }
 
@@ -217,7 +261,7 @@ apply { 42 }
 ### Last of Multiple Arguments
 
 ```kestrel
-func fold(initial: lang.i64, f: (lang.i64, lang.i64) -> lang.i64) -> lang.i64 {
+func fold(initial: Int64, f: (Int64, Int64) -> Int64) -> Int64 {
     f(initial, 10)
 }
 
@@ -228,7 +272,7 @@ fold(0) { (acc, n) in acc + n }
 ### With Implicit `it`
 
 ```kestrel
-func transform(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
+func transform(x: Int64, f: (Int64) -> Int64) -> Int64 {
     f(x)
 }
 
@@ -244,13 +288,13 @@ Kestrel infers closure types based on context. Type information can flow from:
 
 ```kestrel
 // Parameter types inferred from expected type
-let f: (lang.i64) -> lang.i64 = { (x) in x + 1 }
+let f: (Int64) -> Int64 = { (x) in x + 1 }
 
 // Return type inferred from body
-let g: (lang.i64) -> lang.i64 = { (x: lang.i64) in x * 2 }
+let g: (Int64) -> Int64 = { (x: Int64) in x * 2 }
 
 // Both inferred from context
-func transform(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
+func transform(x: Int64, f: (Int64) -> Int64) -> Int64 {
     f(x)
 }
 transform(5, { (x) in x * 2 })  // All types inferred
@@ -264,11 +308,11 @@ let h = { (x) in x }  // No type annotation or context
 The `it` parameter's type is inferred from the expected function type:
 
 ```kestrel
-func apply(f: (lang.i64) -> lang.i64, x: lang.i64) -> lang.i64 {
+func apply(f: (Int64) -> Int64, x: Int64) -> Int64 {
     f(x)
 }
 
-// Type of `it` inferred as lang.i64 from parameter type
+// Type of `it` inferred as Int64 from parameter type
 apply({ it * 2 }, 21)
 ```
 
@@ -279,14 +323,14 @@ Closures are first-class values that can be stored, passed, and returned.
 ### Stored in Variables
 
 ```kestrel
-let f: (lang.i64) -> lang.i64 = { it * 2 };
+let f: (Int64) -> Int64 = { it * 2 };
 let result = f(21)  // Returns 42
 ```
 
 ### Passed as Arguments
 
 ```kestrel
-func apply(x: lang.i64, f: (lang.i64) -> lang.i64) -> lang.i64 {
+func apply(x: Int64, f: (Int64) -> Int64) -> Int64 {
     f(x)
 }
 
@@ -295,20 +339,23 @@ apply(10, { it + 1 })  // Returns 11
 
 ### Returned from Functions
 
+Only **non-capturing** closures can be returned. A closure that captures locals or parameters cannot escape its defining function (E494 — see [Capturing Closures Cannot Escape](#capturing-closures-cannot-escape)):
+
 ```kestrel
-func makeMultiplier(n: lang.i64) -> (lang.i64) -> lang.i64 {
-    { (x) in x * n }
+func makeTripler() -> (Int64) -> Int64 {
+    { (x) in x * 3 }   // OK: captures nothing
 }
 
-let times3 = makeMultiplier(3);
-times3(14)  // Returns 42
+func makeMultiplier(n: Int64) -> (Int64) -> Int64 {
+    { (x) in x * n }   // ERROR[E494]: captures `n`, cannot be returned
+}
 ```
 
 ### Stored in Structs
 
 ```kestrel
 struct Handler {
-    let action: (lang.i64) -> lang.i64
+    let action: (Int64) -> Int64
 }
 
 let h = Handler(action: { it * 2 });
@@ -321,7 +368,7 @@ Note: Parentheses around field access are required when calling: `(h.action)(arg
 
 ```kestrel
 enum Action {
-    case Transform(f: (lang.i64) -> lang.i64)
+    case Transform(f: (Int64) -> Int64)
     case NoOp
 }
 
@@ -340,42 +387,37 @@ struct Provider[T] {
     let provide: () -> T
 }
 
-let p = Provider[lang.i64](provide: { 42 });
+let p = Provider[Int64](provide: { 42 });
 (p.provide)()  // Returns 42
 
 struct Transform[T, U] {
     let transform: (T) -> U
 }
 
-let t = Transform[lang.i64, lang.i64](transform: { it * 2 });
+let t = Transform[Int64, Int64](transform: { it * 2 });
 (t.transform)(21)  // Returns 42
 ```
 
 ## Nested Closures
 
-Closures can contain other closures, enabling currying and higher-order patterns:
-
-```kestrel
-// Closure returning a closure
-func makeAdder() -> (lang.i64) -> (lang.i64) -> lang.i64 {
-    { (x) in { (y) in x + y } }
-}
-
-let add = makeAdder();
-let add10 = add(10);
-add10(5)  // Returns 15
-```
+Closures can contain other closures.
 
 ### Nested Captures
 
-Inner closures can capture from outer closures:
+Inner closures can capture from outer closures, as long as the inner closure doesn't escape the outer one. Note that currying (`{ (x) in { (y) in x + y } }`) is rejected: the inner closure captures the outer closure's parameter `x` and would be *returned* from the outer closure's frame, which the escape check forbids (E494).
 
 ```kestrel
-let f: (lang.i64) -> (lang.i64) -> lang.i64 = {
-    (x) in {
-        (y) in x + y  // inner closure captures outer's x parameter
-    }
+func apply(f: () -> Int64) -> Int64 {
+    f()
+}
+
+// OK: the inner closure captures `x` but is only passed down, not returned
+let f: (Int64) -> Int64 = { (x) in
+    apply({ x + 1 })
 };
+
+// ERROR[E494]: inner closure captures `x` and escapes the outer closure
+let g: (Int64) -> (Int64) -> Int64 = { (x) in { (y) in x + y } };
 ```
 
 ### Nested `it` Shadowing
@@ -383,11 +425,11 @@ let f: (lang.i64) -> (lang.i64) -> lang.i64 = {
 Each closure level has its own `it`:
 
 ```kestrel
-func apply(f: (lang.i64) -> lang.i64) -> lang.i64 {
+func apply(f: (Int64) -> Int64) -> Int64 {
     f(5)
 }
 
-let f: (lang.i64) -> lang.i64 = {
+let f: (Int64) -> Int64 = {
     let outer = it;           // outer closure's it
     apply({ it + outer })     // inner closure's it is different
 }
@@ -402,7 +444,7 @@ Closures can be invoked immediately where they're defined:
 let x = { 42 }()  // Returns 42
 
 // With parameters
-let sum = { (x: lang.i64, y: lang.i64) in x + y }(10, 20)  // Returns 30
+let sum = { (x: Int64, y: Int64) in x + y }(10, 20)  // Returns 30
 
 // For scoping
 let result = {
@@ -418,19 +460,19 @@ The compiler validates closure types against expected types:
 
 ```kestrel
 // ERROR: arity mismatch - too few parameters
-let f: (lang.i64, lang.i64) -> lang.i64 = { (x) in x }
+let f: (Int64, Int64) -> Int64 = { (x) in x }
 
 // ERROR: arity mismatch - too many parameters
-let g: (lang.i64) -> lang.i64 = { (x, y) in x + y }
+let g: (Int64) -> Int64 = { (x, y) in x + y }
 
 // ERROR: return type mismatch
-let h: (lang.i64) -> lang.str = { (x) in x * 2 }
+let h: (Int64) -> String = { (x) in x * 2 }
 
 // ERROR: parameter type mismatch
-let i: (lang.i64) -> lang.i64 = { (x: lang.str) in 42 }
+let i: (Int64) -> Int64 = { (x: String) in 42 }
 
 // ERROR: closure assigned to non-function type
-let j: lang.i64 = { 42 }
+let j: Int64 = { 42 }
 ```
 
 ## Parameter Mutability
@@ -439,7 +481,7 @@ Closure parameters are immutable by default:
 
 ```kestrel
 // ERROR: cannot assign to closure parameter
-let f: (lang.i64) -> lang.i64 = { (x) in
+let f: (Int64) -> Int64 = { (x) in
     x = 10;  // ERROR
     x
 }
@@ -448,7 +490,7 @@ let f: (lang.i64) -> lang.i64 = { (x) in
 To modify values, use local mutable variables:
 
 ```kestrel
-let f: (lang.i64) -> lang.i64 = { (x) in
+let f: (Int64) -> Int64 = { (x) in
     var temp = x;
     temp = temp * 2;
     temp
@@ -490,14 +532,14 @@ Closures enable functional programming patterns:
 
 ```kestrel
 func compose(
-    f: (lang.i64) -> lang.i64,
-    g: (lang.i64) -> lang.i64
-) -> (lang.i64) -> lang.i64 {
+    f: (Int64) -> Int64,
+    g: (Int64) -> Int64
+) -> (Int64) -> Int64 {
     { (x) in g(f(x)) }
 }
 
-let add10 = { (x: lang.i64) in x + 10 };
-let double = { (x: lang.i64) in x * 2 };
+let add10 = { (x: Int64) in x + 10 };
+let double = { (x: Int64) in x * 2 };
 let composed = compose(add10, double);
 composed(11)  // (11 + 10) * 2 = 42
 ```
@@ -505,7 +547,7 @@ composed(11)  // (11 + 10) * 2 = 42
 ### Apply Twice
 
 ```kestrel
-func applyTwice(f: (lang.i64) -> lang.i64, x: lang.i64) -> lang.i64 {
+func applyTwice(f: (Int64) -> Int64, x: Int64) -> Int64 {
     f(f(x))
 }
 
@@ -517,7 +559,7 @@ applyTwice({ (x) in x + 10 }, 22)  // (22 + 10) + 10 = 42
 ### Factory Functions
 
 ```kestrel
-func makeCounter(start: lang.i64) -> () -> lang.i64 {
+func makeCounter(start: Int64) -> () -> Int64 {
     var count = start;
     { () in
         let current = count;
@@ -527,7 +569,7 @@ func makeCounter(start: lang.i64) -> () -> lang.i64 {
 }
 ```
 
-Note: This pattern is conceptual. Actual implementation depends on Kestrel's capture semantics allowing mutable captures, which is currently not supported.
+Note: This pattern is conceptual. It requires both mutable captures (not supported — E603) and returning a capturing closure (not supported — E494).
 
 ### Callbacks
 
@@ -560,7 +602,8 @@ configure(myBuilder) { (b) in
 ### Current Status
 
 - Closures are implemented and fully functional
-- Capture by value is the only capture mode
+- Capture by value is the only capture mode; non-`Copyable` values are moved into the environment (use-after-capture is E500, moving a capture back out is E506)
+- Capturing closures are escape-checked via provenance analysis — they cannot leave their defining frame (E494)
 - No explicit return type annotation syntax (return type is inferred)
 - The `it` parameter is available for single-parameter closures
 

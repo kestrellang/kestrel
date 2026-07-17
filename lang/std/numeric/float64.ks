@@ -867,7 +867,7 @@ public struct Float64:
     /// Float64(parsing: "");          // None
     /// ```
     public init(parsing string: String)? {
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -1225,7 +1225,7 @@ public struct Float64:
             }
         }
         if trimTrailingZeros {
-            let len = number.byteCount;
+            let len = number.bytes.count;
             var dotIndex: Int64 = -1;
             var expIndex: Int64 = -1;
             var i: Int64 = 0;

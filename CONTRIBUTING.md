@@ -9,13 +9,19 @@ Thanks for your interest in contributing to Kestrel!
 git clone https://github.com/kestrellang/kestrel.git
 cd kestrel
 
-# Run tests
-cargo test
+# Run the .ks test suite via the triage CLI — do NOT use `cargo test` for it
+triage                 # full suite
+triage <pattern>       # targeted subset
+
+# Unit tests for an individual crate are still plain cargo
+cargo test -p kestrel-type-infer
 
 # Check formatting and lints
 cargo fmt --check
 cargo clippy
 ```
+
+The `.ks` test suite (`kestrel-test-suite`) must be run through the `triage` CLI, not `cargo test` — triage records results in `.triage/triage.db`, supports background runs (`triage --async`), and is safe alongside other agents working in the same tree. See `.claude/skills/triage/SKILL.md` and [`docs/contributing/index.md`](docs/contributing/index.md) for details.
 
 ## Documentation
 
@@ -41,5 +47,5 @@ Detailed contributing guides are in [`docs/contributing/`](docs/contributing/):
 ```bash
 cargo fmt
 cargo clippy
-cargo test
+triage          # full .ks suite — required before commits, not after every edit
 ```

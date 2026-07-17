@@ -302,7 +302,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
         let actual = requestSegments(unchecked: i);
 
         if pattern.starts(with: ":") {
-            let paramName = pattern.asSlice().subslice(from: 1, to: pattern.byteCount).toOwned();
+            let paramName = pattern.asSlice().subslice(from: 1, to: pattern.bytes.count).toOwned();
              params.insert(paramName, actual);
         } else if pattern != actual {
             return .None
@@ -316,7 +316,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
 func splitPathSegments(path: String) -> Array[String] {
     var segments = Array[String]();
     for part in path.split("/") {
-        if part.byteCount > 0 {
+        if part.bytes.count > 0 {
             segments.append(part.toOwned())
         }
     }

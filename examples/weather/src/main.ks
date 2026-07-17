@@ -37,7 +37,7 @@ func handleSearch(req: Request, ctx: Ctx) -> Response {
         .Some(v) => percentDecode(v),
         .None => ""
     };
-    if city.byteCount == 0 {
+    if city.bytes.count == 0 {
         return Response.ok(Html(""))
     };
 

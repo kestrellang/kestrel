@@ -33,16 +33,6 @@ extend Str {
 
     // -- Size ----------------------------------------------------------------
 
-    /// Number of UTF-8 bytes. O(1).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// "hello".byteCount;       // 5
-    /// "\u{00E9}".byteCount;    // 2 (é is two UTF-8 bytes)
-    /// ```
-    public var byteCount: Int64 { self.asSlice().byteCount }
-
     /// True when the string contains no bytes.
     ///
     /// # Examples
@@ -124,7 +114,7 @@ extend Str {
     /// ```
     public func toBytes() -> Array[UInt8] {
         let slice = self.asSlice();
-        let n = slice.byteCount;
+        let n = (slice.end - slice.start);
         var buffer = Array[UInt8](capacity: n);
         if n == 0 {
             return buffer
@@ -151,7 +141,7 @@ extend Str {
     /// ```
     public func asByteSlice() -> ArraySlice[UInt8] {
         let slice = self.asSlice();
-        ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: slice.byteCount)
+        ArraySlice(pointer: slice._rawPtr().offset(by: slice.start), count: (slice.end - slice.start))
     }
 
     // -- Iteration -----------------------------------------------------------
@@ -257,8 +247,8 @@ extend Str {
     public func starts(with prefix: String) -> Bool {
         let slice = self.asSlice();
         let ps = prefix.asSlice();
-        let prefixLen = ps.byteCount;
-        if prefixLen > slice.byteCount { return false }
+        let prefixLen = (ps.end - ps.start);
+        if prefixLen > (slice.end - slice.start) { return false }
         if prefixLen == 0 { return true }
         _bytesEqual(a: slice._rawPtr().offset(by: slice.start), b: ps._rawPtr().offset(by: ps.start), n: prefixLen)
     }
@@ -276,8 +266,8 @@ extend Str {
     public func ends(with suffix: String) -> Bool {
         let slice = self.asSlice();
         let ss = suffix.asSlice();
-        let suffixLen = ss.byteCount;
-        if suffixLen > slice.byteCount { return false }
+        let suffixLen = (ss.end - ss.start);
+        if suffixLen > (slice.end - slice.start) { return false }
         if suffixLen == 0 { return true }
         _bytesEqual(a: slice._rawPtr().offset(by: slice.end - suffixLen), b: ss._rawPtr().offset(by: ss.start), n: suffixLen)
     }
@@ -297,8 +287,8 @@ extend Str {
     public func firstIndex(of substring: String) -> ByteIndex? {
         let slice = self.asSlice();
         let sub = substring.asSlice();
-        let subLen = sub.byteCount;
-        let myLen = slice.byteCount;
+        let subLen = (sub.end - sub.start);
+        let myLen = (slice.end - slice.start);
         if subLen == 0 {
             return .Some(ByteIndex(slice.start))
         }
@@ -329,8 +319,8 @@ extend Str {
     public func lastIndex(of substring: String) -> ByteIndex? {
         let slice = self.asSlice();
         let sub = substring.asSlice();
-        let subLen = sub.byteCount;
-        let myLen = slice.byteCount;
+        let subLen = (sub.end - sub.start);
+        let myLen = (slice.end - slice.start);
         if subLen == 0 {
             return .Some(ByteIndex(slice.end))
         }
@@ -408,7 +398,7 @@ extend Str {
     /// ```
     public func trimmed() -> StringSlice {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var realStart: Int64 = 0;
         var startDone: Bool = false;
@@ -450,7 +440,7 @@ extend Str {
     /// ```
     public func trimmedStart() -> StringSlice {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var realStart: Int64 = 0;
         var done: Bool = false;
@@ -479,7 +469,7 @@ extend Str {
     /// ```
     public func trimmedEnd() -> StringSlice {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var endPos: Int64 = myLen;
         var done: Bool = false;
@@ -511,7 +501,7 @@ extend Str {
     /// ```
     public func trimmed(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](basePtr.asRaw().raw);
         var realStart: Int64 = 0;
@@ -554,7 +544,7 @@ extend Str {
     /// ```
     public func trimmedStart(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](basePtr.asRaw().raw);
         var realStart: Int64 = 0;
@@ -584,7 +574,7 @@ extend Str {
     /// ```
     public func trimmedEnd(where predicate: (Char) -> Bool) -> StringSlice {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         let rawPtr: lang.ptr[lang.i8] = lang.cast_ptr[_, lang.i8](basePtr.asRaw().raw);
         var lastNonMatch: Int64 = 0;
@@ -619,7 +609,7 @@ extend Str {
     /// ```
     public func lowercased() -> String {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var hasUpperAscii = false;
         var i: Int64 = 0;
@@ -674,7 +664,7 @@ extend Str {
     /// ```
     public func uppercased() -> String {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var hasLowerAscii = false;
         var i: Int64 = 0;
@@ -765,7 +755,7 @@ extend Str {
     /// ```
     public func lowercasedAscii() -> String {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var result = String(capacity: myLen);
         var i: Int64 = 0;
@@ -796,7 +786,7 @@ extend Str {
     /// ```
     public func uppercasedAscii() -> String {
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         let basePtr = slice._rawPtr().offset(by: slice.start);
         var result = String(capacity: myLen);
         var i: Int64 = 0;
@@ -881,7 +871,7 @@ extend Str {
     /// "Hello".caseFolded();  // "hello"
     /// ```
     public func caseFolded() -> String {
-        var result = String(capacity: self.byteCount);
+        var result = String(capacity: self.bytes.count);
         for c in self.chars {
             result.append(char: unicode.caseFold(c))
         }
@@ -905,12 +895,12 @@ extend Str {
     /// ```
     public func replaced(pattern: String, with replacement: String) -> String {
         let patternSlice = pattern.asSlice();
-        let patternLen = patternSlice.byteCount;
+        let patternLen = (patternSlice.end - patternSlice.start);
         if patternLen == 0 {
             return self.toOwned()
         }
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         if patternLen > myLen {
             return self.toOwned()
         }
@@ -934,7 +924,7 @@ extend Str {
         }
 
         let repSlice = replacement.asSlice();
-        let repLen = repSlice.byteCount;
+        let repLen = (repSlice.end - repSlice.start);
         let repPtr = repSlice._rawPtr().offset(by: repSlice.start);
         let resultLen = myLen - matchCount * patternLen + matchCount * repLen;
         var result = String(capacity: resultLen);
@@ -975,7 +965,7 @@ extend Str {
             return String()
         }
         let slice = self.asSlice();
-        let myLen = slice.byteCount;
+        let myLen = (slice.end - slice.start);
         if myLen == 0 {
             return String()
         }
@@ -1005,12 +995,12 @@ extend Str {
             return self.toOwned()
         }
         let paddingCount = length - currentLen;
-        var result = String(capacity: self.byteCount + paddingCount * char.utf8Length());
+        let slice = self.asSlice();
+        var result = String(capacity: (slice.end - slice.start) + paddingCount * char.utf8Length());
         for i in 0..<paddingCount {
             result.append(char: char)
         }
-        let slice = self.asSlice();
-        result._appendBytes(slice._rawPtr().offset(by: slice.start), slice.byteCount);
+        result._appendBytes(slice._rawPtr().offset(by: slice.start), (slice.end - slice.start));
         result
     }
 
@@ -1031,9 +1021,9 @@ extend Str {
             return self.toOwned()
         }
         let paddingCount = length - currentLen;
-        var result = String(capacity: self.byteCount + paddingCount * char.utf8Length());
         let slice = self.asSlice();
-        result._appendBytes(slice._rawPtr().offset(by: slice.start), slice.byteCount);
+        var result = String(capacity: (slice.end - slice.start) + paddingCount * char.utf8Length());
+        result._appendBytes(slice._rawPtr().offset(by: slice.start), (slice.end - slice.start));
         for i in 0..<paddingCount {
             result.append(char: char)
         }

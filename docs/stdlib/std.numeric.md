@@ -269,6 +269,25 @@ Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
 
 _Defined in `lang/std/numeric/float32.ks`._
 
+#### field `bitPattern`
+
+```kestrel
+public var bitPattern: UInt32 { get }
+```
+
+The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+(UInt32 for Float32). No value conversion — the bits are
+preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+masking. Inverse of `init(bitPattern:)`.
+
+##### Examples
+
+```
+(1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 #### function `cbrt`
 
 ```kestrel
@@ -494,6 +513,23 @@ Float64.infinity;       // inf
 Float64.infinity + 1;   // inf
 1.0 / 0.0;              // inf
 Float64.infinity.negate();  // -inf
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(bitPattern: UInt32)
+```
+
+Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+inverse of `bitPattern`). No value conversion — the bits are used directly.
+
+##### Examples
+
+```
+Float32(bitPattern: 4607182418800017408);   // 1.0  (Float64)
 ```
 
 _Defined in `lang/std/numeric/float32.ks`._
@@ -1185,6 +1221,154 @@ Default `!=`: delegates to `==` so there's a single source of truth.
 
 _Defined in `lang/std/core/protocols.ks`._
 
+### Implements `Less`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float32
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Float32) -> Bool
+```
+
+Returns true if `self < other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `LessOrEqual`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/comparison.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Float32) -> Bool
+```
+
+Returns true if `self <= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `Greater`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/comparison.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Float32) -> Bool
+```
+
+Returns true if `self > other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
+### Implements `GreaterOrEqual`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/comparison.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Float32) -> Bool
+```
+
+Returns true if `self >= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float32.ks`._
+
 ### Implements `Formattable`
 
 #### function `format`
@@ -1195,6 +1379,10 @@ public func format(into: mutating StringBuilder, FormatOptions)
 
 Formats the float directly into `writer`, honouring the supplied
 `FormatOptions`. Implements `Formattable`.
+
+Digit generation uses the exact big-integer engine in `float_digits.ks`:
+the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+even on the stored binary value, so printed decimals are correct.
 
 ##### Examples
 
@@ -1228,42 +1416,10 @@ _Defined in `lang/std/text/format.ks`._
 #### typealias `Output`
 
 ```kestrel
-type Output = Float32
+type Output
 ```
 
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float32
-```
-
-_Defined in `lang/std/numeric/float32.ks`._
+_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `add`
 
@@ -1697,6 +1853,25 @@ Inverse hyperbolic tangent. NaN outside `(-1.0, 1.0)`; `±inf` at ±1.
 
 _Defined in `lang/std/numeric/float64.ks`._
 
+#### field `bitPattern`
+
+```kestrel
+public var bitPattern: UInt64 { get }
+```
+
+The raw IEEE-754 bit pattern reinterpreted as an unsigned integer
+(UInt64 for Float64). No value conversion — the bits are
+preserved exactly, so `sign`/`exponent`/`significand` can be extracted by
+masking. Inverse of `init(bitPattern:)`.
+
+##### Examples
+
+```
+(1.0).bitPattern;        // 4607182418800017408 (0x3FF0000000000000)
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 #### function `cbrt`
 
 ```kestrel
@@ -1922,6 +2097,23 @@ Float64.infinity;       // inf
 Float64.infinity + 1;   // inf
 1.0 / 0.0;              // inf
 Float64.infinity.negate();  // -inf
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### initializer `init`
+
+```kestrel
+public init(bitPattern: UInt64)
+```
+
+Constructs a float by reinterpreting a raw IEEE-754 bit pattern (the
+inverse of `bitPattern`). No value conversion — the bits are used directly.
+
+##### Examples
+
+```
+Float64(bitPattern: 4607182418800017408);   // 1.0  (Float64)
 ```
 
 _Defined in `lang/std/numeric/float64.ks`._
@@ -2613,6 +2805,154 @@ Default `!=`: delegates to `==` so there's a single source of truth.
 
 _Defined in `lang/std/core/protocols.ks`._
 
+### Implements `Less`
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Float64
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### typealias `Output`
+
+```kestrel
+type Output = Bool
+```
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+#### function `lessThan`
+
+```kestrel
+public func lessThan(Float64) -> Bool
+```
+
+Returns true if `self < other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `LessOrEqual`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/comparison.ks`._
+
+#### function `lessThanOrEqual`
+
+```kestrel
+public func lessThanOrEqual(Float64) -> Bool
+```
+
+Returns true if `self <= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `Greater`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/comparison.ks`._
+
+#### function `greaterThan`
+
+```kestrel
+public func greaterThan(Float64) -> Bool
+```
+
+Returns true if `self > other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
+### Implements `GreaterOrEqual`
+
+#### typealias `Output`
+
+```kestrel
+type Output
+```
+
+_Defined in `lang/std/core/comparison.ks`._
+
+#### function `greaterThanOrEqual`
+
+```kestrel
+public func greaterThanOrEqual(Float64) -> Bool
+```
+
+Returns true if `self >= other` per IEEE 754. Always false when either
+operand is NaN.
+
+_Defined in `lang/std/numeric/float64.ks`._
+
 ### Implements `Formattable`
 
 #### function `format`
@@ -2623,6 +2963,10 @@ public func format(into: mutating StringBuilder, FormatOptions)
 
 Formats the float directly into `writer`, honouring the supplied
 `FormatOptions`. Implements `Formattable`.
+
+Digit generation uses the exact big-integer engine in `float_digits.ks`:
+the value is decomposed into `m * 2^e` and rounded with round-to-nearest-
+even on the stored binary value, so printed decimals are correct.
 
 ##### Examples
 
@@ -2656,42 +3000,10 @@ _Defined in `lang/std/text/format.ks`._
 #### typealias `Output`
 
 ```kestrel
-type Output = Float64
+type Output
 ```
 
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
-
-#### typealias `Output`
-
-```kestrel
-type Output = Float64
-```
-
-_Defined in `lang/std/numeric/float64.ks`._
+_Defined in `lang/std/core/arithmetic.ks`._
 
 #### function `add`
 
@@ -3236,6 +3548,25 @@ Division that returns `None` for divide-by-zero or for the
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int16) -> Int16
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `gcd`
 
 ```kestrel
@@ -3369,6 +3700,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int16) -> Int16
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int16.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -3376,8 +3722,6 @@ public func multiplyChecked(Int16) -> Int16?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int16.ks`._
 
@@ -3562,6 +3906,18 @@ Absolute value. Wraps at the minimum value
 _Defined in `lang/std/numeric/int16.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: Int16) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int16.ks`._
 
 #### function `predecessor`
 
@@ -4455,6 +4811,16 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## struct `Int32`
 
 ```kestrel
@@ -4813,6 +5179,25 @@ Division that returns `None` for divide-by-zero or for the
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int32) -> Int32
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `gcd`
 
 ```kestrel
@@ -4946,6 +5331,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int32) -> Int32
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int32.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -4953,8 +5353,6 @@ public func multiplyChecked(Int32) -> Int32?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int32.ks`._
 
@@ -5139,6 +5537,18 @@ Absolute value. Wraps at the minimum value
 _Defined in `lang/std/numeric/int32.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: Int32) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int32.ks`._
 
 #### function `predecessor`
 
@@ -6032,6 +6442,16 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## struct `Int64`
 
 ```kestrel
@@ -6390,6 +6810,25 @@ Division that returns `None` for divide-by-zero or for the
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int64) -> Int64
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `gcd`
 
 ```kestrel
@@ -6523,6 +6962,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int64) -> Int64
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int64.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -6530,8 +6984,6 @@ public func multiplyChecked(Int64) -> Int64?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int64.ks`._
 
@@ -6716,6 +7168,18 @@ Absolute value. Wraps at the minimum value
 _Defined in `lang/std/numeric/int64.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: Int64) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int64.ks`._
 
 #### function `predecessor`
 
@@ -7711,6 +8175,16 @@ public func writeSeqWrapped(to: ArraySlice[T], with: T?)
 
 _Defined in `lang/std/collections/slice.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ### Implements `BytesIndex`
 
 #### typealias `BytesYield`
@@ -8325,6 +8799,25 @@ Division that returns `None` for divide-by-zero or for the
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming Int8) -> Int8
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `gcd`
 
 ```kestrel
@@ -8458,6 +8951,21 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming Int8) -> Int8
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/int8.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
@@ -8465,8 +8973,6 @@ public func multiplyChecked(Int8) -> Int8?
 ```
 
 Wrapping multiplication that returns `None` instead of overflowing.
-Implemented by multiplying then dividing back; replace with an
-overflow-detecting intrinsic when one is available.
 
 _Defined in `lang/std/numeric/int8.ks`._
 
@@ -8651,6 +9157,18 @@ Absolute value. Wraps at the minimum value
 _Defined in `lang/std/numeric/int8.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: Int8) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/int8.ks`._
 
 #### function `predecessor`
 
@@ -9544,6 +10062,16 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## struct `Lcg64`
 
 ```kestrel
@@ -9763,6 +10291,27 @@ for example) follows the same wrapping rules as `add`/`subtract`.
 _Defined in `lang/std/numeric/numeric.ks`._
 
 ### Members
+
+#### function `distance`
+
+```kestrel
+func distance(to: Self) -> Int64
+```
+
+The number of `successor()` steps from `self` to `other` (negative
+when `other` precedes `self`). For integers this is `other - self`.
+
+This is the `O(1)` stride distance — it lets range iterators carry a
+remaining-element *counter* instead of a boolean "finished" flag,
+which is what keeps `for x in a..=b` unrollable (a counter is an
+induction variable the optimizer can reason about; a flag is not).
+
+The result must fit in `Int64`. For spans wider than `Int64` (only
+reachable via near-full-width ranges, which never terminate in
+practice) the value wraps, following the same edge rule as
+`successor`/`predecessor`.
+
+_Defined in `lang/std/numeric/numeric.ks`._
 
 #### function `predecessor`
 
@@ -10038,8 +10587,7 @@ _Defined in `lang/std/numeric/uint16.ks`._
 public func addChecked(UInt16) -> UInt16?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10130,6 +10678,25 @@ public func divideChecked(UInt16) -> UInt16?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt16) -> UInt16
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10266,14 +10833,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt16) -> UInt16
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint16.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt16) -> UInt16?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint16.ks`._
 
@@ -10425,6 +11006,18 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/uint16.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt16) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint16.ks`._
 
 #### function `predecessor`
 
@@ -11288,6 +11881,16 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## struct `UInt32`
 
 ```kestrel
@@ -11532,8 +12135,7 @@ _Defined in `lang/std/numeric/uint32.ks`._
 public func addChecked(UInt32) -> UInt32?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11624,6 +12226,25 @@ public func divideChecked(UInt32) -> UInt32?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt32) -> UInt32
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11760,14 +12381,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt32) -> UInt32
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint32.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt32) -> UInt32?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint32.ks`._
 
@@ -11919,6 +12554,18 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/uint32.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt32) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint32.ks`._
 
 #### function `predecessor`
 
@@ -12782,6 +13429,16 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## struct `UInt64`
 
 ```kestrel
@@ -13026,8 +13683,7 @@ _Defined in `lang/std/numeric/uint64.ks`._
 public func addChecked(UInt64) -> UInt64?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13118,6 +13774,25 @@ public func divideChecked(UInt64) -> UInt64?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt64) -> UInt64
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13254,14 +13929,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt64) -> UInt64
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint64.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt64) -> UInt64?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint64.ks`._
 
@@ -13413,6 +14102,18 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/uint64.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt64) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint64.ks`._
 
 #### function `predecessor`
 
@@ -14276,6 +14977,16 @@ Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
 
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
+
 ## struct `UInt8`
 
 ```kestrel
@@ -14520,8 +15231,7 @@ _Defined in `lang/std/numeric/uint8.ks`._
 public func addChecked(UInt8) -> UInt8?
 ```
 
-Wrapping addition that returns `None` on overflow. For unsigned types
-overflow is detected via `result < self`.
+Wrapping addition that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14612,6 +15322,25 @@ public func divideChecked(UInt8) -> UInt8?
 ```
 
 Division that returns `None` for divide-by-zero.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
+#### function `divideUnchecked`
+
+```kestrel
+public consuming func divideUnchecked(consuming UInt8) -> UInt8
+```
+
+`self / other` without the divide-by-zero and `minValue / -1` guards —
+the bare hardware divide. Faster in hot loops, but **undefined
+behaviour** if `other == 0` or (for signed types) `self == minValue and
+other == -1`. The caller must guarantee a valid divisor. Prefer
+`divide` everywhere correctness matters; this is the `arr(unchecked:)`
+of arithmetic.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue / -1`.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14748,14 +15477,28 @@ itself; use `negateChecked()` if you need to detect that.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
+#### function `moduloUnchecked`
+
+```kestrel
+public consuming func moduloUnchecked(consuming UInt8) -> UInt8
+```
+
+`self % other` without the divide-by-zero and `minValue % -1` guards.
+Same safety contract as `divideUnchecked`.
+
+##### Safety
+
+UB when `other == 0`, or signed `minValue % -1`.
+
+_Defined in `lang/std/numeric/uint8.ks`._
+
 #### function `multiplyChecked`
 
 ```kestrel
 public func multiplyChecked(UInt8) -> UInt8?
 ```
 
-Wrapping multiplication that returns `None` on overflow. Implemented
-by multiplying then dividing back.
+Wrapping multiplication that returns `None` on overflow.
 
 _Defined in `lang/std/numeric/uint8.ks`._
 
@@ -14907,6 +15650,18 @@ power of two dividing the value.
 _Defined in `lang/std/numeric/uint8.ks`._
 
 ### Implements `Steppable`
+
+#### function `distance`
+
+```kestrel
+public func distance(to: UInt8) -> Int64
+```
+
+Number of `successor()` steps from `self` to `other` — `other - self`
+widened to `Int64` (negative when `other < self`). `O(1)`; lets closed
+ranges iterate with a counter instead of a "finished" flag.
+
+_Defined in `lang/std/numeric/uint8.ks`._
 
 #### function `predecessor`
 
@@ -15769,6 +16524,16 @@ init(from: From)
 Creates an instance from `value`.
 
 _Defined in `lang/std/core/convertible.ks`._
+
+### Implements `Exitable`
+
+#### function `report`
+
+```kestrel
+consuming func report() -> ExitCode
+```
+
+_Defined in `lang/std/os/exitable.ks`._
 
 ## protocol `UnsignedInteger`
 

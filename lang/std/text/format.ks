@@ -418,7 +418,8 @@ public func _writePadded(mutating into writer: StringBuilder, content: String, o
 
             // When zero-filling and padding on the left, emit any sign/prefix
             // before the zeros so we get "-0000005" rather than "000000-5".
-            if padLeft > 0 and options.fill == '0' and content.byteCount > 0 {
+            let contentLen = content.bytes.count;
+            if padLeft > 0 and options.fill == '0' and contentLen > 0 {
                 // Detect sign character: '-' (45), '+' (43), ' ' (32)
                 let firstByte = Int64(from: content.bytes(unchecked: 0));
                 var prefixLen: Int64 = 0;
@@ -426,7 +427,7 @@ public func _writePadded(mutating into writer: StringBuilder, content: String, o
                     prefixLen = 1
                 }
                 // Detect radix prefix: "0b", "0o", "0x", "0X" after optional sign
-                if content.byteCount > prefixLen + 1 {
+                if contentLen > prefixLen + 1 {
                     let p0 = Int64(from: content.bytes(unchecked: prefixLen));
                     let p1 = Int64(from: content.bytes(unchecked: prefixLen + 1));
                     // p0 == '0' (48), p1 == 'b'(98)/'o'(111)/'x'(120)/'X'(88)
@@ -441,7 +442,7 @@ public func _writePadded(mutating into writer: StringBuilder, content: String, o
                         writer.append(char: options.fill);
                         padLeft = padLeft - 1
                     }
-                    writer.append(content.substringBytes(from: prefixLen, to: content.byteCount));
+                    writer.append(content.substringBytes(from: prefixLen, to: contentLen));
                     while padRight > 0 {
                         writer.append(char: options.fill);
                         padRight = padRight - 1

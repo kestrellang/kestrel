@@ -202,7 +202,7 @@ extend Headers {
     public static func parse(from headerBlock: String) -> Headers {
         var headers = Headers();
         for line in headerBlock.split("\r\n") {
-            if line.byteCount == 0 {
+            if line.bytes.count == 0 {
                 break
             }
             match line.firstIndex(of: ":") {

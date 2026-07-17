@@ -528,7 +528,7 @@ public func getcwd() -> String {
 /// byte scan — works correctly for UTF-8 because `/` is ASCII and
 /// cannot appear inside a multi-byte sequence.
 func findLastSlash(s: String) -> Int64 {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var i: Int64 = len - 1;
     while i >= 0 {
         if s.bytes(unchecked: i) == 47 {

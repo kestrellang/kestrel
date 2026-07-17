@@ -94,7 +94,7 @@ public func searchResultsHtml(json: Value) -> String {
                         t.setInt("delay", i * 40);
 
                         var detail = String();
-                        if admin1.byteCount > 0 {
+                        if admin1.bytes.count > 0 {
                             detail.append(admin1);
                             detail.append(", ")
                         };

@@ -148,7 +148,7 @@ struct StringStorage: Cloneable {
 /// ```
 /// var s = "hello";
 /// s.append(", world");
-/// s.byteCount;            // 12
+/// s.bytes.count;          // 12
 /// s.contains(",");  // true
 /// for line in "a\nb".lines { /* ... */ }
 /// ```
@@ -178,7 +178,7 @@ struct StringStorage: Cloneable {
 /// # Guarantees
 ///
 /// - Bytes are valid UTF-8 after every public mutator.
-/// - `byteCount`, `capacity`, and `isEmpty` are O(1); `count` (code
+/// - `bytes.count`, `capacity`, and `isEmpty` are O(1); `chars.count` (code
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
@@ -218,7 +218,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// ```
     /// let s = String();
     /// s.isEmpty;     // true
-    /// s.byteCount;   // 0
+    /// s.bytes.count; // 0
     /// ```
     public init() {
         self.storage = CowBox(StringStorage(
@@ -245,7 +245,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     ///
     /// ```
     /// var s = String(capacity: 64);
-    /// s.byteCount;  // 0
+    /// s.bytes.count;  // 0
     /// s.capacity;   // 64
     /// ```
     public init(capacity capacity: Int64) {
@@ -276,14 +276,14 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// Panics with `"String allocation failed"` if the system
     /// allocator returns null.
     public init(stringLiteral ptr: lang.ptr[lang.i8], length: lang.i64) {
-        let byteCount = Int64(intLiteral: length);
-        if byteCount > 0 {
-            let newPtr = _textAlloc(Layout.array[UInt8](byteCount));
-             memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteCount);
+        let byteLen = Int64(intLiteral: length);
+        if byteLen > 0 {
+            let newPtr = _textAlloc(Layout.array[UInt8](byteLen));
+             memcpy(newPtr.asRaw(), RawPointer(raw: ptr), byteLen);
             self.storage = CowBox(StringStorage(
                 ptr: newPtr,
-                len: byteCount,
-                cap: byteCount
+                len: byteLen,
+                cap: byteLen
             ))
         } else {
             self.storage = CowBox(StringStorage(
@@ -452,12 +452,6 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     // SIZE & CAPACITY
     // ========================================================================
 
-    /// The number of UTF-8 bytes in the string. O(1).
-    ///
-    /// This is **not** the character count — see `count` for that.
-    /// Pure ASCII strings have `byteCount == count`.
-    public var byteCount: Int64 { self.len() }
-
     /// The number of bytes the storage buffer can hold without reallocating. O(1).
     public var capacity: Int64 { self.cap() }
 
@@ -512,7 +506,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// ```
     public mutating func append(other: some Str) {
         let slice = other.asSlice();
-        let otherLen = slice.byteCount;
+        let otherLen = (slice.end - slice.start);
         if otherLen == 0 {
             return
         }
@@ -756,7 +750,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
             result.append(other);
             result
         } else {
-            var result = String(capacity: self.byteCount + other.byteCount);
+            var result = String(capacity: self.len() + other.len());
             result.append(self);
             result.append(other);
             result

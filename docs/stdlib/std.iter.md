@@ -238,7 +238,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -255,7 +255,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -310,7 +310,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -404,7 +404,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -444,7 +444,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -519,7 +519,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -655,7 +655,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -693,7 +693,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -784,7 +784,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -836,7 +836,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -1122,7 +1122,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -1139,7 +1139,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -1194,7 +1194,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -1288,7 +1288,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -1328,7 +1328,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -1403,7 +1403,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -1539,7 +1539,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -1577,7 +1577,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -1668,7 +1668,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -1720,7 +1720,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -2040,7 +2040,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -2057,7 +2057,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -2112,7 +2112,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -2206,7 +2206,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -2246,7 +2246,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -2321,7 +2321,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -2459,7 +2459,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -2497,7 +2497,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -2588,7 +2588,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -2640,7 +2640,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -2907,7 +2907,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -2924,7 +2924,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -2979,7 +2979,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -3073,7 +3073,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -3113,7 +3113,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -3188,7 +3188,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -3324,7 +3324,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -3362,7 +3362,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -3453,7 +3453,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -3505,7 +3505,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -3790,7 +3790,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -3807,7 +3807,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -3862,7 +3862,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -3956,7 +3956,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -3996,7 +3996,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -4071,7 +4071,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -4208,7 +4208,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -4246,7 +4246,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -4337,7 +4337,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -4389,7 +4389,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -4668,7 +4668,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -4685,7 +4685,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -4740,7 +4740,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -4834,7 +4834,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -4874,7 +4874,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -4949,7 +4949,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -5087,7 +5087,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -5125,7 +5125,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -5216,7 +5216,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -5268,7 +5268,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -5344,7 +5344,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, where: (I.Item) -> Bool)
+public init(inner: I, where: consuming (I.Item) -> Bool)
 ```
 
 Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
@@ -5553,7 +5553,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -5570,7 +5570,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -5625,7 +5625,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -5719,7 +5719,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -5759,7 +5759,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -5834,7 +5834,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -5971,7 +5971,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -6009,7 +6009,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -6100,7 +6100,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -6152,7 +6152,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -6229,7 +6229,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, as: (I.Item) -> U?)
+public init(inner: I, as: consuming (I.Item) -> U?)
 ```
 
 Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
@@ -6439,7 +6439,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -6456,7 +6456,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -6511,7 +6511,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -6605,7 +6605,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -6645,7 +6645,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -6720,7 +6720,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -6856,7 +6856,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -6894,7 +6894,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -6985,7 +6985,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -7037,7 +7037,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -7113,7 +7113,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, as: (I.Item) -> U)
+public init(inner: I, as: consuming (I.Item) -> U)
 ```
 
 Builds a `FlatMapIterator` with no inner iterator buffered.
@@ -7330,7 +7330,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -7347,7 +7347,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -7402,7 +7402,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -7496,7 +7496,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -7536,7 +7536,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -7611,7 +7611,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -7749,7 +7749,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -7787,7 +7787,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -7878,7 +7878,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -7930,7 +7930,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -8215,7 +8215,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -8232,7 +8232,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -8287,7 +8287,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -8381,7 +8381,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -8421,7 +8421,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -8496,7 +8496,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -8633,7 +8633,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -8671,7 +8671,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -8762,7 +8762,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -8814,7 +8814,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -9098,7 +9098,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -9115,7 +9115,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -9170,7 +9170,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -9264,7 +9264,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -9304,7 +9304,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -9379,7 +9379,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -9516,7 +9516,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -9554,7 +9554,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -9645,7 +9645,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -9697,7 +9697,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -9772,7 +9772,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, inspector: (I.Item) -> ())
+public init(inner: I, inspector: consuming (I.Item) -> ())
 ```
 
 Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
@@ -9981,7 +9981,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -9998,7 +9998,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -10053,7 +10053,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -10147,7 +10147,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -10187,7 +10187,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -10262,7 +10262,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -10399,7 +10399,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -10437,7 +10437,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -10528,7 +10528,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -10580,7 +10580,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -10882,7 +10882,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -10899,7 +10899,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -10954,7 +10954,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -11048,7 +11048,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -11088,7 +11088,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -11163,7 +11163,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -11301,7 +11301,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -11339,7 +11339,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -11430,7 +11430,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -11482,7 +11482,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -11559,7 +11559,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, with: () -> I.Item)
+public init(inner: I, with: consuming () -> I.Item)
 ```
 
 Builds an `IntersperseWithIterator`.
@@ -11784,7 +11784,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -11801,7 +11801,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -11856,7 +11856,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -11950,7 +11950,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -11990,7 +11990,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -12065,7 +12065,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -12202,7 +12202,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -12240,7 +12240,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -12331,7 +12331,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -12383,7 +12383,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -12676,7 +12676,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -12693,7 +12693,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -12760,7 +12760,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -12854,7 +12854,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -12894,7 +12894,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -12955,7 +12955,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `isSorted`
 
 ```kestrel
-public consuming func isSorted[K](byKey: (Item) -> K) -> Bool where K: Comparable
+public consuming func isSorted[K](byKey: consuming (Item) -> K) -> Bool where K: Comparable
 ```
 
 True if elements are sorted ascending by `key(element)`. Sugar
@@ -12996,7 +12996,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -13162,7 +13162,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -13200,7 +13200,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -13291,7 +13291,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -13343,7 +13343,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -13458,7 +13458,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, as: (I.Item) -> U)
+public init(inner: I, as: consuming (I.Item) -> U)
 ```
 
 Builds a `MapIterator` from `inner` and `transform`. Prefer
@@ -13668,7 +13668,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -13685,7 +13685,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -13740,7 +13740,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -13834,7 +13834,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -13874,7 +13874,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -13949,7 +13949,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -14085,7 +14085,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -14123,7 +14123,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -14214,7 +14214,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -14266,7 +14266,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -14542,7 +14542,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -14559,7 +14559,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -14614,7 +14614,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -14708,7 +14708,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -14748,7 +14748,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -14823,7 +14823,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -14959,7 +14959,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -14997,7 +14997,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -15088,7 +15088,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -15140,7 +15140,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -15437,7 +15437,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -15454,7 +15454,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -15509,7 +15509,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -15603,7 +15603,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -15643,7 +15643,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -15718,7 +15718,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -15854,7 +15854,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -15892,7 +15892,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -15983,7 +15983,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -16035,7 +16035,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -16311,7 +16311,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -16328,7 +16328,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -16383,7 +16383,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -16477,7 +16477,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -16517,7 +16517,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -16592,7 +16592,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -16728,7 +16728,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -16766,7 +16766,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -16857,7 +16857,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -16909,7 +16909,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -17194,7 +17194,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -17211,7 +17211,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -17266,7 +17266,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -17360,7 +17360,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -17400,7 +17400,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -17475,7 +17475,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -17612,7 +17612,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -17650,7 +17650,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -17741,7 +17741,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -17793,7 +17793,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -18071,7 +18071,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -18088,7 +18088,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -18143,7 +18143,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -18237,7 +18237,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -18277,7 +18277,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -18352,7 +18352,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -18489,7 +18489,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -18527,7 +18527,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -18618,7 +18618,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -18670,7 +18670,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -18778,7 +18778,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, from: Acc, by: (Acc, I.Item) -> Acc)
+public init(inner: I, from: Acc, by: consuming (Acc, I.Item) -> Acc)
 ```
 
 Builds a `ScanIterator` seeded with `initial`.
@@ -18995,7 +18995,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -19012,7 +19012,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -19067,7 +19067,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -19161,7 +19161,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -19201,7 +19201,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -19276,7 +19276,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -19413,7 +19413,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -19451,7 +19451,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -19542,7 +19542,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -19594,7 +19594,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -19880,7 +19880,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -19897,7 +19897,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -19952,7 +19952,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -20046,7 +20046,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -20086,7 +20086,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -20161,7 +20161,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -20298,7 +20298,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -20336,7 +20336,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -20427,7 +20427,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -20479,7 +20479,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -20556,7 +20556,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, where: (I.Item) -> Bool)
+public init(inner: I, where: consuming (I.Item) -> Bool)
 ```
 
 Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
@@ -20773,7 +20773,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -20790,7 +20790,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -20845,7 +20845,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -20939,7 +20939,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -20979,7 +20979,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -21054,7 +21054,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -21192,7 +21192,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -21230,7 +21230,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -21321,7 +21321,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -21373,7 +21373,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -21668,7 +21668,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -21685,7 +21685,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -21740,7 +21740,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -21834,7 +21834,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -21874,7 +21874,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -21949,7 +21949,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -22086,7 +22086,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -22124,7 +22124,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -22215,7 +22215,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -22267,7 +22267,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -22551,7 +22551,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -22568,7 +22568,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -22623,7 +22623,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -22717,7 +22717,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -22757,7 +22757,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -22832,7 +22832,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -22969,7 +22969,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -23007,7 +23007,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -23098,7 +23098,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -23150,7 +23150,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -23226,7 +23226,7 @@ _Defined in `lang/std/iter/adapters.ks`._
 #### initializer `From Source`
 
 ```kestrel
-public init(inner: I, where: (I.Item) -> Bool)
+public init(inner: I, where: consuming (I.Item) -> Bool)
 ```
 
 Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.
@@ -23443,7 +23443,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -23460,7 +23460,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -23515,7 +23515,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -23609,7 +23609,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -23649,7 +23649,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -23724,7 +23724,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -23862,7 +23862,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -23900,7 +23900,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -23991,7 +23991,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -24043,7 +24043,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the
@@ -24327,7 +24327,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filter`
 
 ```kestrel
-public func filter(where: (Item) -> Bool) -> FilterIterator[Self]
+public func filter(where: consuming (Item) -> Bool) -> FilterIterator[Self]
 ```
 
 Yields only elements where `predicate` returns `true`. Lazy —
@@ -24344,7 +24344,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `filterMap`
 
 ```kestrel
-public func filterMap[U](as: (Item) -> U?) -> FilterMapIterator[Self, U]
+public func filterMap[U](as: consuming (Item) -> U?) -> FilterMapIterator[Self, U]
 ```
 
 Combined map + filter — `transform` returns `Optional[U]`; `None`
@@ -24399,7 +24399,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `flatMap`
 
 ```kestrel
-public func flatMap[U](as: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
+public func flatMap[U](as: consuming (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator
 ```
 
 Maps each element to an iterator and concatenates the results.
@@ -24493,7 +24493,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `inspect`
 
 ```kestrel
-public func inspect((Item) -> ()) -> InspectIterator[Self]
+public func inspect(consuming (Item) -> ()) -> InspectIterator[Self]
 ```
 
 Calls `inspector` on each element as it flows through, leaving
@@ -24533,7 +24533,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `intersperseWith`
 
 ```kestrel
-public func intersperseWith(with: () -> Item) -> IntersperseWithIterator[Self]
+public func intersperseWith(with: consuming () -> Item) -> IntersperseWithIterator[Self]
 ```
 
 Like `intersperse`, but builds each separator on demand by calling
@@ -24608,7 +24608,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `map`
 
 ```kestrel
-public func map[U](as: (Item) -> U) -> MapIterator[Self, U]
+public func map[U](as: consuming (Item) -> U) -> MapIterator[Self, U]
 ```
 
 Applies `transform` to each element. Lazy — the function only
@@ -24745,7 +24745,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `scan`
 
 ```kestrel
-public func scan[Acc](from: Acc, by: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
+public func scan[Acc](from: Acc, by: consuming (Acc, Item) -> Acc) -> ScanIterator[Self, Acc]
 ```
 
 Like `fold`, but yields each intermediate accumulator value
@@ -24783,7 +24783,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `skipWhile`
 
 ```kestrel
-public func skipWhile(where: (Item) -> Bool) -> SkipWhileIterator[Self]
+public func skipWhile(where: consuming (Item) -> Bool) -> SkipWhileIterator[Self]
 ```
 
 Drops elements while `predicate` is `true`, then yields *every*
@@ -24874,7 +24874,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `takeWhile`
 
 ```kestrel
-public func takeWhile(where: (Item) -> Bool) -> TakeWhileIterator[Self]
+public func takeWhile(where: consuming (Item) -> Bool) -> TakeWhileIterator[Self]
 ```
 
 Yields elements until `predicate` first returns `false`, then
@@ -24926,7 +24926,7 @@ _Defined in `lang/std/iter/iterator.ks`._
 #### function `tryForEach`
 
 ```kestrel
-public mutating func tryForEach[E]((Item) -> Result[(), E]) -> Result[(), E]
+public mutating func tryForEach[E](consuming (Item) -> Result[(), E]) -> Result[(), E]
 ```
 
 `forEach` with early exit on `Err`. Mirror of `tryFold` for the

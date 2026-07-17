@@ -72,9 +72,10 @@ Source text
     │
     ▼
 ┌──────────────────────────────────────────────────────┐
-│  CODEGEN         kestrel-codegen + …-cranelift       │
-│  Monomorphization already ran as a MIR pass;         │
-│  mangle, emit Cranelift IR, link.                    │
+│  CODEGEN         …-cranelift or …-llvm               │
+│  Monomorphization and mangling already ran as MIR    │
+│  passes; emit Cranelift IR (default) or LLVM IR      │
+│  (--backend llvm), link.                             │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -122,15 +123,19 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 | `kestrel-hir-lower` | `LowerBody`, `LowerCallableTypes` queries — AST bodies → HIR bodies. |
 | `kestrel-type-infer` | Constraint-based inference; `InferBody` query, `Constraint` / `InferError` enums, `TypeResolver`. |
 | `kestrel-semantics` | Higher-level semantic queries: conformance resolution and polarity, protocol refinement, builtin-protocol identification, copy semantics. Used by infer/analyze. (Witness resolution lives in `kestrel-mir-lower`/codegen.) |
+| `kestrel-copy-fold` | Single source of truth for the Copyable / Cloneable / NotCopyable decision tree (`fold_members` + `instance_semantics`). Five layer adapters (semantics over `HirTy`, the solver over `TyKind`, analyze move tracking over `ResolvedTy`, MIR `ty_query` and `mono` over `TyId`) all route through it — never re-implement the fold. |
 | `kestrel-analyze` | Analyzer framework + every concrete analyzer. |
 | `kestrel-pattern-matching` | Exhaustiveness checking. |
 | `kestrel-mir` | OSSA MIR types: `MirModule`, `FunctionDef`, `OssaBody`, `ValueId`, `Instruction`, `BasicBlock`, `Terminator`. SSA, not place-based (no `Place`/`Rvalue`/`Statement`). Also owns the MIR pass pipeline, monomorphization, type layout, and symbol mangling. |
 | `kestrel-mir-lower` | Entities + typed bodies → MIR via plain functions (entry: `lower_module`), not a query; its only query is `IsProtocolMethod`. |
 | `kestrel-codegen` | Tiny backend-agnostic crate: target configuration (`TargetConfig`). Layout and mangling now live in `kestrel-mir`. |
-| `kestrel-codegen-cranelift` | Cranelift backend: lowers the already-monomorphized OSSA MIR → machine code and links. |
+| `kestrel-codegen-cranelift` | Cranelift backend (default): lowers the already-monomorphized OSSA MIR → machine code and links. |
+| `kestrel-codegen-llvm` | LLVM 18 backend (via inkwell): consumes the same monomorphized MIR and produces a linkable object file (plus optional textual LLVM IR). Selected via the CLI `--backend llvm` flag (`Backend` enum in `src/main.rs`; `KESTREL_BACKEND` env var overrides). |
 | `kestrel-compiler` | Low-level compiler / query engine. Owns the `World`. |
 | `kestrel-compiler-driver` | High-level orchestration used by the CLI and tests. |
 | `kestrel-debug` | Introspection utilities. |
+| `kestrel-doc` | Walks a compiled `World` and extracts public declarations into JSON for the rustdoc-style stdlib reference site. |
+| `kestrel-lsp` | Kestrel language server — LSP over stdio (tower-lsp). |
 | `kestrel-reporting` | Diagnostic formatting (codespan-reporting wrapper). |
 | `kestrel-test-suite` | `.ks`-file test runner. Package name in `Cargo.toml` is `kestrel-test-suite`. |
 

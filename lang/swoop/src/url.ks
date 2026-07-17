@@ -41,7 +41,7 @@ public struct ClientUrl: Cloneable {
 
     /// Returns the full request path including query string (e.g. "/users?page=1").
     public func requestPath() -> String {
-        if self.queryString.byteCount > 0 {
+        if self.queryString.bytes.count > 0 {
             var full = String();
             full.append(self.path);
             full.append("?");
@@ -77,7 +77,7 @@ public struct ClientUrl: Cloneable {
 ///
 /// Supports: http://host/path, https://host/path, with optional :port and ?query
 public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
-    let len = raw.byteCount;
+    let len = raw.bytes.count;
 
     // Determine scheme
     var scheme = String();
@@ -110,7 +110,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     // Extract host:port portion
     let rawSlice = raw.asSlice();
     let hostPort = rawSlice.subslice(from: afterScheme, to: pathStart).toOwned();
-    if hostPort.byteCount == 0 {
+    if hostPort.bytes.count == 0 {
         return .Err(SwoopError.invalidUrl("missing host"))
     }
 

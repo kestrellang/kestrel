@@ -104,7 +104,7 @@ func invokeRun(
 ) -> Result[(), FlockError] {
     // `mktemp -t flock-run` works on both macOS and Linux.
     let tempPath = captureOutput("mktemp -t flock-run");
-    if tempPath.byteCount == 0 {
+    if tempPath.bytes.count == 0 {
         return .Err(FlockError.IoError("failed to create temp file for run"))
     }
 
@@ -179,7 +179,7 @@ func quoteArg(s: String) -> String {
 
 func containsSpace(s: String) -> Bool {
     var i: Int64 = 0;
-    while i < s.byteCount {
+    while i < s.bytes.count {
         if s.bytes(unchecked: i) == 32 { // space
             return true
         }

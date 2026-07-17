@@ -145,8 +145,8 @@ public func filterKanto(query: String, typeFilter: String) -> Array[PokemonEntry
     var i: Int64 = 0;
     while i < all.count {
         let e = all(unchecked: i);
-        let nameMatch = q.byteCount == 0 or containsLower(e.apiName, q) or containsLower(e.displayName, q);
-        let typeMatch = typeFilter.byteCount == 0 or e.primaryType == typeFilter;
+        let nameMatch = q.bytes.count == 0 or containsLower(e.apiName, q) or containsLower(e.displayName, q);
+        let typeMatch = typeFilter.bytes.count == 0 or e.primaryType == typeFilter;
         if nameMatch and typeMatch {
             out.append(e)
         };

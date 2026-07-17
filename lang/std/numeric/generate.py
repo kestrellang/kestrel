@@ -534,7 +534,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
             }}
         }}
 
-        var i = digits.byteCount - 1;
+        var i = digits.bytes.count - 1;
         while i >= 0 {{
             result.appendByte(digits.bytes(unchecked: i));
             i = i - 1
@@ -595,7 +595,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// {type_name}(parsing: "abc");   // None
     /// ```
     public init(parsing string: String)? {{
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -669,7 +669,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             return null
         }}
 
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -750,7 +750,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
     /// let bad = {type_name}(parsing: "-1"); // null (no sign for unsigned)
     /// ```
     public init(parsing string: String)? {{
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -826,7 +826,7 @@ def generate_integer_parse_method(type_name: str, bits: int, signed: bool) -> st
             return null
         }}
 
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {{
             return null
         }}
@@ -1228,7 +1228,7 @@ def generate_float_parse_method(type_name: str, bits: int) -> str:
     /// __TYPE_NAME__(parsing: "");          // None
     /// ```
     public init(parsing string: String)? {
-        let len = string.byteCount;
+        let len = string.bytes.count;
         if len == 0 {
             return null
         }
@@ -1624,7 +1624,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
             }
         }
         if trimTrailingZeros {
-            let len = number.byteCount;
+            let len = number.bytes.count;
             var dotIndex: Int64 = -1;
             var expIndex: Int64 = -1;
             var i: Int64 = 0;

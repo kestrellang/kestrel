@@ -112,7 +112,7 @@ public func detectPlatform() -> Result[Platform, JessupError] {
 
 /// Trims trailing whitespace (newlines, spaces) from a string.
 func trimWhitespace(s: String) -> String {
-    let len = s.byteCount;
+    let len = s.bytes.count;
     var end = len;
     while end > 0 {
         let b = s.bytes(unchecked: end - 1);

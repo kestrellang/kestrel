@@ -44,6 +44,8 @@ func main() {
 }
 ```
 
+Moves are enforced by the compiler's move checker: using a value after it was moved is E500 (`use_after_move`), using a value that was moved on only some control-flow paths is E501 (`maybe_moved`), moving a non-copyable value out from behind a borrow is E503 (`move_out_of_borrow`), and moving a captured value out of a closure body is E506 (`move_captured_out_of_closure`). For the full ownership model, see [docs/memory-model/](../memory-model/overview.md).
+
 ### RAII and Deinit
 Resources are managed via Resource Acquisition Is Initialization (RAII). Types can define a `deinit` block that runs when the value goes out of scope.
 
@@ -120,7 +122,7 @@ Generic types assume `Copyable` by default. To support non-copyable types, use `
 
 ## Error Handling
 
-Kestrel uses **Typed Errors** via the `Result[T, E]` enum.
+Kestrel uses **Typed Errors** via the `Result[T, E]` enum. See [Error Handling](error-handling.md) for the full model.
 
 -   **Exceptions are Values**: Errors are regular values, not unchecked exceptions.
 -   **Propagation**: The `try` keyword is used to propagate errors up the call stack.
@@ -147,10 +149,12 @@ Protocols define a set of requirements (methods, properties) that a type must fu
 
 ## Closures
 
-Closures capture their environment **by value** (copy).
+Closures capture their environment **by value** (copy for `Copyable` types; non-copyable values are *moved* into the closure).
 -   Captured variables are immutable inside the closure by default.
--   Closures are first-class values and can be passed around.
+-   Closures are first-class values and can be passed around, but a closure that captures locals cannot escape the function that created it (E494).
 -   `{ it }` syntax is sugar for single-argument closures.
+
+See [Closures](closures.md) for details.
 
 ## Type Resolution
 
