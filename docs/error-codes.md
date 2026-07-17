@@ -1,10 +1,11 @@
 # Kestrel Compiler Error Codes
 
 > Generated from the compiler source (diagnostic descriptors in `lib/`) on
-> 2026-07-01. Every code below corresponds to a descriptor or emit site in the
-> compiler; message templates use `{name}`-style placeholders for interpolated
-> values. Unless marked *(warning)*, a code is an error. A few code numbers are
-> shared by two unrelated diagnostics; both meanings are listed.
+> 2026-07-01, updated 2026-07-17. Every code below corresponds to a descriptor
+> or emit site in the compiler; message templates use `{name}`-style
+> placeholders for interpolated values. Unless marked *(warning)*, a code is an
+> error. Each code maps to exactly one diagnostic (enforced by a unit test in
+> `kestrel-analyze`).
 
 Most diagnostics print as `message [E-code]` with source labels. Inference
 errors are all surfaced under the umbrella code **E100**; the detailed message
@@ -16,10 +17,10 @@ comes from the type checker.
 - [E100–E121 — Type checking, parameters & literals](#e100e121--type-checking-parameters--literals)
 - [E200–E212 — Mutability, access modes & assignment](#e200e212--mutability-access-modes--assignment)
 - [E300–E316 — Patterns & exhaustiveness](#e300e316--patterns--exhaustiveness)
-- [E411–E466 — Declarations, generics & protocol conformance](#e411e466--declarations-generics--protocol-conformance)
+- [E411–E478 — Declarations, generics & protocol conformance](#e411e478--declarations-generics--protocol-conformance)
 - [E488–E499 — References & escape checking](#e488e499--references--escape-checking)
 - [E500–E506 — Moves & ownership](#e500e506--moves--ownership)
-- [E600–E614 — Closures, externs & declaration shape](#e600e614--closures-externs--declaration-shape)
+- [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E700–E707 — String literals & escapes](#e700e707--string-literals--escapes)
@@ -116,7 +117,7 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E411–E466 — Declarations, generics & protocol conformance
+## E411–E478 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -125,7 +126,6 @@ func unwrap(opt: Int64?) -> Int64 {
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
 | E415 | enums cannot have stored fields | Enums carry data in case payloads, not stored fields. |
 | E416 | static stored properties not supported in generic types | A generic type would need one global per instantiation; use a computed static instead. |
-| E417 | 'static' is redundant here | Global (module-level) properties are already static. |
 | E417 | protocol method '{method}' in '{protocol}' cannot have a body | Protocol requirements are signatures only; put default bodies in a protocol extension. |
 | E418 | '{name}' cannot be static in this context | `static` is not allowed at module level. |
 | E419 | @builtin(.{feature}) must be a marker protocol (no required methods or types) | Builtin language-feature protocols cannot declare requirements. |
@@ -133,10 +133,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E421 | '{type_name}' conforms to '{child_protocol}' but not its parent '{parent_protocol}' | Conforming to a child protocol requires conforming to the protocols it inherits from. |
 | E422 | enum '{enum_name}' cannot conform to protocol '{protocol_name}' | This protocol is restricted to non-enum types. |
 | E423 | cannot conform to \`{protocol_name}\` and opt out of \`Copyable\` | A conformance that requires `Copyable` conflicts with `: not Copyable`. |
-| E423 | struct \`{name}\` already has a deinit | A type may declare at most one `deinit`. |
-| E424 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
 | E424 | '{name}' is not a language feature protocol | `not P` (negative conformance) is only allowed for language-feature protocols like `Copyable`. |
-| E425 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
 | E425 | '{type}' conforms to Copyable but contains non-Copyable field '{field}' | A `Copyable` type must be copyable field-by-field. |
 | E426 | duplicate {kind} signature: {signature} | Two functions/inits/subscripts have identical signatures — overloads must differ. |
 | E427 | duplicate enum case '{case_name}' | The same case name is declared twice in one enum. |
@@ -149,7 +146,6 @@ func unwrap(opt: Int64?) -> Int64 {
 | E434 | duplicate type parameter name '{name}' | The same generic parameter name appears twice in one parameter list. |
 | E435 | type parameter '{without}' without default follows '{with_default}' which has a default | Defaulted type parameters must come last. |
 | E436 | bound '{type_name}' is a {type_kind}, not a protocol | Generic bounds (`T: X`) must name protocols. |
-| E436 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. |
 | E437 | undeclared type parameter '{name}' in where clause | The `where` clause constrains a name that isn't a type parameter in scope. |
 | E438 | too few/too many type arguments for '{name}': expected {n}, got {m} | Wrong number of generic arguments (also: the type doesn't accept arguments at all). |
 | E439 | type parameter '{name}' shadows outer type parameter | A nested declaration reuses an enclosing generic parameter's name. |
@@ -172,7 +168,6 @@ func unwrap(opt: Int64?) -> Int64 {
 | E456 | property '{name}' has wrong type for protocol '{proto}' | A witness property's type doesn't match the protocol requirement. |
 | E457 | type '{bound}' does not satisfy bound '{proto}' on associated type '{name}' | The associated type chosen for a conformance breaks the protocol's `where` bound. |
 | E458 | method '{name}' has wrong return type for protocol '{proto}' | A witness method's return type doesn't match the requirement. |
-| E459 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) doesn't match the requirement. |
 | E459 | circular protocol inheritance: '{A}' -> ... -> '{A}' | Protocols inherit from each other in a cycle. |
 | E460 | property '{name}' requires a setter to satisfy protocol '{proto}' | The protocol requires `get set` but the witness property is read-only. |
 | E461 *(warning)* | unknown attribute '{name}' | An `@attribute` isn't recognized by the compiler. |
@@ -181,6 +176,13 @@ func unwrap(opt: Int64?) -> Int64 {
 | E464 | init has wrong effect for protocol '{proto}' | A witness `init`'s failability/throwing effect doesn't match the protocol requirement. |
 | E465 | indirect enums are not yet supported | `indirect` is recognized but not implemented in this version. |
 | E466 | 'some' (opaque type) is not allowed in a field type | Opaque `some P` types can only appear in return position. |
+| E467 | method '{name}' shadows the stored field '{name}' of '{type}' | A zero-arg extension method with a stored field's name would recurse instead of reading the field. |
+| E473 | struct \`{name}\` already has a deinit | A type may declare at most one `deinit`. |
+| E474 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
+| E475 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
+| E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. |
+| E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) doesn't match the requirement. |
+| E478 | 'static' is redundant here | Global (module-level) properties are already static. |
 
 ### Example — E412 (duplicate extension method)
 
@@ -301,7 +303,7 @@ func capture(consuming r: Res) -> () -> Res {
 }
 ```
 
-## E600–E614 — Closures, externs & declaration shape
+## E600–E614, E623 — Closures, externs & declaration shape
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -310,10 +312,8 @@ func capture(consuming r: Res) -> () -> Res {
 | E602 | closure parameter type mismatch at position {index} | An annotated closure parameter conflicts with the expected function type. |
 | E603 | cannot assign to captured variable '{name}' | Captured variables are immutable inside closures. |
 | E604 | cannot assign to closure parameter '{name}' | Closure parameters are immutable. |
-| E605 | *(declared; superseded)* capturing closure escape | The old syntactic escape check; capturing-closure escapes are now reported as E494 by the MIR escape checker. |
 | E605 | parameter/return type does not conform to FFISafe | `@extern` signatures may only use FFI-safe types. |
 | E606 | could not infer type for closure parameter | The closure needs type context (annotate the parameter or the binding). |
-| E606 | function '{name}' requires a body | A non-protocol, non-extern function was declared without a body. |
 | E607 | subscript must have at least one parameter | Subscripts index by something; zero-parameter subscripts aren't allowed. |
 | E608 | subscript must have a body | Subscript declarations outside protocols need an implementation. |
 | E609 | @extern functions cannot be generic | Generic functions have no stable ABI to export. |
@@ -322,6 +322,7 @@ func capture(consuming r: Res) -> () -> Res {
 | E612 | @extern requires a calling convention | Write e.g. `@extern(.C)`. |
 | E613 | required parameter '{name}' cannot follow parameter '{default_name}' which has a default value | Defaulted parameters must come last. |
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
+| E623 | function '{name}' requires a body | A non-protocol, non-extern function was declared without a body. |
 
 ### Example — E600 / E601 (closure arity)
 

@@ -304,26 +304,30 @@ pub(crate) fn ty_parser<'tokens>()
             )
             .boxed();
 
-        // Opaque type: some P, some P and Q
+        // Opaque type: some P, some P and Q, some P and not Copyable
+        // Each bound is a path type with optional type args
+        let some_bound = path_segments_parser()
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::LBracket))
+                    .ignore_then(
+                        ty.clone()
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing()
+                            .collect::<Vec<_>>(),
+                    )
+                    .then_ignore(skip_trivia())
+                    .then_ignore(just(Token::RBracket))
+                    .or_not(),
+            )
+            .map(|(segments, args)| TyVariant::Path { segments, args })
+            .boxed();
+
         let some_type = skip_trivia()
             .ignore_then(just(Token::Some).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
-                // Each bound is a path type with optional type args
-                path_segments_parser()
-                    .then(
-                        skip_trivia()
-                            .ignore_then(just(Token::LBracket))
-                            .ignore_then(
-                                ty.clone()
-                                    .separated_by(just(Token::Comma))
-                                    .allow_trailing()
-                                    .collect::<Vec<_>>(),
-                            )
-                            .then_ignore(skip_trivia())
-                            .then_ignore(just(Token::RBracket))
-                            .or_not(),
-                    )
-                    .map(|(segments, args)| TyVariant::Path { segments, args })
+                some_bound
+                    .clone()
                     .separated_by(
                         skip_trivia()
                             .ignore_then(just(Token::And))
@@ -332,7 +336,21 @@ pub(crate) fn ty_parser<'tokens>()
                     .at_least(1)
                     .collect::<Vec<_>>(),
             )
-            .map(|(some_span, bounds)| TyVariant::Some(some_span, bounds))
+            // Trailing negative bound: `and not Copyable`. The bounds list
+            // above rewinds its trailing `and` when the next item starts with
+            // `not`, letting this branch pick it up. Only `Copyable` is legal
+            // as a negative — enforced at HIR lowering where the path resolves.
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::And))
+                    .ignore_then(skip_trivia())
+                    .ignore_then(just(Token::Not).map_with(|_, e| to_kestrel_span(e.span())))
+                    .then_ignore(skip_trivia())
+                    .then(some_bound)
+                    .map(|(not_span, negative_ty)| (not_span, Box::new(negative_ty)))
+                    .or_not(),
+            )
+            .map(|((some_span, bounds), negative)| TyVariant::Some(some_span, bounds, negative))
             .boxed();
 
         // Try some first (prefix keyword), then never, inferred, parens, array/dict, path
@@ -433,13 +451,14 @@ pub(crate) fn ty_parser<'tokens>()
             .collect::<Vec<_>>()
             .then(postfixed)
             .map(|(prefixes, base)| {
-                prefixes.into_iter().rev().fold(base, |inner, (amp, mutating)| {
-                    TyVariant::Ref {
+                prefixes
+                    .into_iter()
+                    .rev()
+                    .fold(base, |inner, (amp, mutating)| TyVariant::Ref {
                         amp,
                         mutating,
                         inner: Box::new(inner),
-                    }
-                })
+                    })
             })
             .boxed()
     })
@@ -509,8 +528,8 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Result(success_ty, throws_span, error_ty) => {
             emit_result_type(sink, success_ty, throws_span.clone(), error_ty);
         },
-        TyVariant::Some(some_span, bounds) => {
-            emit_some_type(sink, some_span.clone(), bounds);
+        TyVariant::Some(some_span, bounds, negative) => {
+            emit_some_type(sink, some_span.clone(), bounds, negative.as_ref());
         },
         TyVariant::Ref {
             amp,
@@ -551,8 +570,9 @@ pub enum TyVariant {
     Optional(Box<TyVariant>, Span), // (base_type, question_span)
     /// Result type: T throws E
     Result(Box<TyVariant>, Span, Box<TyVariant>), // (success_type, throws_span, error_type)
-    /// Opaque type: some P, some P and Q
-    Some(Span, Vec<TyVariant>), // (some_span, bound types)
+    /// Opaque type: some P, some P and Q, some P and not Copyable
+    /// (some_span, bound types, optional trailing negative bound: not_span + type)
+    Some(Span, Vec<TyVariant>, Option<(Span, Box<TyVariant>)>),
     /// Reference type: &T or &mutating T. Parsed in every type position but
     /// accepted in none (stage 0.5) — rejection happens at HIR lowering.
     Ref {
@@ -796,7 +816,12 @@ pub(crate) fn emit_result_type(
     sink.finish_node(); // Finish Ty
 }
 
-pub(crate) fn emit_some_type(sink: &mut EventSink, some_span: Span, bounds: &[TyVariant]) {
+pub(crate) fn emit_some_type(
+    sink: &mut EventSink,
+    some_span: Span,
+    bounds: &[TyVariant],
+    negative: Option<&(Span, Box<TyVariant>)>,
+) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TySome);
 
@@ -807,6 +832,16 @@ pub(crate) fn emit_some_type(sink: &mut EventSink, some_span: Span, bounds: &[Ty
             // since they're consumed during parsing; emit the bound type directly
         }
         emit_ty_variant(sink, bound);
+    }
+
+    // Negative bound (`and not Copyable`) uses the same NegativeConformance
+    // wrapper as conformance lists, so the ast-builder can tell it apart from
+    // the positive bounds (which are direct type-node children).
+    if let Some((not_span, negative_ty)) = negative {
+        sink.start_node(SyntaxKind::NegativeConformance);
+        sink.add_token(SyntaxKind::Not, not_span.clone());
+        emit_ty_variant(sink, negative_ty);
+        sink.finish_node();
     }
 
     sink.finish_node(); // Finish TySome
@@ -981,5 +1016,52 @@ mod tests {
         let ty = parse_ty_from_source(source);
 
         assert!(ty.is_array());
+    }
+
+    #[test]
+    fn test_some_type_basic() {
+        let source = "some Shape";
+        let ty = parse_ty_from_source(source);
+
+        let some_node = ty
+            .syntax
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::TySome)
+            .expect("expected a TySome node");
+        assert!(
+            !some_node
+                .descendants()
+                .any(|n| n.kind() == SyntaxKind::NegativeConformance),
+            "plain `some P` must not carry a negative bound"
+        );
+    }
+
+    #[test]
+    fn test_some_type_with_negative_bound() {
+        let source = "some Shape and Equatable and not Copyable";
+        let ty = parse_ty_from_source(source);
+
+        let some_node = ty
+            .syntax
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::TySome)
+            .expect("expected a TySome node");
+
+        // Positive bounds are direct type-node children; the negative bound
+        // lives inside a NegativeConformance wrapper.
+        let direct_ty_children = some_node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::Ty)
+            .count();
+        assert_eq!(direct_ty_children, 2, "two positive bounds expected");
+
+        let negative = some_node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::NegativeConformance)
+            .expect("expected a NegativeConformance child for `not Copyable`");
+        assert!(
+            negative.descendants().any(|n| n.kind() == SyntaxKind::Ty),
+            "negative bound should wrap a type node"
+        );
     }
 }

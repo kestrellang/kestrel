@@ -284,18 +284,16 @@ impl Compiler {
     /// on the codegen path only — `dump mir` / the test harness still inspect a
     /// module that lowered with errors.
     #[allow(clippy::result_large_err)]
-    fn ensure_no_lowering_errors(
-        &self,
-    ) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
+    fn ensure_no_lowering_errors(&self) -> Result<(), kestrel_codegen_cranelift::CodegenError> {
         let errors = self
             .diagnostics()
             .iter()
             .filter(|d| d.severity >= Severity::Error)
             .count();
         if errors > 0 {
-            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(format!(
-                "compilation failed with {errors} error(s)"
-            )));
+            return Err(kestrel_codegen_cranelift::CodegenError::Unsupported(
+                format!("compilation failed with {errors} error(s)"),
+            ));
         }
         Ok(())
     }

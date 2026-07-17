@@ -381,8 +381,11 @@ impl LowerCtx<'_> {
                 entity,
                 resolved_index,
             } => {
-                let base =
-                    self.alloc_expr(HirExpr::Def(entity, explicit_type_args.clone(), span.clone()));
+                let base = self.alloc_expr(HirExpr::Def(
+                    entity,
+                    explicit_type_args.clone(),
+                    span.clone(),
+                ));
                 self.lower_trailing_member_segments(base, &segments[resolved_index + 1..])
             },
             ValueResolution::FieldValue {
@@ -1201,7 +1204,10 @@ impl LowerCtx<'_> {
         // breaks OSSA dominance because bindings created inside the match don't
         // dominate the if's then-block (issue #126's if-let twin), so binding
         // conditions must never go through `lower_if_conditions`.
-        if conditions.iter().any(|c| matches!(c, IfCondition::Let { .. })) {
+        if conditions
+            .iter()
+            .any(|c| matches!(c, IfCondition::Let { .. }))
+        {
             let mut on_success = |this: &mut Self| {
                 let then_block = this.lower_block(body, then_body);
                 this.hir_block_to_expr(then_block, span)
@@ -1353,10 +1359,9 @@ impl LowerCtx<'_> {
                 // and the body lowers the param as a by-reference place.
                 let param_is_mut = is_mut || p.is_mut;
                 let local = self.define_local(&name, param_is_mut, span.clone());
-                let ty = p
-                    .ty
-                    .as_ref()
-                    .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));
+                let ty =
+                    p.ty.as_ref()
+                        .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));
 
                 let pattern = if needs_desugar {
                     // Lower the pattern (creates locals for bindings)

@@ -76,8 +76,14 @@ pub enum AstType {
     Never(Span),
     /// Inferred type `_`
     Inferred(Span),
-    /// Opaque type, e.g. `some P`, `some P and Q`
-    Some { bounds: Vec<AstType>, span: Span },
+    /// Opaque type, e.g. `some P`, `some P and Q`, `some P and not Copyable`.
+    /// `negative` is the trailing `not <path>` bound; only `Copyable` is
+    /// legal there — validated at HIR lowering, where the path resolves.
+    Some {
+        bounds: Vec<AstType>,
+        negative: Option<Box<AstType>>,
+        span: Span,
+    },
     /// Reference type, e.g. `&T` or `&mutating T`. Parses in every type
     /// position but is accepted in none (stage 0.5) — every occurrence is
     /// rejected at HIR lowering, so no `Ref` survives past it.

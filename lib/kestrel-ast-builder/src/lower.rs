@@ -517,8 +517,7 @@ impl LowerCtx {
                         };
 
                         // Re-lex and re-parse the expression
-                        let expr =
-                            self.reparse_interpolation_expr(&expr_text, &span, hole_offset);
+                        let expr = self.reparse_interpolation_expr(&expr_text, &span, hole_offset);
                         parts.push(StringPart::Interpolation {
                             expr,
                             format: format_spec,
@@ -1571,9 +1570,10 @@ impl LowerCtx {
     fn lower_ref_binding_pattern(&mut self, node: &SyntaxNode) -> PatId {
         let span = self.span(node);
 
-        let mutating = node
-            .children_with_tokens()
-            .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Mutating));
+        let mutating = node.children_with_tokens().any(|e| {
+            e.as_token()
+                .is_some_and(|t| t.kind() == SyntaxKind::Mutating)
+        });
 
         let name = node
             .children_with_tokens()
@@ -2927,6 +2927,17 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
                     if token.kind() == SyntaxKind::Identifier && token.text() == "it" {
                         return true;
                     }
+                    // Interpolated strings are a single `String` token in the
+                    // CST (holes are only re-parsed during body lowering), so
+                    // an `it` inside `\(...)` is invisible to the Identifier
+                    // check above — extract and re-parse the holes.
+                    // `RawString` tokens never interpolate (lowered as plain
+                    // literals), so they are deliberately excluded.
+                    if token.kind() == SyntaxKind::String
+                        && string_token_references_it(token.text())
+                    {
+                        return true;
+                    }
                 },
                 rowan::NodeOrToken::Node(child_node) => {
                     // Don't descend into nested closures — their `it` is their own
@@ -2946,6 +2957,62 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
         false
     }
     walk(node)
+}
+
+/// Does any interpolation hole in this string token reference `it`?
+/// Mirrors the hole extraction in `lower_interpolated_string_from_token`;
+/// only answers the reference question, so spans don't matter and the
+/// re-parse uses a dummy file id.
+fn string_token_references_it(token_text: &str) -> bool {
+    let form = crate::string_token::classify_string_token(token_text);
+    if form.body_end <= form.body_start {
+        return false;
+    }
+    let body = &token_text[form.body_start..form.body_end];
+    if !string_contains_interpolation(body) {
+        return false;
+    }
+    let processed_owned;
+    let inner: &str = if form.is_multiline {
+        processed_owned = crate::string_token::process_multiline_body(body, 0, 0).value;
+        &processed_owned
+    } else {
+        body
+    };
+
+    let mut chars = inner.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c != '\\' {
+            continue;
+        }
+        if let Some(&(_, next)) = chars.peek() {
+            if next == '(' {
+                chars.next(); // skip '('
+                let (expr_text, _format, _end) = extract_interpolation(&mut chars, inner, i + 2);
+                if interpolation_expr_references_it(&expr_text) {
+                    return true;
+                }
+            } else {
+                chars.next(); // skip escaped char
+            }
+        }
+    }
+    false
+}
+
+/// Re-lex + re-parse a hole expression and run the same `it`-reference walk
+/// over its CST. Recursing through `closure_body_references_it` keeps the
+/// nested-closure exclusion and handles strings-within-holes.
+fn interpolation_expr_references_it(expr_text: &str) -> bool {
+    let tokens: Vec<_> = kestrel_lexer::lex(expr_text, 0)
+        .filter_map(|t| t.ok())
+        .map(|spanned| (spanned.value, spanned.span))
+        .collect();
+    if tokens.is_empty() {
+        return false;
+    }
+    let parsed = kestrel_parser::parse_expr_from_source(expr_text, tokens.into_iter());
+    closure_body_references_it(&parsed.syntax)
 }
 
 // ===== String interpolation helpers =====

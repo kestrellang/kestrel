@@ -2,7 +2,7 @@
 // stdlib: true
 
 // E467 scoping (#130): a zero-arg EXTENSION method colliding with a stored
-// field is flagged (in-body collisions are already E425) — but an extension
+// field is flagged (in-body collisions are already E475) — but an extension
 // method that REQUIRES labeled arguments (the stdlib's `slice` field +
 // `slice(from:to:)` pattern) is disambiguated by its labels at every use
 // site and must NOT be flagged, and neither may a static method (different

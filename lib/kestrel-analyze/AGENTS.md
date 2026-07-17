@@ -169,13 +169,13 @@ Current allocations:
 - E450: `circular_struct_containment` (compilation/struct_cycles.rs)
 - E451: `circular_constraint` (compilation/constraint_cycles.rs)
 - E459: `circular_protocol_inheritance` (compilation/protocol_cycles.rs)
-  — **WARNING: double-allocated**; conformance_completeness.rs also
-  claims E459. Pre-existing; resolve before allocating near it.
+  — was double-allocated with conformance_completeness's receiver-kind
+  check; resolved 2026-07 by moving that check to E477.
 - E454–E458, E460, E462–E465: conformance completeness + indirect-enum
   checks (compilation/conformance_completeness.rs, indirect_enum.rs) —
   this list is stale for that range.
 - E466: `some_in_field_type` (decl/field.rs) — `some P` rejected in field
-  position (#168). **Next free E4xx is E467.**
+  position (#168).
   E458 (`wrong_method_return_type`) carries the stage-2d ref-shape rule:
   a witness's reference return must match the requirement EXACTLY in
   shape and mutability (`-> T` never witnesses `-> &T` and vice versa —
@@ -184,6 +184,20 @@ Current allocations:
   (`ResolvedTy::Ref`); a mismatch with a ref on either side gets the
   ABI-explainer note.
 - E461: `unknown_attribute` (compilation/unknown_attribute.rs)
+- E467: `method_shadows_field` (decl/field_method_collision.rs) — #130
+- E468–E472: RESERVED by the opaque-types plan
+  (docs/plans/opaque-types/implementation-spec.md); not yet emitted.
+- E473–E478: allocated 2026-07 resolving the eight double-allocated
+  E-codes (each pair's registered/externally-referenced owner kept the
+  old code; the other side moved here). Uniqueness is now enforced by
+  `registry.rs::descriptor_ids_are_unique_across_all_analyzers`.
+  **Next free E4xx is E479.**
+  - E473: `duplicate_deinit` (decl/duplicate_deinit.rs) — was E423
+  - E474: `duplicate_symbol_same_kind` (decl/duplicate_symbol.rs) — was E424
+  - E475: `duplicate_symbol_different_kind` (decl/duplicate_symbol.rs) — was E425
+  - E476: `unresolved_type_in_annotation` (compilation/type_annotation_resolution.rs) — was E436
+  - E477: `wrong_method_receiver_kind` (compilation/conformance_completeness.rs) — was E459
+  - E478: `global_property_already_static` (decl/field.rs) — was E417
 - E480–E489: reference-type rejections (stage 0.5 of references). NOT
   analyzer descriptors — emitted from HIR lowering via codespan
   `with_code` (kestrel-hir-lower `ty.rs::reject_ref_types` +
@@ -279,6 +293,7 @@ Current allocations:
 - E620: `duplicate_write_provider` (decl/place_accessor.rs) — `set` + `mutating ref` on one member
 - E621: `ref_accessor_in_protocol` (decl/place_accessor.rs) — ref accessors are concrete-inherent-only; rejected in protocols and protocol extensions
 - E622: `accessor_missing_read_provider` (decl/place_accessor.rs) — write provider with no `get`/`ref` (set-only / mutating-ref-only accessor blocks)
+- E623: `function_missing_body` (decl/function_body.rs) — was E606, moved 2026-07 (E606 stays `cannot_infer_closure_type`, body/closure.rs). The dead `capturing_closure_escape` descriptor that shared E605 with extern_ffi_safe was deleted (check lives in MIR as E494); E605 is FFISafe-only. **Next free E6xx is E624.**
 - E700: `invalid_escape_sequence` (body/string_escape.rs)
 - E701: `ascii_escape_out_of_range` (body/string_escape.rs)
 - E702: `invalid_unicode_escape` (body/string_escape.rs)

@@ -80,11 +80,14 @@ pub enum TyKind {
     /// Opaque return type: `some P`. Callers see only the protocol bounds;
     /// the concrete type is hidden. Created at call sites for functions with
     /// opaque return types. Never created inside the defining body.
+    /// `not_copyable` mirrors an `and not Copyable` negative bound on the
+    /// origin's annotation: the value must be treated as move-only.
     Opaque {
         origin: Entity,
         bounds: Vec<(Entity, Vec<TyVar>)>,
         origin_args: Vec<TyVar>,
         index: u32,
+        not_copyable: bool,
     },
 
     /// Second-class reference `&T` / `&mutating T` (stage 1). Legal ONLY as

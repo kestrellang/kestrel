@@ -95,7 +95,13 @@ pub fn contextual_keyword<'tokens>(
     kw: &'static str,
 ) -> impl Parser<'tokens, ParserInput<'tokens>, Span, ParserExtra<'tokens>> + Clone {
     trivia(just(Token::Identifier).try_map_with(
-        move |_, e: &mut chumsky::input::MapExtra<'tokens, '_, ParserInput<'tokens>, ParserExtra<'tokens>>| {
+        move |_,
+              e: &mut chumsky::input::MapExtra<
+            'tokens,
+            '_,
+            ParserInput<'tokens>,
+            ParserExtra<'tokens>,
+        >| {
             let span = to_kestrel_span(e.span());
             let src: &str = e.state().0;
             if src.get(span.start..span.end) == Some(kw) {

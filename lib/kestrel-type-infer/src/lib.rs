@@ -104,16 +104,35 @@ impl QueryFn for InferBody {
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.
-        if let Some(ref info) = infer_ctx.opaque_return {
+        // Otherwise, a plain `some P` (no `and not Copyable`) promises callers
+        // a duplicable value — reject a move-only concrete type behind it.
+        // (Cloneable underliers are fine: uses duplicate, MIR clone-elaborates.)
+        let opaque_check = infer_ctx.opaque_return.as_ref().map(|info| {
             let resolved = infer_ctx.resolve(info.concrete_tv);
-            if let ty::TySlot::Resolved(ty::TyKind::Opaque { .. }) =
-                &infer_ctx.types[resolved.0 as usize]
+            let is_circular = matches!(
+                &infer_ctx.types[resolved.0 as usize],
+                ty::TySlot::Resolved(ty::TyKind::Opaque { .. })
+            );
+            (
+                info.concrete_tv,
+                info.not_copyable,
+                info.span.clone(),
+                is_circular,
+            )
+        });
+        if let Some((concrete_tv, not_copyable, span, is_circular)) = opaque_check {
+            if is_circular {
+                // report_error keeps errors/error_details parallel (a bare
+                // errors.push would drop the detail in the analyze zip).
+                infer_ctx.report_error(error::InferError::CircularOpaqueReturn { span });
+            } else if !not_copyable
+                && solver::solver_copy_class(&infer_ctx, concrete_tv, 0)
+                    == kestrel_copy_fold::CopySemantics::NotCopyable
             {
-                infer_ctx
-                    .errors
-                    .push(error::InferError::CircularOpaqueReturn {
-                        span: info.span.clone(),
-                    });
+                infer_ctx.report_error(error::InferError::OpaqueUnderlierNotCopyable {
+                    concrete: concrete_tv,
+                    span,
+                });
             }
         }
 
@@ -549,7 +568,11 @@ fn create_return_type_with_opaque(
 ) -> ty::TyVar {
     use kestrel_hir::ty::HirTy;
     match hir_ty {
-        HirTy::Opaque { bounds, span } => {
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            span,
+        } => {
             let concrete_ret = ctx.fresh();
 
             let mut opaque_bounds = Vec::new();
@@ -569,6 +592,7 @@ fn create_return_type_with_opaque(
             ctx.opaque_return = Some(ctx::OpaqueReturnInfo {
                 concrete_tv: concrete_ret,
                 bounds: opaque_bounds,
+                not_copyable: *not_copyable,
                 span: span.clone(),
             });
 
@@ -1045,12 +1069,14 @@ fn is_ptr_ref_intrinsic_call(
         return false;
     };
     // Mirror of body lowering's resolve_callee_entity_from_expr.
-    let entity = typed.resolutions.get(callee).copied().or_else(|| {
-        match &hir.exprs[*callee] {
+    let entity = typed
+        .resolutions
+        .get(callee)
+        .copied()
+        .or_else(|| match &hir.exprs[*callee] {
             HirExpr::Def(e, _, _) => Some(*e),
             _ => None,
-        }
-    });
+        });
     let Some(e) = entity else {
         return false;
     };

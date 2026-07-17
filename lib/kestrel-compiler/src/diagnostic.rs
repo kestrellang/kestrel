@@ -296,6 +296,12 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                 .with_notes(vec![
                     "mutually recursive functions with 'some' return types must have at least one non-opaque base case".into(),
                 ]),
+            InferError::OpaqueUnderlierNotCopyable { .. } => Diagnostic::error()
+                .with_message("opaque return type hides a non-Copyable type")
+                .with_labels(vec![Label::primary(file_id, range).with_message(detail)])
+                .with_notes(vec![
+                    "a plain 'some P' promises callers a Copyable value; write 'some P and not Copyable' to allow a move-only concrete type".into(),
+                ]),
             InferError::ConventionMismatch { .. } => Diagnostic::error()
                 .with_message(
                     "convention mismatch: cannot pass a mutating closure where a non-mutating parameter is expected",

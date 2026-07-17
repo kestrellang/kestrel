@@ -178,15 +178,31 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
             })
         },
         SyntaxKind::TySome => {
+            // Positive bounds are direct type-node children; the negative
+            // bound (`and not Copyable`) is wrapped in a NegativeConformance
+            // node, so the filter below never picks it up as a bound.
             let bounds: Vec<AstType> = node
                 .children()
                 .filter(|c| is_type_node(c.kind()))
                 .filter_map(|c| ast_type_from_cst(&c, file_id))
                 .collect();
+            let negative = node
+                .children()
+                .find(|c| c.kind() == SyntaxKind::NegativeConformance)
+                .and_then(|neg| {
+                    neg.children()
+                        .find(|c| is_type_node(c.kind()))
+                        .and_then(|c| ast_type_from_cst(&c, file_id))
+                })
+                .map(Box::new);
             if bounds.is_empty() {
                 None
             } else {
-                Some(AstType::Some { bounds, span })
+                Some(AstType::Some {
+                    bounds,
+                    negative,
+                    span,
+                })
             }
         },
 

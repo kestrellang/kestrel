@@ -11,7 +11,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E436 -- `unresolved_type_in_annotation` (Error, Correctness)
+//! ### E476 -- `unresolved_type_in_annotation` (Error, Correctness)
 //! **Message:** "cannot find type '{name}' in this scope"
 
 use crate::context::CompilationContext;
@@ -23,7 +23,7 @@ use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E436",
+    id: "E476",
     name: "unresolved_type_in_annotation",
     default_severity: Severity::Error,
     category: Category::Correctness,
@@ -177,4 +177,3 @@ fn check_ast_type(
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }
 }
-

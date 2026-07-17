@@ -51,9 +51,7 @@ impl LowerCtx<'_> {
                     self.ctx.accumulate(
                         kestrel_reporting::Diagnostic::error()
                             .with_code("E211")
-                            .with_message(
-                                "`&` pattern bindings are not supported in this position",
-                            )
+                            .with_message("`&` pattern bindings are not supported in this position")
                             .with_labels(vec![
                                 kestrel_reporting::Label::primary(span.file_id, span.range())
                                     .with_message("`&` binder pattern"),

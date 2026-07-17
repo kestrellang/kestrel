@@ -264,6 +264,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::MemberAccessOnPrimitive { .. } => "MemberAccessOnPrimitive",
         InferError::MethodNotCalled { .. } => "MethodNotCalled",
         InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
+        InferError::OpaqueUnderlierNotCopyable { .. } => "OpaqueUnderlierNotCopyable",
         InferError::ConventionMismatch { .. } => "ConventionMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
@@ -406,6 +407,12 @@ fn format_error(err: &InferError) -> String {
         ),
         InferError::CircularOpaqueReturn { .. } => {
             format!("CircularOpaqueReturn at {}:{}", span.file_id, span.start)
+        },
+        InferError::OpaqueUnderlierNotCopyable { .. } => {
+            format!(
+                "OpaqueUnderlierNotCopyable at {}:{}",
+                span.file_id, span.start
+            )
         },
         InferError::ConventionMismatch { .. } => {
             format!("ConventionMismatch at {}:{}", span.file_id, span.start)

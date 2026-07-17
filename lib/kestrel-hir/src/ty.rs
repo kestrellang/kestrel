@@ -71,7 +71,14 @@ pub enum HirTy {
     },
     /// Opaque type: `some P`, `some P and Q`. Bounds are protocol types.
     /// Lowered from `AstType::Some`. Carries resolved protocol bounds.
-    Opaque { bounds: Vec<HirTy>, span: Span },
+    /// `not_copyable` records an `and not Copyable` negative bound: the
+    /// concrete underlier may be move-only, and use sites must treat the
+    /// opaque value as NotCopyable.
+    Opaque {
+        bounds: Vec<HirTy>,
+        not_copyable: bool,
+        span: Span,
+    },
     /// Never type (diverging expressions, e.g. `panic()`)
     Never(Span),
     /// Inferred type (user wrote `_` or omitted)

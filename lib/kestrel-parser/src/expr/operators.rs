@@ -33,9 +33,7 @@ pub(super) fn unary_op_parser<'tokens>()
         .map_with(|tok, e| (tok, to_kestrel_span(e.span())))
         .then(
             skip_trivia()
-                .ignore_then(
-                    just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())),
-                )
+                .ignore_then(just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())))
                 .or_not(),
         )
         .map(|((tok, span), mutating)| (tok, span, mutating));

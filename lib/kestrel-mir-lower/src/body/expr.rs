@@ -270,7 +270,10 @@ impl OssaBodyCtx<'_, '_> {
                     if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
-                            "consuming read of an already-moved var — frontend should reject use-after-move"
+                            "consuming read of an already-moved var — frontend should reject use-after-move (func {:?} {:?}, local {:?})",
+                            self.ctx.module.functions.get(&self.func_entity).map(|f| f.name.clone()),
+                            self.func_entity,
+                            hir_local
                         );
                         let v = self.emit_take(addr, ty);
                         self.set_var_init(*hir_local, super::VarInit::DefUninit);

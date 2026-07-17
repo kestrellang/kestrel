@@ -219,6 +219,12 @@ pub enum InferError {
     /// concrete type can be determined.
     CircularOpaqueReturn { span: Span },
 
+    /// The concrete type behind a plain `some P` return is move-only.
+    /// Callers treat `some P` as duplicable, so a NotCopyable underlier
+    /// would be bit-copied unsoundly; the annotation needs an explicit
+    /// `and not Copyable` negative bound.
+    OpaqueUnderlierNotCopyable { concrete: TyVar, span: Span },
+
     /// A `mutating` closure was passed where a non-mutating (`Borrow`/
     /// `Consuming`) closure parameter is expected — the callee never lends a
     /// mutable place, so the closure's write access can't be honored (#106).
@@ -256,6 +262,7 @@ impl InferError {
             | Self::MemberAccessOnPrimitive { span, .. }
             | Self::MethodNotCalled { span, .. }
             | Self::CircularOpaqueReturn { span }
+            | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
             | Self::ConventionMismatch { span } => span,

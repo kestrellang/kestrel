@@ -62,7 +62,40 @@ b.describe();   // from Printable
 b.area();       // from Shape
 ```
 
-(`some Shape and not Copyable` — a negative bound for move-only underliers — is designed but does not parse yet.)
+## Move-Only Underliers: `and not Copyable`
+
+A plain `some P` promises callers a `Copyable` value, so the concrete type
+behind it must be duplicable. Hiding a move-only type behind `some P` is
+rejected:
+
+```kestrel
+struct Token: not Copyable { let value: Int64; }
+
+func makeShape() -> some Shape {
+    Token(7)   // ERROR: opaque return type hides non-Copyable type 'Token';
+               //        add 'and not Copyable' to the return type
+}
+```
+
+Appending the negative bound `and not Copyable` lifts the requirement — the
+concrete type *may* be move-only (a Copyable underlier is still allowed).
+In exchange, callers must treat the opaque value as move-only: it moves on
+assignment and re-use after a move is an error.
+
+```kestrel
+func makeShape() -> some Shape and not Copyable {
+    Token(7)   // OK
+}
+
+let s = makeShape();
+let t = s;     // moves
+s.area();      // ERROR: use of moved value
+```
+
+The negative bound must come last, and only `Copyable` may be negated —
+`some P and not Q` for other protocols is rejected (the same rule as
+conformance lists). In parameter position, `some P and not Copyable`
+desugars to a generic parameter with a `where T: not Copyable` bound.
 
 ## Opaque Returns from Generic Types
 

@@ -9,7 +9,7 @@
 //! Consumed by:
 //! - MIR lowering (`kestrel-mir-lower`): env-struct fields, parent-side
 //!   projection, and body rewriting (read the env value for `self.cap`).
-//! - `kestrel-analyze` `ClosureAnalyzer` (E603/E605): the captured-root set.
+//! - `kestrel-analyze` `ClosureAnalyzer` (E603): the captured-root set.
 //!
 //! The analysis follows RFC 2229 ("disjoint closure captures"): it records the
 //! *maximal* place each access touches, then reduces per root local to the

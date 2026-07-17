@@ -458,7 +458,7 @@ struct Connection: not Copyable { deinit { self.close(); } }         // RAII
 - Structs with `String`/`Array`/`Dictionary` fields need explicit `Cloneable` conformance.
 - Inside a hand-written `clone()`, `self` is a **bitwise copy** — deep-clone heap fields explicitly; `clone() { self }` aliases them → double-free. (See *Writing `clone()`*.)
 - Multi-line method chaining (`.foo()\n.bar()`) **parses fine** (verified 2026-07 by compiling+running). The real chaining constraint: **a trailing closure only binds to an unlabeled closure param** — `iter().filter { it > 0 }` fails with "wrong label: expected 'where', got '_'"; write `filter(where: { it > 0 })`. `map` takes its closure positionally so `xs.map { it * 2 }` works, but `filter` is labeled on both Array and Iterator (`filter(where: { it % 2 == 0 })`), as are most adapters (`where:`, `as:`, `by:`) — when a trailing closure fails with a label error, spell the label.
-- `it` is **not visible inside string-interpolation holes** in a closure body — `map { "x \(it)" }` fails with "undefined name 'it'"; name the param: `map { (x) in "x \(x)" }`.
+- `it` **works inside string-interpolation holes** — `map { "x \(it)" }` is fine (fixed 2026-07-17; older compilers errored "undefined name 'it'").
 - Closures that **capture variables** can't escape the defining function (returning or storing them outward is rejected with E494); capture-free closures can be returned and stored freely.
 - `F.Type` metatype syntax is not yet supported.
 - `!` is the Never type, not `Never`.

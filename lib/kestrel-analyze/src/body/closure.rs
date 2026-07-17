@@ -102,12 +102,9 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
-    DiagnosticDescriptor {
-        id: "E605",
-        name: "capturing_closure_escape",
-        default_severity: Severity::Error,
-        category: Category::Correctness,
-    },
+    // NOTE: E605 (`capturing_closure_escape`) used to live here; the check
+    // moved to the MIR escape checker (E494, see #174) and the descriptor was
+    // deleted. E605 now belongs solely to extern_ffi_safe.rs.
     DiagnosticDescriptor {
         id: "E606",
         name: "cannot_infer_closure_type",
@@ -141,7 +138,7 @@ impl BodyCheck for ClosureAnalyzer {
         let mut diags = Vec::new();
 
         // Captures come from the single source of truth — the post-inference
-        // ClosureCaptures query (place-based). E603/E605 only need the set of
+        // ClosureCaptures query (place-based). E603 only needs the set of
         // captured *root* locals.
         let capture_plan = cx.query.query(kestrel_type_infer::ClosureCaptures {
             entity: cx.entity,
@@ -174,7 +171,8 @@ impl BodyCheck for ClosureAnalyzer {
                     continue;
                 };
                 let is_ref = matches!(ty, ResolvedTy::Ref { .. });
-                if !is_ref && crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root)
+                if !is_ref
+                    && crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root)
                 {
                     continue;
                 }
@@ -193,8 +191,8 @@ impl BodyCheck for ClosureAnalyzer {
                     )
                 };
                 diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[7].id,
-                    severity: DESCRIPTORS[7].default_severity,
+                    descriptor_id: DESCRIPTORS[6].id,
+                    severity: DESCRIPTORS[6].default_severity,
                     message,
                     labels: vec![DiagLabel {
                         span: util::expr_span(cx.hir, expr_id),
@@ -224,8 +222,8 @@ impl BodyCheck for ClosureAnalyzer {
                 });
                 if has_unresolved {
                     diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[6].id,
-                        severity: DESCRIPTORS[6].default_severity,
+                        descriptor_id: DESCRIPTORS[5].id,
+                        severity: DESCRIPTORS[5].default_severity,
                         message: "could not infer type for closure parameter".into(),
                         labels: vec![DiagLabel {
                             span: util::expr_span(cx.hir, expr_id),

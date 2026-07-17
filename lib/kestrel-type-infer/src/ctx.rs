@@ -287,6 +287,9 @@ pub struct PromotionInfo {
 pub(crate) struct OpaqueReturnInfo {
     pub concrete_tv: TyVar,
     pub bounds: Vec<(Entity, Vec<TyVar>)>,
+    /// `and not Copyable` on the annotation — the underlier may be move-only,
+    /// so the post-solve Copyable check on `concrete_tv` is skipped.
+    pub not_copyable: bool,
     pub span: Span,
 }
 

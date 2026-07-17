@@ -13,8 +13,9 @@ use kestrel_ast_builder::{
     TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ExtensionTargetEntity, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ExtensionTargetEntity, ResolveBuiltin, ResolveTypePath, TypeResolution};
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 
@@ -150,13 +151,43 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         AstType::Unit(span) => HirTy::Tuple(Vec::new(), span.clone()),
         AstType::Never(span) => HirTy::Never(span.clone()),
         AstType::Inferred(span) => HirTy::Infer(span.clone()),
-        AstType::Some { bounds, span } => {
+        AstType::Some {
+            bounds,
+            negative,
+            span,
+        } => {
             let hir_bounds: Vec<HirTy> = bounds
                 .iter()
                 .map(|b| lower_ast_type(ctx, owner, root, b))
                 .collect();
+            // The only legal negative bound is `Copyable` (same rule as the
+            // E424 conformance-list check). Recovery keeps the flag set so a
+            // bad negative doesn't cascade into "underlier must be Copyable".
+            let not_copyable = match negative {
+                None => false,
+                Some(neg) => {
+                    if !negative_bound_is_copyable(ctx, owner, root, neg) {
+                        let neg_span = ast_type_span(neg);
+                        ctx.accumulate(
+                            Diagnostic::error()
+                                .with_message("negative bound on an opaque type must be 'Copyable'")
+                                .with_labels(vec![
+                                    Label::primary(neg_span.file_id, neg_span.range())
+                                        .with_message("only 'not Copyable' is supported here"),
+                                ])
+                                .with_notes(vec![
+                                    "`not` is only legal on builtin protocols with implicit \
+                                     conformance (e.g. `Copyable`)"
+                                        .into(),
+                                ]),
+                        );
+                    }
+                    true
+                },
+            };
             HirTy::Opaque {
                 bounds: hir_bounds,
+                not_copyable,
                 span: span.clone(),
             }
         },
@@ -634,11 +665,16 @@ pub fn reject_ref_types(
             assoc,
             span,
         },
-        HirTy::Opaque { bounds, span } => HirTy::Opaque {
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            span,
+        } => HirTy::Opaque {
             bounds: bounds
                 .into_iter()
                 .map(|b| reject_ref_types(ctx, b, RefPosition::Other, RefPolicy::Strict))
                 .collect(),
+            not_copyable,
             span,
         },
         leaf @ (HirTy::Param(..)
@@ -872,9 +908,12 @@ impl QueryFn for LowerTypeAnnotation {
                 Diagnostic::error()
                     .with_code("E490")
                     .with_message("a throwing function cannot return a reference")
-                    .with_labels(vec![Label::primary(span.file_id, span.range())
-                        .with_message("`throws` wraps the return in `Result` — a reference \
-                                       cannot live in an enum payload")]),
+                    .with_labels(vec![
+                        Label::primary(span.file_id, span.range()).with_message(
+                            "`throws` wraps the return in `Result` — a reference \
+                                       cannot live in an enum payload",
+                        ),
+                    ]),
             );
             return Some(HirTy::Error(span.clone()));
         }
@@ -903,7 +942,8 @@ impl QueryFn for LowerTypeAnnotation {
                 span,
             } = lowered
         {
-            let inner = reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
+            let inner =
+                reject_ref_types(ctx, *inner, RefPosition::Other, RefPolicy::AllowAggregate);
             return Some(HirTy::Ref {
                 inner: Box::new(inner),
                 mutating,
@@ -1196,6 +1236,34 @@ impl QueryFn for LowerExtensionTargetTypeArgs {
             .collect();
         Some(args)
     }
+}
+
+/// Is the negative bound of `some P and not X` the `Copyable` builtin?
+///
+/// Entity comparison is the source of truth; the last-segment string match is
+/// a fallback for stdlib-less fixtures where the builtin entity isn't
+/// registered (mirrors `nominal_copy_semantics_impl` in kestrel-semantics).
+fn negative_bound_is_copyable(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    neg: &AstType,
+) -> bool {
+    let AstType::Named { segments, .. } = neg else {
+        return false;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    if let TypeResolution::Found(entity) = ctx.query(ResolveTypePath {
+        segments: seg_names,
+        context: owner,
+        root,
+    }) {
+        return ctx.query(ResolveBuiltin {
+            builtin: Builtin::Copyable,
+            root,
+        }) == Some(entity);
+    }
+    segments.last().is_some_and(|s| s.name == "Copyable")
 }
 
 fn ast_type_span(ty: &AstType) -> Span {

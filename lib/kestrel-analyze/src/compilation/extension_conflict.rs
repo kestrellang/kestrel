@@ -271,11 +271,7 @@ fn extension_specificity(cx: &CompilationContext<'_>, extension: Entity) -> usiz
 /// spans), with type parameters treated as wildcards so two fully-generic
 /// targets (`Box[T]` / `Box[U]`) match while concrete instantiations
 /// (`Box[Int64]` / `Box[String]`) do not.
-fn same_target_instantiation(
-    cx: &CompilationContext<'_>,
-    ext_i: Entity,
-    ext_j: Entity,
-) -> bool {
+fn same_target_instantiation(cx: &CompilationContext<'_>, ext_i: Entity, ext_j: Entity) -> bool {
     use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
 
     let args = |ext| {
@@ -351,18 +347,26 @@ fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
         (HirTy::Tuple(xa, _), HirTy::Tuple(xb, _)) => list_eq(xa, xb),
         (
             HirTy::Function {
-                params: pa, ret: ra, ..
+                params: pa,
+                ret: ra,
+                ..
             },
             HirTy::Function {
-                params: pb, ret: rb, ..
+                params: pb,
+                ret: rb,
+                ..
             },
         ) => list_eq(pa, pb) && hir_ty_eq(ra, rb),
         (
             HirTy::AssocProjection {
-                base: ba, assoc: sa, ..
+                base: ba,
+                assoc: sa,
+                ..
             },
             HirTy::AssocProjection {
-                base: bb, assoc: sb, ..
+                base: bb,
+                assoc: sb,
+                ..
             },
         ) => sa == sb && hir_ty_eq(ba, bb),
         (HirTy::Opaque { bounds: ba, .. }, HirTy::Opaque { bounds: bb, .. }) => list_eq(ba, bb),
@@ -381,10 +385,7 @@ fn hir_ty_eq(a: &kestrel_hir::ty::HirTy, b: &kestrel_hir::ty::HirTy) -> bool {
         (HirTy::SelfType(ea, _), HirTy::SelfType(eb, _)) => ea == eb,
         // Type parameters / inferred slots are wildcards: equal to one another,
         // never to a concrete type.
-        (
-            HirTy::Param(..) | HirTy::Infer(..),
-            HirTy::Param(..) | HirTy::Infer(..),
-        ) => true,
+        (HirTy::Param(..) | HirTy::Infer(..), HirTy::Param(..) | HirTy::Infer(..)) => true,
         (HirTy::Never(_), HirTy::Never(_)) => true,
         (HirTy::Error(_), HirTy::Error(_)) => true,
         _ => false,

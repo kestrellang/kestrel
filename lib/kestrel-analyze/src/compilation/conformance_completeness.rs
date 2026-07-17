@@ -18,7 +18,7 @@
 //! ### E458 -- `wrong_method_return_type` (Error, Correctness)
 //! **Message:** "method '{name}' has wrong return type for protocol '{proto}'"
 //!
-//! ### E459 -- `wrong_method_receiver_kind` (Error, Correctness)
+//! ### E477 -- `wrong_method_receiver_kind` (Error, Correctness)
 //! **Message:** "method '{name}' has wrong receiver kind for protocol '{proto}'"
 //!
 //! ### E460 -- `missing_property_setter` (Error, Correctness)
@@ -89,7 +89,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E459",
+        id: "E477",
         name: "wrong_method_receiver_kind",
         default_severity: Severity::Error,
         category: Category::Correctness,
@@ -1101,7 +1101,8 @@ fn self_type_for_compare(cx: &CompilationContext<'_>, type_entity: Entity) -> Re
     {
         return ResolvedTy::Tuple(Vec::new());
     }
-    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "!") == Some(type_entity)
+    if kestrel_name_res::extensions::resolve_lang_child(&cx.query, cx.root, "!")
+        == Some(type_entity)
     {
         return ResolvedTy::Never;
     }
@@ -1640,7 +1641,9 @@ fn extension_clauses_entailed(
         // provides `isEqual` to `BoxC: Container[Int64]` exactly when Int64
         // genuinely satisfies Equatable. This is the constrained-protocol-
         // extension witness the stdlib's own Array/Slice idiom relies on (#213).
-        if let ResolvedWhereClause::Bound { param, protocol, .. } = c
+        if let ResolvedWhereClause::Bound {
+            param, protocol, ..
+        } = c
             && let Some(binding) = proto_subs.get(param)
             && !matches!(binding, ResolvedTy::Param { .. })
         {

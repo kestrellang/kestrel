@@ -574,7 +574,10 @@ mod tests {
             .collect();
         let prepared = prepare_tokens(tokens.into_iter());
         let input = create_input(&prepared, source.len());
-        type_parameter_list_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result().ok()
+        type_parameter_list_parser()
+            .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
+            .into_result()
+            .ok()
     }
 
     fn parse_where(source: &str) -> Option<WhereClauseData> {
@@ -584,7 +587,10 @@ mod tests {
             .collect();
         let prepared = prepare_tokens(tokens.into_iter());
         let input = create_input(&prepared, source.len());
-        where_clause_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result().ok()
+        where_clause_parser()
+            .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
+            .into_result()
+            .ok()
     }
 
     fn parse_type_args(source: &str) -> Option<Vec<TypeArgumentData>> {
@@ -594,7 +600,10 @@ mod tests {
             .collect();
         let prepared = prepare_tokens(tokens.into_iter());
         let input = create_input(&prepared, source.len());
-        type_argument_list_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result().ok()
+        type_argument_list_parser()
+            .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
+            .into_result()
+            .ok()
     }
 
     #[test]
@@ -765,7 +774,10 @@ mod tests {
             .collect();
         let prepared = prepare_tokens(tokens.into_iter());
         let input = create_input(&prepared, source.len());
-        conformance_list_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result().ok()
+        conformance_list_parser()
+            .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
+            .into_result()
+            .ok()
     }
 
     #[test]

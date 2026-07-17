@@ -147,9 +147,7 @@ impl LowerCtx<'_> {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E488")
-                    .with_message(
-                        "a borrow expression is only allowed as a `let` initializer",
-                    )
+                    .with_message("a borrow expression is only allowed as a `let` initializer")
                     .with_labels(vec![Label::primary(span.file_id, span.range())])
                     .with_notes(vec![
                         "arguments borrow by signature: a parameter `x: T` already borrows, \

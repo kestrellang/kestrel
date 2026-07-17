@@ -247,7 +247,12 @@ fn desugar_opaque_params(
     let mut changed = false;
 
     for param in &mut new_callable_params {
-        if let Some(AstType::Some { bounds, span }) = &param.ty {
+        if let Some(AstType::Some {
+            bounds,
+            negative,
+            span,
+        }) = &param.ty
+        {
             let tp_name = format!("__opaque_{}", opaque_index);
             let tp_span = span.clone();
             opaque_index += 1;
@@ -275,6 +280,16 @@ fn desugar_opaque_params(
                 protocols: bounds.clone(),
                 node: cst_node.clone(),
             });
+
+            // `some P and not Copyable` in param position desugars to the
+            // existing `where __opaque_N: not Copyable` machinery.
+            if let Some(negative) = negative {
+                new_where_constraints.push(WhereConstraint::NegativeBound {
+                    subject: tp_ast.clone(),
+                    protocol: (**negative).clone(),
+                    node: cst_node.clone(),
+                });
+            }
 
             param.ty = Some(tp_ast);
             changed = true;

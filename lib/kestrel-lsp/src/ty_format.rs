@@ -66,7 +66,11 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             out.push('.');
             out.push_str(&name_of(world, *assoc).unwrap_or_else(|| "?".into()));
         },
-        ResolvedTy::Opaque { bounds, .. } => {
+        ResolvedTy::Opaque {
+            bounds,
+            not_copyable,
+            ..
+        } => {
             out.push_str("some ");
             for (i, (proto, _)) in bounds.iter().enumerate() {
                 if i > 0 {
@@ -76,6 +80,9 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             if bounds.is_empty() {
                 out.push('?');
+            }
+            if *not_copyable {
+                out.push_str(" and not Copyable");
             }
         },
         ResolvedTy::Never => out.push('!'),

@@ -2146,7 +2146,15 @@ impl WorldResolver<'_> {
             // Mirror `hir_type_copy_semantics`: protocol existentials / `some P`
             // are Copyable; an abstract associated projection is conservatively
             // NotCopyable (not known to be copyable).
-            TyKind::Protocol { .. } | TyKind::Opaque { .. } => CopySemantics::Copyable,
+            TyKind::Protocol { .. } => CopySemantics::Copyable,
+            // `some P and not Copyable` may hide a move-only underlier.
+            TyKind::Opaque { not_copyable, .. } => {
+                if *not_copyable {
+                    CopySemantics::NotCopyable
+                } else {
+                    CopySemantics::Copyable
+                }
+            },
             TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
             // Tuple elements aren't resolvable here; Function/Never/Error and
             // reducible aliases never block a Copyable bound. Permissive — the

@@ -7,9 +7,9 @@
 //! name and shows just `label: Type` (or just `Type` for unlabeled).
 
 use kestrel_ast_builder::{
-    AstParam, AstType, Callable, Computed, ConformanceItem, Conformances, CstNode,
-    ExtensionTarget, FieldMutability, IsIndirect, MutatingAccessor, Name, NodeKind, ReceiverKind,
-    Static, TypeAnnotation, TypeParams, Vis, WhereClause, WhereConstraint,
+    AstParam, AstType, Callable, Computed, ConformanceItem, Conformances, CstNode, ExtensionTarget,
+    FieldMutability, IsIndirect, MutatingAccessor, Name, NodeKind, ReceiverKind, Static,
+    TypeAnnotation, TypeParams, Vis, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxKind;
@@ -448,9 +448,14 @@ fn ty(t: &AstType) -> String {
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
-        AstType::Some { bounds, .. } => {
+        AstType::Some {
+            bounds, negative, ..
+        } => {
             let b: Vec<_> = bounds.iter().map(ty).collect();
-            format!("some {}", b.join(" and "))
+            match negative {
+                Some(neg) => format!("some {} and not {}", b.join(" and "), ty(neg)),
+                None => format!("some {}", b.join(" and ")),
+            }
         },
         AstType::Ref {
             inner, mutating, ..

@@ -60,3 +60,40 @@ impl AnalyzerRegistry {
 /// ECS component wrapper for the registry. Stored on the root entity.
 #[derive(Clone)]
 pub struct AnalyzerRegistryRef(pub Arc<AnalyzerRegistry>);
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    /// `DiagnosticDescriptor::id` is documented as unique, but nothing
+    /// enforced it — eight E-codes ended up claimed by two unrelated
+    /// analyzers. Walk every registered analyzer's descriptors and reject
+    /// any id declared twice, so a fresh allocation can't silently collide.
+    /// Two analyzers may share ONE descriptor object (e.g. GenericsAnalyzer
+    /// and TypeArgArityAnalyzer both list E438 from the same static array);
+    /// only distinct descriptors with the same id are collisions.
+    #[test]
+    fn descriptor_ids_are_unique_across_all_analyzers() {
+        let registry = crate::default_analyzers();
+        let all = registry
+            .body_checks
+            .iter()
+            .map(|a| a.descriptors())
+            .chain(registry.decl_checks.iter().map(|a| a.descriptors()))
+            .chain(registry.compilation_checks.iter().map(|a| a.descriptors()))
+            .flatten();
+        let mut owner: HashMap<&str, &crate::diagnostic::DiagnosticDescriptor> = HashMap::new();
+        for d in all {
+            if let Some(prev) = owner.insert(d.id, d) {
+                assert!(
+                    std::ptr::eq(prev, d),
+                    "diagnostic id {} is declared by both `{}` and `{}` — \
+                     allocate a fresh code (see kestrel-analyze/AGENTS.md)",
+                    d.id,
+                    prev.name,
+                    d.name
+                );
+            }
+        }
+    }
+}

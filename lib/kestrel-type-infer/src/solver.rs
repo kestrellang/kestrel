@@ -2213,7 +2213,7 @@ impl CopyLayer for SolverCopyLayer<'_, '_> {
 /// solver", not a real classification. Consume only via
 /// `type_conforms_copyable`; reading the class directly for clone-vs-bitcopy
 /// decisions or diagnostics would inherit a wrong answer.
-fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics {
+pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics {
     if depth > 64 {
         return CopySemantics::Cloneable; // recursion guard — never block (both questions)
     }
@@ -2256,10 +2256,19 @@ fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> CopySemantics
         // never this fold — this classifies the ref VALUE for gating-arg
         // folds (`Optional[&File]` is Copyable even though File isn't).
         TyKind::Ref { .. } => CopySemantics::Copyable,
-        // Mirror `hir_type_copy_semantics`: protocol existentials / `some P` /
+        // `some P and not Copyable`: the underlier may be move-only, so use
+        // sites must move, never bit-copy. Plain `some P` guarantees a
+        // duplicable underlier (enforced post-solve on the defining body).
+        TyKind::Opaque { not_copyable, .. } => {
+            if not_copyable {
+                CopySemantics::NotCopyable
+            } else {
+                CopySemantics::Copyable
+            }
+        },
+        // Mirror `hir_type_copy_semantics`: protocol existentials /
         // functions are Copyable (not known Cloneable).
         TyKind::Protocol { .. }
-        | TyKind::Opaque { .. }
         | TyKind::Function { .. }
         | TyKind::Never
         | TyKind::TypeAlias { .. } => CopySemantics::Copyable,
@@ -4827,6 +4836,7 @@ pub fn kind_to_tyvar_sub(
             bounds,
             origin_args,
             index,
+            not_copyable,
         } => {
             // Remap bound args and origin_args through the substitution
             let new_bounds: Vec<(Entity, Vec<TyVar>)> = bounds
@@ -4851,6 +4861,7 @@ pub fn kind_to_tyvar_sub(
                 bounds: new_bounds,
                 origin_args: new_origin_args,
                 index: *index,
+                not_copyable: *not_copyable,
             }));
             TyVar(idx)
         },
@@ -5135,7 +5146,12 @@ fn lower_opaque_aware(
     recv_tv: TyVar,
     subs: &[(kestrel_hecs::Entity, TyVar)],
 ) -> TyVar {
-    if let kestrel_hir::ty::HirTy::Opaque { bounds, .. } = hir_ty {
+    if let kestrel_hir::ty::HirTy::Opaque {
+        bounds,
+        not_copyable,
+        ..
+    } = hir_ty
+    {
         if ctx.owner == callee {
             return ctx.return_ty;
         }
@@ -5160,6 +5176,7 @@ fn lower_opaque_aware(
             bounds: opaque_bounds,
             origin_args,
             index: 0,
+            not_copyable: *not_copyable,
         });
         tv
     } else {

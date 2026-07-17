@@ -676,9 +676,14 @@ fn format_type(ty: &AstType) -> String {
         AstType::Unit(_) => "()".into(),
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
-        AstType::Some { bounds, .. } => {
+        AstType::Some {
+            bounds, negative, ..
+        } => {
             let b: Vec<_> = bounds.iter().map(format_type).collect();
-            format!("some {}", b.join(" and "))
+            match negative {
+                Some(neg) => format!("some {} and not {}", b.join(" and "), format_type(neg)),
+                None => format!("some {}", b.join(" and ")),
+            }
         },
         AstType::Ref {
             inner, mutating, ..

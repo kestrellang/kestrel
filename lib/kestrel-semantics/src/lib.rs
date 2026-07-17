@@ -16,11 +16,11 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_ast_builder::{
     Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
+use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
@@ -600,7 +600,16 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             // No per-instantiation refinement for Self/alias uses (current behavior).
             HirTy::SelfType(entity, _) => self.base_semantics(*entity),
             HirTy::AliasUse { entity, .. } => self.base_semantics(*entity),
-            HirTy::Protocol { .. } | HirTy::Opaque { .. } => CopySemantics::Copyable,
+            HirTy::Protocol { .. } => CopySemantics::Copyable,
+            // `some P and not Copyable` may hide a move-only underlier; the
+            // plain form guarantees a duplicable one (post-solve check).
+            HirTy::Opaque { not_copyable, .. } => {
+                if *not_copyable {
+                    CopySemantics::NotCopyable
+                } else {
+                    CopySemantics::Copyable
+                }
+            },
             // Ref is rejected (rewritten to Error) at HIR lowering and should
             // never reach here; treat it exactly like Error if it does.
             // Infer/Error are recovery.

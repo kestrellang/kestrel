@@ -5,7 +5,7 @@
 //!
 //! ## Diagnostics
 //!
-//! ### E423 -- `duplicate_deinit` (Error, Correctness)
+//! ### E473 -- `duplicate_deinit` (Error, Correctness)
 //!
 //! **Message:** "struct `{name}` already has a deinit"
 //!
@@ -26,7 +26,7 @@ use crate::util;
 use kestrel_ast_builder::NodeKind;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
-    id: "E423",
+    id: "E473",
     name: "duplicate_deinit",
     default_severity: Severity::Error,
     category: Category::Correctness,

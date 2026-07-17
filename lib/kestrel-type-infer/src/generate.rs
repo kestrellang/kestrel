@@ -1998,7 +1998,9 @@ fn emit_copyable_wellformedness(
         else {
             continue;
         };
-        if Some(protocol) != copyable && Some(protocol) != cloneable && Some(protocol) != static_proto
+        if Some(protocol) != copyable
+            && Some(protocol) != cloneable
+            && Some(protocol) != static_proto
         {
             continue;
         }
@@ -2123,11 +2125,15 @@ fn lower_return_ty_with_opaque(
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
     match ret_hir {
-        HirTy::Opaque { bounds, .. } => {
+        HirTy::Opaque {
+            bounds,
+            not_copyable,
+            ..
+        } => {
             if ctx.owner == callee {
                 return ctx.return_ty;
             }
-            lower_opaque_to_tyvar(ctx, bounds, callee, subs)
+            lower_opaque_to_tyvar(ctx, bounds, *not_copyable, callee, subs)
         },
         // Recurse into structural types so nested opaques are handled
         HirTy::Struct { entity, args, .. } => {
@@ -2173,6 +2179,7 @@ fn lower_return_ty_with_opaque(
 fn lower_opaque_to_tyvar(
     ctx: &mut InferCtx<'_>,
     bounds: &[HirTy],
+    not_copyable: bool,
     callee: Entity,
     subs: &[(Entity, TyVar)],
 ) -> TyVar {
@@ -2198,6 +2205,7 @@ fn lower_opaque_to_tyvar(
         bounds: opaque_bounds,
         origin_args,
         index: 0,
+        not_copyable,
     });
     tv
 }

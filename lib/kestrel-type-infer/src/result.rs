@@ -152,11 +152,14 @@ pub enum ResolvedTy {
     /// Opaque return type from a call to a function with `some P` return.
     /// Preserved through inference output so MIR lowering can resolve it
     /// to the concrete type by querying InferBody on the origin.
+    /// `not_copyable` mirrors an `and not Copyable` bound on the origin —
+    /// the analyze move checker treats the value as move-only.
     Opaque {
         origin: Entity,
         bounds: Vec<(Entity, Vec<ResolvedTy>)>,
         origin_args: Vec<ResolvedTy>,
         index: u32,
+        not_copyable: bool,
     },
     /// Second-class reference `&T` / `&mutating T` — a ret_borrow call
     /// result's expression type. MIR lowering PEELS it (a ref-typed value
@@ -242,8 +245,10 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
             bounds,
             origin_args,
             index,
+            not_copyable,
         } => ResolvedTy::Opaque {
             origin: *origin,
+            not_copyable: *not_copyable,
             bounds: bounds
                 .iter()
                 .map(|(e, args)| {
@@ -429,9 +434,18 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
             format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
         },
-        TyKind::Opaque { bounds, .. } => {
+        TyKind::Opaque {
+            bounds,
+            not_copyable,
+            ..
+        } => {
+            let suffix = if *not_copyable {
+                " and not Copyable"
+            } else {
+                ""
+            };
             if bounds.is_empty() {
-                "some ?".into()
+                format!("some ?{suffix}")
             } else {
                 let bound_names: Vec<String> = bounds
                     .iter()
@@ -442,7 +456,7 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                             .unwrap_or_else(|| format!("{:?}", e))
                     })
                     .collect();
-                format!("some {}", bound_names.join(" and "))
+                format!("some {}{suffix}", bound_names.join(" and "))
             }
         },
         TyKind::Never => "Never".into(),
@@ -642,6 +656,10 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             describe_tyvar(ctx, *receiver)
         ),
         InferError::CircularOpaqueReturn { .. } => "circular opaque return type".into(),
+        InferError::OpaqueUnderlierNotCopyable { concrete, .. } => format!(
+            "opaque return type hides non-Copyable type '{}'; add 'and not Copyable' to the return type",
+            describe_tyvar(ctx, *concrete)
+        ),
         InferError::RefFunctionAsValue { .. } => {
             "a reference-returning function is not a value".into()
         },
@@ -669,9 +687,9 @@ fn describe_static_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> O
     };
     match kind.clone() {
         TyKind::Ref { .. } => Some("a reference is never Static".into()),
-        TyKind::Param { .. } => {
-            Some("the type parameter is relaxed with 'not Static', so it may hold references".into())
-        },
+        TyKind::Param { .. } => Some(
+            "the type parameter is relaxed with 'not Static', so it may hold references".into(),
+        ),
         TyKind::Struct { entity, args } | TyKind::Enum { entity, args } => {
             let info = ctx.query_ctx.query(NominalStaticness {
                 entity,

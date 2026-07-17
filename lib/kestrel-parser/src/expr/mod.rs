@@ -776,12 +776,11 @@ pub fn expr_parser<'tokens>()
                 })
             });
 
-        let condition_unary = unary_op
-            .clone()
-            .then(condition_postfix.clone())
-            .map(|((tok, span, mutating), operand)| {
+        let condition_unary = unary_op.clone().then(condition_postfix.clone()).map(
+            |((tok, span, mutating), operand)| {
                 ExprVariant::Unary(tok, span, mutating, Box::new(operand))
-            });
+            },
+        );
 
         // `try expr` in condition position (e.g. `if try f() { ... }`). Mirrors
         // the full grammar's `try_expr`: `try` binds high, wrapping a postfix
@@ -1327,7 +1326,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match expr_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result() {
+    match expr_parser()
+        .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
+        .into_result()
+    {
         Ok(variant) => {
             // Transform strings with interpolation to InterpolatedString variant
             let transformed = emit::maybe_convert_to_interpolated(source, variant);

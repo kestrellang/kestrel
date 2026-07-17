@@ -354,20 +354,20 @@ pub fn pattern_parser<'tokens>()
             .ignore_then(just(Token::Ampersand).map_with(|_, e| to_kestrel_span(e.span())))
             .then(
                 skip_trivia()
-                    .ignore_then(
-                        just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())),
-                    )
+                    .ignore_then(just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())))
                     .or_not(),
             )
             .then(
                 skip_trivia()
                     .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) }),
             )
-            .map(|((amp_span, mutating_span), name_span)| PatternVariant::Ref {
-                amp_span,
-                mutating_span,
-                name_span,
-            });
+            .map(
+                |((amp_span, mutating_span), name_span)| PatternVariant::Ref {
+                    amp_span,
+                    mutating_span,
+                    name_span,
+                },
+            );
 
         let immutable_binding = skip_trivia()
             .ignore_then(select! { Token::Identifier = e => to_kestrel_span(e.span()) })
@@ -1192,7 +1192,10 @@ where
     let prepared = prepare_tokens(tokens);
     let input = create_input(&prepared, source.len());
 
-    match pattern_parser().parse_with_state(input, &mut ::chumsky::extra::SimpleState(source)).into_result() {
+    match pattern_parser()
+        .parse_with_state(input, &mut ::chumsky::extra::SimpleState(source))
+        .into_result()
+    {
         Ok(variant) => {
             emit_pattern_variant(sink, &variant);
         },

@@ -64,7 +64,9 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Computed, FieldMutability, NodeKind, Static, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{
+    Computed, FieldMutability, NodeKind, Static, TypeAnnotation, TypeParams,
+};
 
 /// Span of the first `some` (opaque) type found anywhere in `ty`, or `None`.
 /// Opaque is legal only in return position; a field annotation containing it
@@ -85,10 +87,7 @@ fn opaque_span(ty: &AstType) -> Option<kestrel_span::Span> {
             .find_map(opaque_span)
             .or_else(|| opaque_span(return_type)),
         AstType::Ref { inner, .. } => opaque_span(inner),
-        AstType::Named { .. }
-        | AstType::Unit(_)
-        | AstType::Never(_)
-        | AstType::Inferred(_) => None,
+        AstType::Named { .. } | AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => None,
     }
 }
 
@@ -112,7 +111,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         category: Category::Correctness,
     },
     DiagnosticDescriptor {
-        id: "E417",
+        id: "E478",
         name: "global_property_already_static",
         default_severity: Severity::Error,
         category: Category::Correctness,

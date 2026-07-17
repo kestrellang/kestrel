@@ -5,8 +5,8 @@
 //! with no arguments. Member resolution cannot disambiguate that pair —
 //! `self.name` inside the method binds back to the method itself, producing
 //! silent infinite recursion at runtime (#130) — so the collision is rejected
-//! at declaration time. In-body collisions are already rejected by E425
-//! (`field.rs`), and a method requiring labeled arguments (the stdlib's
+//! at declaration time. In-body collisions are already rejected by E475
+//! (`duplicate_symbol.rs`), and a method requiring labeled arguments (the stdlib's
 //! `slice` field + `slice(from:to:)` pattern) is disambiguated by its labels
 //! at every use site, so neither is flagged here.
 //!
@@ -76,7 +76,7 @@ impl DeclCheck for FieldMethodCollisionAnalyzer {
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
         // The type whose fields the extension's methods share a member
-        // namespace with. In-body collisions are E425's job.
+        // namespace with. In-body collisions are E475's job.
         let Some(field_owner) = cx.query.query(ExtensionTargetEntity {
             extension: cx.entity,
             root: cx.root,

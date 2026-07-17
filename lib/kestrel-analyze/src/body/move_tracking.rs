@@ -40,11 +40,11 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
-use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, NodeKind, ReceiverKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
+use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
@@ -522,7 +522,13 @@ fn analyze_expr(
                 captures: Arc::clone(&mcx.captures),
                 captured_borrow: captured_nc.clone(),
             };
-            let mut inner = analyze_block(&inner_mcx, &body.stmts, body.tail_expr, State::empty(), diags);
+            let mut inner = analyze_block(
+                &inner_mcx,
+                &body.stmts,
+                body.tail_expr,
+                State::empty(),
+                diags,
+            );
             // A bare-local tail (`{ () in r }`) is the closure's return value but
             // is not a `record_move` site (a tail `Local` read records no move),
             // so flag it explicitly.
@@ -557,13 +563,9 @@ fn analyze_expr(
             // `ptr_to(value)`, not `value`), a `consuming` one moves. Route it
             // through the normal consuming-param path so a borrowed operand is
             // not falsely seen as moved.
-            let explicit_init = mcx
-                .cx
-                .typed
-                .resolutions
-                .get(&id)
-                .copied()
-                .filter(|&e| matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::Initializer)));
+            let explicit_init = mcx.cx.typed.resolutions.get(&id).copied().filter(|&e| {
+                matches!(mcx.cx.query.get::<NodeKind>(e), Some(NodeKind::Initializer))
+            });
             if let Some(init) = explicit_init {
                 apply_call_moves(mcx, init, args, None, &mut state, diags);
             } else if stores_operands_by_value(mcx, callee_entity, id) {
@@ -877,7 +879,9 @@ fn self_witnesses_consuming_requirement(cx: &BodyContext<'_>) -> bool {
             .iter()
             .any(|m| {
                 matches!(
-                    cx.query.get::<Callable>(m.entity).and_then(|c| c.receiver.as_ref()),
+                    cx.query
+                        .get::<Callable>(m.entity)
+                        .and_then(|c| c.receiver.as_ref()),
                     Some(ReceiverKind::Consuming)
                 )
             })
@@ -1191,9 +1195,21 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
                     root: self.mcx.cx.root,
                 })
                 .into(),
-            ResolvedTy::Tuple(elems) => fold_members(elems.iter().map(|e| self.member_semantics(e))),
+            ResolvedTy::Tuple(elems) => {
+                fold_members(elems.iter().map(|e| self.member_semantics(e)))
+            },
+            // `some P and not Copyable` hides a possibly move-only underlier —
+            // uses must move. A plain `some P` guarantees a duplicable
+            // underlier (enforced on the defining body post-solve).
+            ResolvedTy::Opaque { not_copyable, .. } => {
+                if *not_copyable {
+                    CopySemantics::NotCopyable
+                } else {
+                    CopySemantics::Copyable
+                }
+            },
             // Assoc projections are Copyable-by-default (matches
-            // `hir_type_copy_semantics`); functions/opaque/never/error are
+            // `hir_type_copy_semantics`); functions/never/error are
             // pointer-like / recovery — all Copyable. Explicit so a future
             // ResolvedTy variant forces a decision here.
             // A ref (stage 1) is a borrow: copying it duplicates the pointer,
@@ -1201,7 +1217,6 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             // catch-all gave.
             ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Function { .. }
-            | ResolvedTy::Opaque { .. }
             | ResolvedTy::Never
             | ResolvedTy::Ref { .. }
             | ResolvedTy::Error => CopySemantics::Copyable,
@@ -1222,6 +1237,8 @@ fn ty_is_copyable(mcx: &MoveCtx<'_>, ty: &ResolvedTy) -> bool {
         ResolvedTy::Named { entity, .. } => !entity_negates_copyable(mcx, *entity),
         ResolvedTy::Param { entity } => !param_negates_copyable(mcx, *entity),
         ResolvedTy::Tuple(elems) => elems.iter().all(|t| ty_is_copyable(mcx, t)),
+        // `some P and not Copyable` — treat like an explicit negation.
+        ResolvedTy::Opaque { not_copyable, .. } => !not_copyable,
         // Functions, Never, Error, SelfType — treat as copyable (pointer-like).
         _ => true,
     }
