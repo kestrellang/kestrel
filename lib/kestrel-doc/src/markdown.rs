@@ -84,6 +84,11 @@ fn write_group(out: &mut String, group: &MemberGroup, level: usize) {
     let _ = writeln!(out, "{hashes} {label}");
     out.push('\n');
 
+    if let Some(cond) = &group.where_clause {
+        let _ = writeln!(out, "_Conditional: `{cond}`._");
+        out.push('\n');
+    }
+
     for member in &group.members {
         write_item(out, member, level + 1);
     }

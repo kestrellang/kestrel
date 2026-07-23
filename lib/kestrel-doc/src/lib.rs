@@ -68,6 +68,10 @@ pub struct MemberGroup {
     /// Dotted module path the protocol lives at, when known. Used by
     /// the frontend to link "Cloneable" → the protocol's page.
     pub source_path: Option<String>,
+    /// For conditional conformances (`extend Result[T, E]: Equatable
+    /// where T: Equatable, ...`), the rendered `where ...` condition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub where_clause: Option<String>,
     pub members: Vec<Item>,
 }
 
@@ -259,11 +263,18 @@ fn build_member_groups(
 ) -> Vec<MemberGroup> {
     // Step 1: collect member entities from the type itself + every
     // extension targeting it. Extensions are flattened into the type's
-    // docs surface so users see one consolidated view.
-    let mut direct_entities: Vec<(Entity, String)> = Vec::new();
+    // docs surface so users see one consolidated view; a constrained
+    // extension's `where` clause is carried onto each of its members so
+    // the availability condition isn't silently dropped.
+    let mut direct_entities: Vec<(Entity, String, String)> = Vec::new();
     let mut sources: Vec<Entity> = vec![entity];
     sources.extend(extensions.iter().copied());
     for &source in &sources {
+        let source_where = if source == entity {
+            String::new()
+        } else {
+            signature::where_clause_str(world, source)
+        };
         for &child in world.children_of(source) {
             let Some(kind) = world.get::<NodeKind>(child) else {
                 continue;
@@ -278,13 +289,15 @@ fn build_member_groups(
                 .get::<Name>(child)
                 .map(|n| n.0.clone())
                 .unwrap_or_default();
-            direct_entities.push((child, raw_name));
+            direct_entities.push((child, raw_name, source_where.clone()));
         }
     }
 
     // Step 2: collect protocols this type conforms to — both directly and
-    // via every extension — in source order, deduped.
-    let mut conformed: Vec<Entity> = Vec::new();
+    // via every extension — in source order, deduped. A conformance
+    // declared on a constrained extension is conditional; keep the
+    // extension's `where` clause alongside it.
+    let mut conformed: Vec<(Entity, Option<String>)> = Vec::new();
     for &source in &sources {
         if let Some(conformances) = world.get::<Conformances>(source) {
             for item in &conformances.0 {
@@ -296,41 +309,55 @@ fn build_member_groups(
                 else {
                     continue;
                 };
-                if protocol == entity || conformed.contains(&protocol) {
+                if protocol == entity || conformed.iter().any(|(p, _)| *p == protocol) {
                     continue;
                 }
-                conformed.push(protocol);
+                let condition = (source != entity)
+                    .then(|| signature::where_clause_str(world, source))
+                    .filter(|w| !w.is_empty())
+                    .map(|w| w.trim().to_string());
+                conformed.push((protocol, condition));
             }
         }
     }
 
     // Step 3: route each direct entity to a protocol group whose
-    // declaration it satisfies. First match wins so we don't double-list.
-    let mut by_protocol: HashMap<Entity, Vec<Entity>> = HashMap::new();
+    // declaration it satisfies. First match wins so we don't double-list;
+    // every overload sharing the name travels together.
+    let mut by_protocol: HashMap<Entity, Vec<(Entity, String)>> = HashMap::new();
     let mut assigned: std::collections::HashSet<Entity> = Default::default();
-    for &protocol in &conformed {
+    for (protocol, _) in &conformed {
         let protocol_member_names: std::collections::HashSet<String> = world
-            .children_of(protocol)
+            .children_of(*protocol)
             .iter()
             .filter_map(|&c| world.get::<Name>(c).map(|n| n.0.clone()))
             .collect();
-        for (e, raw_name) in &direct_entities {
+        for (e, raw_name, ext_where) in &direct_entities {
             if assigned.contains(e) {
                 continue;
             }
             if protocol_member_names.contains(raw_name) {
-                by_protocol.entry(protocol).or_default().push(*e);
+                by_protocol
+                    .entry(*protocol)
+                    .or_default()
+                    .push((*e, ext_where.clone()));
                 assigned.insert(*e);
             }
         }
     }
 
+    let build_member = |e: Entity, ext_where: &str| -> Option<Item> {
+        let mut item = build_item(world, e, protocol_index, extensions_by_target)?;
+        item.signature = merge_where(item.signature, ext_where);
+        Some(item)
+    };
+
     // Step 4: build the Direct group from anything left over.
     let mut groups = Vec::new();
     let mut direct_items: Vec<Item> = direct_entities
         .iter()
-        .filter(|(e, _)| !assigned.contains(e))
-        .filter_map(|(e, _)| build_item(world, *e, protocol_index, extensions_by_target))
+        .filter(|(e, _, _)| !assigned.contains(e))
+        .filter_map(|(e, _, w)| build_member(*e, w))
         .collect();
     direct_items.sort_by(|a, b| a.name.cmp(&b.name));
     if !direct_items.is_empty() {
@@ -338,73 +365,62 @@ fn build_member_groups(
             kind: "direct".into(),
             label: None,
             source_path: None,
+            where_clause: None,
             members: direct_items,
         });
     }
 
-    // Step 5: build a group per conformed protocol — the type's
-    // implementations first, then any protocol-declared members the type
-    // didn't override (so abstract / default-only items still show up).
-    for protocol in conformed {
+    // Step 5: build a group per conformed protocol, listing only the
+    // members this type actually provides. Protocol requirements and
+    // default implementations are documented once, on the protocol's own
+    // page — inlining them here duplicated half the reference and
+    // collapsed overloads that share a name.
+    for (protocol, condition) in conformed {
         let label = protocol_short_name(world, protocol);
         let source_path = Some(module_path_for(world, protocol));
 
-        let mut members: Vec<Item> = Vec::new();
-        let mut covered_names: std::collections::HashSet<String> = Default::default();
-
-        for &e in by_protocol.get(&protocol).unwrap_or(&Vec::new()) {
-            let raw_name = world
-                .get::<Name>(e)
-                .map(|n| n.0.clone())
-                .unwrap_or_default();
-            if let Some(item) = build_item(world, e, protocol_index, extensions_by_target) {
-                covered_names.insert(raw_name);
-                members.push(item);
-            }
-        }
-        // Collect members from the protocol itself and any extensions of
-        // the protocol (default implementations like `extend Str`).
-        let empty_ext: Vec<Entity> = Vec::new();
-        let protocol_extensions = extensions_by_target.get(&protocol).unwrap_or(&empty_ext);
-        let mut protocol_sources: Vec<Entity> = vec![protocol];
-        protocol_sources.extend(protocol_extensions.iter().copied());
-        for &proto_source in &protocol_sources {
-            for &child in world.children_of(proto_source) {
-                let Some(kind) = world.get::<NodeKind>(child) else {
-                    continue;
-                };
-                if !is_member_kind(kind) {
-                    continue;
-                }
-                if signature::is_private(world, child) {
-                    continue;
-                }
-                let raw_name = world
-                    .get::<Name>(child)
-                    .map(|n| n.0.clone())
-                    .unwrap_or_default();
-                if covered_names.contains(&raw_name) {
-                    continue;
-                }
-                covered_names.insert(raw_name);
-                if let Some(item) = build_item(world, child, protocol_index, extensions_by_target) {
-                    members.push(item);
-                }
-            }
-        }
-
+        let mut members: Vec<Item> = by_protocol
+            .get(&protocol)
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|(e, w)| build_member(*e, w))
+            .collect();
         members.sort_by(|a, b| a.name.cmp(&b.name));
-        if !members.is_empty() {
-            groups.push(MemberGroup {
-                kind: "protocol".into(),
-                label: Some(label),
-                source_path,
-                members,
-            });
-        }
+
+        // Emit even when empty — an empty group still records the
+        // conformance (e.g. `extend Result: Copyable where ... { }`).
+        groups.push(MemberGroup {
+            kind: "protocol".into(),
+            label: Some(label),
+            source_path,
+            where_clause: condition,
+            members,
+        });
     }
 
     groups
+}
+
+/// Append an extension's `where` clause (rendered with a leading
+/// `" where "`) onto a member signature, merging with any where clause
+/// the member already carries.
+fn merge_where(signature: String, ext_where: &str) -> String {
+    if ext_where.is_empty() {
+        return signature;
+    }
+    let constraints = ext_where.trim_start().trim_start_matches("where ");
+    // Subscript/field signatures end in an accessor block — insert the
+    // clause before ` { get ... }` rather than after it.
+    let (head, tail) = match signature.rfind(" { ") {
+        Some(i) => (&signature[..i], &signature[i..]),
+        None => (signature.as_str(), ""),
+    };
+    if head.contains(" where ") {
+        format!("{}, {}{}", head, constraints, tail)
+    } else {
+        format!("{} where {}{}", head, constraints, tail)
+    }
 }
 
 /// Group every Extension in the world by the entity it targets, so a
