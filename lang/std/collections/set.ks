@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, Comparable)
-import std.text.(Formattable, FormatOptions, StringBuilder)
+import std.text.(Formattable, Formatter, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
@@ -1222,7 +1222,7 @@ extend Set[T, H]: Formattable where T: Formattable, T: Hashable, H: Hasher, H: D
     /// Set[Int64]().format();    // "{}"
     /// "\{Set([1, 2, 3])}";      // "{1, 2, 3}" via interpolation
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
         var first = true;
         var iter = self.iter();

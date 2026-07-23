@@ -4,7 +4,7 @@ public enum DateTimeError: Formattable {
     case InvalidDate(year: Int64, month: Int64, day: Int64)
     case InvalidTime(hour: Int64, minute: Int64, second: Int64)
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         match self {
             .InvalidDate(year: y, month: m, day: d) => {
                 writer.append("invalid date: \(y)-\(m)-\(d)");
@@ -21,7 +21,7 @@ public enum ParseError: Formattable {
     case InvalidValue(String)
     case UnexpectedEnd
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         match self {
             .InvalidFormat(msg) => writer.append("invalid format: \(msg)"),
             .InvalidValue(msg) => writer.append("invalid value: \(msg)"),

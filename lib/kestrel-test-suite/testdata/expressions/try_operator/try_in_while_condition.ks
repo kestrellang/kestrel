@@ -8,7 +8,7 @@
 module Test
 
 struct E: Formattable {
-    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append("e");
     }
 }

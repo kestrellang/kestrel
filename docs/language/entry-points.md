@@ -67,7 +67,7 @@ struct AppError {
 }
 
 extend AppError: Formattable {
-    public func format(mutating into writer: StringBuilder, options: FormatOptions) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions) {
         writer.append(self.message);
     }
 }

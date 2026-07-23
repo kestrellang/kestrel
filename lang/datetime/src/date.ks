@@ -226,7 +226,7 @@ public struct Date: Equatable, Comparable, Hashable, Formattable, Cloneable {
         self.d.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         // ISO 8601: YYYY-MM-DD
         appendPadded(into: writer, self.y, 4);
         writer.append("-");
@@ -350,7 +350,7 @@ func parseDigits(bytes: Array[UInt8], offset: Int64, count: Int64) -> Int64 thro
 }
 
 // Zero-pad a number to `width` digits and append to builder
-func appendPadded(mutating into writer: StringBuilder, value: Int64, width: Int64) {
+func appendPadded(mutating into writer: some Formatter, value: Int64, width: Int64) {
     let v = value.abs();
     if value < 0 { writer.append("-"); }
     // Count digits

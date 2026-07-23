@@ -187,7 +187,7 @@ public struct DateTime: Equatable, Comparable, Hashable, Formattable, Cloneable 
         self.timeVal.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         self.dateVal.format(into: writer);
         writer.append("T");
         self.timeVal.format(into: writer);

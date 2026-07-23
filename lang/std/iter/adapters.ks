@@ -22,7 +22,7 @@ import std.numeric.(Int64)
 ///
 /// Wraps the source iterator and the transform closure. No buffering —
 /// elements pass through one at a time.
-public struct MapIterator[I, U]: Iterator where I: Iterator {
+public struct MapIterator[I, U]: Iterator where I: Iterator, I: not Copyable {
     type Item = U
 
     internal var inner: I
@@ -31,7 +31,7 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `MapIterator` from `inner` and `transform`. Prefer
     /// `inner.map(transform)`.
-    public init(inner inner: I, consuming as transform: (I.Item) -> U) {
+    public init(consuming inner inner: I, consuming as transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -57,7 +57,7 @@ public struct MapIterator[I, U]: Iterator where I: Iterator {
 ///
 /// Source iterator + predicate closure. `next()` skips ahead until the
 /// predicate accepts.
-public struct FilterIterator[I]: Iterator where I: Iterator {
+public struct FilterIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -65,7 +65,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
-    public init(inner inner: I, consuming where predicate: (I.Item) -> Bool) {
+    public init(consuming inner inner: I, consuming where predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
     }
@@ -90,7 +90,7 @@ public struct FilterIterator[I]: Iterator where I: Iterator {
 ///
 /// Source iterator + transform closure. `next()` skips ahead until the
 /// transform yields `Some`.
-public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
+public struct FilterMapIterator[I, U]: Iterator where I: Iterator, I: not Copyable {
     type Item = U
 
     internal var inner: I
@@ -99,7 +99,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
     /// `inner.compactMap()`.
-    public init(inner inner: I, consuming as transform: (I.Item) -> U?) {
+    public init(consuming inner inner: I, consuming as transform: (I.Item) -> U?) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -127,7 +127,7 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator {
 ///
 /// Source iterator + predicate + a one-bit `done` flag that latches once
 /// the predicate fails.
-public struct TakeWhileIterator[I]: Iterator where I: Iterator {
+public struct TakeWhileIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -136,7 +136,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.
-    public init(inner inner: I, consuming where predicate: (I.Item) -> Bool) {
+    public init(consuming inner inner: I, consuming where predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.done = false;
@@ -172,7 +172,7 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator {
 ///
 /// Source iterator + predicate + a one-bit `doneSkipping` flag that
 /// latches once the skipping phase ends.
-public struct SkipWhileIterator[I]: Iterator where I: Iterator {
+public struct SkipWhileIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -181,7 +181,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
-    public init(inner inner: I, consuming where predicate: (I.Item) -> Bool) {
+    public init(consuming inner inner: I, consuming where predicate: (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.doneSkipping = false;
@@ -217,7 +217,7 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator {
 /// # Representation
 ///
 /// Holds both source iterators. No buffering.
-public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
+public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator, A: not Copyable, B: not Copyable {
     type Item = (A.Item, B.Item)
 
     internal var first: A
@@ -225,7 +225,7 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
 
     /// @name From Sources
     /// Builds a `ZipIterator`. Prefer `first.zip(other: second)`.
-    public init(first first: A, second second: B) {
+    public init(consuming first first: A, consuming second second: B) {
         self.first = first;
         self.second = second;
     }
@@ -251,7 +251,7 @@ public struct ZipIterator[A, B]: Iterator where A: Iterator, B: Iterator {
 /// # Representation
 ///
 /// Source iterator + a running `Int64` index that ticks per element.
-public struct EnumerateIterator[I]: Iterator where I: Iterator {
+public struct EnumerateIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = (Int64, I.Item)
 
     internal var inner: I
@@ -260,7 +260,7 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds an `EnumerateIterator` with the index starting at 0.
     /// Prefer `inner.enumerate()`.
-    public init(inner inner: I) {
+    public init(consuming inner inner: I) {
         self.inner = inner;
         self.index = 0;
     }
@@ -288,7 +288,7 @@ public struct EnumerateIterator[I]: Iterator where I: Iterator {
 /// # Representation
 ///
 /// Source iterator + a counter that ticks down to zero.
-public struct TakeIterator[I]: Iterator where I: Iterator {
+public struct TakeIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -296,7 +296,7 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `TakeIterator` with `count` capacity.
-    public init(inner inner: I, count count: Int64) {
+    public init(consuming inner inner: I, count count: Int64) {
         self.inner = inner;
         self.remaining = count;
     }
@@ -320,7 +320,7 @@ public struct TakeIterator[I]: Iterator where I: Iterator {
 ///
 /// Source iterator + a counter; the first `next()` call drains the
 /// budget by pulling the source.
-public struct SkipIterator[I]: Iterator where I: Iterator {
+public struct SkipIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -329,7 +329,7 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `SkipIterator` that will drop `count` elements before
     /// yielding.
-    public init(inner inner: I, count count: Int64) {
+    public init(consuming inner inner: I, count count: Int64) {
         self.inner = inner;
         self.remaining = count;
     }
@@ -356,7 +356,7 @@ public struct SkipIterator[I]: Iterator where I: Iterator {
 ///
 /// Both source iterators + a one-bit `firstDone` flag that latches when
 /// the first iterator runs out.
-public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item {
+public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.Item = A.Item, A: not Copyable, B: not Copyable {
     type Item = A.Item
 
     internal var first: A
@@ -365,7 +365,7 @@ public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.It
 
     /// @name From Sources
     /// Builds a `ChainIterator`. Prefer `first.chain(other: second)`.
-    public init(first first: A, second second: B) {
+    public init(consuming first first: A, consuming second second: B) {
         self.first = first;
         self.second = second;
         self.firstDone = false;
@@ -394,7 +394,7 @@ public struct ChainIterator[A, B]: Iterator where A: Iterator, B: Iterator, B.It
 ///
 /// Source iterator + a one-slot lookahead buffer (`peeked`). `peek()`
 /// fills the buffer; `next()` drains it before pulling the source.
-public struct PeekableIterator[I]: Iterator where I: Iterator {
+public struct PeekableIterator[I]: Iterator where I: Iterator, I: not Copyable, I.Item: Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -402,7 +402,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `PeekableIterator` with no value buffered.
-    public init(inner inner: I) {
+    public init(consuming inner inner: I) {
         self.inner = inner;
         self.peeked = .None;
     }
@@ -443,7 +443,7 @@ public struct PeekableIterator[I]: Iterator where I: Iterator {
 /// Two copies of the source: `original` (immutable template) and
 /// `current` (the working iterator). When `current` exhausts, it is
 /// reset from `original`.
-public struct CycleIterator[I]: Iterator where I: Iterator {
+public struct CycleIterator[I]: Iterator where I: Iterator, I: Copyable {
     type Item = I.Item
 
     internal var original: I
@@ -451,7 +451,7 @@ public struct CycleIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `CycleIterator` that will replay `iter` forever.
-    public init(iter iter: I) {
+    public init(consuming iter iter: I) {
         self.original = iter;
         self.current = iter;
     }
@@ -472,7 +472,7 @@ public struct CycleIterator[I]: Iterator where I: Iterator {
 /// # Representation
 ///
 /// Source iterator + a one-bit latch.
-public struct FusedIterator[I]: Iterator where I: Iterator {
+public struct FusedIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -480,7 +480,7 @@ public struct FusedIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `FusedIterator` in the "still active" state.
-    public init(inner inner: I) {
+    public init(consuming inner inner: I) {
         self.inner = inner;
         self.done = false;
     }
@@ -529,22 +529,20 @@ public struct EmptyIterator[T]: Iterator {
 /// # Representation
 ///
 /// One `Optional[T]` field. `next()` empties it on first call.
-public struct OnceIterator[T]: Iterator {
+public struct OnceIterator[T]: Iterator where T: not Copyable {
     type Item = T
 
     internal var value: T?
 
     /// @name From Value
     /// Builds a `OnceIterator` carrying `value`.
-    public init(value value: T) {
+    public init(consuming value value: T) {
         self.value = .Some(value);
     }
 
     /// Returns the value once, then `None` forever after.
     public mutating func next() -> T? {
-        let result = self.value;
-        self.value = .None;
-        result
+        self.value.take()
     }
 }
 
@@ -554,14 +552,14 @@ public struct OnceIterator[T]: Iterator {
 /// # Representation
 ///
 /// One `T` field that is copied on every `next()` call.
-public struct RepeatIterator[T]: Iterator {
+public struct RepeatIterator[T]: Iterator where T: Copyable {
     type Item = T
 
     internal var value: T
 
     /// @name From Value
     /// Builds a `RepeatIterator` over `value`.
-    public init(value value: T) {
+    public init(consuming value value: T) {
         self.value = value;
     }
 
@@ -577,7 +575,7 @@ public struct RepeatIterator[T]: Iterator {
 /// # Representation
 ///
 /// `T` payload + an `Int64` countdown.
-public struct RepeatNIterator[T]: Iterator {
+public struct RepeatNIterator[T]: Iterator where T: Copyable {
     type Item = T
 
     internal var value: T
@@ -586,7 +584,7 @@ public struct RepeatNIterator[T]: Iterator {
     /// @name From Value
     /// Builds a `RepeatNIterator` that will yield `value` exactly
     /// `count` times.
-    public init(value value: T, count count: Int64) {
+    public init(consuming value value: T, count count: Int64) {
         self.value = value;
         self.remaining = count;
     }
@@ -614,7 +612,7 @@ public struct RepeatNIterator[T]: Iterator {
 ///
 /// Source iterator + transform closure + a one-slot buffer (`current`)
 /// holding the inner iterator currently being drained.
-public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
+public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator, I: not Copyable, U: not Copyable {
     type Item = U.Item
 
     internal var inner: I
@@ -623,7 +621,7 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 
     /// @name From Source
     /// Builds a `FlatMapIterator` with no inner iterator buffered.
-    public init(inner inner: I, consuming as transform: (I.Item) -> U) {
+    public init(consuming inner inner: I, consuming as transform: (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
         self.current = .None;
@@ -634,7 +632,7 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
     /// and continues.
     public mutating func next() -> U.Item? {
         while true {
-            if let .Some(existing) = self.current {
+            if let .Some(existing) = self.current.take() {
                 var currentIter = existing;
                 if let .Some(item) = currentIter.next() {
                     self.current = .Some(currentIter);
@@ -665,7 +663,7 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator {
 ///
 /// Source iterator + a one-slot buffer holding the inner iterator
 /// currently being drained.
-public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
+public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator, I: not Copyable, I.Item: not Copyable {
     type Item = I.Item.Item
 
     internal var inner: I
@@ -673,7 +671,7 @@ public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
 
     /// @name From Source
     /// Builds a `FlattenIterator` with no inner iterator buffered.
-    public init(inner inner: I) {
+    public init(consuming inner inner: I) {
         self.inner = inner;
         self.current = .None;
     }
@@ -682,7 +680,7 @@ public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
     /// iterator from the source.
     public mutating func next() -> I.Item.Item? {
         while true {
-            if let .Some(existing) = self.current {
+            if let .Some(existing) = self.current.take() {
                 var currentIter = existing;
                 if let .Some(item) = currentIter.next() {
                     self.current = .Some(currentIter);
@@ -712,7 +710,7 @@ public struct FlattenIterator[I]: Iterator where I: Iterator, I.Item: Iterator {
 /// # Representation
 ///
 /// Source iterator + inspector closure. No buffering.
-public struct InspectIterator[I]: Iterator where I: Iterator {
+public struct InspectIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -720,7 +718,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
-    public init(inner inner: I, consuming inspector inspector: (I.Item) -> ()) {
+    public init(consuming inner inner: I, consuming inspector inspector: (I.Item) -> ()) {
         self.inner = inner;
         self.inspector = inspector;
     }
@@ -749,7 +747,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator {
 /// Source iterator + step size + a one-bit `first` flag (the first
 /// element is always emitted; subsequent ones consume `step - 1` extra
 /// pulls).
-public struct StepByIterator[I]: Iterator where I: Iterator {
+public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -759,7 +757,7 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
     /// @name From Source
     /// Builds a `StepByIterator`. Caller guarantees `step >= 1`; `step
     /// == 0` produces undefined behaviour.
-    public init(inner inner: I, step step: Int64) {
+    public init(consuming inner inner: I, step step: Int64) {
         self.inner = inner;
         self.step = step;
         self.first = true;
@@ -794,14 +792,14 @@ public struct StepByIterator[I]: Iterator where I: Iterator {
 /// # Representation
 ///
 /// Just the inner iterator — no buffering.
-public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator {
+public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
 
     /// @name From Source
     /// Builds a `ReversedIterator`. Prefer `inner.rev()`.
-    public init(inner inner: I) {
+    public init(consuming inner inner: I) {
         self.inner = inner;
     }
 }
@@ -819,7 +817,7 @@ public struct ReversedIterator[I]: Iterator where I: DoubleEndedIterator, I: Ite
 ///
 /// Source iterator + the running accumulator state + the combine
 /// closure.
-public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
+public struct ScanIterator[I, Acc]: Iterator where I: Iterator, I: not Copyable, Acc: Copyable {
     type Item = Acc
 
     internal var inner: I
@@ -828,7 +826,7 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds a `ScanIterator` seeded with `initial`.
-    public init(inner inner: I, from initial: Acc, consuming by combine: (Acc, I.Item) -> Acc) {
+    public init(consuming inner inner: I, consuming from initial: Acc, consuming by combine: (Acc, I.Item) -> Acc) {
         self.inner = inner;
         self.state = initial;
         self.combine = combine;
@@ -858,7 +856,7 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator {
 /// Source iterator + separator value + a `needsSeparator` flag + a
 /// one-slot pending-element buffer (used to remember an element while a
 /// separator is being yielded).
-public struct IntersperseIterator[I]: Iterator where I: Iterator {
+public struct IntersperseIterator[I]: Iterator where I: Iterator, I: not Copyable, I.Item: Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -868,7 +866,7 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `IntersperseIterator`.
-    public init(inner inner: I, with separator: I.Item) {
+    public init(consuming inner inner: I, consuming with separator: I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;
@@ -906,7 +904,7 @@ public struct IntersperseIterator[I]: Iterator where I: Iterator {
 ///
 /// Same as `IntersperseIterator`, except the stored value is a
 /// zero-arg closure producing fresh separators.
-public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
+public struct IntersperseWithIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
@@ -916,7 +914,7 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator {
 
     /// @name From Source
     /// Builds an `IntersperseWithIterator`.
-    public init(inner inner: I, consuming with separator: () -> I.Item) {
+    public init(consuming inner inner: I, consuming with separator: () -> I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;
@@ -957,18 +955,18 @@ public func empty[T]() -> EmptyIterator[T] {
 
 /// Returns a `OnceIterator` that yields `value` and then nothing.
 /// Equivalent to `[value].iter()` without the array allocation.
-public func once[T](value: T) -> OnceIterator[T] {
+public func once[T](consuming value: T) -> OnceIterator[T] where T: not Copyable {
     OnceIterator(value: value)
 }
 
 /// Returns a `RepeatIterator` that yields copies of `value` forever.
 /// Combine with `take` to cap it.
-public func repeatValue[T](value: T) -> RepeatIterator[T] {
+public func repeatValue[T](consuming value: T) -> RepeatIterator[T] where T: Copyable {
     RepeatIterator(value: value)
 }
 
 /// Returns a `RepeatNIterator` that yields `count` copies of `value`,
 /// then stops.
-public func repeatN[T](value: T, count: Int64) -> RepeatNIterator[T] {
+public func repeatN[T](consuming value: T, count: Int64) -> RepeatNIterator[T] where T: Copyable {
     RepeatNIterator(value: value, count: count)
 }

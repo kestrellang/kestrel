@@ -811,7 +811,7 @@ mod tests {
         let path = world.get::<ModulePath>(import).unwrap();
         assert_eq!(path.0, vec!["std", "text"]);
         let items = world.get::<ImportItems>(import).unwrap();
-        assert_eq!(items.0.len(), 4); // String, StringBuilder, FormatOptions, Formattable
+        assert_eq!(items.0.len(), 4); // String, Formatter, FormatOptions, Formattable
 
         // Verify enum Ordering
         let ordering = find_child_by_name(&world, core, &NodeKind::Enum, "Ordering").unwrap();
@@ -877,7 +877,7 @@ mod tests {
             find_child_by_name(&world, ordering, &NodeKind::Function, "format").unwrap();
         let callable = world.get::<Callable>(format_fn).unwrap();
         assert_eq!(callable.params.len(), 2);
-        // params[0] is `into writer: StringBuilder` (no default); params[1] is
+        // params[0] is `into writer: some Formatter` (no default); params[1] is
         // `options: FormatOptions = ...`, which carries the default.
         assert!(
             callable.params[1].default_entity.is_some(),

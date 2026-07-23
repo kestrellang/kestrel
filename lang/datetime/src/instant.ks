@@ -172,7 +172,7 @@ public struct Instant: Equatable, Comparable, Hashable, Formattable, Cloneable {
         self.nanos.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         // RFC 3339 UTC: "2024-07-04T15:30:05Z"
         let dt = self.toDateTime(in: TimeZone.utc);
         dt.dateVal.format(into: writer);

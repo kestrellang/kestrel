@@ -5,7 +5,7 @@ module std.text
 import std.core.(Bool, Cloneable, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.memory.(Layout, Pointer, RawPointer, RcBox, CowBox)
-import std.text.(Char, encodeUtf8, String, StringSlice, StringStorage, Str, _textAlloc, _textDealloc, _memcpyBytes)
+import std.text.(Char, encodeUtf8, Formatter, String, StringSlice, StringStorage, Str, _textAlloc, _textDealloc, _memcpyBytes)
 
 /// Write-only buffer for efficient string construction. No COW, no
 /// RcBox, no `isUnique` checks — every append writes directly.
@@ -32,7 +32,7 @@ import std.text.(Char, encodeUtf8, String, StringSlice, StringStorage, Str, _tex
 /// Owns its buffer directly. `build()` donates the buffer to a
 /// `String`; the builder is left empty. `deinit` frees the buffer
 /// if `build()` was never called.
-public struct StringBuilder: Cloneable {
+public struct StringBuilder: Cloneable, Formatter {
     private var ptr: Pointer[UInt8]
     private var len: Int64
     private var cap: Int64

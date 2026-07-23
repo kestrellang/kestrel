@@ -4,7 +4,7 @@ module std.text
 
 import std.core.(Bool, Equatable, Matchable, ExpressibleByStringLiteral)
 import std.numeric.(Int64)
-import std.text.(String, Char, StringBuilder)
+import std.text.(String, Char, Str, StringBuilder)
 import std.result.(Optional)
 import std.collections.(Array)
 
@@ -363,6 +363,16 @@ public struct FormatOptions: Equatable {
 /// "\{pi:.2}";        // "3.14"           (precision 2)
 /// "\{value:?}";      // debug representation
 /// ```
+/// Mutable destination for formatted text.
+///
+/// Formatters only need to accept string-like values and individual code
+/// points. `StringBuilder` is the default implementation; streaming sinks can
+/// implement this protocol without forcing an intermediate `String`.
+public protocol Formatter {
+    mutating func append(other: some Str)
+    mutating func append(char c: Char)
+}
+
 @builtin(.FormattableProtocol)
 public protocol Formattable {
     /// Writes this value's formatted representation directly into `writer`.
@@ -371,7 +381,7 @@ public protocol Formattable {
     /// here. The convenience `format(options:) -> String` in the protocol
     /// extension calls this under the hood.
     @builtin(.FormattableFormatInto)
-    func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default())
+    func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default())
 }
 
 extend Formattable {
@@ -399,7 +409,7 @@ extend Formattable {
 /// `0X`) that appears at the start of `content` is emitted *before* the
 /// zero-padding so the result matches the C `printf` "%08d" convention,
 /// e.g. `-5` with width 8 → `-0000005` rather than `000000-5`.
-public func _writePadded(mutating into writer: StringBuilder, content: String, options: FormatOptions) {
+public func _writePadded(mutating into writer: some Formatter, content: String, options: FormatOptions) {
     if let .Some(width) = options.width {
         let currentLen = content.chars.count;
         if width > currentLen {

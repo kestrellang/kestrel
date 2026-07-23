@@ -7,7 +7,7 @@ import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(ArraySlice, ArraySliceIterator, Pointer)
 import std.iter.(Iterable)
-import std.text.(Formattable, FormatOptions, StringBuilder, String)
+import std.text.(Formattable, Formatter, FormatOptions, StringBuilder, String)
 import std.collections.(Array)
 
 // ============================================================================
@@ -1413,7 +1413,7 @@ extend Slice[T] where T: Formattable {
     /// [1, 2, 3].format();  // "[1, 2, 3]"
     /// [].format();          // "[]"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '[');
         let s = self.asSlice();
         let myPtr = s.pointer;

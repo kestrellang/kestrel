@@ -4,7 +4,7 @@ module std.core
 
 import std.ffi.(FFISafe)
 import std.core.(Hashable, Hasher)
-import std.text.(String, StringBuilder, FormatOptions, Formattable)
+import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
 import std.numeric.(UInt8, Int64)
 import std.memory.(ArraySlice, Pointer)
 
@@ -132,7 +132,7 @@ public struct Bool:
     /// true.format()                                       // "true"
     /// false.format(FormatOptions.debug())                 // "Bool(false)"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let value = if self.value { "true" } else { "false" };
         if options.debug {
             writer.append("Bool(");

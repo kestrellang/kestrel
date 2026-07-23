@@ -205,7 +205,7 @@ let SHORT_WEEKDAY_NAMES: Array[String] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sa
 let NARROW_WEEKDAY_NAMES: Array[String] = ["M", "T", "W", "T", "F", "S", "S"];
 
 // Format a component using date/time/zone values
-func formatComponent(mutating into writer: StringBuilder,
+func formatComponent(mutating into writer: some Formatter,
                      component component: FormatComponent,
                      year year: Int64, month month: Int64, day day: Int64,
                      hour hour: Int64, minute minute: Int64, second second: Int64, nanosecond nanosecond: Int64,

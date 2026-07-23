@@ -15,7 +15,7 @@ import std.core.(
     RangeFromConstructible, RangeUpToConstructible, RangeThroughConstructible,
     RangeFrom, RangeUpTo, RangeThrough
 )
-import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.memory.(ArraySlice, Pointer)
 import std.collections.(Slice)
 import std.numeric.(UInt8, Int64, UInt64)
@@ -950,7 +950,7 @@ public struct UInt8:
     /// (42).format(.{width: .Some(5), fill: '0'});     // "00042"
     /// (-42).format(.{sign: .Always});                 // "-42"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var n = self;
         let isNegative = false;
 

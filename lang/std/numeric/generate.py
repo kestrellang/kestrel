@@ -505,7 +505,7 @@ def generate_integer_format_method(type_name: str, bits: int, signed: bool) -> s
     /// (42).format(.{{width: .Some(5), fill: '0'}});     // "00042"
     /// (-42).format(.{{sign: .Always}});                 // "-42"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {{
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {{
         var n = self;{sign_handling}
 
         var radix: Int64 = options.radix;
@@ -1506,7 +1506,7 @@ def generate_float_format_method(type_name: str, bits: int) -> str:
     /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
     /// (3.14).format(.{sign: .Always});                    // "+3.14"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;
         var precisionProvided = false;
         if let .Some(p) = options.precision {

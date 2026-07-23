@@ -6,7 +6,7 @@ import std.core.(Bool, Equatable, Comparable, Ordering, Range, ClosedRange, Rang
 import std.numeric.(Int64, UInt8, UInt32)
 import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
-import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, LineIndex)
+import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, Str, LineIndex)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
 import std.memory.(Pointer)
 import std.collections.(Array)
@@ -3490,13 +3490,13 @@ public struct SplitViewIterator: Iterator, Cloneable {
     type Item = StringSlice
 
     fileprivate var slice: StringSlice
-    fileprivate var separator: String
+    fileprivate var separator: StringSlice
     fileprivate var sourcePtr: Pointer[UInt8]
     fileprivate var sourceLen: Int64
     fileprivate var index: Int64
     fileprivate var done: Bool
 
-    public init(slice slice: StringSlice, separator separator: String) {
+    public init(slice slice: StringSlice, separator separator: StringSlice) {
         self.slice = slice;
         self.separator = separator;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -3505,7 +3505,7 @@ public struct SplitViewIterator: Iterator, Cloneable {
         self.done = false;
     }
 
-    fileprivate init(slice slice: StringSlice, separator separator: String, index index: Int64, done done: Bool) {
+    fileprivate init(slice slice: StringSlice, separator separator: StringSlice, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.separator = separator;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -3583,9 +3583,9 @@ public struct SplitView: Iterable, Cloneable {
     type TargetIterator = SplitViewIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var separator: String
+    fileprivate var separator: StringSlice
 
-    public init(slice slice: StringSlice, separator separator: String) {
+    public init(slice slice: StringSlice, separator separator: StringSlice) {
         self.slice = slice;
         self.separator = separator;
     }

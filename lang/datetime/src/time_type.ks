@@ -148,7 +148,7 @@ public struct Time: Equatable, Comparable, Hashable, Formattable, Cloneable {
         self.nanosSinceMidnight.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         appendPadded(into: writer, self.hour, 2);
         writer.append(":");
         appendPadded(into: writer, self.minute, 2);

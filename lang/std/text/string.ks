@@ -2,8 +2,8 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
-import std.text.(Formattable, StringBuilder, _writePadded)
+import std.core.(Bool, Equal, NotEqual, Equatable, Matchable, Comparable, Cloneable, Ordering, Addable, ExpressibleByStringLiteral, Hashable, Hasher, Defaultable, fatalError)
+import std.text.(Formattable, Formatter, StringBuilder, _writePadded)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, RcBox, CowBox, ArraySlice)
@@ -182,11 +182,15 @@ struct StringStorage: Cloneable {
 ///   points) is O(n).
 /// - Clones do not share mutation; `s.clone()` and `s` will diverge as
 ///   soon as either is mutated.
-public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
+public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice], NotEqual[String], NotEqual[StringSlice], Matchable, Comparable, Cloneable, Formattable, Addable, ExpressibleByStringLiteral, Hashable, Defaultable {
     /// The element type yielded by iteration — always `Char`.
     type Item = Char
     /// The iterator type returned by `iter()`.
     type TargetIterator = CharsIterator
+    type Equal[String].Output = Bool
+    type Equal[StringSlice].Output = Bool
+    type NotEqual[String].Output = Bool
+    type NotEqual[StringSlice].Output = Bool
     /// The output type of `+` (concatenation) — always `String`.
     type Output = String
 
@@ -721,7 +725,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     // ========================================================================
 
     /// Replaces every occurrence of `pattern` with `replacement`, in place.
-    public mutating func replace(pattern: String, with replacement: String) {
+    public mutating func replace(pattern: some Str, with replacement: some Str) {
         self = self.replaced(pattern, with: replacement)
     }
 
@@ -775,6 +779,22 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
             return false
         }
         _bytesEqual(a: self.ptr(), b: other.ptr(), n: myLen)
+    }
+
+    public func equal(to other: String) -> Bool {
+        self.isEqual(to: other)
+    }
+
+    public func notEqual(to other: String) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
+    }
+
+    public func equal(to other: StringSlice) -> Bool {
+        self.asSlice().isEqual(to: other)
+    }
+
+    public func notEqual(to other: StringSlice) -> Bool {
+        if self.asSlice().isEqual(to: other) { false } else { true }
     }
 
     /// Pattern-match form of `isEqual`: each `case "literal" =>` arm
@@ -856,7 +876,7 @@ public struct String: Str, Iterable, Equatable, Matchable, Comparable, Cloneable
     /// opts.alignment = .Center;
     /// "test".format(opts);   // "   test   "
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         _writePadded(into: writer, self, options)
     }
 }

@@ -151,7 +151,7 @@ public struct Period: Equatable, Hashable, Formattable, Cloneable {
         self.d.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(self.isoString());
     }
 

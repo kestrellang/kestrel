@@ -940,12 +940,17 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
         self.storage.modify { (mutating s) in
             var writeIdx: Int64 = 0;
             for readIdx in 0..<s.len {
-                let element = s.ptr.offset(by: readIdx).read();
-                if predicate(element) {
+                let keep = s.ptr.offset(by: readIdx).with { (element) in
+                    predicate(element)
+                };
+                if keep {
                     if writeIdx != readIdx {
+                        let element = s.ptr.offset(by: readIdx).take();
                         s.ptr.offset(by: writeIdx).write(element)
                     }
                     writeIdx = writeIdx + 1
+                } else {
+                    s.ptr.offset(by: readIdx).dropInPlace()
                 }
             }
             s.len = writeIdx
@@ -1401,11 +1406,15 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
 
             while true {
                 // Find first element that doesn't satisfy predicate
-                while lo < s.len and predicate(s.ptr.offset(by: lo).read()) {
+                while lo < s.len {
+                    let matches = s.ptr.offset(by: lo).with { (element) in predicate(element) };
+                    if matches == false { break };
                     lo = lo + 1
                 }
                 // Find last element that satisfies predicate
-                while hi >= 0 and predicate(s.ptr.offset(by: hi).read()) == false {
+                while hi >= 0 {
+                    let matches = s.ptr.offset(by: hi).with { (element) in predicate(element) };
+                    if matches { break };
                     hi = hi - 1
                 }
 
@@ -1414,9 +1423,11 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
                 }
 
                 // Swap
-                let temp = s.ptr.offset(by: lo).read();
-                s.ptr.offset(by: lo).write(s.ptr.offset(by: hi).read());
-                s.ptr.offset(by: hi).write(temp);
+                let loPtr = s.ptr.offset(by: lo);
+                let hiPtr = s.ptr.offset(by: hi);
+                let temp = loPtr.take();
+                loPtr.write(hiPtr.take());
+                hiPtr.write(temp);
                 lo = lo + 1;
                 hi = hi - 1
             }
@@ -1438,17 +1449,19 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// // evens = [2, 4]
     /// // odds  = [1, 3, 5]
     /// ```
-    public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]) {
+    public func partitioned(by predicate: (T) -> Bool) -> (Array[T], Array[T]) where T: Copyable {
         var matching = Array[T]();
         var notMatching = Array[T]();
         let myLen = self.len();
         let myPtr = self.ptr();
         for i in 0..<myLen {
-            let element = myPtr.offset(by: i).read();
-            if predicate(element) {
-                matching.append( element)
+            let matches = myPtr.offset(by: i).with { (element) in
+                predicate(element)
+            };
+            if matches {
+                matching.append(myPtr.offset(by: i).read())
             } else {
-                notMatching.append( element)
+                notMatching.append(myPtr.offset(by: i).read())
             }
         }
         (matching, notMatching)
@@ -1953,4 +1966,3 @@ extend Array[T] where T: Formattable {
 /// ```
 @builtin(.ArrayTypeOperator)
 public type ArrayTypeOperator[T] = Array[T];
-

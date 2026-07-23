@@ -121,7 +121,7 @@ struct Point {
 }
 
 extend Point: Formattable {
-    public func format(mutating into writer: StringBuilder, options: FormatOptions) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions) {
         writer.append("(\(self.x), \(self.y))");
     }
 }

@@ -14,7 +14,7 @@ import std.core.(
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, UInt64, Float32)
 import std.collections.Array
 
@@ -1107,7 +1107,7 @@ public struct Float64:
     /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
     /// (3.14).format(.{sign: .Always});                    // "+3.14"
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;
         var precisionProvided = false;
         if let .Some(p) = options.precision {

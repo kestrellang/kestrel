@@ -25,5 +25,5 @@ public protocol Coalesce[Default] {
 
     /// Returns the contained value, or the result of `default()` if absent.
     @builtin(.CoalesceOperatorMethod)
-    func coalesce(default: () -> Default) -> Output
+    consuming func coalesce(default: () -> Default) -> Output
 }

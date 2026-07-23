@@ -3,8 +3,9 @@
 module std.memory
 
 import std.result.(Optional)
-import std.memory.(Layout, RawPointer)
-import std.ffi.(malloc, free, realloc)
+import std.memory.(Layout, RawPointer, Pointer)
+import std.ffi.(malloc, free, realloc, posixMemalign, memcpy)
+import std.numeric.(Int64)
 
 /// Protocol for raw-memory allocators.
 ///
@@ -58,15 +59,33 @@ public struct SystemAllocator: Allocator {
     /// Builds a stateless system allocator. No heap interaction occurs here.
     public init() {}
 
-    /// Calls `malloc(layout.size)`. Alignment beyond `malloc`'s natural
-    /// alignment (typically 16) is **not** honoured — types that need
-    /// larger alignment should use a different allocator.
+    /// Allocates storage with the requested alignment. Naturally aligned
+    /// layouts use `malloc`; over-aligned layouts use `posix_memalign`.
     public mutating func allocate(layout: Layout) -> RawPointer? {
-        let ptr = malloc(layout.size);
-        if ptr.isNull {
-            .None
+        if layout.size < 0 or not layout.alignment.isPowerOfTwo {
+            return .None
+        };
+
+        let naturalAlignment = Layout.of[RawPointer]().alignment;
+        if layout.alignment <= naturalAlignment {
+            let ptr = malloc(layout.size);
+            if ptr.isNull {
+                .None
+            } else {
+                .Some(ptr)
+            }
         } else {
-            .Some(ptr)
+            var ptr = RawPointer.nullPointer();
+            let status = posixMemalign(
+                Pointer(to: ptr).asRaw(),
+                layout.alignment,
+                layout.size
+            );
+            if status != 0 or ptr.isNull {
+                .None
+            } else {
+                .Some(ptr)
+            }
         }
     }
 
@@ -76,14 +95,39 @@ public struct SystemAllocator: Allocator {
         free(ptr)
     }
 
-    /// Calls `realloc(ptr, newLayout.size)`. As with `allocate`, only
-    /// `malloc`-natural alignment is guaranteed.
+    /// Resizes while preserving the requested alignment. When either layout
+    /// is over-aligned, this allocates a new block, copies the common prefix,
+    /// and frees the old block only after allocation succeeds.
     public mutating func reallocate(ptr: RawPointer, oldLayout: Layout, newLayout: Layout) -> RawPointer? {
-        let newPtr = realloc(ptr, newLayout.size);
-        if newPtr.isNull {
-            .None
+        if oldLayout.size < 0 or not oldLayout.alignment.isPowerOfTwo or
+            newLayout.size < 0 or not newLayout.alignment.isPowerOfTwo {
+            return .None
+        };
+
+        let naturalAlignment = Layout.of[RawPointer]().alignment;
+        if oldLayout.alignment <= naturalAlignment and newLayout.alignment <= naturalAlignment {
+            let newPtr = realloc(ptr, newLayout.size);
+            if newPtr.isNull {
+                .None
+            } else {
+                .Some(newPtr)
+            }
         } else {
-            .Some(newPtr)
+            match self.allocate(newLayout) {
+                .Some(newPtr) => {
+                    let copySize: Int64 = if oldLayout.size < newLayout.size {
+                        oldLayout.size
+                    } else {
+                        newLayout.size
+                    };
+                    if copySize > 0 {
+                        memcpy(newPtr, ptr, copySize);
+                    };
+                    free(ptr);
+                    .Some(newPtr)
+                },
+                .None => .None
+            }
         }
     }
 }

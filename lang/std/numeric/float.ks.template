@@ -14,7 +14,7 @@ import std.core.(
     Addable, Subtractable, Multipliable, Divisible, Negatable,
     ExpressibleByFloatLiteral, ExpressibleByIntLiteral, Convertible, Defaultable
 )
-import std.text.(String, StringBuilder, Formattable, FormatOptions, _writePadded)
+import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions, _writePadded)
 import std.numeric.(Int64, {{UINT_TYPE}}, {{OTHER_FLOAT}})
 import std.collections.Array
 

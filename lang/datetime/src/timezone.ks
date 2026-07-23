@@ -134,7 +134,7 @@ public struct TimeZone: Equatable, Hashable, Formattable {
         self.id.hash(into: hasher);
     }
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(self.name);
     }
 }

@@ -3,7 +3,7 @@
 module std.collections
 
 import std.core.(Bool, Equatable, Cloneable, Hashable, Hasher, Defaultable, Addable, fatalError)
-import std.text.(Formattable, FormatOptions, String, StringBuilder)
+import std.text.(Formattable, Formatter, FormatOptions, String, StringBuilder)
 import std.numeric.(Int64, UInt64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, SystemAllocator, CowBox)
@@ -1831,7 +1831,7 @@ extend Dictionary[K, V, H]: Formattable where K: Hashable, K: Formattable, V: Fo
     /// Dictionary[String, Int64]().format();  // "{}"
     /// "\{["a": 1, "b": 2]}";      // "{a: 1, b: 2}"  via interpolation
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         writer.append(char: '{');
         var first = true;
         let myCap = self.capacity;

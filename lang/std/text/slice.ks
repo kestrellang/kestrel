@@ -2,12 +2,12 @@
 
 module std.text
 
-import std.core.(Bool, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
+import std.core.(Bool, Equal, NotEqual, Equatable, Comparable, Ordering, Cloneable, Hashable, Hasher, fatalError)
 import std.numeric.(Int64, UInt8)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, RcBox, ArraySlice)
 import std.iter.(Iterable)
-import std.text.(Formattable, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
+import std.text.(Formattable, Formatter, FormatOptions, Char, Grapheme, decodeUtf8, encodeUtf8, String, StringBuilder, StringStorage, CharsIterator, ByteIndex, CharIndex, GraphemeIndex, Str, _bytesEqual, _bytesCompare)
 
 // ============================================================================
 // STRING INDEX PROTOCOL
@@ -124,13 +124,17 @@ extend CharIndex {
 /// Shared ownership via `RcBox`. The source string's buffer stays
 /// alive as long as any slice references it. Call `.toOwned()` to
 /// copy just the slice's bytes into an independent `String`.
-public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Formattable, Iterable {
+public struct StringSlice: Str, Equatable, Equal[StringSlice], Equal[String], NotEqual[StringSlice], NotEqual[String], Comparable, Hashable, Cloneable, Formattable, Iterable {
     type Item = Char
     type TargetIterator = CharsIterator
+    type Equal[StringSlice].Output = Bool
+    type Equal[String].Output = Bool
+    type NotEqual[StringSlice].Output = Bool
+    type NotEqual[String].Output = Bool
 
     var source: RcBox[StringStorage]
-    public var start: Int64
-    public var end: Int64
+    public let start: Int64
+    public let end: Int64
 
     /// @name From Source
     /// Creates a slice covering `[start, end)` in the given storage.
@@ -190,7 +194,7 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
 
     // -- Protocol conformances -----------------------------------------------
 
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         self.toOwned().format(into: writer, options)
     }
 
@@ -204,6 +208,22 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
             b: other._rawPtr().offset(by: other.start),
             n: myLen
         )
+    }
+
+    public func equal(to other: StringSlice) -> Bool {
+        self.isEqual(to: other)
+    }
+
+    public func notEqual(to other: StringSlice) -> Bool {
+        if self.isEqual(to: other) { false } else { true }
+    }
+
+    public func equal(to other: String) -> Bool {
+        self.isEqual(to: other.asSlice())
+    }
+
+    public func notEqual(to other: String) -> Bool {
+        if self.isEqual(to: other.asSlice()) { false } else { true }
     }
 
     public func compare(other: StringSlice) -> Ordering {
@@ -227,4 +247,3 @@ public struct StringSlice: Str, Equatable, Comparable, Hashable, Cloneable, Form
         StringSlice(source: self.source.clone(), start: self.start, end: self.end)
     }
 }
-

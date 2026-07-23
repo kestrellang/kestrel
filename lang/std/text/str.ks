@@ -9,7 +9,7 @@ import std.memory.(Pointer, RawPointer, ArraySlice)
 import std.collections.(Array)
 import std.iter.(Iterable)
 import std.ffi.(memmem)
-import std.text.(Formattable, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
+import std.text.(Formattable, Formatter, FormatOptions, Char, decodeUtf8, String, StringBuilder, StringSlice, CharsIterator, BytesView, CharsView, GraphemesView, LinesView, ByteIndex, CharIndex, GraphemeIndex, LineIndex, SplitView, SplitWhereView, _bytesEqual)
 import std.text.unicode as unicode
 
 // ============================================================================
@@ -205,7 +205,7 @@ extend Str {
     /// ```
     /// "hi".format(FormatOptions(width: 5));  // "hi   "
     /// ```
-    public func format(mutating into writer: StringBuilder, options: FormatOptions = FormatOptions.default()) {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         self.toOwned().format(into: writer, options)
     }
 
@@ -219,7 +219,7 @@ extend Str {
     /// "hello world".contains(substring: "world");  // true
     /// "hello world".contains(substring: "xyz");    // false
     /// ```
-    public func contains(substring: String) -> Bool {
+    public func contains(substring: some Str) -> Bool {
         self.firstIndex(of: substring).isSome()
     }
 
@@ -244,7 +244,7 @@ extend Str {
     /// "hello".starts(with: "hel");  // true
     /// "hello".starts(with: "xyz");  // false
     /// ```
-    public func starts(with prefix: String) -> Bool {
+    public func starts(with prefix: some Str) -> Bool {
         let slice = self.asSlice();
         let ps = prefix.asSlice();
         let prefixLen = (ps.end - ps.start);
@@ -263,7 +263,7 @@ extend Str {
     /// "hello".ends(with: "llo");  // true
     /// "hello".ends(with: "xyz");  // false
     /// ```
-    public func ends(with suffix: String) -> Bool {
+    public func ends(with suffix: some Str) -> Bool {
         let slice = self.asSlice();
         let ss = suffix.asSlice();
         let suffixLen = (ss.end - ss.start);
@@ -284,7 +284,7 @@ extend Str {
     /// "hello world".firstIndex(of: "world");  // Some(ByteIndex(6))
     /// "hello world".firstIndex(of: "xyz");    // None
     /// ```
-    public func firstIndex(of substring: String) -> ByteIndex? {
+    public func firstIndex(of substring: some Str) -> ByteIndex? {
         let slice = self.asSlice();
         let sub = substring.asSlice();
         let subLen = (sub.end - sub.start);
@@ -316,7 +316,7 @@ extend Str {
     /// "abcabc".lastIndex(of: "abc");  // Some(ByteIndex(3))
     /// "abcabc".lastIndex(of: "xyz");  // None
     /// ```
-    public func lastIndex(of substring: String) -> ByteIndex? {
+    public func lastIndex(of substring: some Str) -> ByteIndex? {
         let slice = self.asSlice();
         let sub = substring.asSlice();
         let subLen = (sub.end - sub.start);
@@ -362,8 +362,8 @@ extend Str {
     /// "a,b,c".split(",").collect();   // ["a", "b", "c"]
     /// "a,,b".split(",").count;        // 3 (empty segment preserved)
     /// ```
-    public func split(separator: String) -> SplitView {
-        SplitView(slice: self.asSlice(), separator: separator)
+    public func split(separator: some Str) -> SplitView {
+        SplitView(slice: self.asSlice(), separator: separator.asSlice())
     }
 
     /// Returns a lazy view that splits at every code point matching
@@ -818,7 +818,7 @@ extend Str {
     /// "Hello".equalsCaseInsensitive("HELLO");  // true
     /// "Hello".equalsCaseInsensitive("World");  // false
     /// ```
-    public func equalsCaseInsensitive(other: String) -> Bool {
+    public func equalsCaseInsensitive(other: some Str) -> Bool {
         self.caseFolded().isEqual(to: other.caseFolded())
     }
 
@@ -893,7 +893,7 @@ extend Str {
     /// "hello world".replaced("o", with: "0");    // "hell0 w0rld"
     /// "abcabc".replaced("ab", with: "ABCD");     // "ABCDcABCDc"
     /// ```
-    public func replaced(pattern: String, with replacement: String) -> String {
+    public func replaced(pattern: some Str, with replacement: some Str) -> String {
         let patternSlice = pattern.asSlice();
         let patternLen = (patternSlice.end - patternSlice.start);
         if patternLen == 0 {
