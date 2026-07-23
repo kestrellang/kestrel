@@ -176,14 +176,16 @@ public func eprintln(value: some Formattable) -> Result[(), IoError] {
 
 /// Reads a single line from stdin, stripping the trailing `\n` (and
 /// `\r` if present, for tolerance with Windows-style line endings).
-/// Returns an empty string on immediate EOF.
 ///
-/// TODO: the trailing-bytes are collected but the returned `String` is
-/// currently empty — see the comment in the body about
-/// `String.fromUtf8Bytes`.
-public func readLine() -> Result[String, IoError] {
+/// Distinguishes EOF from a blank line, following the
+/// `readByte() -> Result[Optional[UInt8], IoError]` pattern:
+/// `.Ok(.None)` means EOF with no bytes read, while a bare newline
+/// yields `.Ok(.Some(""))`. Invalid UTF-8 is decoded lossily
+/// (invalid sequences become U+FFFD).
+public func readLine() -> Result[Optional[String], IoError] {
     var input = stdin();
     var bytes = Array[UInt8]();
+    var atEof = false;
 
     loop {
         var buf = Array[UInt8](capacity: 1);
@@ -191,6 +193,7 @@ public func readLine() -> Result[String, IoError] {
         let slice = ArraySlice(pointer: buf.asPointer(), count: 1);
         let n = try input.read(into: slice);
         if n == 0 {
+            atEof = true;
             break  // EOF
         }
         let b = buf(unchecked: 0);
@@ -198,6 +201,11 @@ public func readLine() -> Result[String, IoError] {
             break
         }
         bytes.append(b)
+    }
+
+    // EOF before any bytes: no line at all.
+    if atEof and bytes.count == 0 {
+        return .Ok(.None)
     }
 
     // Strip trailing \r if present (Windows line endings)
@@ -209,23 +217,23 @@ public func readLine() -> Result[String, IoError] {
         }
     }
 
-    // Build string from bytes (inefficient but works)
-    // TODO: Add proper String.fromUtf8Bytes()
-    var result = "";
-    .Ok(result)
+    .Ok(.Some(String(fromUtf8Lossy: bytes)))
 }
 
 /// Writes `message` to stdout, flushes, then reads a line from stdin.
 /// The flush matters for line-buffered terminals — without it the
 /// prompt would appear after the user's keystrokes.
 ///
+/// Returns `.Ok(.None)` on immediate EOF, like `readLine`.
+///
 /// # Examples
 ///
 /// ```
-/// let name = try prompt("Name: ");
-/// try println("Hello, " + name);
+/// if let .Some(name) = try prompt("Name: ") {
+///     try println("Hello, " + name);
+/// }
 /// ```
-public func prompt(message: String) -> Result[String, IoError] {
+public func prompt(message: String) -> Result[Optional[String], IoError] {
     var out = stdout();
     try writeString(out, message);
     try out.flush();

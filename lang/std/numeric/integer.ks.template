@@ -483,8 +483,11 @@ public struct {{TYPE_NAME}}:
     // CLAMPING
     // ========================================================================
 
-    /// Clamps `self` into `[min, max]`. Caller is responsible for ensuring
-    /// `min <= max`; otherwise the result is undefined.
+    /// Clamps `self` into `[min, max]`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"clamp: min must be <= max"` when `min > max`.
     ///
     /// # Examples
     ///
@@ -494,6 +497,9 @@ public struct {{TYPE_NAME}}:
     /// (15).clamp(0, 10);   // 10
     /// ```
     public func clamp(min: {{TYPE_NAME}}, max: {{TYPE_NAME}}) -> {{TYPE_NAME}} {
+        if min > max {
+            fatalError("clamp: min must be <= max")
+        }
         if self < min { min }
         else if self > max { max }
         else { self }
@@ -515,13 +521,15 @@ public struct {{TYPE_NAME}}:
     /// Bitwise NOT — flips all bits. For signed types this is `-self - 1`.
     public consuming func bitwiseNot() -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_not(self.raw)) }
 
-    /// Left shift by `count`. Behavior is undefined when `count >= bitWidth`
-    /// — pre-mask the count if you can't guarantee the bound.
+    /// Left shift by `count`. The shift count is masked to
+    /// `count % bitWidth` (matching hardware semantics), so
+    /// `count >= bitWidth` wraps around rather than zeroing the value —
+    /// e.g. shifting a `{{TYPE_NAME}}` left by `bitWidth` is a no-op.
     public consuming func shiftLeft(consuming by count: Int64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_shl(self.raw, {{SHIFT_CAST}})) }
 
     /// Right shift by `count`. Arithmetic (sign-extending) for signed types,
-    /// logical (zero-filling) for unsigned. Same `count` precondition as
-    /// `shiftLeft`.
+    /// logical (zero-filling) for unsigned. The count is masked to
+    /// `count % bitWidth`, same as `shiftLeft`.
     public consuming func shiftRight(consuming by count: Int64) -> {{TYPE_NAME}} { {{TYPE_NAME}}(raw: lang.{{LANG_TYPE}}_{{SIGNED_PREFIX}}shr(self.raw, {{SHIFT_CAST}})) }
 
     /// Rotates bits left by `count`, modulo `bitWidth`. Bits shifted past the

@@ -71,8 +71,8 @@ public struct Platform: Cloneable {
 
 /// Detects the current platform from uname.
 public func detectPlatform() -> Result[Platform, JessupError] {
-    let rawOs = captureOutput("uname -s");
-    let rawArch = captureOutput("uname -m");
+    let rawOs = captureOutput("uname -s").unwrap(or: String());
+    let rawArch = captureOutput("uname -m").unwrap(or: String());
 
     let os = trimWhitespace(rawOs);
     let arch = trimWhitespace(rawArch);

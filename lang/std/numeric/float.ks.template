@@ -30,7 +30,7 @@ import std.collections.Array
 /// ```
 /// let pi = Float64.pi;
 /// let area = pi * radius * radius;
-/// let s = area.format(.{precision: 2});  // "314.16"
+/// let s = area.formatted(.{precision: 2});  // "314.16"
 /// ```
 ///
 /// ```

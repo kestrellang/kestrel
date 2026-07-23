@@ -140,11 +140,11 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// # Examples
     ///
     /// ```
-    /// Some(42).isSomeAnd { it > 0 };    // true
-    /// Some(-1).isSomeAnd { it > 0 };    // false
-    /// None.isSomeAnd { it > 0 };        // false
+    /// Some(42).isSomeAnd(where: { it > 0 });    // true
+    /// Some(-1).isSomeAnd(where: { it > 0 });    // false
+    /// None.isSomeAnd(where: { it > 0 });        // false
     /// ```
-    public func isSomeAnd(predicate: (T) -> Bool) -> Bool {
+    public func isSomeAnd(where predicate: (T) -> Bool) -> Bool {
         match self {
             .Some(value) => predicate(value),
             .None => false
@@ -292,11 +292,11 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// # Examples
     ///
     /// ```
-    /// Some(4).filter { it % 2 == 0 };   // Some(4)
-    /// Some(3).filter { it % 2 == 0 };   // None
-    /// None.filter { it % 2 == 0 };      // None
+    /// Some(4).filter(where: { it % 2 == 0 });   // Some(4)
+    /// Some(3).filter(where: { it % 2 == 0 });   // None
+    /// None.filter(where: { it % 2 == 0 });      // None
     /// ```
-    public consuming func filter(predicate: (T) -> Bool) -> Optional[T] {
+    public consuming func filter(where predicate: (T) -> Bool) -> Optional[T] {
         match self {
             .Some(value) => {
                 if predicate(value) {
@@ -780,7 +780,7 @@ extend Optional[T]: ExpressibleByNullLiteral {
 ///
 /// ```
 /// let value = optionalInt ?? 0;
-/// let name  = user?.name   ?? "Anonymous";
+/// let name  = user.map { it.name } ?? "Anonymous";
 /// ```
 extend Optional[T]: Coalesce[T] {
     type Coalesce.Output = T

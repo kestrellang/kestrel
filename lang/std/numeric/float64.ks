@@ -30,7 +30,7 @@ import std.collections.Array
 /// ```
 /// let pi = Float64.pi;
 /// let area = pi * radius * radius;
-/// let s = area.format(.{precision: 2});  // "314.16"
+/// let s = area.formatted(.{precision: 2});  // "314.16"
 /// ```
 ///
 /// ```
@@ -1100,12 +1100,12 @@ public struct Float64:
     /// # Examples
     ///
     /// ```
-    /// (3.14159).format();                                          // "3.14159"
-    /// (3.14159).format(.{precision: 2});                  // "3.14"
-    /// (1234.5).format(.{floatStyle: .Scientific});        // "1.2345e3"
-    /// (0.756).format(.{floatStyle: .Percent});            // "75.6%"
-    /// (3.14).format(.{width: 8, fill: '0'});              // "00003.14"
-    /// (3.14).format(.{sign: .Always});                    // "+3.14"
+    /// (3.14159).formatted();                                          // "3.14159"
+    /// (3.14159).formatted(.{precision: 2});                  // "3.14"
+    /// (1234.5).formatted(.{floatStyle: .Scientific});        // "1.2345e3"
+    /// (0.756).formatted(.{floatStyle: .Percent});            // "75.6%"
+    /// (3.14).formatted(.{width: 8, fill: '0'});              // "00003.14"
+    /// (3.14).formatted(.{sign: .Always});                    // "+3.14"
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         var precision: Int64 = 6;

@@ -123,7 +123,7 @@ public func writeConfig(config config: JessupConfig) -> Result[(), JessupError] 
                     var mkdirCmd = String();
                     mkdirCmd.append("mkdir -p ");
                     mkdirCmd.append(home);
-                     spawn(mkdirCmd);
+                     spawn(mkdirCmd).unwrap(or: -1);
                 }
             }
 
@@ -157,12 +157,12 @@ public func ensureDirectories() -> Result[(), JessupError] {
             mkBinCmd.append("mkdir -p ");
             mkBinCmd.append(home);
             mkBinCmd.append("/bin");
-             spawn(mkBinCmd);
+             spawn(mkBinCmd).unwrap(or: -1);
             var mkTcCmd = String();
             mkTcCmd.append("mkdir -p ");
             mkTcCmd.append(home);
             mkTcCmd.append("/toolchains");
-             spawn(mkTcCmd);
+             spawn(mkTcCmd).unwrap(or: -1);
             .Ok(())
         }
     }

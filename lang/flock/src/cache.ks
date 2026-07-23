@@ -76,7 +76,7 @@ public func ensureCacheDir(org org: String, pkg pkg: String, version version: Ve
 /// Downloads a file from a URL to a local path using curl.
 public func downloadFile(url url: String, outputPath outputPath: String) -> Result[(), FlockError] {
     var cmd = String(); cmd.append("curl -sL -o "); cmd.append(outputPath); cmd.append(" "); cmd.append(url);
-    let exitCode = spawn(cmd);
+    let exitCode = spawn(cmd).unwrap(or: -1);
     if exitCode != 0 {
         var msg = String(); msg.append("download failed: "); msg.append(url);
         return .Err(FlockError.RegistryError(msg))
@@ -87,7 +87,7 @@ public func downloadFile(url url: String, outputPath outputPath: String) -> Resu
 /// Extracts a .tar.gz archive into the target directory.
 public func extractArchive(archivePath archivePath: String, targetDir targetDir: String) -> Result[(), FlockError] {
     var cmd = String(); cmd.append("tar xzf "); cmd.append(archivePath); cmd.append(" -C "); cmd.append(targetDir);
-    let exitCode = spawn(cmd);
+    let exitCode = spawn(cmd).unwrap(or: -1);
     if exitCode != 0 {
         var msg = String(); msg.append("failed to extract archive: "); msg.append(archivePath);
         return .Err(FlockError.CacheError(msg))

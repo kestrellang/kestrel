@@ -9,13 +9,13 @@ module Test
             let none: std.result.Optional[std.numeric.Int64] = .None;
 
             // Test isSomeAnd - Some with true predicate
-            if someOpt.isSomeAnd({ (x) in x > 0 }) == false { return 1 }
+            if someOpt.isSomeAnd(where: { (x) in x > 0 }) == false { return 1 }
 
             // Test isSomeAnd - Some with false predicate
-            if someOpt.isSomeAnd({ (x) in x < 0 }) { return 2 }
+            if someOpt.isSomeAnd(where: { (x) in x < 0 }) { return 2 }
 
             // Test isSomeAnd - None always false
-            if none.isSomeAnd({ (x) in x > 0 }) { return 3 }
+            if none.isSomeAnd(where: { (x) in x > 0 }) { return 3 }
 
             // Test expect on Some (should not panic, returns value)
             if someOpt.expect("should have value") != 42 { return 4 }

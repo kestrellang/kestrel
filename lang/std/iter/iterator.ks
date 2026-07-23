@@ -446,8 +446,11 @@ extend Iterator {
         InspectIterator(inner: self, inspector: inspector)
     }
 
-    /// Yields every `n`-th element, starting at the first. `n == 0` is
-    /// undefined (the adapter will spin forever).
+    /// Yields every `n`-th element, starting at the first.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Iterator.stepBy: step must be >= 1"` when `n < 1`.
     ///
     /// # Examples
     ///

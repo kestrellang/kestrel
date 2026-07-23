@@ -30,15 +30,15 @@ module Test
             // Test isEmpty after inserts
             if s.isEmpty { return 10 }
 
-            // Test remove() - returns true for existing element
+            // Test remove() - returns the stored element when present
             let removed1 = s.remove(20);
-            if removed1 == false { return 11 }
+            if removed1 != .Some(20) { return 11 }
             if s.count != 2 { return 12 }
             if s.contains(20) { return 13 }
 
-            // Test remove() - returns false for missing element
+            // Test remove() - returns .None for missing element
             let removed2 = s.remove(999);
-            if removed2 { return 14 }
+            if removed2.isSome() { return 14 }
 
             // Test clear()
             s.clear();

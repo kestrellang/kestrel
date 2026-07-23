@@ -9,6 +9,8 @@ import std.text.(String)
 import std.core.(Bool)
 import std.ffi.(CString)
 import std.ffi.(malloc, free)
+import std.result.(Result)
+import std.io.error.(IoError)
 
 // ============================================================================
 // RAW FFI BINDINGS
@@ -42,19 +44,29 @@ func libc_exit(code: Int32)
 /// the parent process — they go straight to the terminal. For
 /// captured output, use `captureOutput`.
 ///
+/// # Errors
+///
+/// Returns `Err(IoError)` if the shell child could not be created
+/// (`system` returned `-1`, e.g. fork failure); `errno` is captured.
+/// A command that runs and exits non-zero is still `Ok` — the exit
+/// code is the payload.
+///
 /// # Examples
 ///
 /// ```
-/// let code = spawn("ls -la");
+/// let code = try spawn("ls -la");
 /// if code != 0 {
 ///     print("ls failed");
 /// }
 /// ```
-public func spawn(command: String) -> Int32 {
+public func spawn(command: String) -> Result[Int32, IoError] {
     let ccmd = command.toCString();
     let rawStatus = libc_system(ccmd.raw.asRaw());
     ccmd.free();
-    rawStatus >> 8
+    if rawStatus < 0 {
+        return .Err(IoError.last())
+    }
+    .Ok(rawStatus >> 8)
 }
 
 /// Runs `command` through the system shell and returns its captured stdout.
@@ -62,16 +74,20 @@ public func spawn(command: String) -> Int32 {
 /// Reads from `popen(command, "r")` 1 KiB at a time until EOF, then
 /// trims a single run of trailing ASCII whitespace (space, tab, LF,
 /// CR) so callers don't have to chomp the newline themselves. Stderr
-/// is **not** captured — it goes to the parent's stderr. Returns the
-/// empty string if `popen` fails.
+/// is **not** captured — it goes to the parent's stderr.
+///
+/// # Errors
+///
+/// Returns `Err(IoError)` if `popen` fails (fork/pipe failure);
+/// `errno` is captured. A command producing no output is `Ok("")`.
 ///
 /// # Examples
 ///
 /// ```
-/// let branch = captureOutput("git rev-parse --abbrev-ref HEAD");
+/// let branch = try captureOutput("git rev-parse --abbrev-ref HEAD");
 /// // "main"
 /// ```
-public func captureOutput(command: String) -> String {
+public func captureOutput(command: String) -> Result[String, IoError] {
     let ccmd = command.toCString();
     let modeStr = "r".toCString();
     let stream = libc_popen(ccmd.raw.asRaw(), modeStr.raw.asRaw());
@@ -79,7 +95,7 @@ public func captureOutput(command: String) -> String {
     modeStr.free();
 
     if stream.isNull {
-        return String()
+        return .Err(IoError.last())
     }
 
     var output = String();
@@ -98,7 +114,7 @@ public func captureOutput(command: String) -> String {
     free(buf);
      libc_pclose(stream);
 
-    trimEnd(output)
+    .Ok(trimEnd(output))
 }
 
 /// Terminates the calling process immediately with the given exit code.

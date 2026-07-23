@@ -203,7 +203,7 @@ extend Str {
     /// # Examples
     ///
     /// ```
-    /// "hi".format(FormatOptions(width: 5));  // "hi   "
+    /// "hi".formatted(FormatOptions(width: 5));  // "hi   "
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         self.toOwned().format(into: writer, options)

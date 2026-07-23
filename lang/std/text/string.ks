@@ -870,11 +870,11 @@ public struct String: Str, Iterable, Equatable, Equal[String], Equal[StringSlice
     /// var opts = FormatOptions();
     /// opts.width = .Some(10);
     /// opts.alignment = .Left;
-    /// "test".format(opts);   // "test      "
+    /// "test".formatted(opts);   // "test      "
     /// opts.alignment = .Right;
-    /// "test".format(opts);   // "      test"
+    /// "test".formatted(opts);   // "      test"
     /// opts.alignment = .Center;
-    /// "test".format(opts);   // "   test   "
+    /// "test".formatted(opts);   // "   test   "
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         _writePadded(into: writer, self, options)

@@ -26,9 +26,9 @@ import std.collections.(Array)
 /// var opts = FormatOptions();
 /// opts.width = .Some(8);
 /// opts.alignment = .Right;
-/// "ab".format(options: opts);  // "      ab"
+/// "ab".formatted(opts);  // "      ab"
 /// opts.alignment = .Center;
-/// "ab".format(options: opts);  // "   ab   "
+/// "ab".formatted(opts);  // "   ab   "
 /// ```
 public enum Alignment: Equatable, Matchable {
     /// Pad on the right; the value sits flush against the left edge of the field.
@@ -86,10 +86,10 @@ public enum Alignment: Equatable, Matchable {
 /// ```
 /// var opts = FormatOptions();
 /// opts.sign = .Always;
-/// (3).format(options: opts);   // "+3"
-/// (-3).format(options: opts);  // "-3"
+/// (3).formatted(opts);   // "+3"
+/// (-3).formatted(opts);  // "-3"
 /// opts.sign = .Space;
-/// (3).format(options: opts);   // " 3"
+/// (3).formatted(opts);   // " 3"
 /// ```
 public enum Sign: Equatable, Matchable {
     /// Show `-` for negative values, no prefix for zero or positive (default).
@@ -145,11 +145,11 @@ public enum Sign: Equatable, Matchable {
 /// var opts = FormatOptions();
 /// opts.precision = .Some(2);
 /// opts.floatStyle = .Fixed;
-/// (3.14159).format(options: opts);       // "3.14"
+/// (3.14159).formatted(opts);       // "3.14"
 /// opts.floatStyle = .Scientific;
-/// (3.14159).format(options: opts);       // "3.14e0"
+/// (3.14159).formatted(opts);       // "3.14e0"
 /// opts.floatStyle = .Percent;
-/// (0.5).format(options: opts);           // "50.00%"
+/// (0.5).formatted(opts);           // "50.00%"
 /// ```
 public enum FloatStyle: Equatable, Matchable {
     /// Shortest round-trippable representation; switches to scientific for very large or very small magnitudes.
@@ -277,7 +277,7 @@ public struct FormatOptions: Equatable {
     ///
     /// ```
     /// let opts = FormatOptions.default();
-    /// (42).format(options: opts);  // "42"
+    /// (42).formatted(opts);  // "42"
     /// ```
     public static func default() -> FormatOptions {
         FormatOptions()
@@ -296,7 +296,7 @@ public struct FormatOptions: Equatable {
     /// var opts = FormatOptions();
     /// opts.width = .Some(6);
     /// opts.alignment = .Right;
-    /// "hi".format(options: opts);  // "    hi"
+    /// "hi".formatted(opts);  // "    hi"
     /// ```
     public init() {
         self.width = .None;
@@ -378,7 +378,7 @@ public protocol Formattable {
     /// Writes this value's formatted representation directly into `writer`.
     ///
     /// This is the kernel method — all formatting ultimately bottoms out
-    /// here. The convenience `format(options:) -> String` in the protocol
+    /// here. The convenience `formatted(options:) -> String` in the protocol
     /// extension calls this under the hood.
     @builtin(.FormattableFormatInto)
     func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default())

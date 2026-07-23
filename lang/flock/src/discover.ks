@@ -48,7 +48,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     // src/bin/*.ks -> one bin each (direct children only).
     let binDir = joinPath(base: srcDir, rel: "bin");
     if isDirectory(binDir) {
-        let entries = listDir(binDir);
+        let entries = listDir(binDir).unwrap(or: Array[String]());
         var i: Int64 = 0;
         while i < entries.count {
             let entry = entries(unchecked: i);
@@ -123,7 +123,7 @@ func declsContainName(bins bins: Array[BinDecl], name name: String) -> Bool {
 /// Skips hidden directories (starting with ".") and "target" directories.
 public func discoverSources(rootDir rootDir: String) -> Array[String] {
     var result = Array[String]();
-    let entries = listDir(rootDir);
+    let entries = listDir(rootDir).unwrap(or: Array[String]());
     var i: Int64 = 0;
     while i < entries.count {
         let entry = entries(unchecked: i);

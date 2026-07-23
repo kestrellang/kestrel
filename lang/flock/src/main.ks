@@ -194,7 +194,7 @@ func handleCheck() -> lang.i32 {
 }
 
 func handleInit(lib lib: Bool) -> lang.i32 {
-    let cwd = getcwd();
+    let cwd = getcwd().unwrap(or: String());
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if fileExists( manifestPath) {
@@ -220,7 +220,7 @@ func handleInit(lib lib: Bool) -> lang.i32 {
     let srcDir = joinPath(base: cwd, rel: "src");
     if not isDirectory( srcDir) {
         var mkdirCmd = String(); mkdirCmd.append("mkdir -p "); mkdirCmd.append(srcDir.clone());
-         spawn(mkdirCmd);
+         spawn(mkdirCmd).unwrap(or: -1);
          println("Created src/");
     }
 
@@ -273,7 +273,7 @@ func sanitizeModuleName(name name: String) -> String {
 }
 
 func handlePublish() -> lang.i32 {
-    let cwd = getcwd();
+    let cwd = getcwd().unwrap(or: String());
     let manifestPath = joinPath(base: cwd, rel: "flock.toml");
 
     if not fileExists(manifestPath) {
@@ -353,7 +353,7 @@ func handlePublish() -> lang.i32 {
     // Create archive
     var archivePath = String(); archivePath.append("/tmp/flock-publish-"); archivePath.append(name); archivePath.append("-"); archivePath.append(version); archivePath.append(".tar.gz");
     var tarCmd = String(); tarCmd.append("tar czf "); tarCmd.append(archivePath); tarCmd.append(" -C "); tarCmd.append(quoteArg(cwd)); tarCmd.append(" .");
-    let tarExit = spawn(tarCmd);
+    let tarExit = spawn(tarCmd).unwrap(or: -1);
     if tarExit != 0 {
          eprintln("failed to create archive");
         return 1
@@ -363,7 +363,7 @@ func handlePublish() -> lang.i32 {
     var docsDir = String(); docsDir.append("/tmp/flock-docs-"); docsDir.append(name); docsDir.append("-"); docsDir.append(version);
     let sourceDir = joinPath(base: cwd, rel: manifest.package.source);
     var docCmd = String(); docCmd.append("kestrel-doc --src "); docCmd.append(quoteArg(sourceDir)); docCmd.append(" --out "); docCmd.append(quoteArg(docsDir)); docCmd.append(" --bundle --format json");
-    let docExit = spawn(docCmd);
+    let docExit = spawn(docCmd).unwrap(or: -1);
     var hasDocs = false;
     if docExit == 0 {
         var docsPath = String(); docsPath.append(docsDir); docsPath.append("/docs.json");
@@ -380,7 +380,7 @@ func handlePublish() -> lang.i32 {
     var pubMsg = String(); pubMsg.append("Publishing "); pubMsg.append(org); pubMsg.append("/"); pubMsg.append(name); pubMsg.append("@"); pubMsg.append(version); pubMsg.append(" to "); pubMsg.append(regUrl); pubMsg.append("...");
      println(pubMsg);
 
-    let output = captureOutput(curlCmd);
+    let output = captureOutput(curlCmd).unwrap(or: String());
      println(output);
 
     // Upload docs if generated
@@ -389,26 +389,26 @@ func handlePublish() -> lang.i32 {
         var docsUrl = String(); docsUrl.append(regUrl); docsUrl.append("/api/v1/packages/"); docsUrl.append(org); docsUrl.append("/"); docsUrl.append(name); docsUrl.append("/"); docsUrl.append(version); docsUrl.append("/docs");
         var docsCurlCmd = String(); docsCurlCmd.append("curl -s -X PUT "); docsCurlCmd.append(quoteArg(docsUrl)); docsCurlCmd.append(" -H \"Authorization: Bearer "); docsCurlCmd.append(token); docsCurlCmd.append("\" -H \"Content-Type: application/json\" --data-binary @"); docsCurlCmd.append(docsPath);
          println("Uploading documentation...");
-        let docsOutput = captureOutput(docsCurlCmd);
+        let docsOutput = captureOutput(docsCurlCmd).unwrap(or: String());
          println(docsOutput);
     }
 
     // Clean up
     var rmCmd = String(); rmCmd.append("rm -f "); rmCmd.append(archivePath);
-     spawn(rmCmd);
+     spawn(rmCmd).unwrap(or: -1);
     var rmDocsCmd = String(); rmDocsCmd.append("rm -rf "); rmDocsCmd.append(docsDir);
-     spawn(rmDocsCmd);
+     spawn(rmDocsCmd).unwrap(or: -1);
     0
 }
 
 func handleUpdate() -> lang.i32 {
-    let cwd = getcwd();
+    let cwd = getcwd().unwrap(or: String());
     let lockPath = joinPath(base: cwd, rel: "flock.lock");
 
     // Delete existing lock file to force re-resolution
     if fileExists(lockPath) {
         var rmCmd = String(); rmCmd.append("rm "); rmCmd.append(lockPath);
-         spawn(rmCmd);
+         spawn(rmCmd).unwrap(or: -1);
          println("Removed flock.lock");
     }
 
@@ -484,7 +484,7 @@ func handleInstall(target target: Optional[String], binFlag binFlag: Optional[St
 /// registry package `<org>/<pkg>[@version]`, or a local directory path.
 func resolveInstallRoot(target target: Optional[String]) -> Result[ResolvedPackage, FlockError] {
     match target {
-        .None => loadLocalPackage(rootDir: getcwd()),
+        .None => loadLocalPackage(rootDir: getcwd().unwrap(or: String())),
         .Some(t) => {
             if not isRegistryName(name: t) {
                 // A bare (non-`org/pkg`) target is treated as a local path.
@@ -515,7 +515,7 @@ func resolveInstallRoot(target target: Optional[String]) -> Result[ResolvedPacka
             }
             let regUrl = resolveRegistryUrl(projectUrl: .None);
             let regSrc = RegistrySource(config: RegistryConfig(url: regUrl));
-            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: getcwd())
+            regSrc.resolve(name: name, spec: DependencySpec.Registry(constraint), baseDir: getcwd().unwrap(or: String()))
         }
     }
 }
@@ -686,7 +686,7 @@ func collectBuild(root root: ResolvedPackage) -> Result[ResolvedBuild, FlockErro
         }
         match build.cFlagsCmd {
             .Some(cmd) => {
-                let output = captureOutput( cmd);
+                let output = captureOutput( cmd).unwrap(or: String());
                 let extra = splitWhitespace(output);
                 j = 0;
                 while j < extra.count {
@@ -714,7 +714,7 @@ func collectBuild(root root: ResolvedPackage) -> Result[ResolvedBuild, FlockErro
             }
             ccCmd.append(" "); ccCmd.append(quoteArg(cPath)); ccCmd.append(" -o "); ccCmd.append(quoteArg(oPath));
 
-            let exitCode = spawn( ccCmd);
+            let exitCode = spawn( ccCmd).unwrap(or: -1);
             if exitCode != 0 {
                 return .Err(FlockError.CompilerFailed(exitCode))
             }
@@ -728,7 +728,7 @@ func collectBuild(root root: ResolvedPackage) -> Result[ResolvedBuild, FlockErro
         // Resolve dynamic link flags if link-cmd is set
         match build.linkCmd {
             .Some(cmd) => {
-                let output = captureOutput( cmd);
+                let output = captureOutput( cmd).unwrap(or: String());
                 let flags = splitWhitespace(output);
                 j = 0;
                 while j < flags.count {
@@ -820,7 +820,7 @@ func writeLockFile(cwd cwd: String, rootName rootName: String, nodes nodes: Arra
 /// Reads the current package, resolves + discovers everything, writes the lock
 /// file, and returns the build set (shared sources + binary targets).
 func resolveAndDiscover() -> Result[ResolvedBuild, FlockError] {
-    let cwd = getcwd();
+    let cwd = getcwd().unwrap(or: String());
     match loadLocalPackage(rootDir: cwd) {
         .Err(e) => .Err(e),
         .Ok(root) => {

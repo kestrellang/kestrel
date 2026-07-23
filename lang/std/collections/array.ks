@@ -1661,6 +1661,31 @@ extend Array[T] where T: Comparable {
 // HASH EXTENSION
 // ============================================================================
 
+/// `Hashable` conformance — an array hashes its elements in order, so
+/// two arrays hash equal exactly when they compare `==`.
+extend Array[T]: Hashable where T: Hashable {
+    /// Order-sensitive hash: feeds the element count, then each element
+    /// front to back, into `hasher`.
+    ///
+    /// The count prefix disambiguates nested-collection layouts (e.g.
+    /// `[[1], [2]]` vs `[[1, 2], []]`). Consistent with the `Equatable`
+    /// conformance: equal arrays produce equal hashes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = DefaultHasher();
+    /// [1, 2, 3].hash(into: h);
+    /// let digest = h.finish();
+    /// ```
+    public func hash[H](mutating into hasher: H) where H: Hasher {
+        self.count.hash(into: hasher);
+        for i in 0..<self.count {
+            self(unchecked: i).hash(into: hasher);
+        }
+    }
+}
+
 extend Array[T] where T: Hashable {
     /// Removes every duplicate in place, keeping the first occurrence.
     ///

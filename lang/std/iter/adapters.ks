@@ -746,7 +746,7 @@ public struct InspectIterator[I]: Iterator where I: Iterator, I: not Copyable {
 ///
 /// Source iterator + step size + a one-bit `first` flag (the first
 /// element is always emitted; subsequent ones consume `step - 1` extra
-/// pulls).
+/// pulls). Construction panics when `step < 1`.
 public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
@@ -755,9 +755,16 @@ public struct StepByIterator[I]: Iterator where I: Iterator, I: not Copyable {
     internal var first: Bool
 
     /// @name From Source
-    /// Builds a `StepByIterator`. Caller guarantees `step >= 1`; `step
-    /// == 0` produces undefined behaviour.
+    /// Builds a `StepByIterator`. Prefer `inner.stepBy(n:)`.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `"Iterator.stepBy: step must be >= 1"` when
+    /// `step < 1`.
     public init(consuming inner inner: I, step step: Int64) {
+        if step < 1 {
+            fatalError("Iterator.stepBy: step must be >= 1")
+        }
         self.inner = inner;
         self.step = step;
         self.first = true;

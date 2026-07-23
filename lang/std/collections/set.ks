@@ -436,9 +436,12 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     // REMOVING ELEMENTS
     // ========================================================================
 
-    /// Removes `element` if present; returns whether anything was
-    /// removed.
+    /// Removes `element` if present and returns the *stored* element,
+    /// or `None` if it was absent.
     ///
+    /// Returning the stored value (rather than a `Bool`) matters when
+    /// equality is coarser than identity — e.g. case-insensitive keys —
+    /// because the set's copy may differ from the probe you passed in.
     /// Leaves a tombstone in the backing dictionary — see
     /// `Dictionary.remove`. Tombstones are reclaimed by the next
     /// resize. Triggers COW only when an element is actually removed.
@@ -447,11 +450,14 @@ public struct Set[T, H = DefaultHasher]: Iterable, Cloneable where T: Hashable, 
     ///
     /// ```
     /// var set: Set = [1, 2, 3];
-    /// set.remove(2);  // true; set == {1, 3}
-    /// set.remove(5);  // false; set unchanged
+    /// set.remove(2);  // .Some(2); set == {1, 3}
+    /// set.remove(5);  // .None;    set unchanged
     /// ```
-    public mutating func remove(element: T) -> Bool {
-        self.dict.remove(element).isSome()
+    public mutating func remove(element: T) -> T? {
+        match self.dict.removeEntry(element) {
+            .Some(pair) => .Some(pair.0),
+            .None => .None
+        }
     }
 
     /// Removes every element, leaving capacity untouched.
@@ -1199,6 +1205,43 @@ extend Set[T, H]: Equatable where T: Hashable, H: Hasher, H: Defaultable {
             return false
         }
         self.isSubset(of: other)
+    }
+}
+
+// ============================================================================
+// CONDITIONAL EXTENSIONS - HASHABLE
+// ============================================================================
+
+/// `Hashable` conformance — order-independent, so two sets with the
+/// same elements hash equal regardless of insertion order.
+extend Set[T, H]: Hashable where T: Hashable, H: Hasher, H: Defaultable {
+
+    /// Order-independent hash: hashes each element with a fresh hasher
+    /// and combines the per-element digests with a commutative
+    /// (wrapping) sum, then feeds the count and combined sum into
+    /// `hasher`.
+    ///
+    /// Consistent with `Equatable`: equal sets (same elements, any
+    /// insertion order) produce equal hashes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = DefaultHasher();
+    /// let s: Set = [1, 2, 3];
+    /// s.hash(into: h);   // same digest as for a set built as [3, 2, 1]
+    /// ```
+    public func hash[H2](mutating into hasher: H2) where H2: Hasher {
+        var combined: UInt64 = 0;
+        var elems = self.iter();
+        while let .Some(elem) = elems.next() {
+            var elemHasher = H();
+            elem.hash(into: elemHasher);
+            // `+` wraps by default, so the sum is a safe commutative combiner.
+            combined = combined + elemHasher.finish();
+        }
+        self.count.hash(into: hasher);
+        combined.hash(into: hasher);
     }
 }
 

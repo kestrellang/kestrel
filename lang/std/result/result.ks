@@ -5,6 +5,7 @@ module std.result
 import std.core.(Equatable, Bool, ControlFlow, Tryable, FromResidual, FromValue, Coalesce, fatalError)
 import std.text.(String, StringBuilder, Formatter, Formattable, FormatOptions)
 import std.result.(Optional)
+import std.iter.(Iterator)
 
 /// The fallible-operation enum: either `Ok(value)` or `Err(error)`. The
 /// project's exception-free error story.
@@ -22,8 +23,8 @@ import std.result.(Optional)
 /// # Examples
 ///
 /// ```
-/// func parseAndDouble(s: String) -> Int64 throws ParseError {
-///     let n = try Int64.parse(s).okOr(ParseError());
+/// func parseAndDouble(s: String) -> Int64 throws String {
+///     let n = try Int64(parsing: s).okOr("not a number");
 ///     n * 2
 /// }
 ///
@@ -94,6 +95,42 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
         }
     }
 
+    /// True when `.Ok(value)` and `predicate(value)` returns `true`.
+    /// `.Err` always answers `false` without invoking the predicate.
+    /// Mirror of `Optional.isSomeAnd(where:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Ok(42).isOkAnd(where: { it > 0 });      // true
+    /// Ok(-1).isOkAnd(where: { it > 0 });      // false
+    /// Err("x").isOkAnd(where: { it > 0 });    // false
+    /// ```
+    public func isOkAnd(where predicate: (T) -> Bool) -> Bool {
+        match self {
+            .Ok(value) => predicate(value),
+            .Err(_) => false
+        }
+    }
+
+    /// True when `.Err(error)` and `predicate(error)` returns `true`.
+    /// `.Ok` always answers `false` without invoking the predicate.
+    /// Complement of `isOkAnd(where:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Err(404).isErrAnd(where: { it == 404 });   // true
+    /// Err(500).isErrAnd(where: { it == 404 });   // false
+    /// Ok(1).isErrAnd(where: { it == 404 });      // false
+    /// ```
+    public func isErrAnd(where predicate: (E) -> Bool) -> Bool {
+        match self {
+            .Ok(_) => false,
+            .Err(error) => predicate(error)
+        }
+    }
+
     /// Borrows the success value without consuming this result.
     public func okRef() -> Optional[&T] {
         match self {
@@ -146,6 +183,26 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
         match self {
             .Ok(value) => value,
             .Err(_) => fatalError("called unwrap() on Err")
+        }
+    }
+
+    /// Like `unwrap`, but the panic carries `message` instead of the
+    /// generic text. Mirror of `Optional.expect(message:)` — use where a
+    /// failure should crash loudly with context.
+    ///
+    /// # Errors
+    ///
+    /// Panics with `message` on `.Err` via `fatalError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let cfg = loadConfig().expect("Config file required");
+    /// ```
+    public consuming func expect(message: String) -> T {
+        match self {
+            .Ok(value) => value,
+            .Err(_) => fatalError(message)
         }
     }
 
@@ -211,6 +268,66 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
         match self {
             .Ok(value) => transform(value),
             .Err(error) => .Err(error)
+        }
+    }
+
+    /// Collapses a `Result[Result[T, E], E]` one level. Available only
+    /// when the success payload is itself a `Result` with the same error
+    /// type. Mirror of `Optional.flatten()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// Ok(Ok(42)).flatten();        // Ok(42)
+    /// Ok(Err("inner")).flatten();  // Err("inner")
+    /// Err("outer").flatten();      // Err("outer")
+    /// ```
+    public consuming func flatten[U]() -> Result[U, E] where T = Result[U, E] {
+        match self {
+            .Ok(inner) => inner,
+            .Err(error) => .Err(error)
+        }
+    }
+
+    /// Side-effecting tap on the success branch — runs `fn` on the `Ok`
+    /// value (if any) and returns `self` unchanged. Useful for logging or
+    /// assertions inside a chain. Mirror of `Optional.inspect(fn:)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// parsePort(input)
+    ///     .inspect { print("port = \{it}") }
+    ///     .map { it + 1 };
+    /// ```
+    public consuming func inspect(fn: (T) -> ()) -> Result[T, E] {
+        match self {
+            .Ok(value) => {
+                fn(value);
+                .Ok(value)
+            },
+            .Err(error) => .Err(error)
+        }
+    }
+
+    /// Side-effecting tap on the error branch — runs `fn` on the `Err`
+    /// value (if any) and returns `self` unchanged. Mirror of `inspect`
+    /// for the failure path.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// parsePort(input)
+    ///     .inspectErr { print("failed: \{it}") }
+    ///     .mapErr { AppError.Parse(it) };
+    /// ```
+    public consuming func inspectErr(fn: (E) -> ()) -> Result[T, E] {
+        match self {
+            .Ok(value) => .Ok(value),
+            .Err(error) => {
+                fn(error);
+                .Err(error)
+            }
         }
     }
 

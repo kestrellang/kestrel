@@ -1070,6 +1070,45 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
         .None
     }
 
+    /// Removes `key` and returns the *stored* `(key, value)` pair, or
+    /// `None` if absent.
+    ///
+    /// Like `remove(...)`, but also hands back the stored key — useful
+    /// when key equality is coarser than identity (the stored key may
+    /// differ from the probe). Same tombstone/COW behaviour as
+    /// `remove(...)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var dict = ["a": 1, "b": 2];
+    /// dict.removeEntry("a");  // Some(("a", 1)); dict = ["b": 2]
+    /// dict.removeEntry("z");  // None;           dict unchanged
+    /// ```
+    public mutating func removeEntry(key: K) -> (K, V)? {
+        let maybeIndex = self.findEntry(key);
+
+        if let .Some(index) = maybeIndex {
+            self.makeUnique();
+            let removedEntry = self.storage.modify { (mutating s) in
+                let bucket = s.buckets.offset(by: index).read();
+                let rv: (K, V)? = match bucket {
+                    .Occupied(k, v, _) => .Some((k, v)),
+                    _ => .None
+                };
+
+                // Mark as deleted (tombstone)
+                s.buckets.offset(by: index).write(.Deleted);
+                s.len = s.len - 1;
+                rv
+            };
+
+            return removedEntry
+        }
+
+        .None
+    }
+
     /// Removes every entry, leaving the bucket array allocated and
     /// reset to all-`.Empty`.
     ///
@@ -1095,6 +1134,10 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
     /// Applies `transform` to the existing value for `key` and writes
     /// the result back; returns whether the key was found.
+    ///
+    /// **Deprecated:** prefer `modify(...)`, which mutates in place with
+    /// a single probe (no re-hash on write-back) and returns the
+    /// closure's result. `update` will be removed in a future release.
     ///
     /// No-op when the key is absent — for "update or insert" semantics
     /// use `upsert(...)`. Internally re-uses `insert(...)`, so the
@@ -1675,6 +1718,40 @@ public struct Dictionary[K, V, H = DefaultHasher]: Iterable, Cloneable where K: 
 
 /// `Equatable` conformance for dictionaries whose values are themselves
 /// `Equatable`.
+/// `Hashable` conformance — order-independent over entries, so two
+/// dictionaries with the same `(key, value)` pairs hash equal
+/// regardless of insertion order.
+extend Dictionary[K, V, H]: Hashable where K: Hashable, V: Hashable, H: Hasher, H: Defaultable {
+
+    /// Order-independent hash: hashes each `(key, value)` entry with a
+    /// fresh hasher (key then value) and combines the per-entry digests
+    /// with a commutative (wrapping) sum, then feeds the count and the
+    /// combined sum into `hasher`.
+    ///
+    /// Consistent with `Equatable`: equal dictionaries produce equal
+    /// hashes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// var h = DefaultHasher();
+    /// ["a": 1, "b": 2].hash(into: h);  // same digest as ["b": 2, "a": 1]
+    /// ```
+    public func hash[H2](mutating into hasher: H2) where H2: Hasher {
+        var combined: UInt64 = 0;
+        var entries = self.iter();
+        while let .Some(pair) = entries.next() {
+            var entryHasher = H();
+            pair.0.hash(into: entryHasher);
+            pair.1.hash(into: entryHasher);
+            // `+` wraps by default, so the sum is a safe commutative combiner.
+            combined = combined + entryHasher.finish();
+        }
+        self.count.hash(into: hasher);
+        combined.hash(into: hasher);
+    }
+}
+
 extend Dictionary[K, V, H]: Equatable where K: Hashable, V: Equatable, H: Hasher, H: Defaultable {
     /// Order-independent equality: dictionaries are equal iff they have
     /// the same `count` and every key in `self` is present in `other`

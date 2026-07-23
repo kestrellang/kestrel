@@ -129,8 +129,8 @@ public struct Bool:
     /// # Examples
     ///
     /// ```
-    /// true.format()                                       // "true"
-    /// false.format(FormatOptions.debug())                 // "Bool(false)"
+    /// true.formatted()                                       // "true"
+    /// false.formatted(FormatOptions.debug())                 // "Bool(false)"
     /// ```
     public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
         let value = if self.value { "true" } else { "false" };

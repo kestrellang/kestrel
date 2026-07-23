@@ -8,7 +8,7 @@ import std.result.(Optional)
 import std.iter.(Iterator, Iterable)
 import std.text.(Char, Grapheme, decodeUtf8, String, StringSlice, Str, LineIndex)
 import std.text.unicode.(GraphemeBreakProperty, graphemeBreakProperty, shouldBreakBetween)
-import std.memory.(Pointer)
+import std.memory.(Pointer, ArraySlice)
 import std.collections.(Array)
 import std.ffi.(memmem)
 
@@ -206,9 +206,14 @@ public struct BytesView: Iterable, Cloneable {
 
     /// Materializes the view as an owned `String`. Copies all bytes
     /// into a fresh buffer; the result is independent of the source.
-    /// Bytes are copied verbatim — no UTF-8 validation is performed.
+    /// The bytes are validated as UTF-8: any invalid sequence (e.g.
+    /// from a sub-view cut mid-codepoint) is replaced with U+FFFD,
+    /// so the result is always a well-formed `String`.
     public func toString() -> String {
-        _copyByteRange(ptr: self.ptr, startByte: 0, endByte: self.length)
+        String(fromUtf8Lossy: ArraySlice(
+            pointer: self.slice._rawPtr().offset(by: self.slice.start),
+            count: self.length
+        ))
     }
 
     /// Convenience: dispatches to a `BytesSubstringIndex` to produce

@@ -4,7 +4,7 @@ module std.io.error
 
 import std.core.(Bool)
 import std.numeric.(Int32, Int64)
-import std.text.(String)
+import std.text.(String, Formatter, Formattable, FormatOptions, _writePadded)
 import std.result.(Result)
 import std.io.libc
 
@@ -193,6 +193,20 @@ public struct IoError {
     /// between `.Other` codes.
     public func errno() -> Int32 {
         self.kind.errno()
+    }
+}
+
+/// `Formattable` conformance — delegates to `description()`, so
+/// `IoError` values can be interpolated and printed directly. For the
+/// `.Other` kind the raw errno is included (e.g. `"unknown error (errno 99)"`)
+/// so no information is lost in the rendered form.
+extend IoError: Formattable {
+    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
+        let content = match self.kind {
+            .Other(c) => "\(self.description()) (errno \(c))",
+            _         => self.description()
+        };
+        _writePadded(into: writer, content, options)
     }
 }
 
