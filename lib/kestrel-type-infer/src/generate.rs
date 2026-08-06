@@ -344,6 +344,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             protocol,
             method,
             args,
+            from_operator,
             span,
             ..
         } => {
@@ -370,6 +371,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // `==` forwards via `extend W: Equatable`, never by peeling the
             // member to the pointee (which would coerce the argument; R7).
             ctx.protocol_dispatch_members.insert(id);
+            if *from_operator {
+                ctx.operator_members.insert(id);
+            }
             // Resolve method on the protocol
             ctx.member(
                 recv_tv,

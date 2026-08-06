@@ -24,9 +24,9 @@ formatters honour the same convention.
 var opts = FormatOptions();
 opts.width = .Some(8);
 opts.alignment = .Right;
-"ab".format(options: opts);  // "      ab"
+"ab".formatted(opts);  // "      ab"
 opts.alignment = .Center;
-"ab".format(options: opts);  // "   ab   "
+"ab".formatted(opts);  // "   ab   "
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -535,7 +535,9 @@ public func toString() -> String
 
 Materializes the view as an owned `String`. Copies all bytes
 into a fresh buffer; the result is independent of the source.
-Bytes are copied verbatim — no UTF-8 validation is performed.
+The bytes are validated as UTF-8: any invalid sequence (e.g.
+from a sub-view cut mid-codepoint) is replaced with U+FFFD,
+so the result is always a well-formed `String`.
 
 _Defined in `lang/std/text/views.ks`._
 
@@ -1862,11 +1864,11 @@ of style is independent of `precision` — `Auto` honours precision as
 var opts = FormatOptions();
 opts.precision = .Some(2);
 opts.floatStyle = .Fixed;
-(3.14159).format(options: opts);       // "3.14"
+(3.14159).formatted(opts);       // "3.14"
 opts.floatStyle = .Scientific;
-(3.14159).format(options: opts);       // "3.14e0"
+(3.14159).formatted(opts);       // "3.14e0"
 opts.floatStyle = .Percent;
-(0.5).format(options: opts);           // "50.00%"
+(0.5).formatted(opts);           // "50.00%"
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -2026,7 +2028,7 @@ decimal radix, lowercase hex, negative-only sign, no alternate form,
 var opts = FormatOptions();
 opts.width = .Some(6);
 opts.alignment = .Right;
-"hi".format(options: opts);  // "    hi"
+"hi".formatted(opts);  // "    hi"
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -2077,7 +2079,7 @@ callers that want defaults without spelling out the constructor
 
 ```
 let opts = FormatOptions.default();
-(42).format(options: opts);  // "42"
+(42).formatted(opts);  // "42"
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -2198,7 +2200,7 @@ func format(into: mutating some Formatter, FormatOptions)
 Writes this value's formatted representation directly into `writer`.
 
 This is the kernel method — all formatting ultimately bottoms out
-here. The convenience `format(options:) -> String` in the protocol
+here. The convenience `formatted(options:) -> String` in the protocol
 extension calls this under the hood.
 
 _Defined in `lang/std/text/format.ks`._
@@ -3644,10 +3646,10 @@ column so columns of mixed signs line up.
 ```
 var opts = FormatOptions();
 opts.sign = .Always;
-(3).format(options: opts);   // "+3"
-(-3).format(options: opts);  // "-3"
+(3).formatted(opts);   // "+3"
+(-3).formatted(opts);  // "-3"
 opts.sign = .Space;
-(3).format(options: opts);   // " 3"
+(3).formatted(opts);   // " 3"
 ```
 
 _Defined in `lang/std/text/format.ks`._
@@ -4840,7 +4842,7 @@ Formats the string using the given options.
 ##### Examples
 
 ```
-"hi".format(FormatOptions(width: 5));  // "hi   "
+"hi".formatted(FormatOptions(width: 5));  // "hi   "
 ```
 
 _Defined in `lang/std/text/str.ks`._
@@ -5665,11 +5667,11 @@ alignment purposes (display width still depends on font).
 var opts = FormatOptions();
 opts.width = .Some(10);
 opts.alignment = .Left;
-"test".format(opts);   // "test      "
+"test".formatted(opts);   // "test      "
 opts.alignment = .Right;
-"test".format(opts);   // "      test"
+"test".formatted(opts);   // "      test"
 opts.alignment = .Center;
-"test".format(opts);   // "   test   "
+"test".formatted(opts);   // "   test   "
 ```
 
 _Defined in `lang/std/text/string.ks`._

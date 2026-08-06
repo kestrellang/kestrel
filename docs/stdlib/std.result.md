@@ -116,7 +116,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `filter`
 
 ```kestrel
-public consuming func filter((T) -> Bool) -> Optional[T]
+public consuming func filter(where: (T) -> Bool) -> Optional[T]
 ```
 
 Returns `Some(value)` when the predicate accepts the value, `None`
@@ -125,9 +125,9 @@ otherwise.
 ##### Examples
 
 ```
-Some(4).filter { it % 2 == 0 };   // Some(4)
-Some(3).filter { it % 2 == 0 };   // None
-None.filter { it % 2 == 0 };      // None
+Some(4).filter(where: { it % 2 == 0 });   // Some(4)
+Some(3).filter(where: { it % 2 == 0 });   // None
+None.filter(where: { it % 2 == 0 });      // None
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -222,7 +222,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `isSomeAnd`
 
 ```kestrel
-public func isSomeAnd((T) -> Bool) -> Bool
+public func isSomeAnd(where: (T) -> Bool) -> Bool
 ```
 
 True when `.Some(value)` and `predicate(value)` returns `true`.
@@ -231,9 +231,9 @@ True when `.Some(value)` and `predicate(value)` returns `true`.
 ##### Examples
 
 ```
-Some(42).isSomeAnd { it > 0 };    // true
-Some(-1).isSomeAnd { it > 0 };    // false
-None.isSomeAnd { it > 0 };        // false
+Some(42).isSomeAnd(where: { it > 0 });    // true
+Some(-1).isSomeAnd(where: { it > 0 });    // false
+None.isSomeAnd(where: { it > 0 });        // false
 ```
 
 _Defined in `lang/std/result/optional.ks`._
@@ -881,6 +881,28 @@ Borrows the error value without consuming this result.
 
 _Defined in `lang/std/result/result.ks`._
 
+#### function `expect`
+
+```kestrel
+public consuming func expect(String) -> T
+```
+
+Like `unwrap`, but the panic carries `message` instead of the
+generic text. Mirror of `Optional.expect(message:)` — use where a
+failure should crash loudly with context.
+
+##### Errors
+
+Panics with `message` on `.Err` via `fatalError`.
+
+##### Examples
+
+```
+let cfg = loadConfig().expect("Config file required");
+```
+
+_Defined in `lang/std/result/result.ks`._
+
 #### function `flatMap`
 
 ```kestrel
@@ -903,6 +925,66 @@ itself returns a `Result`, without nesting. Mirror of `flatMap`.
 
 _Defined in `lang/std/result/result.ks`._
 
+#### function `flatten`
+
+```kestrel
+public consuming func flatten[U]() -> Result[U, E] where T == Result[U, E]
+```
+
+Collapses a `Result[Result[T, E], E]` one level. Available only
+when the success payload is itself a `Result` with the same error
+type. Mirror of `Optional.flatten()`.
+
+##### Examples
+
+```
+Ok(Ok(42)).flatten();        // Ok(42)
+Ok(Err("inner")).flatten();  // Err("inner")
+Err("outer").flatten();      // Err("outer")
+```
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `inspect`
+
+```kestrel
+public consuming func inspect((T) -> ()) -> Result[T, E]
+```
+
+Side-effecting tap on the success branch — runs `fn` on the `Ok`
+value (if any) and returns `self` unchanged. Useful for logging or
+assertions inside a chain. Mirror of `Optional.inspect(fn:)`.
+
+##### Examples
+
+```
+parsePort(input)
+    .inspect { print("port = \{it}") }
+    .map { it + 1 };
+```
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `inspectErr`
+
+```kestrel
+public consuming func inspectErr((E) -> ()) -> Result[T, E]
+```
+
+Side-effecting tap on the error branch — runs `fn` on the `Err`
+value (if any) and returns `self` unchanged. Mirror of `inspect`
+for the failure path.
+
+##### Examples
+
+```
+parsePort(input)
+    .inspectErr { print("failed: \{it}") }
+    .mapErr { AppError.Parse(it) };
+```
+
+_Defined in `lang/std/result/result.ks`._
+
 #### function `isErr`
 
 ```kestrel
@@ -910,6 +992,26 @@ public func isErr() -> Bool
 ```
 
 True when this is `.Err`. Complement of `isOk`.
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `isErrAnd`
+
+```kestrel
+public func isErrAnd(where: (E) -> Bool) -> Bool
+```
+
+True when `.Err(error)` and `predicate(error)` returns `true`.
+`.Ok` always answers `false` without invoking the predicate.
+Complement of `isOkAnd(where:)`.
+
+##### Examples
+
+```
+Err(404).isErrAnd(where: { it == 404 });   // true
+Err(500).isErrAnd(where: { it == 404 });   // false
+Ok(1).isErrAnd(where: { it == 404 });      // false
+```
 
 _Defined in `lang/std/result/result.ks`._
 
@@ -926,6 +1028,26 @@ True when this is `.Ok`. Cheap discriminator-only check.
 ```
 Ok(42).isOk();          // true
 Err("oops").isOk();     // false
+```
+
+_Defined in `lang/std/result/result.ks`._
+
+#### function `isOkAnd`
+
+```kestrel
+public func isOkAnd(where: (T) -> Bool) -> Bool
+```
+
+True when `.Ok(value)` and `predicate(value)` returns `true`.
+`.Err` always answers `false` without invoking the predicate.
+Mirror of `Optional.isSomeAnd(where:)`.
+
+##### Examples
+
+```
+Ok(42).isOkAnd(where: { it > 0 });      // true
+Ok(-1).isOkAnd(where: { it > 0 });      // false
+Err("x").isOkAnd(where: { it > 0 });    // false
 ```
 
 _Defined in `lang/std/result/result.ks`._

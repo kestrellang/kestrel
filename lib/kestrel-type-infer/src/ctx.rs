@@ -123,6 +123,13 @@ pub struct InferCtx<'a> {
     /// Populated by the `ProtocolCall` arm of `generate.rs`.
     pub(crate) protocol_dispatch_members: HashSet<HirExprId>,
 
+    /// Subset of `protocol_dispatch_members`: exprs desugared from OPERATORS
+    /// (HIR `ProtocolCall.from_operator`). These members follow the
+    /// `Output = Self`-by-convention operator protocols, which licenses the
+    /// solver's literal passes (receiver-from-result inference, operator
+    /// shape projection) — for-in/try sugar must NOT get that reasoning.
+    pub(crate) operator_members: HashSet<HirExprId>,
+
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
     pub(crate) resolutions: HashMap<HirExprId, Entity>,
@@ -320,6 +327,7 @@ impl<'a> InferCtx<'a> {
             pattern_binder_gate: true,
             poison_protocol_call_recv_on_failure: HashSet::new(),
             protocol_dispatch_members: HashSet::new(),
+            operator_members: HashSet::new(),
             resolutions: HashMap::new(),
             indirection_peels: HashMap::new(),
             field_subscripts: HashMap::new(),

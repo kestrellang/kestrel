@@ -60,9 +60,15 @@ witness's protocol type args against the expected args from the call site's
 `method_type_args`. Without this filter, the first matching witness wins
 regardless of which generic instantiation it represents.
 
-`witness_proto_args_match` treats `TypeParam` entries as wildcards (they
-come from `extend T: Proto[FreeParam]` where the free param has no
-concrete value at witness-construction time).
+`witness_proto_args_match` substitutes `TypeParam` entries that were BOUND
+by the implementing-type pattern match before comparing (`extend
+ClosedRange[T]: RandomBounds[T]` at self `ClosedRange[Int64]` contributes
+proto arg `Int64`, and must NOT satisfy a `RandomBounds[Int16]` call site —
+treating bound params as wildcards was a silent wrong-layout miscompile).
+Only a genuinely free param (`extend T: Proto[FreeParam]`, never mentioned
+in the implementing type) still matches anything. This requires
+`match_pattern` to run BEFORE the proto-args filter in
+`find_witness_with_method` — keep that ordering.
 
 ## Per-type lookups in mono passes: key by `(Entity, type_args)`, never nominal alone
 

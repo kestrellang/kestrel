@@ -46,6 +46,18 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     //   literals get their fallback default.
     let mut relax_level = 0u8;
     loop {
+        // Stage 2-pre operator shape projection — must run BEFORE literal
+        // defaulting: a deferred operator member's literal RECEIVER is not
+        // in the blocked set, so `apply_literal_defaults` would pin it to
+        // Int64 on the very first pass. Give the result var its nominal
+        // shape (`100..=200` → `ClosedRange[?lit]`) so annotations and
+        // parameterized bounds can pin the literal through the fixpoint
+        // instead (see the fn doc).
+        if apply_operator_shape_projections(ctx) {
+            fixpoint(ctx);
+            relax_level = 0;
+            continue;
+        }
         let progress = apply_literal_defaults(ctx, relax_level);
         if progress {
             fixpoint(ctx);
@@ -2073,6 +2085,20 @@ fn solve_conforms(
                 }
             };
             if conforms {
+                // Parameterized bounds: `where R: P[Int16]` must also pin the
+                // matched conformance's declared protocol args against the
+                // bound's args — dropping them lets `R = ClosedRange[Int64]`
+                // sail through a `RandomBounds[Int16]` bound and mono then
+                // reads the range at the wrong layout (silent miscompile).
+                // Unification also drives inference: an unresolved literal
+                // arg (the element of `100..=200`) gets pinned by the bound
+                // before literal defaulting runs.
+                if unify_bound_protocol_args(ctx, ty, resolved, protocol).is_err() {
+                    if poison_ty_on_failure {
+                        ctx.poison(ty);
+                    }
+                    return SolveResult::Error(InferError::DoesNotConform { ty, protocol, span });
+                }
                 SolveResult::Solved
             } else if typearg_failure_is_duplicate(ctx, resolved, protocol, origin) {
                 SolveResult::Solved
@@ -2085,6 +2111,242 @@ fn solve_conforms(
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
     }
+}
+
+/// Unify a parameterized bound's protocol args (recorded via
+/// `record_witness_args` at where-clause emission) with the declared
+/// conformance's protocol args instantiated at the concrete receiver.
+///
+/// `extend Foo[T]: P[T]` at receiver `Foo[X]` declares `P[X]`; a bound
+/// `R: P[Int16]` therefore requires `X = Int16`. When `X` is still an
+/// unresolved (literal) TyVar this PINS it — bound-driven inference; when
+/// `X` is already concrete and different, this reports the mismatch that
+/// was previously silently accepted (and miscompiled at mono).
+///
+/// Overlapping specializations (one concrete conformance per element type)
+/// are first narrowed by the bound's args; a unique survivor also PINS the
+/// receiver's own args via the extension's concrete target positions, so
+/// `Int8.random(in: 3..=9)` infers `ClosedRange[Int8]` instead of letting
+/// the literal default to `Int64`.
+///
+/// Conservative by design: no recorded args, non-nominal receivers,
+/// arg-less conformance declarations, or genuinely ambiguous multi-source
+/// matches all permit (returning `Ok`) — only a definite arg conflict
+/// (including "no declared instantiation is compatible with the bound")
+/// rejects.
+fn unify_bound_protocol_args(
+    ctx: &mut InferCtx<'_>,
+    ty: TyVar,
+    resolved: TyVar,
+    protocol: Entity,
+) -> Result<(), ()> {
+    // Bound args recorded for this (container, protocol) pair. The record is
+    // keyed by the canonical TyVar at emission time; redirects may have moved
+    // since, so fall back to an unambiguous canonical scan (mirrors the
+    // consumer in `solve_associated`).
+    let canonical = ctx.resolve(ty);
+    let want_args = ctx
+        .witness_protocol_args
+        .get(&(canonical, protocol))
+        .cloned()
+        .or_else(|| {
+            let mut iter = ctx
+                .witness_protocol_args
+                .iter()
+                .filter(|((k_tv, k_proto), _)| {
+                    *k_proto == protocol && ctx.resolve(*k_tv) == canonical
+                });
+            let first = iter.next()?;
+            if iter.next().is_some() {
+                return None; // Ambiguous — permit rather than guess.
+            }
+            Some(first.1.clone())
+        });
+    let Some(want_args) = want_args else {
+        return Ok(());
+    };
+    if want_args.is_empty() {
+        return Ok(());
+    }
+
+    // Only nominal receivers carry declared conformance instantiations.
+    let (entity, recv_args) = match ctx.slot(resolved) {
+        TySlot::Resolved(TyKind::Struct { entity, args })
+        | TySlot::Resolved(TyKind::Enum { entity, args }) => (*entity, args.clone()),
+        _ => return Ok(()),
+    };
+
+    // Find the conformance declaration(s) for this protocol whose target
+    // instantiation applies to the receiver.
+    let insts = ctx
+        .query_ctx
+        .query(kestrel_name_res::ConformingProtocolInstantiations {
+            entity,
+            root: ctx.root,
+        });
+    let mut applicable: Vec<ApplicableConformance> = Vec::new();
+    for (proto, source, ast_args) in &insts {
+        if *proto != protocol || ast_args.is_empty() {
+            continue;
+        }
+        // Map the source's free type params to the receiver's concrete args:
+        // decl-header conformances map the type's own params positionally;
+        // extension conformances map the Param positions of the extension's
+        // target args (skipping extensions whose concrete target args don't
+        // match this instantiation). Applicability is judged against the
+        // receiver's arg TyVars directly (not a reified HirTy): an UNRESOLVED
+        // receiver arg — a still-defaultable literal — must keep concrete
+        // extensions in play so the bound can pin it, whereas reification
+        // maps it to `Error` which matches nothing.
+        let (subs, target_args): (Vec<(Entity, TyVar)>, Vec<kestrel_hir::ty::HirTy>) =
+            if *source == entity {
+                let subs = ctx
+                    .query_ctx
+                    .get::<TypeParams>(entity)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .zip(recv_args.iter().copied())
+                    .collect();
+                (subs, Vec::new())
+            } else {
+                let target_args = ctx
+                    .query_ctx
+                    .query(kestrel_hir_lower::LowerExtensionTargetTypeArgs {
+                        extension: *source,
+                        root: ctx.root,
+                    })
+                    .unwrap_or_default();
+                if target_args
+                    .iter()
+                    .zip(recv_args.iter())
+                    .any(|(t, &r)| tv_definitely_incompatible(ctx, r, t))
+                {
+                    continue;
+                }
+                let mut subs: Vec<(Entity, TyVar)> = target_args
+                    .iter()
+                    .zip(recv_args.iter().copied())
+                    .filter_map(|(t, c)| match t {
+                        kestrel_hir::ty::HirTy::Param(e, _) => Some((*e, c)),
+                        _ => None,
+                    })
+                    .collect();
+                // Blanket free params (`extend Int64: SeqIndex[T]` — T appears
+                // only on the protocol side): the conformance holds for every T,
+                // so map them to fresh TyVars that unify freely with the bound's
+                // args instead of leaking as rigid `Param`s.
+                for p in ctx
+                    .query_ctx
+                    .get::<TypeParams>(*source)
+                    .map(|tp| tp.0.clone())
+                    .unwrap_or_default()
+                {
+                    if !subs.iter().any(|(e, _)| *e == p) {
+                        let fresh = ctx.fresh();
+                        subs.push((p, fresh));
+                    }
+                }
+                (subs, target_args)
+            };
+        // Lower the declared protocol args (in the source's scope) to HirTy.
+        let decl_args: Vec<kestrel_hir::ty::HirTy> = ast_args
+            .iter()
+            .map(|a| kestrel_hir_lower::lower_ast_type(ctx.query_ctx, *source, ctx.root, a))
+            .collect();
+        applicable.push(ApplicableConformance {
+            decl_args,
+            subs,
+            target_args,
+        });
+    }
+    if applicable.is_empty() {
+        // No parameterized declaration — permit.
+        return Ok(());
+    }
+    // Several applicable sources (overlapping specializations — e.g. one
+    // concrete conformance per element type): narrow by the bound's args.
+    // A source whose DECLARED protocol args definitely contradict the bound's
+    // can never be the one mono selects, so drop it. Exactly one survivor →
+    // proceed (this is what pins a literal receiver arg to the only viable
+    // instantiation); several survivors → permit (mono picks most-specific);
+    // zero → every declared instantiation contradicts the bound: reject.
+    if applicable.len() > 1 {
+        applicable.retain(|c| {
+            !want_args
+                .iter()
+                .zip(c.decl_args.iter())
+                .any(|(&w, d)| tv_definitely_incompatible(ctx, w, d))
+        });
+        if applicable.is_empty() {
+            return Err(());
+        }
+        if applicable.len() > 1 {
+            return Ok(());
+        }
+    }
+    let ApplicableConformance {
+        decl_args,
+        subs,
+        target_args,
+    } = applicable.swap_remove(0);
+
+    // Pin the receiver's args against the selected source's CONCRETE target
+    // positions (`extend ClosedRange[Int8]: P[Int8]` at receiver
+    // `ClosedRange[?lit]` pins `?lit = Int8`). A resolved-but-conflicting
+    // receiver arg fails here — the conformance provably doesn't apply.
+    for (t, &r) in target_args.iter().zip(recv_args.iter()) {
+        if matches!(t, kestrel_hir::ty::HirTy::Param(..)) {
+            continue;
+        }
+        let t_tv = lower_hir_ty_sub(ctx, t, None, resolved, &subs);
+        if unify::unify(ctx, r, t_tv).is_err() {
+            return Err(());
+        }
+    }
+
+    for (want, decl) in want_args.iter().zip(decl_args.iter()) {
+        let decl_tv = lower_hir_ty_sub(ctx, decl, None, resolved, &subs);
+        if unify::unify(ctx, *want, decl_tv).is_err() {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+/// One conformance declaration of (receiver-entity, protocol) that structurally
+/// applies to the receiver instantiation, as collected by
+/// `unify_bound_protocol_args`.
+struct ApplicableConformance {
+    /// The declared protocol args, lowered in the source's scope.
+    decl_args: Vec<kestrel_hir::ty::HirTy>,
+    /// Source free param → receiver arg (or fresh) substitution.
+    subs: Vec<(Entity, TyVar)>,
+    /// The extension's own target args (empty for decl-header conformances).
+    target_args: Vec<kestrel_hir::ty::HirTy>,
+}
+
+/// Does the (resolved state of) `tv` PROVABLY conflict with `hir`? Only a
+/// nominal-vs-nominal entity mismatch (recursively through args) counts;
+/// unresolved vars, `Param` patterns, and every non-nominal shape are
+/// "can't rule out" — this must never reject on incompleteness.
+fn tv_definitely_incompatible(ctx: &InferCtx<'_>, tv: TyVar, hir: &kestrel_hir::ty::HirTy) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let (h_entity, h_args) = match hir {
+        HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => (*entity, args),
+        _ => return false,
+    };
+    let resolved = ctx.resolve(tv);
+    let (t_entity, t_args) = match ctx.slot(resolved) {
+        TySlot::Resolved(TyKind::Struct { entity, args })
+        | TySlot::Resolved(TyKind::Enum { entity, args }) => (*entity, args.clone()),
+        _ => return false,
+    };
+    t_entity != h_entity
+        || t_args
+            .iter()
+            .zip(h_args.iter())
+            .any(|(&t, h)| tv_definitely_incompatible(ctx, t, h))
 }
 
 /// Reify a fully-resolved `TyVar` into a `HirTy` for the bound-aware conformance
@@ -4575,6 +4837,197 @@ fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
     progress
 }
 
+/// Stage 2c: operator-result shape projection.
+///
+/// `100..=200` desugars to `100.inclusiveRange(to: 200)` — a Member on a
+/// still-unresolved literal receiver, so the member defers and its result
+/// TyVar stays a bare unknown. Any downstream information (an annotation
+/// `ClosedRange[Int16]`, or a parameterized bound `RandomBounds[Int16]`
+/// via `unify_bound_protocol_args`) can only flow back into the literal
+/// through that result var — but only once it has a nominal *shape*.
+///
+/// This stage supplies the shape without picking an element type: for a
+/// deferred operator-protocol member (name from the HIR desugar tables) on
+/// a numeric-literal receiver, look the method up on the literal's DEFAULT
+/// type and generalize its return type by substituting the default entity
+/// with the receiver's own TyVar (`ClosedRange[Int64]` at receiver `?a` →
+/// `ClosedRange[?a]`). Unification with the expectation then pins `?a`,
+/// which un-defers the member — bidirectional flow through the operator.
+///
+/// Sound by construction: if the generalization is wrong for the type the
+/// receiver ends up pinned to, the member's real return type fails to
+/// unify with the projection — a type error, never a miscompile. Only the
+/// generic-wrapper shape projects (return mentions the default entity
+/// under a different head constructor); `Output = Self` operators
+/// (`negate`, `add`, …) already flow through literal-marker unification
+/// and the context-driven pass in `apply_literal_defaults`.
+fn apply_operator_shape_projections(ctx: &mut InferCtx<'_>) -> bool {
+    // Collect candidates immutably first; project after.
+    let mut candidates: Vec<(TyVar, TyVar, String, Vec<crate::constraint::CallArg>)> = Vec::new();
+    for c in &ctx.constraints {
+        let Constraint::Member {
+            receiver,
+            name,
+            args,
+            result,
+            expr,
+            is_call: true,
+            is_static_context: false,
+            ..
+        } = c
+        else {
+            continue;
+        };
+        // Operator desugars only — HIR marks them (ProtocolCall.from_operator)
+        // and generate records the expr ids.
+        if !ctx.operator_members.contains(expr) {
+            continue;
+        }
+        let recv = ctx.resolve(*receiver);
+        // Numeric literal receivers only — the shape generalizes from the
+        // default type across the numeric family; other literal kinds have
+        // a single conformer anyway and gain nothing.
+        if !matches!(
+            ctx.slot(recv),
+            TySlot::Unresolved {
+                literal: Some(LiteralKind::Integer | LiteralKind::Float)
+            }
+        ) {
+            continue;
+        }
+        // Result: either a bare unknown (bound/annotation arrives later —
+        // `low16(100..=200)`) or already pinned by a Coerce to a concrete
+        // nominal (`let r: ClosedRange[Int16] = 100..=200` binds the result
+        // during phase 1). Both unify against the projected shape; only a
+        // literal-marked result (its own literal) is out of scope.
+        let res = ctx.resolve(*result);
+        match ctx.slot(res) {
+            TySlot::Unresolved { literal: None } => {},
+            TySlot::Resolved(TyKind::Struct { .. } | TyKind::Enum { .. }) => {},
+            _ => continue,
+        }
+        kestrel_debug::ktrace!("op-shape", "candidate {name} recv={recv:?} res={res:?}");
+        candidates.push((recv, res, name.clone(), args.clone()));
+    }
+
+    let mut progress = false;
+    for (recv, res, name, args) in candidates {
+        // A previous projection in this batch may have pinned either side.
+        if !matches!(
+            ctx.slot(ctx.resolve(recv)),
+            TySlot::Unresolved { literal: Some(_) }
+        ) {
+            continue;
+        }
+        let lit = match ctx.slot(ctx.resolve(recv)) {
+            TySlot::Unresolved { literal: Some(l) } => *l,
+            _ => unreachable!(),
+        };
+        let feature = match lit {
+            LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
+            LiteralKind::Float => Builtin::DefaultFloatLiteralType,
+            _ => continue,
+        };
+        let Some(default_entity) = ctx.resolver.builtin(feature) else {
+            continue;
+        };
+        let default_kind = TyKind::Struct {
+            entity: default_entity,
+            args: vec![],
+        };
+        let Ok(resolution) = ctx.resolver.resolve_member(&default_kind, &name, &args) else {
+            continue;
+        };
+        // Project only the generic-wrapper shape: a nominal head other than
+        // the default type, whose args mention the default type. Anything
+        // else (Self-typed returns, params, aliases, fn types) declines —
+        // this stage must never guess where unanimity across the numeric
+        // family isn't structurally plausible.
+        if !projectable_wrapper_return(&resolution.return_type, default_entity) {
+            continue;
+        }
+        let res_was_unresolved = matches!(
+            ctx.slot(ctx.resolve(res)),
+            TySlot::Unresolved { literal: None }
+        );
+        let subs = [(default_entity, ctx.resolve(recv))];
+        let projected = lower_hir_ty_sub(ctx, &resolution.return_type, None, res, &subs);
+        let ok = unify::unify(ctx, res, projected).is_ok();
+        // Progress only when the projection ADDED information: the result
+        // gained its shape, or the receiver literal got pinned through an
+        // already-shaped result. A projection that merely re-unifies fresh
+        // vars (nothing downstream ever pins the element) must NOT count,
+        // or the relax loop re-fires it forever and never defaults.
+        let recv_pinned = !matches!(
+            ctx.slot(ctx.resolve(recv)),
+            TySlot::Unresolved { literal: Some(_) }
+        );
+        kestrel_debug::ktrace!(
+            "op-shape",
+            "project {name}: ret={:?} ok={ok} res_new={res_was_unresolved} recv_pinned={recv_pinned}",
+            resolution.return_type
+        );
+        if ok && (res_was_unresolved || recv_pinned) {
+            progress = true;
+        }
+    }
+    progress
+}
+
+/// Shared body of the context-driven pass in `apply_literal_defaults`: a
+/// literal receiver whose member/call result is already concrete adopts the
+/// result type — valid only where result type ≈ receiver type (operator
+/// members, subscript-style calls).
+fn collect_context_literal(
+    ctx: &InferCtx<'_>,
+    receiver: TyVar,
+    result: TyVar,
+    context_types: &mut Vec<(TyVar, TyVar)>,
+) {
+    let recv_resolved = ctx.resolve(receiver);
+    let lit = match &ctx.types[recv_resolved.0 as usize] {
+        TySlot::Unresolved { literal: Some(lit) } => *lit,
+        _ => return,
+    };
+    let result_resolved = ctx.resolve(result);
+    if let TySlot::Resolved(kind) = &ctx.types[result_resolved.0 as usize] {
+        // Verify the concrete type conforms to the literal protocol.
+        if unify::conforms_to_literal_protocol(ctx, kind, lit) {
+            context_types.push((recv_resolved, result_resolved));
+        }
+    }
+}
+
+/// Is `ty` a nominal wrapper `Head[..default..]` safe to generalize — head a
+/// Struct/Enum other than `default_entity`, all args recursively nominal, and
+/// at least one arg mentioning `default_entity` (the Self-varying position)?
+fn projectable_wrapper_return(ty: &kestrel_hir::ty::HirTy, default_entity: Entity) -> bool {
+    use kestrel_hir::ty::HirTy;
+    let (entity, args) = match ty {
+        HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => (*entity, args),
+        _ => return false,
+    };
+    if entity == default_entity || args.is_empty() {
+        return false;
+    }
+    fn nominal_only(ty: &HirTy, default_entity: Entity, mentions: &mut bool) -> bool {
+        match ty {
+            HirTy::Struct { entity, args, .. } | HirTy::Enum { entity, args, .. } => {
+                if *entity == default_entity {
+                    *mentions = true;
+                }
+                args.iter()
+                    .all(|a| nominal_only(a, default_entity, mentions))
+            },
+            _ => false,
+        }
+    }
+    let mut mentions = false;
+    args.iter()
+        .all(|a| nominal_only(a, default_entity, &mut mentions))
+        && mentions
+}
+
 fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     let defaults = std::mem::take(&mut ctx.type_param_defaults);
@@ -4611,31 +5064,34 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
     let mut progress = false;
 
     // First pass: collect context-driven types for literals that have deferred
-    // Member constraints with already-resolved result TyVars.
+    // Member constraints with already-resolved result TyVars. The receiver :=
+    // result inference is only justified for operator members (`Output = Self`
+    // by convention: `-1` into an Int32 slot → negate's result is Int32, so
+    // the literal is Int32). A non-operator member's result says nothing about
+    // its receiver (`i.raw → lang.i64` must NOT pin `i` to the intrinsic), so
+    // gate Member on operator provenance (HIR ProtocolCall.from_operator, via
+    // ctx.operator_members); `Call` (subscript-like callee) keeps the old
+    // unconditional behavior.
     let mut context_types: Vec<(TyVar, TyVar)> = Vec::new();
     for constraint in &ctx.constraints {
         if let Constraint::Member {
-            receiver, result, ..
-        }
-        | Constraint::Call {
+            receiver,
+            result,
+            expr,
+            ..
+        } = constraint
+        {
+            if !ctx.operator_members.contains(expr) {
+                continue;
+            }
+            collect_context_literal(ctx, *receiver, *result, &mut context_types);
+        } else if let Constraint::Call {
             callee: receiver,
             result,
             ..
         } = constraint
         {
-            let recv_resolved = ctx.resolve(*receiver);
-            let lit = match &ctx.types[recv_resolved.0 as usize] {
-                TySlot::Unresolved { literal: Some(lit) } => *lit,
-                _ => continue,
-            };
-            // Check if the result TyVar is already concrete (constrained by context)
-            let result_resolved = ctx.resolve(*result);
-            if let TySlot::Resolved(kind) = &ctx.types[result_resolved.0 as usize] {
-                // Verify the concrete type conforms to the literal protocol
-                if unify::conforms_to_literal_protocol(ctx, kind, lit) {
-                    context_types.push((recv_resolved, result_resolved));
-                }
-            }
+            collect_context_literal(ctx, *receiver, *result, &mut context_types);
         }
     }
 

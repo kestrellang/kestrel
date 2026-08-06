@@ -221,6 +221,20 @@ impl TestCompiler {
 
     /// Check that no errors occurred. Returns Err with details on failure.
     pub fn check_no_errors(&self) -> Result<(), String> {
+        // Stdlib-side errors are recorded once at cache build (their
+        // diagnostics never reach this compiler's sink) — a broken stdlib
+        // must fail HERE with the real error, not later as a mono/codegen
+        // mystery in whichever body the unresolved call survived into.
+        if self.has_stdlib {
+            let stdlib_errors = crate::stdlib_errors();
+            if !stdlib_errors.is_empty() {
+                return Err(format!(
+                    "stdlib failed to typecheck ({} error(s) — these poison every test):\n  {}",
+                    stdlib_errors.len(),
+                    stdlib_errors.join("\n  ")
+                ));
+            }
+        }
         let diags = self.all_diagnostics();
         let errors: Vec<&TestDiagnostic> = diags
             .iter()

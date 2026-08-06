@@ -58,7 +58,7 @@ struct Grid {
     mutating func randomize(seed seed: UInt64) {
         var rng = Lcg64(seed: seed);
         for i in 0..<self.cells.count {
-            self.cells(i) = rng.nextInt(below: 10) < 3;
+            self.cells(i) = Int64.random(in: 0..<10, using: rng) < 3;
         }
     }
 }

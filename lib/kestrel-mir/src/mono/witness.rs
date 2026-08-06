@@ -234,14 +234,15 @@ pub fn find_witness_with_method(
         if witness.protocol != protocol {
             continue;
         }
-        if !witness_proto_args_match(arena, witness, expected_proto_args) {
-            continue;
-        }
         if !witness.methods.iter().any(|m| m.key == *method) {
             continue;
         }
+        // Pattern-match BEFORE the proto-args filter: the bindings it produces
+        // are what let the filter substitute pattern-bound params instead of
+        // treating them as wildcards.
         let mut bindings = HashMap::new();
         if match_pattern(arena, witness.implementing_type, self_type, &mut bindings)
+            && witness_proto_args_match(arena, witness, expected_proto_args, &bindings)
             && witness_constraints_hold(arena, witnesses, witness, &bindings, 0)
         {
             candidates.push((i, bindings));
@@ -387,9 +388,21 @@ fn type_conforms_at_mono(
 
 /// Check whether a witness's protocol type args match the expected concrete
 /// types from the call site. Empty expected matches any witness (back-compat
-/// for non-generic protocols). Witness args that are TypeParam wildcards
-/// (from `extend T: Proto[FreeParam]`) match anything.
-fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[TyId]) -> bool {
+/// for non-generic protocols).
+///
+/// A witness arg that is a TypeParam BOUND by the implementing-type pattern
+/// match (`extend ClosedRange[T]: RandomBounds[T]` at self `ClosedRange[Int64]`
+/// binds `T → Int64`) is substituted before comparing — treating it as a
+/// match-anything wildcard let a `ClosedRange[Int64]` witness satisfy a
+/// `RandomBounds[Int16]` call site and sample at the wrong layout (silent
+/// miscompile). Only a genuinely free param (`extend T: Proto[FreeParam]`,
+/// never mentioned in the implementing type) still matches anything.
+fn witness_proto_args_match(
+    arena: &TyArena,
+    witness: &WitnessDef,
+    expected: &[TyId],
+    bindings: &HashMap<Entity, TyId>,
+) -> bool {
     if expected.is_empty() {
         return true;
     }
@@ -403,7 +416,10 @@ fn witness_proto_args_match(arena: &TyArena, witness: &WitnessDef, expected: &[T
         .proto_type_args
         .iter()
         .zip(expected.iter())
-        .all(|(&w, &e)| matches!(arena.get(w), MirTy::TypeParam(_)) || w == e)
+        .all(|(&w, &e)| match arena.get(w) {
+            MirTy::TypeParam(p) => bindings.get(p).is_none_or(|&bound| bound == e),
+            _ => w == e,
+        })
 }
 
 /// Resolve a `Callee::Witness` to a concrete function entity + type_args + self_type.

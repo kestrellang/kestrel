@@ -282,6 +282,13 @@ pub enum HirExpr {
         method: HirName,
         type_args: Option<Vec<HirTy>>,
         args: Vec<HirCallArg>,
+        /// True when this call was desugared from an operator (binary, unary,
+        /// postfix, short-circuit, compound-assign) — i.e. the method follows
+        /// the `Output = Self`-by-convention operator protocols. False for
+        /// other sugar (for-in's iterate/next, try's branch). Consumed by the
+        /// solver's literal-inference passes, which must not apply
+        /// operator-shaped reasoning to non-operator sugar.
+        from_operator: bool,
         span: Span,
     },
 

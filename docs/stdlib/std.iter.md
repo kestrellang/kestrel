@@ -1731,8 +1731,11 @@ _Defined in `lang/std/iter/iterator.ks`._
 public consuming func stepBy(Int64) -> StepByIterator[Self]
 ```
 
-Yields every `n`-th element, starting at the first. `n == 0` is
-undefined (the adapter will spin forever).
+Yields every `n`-th element, starting at the first.
+
+##### Errors
+
+Panics with `"Iterator.stepBy: step must be >= 1"` when `n < 1`.
 
 ##### Examples
 
@@ -2543,7 +2546,7 @@ first. Returned by `Iterator.stepBy(n:)`.
 
 Source iterator + step size + a one-bit `first` flag (the first
 element is always emitted; subsequent ones consume `step - 1` extra
-pulls).
+pulls). Construction panics when `step < 1`.
 
 _Defined in `lang/std/iter/adapters.ks`._
 
@@ -2555,8 +2558,12 @@ _Defined in `lang/std/iter/adapters.ks`._
 public init(inner: consuming I, step: Int64)
 ```
 
-Builds a `StepByIterator`. Caller guarantees `step >= 1`; `step
-== 0` produces undefined behaviour.
+Builds a `StepByIterator`. Prefer `inner.stepBy(n:)`.
+
+##### Errors
+
+Panics with `"Iterator.stepBy: step must be >= 1"` when
+`step < 1`.
 
 _Defined in `lang/std/iter/adapters.ks`._
 

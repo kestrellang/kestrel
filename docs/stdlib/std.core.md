@@ -427,6 +427,39 @@ Builds a `Bool` from the primitive `lang.i1` produced by a literal.
 
 _Defined in `lang/std/core/bool.ks`._
 
+#### function `random`
+
+```kestrel
+public static func random(using: mutating some RandomNumberGenerator) -> Bool
+```
+
+Returns `true` or `false` with equal probability, drawn from `rng`.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+let coin = Bool.random(using: rng);
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
+#### function `random`
+
+```kestrel
+public static func random() -> Bool
+```
+
+Returns `true` or `false` with equal probability, using OS entropy.
+
+##### Examples
+
+```
+if Bool.random() { }
+```
+
+_Defined in `lang/std/numeric/random.ks`._
+
 ### Implements `Equatable`
 
 #### function `isEqual`
@@ -466,8 +499,8 @@ Renders as `"true"` / `"false"`. With `options.debug`, wraps as
 ##### Examples
 
 ```
-true.format()                                       // "true"
-false.format(FormatOptions.debug())                 // "Bool(false)"
+true.formatted()                                       // "true"
+false.formatted(FormatOptions.debug())                 // "Bool(false)"
 ```
 
 _Defined in `lang/std/core/bool.ks`._
@@ -826,6 +859,18 @@ public func resolve(Int64) -> Range[Int64]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
+
+### Implements `RandomBounds`
+
+_Conditional: `where T: Steppable, T: Comparable`._
+
+#### function `inclusiveBounds`
+
+```kestrel
+public func inclusiveBounds() -> ClosedRange[T] where T: Steppable, T: Comparable
+```
+
+_Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `BytesIndex`
 
@@ -2343,8 +2388,8 @@ public protocol Modulo[Other = Self]
 Raw protocol backing the `%` operator.
 
 For integers this is the remainder of truncated division, with the sign of
-the dividend. Use `floorMod` (defined on integer types) when you want
-Euclidean / floor-style remainder semantics.
+the dividend. If you need Euclidean / floor-style remainder semantics
+(result with the sign of the divisor), compute `((a % b) + b) % b`.
 
 _Defined in `lang/std/core/arithmetic.ks`._
 
@@ -2504,7 +2549,7 @@ Raw protocol backing the unary `-` operator.
 
 On signed two's-complement integers, negating the minimum value overflows
 (e.g. `-Int8.minValue == Int8.minValue`); the operator wraps. Use
-`checkedNegate` if overflow needs to surface.
+`negateChecked` if overflow needs to surface.
 
 _Defined in `lang/std/core/arithmetic.ks`._
 
@@ -2979,6 +3024,18 @@ public func resolve(Int64) -> Range[Int64]
 ```
 
 _Defined in `lang/std/collections/slice.ks`._
+
+### Implements `RandomBounds`
+
+_Conditional: `where T: Steppable, T: Comparable`._
+
+#### function `inclusiveBounds`
+
+```kestrel
+public func inclusiveBounds() -> ClosedRange[T] where T: Steppable, T: Comparable
+```
+
+_Defined in `lang/std/numeric/random.ks`._
 
 ### Implements `BytesIndex`
 

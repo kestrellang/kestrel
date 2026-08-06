@@ -941,7 +941,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `shuffle`
 
 ```kestrel
-public mutating func shuffle(using: some RandomNumberGenerator)
+public mutating func shuffle(using: mutating some RandomNumberGenerator)
 ```
 
 Shuffles the array in place using `rng`.
@@ -985,7 +985,7 @@ _Defined in `lang/std/collections/array.ks`._
 #### function `shuffled`
 
 ```kestrel
-public func shuffled(using: some RandomNumberGenerator) -> Array[T]
+public func shuffled(using: mutating some RandomNumberGenerator) -> Array[T]
 ```
 
 Returns a new array shuffled with `rng`. The original is unchanged.
@@ -1308,6 +1308,33 @@ Pattern-matcher hook returning the half-open `[from, to)` slice.
 
 Used to bind `..rest` segments. The matcher guarantees the
 indices are in range.
+
+_Defined in `lang/std/collections/array.ks`._
+
+### Implements `Hashable`
+
+_Conditional: `where T: Hashable`._
+
+#### function `hash`
+
+```kestrel
+public func hash[H](into: mutating H) where H: Hasher, T: Hashable
+```
+
+Order-sensitive hash: feeds the element count, then each element
+front to back, into `hasher`.
+
+The count prefix disambiguates nested-collection layouts (e.g.
+`[[1], [2]]` vs `[[1, 2], []]`). Consistent with the `Equatable`
+conformance: equal arrays produce equal hashes.
+
+##### Examples
+
+```
+var h = DefaultHasher();
+[1, 2, 3].hash(into: h);
+let digest = h.finish();
+```
 
 _Defined in `lang/std/collections/array.ks`._
 
@@ -3344,6 +3371,30 @@ dict.removeAll { (k, v) in v < 2 };  // ["b": 2, "c": 3]
 
 _Defined in `lang/std/collections/dictionary.ks`._
 
+#### function `removeEntry`
+
+```kestrel
+public mutating func removeEntry(K) -> (K, V)?
+```
+
+Removes `key` and returns the *stored* `(key, value)` pair, or
+`None` if absent.
+
+Like `remove(...)`, but also hands back the stored key — useful
+when key equality is coarser than identity (the stored key may
+differ from the probe). Same tombstone/COW behaviour as
+`remove(...)`.
+
+##### Examples
+
+```
+var dict = ["a": 1, "b": 2];
+dict.removeEntry("a");  // Some(("a", 1)); dict = ["b": 2]
+dict.removeEntry("z");  // None;           dict unchanged
+```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
 #### function `reserveCapacity`
 
 ```kestrel
@@ -3443,6 +3494,10 @@ public mutating func update(K, with: (V) -> V) -> Bool
 
 Applies `transform` to the existing value for `key` and writes
 the result back; returns whether the key was found.
+
+**Deprecated:** prefer `modify(...)`, which mutates in place with
+a single probe (no re-hash on write-back) and returns the
+closure's result. `update` will be removed in a future release.
 
 No-op when the key is absent — for "update or insert" semantics
 use `upsert(...)`. Internally re-uses `insert(...)`, so the
@@ -3574,6 +3629,33 @@ extension below).
 let a: [String: Int64] = ["x": 1];
 var b = a.clone();  // O(1), shares storage
 b("y") = 2;         // b deep-copies here; a is unchanged
+```
+
+_Defined in `lang/std/collections/dictionary.ks`._
+
+### Implements `Hashable`
+
+_Conditional: `where K: Hashable, V: Hashable, H: Hasher, H: Defaultable`._
+
+#### function `hash`
+
+```kestrel
+public func hash[H2](into: mutating H2) where H2: Hasher, K: Hashable, V: Hashable, H: Hasher, H: Defaultable
+```
+
+Order-independent hash: hashes each `(key, value)` entry with a
+fresh hasher (key then value) and combines the per-entry digests
+with a commutative (wrapping) sum, then feeds the count and the
+combined sum into `hasher`.
+
+Consistent with `Equatable`: equal dictionaries produce equal
+hashes.
+
+##### Examples
+
+```
+var h = DefaultHasher();
+["a": 1, "b": 2].hash(into: h);  // same digest as ["b": 2, "a": 1]
 ```
 
 _Defined in `lang/std/collections/dictionary.ks`._
@@ -5303,12 +5385,15 @@ _Defined in `lang/std/collections/set.ks`._
 #### function `remove`
 
 ```kestrel
-public mutating func remove(T) -> Bool
+public mutating func remove(T) -> T?
 ```
 
-Removes `element` if present; returns whether anything was
-removed.
+Removes `element` if present and returns the *stored* element,
+or `None` if it was absent.
 
+Returning the stored value (rather than a `Bool`) matters when
+equality is coarser than identity — e.g. case-insensitive keys —
+because the set's copy may differ from the probe you passed in.
 Leaves a tombstone in the backing dictionary — see
 `Dictionary.remove`. Tombstones are reclaimed by the next
 resize. Triggers COW only when an element is actually removed.
@@ -5317,8 +5402,8 @@ resize. Triggers COW only when an element is actually removed.
 
 ```
 var set: Set = [1, 2, 3];
-set.remove(2);  // true; set == {1, 3}
-set.remove(5);  // false; set unchanged
+set.remove(2);  // .Some(2); set == {1, 3}
+set.remove(5);  // .None;    set unchanged
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -5608,6 +5693,34 @@ at the count check.
 ```
 Set([1, 2, 3]).isEqual(to: Set([3, 2, 1]));  // true
 Set([1, 2]).isEqual(to: Set([1, 2, 3]));     // false
+```
+
+_Defined in `lang/std/collections/set.ks`._
+
+### Implements `Hashable`
+
+_Conditional: `where T: Hashable, H: Hasher, H: Defaultable`._
+
+#### function `hash`
+
+```kestrel
+public func hash[H2](into: mutating H2) where H2: Hasher, T: Hashable, H: Hasher, H: Defaultable
+```
+
+Order-independent hash: hashes each element with a fresh hasher
+and combines the per-element digests with a commutative
+(wrapping) sum, then feeds the count and combined sum into
+`hasher`.
+
+Consistent with `Equatable`: equal sets (same elements, any
+insertion order) produce equal hashes.
+
+##### Examples
+
+```
+var h = DefaultHasher();
+let s: Set = [1, 2, 3];
+s.hash(into: h);   // same digest as for a set built as [3, 2, 1]
 ```
 
 _Defined in `lang/std/collections/set.ks`._
@@ -6364,6 +6477,45 @@ Panics if `count > self.count`.
 ```
 [1, 2, 3, 4, 5].prefix(3);  // ArraySlice[1, 2, 3]
 [1, 2].prefix(0);            // empty slice
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `randomElement`
+
+```kestrel
+public func randomElement(using: mutating some RandomNumberGenerator) -> T?
+```
+
+A uniformly random element drawn from `rng`, or `.None` for an
+empty collection. O(1).
+
+Passing the same seeded generator reproduces the same picks —
+use the no-argument overload for OS-entropy randomness.
+
+##### Examples
+
+```
+var rng = Lcg64(seed: 42);
+[1, 2, 3].randomElement(using: rng);  // deterministic for the seed
+[].randomElement(using: rng);          // None
+```
+
+_Defined in `lang/std/collections/slice.ks`._
+
+#### function `randomElement`
+
+```kestrel
+public func randomElement() -> T?
+```
+
+A uniformly random element using OS entropy, or `.None` for an
+empty collection. O(1).
+
+##### Examples
+
+```
+["red", "green", "blue"].randomElement();  // e.g. Some("green")
 ```
 
 _Defined in `lang/std/collections/slice.ks`._

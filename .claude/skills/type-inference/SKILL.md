@@ -34,6 +34,11 @@ per expr/pat/stmt. Allocates fresh `TyVar`s, records `expr_types` / `local_types
 (solver.rs:589), each arm returns `SolveResult::{Solved, Deferred, Error}`. Deferred
 constraints are re-queued for the next round. Fixpoint: `fixpoint()` at solver.rs:330
 → loops `solve_round()` (solver.rs:343) until a round makes no progress. Then
+the defaulting relax loop: `apply_operator_shape_projections` first (a deferred
+operator-protocol member on a literal receiver gets its result var shaped as the
+default type's generalized return — `100..=200` → `ClosedRange[?lit]` — so
+annotations/parameterized bounds can pin the literal instead of it
+force-defaulting to Int64), then
 `apply_literal_defaults` (solver.rs:2862), another fixpoint, then
 `default_never_fallback` (solver.rs:117), then `report_unsolved` (solver.rs:370) for
 anything still unresolved.

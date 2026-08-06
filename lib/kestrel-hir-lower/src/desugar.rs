@@ -53,6 +53,7 @@ impl LowerCtx<'_> {
             });
             if let Some(protocol) = self.resolve_builtin(proto) {
                 return self.alloc_expr(HirExpr::ProtocolCall {
+                    from_operator: true,
                     receiver: lhs,
                     protocol,
                     method: HirName::name(method),
@@ -73,6 +74,7 @@ impl LowerCtx<'_> {
             && let Some(protocol) = self.resolve_builtin(proto)
         {
             return self.alloc_expr(HirExpr::ProtocolCall {
+                from_operator: true,
                 receiver: lhs,
                 protocol,
                 method: HirName::name(method),
@@ -108,6 +110,7 @@ impl LowerCtx<'_> {
 
         if let Some(protocol) = self.resolve_builtin(Builtin::LogicalAndOperatorProtocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
+                from_operator: true,
                 receiver: lhs,
                 protocol,
                 method: HirName::name("logicalAnd"),
@@ -165,6 +168,7 @@ impl LowerCtx<'_> {
             && let Some(protocol) = self.resolve_builtin(proto)
         {
             return self.alloc_expr(HirExpr::ProtocolCall {
+                from_operator: true,
                 receiver: lowered_operand,
                 protocol,
                 method: HirName::name(method),
@@ -202,6 +206,7 @@ impl LowerCtx<'_> {
             && let Some(protocol) = self.resolve_builtin(proto)
         {
             return self.alloc_expr(HirExpr::ProtocolCall {
+                from_operator: true,
                 receiver: lowered_operand,
                 protocol,
                 method: HirName::name(method),
@@ -272,6 +277,7 @@ impl LowerCtx<'_> {
             && let Some(protocol) = self.resolve_builtin(proto)
         {
             let pcall = self.alloc_expr(HirExpr::ProtocolCall {
+                from_operator: true,
                 receiver: lowered_lhs,
                 protocol,
                 method: HirName::name(method),
@@ -581,6 +587,7 @@ impl LowerCtx<'_> {
             });
         };
         let iterate_call = self.alloc_expr(HirExpr::ProtocolCall {
+            from_operator: false,
             receiver: lowered_iterable,
             protocol: iter_protocol,
             method: HirName::name("iter"),
@@ -601,6 +608,7 @@ impl LowerCtx<'_> {
         let iter_ref = self.alloc_expr(HirExpr::Local(iter_local, span.clone()));
         let next_call = if let Some(protocol) = self.resolve_builtin(Builtin::IteratorProtocol) {
             self.alloc_expr(HirExpr::ProtocolCall {
+                from_operator: false,
                 receiver: iter_ref,
                 protocol,
                 method: HirName::name("next"),
@@ -756,6 +764,7 @@ impl LowerCtx<'_> {
             });
         };
         let scrutinee = self.alloc_expr(HirExpr::ProtocolCall {
+            from_operator: false,
             receiver: lowered_operand,
             protocol: try_protocol,
             method: HirName::name("tryExtract"),

@@ -8,7 +8,7 @@ import std.core.(Range, ClosedRange, Hashable)
 import std.collections.(SeqRange)
 import std.text.(Formattable, FormatOptions, StringBuilder)
 import std.numeric.(Int64)
-import std.numeric.(RandomNumberGenerator, Lcg64)
+import std.numeric.(RandomNumberGenerator, Lcg64, SystemRandom)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, ArraySlice, ArraySliceIterator, RefSliceIterator, MutRefSliceIterator, RawPointer, SystemAllocator, LiteralSlice, CowBox)
 import std.ffi.(memcpy)
@@ -1171,27 +1171,23 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// var rng = Lcg64(seed: 42);
     /// arr.shuffle(using: rng);  // deterministic for the seed
     /// ```
-    public mutating func shuffle(using rng: some RandomNumberGenerator) {
+    public mutating func shuffle(mutating using rng: some RandomNumberGenerator) {
         let n = self.len();
         if n <= 1 {
             return
         }
         self.makeUnique();
-        self.storage.modify { (mutating s) in
-            var generator = rng;
-            // Fisher-Yates shuffle
-            var i: Int64 = n - 1;
-            while i > 0 {
-                // Inline nextInt(below:) since extension methods may not be visible on generic R
-                let bound = UInt64(from: i) + 1;
-                let rngValue = generator.nextUInt64();
-                let j = Int64(from: rngValue.modulo(bound));
-                // Swap elements at i and j
-                let temp = s.ptr.offset(by: i).read();
-                s.ptr.offset(by: i).write(s.ptr.offset(by: j).read());
-                s.ptr.offset(by: j).write(temp);
-                i = i - 1
-            }
+        // Fisher-Yates shuffle. The generator is mutated directly (not the
+        // storage closure's copy) so the caller's stream advances; draws go
+        // through the unbiased nextUInt64(below:).
+        let ptr = self.ptr();
+        var i: Int64 = n - 1;
+        while i > 0 {
+            let j = Int64(from: rng.nextUInt64(below: UInt64(from: i) + 1));
+            let temp = ptr.offset(by: i).read();
+            ptr.offset(by: i).write(ptr.offset(by: j).read());
+            ptr.offset(by: j).write(temp);
+            i = i - 1
         }
     }
 
@@ -1208,7 +1204,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// arr.shuffle();  // e.g. [3, 1, 5, 2, 4]
     /// ```
     public mutating func shuffle() {
-        var rng = Lcg64();
+        var rng = SystemRandom();
         self.shuffle(using: rng)
     }
 
@@ -1225,7 +1221,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// let result = arr.shuffled(using: rng);
     /// // arr is still [1, 2, 3, 4, 5]
     /// ```
-    public func shuffled(using rng: some RandomNumberGenerator) -> Array[T] {
+    public func shuffled(mutating using rng: some RandomNumberGenerator) -> Array[T] {
         var result = self.clone();
         result.shuffle(using: rng);
         result

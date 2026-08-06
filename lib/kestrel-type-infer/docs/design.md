@@ -901,7 +901,14 @@ fn solve(ctx: &mut InferCtx) {
         if !progress { break; }
     }
 
-    // Phase 2: Apply literal defaults for unconstrained literals
+    // Phase 2: Apply literal defaults for unconstrained literals.
+    // Before each defaulting pass, operator shape projection runs: a
+    // deferred operator-protocol member on a literal receiver gets its
+    // result var resolved to the generalized return shape of the
+    // literal's DEFAULT type (`100..=200` → `ClosedRange[?lit]`), so
+    // annotations and parameterized protocol bounds can pin the literal
+    // bidirectionally instead of the receiver force-defaulting to Int64.
+    apply_operator_shape_projections(ctx);
     apply_literal_defaults(ctx);
 
     // Phase 3: Solve again with defaults applied
