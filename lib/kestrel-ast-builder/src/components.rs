@@ -334,6 +334,20 @@ pub enum ConformanceItem {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtensionTarget(pub AstType);
 
+/// Names the extension's target LHS *introduces* as type parameters —
+/// `extend Pair[T, U]` → `["T", "U"]`, `extend Pair[Int64, U]` → `["U"]`,
+/// `extend Int64` → `[]`. For a ref target `extend &T` the pointee is the
+/// parameter position, so → `["T"]`.
+///
+/// The entities these names bind belong to the *target nominal*, not to the
+/// extension, so an extension carries no `TypeParams` for them. This component
+/// is the single record of which of the target's parameters the LHS actually
+/// bound; without it, consumers either miss them entirely (E439's shadowing
+/// walk) or over-approximate by taking every parameter the target declares
+/// (which leaks `T` into `extend Box[Int64]` bodies).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExtensionLhsParamNames(pub Vec<String>);
+
 /// On a TypeAlias declared as `type Protocol.Assoc = T` — the qualifying
 /// protocol path. Absence means the alias is unqualified (`type Assoc = T`).
 /// Captured at build time so analyzers can resolve the protocol entity via

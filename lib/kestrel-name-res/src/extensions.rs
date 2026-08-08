@@ -3,7 +3,7 @@
 //! Finds extensions for a given type entity and resolves extension
 //! target types from AstType to entities.
 
-use kestrel_ast_builder::{ExtensionTarget, Name, NodeKind};
+use kestrel_ast_builder::{ExtensionLhsParamNames, ExtensionTarget, Name, NodeKind, TypeParams};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
@@ -77,6 +77,58 @@ impl QueryFn for ExtensionTargetEntity {
             TypeResolution::Found(entity) => Some(entity),
             _ => None,
         }
+    }
+}
+
+// ===== ExtensionLhsParams =====
+
+/// Query: the target type parameters an extension's LHS actually *binds*.
+///
+/// THE answer to "which type parameters does `extend Foo[…]` bring into
+/// scope?", for every consumer. `extend Box[T]` binds Box's `T`;
+/// `extend Box[Payload]` binds nothing, because `Payload` names no parameter
+/// of Box. The returned entities belong to the target nominal — an extension
+/// never carries `TypeParams` for its LHS.
+///
+/// Both halves matter. Taking the target's parameters unfiltered leaks `T`
+/// into `extend Box[Payload]` bodies; ignoring them entirely (the old
+/// `TypeParams`-only view) makes E439's shadowing walk blind to every generic
+/// extension. Matching is by name, as it has always been, so `extend Box[U]`
+/// binds nothing — positional binding would be a separate behavior change.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ExtensionLhsParams {
+    pub extension: Entity,
+    pub root: Entity,
+}
+
+impl QueryFn for ExtensionLhsParams {
+    type Output = Vec<Entity>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Vec<Entity> {
+        let Some(lhs) = ctx.get::<ExtensionLhsParamNames>(self.extension) else {
+            return Vec::new();
+        };
+        if lhs.0.is_empty() {
+            return Vec::new();
+        }
+        let Some(target) = ctx.query(ExtensionTargetEntity {
+            extension: self.extension,
+            root: self.root,
+        }) else {
+            return Vec::new();
+        };
+        let Some(params) = ctx.get::<TypeParams>(target) else {
+            return Vec::new();
+        };
+        params
+            .0
+            .iter()
+            .copied()
+            .filter(|&tp| {
+                ctx.get::<Name>(tp)
+                    .is_some_and(|n| lhs.0.iter().any(|l| *l == n.0))
+            })
+            .collect()
     }
 }
 

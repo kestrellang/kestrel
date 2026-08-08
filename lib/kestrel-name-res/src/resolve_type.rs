@@ -324,11 +324,15 @@ pub fn resolve_type_param_assoc(
     root: Entity,
 ) -> Option<Entity> {
     let tp_name = ctx.get::<Name>(type_param)?;
+    let subject = SubjectParam {
+        entity: type_param,
+        name: &tp_name.0,
+    };
 
     // Walk the type param's ancestor chain for where-clause bounds.
     let mut ancestor = ctx.parent_of(type_param);
     while let Some(anc) = ancestor {
-        if let Some(found) = search_entity_bounds(ctx, anc, &tp_name.0, assoc_name, root) {
+        if let Some(found) = search_entity_bounds(ctx, anc, subject, assoc_name, root) {
             return Some(found);
         }
         ancestor = ctx.parent_of(anc);
@@ -340,7 +344,7 @@ pub fn resolve_type_param_assoc(
     // where-clause is on the extension which is an ancestor of context, not of T).
     let mut ancestor = Some(context);
     while let Some(anc) = ancestor {
-        if let Some(found) = search_entity_bounds(ctx, anc, &tp_name.0, assoc_name, root) {
+        if let Some(found) = search_entity_bounds(ctx, anc, subject, assoc_name, root) {
             return Some(found);
         }
         ancestor = ctx.parent_of(anc);
@@ -349,29 +353,69 @@ pub fn resolve_type_param_assoc(
     None
 }
 
+/// The type parameter a where-clause subject must denote for its bounds to
+/// apply, carried as *entity plus name* rather than a bare name.
+///
+/// Two distinct type parameters routinely share a name — `struct Holder[T]`
+/// and a method `func f[T]` inside it, or an `extend Box[T]` LHS param and a
+/// method's own `[T]`. Matching by name alone silently hands the inner,
+/// unbounded parameter the outer one's associated types. The name is kept only
+/// as a cheap prefilter so the common case never pays for a `ResolveName`.
+#[derive(Clone, Copy)]
+struct SubjectParam<'a> {
+    entity: Entity,
+    name: &'a str,
+}
+
+/// True when the where-clause subject `name`, resolved in the scope of the
+/// entity that *bears* the clause, denotes exactly `subject.entity`.
+///
+/// Resolving in `scope` is what distinguishes shadowed parameters: a clause on
+/// `Holder` resolves `T` to Holder's parameter, so a method's own `T` — a
+/// different entity with the same name — correctly fails to match.
+fn subject_denotes(
+    ctx: &QueryContext<'_>,
+    scope: Entity,
+    name: &str,
+    subject: SubjectParam<'_>,
+    root: Entity,
+) -> bool {
+    // Prefilter: names must agree before it is worth resolving.
+    if name != subject.name {
+        return false;
+    }
+    let resolution = ctx.query(ResolveName {
+        name: name.to_string(),
+        context: scope,
+        root,
+    });
+    let NameResolution::Found(entities) = resolution else {
+        // Unresolvable subject (malformed clause) — fall back to the name
+        // match so a broken where clause degrades to the old behavior rather
+        // than dropping bounds that used to resolve.
+        return true;
+    };
+    entities.contains(&subject.entity)
+}
+
 /// Search a single entity's where-clause and conformances for bounds
 /// on `type_param_name` that contain an associated type `assoc_name`.
 fn search_entity_bounds(
     ctx: &QueryContext<'_>,
     entity: Entity,
-    type_param_name: &str,
+    subject: SubjectParam<'_>,
     assoc_name: &str,
     root: Entity,
 ) -> Option<Entity> {
     if let Some(where_clause) = ctx.get::<WhereClause>(entity) {
         if let Some(found) =
-            search_bounds_for_assoc(ctx, where_clause, type_param_name, assoc_name, entity, root)
+            search_bounds_for_assoc(ctx, where_clause, subject, assoc_name, entity, root)
         {
             return Some(found);
         }
-        if let Some(found) = search_inherited_assoc_bounds(
-            ctx,
-            where_clause,
-            type_param_name,
-            assoc_name,
-            entity,
-            root,
-        ) {
+        if let Some(found) =
+            search_inherited_assoc_bounds(ctx, where_clause, subject, assoc_name, entity, root)
+        {
             return Some(found);
         }
     }
@@ -383,7 +427,7 @@ fn search_entity_bounds(
 fn search_bounds_for_assoc(
     ctx: &QueryContext<'_>,
     where_clause: &WhereClause,
-    type_param_name: &str,
+    param: SubjectParam<'_>,
     assoc_name: &str,
     scope: Entity,
     root: Entity,
@@ -400,7 +444,10 @@ fn search_bounds_for_assoc(
         let kestrel_ast::AstType::Named { segments, .. } = subject else {
             continue;
         };
-        if segments.len() != 1 || segments[0].name != type_param_name {
+        if segments.len() != 1 {
+            continue;
+        }
+        if !subject_denotes(ctx, scope, &segments[0].name, param, root) {
             continue;
         }
 
@@ -419,7 +466,7 @@ fn search_bounds_for_assoc(
 fn search_inherited_assoc_bounds(
     ctx: &QueryContext<'_>,
     where_clause: &WhereClause,
-    type_param_name: &str,
+    param: SubjectParam<'_>,
     assoc_name: &str,
     scope: Entity,
     root: Entity,
@@ -437,7 +484,10 @@ fn search_inherited_assoc_bounds(
         let kestrel_ast::AstType::Named { segments, .. } = subject else {
             continue;
         };
-        if segments.len() < 2 || segments[0].name != type_param_name {
+        if segments.len() < 2 {
+            continue;
+        }
+        if !subject_denotes(ctx, scope, &segments[0].name, param, root) {
             continue;
         }
 

@@ -74,7 +74,7 @@ use kestrel_ast::AstType;
 use kestrel_ast_builder::{
     Name, NodeKind, TypeAnnotation, TypeParams, WhereClause as AstWhereClause, WhereConstraint,
 };
-use kestrel_name_res::{ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ExtensionLhsParams, ResolveTypePath, TypeResolution};
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -411,13 +411,27 @@ fn check_type_param_shadowing(
 ) {
     // Collect outer type param names by walking parent chain
     let mut outer_params: HashMap<String, Span> = HashMap::new();
+    let mut record = |p: kestrel_hecs::Entity, outer: &mut HashMap<String, Span>| {
+        let name = util::entity_name(cx.query, p);
+        let span = util::entity_span(cx.query, p);
+        outer.entry(name).or_insert(span);
+    };
     let mut current = cx.query.parent_of(cx.entity);
     while let Some(ancestor) = current {
         if let Some(tp) = cx.query.get::<TypeParams>(ancestor) {
             for &p in &tp.0 {
-                let name = util::entity_name(cx.query, p);
-                let span = util::entity_span(cx.query, p);
-                outer_params.entry(name).or_insert(span);
+                record(p, &mut outer_params);
+            }
+        }
+        // An extension carries no `TypeParams` for its LHS — `extend Box[T]`
+        // binds Box's own parameter entity. Without this the shadowing check
+        // is blind to every generic extension (fragility audit F12).
+        if cx.query.get::<NodeKind>(ancestor) == Some(&NodeKind::Extension) {
+            for p in cx.query.query(ExtensionLhsParams {
+                extension: ancestor,
+                root: cx.root,
+            }) {
+                record(p, &mut outer_params);
             }
         }
         current = cx.query.parent_of(ancestor);

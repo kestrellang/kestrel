@@ -47,6 +47,34 @@ shorthand, `{ set { … } }`, `{ ref { … } }`) replaces storage with computati
 In a `protocol` the same form stays a requirement, carried by
 `FieldOwner::Protocol`.
 
+## An extension has no `TypeParams` for its LHS
+
+`extend Box[T]` does not introduce `T` — it *binds* Box's own parameter entity.
+So an extension entity carries `TypeParams` only for free parameters the
+conformance RHS introduced (`extend Int64: ArrayIndex[T]`), and reading
+`TypeParams` off an extension to answer "what generic parameters are in scope
+here" silently returns nothing for every generic extension.
+
+Ask `ExtensionLhsParams { extension, root }` (kestrel-name-res) instead. It is
+the single answer, backed by the `ExtensionLhsParamNames` component this crate
+writes once in `build_extension`. Do **not** reach for the target nominal's
+`TypeParams` directly either — that over-approximates in the other direction and
+leaks `T` into `extend Box[Concrete]` bodies, where the LHS bound nothing.
+
+Both failure modes were real (audit finding F12): E439 never fired for a method
+type parameter shadowing an extension LHS parameter, and `T` resolved inside
+`extend Box[Concrete]`.
+
+`collect_lhs_target_names` returns a source-ordered `Vec`, not a `HashSet`,
+because its output is persisted in a component — see the ordering rule below.
+
+## Component payloads must have deterministic order
+
+Anything stored in a component and later iterated is part of the compiler's
+observable output. Build these from ordered sources; a `HashSet`/`HashMap`
+iteration order that leaks into a component reorders diagnostics, mangled names,
+or emitted code between runs.
+
 ## Accessor children
 
 A setter with a body lives on a spawned `NodeKind::Setter` **child**, not on the

@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 4 fixed · 3 partial · 2 blocked · 50 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 5 fixed · 2 partial · 2 blocked · 50 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
