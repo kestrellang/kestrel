@@ -175,7 +175,7 @@ _Defined in `lang/std/result/optional.ks`._
 #### function `inspect`
 
 ```kestrel
-public consuming func inspect((T) -> ()) -> Optional[T]
+public consuming func inspect(mutating mutating (T) -> ()) -> Optional[T]
 ```
 
 Side-effecting tap — runs `fn` on the wrapped value (if any) and
@@ -948,7 +948,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `inspect`
 
 ```kestrel
-public consuming func inspect((T) -> ()) -> Result[T, E]
+public consuming func inspect(mutating mutating (T) -> ()) -> Result[T, E]
 ```
 
 Side-effecting tap on the success branch — runs `fn` on the `Ok`
@@ -968,7 +968,7 @@ _Defined in `lang/std/result/result.ks`._
 #### function `inspectErr`
 
 ```kestrel
-public consuming func inspectErr((E) -> ()) -> Result[T, E]
+public consuming func inspectErr(mutating mutating (E) -> ()) -> Result[T, E]
 ```
 
 Side-effecting tap on the error branch — runs `fn` on the `Err`

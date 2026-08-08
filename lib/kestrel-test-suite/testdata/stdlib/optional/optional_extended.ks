@@ -26,10 +26,13 @@ module Test
             // Test unwrap(orElse:) on None (should call closure)
             if none.unwrap(orElse: { () in 99 }) != 99 { return 6 }
 
-            // Test inspect on Some (returns self unchanged)
-            // Note: cannot modify captured variables in closures, so just verify return value
-            let inspected = someOpt.inspect({ (x) in });
+            // Test inspect on Some (returns self unchanged). `inspect` takes a
+            // `mutating` closure (docs/design/closures-stdlib-audit.md), so the
+            // literal may assign to a captured frame var.
+            var seenValue: std.numeric.Int64 = 0;
+            let inspected = someOpt.inspect({ (x) in seenValue = x });
             if inspected.unwrap() != 42 { return 7 }
+            if seenValue != 42 { return 18 }
 
             // Test inspect on None (returns None)
             let inspectedNone = none.inspect({ (x) in });

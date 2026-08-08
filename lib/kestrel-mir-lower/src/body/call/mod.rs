@@ -56,6 +56,25 @@ impl OssaBodyCtx<'_, '_> {
             receiver_ty = crate::ty::build_self_type(self.ctx, entity);
         }
 
+        // `escapingClosure.clone()` — the SHARE operation on a boxed
+        // environment. There is no entity to resolve (a function type has no
+        // nominal), so the solver answers the requirement's shape directly and
+        // this emits the same `CopyValue` an implicit copy does: post-mono
+        // expand turns it into the erased retain (`mono/expand.rs`).
+        // `is_shared`, not `is_boxed`: only a shared environment has a share
+        // operation. A `consuming` closure is `not Copyable` and exposes no
+        // `clone()` at all.
+        if method_name == "clone"
+            && args.is_empty()
+            && matches!(
+                self.ctx.module.ty_arena.get(receiver_ty),
+                MirTy::FuncThick { kind, .. } if kind.is_shared()
+            )
+        {
+            let recv = self.lower_expr_for_borrow(receiver_expr);
+            return self.emit_copy_value(recv);
+        }
+
         let resolved_entity = self
             .typed
             .as_ref()
@@ -137,7 +156,20 @@ impl OssaBodyCtx<'_, '_> {
                 MirTy::FuncThin { .. } => Callee::Thin(receiver_val),
                 _ => Callee::Thick(receiver_val),
             };
-            return self.emit_call_returning(callee, call_args, result_ty);
+            let result = self.emit_call_returning(callee, call_args, result_ty);
+            // Lockstep twin of `lower_indirect_call`: calling a `consuming`
+            // value CONSUMES it, so this is its last owner — release the unique
+            // environment here (the body's prologue already took the payload
+            // out, so `destroy()` only reclaims the block).
+            if matches!(
+                self.ctx.module.ty_arena.get(receiver_ty),
+                MirTy::FuncThick { kind, .. } if kind.is_boxed() && !kind.is_shared()
+            ) && self.body.value(receiver_val).ownership == Ownership::Owned
+            {
+                let receiver_val = self.resolve_value(receiver_val);
+                self.emit_destroy_value(receiver_val);
+            }
+            return result;
         }
 
         // Collect conventions early (needed for arg lowering), but defer
@@ -183,7 +215,13 @@ impl OssaBodyCtx<'_, '_> {
                 self.prepare_call_arg_for_expr(receiver_expr, recv_conv)
             };
             let mut a = vec![receiver_arg];
-            a.extend(self.lower_call_args_bound(args, resolved, &conventions, 1, &method_type_args));
+            a.extend(self.lower_call_args_bound(
+                args,
+                resolved,
+                &conventions,
+                1,
+                &method_type_args,
+            ));
             a
         };
 
@@ -241,7 +279,13 @@ impl OssaBodyCtx<'_, '_> {
         if method_name == "init"
             && self.is_delegation_self_receiver(receiver_expr)
             && let Some(inner_effect) = self.ctx.world.get::<InitEffect>(resolved).cloned()
-            && self.ctx.module.functions.get(&self.func_entity).map(|f| f.ret) == Some(result_ty)
+            && self
+                .ctx
+                .module
+                .functions
+                .get(&self.func_entity)
+                .map(|f| f.ret)
+                == Some(result_ty)
         {
             return self.emit_delegation_propagation(result, result_ty, inner_effect);
         }
@@ -974,7 +1018,17 @@ impl OssaBodyCtx<'_, '_> {
         args: &[HirCallArg],
     ) -> ValueId {
         let callee_ty = self.resolve_expr_type(callee_expr);
-        let callee_val = self.lower_callee_value(callee_expr);
+        // A `consuming` closure's call CONSUMES the value: the one call owns
+        // the environment (docs/design/closures.md §"consuming"). The callee
+        // value is therefore MOVED out of its binding and released after the
+        // call — the release reclaims the unique block, whose payload the
+        // body's prologue already took out. A second call is E500 in the front
+        // end, so a consumed binding is never read again.
+        let consuming_callee = matches!(
+            self.ctx.module.ty_arena.get(callee_ty),
+            MirTy::FuncThick { kind, .. } if kind.is_boxed() && !kind.is_shared()
+        );
+        let (callee_val, callee_is_temp) = self.lower_callee_value(callee_expr, consuming_callee);
         let result_ty = self.resolve_expr_type(expr_id);
 
         // Read the callee's per-param conventions from its function type. Only a
@@ -1008,7 +1062,31 @@ impl OssaBodyCtx<'_, '_> {
             _ => Callee::Thick(callee_val),
         };
 
-        self.emit_call_returning(callee, call_args, result_ty)
+        let result = self.emit_call_returning(callee, call_args, result_ty);
+
+        // A call READS its callee; for a BOXED closure the temp materialized
+        // above is a RETAINED handle. Release it here rather than at scope
+        // exit: otherwise the environment stays alive past its last real
+        // owner, and `f = makeThunk(2)` cannot observe the old environment's
+        // last release (docs/design/closures.md §"Copy and Drop"). View kinds
+        // are POD — the destroy expands to nothing.
+        //
+        // A `consuming` callee is released whether or not it was a temp: the
+        // CALL consumed it, so this is its last owner by definition. That also
+        // makes conversion 4 (`escaping` → `consuming`, plan D5) fall out
+        // without an adapter — the coerced value is one retained shared
+        // handle, and this release is the one that gives it back.
+        if (consuming_callee || callee_is_temp)
+            && self.body.value(callee_val).ownership == Ownership::Owned
+            && matches!(
+                self.ctx.module.ty_arena.get(callee_ty),
+                MirTy::FuncThick { kind, .. } if kind.is_boxed()
+            )
+        {
+            let callee_val = self.resolve_value(callee_val);
+            self.emit_destroy_value(callee_val);
+        }
+        result
     }
 
     /// Lower a call's callee to its value. A call reads (does not consume) its
@@ -1016,13 +1094,34 @@ impl OssaBodyCtx<'_, '_> {
     /// once — is used directly rather than moved/copied. The callee value is
     /// not an OSSA operand of `Call`, so leaving it @owned and live is correct:
     /// it is dropped once at scope exit.
-    fn lower_callee_value(&mut self, callee_expr: HirExprId) -> ValueId {
-        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr]
-            && !self.is_var_local(hir_local)
-        {
-            return self.map_local(*hir_local);
+    ///
+    /// `consume` (a `consuming`-kind callee) inverts that: the call is the
+    /// value's one and only use, so an addressable binding is MOVED out of its
+    /// slot (`Take` + mark empty) instead of loaded. Loading would leave the
+    /// slot's scope-exit release live and free the environment twice.
+    ///
+    /// Returns `(value, is_temp)`; `is_temp` marks a value MATERIALIZED here
+    /// (a load out of an addressable binding, a field projection) rather than
+    /// an existing binding — only a temp may be released after the call.
+    fn lower_callee_value(&mut self, callee_expr: HirExprId, consume: bool) -> (ValueId, bool) {
+        if let HirExpr::Local(hir_local, _) = &self.hir.exprs[callee_expr] {
+            let hir_local = *hir_local;
+            if !self.is_var_local(&hir_local) {
+                return (self.map_local(hir_local), false);
+            }
+            if consume {
+                let addr = self.map_local(hir_local);
+                let addr = self.whole_slot_addr(addr);
+                let ty = self.resolve_expr_type(callee_expr);
+                let value = self.emit_take(addr, ty);
+                self.set_var_init(hir_local, crate::body::VarInit::DefUninit);
+                if let Some(flag) = self.var_flag(hir_local) {
+                    self.store_drop_flag(flag, false);
+                }
+                return (value, true);
+            }
         }
-        self.lower_expr(callee_expr)
+        (self.lower_expr(callee_expr), true)
     }
 
     fn resolve_callee_entity_from_expr(&self, callee_expr: HirExprId) -> Option<Entity> {

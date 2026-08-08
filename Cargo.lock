@@ -913,6 +913,7 @@ dependencies = [
 name = "kestrel-copy-fold"
 version = "0.17.0"
 dependencies = [
+ "kestrel-ast",
  "kestrel-hecs",
 ]
 

@@ -1245,6 +1245,7 @@ fn resolve_conformance_type_arg(
             Some(ResolvedTy::Tuple(resolved))
         },
         AstType::Function {
+            kind,
             params,
             param_conventions,
             return_type,
@@ -1256,6 +1257,7 @@ fn resolve_conformance_type_arg(
                 .collect();
             let ret = resolve_conformance_type_arg(cx, return_type, context, ext_to_struct)?;
             Some(ResolvedTy::Function {
+                kind: *kind,
                 params,
                 conventions: param_conventions.clone(),
                 ret: Box::new(ret),

@@ -250,6 +250,16 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
             format!("convention mismatch: {}", detail),
             "mutating closure not allowed here".into(),
         ),
+        InferError::KindMismatch {
+            expected, actual, ..
+        } => (
+            format!(
+                "closure kind mismatch: expected {}, found {}",
+                kestrel_type_infer::describe_fn_kind(*expected),
+                kestrel_type_infer::describe_fn_kind(*actual)
+            ),
+            format!("this is {}", kestrel_type_infer::describe_fn_kind(*actual)),
+        ),
         InferError::RefFunctionAsValue { .. } => (
             "a reference-returning function cannot be used as a value".into(),
             "call it instead; its return convention is not expressible in a function type".into(),

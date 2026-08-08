@@ -13,9 +13,15 @@ pub enum SwitchCase {
     /// `..<N` has `start: None`) and must be left UNTESTED — filling an absent
     /// bound with a sentinel (i64::MIN/MAX) truncates under a narrowed switch
     /// discriminant and makes the test always-false (#186).
-    IntRange { start: Option<i64>, end: Option<i64> },
+    IntRange {
+        start: Option<i64>,
+        end: Option<i64>,
+    },
     CharLiteral(u32),
-    CharRange { start: Option<u32>, end: Option<u32> },
+    CharRange {
+        start: Option<u32>,
+        end: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

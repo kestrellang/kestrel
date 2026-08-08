@@ -192,6 +192,26 @@ pub struct InferCtx<'a> {
     /// Implicit-it closure TyVars: 1 param named "it", requires exactly 1-param context.
     pub(crate) closure_it: HashSet<TyVar>,
 
+    /// Kind-flexible function TyVars — *bare* callable values (named `Def`s and
+    /// enum-case constructors, built by [`InferCtx::function`]). A bare function
+    /// pointer has no environment, so it satisfies every closure kind: in
+    /// `unify` and `solve_coerce` the flex side ADOPTS the other side's kind
+    /// instead of forcing equality. Modeled as a TyVar set rather than a fifth
+    /// `FnTypeKind` variant (plan D1) — a wildcard kind that survives
+    /// unification would poison control-flow merge points.
+    pub(crate) kind_flex: HashSet<TyVar>,
+
+    /// Accepted CROSS-kind coercions: `expr → (source kind, target kind)`.
+    /// Surfaced on `TypedBody.kind_coercions`. NOTE: currently RECORDED but
+    /// UNCONSUMED — mir-lower ended up deriving every representation
+    /// conversion from the value/slot types directly (bare→owning widens via
+    /// the nop-shim `ApplyPartial` path; escaping→normal/consuming reads the
+    /// shared first two words). Kept as the audit trail of the solver's
+    /// passing-table decisions and as the channel a future conversion that
+    /// *cannot* be type-derived would use.
+    pub(crate) kind_coercions:
+        HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
+
     /// HirExprIds of closure-*literal* expressions, recorded during constraint
     /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
     /// convention upgrade to literals only — a named function value's
@@ -344,6 +364,8 @@ impl<'a> InferCtx<'a> {
             type_param_defs: HashMap::new(),
             closure_flex: HashSet::new(),
             closure_it: HashSet::new(),
+            kind_flex: HashSet::new(),
+            kind_coercions: HashMap::new(),
             closure_literal_exprs: HashSet::new(),
             never_fallback_targets: HashSet::new(),
             expected_array_elem: None,
@@ -530,29 +552,55 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
-    /// Allocate a TyVar bound to a Function type. Convenience: every param
-    /// defaults to `Consuming` (the pre-#106 convention). Use
-    /// [`Self::function_conv`] to carry explicit `mutating` conventions.
+    /// Allocate a TyVar for a *bare* callable value — a named `Def` or an
+    /// enum-case constructor. Every param defaults to `Consuming` (the pre-#106
+    /// convention) and the kind is built at `Normal`, but the fresh TyVar is
+    /// also registered in [`Self::kind_flex`]: a capture-free function pointer
+    /// "has no environment, satisfies every kind, and escapes freely"
+    /// (closures.md), so it ADOPTS whatever kind it is checked against rather
+    /// than carrying a wildcard kind through unification (plan D1 — a wildcard
+    /// kind poisons merge points). Each use site instantiates a fresh TyVar, so
+    /// in-place adoption never retroactively re-kinds another site.
+    ///
+    /// Use [`Self::function_conv`] for types whose kind and conventions are
+    /// fixed by an annotation or a closure literal.
     pub fn function(&mut self, params: Vec<TyVar>, ret: TyVar) -> TyVar {
         let conventions = vec![kestrel_ast::ParamConvention::Consuming; params.len()];
-        self.function_conv(params, conventions, ret)
+        let tv = self.function_conv(kestrel_ast::FnTypeKind::Normal, params, conventions, ret);
+        self.kind_flex.insert(tv);
+        tv
     }
 
-    /// Allocate a TyVar bound to a Function type with explicit per-param
-    /// conventions (parallel to `params`).
+    /// Allocate a TyVar bound to a Function type with an explicit closure
+    /// `kind` and explicit per-param conventions (parallel to `params`).
     pub fn function_conv(
         &mut self,
+        kind: kestrel_ast::FnTypeKind,
         params: Vec<TyVar>,
         conventions: Vec<kestrel_ast::ParamConvention>,
         ret: TyVar,
     ) -> TyVar {
         let idx = self.types.len() as u32;
         self.types.push(TySlot::Resolved(TyKind::Function {
+            kind,
             params,
             conventions,
             ret,
         }));
         TyVar(idx)
+    }
+
+    /// Overwrite the resolved `TyKind::Function` *kind* of `tv` in place — the
+    /// closure-literal retrofit (`{ … }` is always built at `Normal`; the
+    /// expected type selects the real kind) and the `kind_flex` adoption.
+    /// No-op if `tv` does not resolve to a function type (mirrors
+    /// [`Self::set_function_conventions`]).
+    pub fn set_function_kind(&mut self, tv: TyVar, kind: kestrel_ast::FnTypeKind) {
+        let root = self.resolve(tv);
+        if let TySlot::Resolved(TyKind::Function { kind: k, .. }) = &mut self.types[root.0 as usize]
+        {
+            *k = kind;
+        }
     }
 
     /// Overwrite the resolved `TyKind::Function` conventions of `tv` in place.

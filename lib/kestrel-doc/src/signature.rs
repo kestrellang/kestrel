@@ -398,11 +398,10 @@ fn push_params(s: &mut String, world: &World, entity: Entity, opts: Options, opa
 }
 
 fn param_str(p: &AstParam, hide_bind: bool, opaque: &OpaqueMap) -> String {
-    let ty_str = p
-        .ty
-        .as_ref()
-        .map(|t| param_ty(t, opaque))
-        .unwrap_or_else(|| "_".into());
+    let ty_str =
+        p.ty.as_ref()
+            .map(|t| param_ty(t, opaque))
+            .unwrap_or_else(|| "_".into());
     // `is_mut` on AstParam encodes the `mutating` (or `consuming`)
     // access-mode keyword from the source. Render it back as written —
     // `mut` is Rust syntax, not Kestrel.
@@ -474,7 +473,11 @@ fn push_accessors(s: &mut String, world: &World, entity: Entity) {
 fn param_ty(t: &AstType, opaque: &OpaqueMap) -> String {
     if let Some(info) = single_segment_name(t).and_then(|n| opaque.get(n)) {
         let b: Vec<_> = info.bounds.iter().map(ty).collect();
-        let head = if b.is_empty() { "_".into() } else { b.join(" and ") };
+        let head = if b.is_empty() {
+            "_".into()
+        } else {
+            b.join(" and ")
+        };
         return match &info.negative {
             Some(neg) => format!("some {} and not {}", head, ty(neg)),
             None => format!("some {}", head),
@@ -566,12 +569,14 @@ fn ty(t: &AstType) -> String {
             format!("({})", inner.join(", "))
         },
         AstType::Function {
+            kind,
             params,
             return_type,
             ..
         } => {
             let p: Vec<_> = params.iter().map(ty).collect();
-            format!("({}) -> {}", p.join(", "), ty(return_type))
+            // `FnTypeKind::prefix()` — empty for the unmarked `Normal` kind.
+            format!("{}({}) -> {}", kind.prefix(), p.join(", "), ty(return_type))
         },
         AstType::Array(inner, _) => format!("[{}]", ty(inner)),
         AstType::Dictionary(k, v, _) => format!("[{}: {}]", ty(k), ty(v)),

@@ -267,6 +267,25 @@ pub enum Builtin {
     /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
     /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
     Indirection,
+
+    // ===== Shared-ownership box (implicit boxing) =====
+    /// The generic struct the compiler instantiates for implicit boxing —
+    /// escaping closure environments today; class storage, `any` payloads and
+    /// `indirect enum` payloads later. Bound to `RcBox` in the stdlib via
+    /// `@builtin(.SharedBox)`; the binding is swappable, so every boxing site
+    /// resolves the *entity* through this builtin and then calls only
+    /// `SharedBox` protocol requirements on it (docs/design/shared-box.md).
+    SharedBox,
+
+    // ===== Unique-ownership box (one-shot `consuming` closure envs) =====
+    /// The generic struct the compiler instantiates for a UNIQUELY owned heap
+    /// environment — a `consuming` closure's captures today. Bound to
+    /// `UniqueBox` in the stdlib via `@builtin(.UniqueBox)`.
+    ///
+    /// Deliberately not the shared box: a shared release drops the whole
+    /// payload, which double-frees the capture slots a one-shot body already
+    /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
+    UniqueBox,
 }
 
 impl Builtin {
@@ -473,6 +492,28 @@ impl Builtin {
 
             // Indirection — resolves by source name (auto-imported from std.core).
             Self::Indirection => "Indirection",
+
+            // Shared box — deliberately NOT the conformer's source name.
+            // Returning "RcBox" would let `ResolveBuiltin`'s name-based fast
+            // path find `RcBox` whether or not it carries the attribute, so
+            // moving the binding to another conformer would silently not take
+            // effect. Resolution must go through the attribute index, exactly
+            // like `OptionalEnum` / `ArrayStruct`.
+            //
+            // The sentinel is deliberately NOT the protocol's name:
+            // `std.memory.SharedBox` is a real, auto-imported protocol, and
+            // `ResolveBuiltin`'s name-based strategy 1 would find that PROTOCOL
+            // entity before ever consulting the attribute index — the boxing
+            // site would instantiate the wrong entity. "SharedBoxBinding" has
+            // no source-level type, so resolution always falls through to the
+            // attribute index and finds whatever type carries
+            // `@builtin(.SharedBox)` (the swappable binding, `RcBox` today).
+            Self::SharedBox => "SharedBoxBinding",
+
+            // Unique box — same rationale as the shared box above: resolution
+            // must go through the attribute index so the binding stays
+            // swappable, and the sentinel must not name any source type.
+            Self::UniqueBox => "UniqueBoxBinding",
         }
     }
 
@@ -675,6 +716,12 @@ impl Builtin {
             // Indirection / smart-pointer member peel
             "Indirection" => Some(Self::Indirection),
 
+            // Shared-ownership box (implicit boxing)
+            "SharedBox" => Some(Self::SharedBox),
+
+            // Unique-ownership box (one-shot closure environments)
+            "UniqueBox" => Some(Self::UniqueBox),
+
             _ => None,
         }
     }
@@ -869,6 +916,15 @@ impl Builtin {
             // Indirection: non-marker protocol with a required `pointeeRef()`
             // method; explicit conformance (NOT implicit, unlike Copyable).
             Self::Indirection => BuiltinKind::protocol(),
+
+            // Shared box: the annotated symbol is the generic *struct* the
+            // compiler instantiates (`RcBox`), not the `SharedBox` protocol
+            // that states its contract.
+            Self::SharedBox => BuiltinKind::Struct,
+
+            // Unique box: the annotated symbol is the generic *struct* the
+            // compiler instantiates (`UniqueBox`).
+            Self::UniqueBox => BuiltinKind::Struct,
 
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,

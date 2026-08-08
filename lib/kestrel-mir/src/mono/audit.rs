@@ -485,6 +485,10 @@ fn mono_needs_drop(module: &MonoModule, ty: TyId) -> bool {
                 })
                 .unwrap_or(false)
         },
+        // A boxed (owning) closure holds a heap-environment handle: a bitwise
+        // duplicate is an uncounted alias (escaping) or an outright duplicate
+        // owner (consuming) — lockstep 1 twin of `expand::ty_needs_drop`.
+        MirTy::FuncThick { kind, .. } => kind.is_boxed(),
         _ => false,
     }
 }

@@ -42,7 +42,12 @@ impl CopyLayer for MirCopyLayer<'_> {
             .structs
             .get(&entity)
             .map(|s| s.type_info.copy.clone())
-            .or_else(|| self.module.enums.get(&entity).map(|e| e.type_info.copy.clone()))
+            .or_else(|| {
+                self.module
+                    .enums
+                    .get(&entity)
+                    .map(|e| e.type_info.copy.clone())
+            })
             // Unknown entity -> Bitwise (current Named fallback).
             .unwrap_or(CopyBehavior::Bitwise)
     }
@@ -104,19 +109,37 @@ pub fn copy_behavior(
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
-        // INTERIM: closures are treated as POD — a 2-word `{code, env}` value
-        // bit-copied like a raw pointer, never owning its captured env (which
-        // today holds only Copyable captures). This lets a borrowed `self`
-        // hand out copies of a stored closure field (e.g. `SplitWhereView.iter`,
-        // `IntersperseIterator` separator). Must stay in lockstep with the
-        // `needs_drop` arm below — Bitwise + droppable would double-free the env.
-        // NEXT VERSION: closures become Rc-boxed reference types; copy → retain.
-        | MirTy::FuncThick { .. }
         // Ref never appears as a value type (signature-only; results register
         // as @guaranteed pointee values), so copy/drop on it is vacuous — a
         // pointer-scalar bit-copy keeps any defensive path harmless.
         | MirTy::Ref { .. }
         | MirTy::Error => CopyBehavior::Bitwise,
+
+        // The closure kind, not the environment payload's fold, decides the
+        // closure value's copy class (docs/design/closures.md §"Copy and
+        // Drop"). MUST stay in lockstep with the `needs_drop` arm below —
+        // Bitwise + droppable double-frees the environment, Clone without drop
+        // leaks it (lockstep 1: `expand.rs ty_needs_drop`,
+        // `audit.rs mono_needs_drop`, `clone_shim.rs ty_needs_clone_shim`,
+        // `mono/mod.rs concrete_copy`).
+        //
+        // - view kinds: the env holds addresses into the frame and owns
+        //   nothing — a 2-word POD value, bit-copied like a raw pointer.
+        // - escaping: a shared, heap-boxed env. Duplication is the box's share
+        //   operation, never a bit-copy; the payload is the Cloneable protocol
+        //   (the same inert payload `clone_shim.rs` stamps).
+        // - consuming: a UNIQUE heap env. There is no duplication operation at
+        //   all — handing one around is a move — so it is `None`, NOT `Clone`.
+        MirTy::FuncThick { kind, .. } => match kind {
+            crate::ty::FnKind::Consuming => CopyBehavior::None,
+            crate::ty::FnKind::Escaping => match find_cloneable_protocol(module) {
+                Some(p) => CopyBehavior::Clone(p),
+                // No stdlib (`Cloneable` absent): nothing can clone anyway, so
+                // the POD reading is the only self-consistent answer.
+                None => CopyBehavior::Bitwise,
+            },
+            _ => CopyBehavior::Bitwise,
+        },
 
         // Canonical fold (copy-drift #3 resolved 2026-06-10): any move-only
         // element makes the tuple move-only regardless of position; else any
@@ -296,15 +319,16 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         | MirTy::Str
         | MirTy::Pointer(_)
         | MirTy::FuncThin { .. }
-        // INTERIM: closures are POD — see `copy_behavior`. A FuncThick never
-        // owns its captured env (Copyable captures only, today), so it needs no
-        // drop. Must match the Bitwise arm in `copy_behavior`. NEXT VERSION:
-        // Rc-boxed closures need drop → release.
-        | MirTy::FuncThick { .. }
         // Ref: a borrow view (signature or stage-2b payload/field slot) —
         // never owns its pointee, never drops.
         | MirTy::Ref { .. }
         | MirTy::Error => false,
+
+        // Lockstep twin of the `copy_behavior` FuncThick arm. A view env owns
+        // nothing; an escaping env is a shared heap box whose last release
+        // destroys the captures (drop → release); a consuming env is a unique
+        // heap box whose release drops every slot not already moved out.
+        MirTy::FuncThick { kind, .. } => kind.is_boxed(),
 
         MirTy::Tuple(elems) => {
             let elems = elems.clone();

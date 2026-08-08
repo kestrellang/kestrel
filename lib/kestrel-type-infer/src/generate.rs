@@ -785,7 +785,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         },
 
         // Block expression: execute stmts, result is the tail expr
-        HirExpr::Block { body, .. } => gen_block(ctx, hir, body),
+        HirExpr::Block { body, .. } => {
+            let tv = gen_block(ctx, hir, body);
+            if let Some(tail) = body.tail_expr {
+                propagate_closure_literal(ctx, tail, id);
+            }
+            tv
+        },
 
         HirExpr::Error { span } => ctx.report_error(InferError::FromHir { span: span.clone() }),
 
@@ -807,6 +813,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.interpolation_link(result_tv, acc_tv, span.clone());
             }
 
+            propagate_closure_literal(ctx, *inner, id);
             result_tv
         },
     };
@@ -814,6 +821,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
     // Record the type for this expression
     ctx.expr_types.insert(id, tv);
     tv
+}
+
+/// Carry the closure-*literal* marker outward through a transparent wrapper
+/// (`HirExpr::Block`, `HirExpr::Sugar`) — both share the inner expression's
+/// TyVar, so the wrapper denotes the same literal.
+///
+/// The marker gates both retrofits the expected type performs on a literal:
+/// the param-convention upgrade (#106) and the closure-kind rewrite (D3). The
+/// `Coerce` those read carries the id of whatever expression sits in the
+/// argument / initializer slot, which for a wrapped literal is the WRAPPER —
+/// without this the retrofit silently misses and the site fails with a
+/// spurious E624 / E603.
+fn propagate_closure_literal(ctx: &mut InferCtx<'_>, inner: HirExprId, outer: HirExprId) {
+    if ctx.closure_literal_exprs.contains(&inner) {
+        ctx.closure_literal_exprs.insert(outer);
+    }
 }
 
 /// Record which inner `ProtocolCall` expr_id is the "primary" for a Sugar
@@ -1591,7 +1614,16 @@ fn gen_closure(
     // closure-local `closure_ret_tv` (unifying the tail value and every
     // `return` in the body), never the raw `body_tv` (which is Never when the
     // tail diverges via `return`).
-    let fn_tv = ctx.function_conv(param_tvs, conventions, closure_ret_tv);
+    // Kind: a closure literal is ALWAYS built at `Normal`. There is no
+    // kind-on-literal syntax; the expected type retrofits the real kind in
+    // place during solving (`reconcile_fn_kinds`), exactly as it upgrades the
+    // param conventions above.
+    let fn_tv = ctx.function_conv(
+        kestrel_ast::FnTypeKind::Normal,
+        param_tvs,
+        conventions,
+        closure_ret_tv,
+    );
 
     if params.is_empty() {
         // No explicit params, no `it` — adapts to any expected arity
@@ -2162,6 +2194,7 @@ fn lower_return_ty_with_opaque(
             ctx.tuple(tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -2172,7 +2205,7 @@ fn lower_return_ty_with_opaque(
                 .map(|p| lower_return_ty_with_opaque(ctx, p, callee, subs))
                 .collect();
             let ret_tv = lower_return_ty_with_opaque(ctx, ret, callee, subs);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         // Non-structural types: delegate to the standard path
         _ => lower_hir_ty_with_subs(ctx, ret_hir, subs),
@@ -2292,6 +2325,7 @@ pub(crate) fn lower_hir_ty_with_subs(
             ctx.tuple(elem_tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -2302,7 +2336,7 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .map(|p| lower_hir_ty_with_subs(ctx, p, subs))
                 .collect();
             let ret_tv = lower_hir_ty_with_subs(ctx, ret, subs);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         HirTy::Param(entity, _) => {
             // Check substitution map first (for instantiated type params)

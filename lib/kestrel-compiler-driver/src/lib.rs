@@ -266,6 +266,7 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::CircularOpaqueReturn { .. } => "CircularOpaqueReturn",
         InferError::OpaqueUnderlierNotCopyable { .. } => "OpaqueUnderlierNotCopyable",
         InferError::ConventionMismatch { .. } => "ConventionMismatch",
+        InferError::KindMismatch { .. } => "KindMismatch",
         InferError::RefFunctionAsValue { .. } => "RefFunctionAsValue",
         InferError::RefInTypeArgument { .. } => "RefInTypeArgument",
     }
@@ -416,6 +417,14 @@ fn format_error(err: &InferError) -> String {
         },
         InferError::ConventionMismatch { .. } => {
             format!("ConventionMismatch at {}:{}", span.file_id, span.start)
+        },
+        InferError::KindMismatch {
+            expected, actual, ..
+        } => {
+            format!(
+                "KindMismatch (expected {expected:?}, got {actual:?}) at {}:{}",
+                span.file_id, span.start
+            )
         },
         InferError::RefFunctionAsValue { .. } => {
             format!("RefFunctionAsValue at {}:{}", span.file_id, span.start)

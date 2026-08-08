@@ -320,7 +320,7 @@ public enum Optional[T]: not Copyable where T: not Static {
     ///     .inspect { print("Found: \{it.name}") }
     ///     .map { it.email };
     /// ```
-    public consuming func inspect(fn: (T) -> ()) -> Optional[T] {
+    public consuming func inspect(mutating fn: mutating (T) -> ()) -> Optional[T] {
         match self {
             .Some(value) => {
                 fn(value);

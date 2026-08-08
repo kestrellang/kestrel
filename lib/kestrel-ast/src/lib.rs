@@ -11,4 +11,4 @@ pub mod pretty;
 
 pub use arena::{Arena, Idx};
 pub use ast_body::*;
-pub use ast_type::{AstType, ParamConvention, PathSegment};
+pub use ast_type::{AstType, FnTypeKind, ParamConvention, PathSegment};

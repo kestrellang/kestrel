@@ -218,7 +218,7 @@ let action: (String) -> () = { (s) in println(s); };
 ### Properties
 
 - **First-class values:** Functions can be passed as arguments and returned from other functions
-- **Structural typing:** Function types are compared by their parameter types and return type
+- **Structural typing:** Function types are compared by their parameter types, return type, and closure kind
 - **Parameter labels not part of type:** Labels are for call-site clarity, not type identity
 
 ```kestrel
@@ -226,6 +226,19 @@ let action: (String) -> () = { (s) in println(s); };
 func add(a: Int64, b: Int64) -> Int64 { a + b }
 func multiply(x: Int64, y: Int64) -> Int64 { x * y }
 ```
+
+### Closure Kinds
+
+A function type may carry an optional **kind** prefix — `mutating`, `consuming`, or `escaping` — which says how a closure of that type holds its captured environment:
+
+```kestrel
+let read:  (Int64) -> Int64 = { it * 2 };            // normal: read-only frame views
+var bump:  mutating () -> () = { total = total + 1; }; // writes back to captures
+let once:  consuming () -> Int64 = { seed };           // owns captures, called once
+let saved: escaping () -> Int64 = { 7 };               // owns captures, may outlive the frame
+```
+
+The kind is part of type identity, so `Array[escaping () -> Int64]` and `Array[() -> Int64]` are different types. See [Closures](closures.md) for the full model.
 
 ## Optional Types
 

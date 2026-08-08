@@ -30,7 +30,7 @@ pub use layout::{EnumLayout, StructLayout};
 pub use op::{DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness};
 pub use substitute::{SubstMap, substitute};
 pub use terminator::SwitchCase;
-pub use ty::{MirTy, ParamConvention, TyArena};
+pub use ty::{FnKind, MirTy, ParamConvention, TyArena, func_thick_words};
 pub use value::Ownership;
 
 use item::enum_def::EnumDef;
@@ -48,7 +48,16 @@ use item::witness::WitnessDef;
 pub struct EscapeCarry {
     pub any_ref: bool,
     pub mutating_ref: bool,
+    /// Carries ANY closure. Drives taint PROPAGATION (`carry_ref_taint`), which
+    /// must keep tracking an owning closure's root so a truncated view of a
+    /// borrowed handle is still recognizable.
     pub closure: bool,
+    /// Carries a FRAME-BOUND closure — a view kind whose environment holds
+    /// addresses into the defining frame. Only this drives the E494 escape
+    /// MODE: a boxed handle (`escaping`'s shared box, `consuming`'s unique
+    /// box) owns its environment, so returning it or storing it in a returned
+    /// struct is legal (plan D7).
+    pub view_closure: bool,
 }
 
 impl EscapeCarry {
@@ -147,7 +156,15 @@ impl MirModule {
                 let pointee = *pointee;
                 self.escape_carry_into(pointee, out, visited);
             },
-            MirTy::FuncThick { .. } => out.closure = true,
+            // A boxed (owning) value owns a heap environment, so its handle
+            // is self-contained: returning it, storing it in a returned struct
+            // and handing back a `consuming` parameter's handle are all legal
+            // (plan D7). It still PROPAGATES taint so the truncated-view check
+            // can see a borrowed handle's root.
+            MirTy::FuncThick { kind, .. } => {
+                out.closure = true;
+                out.view_closure |= !kind.is_boxed();
+            },
             MirTy::Tuple(elems) => {
                 for e in elems.clone() {
                     self.escape_carry_into(e, out, visited);

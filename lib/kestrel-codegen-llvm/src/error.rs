@@ -9,8 +9,14 @@ use std::fmt;
 #[derive(Debug)]
 pub enum CodegenError {
     ModuleCreation(String),
-    FunctionCompilation { name: String, source: String },
-    FunctionDefinition { name: String, source: String },
+    FunctionCompilation {
+        name: String,
+        source: String,
+    },
+    FunctionDefinition {
+        name: String,
+        source: String,
+    },
     ModuleFinish(String),
     LinkerError(String),
     IoError(std::io::Error),

@@ -229,6 +229,29 @@ pub enum InferError {
     /// `Consuming`) closure parameter is expected — the callee never lends a
     /// mutable place, so the closure's write access can't be honored (#106).
     ConventionMismatch { span: Span },
+
+    /// E624 — a closure value's kind does not pass where the expected kind is
+    /// required (the directional passing table in closures.md, "Passing: What
+    /// Fits Where"). Only the passing table reports here: the signature-level
+    /// kind/convention pairing is E625 (a DeclCheck) and calling a
+    /// `mutating`-kind closure non-exclusively is the E203 mutability family.
+    KindMismatch {
+        expected: kestrel_ast::FnTypeKind,
+        actual: kestrel_ast::FnTypeKind,
+        span: Span,
+    },
+}
+
+/// Human wording for a closure kind in a diagnostic — "a normal closure",
+/// "a 'mutating' closure". Single source of truth for E624's message and its
+/// four mirrors.
+pub fn describe_fn_kind(kind: kestrel_ast::FnTypeKind) -> String {
+    match kind {
+        kestrel_ast::FnTypeKind::Normal => "a normal closure".into(),
+        kestrel_ast::FnTypeKind::Escaping => "an 'escaping' closure".into(),
+        // `keyword()` is the single source of truth for the spelling.
+        other => format!("a '{}' closure", other.keyword().unwrap_or("")),
+    }
 }
 
 impl InferError {
@@ -265,7 +288,8 @@ impl InferError {
             | Self::OpaqueUnderlierNotCopyable { span, .. }
             | Self::RefFunctionAsValue { span }
             | Self::RefInTypeArgument { span }
-            | Self::ConventionMismatch { span } => span,
+            | Self::ConventionMismatch { span }
+            | Self::KindMismatch { span, .. } => span,
         }
     }
 }

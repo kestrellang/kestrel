@@ -1,12 +1,18 @@
 # Closure Semantics
 
-**Status: draft — supersedes the interim model documented in `docs/memory-model/closures.md`.**
+**Status: implemented (2026-08-08).** Shipped in full — all four kinds, the
+passing table, the freeze rule, and the owning-tier lowering. The
+implementation record (decisions D1–D10, including E2b's amended
+consuming-release protocol) is
+[docs/plans/closure-kinds/closure-kinds-plan.md](../plans/closure-kinds/closure-kinds-plan.md);
+the user-facing description is [docs/memory-model/closures.md](../memory-model/closures.md),
+which this design superseded.
 
 This document defines sound semantics for Kestrel closures: how they capture,
-copy, and drop. It replaces the current interim implementation, in which every
-closure is treated as plain data — captured values are never dropped (a
-captured `FileHandle`'s `deinit` never runs), and copying a closure aliases
-its stack environment.
+copy, and drop. It replaced an interim implementation in which every closure
+was treated as plain data — captured values were never dropped (a captured
+`FileHandle`'s `deinit` never ran), and copying a closure aliased its stack
+environment.
 
 The design rests on one idea: **a closure holds its environment the way its
 kind says it does, and the kind is spelled in the type.** There are four
@@ -338,15 +344,17 @@ Swift-style capture lists are reserved for future use, not shipped.
 
 ## Diagnostics
 
-| code | today | under this design |
+| code | before | as shipped |
 |---|---|---|
-| E494 | closure capturing a local cannot escape | unchanged for view kinds; message gains a fix-it suggesting an `escaping` or `consuming` owning type |
+| E494 | closure capturing a local cannot escape | unchanged for view kinds; message gained a fix-it note suggesting an `escaping` or `consuming` owning type |
 | E500 | use after move | also fires on use after an owning capture moved a non-Copyable, and on calling a consumed `consuming` closure |
+| E503 | cannot move out of a borrowed value | now also the owning tier's rejection of a non-Copyable capture the frame only borrows, and the replacement guard for a `consuming` body moving a non-owned capture out |
 | E506 | cannot move a capture out of a closure | kept for normal/`mutating`/`escaping` bodies; lifted inside `consuming` bodies |
-| E603 | cannot assign to a capture | kept for normal bodies, with a fix-it suggesting `mutating`/`escaping`; lifted in both |
-| E212 | closures cannot capture reference bindings | retired — view capture is now the default |
-| *new* | freeze violation | cannot move/consume/`deinit` a place while a live view-kind closure captures it (closure analogue of E498) |
-| *new* | kind mismatch | passing against the kind table, or calling a `mutating`-kind closure without exclusive access |
+| E603 | cannot assign to a capture | kept for normal bodies — including assignments to a *projection* of a capture (`c.n = 5`) — with a fix-it note suggesting a `mutating` expected type; lifted for `mutating`, `consuming`, and `escaping` |
+| E212 | closures cannot capture reference bindings | **retired** — view capture is now the default; the descriptor is deleted and only the owning tier still rejects frame provenance (under E624) |
+| **E507** | *(new)* | freeze violation: cannot move/consume/`deinit` a place while a live view-kind closure captures it, and cannot store a value carrying the view into a longer-lived binding (closure analogue of E498). Shipped **place-granular**, with the scope-depth "outlives" variant |
+| **E624** | *(new)* | kind mismatch: the passing table, plus the owning tier's rejection of a frame-provenance capture |
+| **E625** | *(new)* | the signature-level kind/convention pairing (a `mutating`-kind parameter must be declared `mutating`, a `consuming`-kind parameter `consuming`) — a DeclCheck, so bodiless declarations are covered. Calling a `mutating`-kind closure without exclusive access routes through the existing mutability band instead (the E203 family) |
 
 ## Behavior Changes from Today
 
@@ -422,24 +430,38 @@ already makes.
 
 ## Open Questions
 
-1. **Exclusivity for `mutating` captures.** Kestrel has no uniqueness rule
-   for `&mutating`, and this design does not add one: two `mutating` closures
-   over the same place are permitted (single-threaded, deterministic).
-   Decided for now; revisit if a general exclusivity rule ever lands.
-2. **`consuming` in v1?** The kind is fully specified here; shipping it may
-   trail the others if the schedule demands.
-3. **Generic/protocol positions.** Kinds on function types in witness and
-   generic contexts (e.g. a protocol method taking `consuming () -> T`) are
-   expected to work like other conventions but need their own test matrix.
-4. **Threading.** `escaping`'s shared mutable state is sound today because
-   Kestrel is single-threaded. A future concurrency story must revisit it
-   (an atomic or otherwise thread-safe container, and either a
-   `Sendable`-style marker or exclusivity).
-5. **The shared-object container.** Designed: see
-   [shared-box.md](shared-box.md). A `SharedBox` protocol (defined entirely
-   in Kestrel) states the contract; `RcBox` is the default `@lang(sharedBox)`
-   binding, swappable for other containers (GC, atomic) without changing any
-   client lowering. Escaping environments are the first client; classes,
-   `any` existentials, and `indirect enum` payloads follow. The initial
+Kept for the record; each carries its resolution as of the 2026-08-08
+implementation.
+
+1. **Exclusivity for `mutating` captures** — *decided (no exclusivity), as
+   shipped.* Kestrel has no uniqueness rule for `&mutating`, and this design
+   does not add one: two `mutating` closures over the same place are
+   permitted (single-threaded, deterministic). Pinned by
+   `memory_model/closure_kinds/mutating/two_mutating_closures_same_place_allowed.ks`.
+   Revisit only if a general exclusivity rule ever lands.
+2. **`consuming` in v1?** — **resolved: SHIPPED in v1.** All four kinds landed
+   together. The container is *not* the shared box: a `consuming` closure owns
+   a unique heap environment (`@builtin(.UniqueBox)` → `std.memory.UniqueBox`),
+   the call transfers the environment to the callee, and the caller reclaims
+   the emptied block via `release_fn` after every call — the uniform rule that
+   makes `escaping → consuming` work with no synthesized adapter. See plan D5
+   (decision 2, as amended by E2b).
+3. **Generic/protocol positions** — *still open (no blocker found).* Kinds
+   participate in `ResolvedTy` equality, so witness matching is kind-exact and
+   generic instantiation preserves the kind. No stdlib protocol *requirement*
+   needed a non-normal kind, so the dedicated witness/generic test matrix was
+   not written; write it before relying on kinds in protocol requirements.
+4. **Threading** — *still open, deliberately deferred.* `escaping`'s shared
+   mutable state is sound today because Kestrel is single-threaded. A future
+   concurrency story must revisit it (an atomic or otherwise thread-safe
+   container, and either a `Sendable`-style marker or exclusivity). The
+   `SharedBox` binding is the hook point.
+5. **The shared-object container** — **resolved: see
+   [shared-box.md](shared-box.md), implemented.** A `SharedBox` protocol
+   (defined entirely in Kestrel) states the contract; `RcBox` is the default
+   `@lang(sharedBox)` binding — shipped as `@builtin(.SharedBox)` on the
+   `@builtin` machinery — swappable for other containers (GC, atomic) without
+   changing any client lowering. Escaping environments are the first client;
+   classes, `any` existentials, and `indirect enum` payloads follow. The
    contract is deterministic last-release cleanup and share-on-clone; strong
    cycles leak.

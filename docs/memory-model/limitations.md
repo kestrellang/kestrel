@@ -108,9 +108,11 @@ Recursive *enums* are supported via `indirect enum` (heap indirection).
 
 ---
 
-## Capturing Closures Cannot Escape
+## View-Kind Closures Cannot Escape
 
-Closure environments are stack-allocated in the creating frame, so a closure that captures anything cannot be returned or stored beyond that frame (E494); capture-free closures are unrestricted. See [closures.md](closures.md). Heap-allocated environments are planned; the by-value capture semantics will not change.
+A normal or `mutating` closure holds **views** into the frame that created it, so it cannot be returned or stored beyond that frame (E494), and the places it views are frozen against destruction for its lexical extent (E507). To leave the frame, spell an owning kind in the expected type: `escaping` (owned snapshots in a shared, refcounted environment — reference semantics, `Cloneable`) or `consuming` (a unique environment, callable exactly once). Capture-free closures are unrestricted at every kind. See [closures.md](closures.md).
+
+Remaining limits: `escaping` environments are refcounted, so a **strong cycle of escaping closures leaks** (no weak references yet); captures reached through a *nested* closure still collapse to the whole enclosing local rather than the narrowest place; and there is no kind-on-literal syntax or Swift-style capture list — the expected type is the only way to select a kind.
 
 ---
 

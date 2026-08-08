@@ -1044,12 +1044,18 @@ mod tests {
                 format!("({})", inner.join(", "))
             },
             AstType::Function {
+                kind,
                 params,
                 return_type,
                 ..
             } => {
                 let p: Vec<_> = params.iter().map(type_name).collect();
-                format!("({}) -> {}", p.join(", "), type_name(return_type))
+                format!(
+                    "{}({}) -> {}",
+                    kind.prefix(),
+                    p.join(", "),
+                    type_name(return_type)
+                )
             },
             AstType::Array(inner, _) => format!("[{}]", type_name(inner)),
             AstType::Dictionary(k, v, _) => format!("[{}: {}]", type_name(k), type_name(v)),

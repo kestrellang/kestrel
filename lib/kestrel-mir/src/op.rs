@@ -163,6 +163,18 @@ pub enum Op {
     AlignOf(TyId),
     StackAlloc(TyId),
 
+    /// Project one machine word out of a `FuncThick` value: `0` = code
+    /// pointer, `1` = environment handle, `2` = retain shim, `3` = release
+    /// shim (the last two exist only at the owning kinds, whose layout is 4
+    /// words — see `passes/layout.rs`).
+    ///
+    /// The ONLY consumer is the post-mono type-erased retain/release dispatch
+    /// in `mono/expand.rs`: a value of type `escaping (…) -> …` does not name
+    /// its environment type, so copy/destroy load the shim pointer out of the
+    /// value and call it indirectly. Codegen is a GEP + load — never pointer
+    /// arithmetic on an address (kestrel-codegen-llvm/AGENTS.md).
+    ClosureWord(u32),
+
     StrPtr,
     StrLen,
 

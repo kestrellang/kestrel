@@ -376,7 +376,7 @@ extend Str {
     /// ```
     /// "hello world".split(where: { (c) in c.isWhitespace }).count;  // 2
     /// ```
-    public func split(consuming where predicate: (Char) -> Bool) -> SplitWhereView {
+    public func split(consuming where predicate: escaping (Char) -> Bool) -> SplitWhereView {
         SplitWhereView(slice: self.asSlice(), where: predicate)
     }
 

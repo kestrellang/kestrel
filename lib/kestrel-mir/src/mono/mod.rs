@@ -113,6 +113,13 @@ pub fn monomorphize(
         &witnesses,
         &mono_bodies,
         target,
+        // Inert `Clone(_)` payload for escaping-closure values — matches the
+        // pre-mono `ty_query` answer so the two sides of the mono boundary
+        // agree (lockstep 1).
+        protocols
+            .values()
+            .find(|p| p.name.ends_with("Cloneable"))
+            .map(|p| p.entity),
     );
 
     // Phase 5: Assembly
@@ -786,7 +793,7 @@ fn rewrite_callees(
     for (bi, block) in body.blocks.iter_mut().enumerate() {
         for (ii, inst) in block.insts.iter_mut().enumerate() {
             match &mut inst.kind {
-                InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
+                InstKind::Call { callee, .. } => {
                     rewrite_callee(
                         callee,
                         bi,
@@ -795,6 +802,28 @@ fn rewrite_callees(
                         func_id_map,
                         functions,
                     );
+                },
+                InstKind::ApplyPartial {
+                    callee,
+                    retain,
+                    release,
+                    ..
+                } => {
+                    // The retain/release shims resolve exactly like the closure
+                    // target — codegen packs all three as function addresses.
+                    for c in [Some(callee), retain.as_mut(), release.as_mut()]
+                        .into_iter()
+                        .flatten()
+                    {
+                        rewrite_callee(
+                            c,
+                            bi,
+                            ii,
+                            &body_result.resolved_witnesses,
+                            func_id_map,
+                            functions,
+                        );
+                    }
                 },
                 InstKind::Literal { value, .. } => {
                     if let ImmediateKind::FunctionRef {
@@ -860,6 +889,7 @@ fn resolve_types_and_layouts(
     witnesses: &[WitnessDef],
     mono_bodies: &[MonoBodyResult],
     target: &TargetConfig,
+    cloneable_proto: Option<Entity>,
 ) -> (
     IndexMap<MonoTypeKey, MonoStruct>,
     IndexMap<MonoTypeKey, MonoEnum>,
@@ -982,7 +1012,14 @@ fn resolve_types_and_layouts(
         }
     }
 
-    refine_mono_copy_behavior(arena, structs, enums, &mut mono_structs, &mut mono_enums);
+    refine_mono_copy_behavior(
+        arena,
+        structs,
+        enums,
+        &mut mono_structs,
+        &mut mono_enums,
+        cloneable_proto,
+    );
 
     (mono_structs, mono_enums)
 }
@@ -1008,6 +1045,7 @@ fn refine_mono_copy_behavior(
     enums: &IndexMap<Entity, EnumDef>,
     mono_structs: &mut IndexMap<MonoTypeKey, MonoStruct>,
     mono_enums: &mut IndexMap<MonoTypeKey, MonoEnum>,
+    cloneable_proto: Option<Entity>,
 ) {
     loop {
         let layer = MonoCopyLayer {
@@ -1016,6 +1054,7 @@ fn refine_mono_copy_behavior(
             enums,
             mono_structs,
             mono_enums,
+            cloneable_proto,
         };
         // (key, is_struct, new copy) — collected read-only, applied after.
         let mut updates: Vec<(MonoTypeKey, bool, CopyBehavior)> = Vec::new();
@@ -1065,6 +1104,9 @@ struct MonoCopyLayer<'a> {
     enums: &'a IndexMap<Entity, EnumDef>,
     mono_structs: &'a IndexMap<MonoTypeKey, MonoStruct>,
     mono_enums: &'a IndexMap<MonoTypeKey, MonoEnum>,
+    /// Inert `Clone(_)` payload for escaping-closure values (the same protocol
+    /// entity `ty_query`/`clone_shim` stamp). Never destructured.
+    cloneable_proto: Option<Entity>,
 }
 
 impl CopyLayer for MonoCopyLayer<'_> {
@@ -1096,14 +1138,24 @@ impl CopyLayer for MonoCopyLayer<'_> {
             self.structs
                 .get(&entity)
                 .map(|s| s.conditionally_copyable.as_slice())
-                .or_else(|| self.enums.get(&entity).map(|e| e.conditionally_copyable.as_slice()))
+                .or_else(|| {
+                    self.enums
+                        .get(&entity)
+                        .map(|e| e.conditionally_copyable.as_slice())
+                })
                 .unwrap_or(&[]),
         )
     }
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
         // Stays per-layer: mono-map lookups, no where_clause.
-        concrete_copy(self.arena, ty, self.mono_structs, self.mono_enums)
+        concrete_copy(
+            self.arena,
+            ty,
+            self.mono_structs,
+            self.mono_enums,
+            self.cloneable_proto,
+        )
     }
 
     fn sem_from_class(&self, entity: Entity, class: CopySemantics) -> CopyBehavior {
@@ -1125,6 +1177,7 @@ fn concrete_copy(
     ty: TyId,
     mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
     mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
+    cloneable_proto: Option<Entity>,
 ) -> CopyBehavior {
     match arena.get(ty) {
         MirTy::Named { entity, type_args } => {
@@ -1143,13 +1196,22 @@ fn concrete_copy(
         MirTy::Tuple(elems) => {
             let mut first_clone = None;
             for &e in elems {
-                match concrete_copy(arena, e, mono_structs, mono_enums) {
+                match concrete_copy(arena, e, mono_structs, mono_enums, cloneable_proto) {
                     CopyBehavior::None => return CopyBehavior::None,
                     b @ CopyBehavior::Clone(_) if first_clone.is_none() => first_clone = Some(b),
                     _ => {},
                 }
             }
             first_clone.unwrap_or(CopyBehavior::Bitwise)
+        },
+        // Explicit arm — the pre-mono `ty_query::copy_behavior` FuncThick arm's
+        // post-mono twin (lockstep 1). Falling into the `_` catch-all below
+        // would silently answer Bitwise for an owning closure and make the two
+        // sides of the mono boundary disagree.
+        MirTy::FuncThick { kind, .. } => match (kind, cloneable_proto) {
+            (crate::ty::FnKind::Consuming, _) => CopyBehavior::None,
+            (crate::ty::FnKind::Escaping, Some(p)) => CopyBehavior::Clone(p),
+            _ => CopyBehavior::Bitwise,
         },
         _ => CopyBehavior::Bitwise,
     }
@@ -1343,6 +1405,7 @@ mod tests {
             body: Some(make_body(vec![], ret_val, vec![ValueDef::owned(unit)])),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
         module.add_function(func);
         module.register_name(entity(1), "main");
@@ -1390,6 +1453,7 @@ mod tests {
             }),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         // main() calls identity[Int64]
@@ -1428,6 +1492,7 @@ mod tests {
             )),
             extern_info: None,
             is_main: false,
+            provides_protocol_default: false,
         };
 
         module.add_function(main_fn);
@@ -1493,6 +1558,7 @@ mod tests {
                 symbol_name: "malloc".into(),
             }),
             is_main: false,
+            provides_protocol_default: false,
         };
         module.add_function(func);
         module.register_name(entity(1), "malloc");

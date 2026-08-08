@@ -97,7 +97,8 @@ pub fn compile_inst<'ctx>(
             // pointee reads through the ref once. @guaranteed ref value =
             // address OF the ref slot → load the stored address; @owned ref
             // value IS the address → pass through. Twin of the Cranelift arm.
-            let operand_is_ref = matches!(fc.ctx.module.ty_arena.get(operand_ty), MirTy::Ref { .. });
+            let operand_is_ref =
+                matches!(fc.ctx.module.ty_arena.get(operand_ty), MirTy::Ref { .. });
             let result_is_ref = matches!(
                 fc.ctx
                     .module
@@ -269,7 +270,10 @@ pub fn compile_inst<'ctx>(
             if result_is_guaranteed {
                 let a = fc.resolve_scalar(builder, *arg);
                 fc.map_value(*result, a);
-            } else if matches!(op, Op::PtrTo(_)) {
+            // `PtrTo`/`RefToPtr` need the ADDRESS of the arg, never its loaded
+            // value: a `&T` IS an address, and `resolve_scalar` would load the
+            // pointee (silently reading a scalar pointee's BITS as a pointer).
+            } else if matches!(op, Op::PtrTo(_) | Op::RefToPtr) {
                 let a = fc.get_value(*arg);
                 let arg_is_guaranteed =
                     fc.body.values[arg.index()].ownership == Ownership::Guaranteed;
@@ -366,8 +370,10 @@ pub fn compile_inst<'ctx>(
             result,
             callee,
             captures,
+            retain,
+            release,
         } => {
-            let val = compile_apply_partial(fc, builder, callee, captures)?;
+            let val = compile_apply_partial(fc, builder, callee, captures, retain, release)?;
             fc.map_value(*result, val);
         },
 
@@ -401,7 +407,8 @@ pub fn compile_inst<'ctx>(
 
         InstKind::DestructureStruct { results, operand } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_struct_extract(fc, builder, result_id, *operand, FieldIdx::new(i))?;
+                let val =
+                    compile_struct_extract(fc, builder, result_id, *operand, FieldIdx::new(i))?;
                 fc.map_value(result_id, val);
             }
         },
@@ -419,7 +426,14 @@ pub fn compile_inst<'ctx>(
             variant,
         } => {
             for (i, &result_id) in results.iter().enumerate() {
-                let val = compile_enum_payload(fc, builder, result_id, *operand, *variant, FieldIdx::new(i))?;
+                let val = compile_enum_payload(
+                    fc,
+                    builder,
+                    result_id,
+                    *operand,
+                    *variant,
+                    FieldIdx::new(i),
+                )?;
                 fc.map_value(result_id, val);
             }
         },
@@ -665,6 +679,19 @@ fn compile_op1<'ctx>(
         Op::RefToImmut => arg,
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
         Op::RefToPtr => arg,
+        // Project word `i` out of a closure value. A `FuncThick` is always
+        // addressed (TypeRepr::Aggregate), so `arg` is the base address; the
+        // offset MUST be a GEP (never int arithmetic) or provenance is lost.
+        Op::ClosureWord(i) => {
+            let base = mem::field_gep(cx, builder, arg.into_pointer_value(), i as u64 * ptr_size);
+            mem::load_from_repr(
+                cx,
+                builder,
+                ptr_size,
+                TypeRepr::Scalar(fc.ctx.tc.ptr_scalar),
+                base,
+            )
+        },
         // The two genuine int<->ptr boundaries.
         Op::PtrFromAddress(_) => mem::int_to_ptr(cx, builder, arg.into_int_value()).into(),
         Op::PtrToAddress => mem::ptr_to_int(cx, builder, arg.into_pointer_value(), ptr_size).into(),
@@ -808,7 +835,9 @@ fn mask_shift_amount<'ctx>(
     bits: IntBits,
     amt: IntValue<'ctx>,
 ) -> IntValue<'ctx> {
-    let mask = amt.get_type().const_int((bits.bit_width() - 1) as u64, false);
+    let mask = amt
+        .get_type()
+        .const_int((bits.bit_width() - 1) as u64, false);
     builder.build_and(amt, mask, "shamt").unwrap()
 }
 
@@ -832,8 +861,14 @@ fn emit_overflow_check<'ctx>(
     };
     let name = format!("llvm.{prefix}{kind}.with.overflow");
     let ty: BasicTypeEnum = lhs.get_type().into();
-    let agg = call_intrinsic(&fc.ctx.llmod, builder, &name, &[ty], &[lhs.into(), rhs.into()])?
-        .into_struct_value();
+    let agg = call_intrinsic(
+        &fc.ctx.llmod,
+        builder,
+        &name,
+        &[ty],
+        &[lhs.into(), rhs.into()],
+    )?
+    .into_struct_value();
     let bit = builder
         .build_extract_value(agg, 1, "ovf")
         .unwrap()
@@ -1299,23 +1334,40 @@ fn compile_apply_partial<'ctx>(
     builder: &Builder<'ctx>,
     callee: &Callee,
     captures: &[ValueId],
+    retain: &Option<Callee>,
+    release: &Option<Callee>,
 ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
     let cx = fc.ctx.cx;
     let ptr_size = fc.ctx.ptr_size;
     let ptr_scalar = fc.ctx.tc.ptr_scalar;
 
-    let func_addr = {
-        let Callee::Resolved(mono_id) = callee else {
-            return Err(CodegenError::Unsupported(format!(
-                "ApplyPartial callee not resolved to a mono instance: {callee:?}"
-            )));
+    let func_addr = resolve_func_addr(fc, callee)?;
+
+    // Owning tier (lockstep 9): 4 words, `captures[0]` IS the already-boxed
+    // environment handle (word 1) and the two type-erased shims are words 2/3.
+    // No environment is allocated here.
+    if let (Some(retain), Some(release)) = (retain.as_ref(), release.as_ref()) {
+        let handle = match captures.first() {
+            Some(&h) => fc.resolve_scalar(builder, h),
+            None => mem::null_ptr(cx).into(),
         };
-        let func = fc.ctx.func_ids[mono_id.index()]
-            .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
-        // Keep the function as a real `ptr` (no ptrtoint) so the constant flows
-        // store->load->call and LLVM can devirtualize the closure call.
-        func.as_global_value().as_pointer_value()
-    };
+        let retain_addr = resolve_func_addr(fc, retain)?;
+        let release_addr = resolve_func_addr(fc, release)?;
+        let thick = fc.alloca(ptr_size * 4, ptr_size);
+        for (i, w) in [
+            func_addr.into(),
+            handle,
+            retain_addr.into(),
+            release_addr.into(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let dest = mem::field_gep(cx, builder, thick, i as u64 * ptr_size);
+            mem::store_to_repr(cx, builder, ptr_size, TypeRepr::Scalar(ptr_scalar), dest, w);
+        }
+        return Ok(thick.into());
+    }
 
     let mut env_size = 0u64;
     let mut env_align = 1u64;
@@ -1369,6 +1421,23 @@ fn compile_apply_partial<'ctx>(
     Ok(thick.into())
 }
 
+/// Address of a mono-resolved callee, for packing into a closure value. Kept
+/// as a real `ptr` (no ptrtoint) so the constant flows store->load->call and
+/// LLVM can devirtualize.
+fn resolve_func_addr<'ctx>(
+    fc: &FuncCompiler<'_, 'ctx>,
+    callee: &Callee,
+) -> Result<inkwell::values::PointerValue<'ctx>, CodegenError> {
+    let Callee::Resolved(mono_id) = callee else {
+        return Err(CodegenError::Unsupported(format!(
+            "ApplyPartial callee not resolved to a mono instance: {callee:?}"
+        )));
+    };
+    let func = fc.ctx.func_ids[mono_id.index()]
+        .ok_or_else(|| CodegenError::Unsupported("closure target not declared".into()))?;
+    Ok(func.as_global_value().as_pointer_value())
+}
+
 // ======================================================================
 // Aggregate destructuring
 // ======================================================================
@@ -1407,7 +1476,10 @@ fn compile_struct_extract<'ctx>(
         // keeps the slot's address per the representation contract.
         if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
             && !matches!(
-                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
                 MirTy::Ref { .. }
             )
         {
@@ -1462,7 +1534,10 @@ fn compile_tuple_extract<'ctx>(
         // address (see compile_struct_extract).
         if matches!(fc.ctx.module.ty_arena.get(elem_ty), MirTy::Ref { .. })
             && !matches!(
-                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
                 MirTy::Ref { .. }
             )
         {
@@ -1530,7 +1605,10 @@ fn compile_enum_payload<'ctx>(
         // address (see compile_struct_extract).
         if matches!(fc.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. })
             && !matches!(
-                fc.ctx.module.ty_arena.get(fc.body.values[result.index()].ty),
+                fc.ctx
+                    .module
+                    .ty_arena
+                    .get(fc.body.values[result.index()].ty),
                 MirTy::Ref { .. }
             )
         {
@@ -1896,7 +1974,7 @@ fn compile_thick_call<'ctx>(
         _ => func_ty,
     };
     let (param_tys, ret_ty) =
-        if let MirTy::FuncThick { params, ret } = module.ty_arena.get(inner_ty) {
+        if let MirTy::FuncThick { params, ret, .. } = module.ty_arena.get(inner_ty) {
             (params.clone(), *ret)
         } else {
             return Err(CodegenError::Unsupported(format!(

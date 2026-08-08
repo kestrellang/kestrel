@@ -229,7 +229,10 @@ impl OssaBodyCtx<'_, '_> {
             return None;
         }
         let callee = self.ctx.world.parent_of(default_entity)?;
-        let tps = self.ctx.world.get::<kestrel_ast_builder::TypeParams>(callee)?;
+        let tps = self
+            .ctx
+            .world
+            .get::<kestrel_ast_builder::TypeParams>(callee)?;
         let mut subst = kestrel_mir::SubstMap::new();
         for (&tp, &arg) in tps.0.iter().zip(callee_type_args.iter()) {
             subst.type_params.insert(tp, arg);
@@ -283,9 +286,10 @@ impl OssaBodyCtx<'_, '_> {
         // not possible (a default expr can't itself call with defaults mid-lower
         // in a way that re-enters here before restore), so a plain save/restore
         // of the scalar field is sufficient.
-        let saved_subst = self
-            .default_arg_subst
-            .replace(self.default_arg_subst_map(default_entity, callee_type_args).unwrap_or_default());
+        let saved_subst = self.default_arg_subst.replace(
+            self.default_arg_subst_map(default_entity, callee_type_args)
+                .unwrap_or_default(),
+        );
 
         // Create values for the default body's HIR locals
         let default_locals: Vec<_> = self

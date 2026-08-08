@@ -1592,7 +1592,7 @@ _Defined in `lang/std/memory/pointer.ks`._
 ## struct `RcBox`
 
 ```kestrel
-public struct RcBox[T] { /* private fields */ }
+public struct RcBox[T] where T: not Copyable { /* private fields */ }
 ```
 
 Heap allocation with a strong-reference count, used as the underlying
@@ -1603,6 +1603,11 @@ plain assignment shares storage and only the first mutating call pays
 for a deep copy. Reach for `RcBox` directly when building a similar
 COW type; for plain shared ownership without mutation prefer a more
 purpose-built container.
+
+`RcBox` is also the `@builtin(.SharedBox)` binding — the box the compiler
+instantiates for implicit boxing (escaping closure environments today).
+That binding is what promises deterministic last-release cleanup and no
+strong-cycle collection; the `SharedBox` protocol itself promises neither.
 
 ### Examples
 
@@ -1629,6 +1634,11 @@ the count and shares storage; `deinit` decrements and frees on zero.
   how COW types decide whether to copy.
 - The refcount is currently **not** atomic, so `RcBox` is not safe to
   share across threads.
+- The payload may be non-`Copyable` (`where T: not Copyable` is a
+  relaxation, the same shape `Pointer[T]` uses): implicit boxing needs it,
+  because a boxed closure environment owns its captures. The two
+  operations that copy the payload back out — `getValue()` and
+  `deepClone()` — are therefore only available when `T: Copyable`.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -1660,7 +1670,7 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### function `deepClone`
 
 ```kestrel
-public func deepClone() -> RcBox[T]
+public func deepClone() -> RcBox[T] where T: Copyable
 ```
 
 Allocates fresh storage with a copy of the value. Used by COW
@@ -1672,23 +1682,12 @@ _Defined in `lang/std/memory/rcbox.ks`._
 #### function `getValue`
 
 ```kestrel
-public func getValue() -> T
+public func getValue() -> T where T: Copyable
 ```
 
-Reads the wrapped value out of storage. Returns a copy — the
-underlying `T` is borrowed through `Pointer.with`, so no
-temporary `RcBoxStorage` is created or dropped.
-
-_Defined in `lang/std/memory/rcbox.ks`._
-
-#### function `isUnique`
-
-```kestrel
-public func isUnique() -> Bool
-```
-
-Returns `true` when no other clone is sharing storage. The litmus
-test for "safe to mutate in place" in COW collections.
+Reads the wrapped value out of storage. Returns a bitwise copy read
+straight from the payload slot, so no temporary `RcBoxStorage` is
+created or dropped and `T.deinit` does not run.
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
@@ -1775,6 +1774,40 @@ public mutating func pointeeMutRef() -> &mutating T
 
 _Defined in `lang/std/memory/rcbox.ks`._
 
+### Implements `SharedBox`
+
+#### function `isIdentical`
+
+```kestrel
+public func isIdentical(to: RcBox[T]) -> Bool
+```
+
+Do the two handles point at the same storage block? Compares raw
+storage addresses, the same way `Pointer.isEqual(to:)` does — payload
+equality is irrelevant, two independently allocated boxes holding equal
+values are never identical.
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+#### function `isUnique`
+
+```kestrel
+public func isUnique() -> Bool
+```
+
+Returns `true` when no other clone is sharing storage. The litmus
+test for "safe to mutate in place" in COW collections.
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
+#### function `sharedMutRef`
+
+```kestrel
+public func sharedMutRef() -> &mutating T
+```
+
+_Defined in `lang/std/memory/rcbox.ks`._
+
 ## struct `RefSliceIterator`
 
 ```kestrel
@@ -1830,6 +1863,143 @@ Yields a reference to the next element in place, or `.None` when
 the count reaches zero.
 
 _Defined in `lang/std/memory/pointer.ks`._
+
+## protocol `SharedBox`
+
+```kestrel
+public protocol SharedBox
+```
+
+The contract for a shared-ownership container the compiler may use for
+implicit boxing: escaping closure environments, class storage, `any`
+payloads, `indirect enum` payloads.
+
+Conformers are *handles*: small, fixed-layout values pointing at managed
+storage that owns one `Target`. Duplicating a handle (`clone()`) shares the
+storage; dropping the last handle destroys the payload exactly once.
+Most of the contract is inherited rather than invented — sharing is
+`Cloneable.clone()`, releasing is the conformer's own `deinit`, and reading
+the payload is `MutableIndirection.pointeeRef()` (which also supplies
+transparent member access, so `box.field` reaches the payload's field).
+Only creation, shared mutation, identity and uniqueness are new.
+
+The mechanism-neutral name belongs to this protocol; each conformer says
+what it actually does. `RcBox` is the stdlib default (non-atomic
+refcounting, deterministic last-release cleanup, no strong-cycle
+collection); a future `ArcBox` or `GcBox` would make different promises.
+This protocol deliberately promises neither determinism nor cycle
+collection — those are properties of the binding, documented there.
+
+### Examples
+
+```
+// Generic over any conforming box; uses only SharedBox requirements.
+func roundTrip[B](value: Int64) -> Int64 where B: SharedBox, B.Target = Int64 {
+    let box: B = B(value);          // init(consuming value: Target)
+    let alias = box.clone();        // shares the managed storage
+    box.isIdentical(to: alias);     // true — one storage, two handles
+    alias.pointeeRef()              // read the payload through the peel
+}
+```
+
+### Memory Model
+
+A conformer is a handle onto storage that is owned collectively by every
+live handle. Lifecycle is ordinary value semantics — no compiler hooks are
+involved: the aggregate copy fold routes a struct/enum copy through
+`clone()`, so a struct holding a handle becomes `Cloneable` and shares on
+copy for free, and the drop machinery releases handles like any other
+value.
+
+### Guarantees
+
+- Handles are never bitwise-`Copyable` (the `Cloneable` refinement says
+  so): a bit-copied handle would skip the share operation and
+  over-release the payload.
+- The handle's size and alignment do not depend on `Target`, so a handle
+  can be type-erased and can appear in a recursive layout.
+- The payload is destroyed exactly once, when the last handle goes away.
+- `sharedMutRef()` is the marked exception to value semantics; it is sound
+  while Kestrel is single-threaded.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+### Members
+
+#### initializer `init`
+
+```kestrel
+init(consuming Target)
+```
+
+Takes ownership of `value`, moves it into managed storage and returns
+the first handle onto it.
+
+`value` is a single-name parameter, so call sites are positional:
+`B(payload)`, never `B(value: payload)`.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+#### function `isIdentical`
+
+```kestrel
+func isIdentical(to: Self) -> Bool
+```
+
+Do the two handles refer to the same managed storage? Backs class
+identity (`===`).
+
+Required instead of exposing an address so that a moving collector can
+still conform. Handles derived from one `init` — by `clone()` or by the
+copy fold — are identical; handles from independent `init`s are not,
+however equal their payloads.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+#### function `isUnique`
+
+```kestrel
+func isUnique() -> Bool
+```
+
+`true` only when this handle is provably the sole owner. Backs
+copy-on-write forking.
+
+Implementations without cheap uniqueness information (a tracing
+collector) may conservatively return `false`; callers must therefore
+treat `false` as "fork before mutating" rather than as proof of
+sharing. A box that always answers `false` degrades to fork-always —
+slower, still correct.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+#### function `sharedMutRef`
+
+```kestrel
+func sharedMutRef() -> &mutating Target
+```
+
+Mutable access to the payload through a *shared*, non-`mutating`
+handle — the interior-mutability primitive. Every handle onto the same
+storage observes the write; nothing forks and uniqueness is unchanged.
+
+This is the marked exception to value semantics, and the operation
+escaping closures and (later) classes are built on. Value-semantic
+clients — `any` payloads, `indirect enum`s — must not use it; they
+check `isUnique()` and fork instead.
+
+##### Safety
+
+Sound only while Kestrel is single-threaded: the returned reference
+aliases storage that other handles can read at the same time. Writing
+through it while a copy-on-write client assumes value semantics breaks
+those semantics for every sharer.
+
+_Defined in `lang/std/memory/sharedbox.ks`._
+
+### Implements `Cloneable`
+
+### Implements `MutableIndirection`
 
 ## struct `SystemAllocator`
 
@@ -1895,6 +2065,112 @@ is over-aligned, this allocates a new block, copies the common prefix,
 and frees the old block only after allocation succeeds.
 
 _Defined in `lang/std/memory/allocator.ks`._
+
+## struct `UniqueBox`
+
+```kestrel
+public struct UniqueBox[T]: not Copyable where T: not Copyable { /* private fields */ }
+```
+
+Heap allocation with exactly one owner, used for the environment of a
+`consuming` (one-shot) closure.
+
+Unlike `RcBox` there is no reference count and no sharing: the single
+owner either *takes* the payload out (`takeValue()`, the one call a
+`consuming` closure gets) or *destroys* it (`destroy()`, the drop of a
+closure that was never called). Exactly one of the two runs, and both
+free the block.
+
+This is deliberately NOT a `SharedBox` conformer. A shared box releases by
+dropping its whole payload, which would double-free the capture slots a
+one-shot body already moved out; the point of the unique box is that the
+payload leaves the allocation intact and its per-slot teardown then happens
+in the caller's frame, where the ordinary partial-move machinery applies.
+
+### Examples
+
+```
+let box = UniqueBox(value: makeResource());
+let r = box.takeValue();   // moves the payload out and frees the block
+```
+
+### Representation
+
+One `Pointer[UniqueBoxStorage[T]]`. The pointed-to block holds an `Int64`
+liveness word followed by the `T` value, allocated via `SystemAllocator`.
+
+### Memory Model
+
+Single owner, no counting. `UniqueBox` has no `deinit` on purpose: it is a
+compiler-internal handle whose lifetime is driven by the closure value that
+carries it, and dropping the handle value itself must never free the block
+(the raw pointer word is forgotten and reconstituted across the closure
+representation). Every allocation is released by exactly one `takeValue()`
+or `destroy()`.
+
+### Guarantees
+
+- `takeValue()` transfers ownership of the payload to the caller and never
+  runs `T.deinit`.
+- `destroy()` runs `T.deinit` exactly once when the payload is still
+  present, and never when it has already been taken.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+### Members
+
+#### initializer `From Value`
+
+```kestrel
+public init(consuming T)
+```
+
+Allocates fresh storage holding `value`. Panics if the underlying
+`SystemAllocator` returns `.None`.
+
+##### Errors
+
+Panics with `"UniqueBox allocation failed"` on allocation failure.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+#### function `destroy`
+
+```kestrel
+public func destroy()
+```
+
+Drops the payload (if it is still present) and frees the block. This is
+the box's single reclamation point — it runs exactly once, whether or
+not `takeValue()` emptied the block first.
+
+##### Safety
+
+Must be called exactly once per box, after any `takeValue()`.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
+
+#### function `takeValue`
+
+```kestrel
+public func takeValue() -> T
+```
+
+Moves the payload out of the block, leaving the block itself alive and
+marked empty. The caller becomes the sole owner of the returned value;
+`T.deinit` does not run here.
+
+The block is NOT freed: a `consuming` closure's call function takes the
+environment out this way, and the closure value's release shim
+(`destroy()`) reclaims the now-empty block afterwards. That keeps
+exactly one free per allocation whether or not the closure was ever
+called.
+
+##### Safety
+
+Must be called at most once per box, and never after `destroy()`.
+
+_Defined in `lang/std/memory/uniquebox.ks`._
 
 ## function `swap`
 

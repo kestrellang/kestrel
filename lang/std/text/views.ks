@@ -3653,13 +3653,13 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
     type Item = StringSlice
 
     fileprivate var slice: StringSlice
-    fileprivate var predicate: (Char) -> Bool
+    fileprivate var predicate: escaping (Char) -> Bool
     fileprivate var sourcePtr: Pointer[UInt8]
     fileprivate var sourceLen: Int64
     fileprivate var index: Int64
     fileprivate var done: Bool
 
-    public init(slice slice: StringSlice, consuming where predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -3668,7 +3668,7 @@ public struct SplitWhereViewIterator: Iterator, Cloneable {
         self.done = false;
     }
 
-    fileprivate init(slice slice: StringSlice, consuming where predicate: (Char) -> Bool, index index: Int64, done done: Bool) {
+    fileprivate init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool, index index: Int64, done done: Bool) {
         self.slice = slice;
         self.predicate = predicate;
         self.sourcePtr = slice._rawPtr().offset(by: slice.start);
@@ -3725,9 +3725,9 @@ public struct SplitWhereView: Iterable, Cloneable {
     type TargetIterator = SplitWhereViewIterator
 
     fileprivate var slice: StringSlice
-    fileprivate var predicate: (Char) -> Bool
+    fileprivate var predicate: escaping (Char) -> Bool
 
-    public init(slice slice: StringSlice, consuming where predicate: (Char) -> Bool) {
+    public init(slice slice: StringSlice, consuming where predicate: escaping (Char) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
     }

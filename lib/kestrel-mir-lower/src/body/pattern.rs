@@ -691,7 +691,14 @@ impl OssaBodyCtx<'_, '_> {
                     // Destroy values that aren't in the tracker (e.g., discriminant)
                     self.destroy_extra_test_values(&extra_vals, &switch_live, params);
                     let rebound = rebound_value(scrutinee, &switch_live, params);
-                    self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, place, arms, exits);
+                    self.emit_decision_tree_threaded(
+                        subtree,
+                        rebound,
+                        scrutinee_ty,
+                        place,
+                        arms,
+                        exits,
+                    );
                 }
 
                 if let (Some(def_tree), Some((def_block, def_params))) = (default, default_block) {
@@ -700,7 +707,14 @@ impl OssaBodyCtx<'_, '_> {
                     self.rebind_scope_values(&switch_live, &def_params);
                     self.destroy_extra_test_values(&extra_vals, &switch_live, &def_params);
                     let rebound = rebound_value(scrutinee, &switch_live, &def_params);
-                    self.emit_decision_tree_threaded(def_tree, rebound, scrutinee_ty, place, arms, exits);
+                    self.emit_decision_tree_threaded(
+                        def_tree,
+                        rebound,
+                        scrutinee_ty,
+                        place,
+                        arms,
+                        exits,
+                    );
                 }
             },
 
@@ -808,7 +822,15 @@ impl OssaBodyCtx<'_, '_> {
                 self.destroy_extra_test_values(&extra_vals, &guard_live, &success_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &success_params);
                 self.pop_scope();
-                self.emit_success_leaf(*arm_index, bindings, rebound, scrutinee_ty, place, arms, exits);
+                self.emit_success_leaf(
+                    *arm_index,
+                    bindings,
+                    rebound,
+                    scrutinee_ty,
+                    place,
+                    arms,
+                    exits,
+                );
 
                 // Failure: scrutinee untouched — continue matching other patterns.
                 // `restore_scope` to the entry snapshot pops the guard frame and
@@ -819,7 +841,14 @@ impl OssaBodyCtx<'_, '_> {
                 self.rebind_scope_values(&guard_live, &failure_params);
                 self.destroy_extra_test_values(&extra_vals, &guard_live, &failure_params);
                 let rebound = rebound_value(scrutinee, &guard_live, &failure_params);
-                self.emit_decision_tree_threaded(failure, rebound, scrutinee_ty, place, arms, exits);
+                self.emit_decision_tree_threaded(
+                    failure,
+                    rebound,
+                    scrutinee_ty,
+                    place,
+                    arms,
+                    exits,
+                );
             },
 
             DecisionTree::Failure => {
@@ -1642,8 +1671,7 @@ impl OssaBodyCtx<'_, '_> {
     /// binding `type Element = T` substitutes `T → Int64`; for a non-generic
     /// one (`Trio` with `type Element = Int64`) the binding is concrete.
     fn array_element_ty(&mut self, array_ty: TyId) -> TyId {
-        let MirTy::Named { entity, type_args } =
-            self.ctx.module.ty_arena.get(array_ty).clone()
+        let MirTy::Named { entity, type_args } = self.ctx.module.ty_arena.get(array_ty).clone()
         else {
             return array_ty;
         };
@@ -1662,7 +1690,11 @@ impl OssaBodyCtx<'_, '_> {
         // scrutinee's type args, so map both entities' params to `type_args`.
         let mut subst = kestrel_mir::SubstMap::new();
         for params_owner in [entity, owner] {
-            if let Some(tp) = self.ctx.world.get::<kestrel_ast_builder::TypeParams>(params_owner) {
+            if let Some(tp) = self
+                .ctx
+                .world
+                .get::<kestrel_ast_builder::TypeParams>(params_owner)
+            {
                 for (&param, &arg) in tp.0.iter().zip(type_args.iter()) {
                     subst.type_params.insert(param, arg);
                 }
@@ -1702,10 +1734,13 @@ impl OssaBodyCtx<'_, '_> {
         {
             return Some((ty, type_entity));
         }
-        let extensions = self.ctx.query.query(kestrel_name_res::extensions::ExtensionsFor {
-            target: type_entity,
-            root: self.ctx.root,
-        });
+        let extensions = self
+            .ctx
+            .query
+            .query(kestrel_name_res::extensions::ExtensionsFor {
+                target: type_entity,
+                root: self.ctx.root,
+            });
         for ext in extensions {
             if let Some(ty) =
                 crate::items::witness_lower::find_associated_type(self.ctx, ext, elem_member)

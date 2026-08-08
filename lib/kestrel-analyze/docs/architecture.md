@@ -18,7 +18,7 @@ Analyzers run after type inference. Body-level checks depend on `LowerBody` (HIR
 
 Three traits, one per granularity level:
 
-- **`BodyCheck`** — analyze function/init bodies. Receives `BodyContext` with HIR + typed body.
+- **`BodyCheck`** — analyze function/init bodies. Receives `BodyContext` with HIR + typed body. A few run their own CFG dataflow: `body/move_tracking.rs` threads move state *and* a place-granular freeze set (the view-closure freeze rule, E507). The freeze set is snapshotted and restored at block boundaries, and each state keeps its OWN reported set — sharing one would let an unrelated move diagnostic swallow a freeze error — with both threaded through loop back-edge re-analysis.
 - **`DeclCheck`** — analyze declarations structurally. Receives `DeclContext` with entity + kind.
 - **`CompilationCheck`** — whole-compilation analysis. Receives `CompilationContext` with root entity.
 
@@ -37,6 +37,8 @@ All extend `Describe` which provides `id()` and `descriptors()`.
 
 - **`AnalyzeDiagnostic`** — rich diagnostic with descriptor ID, severity, message, labels (primary + secondary with spans), and notes. `Clone + Hash` for HECS accumulators.
 - **`DiagnosticDescriptor`** — static metadata per diagnostic kind: ID (e.g. "E001"), name, default severity, category.
+
+The full ID allocation table — including which IDs have a second reporting site, which are shared with a solver `InferError`, and which are **retired** (retired IDs are never reused, so old diagnostics and docs keep resolving) — lives in this crate's `AGENTS.md`. It is the single source of truth; do not restate allocations here.
 
 ### Contexts (`context.rs`)
 

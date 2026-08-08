@@ -100,6 +100,7 @@ impl BodyCheck for AccessModeAnalyzer {
         for (expr_id, expr) in cx.hir.exprs.iter() {
             match expr {
                 HirExpr::Call { callee, args, .. } => {
+                    check_mutating_kind_call(cx, *callee, &mut diags);
                     // Resolve callee entity from typed resolutions
                     let callee_entity = match &cx.hir.exprs[*callee] {
                         HirExpr::Def(entity, _, _) => Some(*entity),
@@ -289,9 +290,99 @@ fn check_call_args(
         if let Some(param) = callable.params.get(i)
             && param.is_mut
             && !param.is_consuming
+            && !arg_is_closure_value(cx, arg.value)
         {
             check_mutating_arg(cx, arg.value, diags);
         }
+    }
+}
+
+/// Is this argument a CLOSURE value?
+///
+/// A `mutating` convention on a closure-typed parameter does not mean "the
+/// callee writes back into the caller's binding" — it declares that the callee
+/// calls the closure EXCLUSIVELY, which is the convention a `mutating`-kind
+/// closure type requires (docs/design/closures.md, "Passing: What Fits Where";
+/// the pairing itself is E625). The mutable place such a call needs is the
+/// closure's own environment — views into the caller's frame — not the
+/// argument expression, so a literal (a temporary) and a `let`-bound normal
+/// closure adapted to `mutating` both pass. Non-exclusive *calls* of a
+/// mutating-kind closure are still an E203-family mutating use of the callee
+/// binding; that is a different site.
+fn arg_is_closure_value(cx: &BodyContext<'_>, arg_id: HirExprId) -> bool {
+    matches!(
+        cx.typed.expr_types.get(&arg_id),
+        Some(kestrel_type_infer::result::ResolvedTy::Function { .. })
+    )
+}
+
+/// Calling a `mutating`-KIND closure is an EXCLUSIVE use of whatever holds it.
+///
+/// docs/design/closures.md, "`mutating`: write-back": "Calling one is an
+/// exclusive use — it must be held in a `var` (or `mutating` parameter)".
+/// Plan D8 deliberately routes this through the EXISTING mutability band
+/// rather than the kind machinery (E624 is the passing table, E625 the
+/// signature-level kind/convention pairing): the callee binding sits in a
+/// mutating position, so the ordinary classification decides — `let`-held is
+/// E203, an immutable field E204, a shared `&` reach E207.
+///
+/// What still passes: an inline literal (a temporary the caller owns for the
+/// duration of the call), a `var` binding, and a `mutating`/MutBorrow
+/// parameter. This is about CALLING, never about PASSING — passing a
+/// closure-typed argument to a `mutating` parameter has its own exemption
+/// (`arg_is_closure_value`).
+fn check_mutating_kind_call(
+    cx: &BodyContext<'_>,
+    callee: HirExprId,
+    diags: &mut Vec<AnalyzeDiagnostic>,
+) {
+    if !matches!(
+        cx.typed.expr_types.get(&callee),
+        Some(kestrel_type_infer::result::ResolvedTy::Function {
+            kind: kestrel_ast::FnTypeKind::Mutating,
+            ..
+        })
+    ) {
+        return;
+    }
+    let span = util::expr_span(cx.hir, callee);
+    let note = "a `mutating` closure writes back through its captures, so calling it needs \
+                exclusive access — hold it in a `var`, or take it as a `mutating` parameter";
+    match classify_mutability(cx, callee) {
+        // Owned temporary (an inline literal) or a mutable place: exclusive.
+        MutClass::Mutable | MutClass::Temporary => {},
+        MutClass::SharedRef => {
+            diags.push(shared_ref_diag(
+                span,
+                "cannot call a `mutating` closure through a shared reference",
+            ));
+        },
+        MutClass::ImmutableLocal(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[0].id,
+                severity: DESCRIPTORS[0].default_severity,
+                message: format!("cannot call `mutating` closure '{name}': it is bound with 'let'"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "calling this needs exclusive access".into(),
+                    is_primary: true,
+                }],
+                notes: vec![note.into()],
+            });
+        },
+        MutClass::ImmutableField(name) => {
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: DESCRIPTORS[1].id,
+                severity: DESCRIPTORS[1].default_severity,
+                message: format!("cannot call `mutating` closure in immutable field '{name}'"),
+                labels: vec![DiagLabel {
+                    span,
+                    message: "calling this needs exclusive access".into(),
+                    is_primary: true,
+                }],
+                notes: vec![note.into()],
+            });
+        },
     }
 }
 

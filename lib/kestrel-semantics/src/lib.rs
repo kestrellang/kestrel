@@ -610,14 +610,15 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
                     CopySemantics::Copyable
                 }
             },
+            // A closure value's copy class is fixed by its KIND, not by what it
+            // captures (plan D6 / docs/design/closures.md §"Copy and Drop").
+            HirTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
             // Ref is rejected (rewritten to Error) at HIR lowering and should
             // never reach here; treat it exactly like Error if it does.
             // Infer/Error are recovery.
-            HirTy::Function { .. }
-            | HirTy::Never(_)
-            | HirTy::Infer(_)
-            | HirTy::Error(_)
-            | HirTy::Ref { .. } => CopySemantics::Copyable,
+            HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) | HirTy::Ref { .. } => {
+                CopySemantics::Copyable
+            },
             // An associated projection (`I.Item`) is Copyable-by-default, exactly
             // like a type param: the model gives every associated type an implicit
             // `Copyable` bound unless it's declared `: not Copyable`, and only

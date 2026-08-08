@@ -19,7 +19,8 @@ The memory model includes:
 - Second-class references (`&T`, `&mutating T`): ref returns, ref bindings, ref struct fields — all escape-checked
 - Copy-by-default generics with `not Copyable` bounds and per-instantiation conditional copyability
 - RAII via `deinit` blocks, plus the explicit `deinit x;` statement for early cleanup
-- A flow-sensitive move checker (E500/E501/E503/E506) and a provenance-based escape checker (E494)
+- A flow-sensitive move checker (E500/E501/E503/E506/E507) and a provenance-based escape checker (E494)
+- Four closure kinds — normal / `mutating` / `consuming` / `escaping` — spelled in the function type, deciding how a closure captures, copies, and drops
 
 | Feature | Document |
 |---------|----------|

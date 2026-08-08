@@ -7,7 +7,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::utils::{extract_path_segments, find_child};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-pub use kestrel_ast::{AstType, PathSegment};
+pub use kestrel_ast::{AstType, FnTypeKind, PathSegment};
 
 /// Convert a CST type node to an AstType.
 ///
@@ -67,9 +67,16 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
         },
 
         SyntaxKind::TyFunction => {
-            // CST structure: TyFunction has exactly 2 children:
+            // CST structure: TyFunction has exactly 2 child NODES:
             //   1. TyList — parameter types (may be empty or contain Ty children)
             //   2. Ty — return type
+            // plus, optionally, a leading kind keyword TOKEN before the TyList
+            // (`mutating` / `consuming` / the contextual `escaping`, which
+            // round-trips as an Identifier). It sits outside TyList precisely
+            // so the positional `mutating`-scan below cannot misread it as a
+            // param convention. `span` (the TyFunction node's range) already
+            // covers it — LSP signature help slices source by that span.
+            let kind = fn_type_kind(node);
             let mut children = node.children();
 
             // First child: TyList with parameter types. Walk tokens+nodes
@@ -113,6 +120,7 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
                 .unwrap_or(AstType::Unit(span.clone()));
 
             Some(AstType::Function {
+                kind,
                 params,
                 param_conventions,
                 return_type: Box::new(return_type),
@@ -214,6 +222,35 @@ pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
 
         _ => None,
     }
+}
+
+/// Read the optional kind keyword that prefixes a `TyFunction` node.
+///
+/// Only tokens that are DIRECT children of `TyFunction` and appear before the
+/// `TyList` count — everything inside `TyList` belongs to the per-parameter
+/// convention scan. `escaping` is a contextual keyword, so it arrives as an
+/// `Identifier` and is matched by source text.
+fn fn_type_kind(node: &SyntaxNode) -> FnTypeKind {
+    for child in node.children_with_tokens() {
+        // The param list starts: anything further is a param convention or
+        // the arrow / return type, never the whole-type kind.
+        if child
+            .as_node()
+            .is_some_and(|n| n.kind() == SyntaxKind::TyList)
+        {
+            break;
+        }
+        let Some(tok) = child.as_token() else {
+            continue;
+        };
+        match tok.kind() {
+            SyntaxKind::Mutating => return FnTypeKind::Mutating,
+            SyntaxKind::Consuming => return FnTypeKind::Consuming,
+            SyntaxKind::Identifier if tok.text() == "escaping" => return FnTypeKind::Escaping,
+            _ => {},
+        }
+    }
+    FnTypeKind::Normal
 }
 
 /// Check if a SyntaxKind is a type node.

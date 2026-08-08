@@ -63,8 +63,10 @@ impl PlaceKey {
     }
 
     /// True if `self.path` is a (non-strict) prefix of `other.path` and they
-    /// share the same root.
-    fn is_prefix_of(&self, other: &PlaceKey) -> bool {
+    /// share the same root. Public because the move checker's freeze rule
+    /// (E507) tests a destroyed place against the frozen set for OVERLAP in
+    /// either direction (plan D8: the freeze is place-granular).
+    pub fn is_prefix_of(&self, other: &PlaceKey) -> bool {
         self.root == other.root
             && self.path.len() <= other.path.len()
             && self.path.iter().zip(&other.path).all(|(a, b)| a == b)

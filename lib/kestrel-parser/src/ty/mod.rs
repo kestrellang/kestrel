@@ -3,8 +3,38 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::parsers::contextual_keyword;
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
+
+/// The keyword prefix that names a function type's *kind*
+/// (`mutating (T) -> R`, `consuming (T) -> R`, `escaping (T) -> R`).
+///
+/// Parser-local mirror of `kestrel_ast::FnTypeKind` minus its `Normal`
+/// variant — the parser only records a prefix that is *present*, and
+/// kestrel-parser deliberately does not depend on kestrel-ast (the CST is the
+/// only contract between them). The AST builder maps the emitted token back
+/// to `FnTypeKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FnKindPrefix {
+    Mutating,
+    Consuming,
+    Escaping,
+}
+
+impl FnKindPrefix {
+    /// The CST token kind this prefix is emitted as. `escaping` is a
+    /// *contextual* keyword — it lexes as an ordinary `Identifier` and stays
+    /// a legal identifier everywhere else — so it round-trips as `Identifier`
+    /// and the AST builder matches it by source text.
+    fn syntax_kind(self) -> SyntaxKind {
+        match self {
+            FnKindPrefix::Mutating => SyntaxKind::Mutating,
+            FnKindPrefix::Consuming => SyntaxKind::Consuming,
+            FnKindPrefix::Escaping => SyntaxKind::Identifier,
+        }
+    }
+}
 
 /// Represents a type expression
 ///
@@ -168,6 +198,103 @@ pub(crate) fn ty_parser<'tokens>()
             .ignore_then(just(Token::Underscore).map_with(|_, e| to_kestrel_span(e.span())))
             .map(TyVariant::Inferred);
 
+        // A parenthesized type element, optionally prefixed by `mutating`
+        // (only meaningful in function-type param position; stripped for
+        // grouping/tuple). Yields `(Option<mutating-span>, TyVariant)`.
+        //
+        // ORDER IS LOAD-BEARING (plan D2): the FULL `ty` is attempted first,
+        // because `ty` now admits kind prefixes. `mutating (T) -> R` is a
+        // mutating-KIND function type; only when that fails do we fall back to
+        // `mutating` as a per-param MutBorrow convention (`mutating T`). The
+        // kind branch commits solely on the trailing `->`, so both readings
+        // stay reachable and neither silently drops the keyword.
+        let elem = ty
+            .clone()
+            .map(|t| (None, t))
+            .or(skip_trivia()
+                .ignore_then(just(Token::Mutating).map_with(|_, e| to_kestrel_span(e.span())))
+                .map(Some)
+                .then(ty.clone()))
+            .boxed();
+
+        // `'(' elems ')'` — the shared paren group behind both the
+        // unit/grouping/tuple/function disambiguation below and the
+        // kind-prefixed function type. Yields `(lparen, elems, has_comma, rparen)`.
+        let paren_elems = skip_trivia()
+            .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
+            .then(
+                // Empty parens case
+                skip_trivia()
+                    .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
+                    .map(|rparen| (Vec::new(), false, rparen))
+                    .or(
+                        // At least one type
+                        elem.clone()
+                            .then(
+                                // Check for comma after first element
+                                skip_trivia()
+                                    .ignore_then(
+                                        just(Token::Comma)
+                                            .map_with(|_, e| to_kestrel_span(e.span())),
+                                    )
+                                    .then(
+                                        // After comma: more types separated by comma
+                                        elem.clone()
+                                            .separated_by(
+                                                skip_trivia().ignore_then(just(Token::Comma)),
+                                            )
+                                            .allow_trailing()
+                                            .collect::<Vec<_>>(),
+                                    )
+                                    .map(|(_comma, more)| (true, more))
+                                    .or(empty().to((false, Vec::new()))),
+                            )
+                            .then(skip_trivia().ignore_then(
+                                just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
+                            ))
+                            .map(|((first, (has_comma, more)), rparen)| {
+                                let mut types = vec![first];
+                                types.extend(more);
+                                (types, has_comma, rparen)
+                            }),
+                    ),
+            )
+            .map(|(lparen, (types, has_comma, rparen))| (lparen, types, has_comma, rparen))
+            .boxed();
+
+        // Kind-prefixed function type: `mutating (T) -> R`, `consuming (T) -> R`,
+        // `escaping (T) -> R`. `escaping` is a CONTEXTUAL keyword (never
+        // reserved); `mutating`/`consuming` are already hard keywords.
+        //
+        // The branch is fully backtrackable: it commits only once the `->`
+        // after the closing paren is seen. Without the arrow the whole branch
+        // rewinds, so `mutating (a, b)` still reads as a param convention on a
+        // grouping/tuple in the contexts that allow one.
+        let kind_prefix = skip_trivia()
+            .ignore_then(
+                just(Token::Mutating)
+                    .map_with(|_, e| (FnKindPrefix::Mutating, to_kestrel_span(e.span())))
+                    .or(just(Token::Consuming)
+                        .map_with(|_, e| (FnKindPrefix::Consuming, to_kestrel_span(e.span()))))
+                    .or(contextual_keyword("escaping").map(|span| (FnKindPrefix::Escaping, span))),
+            )
+            .boxed();
+
+        let kinded_fn = kind_prefix
+            .then(paren_elems.clone())
+            .then(
+                skip_trivia()
+                    .ignore_then(just(Token::Arrow))
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .then(ty.clone()),
+            )
+            .map(
+                |((kind, (lparen, types, _has_comma, rparen)), (arrow, ret))| {
+                    TyVariant::Function(Some(kind), lparen, types, rparen, arrow, Box::new(ret))
+                },
+            )
+            .boxed();
+
         // Unit type, grouping (T), tuple (T, U) or (T,), or function type
         // We need to distinguish:
         // - () -> Unit
@@ -175,81 +302,38 @@ pub(crate) fn ty_parser<'tokens>()
         // - (T,) -> Single-element Tuple
         // - (T, U, ...) -> Tuple
         // - (...) -> T -> Function
-        let paren_types = {
-            // A parenthesized type element, optionally prefixed by `mutating`
-            // (only meaningful in function-type param position; stripped for
-            // grouping/tuple). Yields `(Option<mutating-span>, TyVariant)`.
-            let elem = skip_trivia()
-                .ignore_then(
-                    just(Token::Mutating)
-                        .map_with(|_, e| to_kestrel_span(e.span()))
-                        .or_not(),
-                )
-                .then(ty.clone());
-            skip_trivia()
-                .ignore_then(just(Token::LParen).map_with(|_, e| to_kestrel_span(e.span())))
-                .then(
-                    // Empty parens case
-                    skip_trivia()
-                        .ignore_then(just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())))
-                        .map(|rparen| (Vec::new(), false, rparen))
-                        .or(
-                            // At least one type
-                            elem.clone()
-                                .then(
-                                    // Check for comma after first element
-                                    skip_trivia()
-                                        .ignore_then(
-                                            just(Token::Comma)
-                                                .map_with(|_, e| to_kestrel_span(e.span())),
-                                        )
-                                        .then(
-                                            // After comma: more types separated by comma
-                                            elem.clone()
-                                                .separated_by(
-                                                    skip_trivia().ignore_then(just(Token::Comma)),
-                                                )
-                                                .allow_trailing()
-                                                .collect::<Vec<_>>(),
-                                        )
-                                        .map(|(_comma, more)| (true, more))
-                                        .or(empty().to((false, Vec::new()))),
-                                )
-                                .then(skip_trivia().ignore_then(
-                                    just(Token::RParen).map_with(|_, e| to_kestrel_span(e.span())),
-                                ))
-                                .map(|((first, (has_comma, more)), rparen)| {
-                                    let mut types = vec![first];
-                                    types.extend(more);
-                                    (types, has_comma, rparen)
-                                }),
-                        ),
-                )
-                .then(
-                    // Optional arrow and return type for function types
-                    skip_trivia()
-                        .ignore_then(just(Token::Arrow))
-                        .map_with(|_, e| to_kestrel_span(e.span()))
-                        .then(ty.clone())
-                        .or_not(),
-                )
-                .map(|((lparen, (types, has_comma, rparen)), arrow_and_return)| {
-                    if let Some((arrow_span, return_ty)) = arrow_and_return {
-                        // Function type: keep per-param `mutating` markers.
-                        TyVariant::Function(lparen, types, rparen, arrow_span, Box::new(return_ty))
-                    } else if types.is_empty() {
-                        TyVariant::Unit(lparen, rparen)
-                    } else if types.len() == 1 && !has_comma {
-                        // (T) - grouping, just return the inner type (drop marker)
-                        types.into_iter().next().unwrap().1
-                    } else {
-                        // (T,) or (T, U, ...) - tuple (markers not meaningful)
-                        let elems = types.into_iter().map(|(_, t)| t).collect();
-                        TyVariant::Tuple(lparen, elems, rparen)
-                    }
-                })
-                .boxed()
-        };
+        let paren_types = paren_elems
+            .then(
+                // Optional arrow and return type for function types
+                skip_trivia()
+                    .ignore_then(just(Token::Arrow))
+                    .map_with(|_, e| to_kestrel_span(e.span()))
+                    .then(ty.clone())
+                    .or_not(),
+            )
+            .map(|((lparen, types, has_comma, rparen), arrow_and_return)| {
+                if let Some((arrow_span, return_ty)) = arrow_and_return {
+                    // Function type: keep per-param `mutating` markers.
+                    TyVariant::Function(
+                        None,
+                        lparen,
+                        types,
+                        rparen,
+                        arrow_span,
+                        Box::new(return_ty),
+                    )
+                } else if types.is_empty() {
+                    TyVariant::Unit(lparen, rparen)
+                } else if types.len() == 1 && !has_comma {
+                    // (T) - grouping, just return the inner type (drop marker)
+                    types.into_iter().next().unwrap().1
+                } else {
+                    // (T,) or (T, U, ...) - tuple (markers not meaningful)
+                    let elems = types.into_iter().map(|(_, t)| t).collect();
+                    TyVariant::Tuple(lparen, elems, rparen)
+                }
+            })
+            .boxed();
 
         // Path type with optional type arguments: Foo or Foo[Int, String]
         let path = path_segments_parser()
@@ -353,10 +437,14 @@ pub(crate) fn ty_parser<'tokens>()
             .map(|((some_span, bounds), negative)| TyVariant::Some(some_span, bounds, negative))
             .boxed();
 
-        // Try some first (prefix keyword), then never, inferred, parens, array/dict, path
+        // Try some first (prefix keyword), then never, inferred, the
+        // kind-prefixed function type (before `path`, so a contextual
+        // `escaping` is not swallowed as a path segment), parens,
+        // array/dict, path.
         let base_ty = some_type
             .or(never)
             .or(inferred)
+            .or(kinded_fn)
             .or(paren_types)
             .or(array_or_dict)
             .or(path)
@@ -496,9 +584,10 @@ pub(crate) fn emit_ty_variant(sink: &mut EventSink, variant: &TyVariant) {
         TyVariant::Tuple(lparen, types, rparen) => {
             emit_tuple_type(sink, lparen.clone(), types, rparen.clone());
         },
-        TyVariant::Function(lparen, params, rparen, arrow, return_ty) => {
+        TyVariant::Function(kind, lparen, params, rparen, arrow, return_ty) => {
             emit_function_type(
                 sink,
+                kind.clone(),
                 lparen.clone(),
                 params,
                 rparen.clone(),
@@ -548,9 +637,14 @@ pub enum TyVariant {
     Never(Span),
     Inferred(Span), // _ type
     Tuple(Span, Vec<TyVariant>, Span),
-    /// Function type. Each param carries an optional `mutating` token span
-    /// (`Some` ⇒ a `mutating` by-reference parameter).
+    /// Function type: `[kind] '(' params ')' '->' ret`.
+    ///
+    /// Fields in source order: the optional kind keyword prefix + its span,
+    /// lparen, params, rparen, arrow, return type. Each param carries an
+    /// optional `mutating` token span (`Some` ⇒ a `mutating` by-reference
+    /// parameter) — a per-param convention, orthogonal to the kind.
     Function(
+        Option<(FnKindPrefix, Span)>,
         Span,
         Vec<(Option<Span>, TyVariant)>,
         Span,
@@ -685,6 +779,7 @@ pub(crate) fn emit_tuple_type(
 /// Emit events for a function type
 pub(crate) fn emit_function_type(
     sink: &mut EventSink,
+    kind: Option<(FnKindPrefix, Span)>,
     lparen: Span,
     params: &[(Option<Span>, TyVariant)],
     rparen: Span,
@@ -693,6 +788,14 @@ pub(crate) fn emit_function_type(
 ) {
     sink.start_node(SyntaxKind::Ty);
     sink.start_node(SyntaxKind::TyFunction);
+
+    // The kind keyword is a DIRECT child of TyFunction, before the TyList —
+    // never inside it. The AST builder pairs bare `Mutating` tokens *inside*
+    // TyList with the following param type by positional scan, so a kind
+    // token placed there would be misread as a param convention.
+    if let Some((prefix, span)) = kind {
+        sink.add_token(prefix.syntax_kind(), span);
+    }
 
     // Parameter list
     sink.start_node(SyntaxKind::TyList);
@@ -1016,6 +1119,159 @@ mod tests {
         let ty = parse_ty_from_source(source);
 
         assert!(ty.is_array());
+    }
+
+    /// The first `TyFunction` node in the tree.
+    fn first_fn_node(ty: &TyExpression) -> SyntaxNode {
+        ty.syntax
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::TyFunction)
+            .expect("expected a TyFunction node")
+    }
+
+    /// Text of the kind keyword emitted as a DIRECT child of `TyFunction`
+    /// before its `TyList` (`None` for the unmarked normal kind).
+    fn fn_kind_text(func: &SyntaxNode) -> Option<String> {
+        for child in func.children_with_tokens() {
+            if child
+                .as_node()
+                .is_some_and(|n| n.kind() == SyntaxKind::TyList)
+            {
+                break;
+            }
+            if let Some(tok) = child.as_token()
+                && matches!(
+                    tok.kind(),
+                    SyntaxKind::Mutating | SyntaxKind::Consuming | SyntaxKind::Identifier
+                )
+            {
+                return Some(tok.text().to_string());
+            }
+        }
+        None
+    }
+
+    /// Does the function's own `TyList` carry a bare `mutating` token — i.e.
+    /// a per-param MutBorrow convention?
+    fn has_param_mutating(func: &SyntaxNode) -> bool {
+        func.children()
+            .find(|n| n.kind() == SyntaxKind::TyList)
+            .is_some_and(|list| {
+                list.children_with_tokens()
+                    .filter_map(|c| c.into_token())
+                    .any(|t| t.kind() == SyntaxKind::Mutating)
+            })
+    }
+
+    #[test]
+    fn test_fn_type_kind_prefixes() {
+        for (source, keyword) in [
+            ("mutating () -> Int", "mutating"),
+            ("consuming (Int) -> Bool", "consuming"),
+            ("escaping () -> Int", "escaping"),
+        ] {
+            let ty = parse_ty_from_source(source);
+            assert!(ty.is_function(), "{source} should be a function type");
+            let func = first_fn_node(&ty);
+            assert_eq!(
+                fn_kind_text(&func).as_deref(),
+                Some(keyword),
+                "{source} should carry its kind keyword on TyFunction"
+            );
+            assert!(
+                !has_param_mutating(&func),
+                "{source}: kind keyword must not land inside TyList"
+            );
+        }
+    }
+
+    #[test]
+    fn test_plain_fn_type_has_no_kind() {
+        let ty = parse_ty_from_source("(Int) -> Bool");
+        assert_eq!(fn_kind_text(&first_fn_node(&ty)), None);
+    }
+
+    /// Reading 1 (plan D2): `(mutating () -> ())` is a GROUPED mutating-kind
+    /// function type — parenthesising must not drop the kind.
+    #[test]
+    fn test_grouped_kinded_fn_type_keeps_kind() {
+        let ty = parse_ty_from_source("(mutating () -> ())");
+        assert!(
+            ty.is_function(),
+            "the grouping should unwrap to the fn type"
+        );
+        let func = first_fn_node(&ty);
+        assert_eq!(fn_kind_text(&func).as_deref(), Some("mutating"));
+    }
+
+    /// Reading 2 (plan D2): in `(mutating (T) -> R) -> U` the PARAM is a
+    /// mutating-kind function type, not a MutBorrow-convention param of a
+    /// normal one.
+    #[test]
+    fn test_kinded_fn_type_as_param() {
+        let ty = parse_ty_from_source("(mutating (T) -> R) -> U");
+        let mut fns = ty
+            .syntax
+            .descendants()
+            .filter(|n| n.kind() == SyntaxKind::TyFunction);
+        let outer = fns.next().expect("outer function type");
+        let inner = fns.next().expect("inner (param) function type");
+        assert_eq!(fn_kind_text(&outer), None, "outer type is normal-kind");
+        assert!(
+            !has_param_mutating(&outer),
+            "the keyword belongs to the param's type, not to a convention"
+        );
+        assert_eq!(fn_kind_text(&inner).as_deref(), Some("mutating"));
+    }
+
+    /// Reading 3 (plan D2): the same shape with the contextual `escaping`.
+    #[test]
+    fn test_escaping_fn_type_as_param() {
+        let ty = parse_ty_from_source("(escaping () -> ()) -> U");
+        let mut fns = ty
+            .syntax
+            .descendants()
+            .filter(|n| n.kind() == SyntaxKind::TyFunction);
+        let outer = fns.next().expect("outer function type");
+        let inner = fns.next().expect("inner (param) function type");
+        assert_eq!(fn_kind_text(&outer), None);
+        assert_eq!(fn_kind_text(&inner).as_deref(), Some("escaping"));
+    }
+
+    /// The `mutating` PARAM CONVENTION is unchanged: no trailing `->` after
+    /// the paren group means the kind branch backtracks.
+    #[test]
+    fn test_param_convention_still_parses() {
+        let ty = parse_ty_from_source("(mutating Int64) -> ()");
+        let func = first_fn_node(&ty);
+        assert_eq!(fn_kind_text(&func), None, "no whole-type kind here");
+        assert!(has_param_mutating(&func), "expected a MutBorrow param");
+    }
+
+    /// `mutating (T)` is a MutBorrow convention on a grouped `T` — the kind
+    /// branch requires the arrow and rewinds without it.
+    #[test]
+    fn test_kind_branch_backtracks_without_arrow() {
+        let ty = parse_ty_from_source("(mutating (Int64)) -> ()");
+        let func = first_fn_node(&ty);
+        assert_eq!(fn_kind_text(&func), None);
+        assert!(has_param_mutating(&func));
+        assert_eq!(
+            func.descendants()
+                .filter(|n| n.kind() == SyntaxKind::TyFunction)
+                .count(),
+            1,
+            "the grouped `(Int64)` must not become a function type"
+        );
+    }
+
+    /// `escaping` stays an ordinary identifier: as a bare type name it is a
+    /// path, not a dropped keyword.
+    #[test]
+    fn test_escaping_remains_an_identifier() {
+        let ty = parse_ty_from_source("escaping");
+        assert!(ty.is_path());
+        assert_eq!(ty.path_segments(), Some(vec!["escaping".to_string()]));
     }
 
     #[test]

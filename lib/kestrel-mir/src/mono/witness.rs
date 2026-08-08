@@ -175,18 +175,32 @@ pub fn match_pattern(
                 params: p2,
                 ret: r2,
             },
-        )
-        | (
+        ) => {
+            p1.len() == p2.len()
+                && p1
+                    .iter()
+                    .zip(p2.iter())
+                    .all(|((pt, _), (ct, _))| match_pattern(arena, *pt, *ct, bindings))
+                && match_pattern(arena, r1, r2, bindings)
+        },
+
+        // Closure kinds match EXACTLY (plan lockstep 4): a `mutating (T) -> U`
+        // witness must not satisfy a normal `(T) -> U` requirement — the two
+        // have different environment ownership and copy classes.
+        (
             MirTy::FuncThick {
+                kind: k1,
                 params: p1,
                 ret: r1,
             },
             MirTy::FuncThick {
+                kind: k2,
                 params: p2,
                 ret: r2,
             },
         ) => {
-            p1.len() == p2.len()
+            k1 == k2
+                && p1.len() == p2.len()
                 && p1
                     .iter()
                     .zip(p2.iter())

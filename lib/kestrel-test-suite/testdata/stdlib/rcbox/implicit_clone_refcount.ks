@@ -31,16 +31,24 @@ func main() -> lang.i64 {
     if rc != 1 { return 11 }
     if d.refCount() != 1 { return 12 }
 
-    // --- 4. Closure capture clones ---
+    // --- 4. VIEW capture does NOT clone ---
+    // A normal closure's environment holds an ADDRESS of `e` and owns nothing
+    // (docs/design/closures.md, "Copy and Drop": "normal / `mutating`: the
+    // environment owns nothing (views only) — no drops"). A clone here would
+    // leak: no release ever balances it. So the refcount is untouched.
+    // The OWNING tiers are the ones that clone a Cloneable capture at creation
+    // (see the design's owning-capture table).
     let e = std.memory.RcBox[std.numeric.Int64](200);
     if e.refCount() != 1 { return 20 }
     let getter = { e.getValue() };
-    if e.refCount() != 2 { return 21 }
+    if e.refCount() != 1 { return 21 }
     if getter() != 200 { return 22 }
 
-    // --- 5. Multiple closures capturing same value ---
+    // --- 5. Multiple views of the same value are still free ---
     let f = { e.refCount() };
-    if e.refCount() != 3 { return 30 }
+    if e.refCount() != 1 { return 30 }
+    // ... and each call reads the CURRENT count through its view.
+    if f() != 1 { return 31 }
 
     // --- 6. Copy chain: a -> b -> g ---
     let g = b;

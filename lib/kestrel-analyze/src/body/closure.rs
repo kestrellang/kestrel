@@ -41,6 +41,11 @@
 //!
 //! ### E603 — `assign_to_captured_variable` (Error, Correctness)
 //!
+//! Fires only for **normal**-kind closures (`closure_kind_of`): a normal
+//! closure captures read-only views. `mutating` captures `&mutating` views and
+//! `consuming`/`escaping` own their captures, so all three lift the check
+//! (docs/design/closures.md, Diagnostics table).
+//!
 //! **Message:** "cannot assign to captured variable '{name}'"
 //!
 //! **Labels:**
@@ -48,7 +53,10 @@
 //!   - Span source: `util::expr_span` on the assignment target `HirExprId`
 //!   - Message: "captured variables are immutable in closures"
 //!
-//! **Notes:** (none)
+//! **Notes:**
+//! - "a normal closure captures read-only views; give it a `mutating` expected
+//!   type (e.g. `mutating () -> ()`) to write back to the original, or fold the
+//!   value and return it instead"
 //!
 //! ### E604 — `assign_to_closure_parameter` (Error, Correctness)
 //!
@@ -67,6 +75,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
+use kestrel_ast::FnTypeKind;
 use kestrel_hir::body::*;
 use kestrel_hir::res::LocalId;
 use kestrel_type_infer::result::ResolvedTy;
@@ -111,12 +120,22 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
-    // Stage-1.5 named ref bindings: a closure cannot capture a ref
-    // binding — the env would store the reference (E483 territory) and
-    // the closure can outlive the borrow.
+    // NOTE: E212 (`non_static_capture`) used to live here — "a closure cannot
+    // capture a ref binding / a `not Static` value". It is RETIRED
+    // (docs/design/closures.md, Diagnostics table: "E212 — retired — view
+    // capture is now the default"; plan lockstep 6). A view environment holds
+    // ADDRESSES into the frame it was created in and can never outlive it
+    // (E494 enforces that), so capturing a reference through one is sound.
+    // Only the OWNING tier still rejects frame provenance — that is E624 below.
+    //
+    // Owning-tier capture rejection (plan D4). An `escaping`/`consuming`
+    // environment SNAPSHOTS its captures and may outlive the frame, so a
+    // capture that carries frame provenance (a ref binding, a `not Static`
+    // value) has no owning representation. Shares E624 with the passing table:
+    // both say "this closure kind cannot be formed from this".
     DiagnosticDescriptor {
-        id: "E212",
-        name: "non_static_capture",
+        id: "E624",
+        name: "owning_capture_rejected",
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
@@ -151,6 +170,16 @@ impl BodyCheck for ClosureAnalyzer {
                 continue;
             };
 
+            // Only an OWNING env rejects frame provenance (E624). A view env
+            // is frame-bound, so it captures ref bindings and `not Static`
+            // values like any other place — the retirement of E212.
+            let owning_kind = matches!(
+                cx.typed.expr_types.get(&expr_id),
+                Some(ResolvedTy::Function { kind, .. })
+                    if !matches!(kind, kestrel_ast::FnTypeKind::Normal
+                        | kestrel_ast::FnTypeKind::Mutating)
+            );
+
             let mut capture_roots: Vec<LocalId> = capture_plan
                 .get(expr_id)
                 .iter()
@@ -160,47 +189,44 @@ impl BodyCheck for ClosureAnalyzer {
             capture_roots.dedup();
             let captures = &capture_roots;
 
-            // E212: a non-Static value cannot be captured — the env would
-            // store its reference(s) and the closure can outlive the borrow.
-            // Ref bindings keep their original wording; other non-Static
-            // roots (2a: `not Static`-typed values) get the general one.
-            // TODO(static-2c): relax to "capture makes the closure
-            // non-Static" once function types carry the Static bit.
-            for &root in captures {
-                let Some(ty) = cx.typed.local_types.get(&root) else {
-                    continue;
-                };
-                let is_ref = matches!(ty, ResolvedTy::Ref { .. });
-                if !is_ref
-                    && crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root)
-                {
-                    continue;
+            // E624 (owning tier only): an owned environment SNAPSHOTS its
+            // captures and may outlive this frame, so a capture that carries
+            // frame provenance — a ref binding, a `not Static` value — has no
+            // owning representation. View kinds skip the whole loop: their env
+            // is frame-bound, which is exactly why E212 retired.
+            if owning_kind {
+                for &root in captures {
+                    let Some(ty) = cx.typed.local_types.get(&root) else {
+                        continue;
+                    };
+                    let is_ref = matches!(ty, ResolvedTy::Ref { .. });
+                    if !is_ref
+                        && crate::staticness::resolved_ty_is_static(
+                            cx.query, ty, cx.entity, cx.root,
+                        )
+                    {
+                        continue;
+                    }
+                    let name = cx.hir.locals[root].name.clone();
+                    diags.push(AnalyzeDiagnostic {
+                        descriptor_id: DESCRIPTORS[6].id,
+                        severity: DESCRIPTORS[6].default_severity,
+                        message: format!(
+                            "an owning closure cannot capture '{name}': it carries a reference"
+                        ),
+                        labels: vec![DiagLabel {
+                            span: util::expr_span(cx.hir, expr_id),
+                            message: "captured into an owned environment here".into(),
+                            is_primary: true,
+                        }],
+                        notes: vec![
+                            "an owning environment outlives this frame, so it may only own \
+                             reference-free (Static) snapshots"
+                                .into(),
+                            "copy the referenced value into a `let` first, and capture that".into(),
+                        ],
+                    });
                 }
-                let name = cx.hir.locals[root].name.clone();
-                let (message, note) = if is_ref {
-                    (
-                        format!("closure cannot capture ref binding '{name}'"),
-                        "bind the value first (`let x = ...;`) and capture that".to_string(),
-                    )
-                } else {
-                    (
-                        format!("closure cannot capture non-Static binding '{name}'"),
-                        "the closure environment may outlive this scope; only Static \
-                         (reference-free) values can be captured"
-                            .to_string(),
-                    )
-                };
-                diags.push(AnalyzeDiagnostic {
-                    descriptor_id: DESCRIPTORS[6].id,
-                    severity: DESCRIPTORS[6].default_severity,
-                    message,
-                    labels: vec![DiagLabel {
-                        span: util::expr_span(cx.hir, expr_id),
-                        message: "captured here".into(),
-                        is_primary: true,
-                    }],
-                    notes: vec![note],
-                });
             }
 
             // Check closure arity and types against expected function type.
@@ -236,8 +262,15 @@ impl BodyCheck for ClosureAnalyzer {
                 }
             }
 
-            // E603: check for assignments to captured variables
-            if !captures.is_empty() {
+            // E603: check for assignments to captured variables.
+            //
+            // KIND-GATED (docs/design/closures.md, Diagnostics table): only a
+            // NORMAL closure's captures are read-only views. `mutating` makes
+            // the views `&mutating` (assignment is the whole point) and
+            // `escaping` owns its captures, so both lift the error; `consuming`
+            // owns them too. An expected normal type is never silently
+            // upgraded — the fix-it note points at the `mutating` spelling.
+            if !captures.is_empty() && closure_kind_of(cx, expr_id) == FnTypeKind::Normal {
                 let capture_set: HashSet<LocalId> = captures.iter().copied().collect();
                 check_capture_assignments(cx, body, &capture_set, &mut diags);
             }
@@ -253,6 +286,17 @@ impl BodyCheck for ClosureAnalyzer {
         }
 
         diags
+    }
+}
+
+/// The closure tier inference settled on for this literal. A literal is built
+/// at `Normal` and retrofitted in place from the expected type, so this is the
+/// kind the closure is actually being *built for*. Absent/non-function type →
+/// `Normal` (the default kind).
+fn closure_kind_of(cx: &BodyContext<'_>, closure: HirExprId) -> FnTypeKind {
+    match cx.typed.expr_types.get(&closure) {
+        Some(ResolvedTy::Function { kind, .. }) => *kind,
+        _ => FnTypeKind::Normal,
     }
 }
 
@@ -482,6 +526,21 @@ fn check_capture_assignments(
     }
 }
 
+/// The root local of an assignment TARGET place (`c`, `c.n`, `c.n.0`), or
+/// `None` when the target is not a place chain (a subscript/getter write, an
+/// error node). Deliberately mirrors `place_key_of`'s walk without needing the
+/// field resolutions — E603 only cares about the root.
+fn assign_target_root(cx: &BodyContext<'_>, target: HirExprId) -> Option<LocalId> {
+    match &cx.hir.exprs[target] {
+        HirExpr::Local(local, _) => Some(*local),
+        HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
+            assign_target_root(cx, *base)
+        },
+        HirExpr::Sugar { inner, .. } => assign_target_root(cx, *inner),
+        _ => None,
+    }
+}
+
 fn walk_for_capture_assign(
     cx: &BodyContext<'_>,
     id: HirExprId,
@@ -490,10 +549,17 @@ fn walk_for_capture_assign(
 ) {
     match &cx.hir.exprs[id] {
         HirExpr::Assign { target, value, .. } => {
-            if let HirExpr::Local(local_id, _) = &cx.hir.exprs[*target]
-                && capture_set.contains(local_id)
+            // ANY place rooted at a capture, not just the bare local. A view
+            // env binds the capture's ADDRESS, so `c.n = 5` writes straight
+            // back through the view — and a normal closure's captures are
+            // read-only by design (the copy-soundness argument in
+            // docs/design/closures.md §"Normal: read-only views" depends on
+            // nobody writing through a shared view). Matching only
+            // `HirExpr::Local` let every projected write slip past.
+            if let Some(local_id) = assign_target_root(cx, *target)
+                && capture_set.contains(&local_id)
             {
-                let name = cx.hir.locals[*local_id].name.clone();
+                let name = cx.hir.locals[local_id].name.clone();
                 diags.push(AnalyzeDiagnostic {
                     descriptor_id: DESCRIPTORS[3].id,
                     severity: DESCRIPTORS[3].default_severity,
@@ -503,7 +569,16 @@ fn walk_for_capture_assign(
                         message: "captured variables are immutable in closures".into(),
                         is_primary: true,
                     }],
-                    notes: vec![],
+                    // Fix-it (design: "E603 ... with a fix-it suggesting
+                    // `mutating`/`escaping`"). A normal closure captures
+                    // read-only views; the expected TYPE is what selects a
+                    // writable tier — there is no kind-on-literal spelling.
+                    notes: vec![
+                        "a normal closure captures read-only views; give it a `mutating` \
+                         expected type (e.g. `mutating () -> ()`) to write back to the \
+                         original, or fold the value and return it instead"
+                            .to_string(),
+                    ],
                 });
             }
             walk_for_capture_assign(cx, *value, capture_set, diags);

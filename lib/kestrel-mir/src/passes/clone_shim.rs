@@ -623,6 +623,16 @@ fn has_unresolvable_fields_enum(e: &crate::item::enum_def::EnumDef, arena: &TyAr
 fn ty_needs_clone_shim(arena: &TyArena, ty: TyId) -> bool {
     match arena.get(ty) {
         MirTy::Named { .. } | MirTy::TypeParam(_) => true,
+        // The `String`-field route for closures (plan D6, lockstep 8): a
+        // struct holding an `escaping` closure field must get a clone shim and
+        // the `type_info.copy = Clone(cloneable_proto)` overwrite below, so
+        // copying the struct SHARES the environment handle (a retain) instead
+        // of bit-copying it. No frontend classifier change is involved.
+        // `is_shared`, NOT `is_boxed`: a `consuming` closure is NotCopyable,
+        // not Cloneable — it makes its container non-Copyable (`copy_behavior`
+        // answers `None`, which the aggregate fold propagates) instead of
+        // giving it a clone shim that has nothing to clone.
+        MirTy::FuncThick { kind, .. } => kind.is_shared(),
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
             elems.iter().any(|&e| ty_needs_clone_shim(arena, e))

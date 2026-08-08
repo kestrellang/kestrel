@@ -17,6 +17,10 @@ pub struct LowerCtx<'w> {
     pub module: MirModule,
     pub closure_counter: u32,
     synthetic_counter: u32,
+    /// The module-wide no-op retain/release shim used by capture-free
+    /// `escaping` closure values (see `body/closure_box.rs`). Synthesized on
+    /// first use so a module with no escaping closures gains nothing.
+    pub escaping_nop_shim: Option<Entity>,
 }
 
 impl<'w> LowerCtx<'w> {
@@ -29,6 +33,7 @@ impl<'w> LowerCtx<'w> {
             module: MirModule::new(name),
             closure_counter: 0,
             synthetic_counter: 0,
+            escaping_nop_shim: None,
         }
     }
 

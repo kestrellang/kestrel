@@ -98,8 +98,10 @@ fn lower_witnesses_for_type(
         // (#182). When the source extension has no own impl of the requirement
         // (an empty `extend T: P {}` relying on a default or another extension's
         // member — e.g. #213), `bind_witness_methods` falls through to discovery.
-        let source_is_extension =
-            matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension));
+        let source_is_extension = matches!(
+            ctx.world.get::<NodeKind>(*source),
+            Some(NodeKind::Extension)
+        );
         let prefer_source = source_is_extension;
         let witness_impl_ty = match &concrete_args {
             Some(args) => ctx.module.ty_arena.named(type_entity, args.clone()),
@@ -143,12 +145,22 @@ fn lower_witnesses_for_type(
         // the mono selector can (a) reject a constrained witness whose bound
         // doesn't hold for the concrete self and (b) prefer it over an
         // overlapping unconstrained witness when it does (#182).
-        if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension))
-            && let Some(ast_wc) = ctx.world.get::<kestrel_ast_builder::WhereClause>(*source).cloned()
+        if matches!(
+            ctx.world.get::<NodeKind>(*source),
+            Some(NodeKind::Extension)
+        ) && let Some(ast_wc) = ctx
+            .world
+            .get::<kestrel_ast_builder::WhereClause>(*source)
+            .cloned()
         {
             let mut wc = kestrel_mir::item::function::WhereClause::new();
             for ast_constraint in &ast_wc.0 {
-                crate::items::function_sig::lower_where_constraint(ctx, ast_constraint, *source, &mut wc);
+                crate::items::function_sig::lower_where_constraint(
+                    ctx,
+                    ast_constraint,
+                    *source,
+                    &mut wc,
+                );
             }
             witness.constraints = wc.constraints;
         }
@@ -353,10 +365,7 @@ fn bind_witness_methods(
             let field_ty = resolve_type_annotation(ctx, field);
             let is_setter = method_name.ends_with(".set");
             let accessor = ctx.next_synthetic_entity();
-            let acc_name = format!(
-                "__{}${lookup_name}",
-                if is_setter { "set" } else { "get" }
-            );
+            let acc_name = format!("__{}${lookup_name}", if is_setter { "set" } else { "get" });
             ctx.module.register_name(accessor, acc_name.clone());
             if is_setter {
                 let unit_ty = ctx.module.ty_arena.unit();
@@ -376,7 +385,11 @@ fn bind_witness_methods(
                 ctx.module.add_function(def);
                 crate::body::synthesize_static_var_getter(ctx, accessor, field, field_ty);
             }
-            witness.add_method(WitnessMethodBinding::new(method_key.clone(), accessor, vec![]));
+            witness.add_method(WitnessMethodBinding::new(
+                method_key.clone(),
+                accessor,
+                vec![],
+            ));
             continue;
         }
 
@@ -395,8 +408,7 @@ fn bind_witness_methods(
                 .world
                 .get::<TypeParams>(type_entity)
                 .map(|tp| {
-                    tp.0
-                        .iter()
+                    tp.0.iter()
                         .map(|&e| {
                             ctx.register_name(e);
                             let n = ctx
@@ -420,7 +432,12 @@ fn bind_witness_methods(
                 def.type_params = acc_type_params;
                 def.params = vec![
                     ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::MutBorrow),
-                    ParamDef::new("value", ValueId::new(1), field_ty, ParamConvention::Consuming),
+                    ParamDef::new(
+                        "value",
+                        ValueId::new(1),
+                        field_ty,
+                        ParamConvention::Consuming,
+                    ),
                 ];
                 ctx.module.add_function(def);
                 crate::body::synthesize_instance_var_setter(
@@ -430,8 +447,12 @@ fn bind_witness_methods(
                 let mut def = FunctionDef::new(accessor, &acc_name, field_ty);
                 def.kind = FunctionKind::Free;
                 def.type_params = acc_type_params;
-                def.params =
-                    vec![ParamDef::new("self", ValueId::new(0), self_ty, ParamConvention::Borrow)];
+                def.params = vec![ParamDef::new(
+                    "self",
+                    ValueId::new(0),
+                    self_ty,
+                    ParamConvention::Borrow,
+                )];
                 ctx.module.add_function(def);
                 crate::body::synthesize_instance_var_getter(
                     ctx, accessor, self_ty, field_idx, field_ty,
@@ -570,7 +591,10 @@ fn protocol_ext_default_type_args(
         if *p != supplied_protocol {
             return None;
         }
-        let owner = if matches!(ctx.world.get::<NodeKind>(*source), Some(NodeKind::Extension)) {
+        let owner = if matches!(
+            ctx.world.get::<NodeKind>(*source),
+            Some(NodeKind::Extension)
+        ) {
             *source
         } else {
             type_entity

@@ -15,14 +15,15 @@ comes from the type checker.
 
 - [E001–E009 — Control flow & definite initialization](#e001e009--control-flow--definite-initialization)
 - [E100–E121 — Type checking, parameters & literals](#e100e121--type-checking-parameters--literals)
-- [E200–E212 — Mutability, access modes & assignment](#e200e212--mutability-access-modes--assignment)
+- [E200–E211 — Mutability, access modes & assignment](#e200e211--mutability-access-modes--assignment)
 - [E300–E316 — Patterns & exhaustiveness](#e300e316--patterns--exhaustiveness)
 - [E411–E478 — Declarations, generics & protocol conformance](#e411e478--declarations-generics--protocol-conformance)
 - [E488–E499 — References & escape checking](#e488e499--references--escape-checking)
-- [E500–E506 — Moves & ownership](#e500e506--moves--ownership)
+- [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
+- [E624–E625 — Closure kinds](#e624e625--closure-kinds)
 - [E700–E707 — String literals & escapes](#e700e707--string-literals--escapes)
 
 ---
@@ -67,14 +68,14 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
                       // Int8 holds -128...127
 ```
 
-## E200–E212 — Mutability, access modes & assignment
+## E200–E211 — Mutability, access modes & assignment
 
 | Code | Message | Explanation |
 |---|---|---|
 | E200 | cannot assign to immutable variable '{name}' | Assignment to a `let` binding; declare it `var` to mutate. |
 | E201 | cannot assign to immutable field '{name}' | Assignment to a `let` field, or to a field without a setter. |
 | E202 | cannot assign to this expression | The left-hand side of the assignment is not an assignable place (e.g. a call result or literal). |
-| E203 | cannot pass immutable binding '{name}' to 'mutating' parameter | A `let` binding can't be handed to a parameter that mutates it. |
+| E203 | cannot pass immutable binding '{name}' to 'mutating' parameter · cannot call `mutating` closure '{name}': it is bound with 'let' | A `let` binding can't be handed to a parameter that mutates it. Calling a `mutating`-kind closure is an exclusive use of whatever holds it, so it must live in a `var` (or a `mutating` parameter). |
 | E204 | cannot pass immutable field '{name}' to 'mutating' parameter | An immutable field can't be passed where mutation is required. |
 | E205 | cannot pass temporary value to 'mutating' parameter | A temporary (rvalue) has no place to write the mutation back to. |
 | E206 | *(declared; not currently emitted)* | Reserved: passing a `let` binding to a `consuming` parameter. |
@@ -83,7 +84,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
 | E211 | \`&\` pattern bindings are not supported in this position | `&` patterns are only allowed in match-arm patterns, not in `let`/`for`/conditions/params. |
-| E212 | closure cannot capture non-Static binding '{name}' | A closure environment may outlive the scope, so only Static (reference-free) values can be captured; ref bindings can't be captured at all. |
+| E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
 ## E300–E316 — Patterns & exhaustiveness
 
@@ -251,7 +252,7 @@ Only parameter-rooted or `Pointer`-derived references can be returned. The
 same rule rejects returning a closure that captures a local (the closure's
 environment is rooted at its captures).
 
-## E500–E506 — Moves & ownership
+## E500–E507 — Moves & ownership
 
 These apply to non-`Copyable` types, which move instead of copy.
 
@@ -263,7 +264,8 @@ These apply to non-`Copyable` types, which move instead of copy.
 | E503 | cannot move '{name}' out of a borrowed value | A non-copyable value can't be moved out of a place you only borrow (e.g. a plain `x: T` parameter, or through get/set accessors). |
 | E504 *(warning)* | returned reference points into local '{name}', whose storage dies when the function returns | A `Pointer`-derived reference into dead stack storage escapes (unverified pointer territory). |
 | E505 | static variable '{name}' has non-Static type '{ty}' | A global lives for the whole program, so its type must be `Static` (reference-free). |
-| E506 | cannot move captured value '{name}' out of a closure | A closure only borrows its captures; a non-copyable capture can't be moved out of the closure body. |
+| E506 | cannot move captured value '{name}' out of a closure | A `normal` / `mutating` / `escaping` closure may be called more than once but holds a single non-copyable value, so its body can't move that capture out. **Lifted inside a `consuming` body** — a one-shot closure runs at most once, so moving captures out is exactly what it is for. (A `consuming` body moving a capture the frame only *borrows* is still rejected.) |
+| E507 | cannot move / consume / destroy '{name}' while a closure capturing it is live · a closure viewing '{name}' cannot outlive '{name}' | The freeze rule (docs/design/closures.md). While a live `normal` / `mutating` closure carries a view of a place, that place cannot be moved, passed to a `consuming` parameter, or `deinit`ed, and a value carrying the view cannot be stored into a longer-lived binding. Plain reassignment stays legal. The closure analogue of E498. |
 
 ### Example — E500 / E501 (use after move)
 
@@ -298,8 +300,40 @@ func steal(r: Res) -> Res {   // `r: Res` borrows by default
 ```kestrel
 struct Res: not Copyable { var id: Int64 }
 
-func capture(consuming r: Res) -> () -> Res {
-    { r }   // error[E506]: cannot move captured value 'r' out of a closure
+func runNormal(f: () -> Res) -> Int64 { f().id }
+
+func capture() {
+    let r = Res(id: 7)
+    let n = runNormal({ () in r })   // error[E506]: cannot move captured value 'r'
+                                     //              out of a closure
+}
+
+// The same literal is legal against a `consuming` expected type:
+func runOnce(consuming f: consuming () -> Res) -> Int64 { f().id }
+```
+
+### Example — E507 (freeze rule)
+
+```kestrel
+struct Res: not Copyable { var id: Int64 }
+
+func sink(consuming r: Res) { }
+
+func frozen() {
+    let r = Res(id: 1)
+    let f = { r.id }   // a normal closure captures a VIEW of `r.id`
+    sink(r)            // error[E507]: cannot consume 'r.id' while a closure
+                       //              capturing it is live
+    f()
+}
+
+func outlives() -> Int64 {
+    var g: () -> Int64 = { () in 0 }
+    if true {
+        let r = Res(id: 9)
+        g = { r.id }   // error[E507]: a closure viewing 'r.id' cannot outlive 'r.id'
+    }                  // `r` dies here; `g` would dangle
+    g()
 }
 ```
 
@@ -310,7 +344,7 @@ func capture(consuming r: Res) -> () -> Res {
 | E600 | implicit 'it' parameter used in closure expecting {n} parameters | `it` only works when the closure takes exactly one parameter. |
 | E601 | closure has {actual} parameters, but expected {expected} | The closure's parameter count doesn't match the expected function type. |
 | E602 | closure parameter type mismatch at position {index} | An annotated closure parameter conflicts with the expected function type. |
-| E603 | cannot assign to captured variable '{name}' | Captured variables are immutable inside closures. |
+| E603 | cannot assign to captured variable '{name}' | A **normal** closure captures read-only views, so any assignment target rooted at a capture — the bare local or a projection like `c.n = 5` — is rejected. The note points at the fix: give the closure a `mutating` expected type (e.g. `mutating () -> ()`) to write back to the original, or fold the value and return it. Lifted for `mutating` (its views are `&mutating`) and for `consuming` / `escaping` (they own their captures). |
 | E604 | cannot assign to closure parameter '{name}' | Closure parameters are immutable. |
 | E605 | parameter/return type does not conform to FFISafe | `@extern` signatures may only use FFI-safe types. |
 | E606 | could not infer type for closure parameter | The closure needs type context (annotate the parameter or the binding). |
@@ -378,6 +412,47 @@ computed members.
 | E620 | duplicate write provider: this member declares both \`set\` and \`mutating ref\` | Writes need exactly one provider. |
 | E621 | \`ref\` accessors are not allowed in protocols or protocol extensions | Declare `ref` accessors on concrete types only. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a `get` or `ref`; add a read provider. |
+
+## E624–E625 — Closure kinds
+
+A function type may name a closure *kind* — `mutating (T) -> U`,
+`consuming (T) -> U`, `escaping (T) -> U`; an unmarked type is the *normal*
+kind. The kind fixes how the closure holds its captures and how it may be
+called — see [memory-model/closures.md](memory-model/closures.md).
+
+| Code | Message | Explanation |
+|---|---|---|
+| E624 | closure kind mismatch: expected {expected}, found {actual} | The closure value's kind does not pass where the expected kind is required. Only `normal → mutating`, `escaping → normal`, `escaping → consuming`, and the same-kind diagonal are accepted. |
+| E624 | an owning closure cannot capture '{name}': it carries a reference | An `escaping` / `consuming` literal snapshots its captures into an environment that may outlive the frame, so it cannot capture a ref binding or any other non-`Static` value. Copy the referenced value into a `let` first and capture that. |
+| E625 | a '{kind}' closure parameter must have the '{kind}' access mode | A `mutating`-kind parameter must be declared `mutating`, and a `consuming`-kind parameter `consuming` — the kind dictates the access the callee needs to call it. |
+
+### Example — E624 (passing table)
+
+```kestrel
+func takesConsuming(consuming f: consuming () -> Int64) -> Int64 { f() }
+
+func demo(x: Int64) -> Int64 {
+    let n: () -> Int64 = { x };
+    takesConsuming(n)
+    // error[E624]: closure kind mismatch: expected a 'consuming' closure,
+    //              found a normal closure
+}
+```
+
+A normal or `mutating` closure holds *views* of the enclosing frame, so it
+owns nothing a `consuming` slot could take and can never reach an `escaping`
+slot. A `consuming` closure is one-shot and fits only a `consuming` slot. An
+`escaping` closure passes everywhere except `mutating` (its calls are shared,
+not exclusive).
+
+### Example — E625 (kind / access-mode pairing)
+
+```kestrel
+func each(action: mutating (Int64) -> ()) { }
+// error[E625]: a 'mutating' closure parameter must have the 'mutating' access mode
+
+func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
+```
 
 ## E700–E707 — String literals & escapes
 

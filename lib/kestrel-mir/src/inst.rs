@@ -213,7 +213,21 @@ pub enum InstKind {
         /// instantiation to the first thunk — see the mono `rewrite_callees`
         /// and `compile_apply_partial` handling.
         callee: Callee,
+        /// View tier / bare: the values packed into a freshly allocated stack
+        /// environment (codegen owns the packing).
+        ///
+        /// Owning tier (`FnKind::Escaping`): exactly ONE pointer-sized value —
+        /// the already-boxed environment handle — which becomes word 1
+        /// verbatim; codegen allocates no environment. `retain`/`release` are
+        /// then `Some` and pack into words 2/3.
         captures: Vec<ValueId>,
+        /// Owning tier only: the per-environment type-erased retain shim
+        /// (`(handle) -> ()`, "share this environment"). Packed as word 2 so a
+        /// `CopyValue` on a type-erased `escaping (…) -> …` value can retain
+        /// without knowing the environment type. A new mono root.
+        retain: Option<Callee>,
+        /// Owning tier only: the matching release shim, packed as word 3.
+        release: Option<Callee>,
     },
 
     // -- Address projection --

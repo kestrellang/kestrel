@@ -40,6 +40,7 @@ use result::TypedBody;
 
 pub use captures::{CaptureKind, CapturedPlace, ClosureCaptureMap, ClosureCaptures, PlaceKey};
 pub use conformance::{extension_bounds_hold, type_satisfies};
+pub use error::describe_fn_kind;
 
 /// Resolve the logical enclosing container for a function-like entity.
 /// Setters have an `EnclosingContainer` component set at build time;
@@ -620,6 +621,7 @@ fn create_return_type_with_opaque(
             ctx.tuple(tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -630,7 +632,7 @@ fn create_return_type_with_opaque(
                 .map(|p| create_return_type_with_opaque(ctx, p))
                 .collect();
             let ret_tv = create_return_type_with_opaque(ctx, ret);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         _ => generate::lower_hir_ty(ctx, hir_ty),
     }

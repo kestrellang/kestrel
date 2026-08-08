@@ -394,5 +394,4 @@ impl OssaBodyCtx<'_, '_> {
             None => self.loop_stack.last(),
         }
     }
-
 }

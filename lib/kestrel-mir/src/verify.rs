@@ -383,8 +383,7 @@ impl<'a> BlockVerifier<'a> {
                     .borrows
                     .iter()
                     .filter(|(borrow_val, info)| {
-                        info.source == v
-                            && !exempt.is_some_and(|e| e.contains(borrow_val))
+                        info.source == v && !exempt.is_some_and(|e| e.contains(borrow_val))
                     })
                     .map(|(borrow_val, _)| *borrow_val)
                     .collect();
@@ -1285,12 +1284,61 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
         Carrier { mutating: bool, closure: bool },
     }
 
+    // Escape taint must survive CFG MERGES. A closure (or ref carrier) built
+    // in an `if`/`else` arm reappears at the join under the target block's
+    // PARAM ValueId, and `OssaBody::alloc_value` self-roots a param with no
+    // borrow source — so the taint stamped at `emit_apply_partial` was lost and
+    // a returned frame-view closure escaped with ZERO diagnostics (the
+    // `capture_from_nested_scope.ks` hole). Recover it here: fixpoint the join
+    // of every incoming argument's effective root into its block param. A
+    // SELF-rooted argument is untainted and contributes nothing (joining its
+    // `Local(arg)` would poison every merge).
+    fn merged_roots(
+        body: &crate::body::OssaBody,
+        convs: &[ParamConvention],
+    ) -> FxHashMap<ValueId, RootProvenance> {
+        let mut roots: FxHashMap<ValueId, RootProvenance> = FxHashMap::default();
+        let effective = |roots: &FxHashMap<ValueId, RootProvenance>, v: ValueId| {
+            let r = roots.get(&v).copied().unwrap_or(body.value(v).root);
+            (r != RootProvenance::Local(v) && !r.is_derived_placeholder()).then_some(r)
+        };
+        loop {
+            let mut changed = false;
+            for block in &body.blocks {
+                for (target, args) in block.terminator.kind.successor_args() {
+                    for (i, &arg) in args.iter().enumerate() {
+                        let Some(src) = effective(&roots, arg) else {
+                            continue;
+                        };
+                        let Some(param) = body.block(target).params.get(i) else {
+                            continue;
+                        };
+                        let cur = roots.get(&param.value).copied();
+                        let next = match cur {
+                            Some(c) => c.join(src, convs),
+                            None => src,
+                        };
+                        if cur != Some(next) {
+                            roots.insert(param.value, next);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                return roots;
+            }
+        }
+    }
+
     let mut errors = Vec::new();
     for func in module.functions.values() {
         let Some(body) = &func.body else { continue };
         if body.values.is_empty() || body.blocks.is_empty() {
             continue;
         }
+        let convs: Vec<ParamConvention> = func.params.iter().map(|p| p.convention).collect();
+        let merged = merged_roots(body, &convs);
         let mode = match ret_convention(&module.ty_arena, func.ret) {
             RetConvention::RefBorrow { mutating } => EscapeMode::RefBorrow { mutating },
             _ => {
@@ -1309,7 +1357,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         mutating: carry.mutating_ref,
                         closure: false,
                     }
-                } else if carry.closure {
+                } else if carry.view_closure {
                     EscapeMode::Carrier {
                         mutating: false,
                         closure: true,
@@ -1325,6 +1373,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 continue;
             };
             let vd = body.value(*v);
+            let vd_root = merged.get(v).copied().unwrap_or(vd.root);
             let (carrier, mutating, is_closure) = match mode {
                 EscapeMode::RefBorrow { mutating } => {
                     if vd.ownership != Ownership::Guaranteed {
@@ -1336,9 +1385,9 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 EscapeMode::Carrier { mutating, closure } => {
                     if vd.ownership != Ownership::Owned
                         // Hand-built bodies may bypass alloc_value.
-                        || vd.root.is_derived_placeholder()
+                        || vd_root.is_derived_placeholder()
                         // Untainted: the value's own self-root.
-                        || vd.root == RootProvenance::Local(*v)
+                        || vd_root == RootProvenance::Local(*v)
                     {
                         continue;
                     }
@@ -1364,7 +1413,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 });
             };
 
-            let mut root = vd.root;
+            let mut root = vd_root;
             if root.is_derived_placeholder() {
                 // Hand-built bodies may bypass alloc_value; treat as a local
                 // with no known definition. (Carrier mode skipped these.)
@@ -1374,7 +1423,10 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
             // A directly-returned closure says "this closure"; a struct/tuple
             // that merely carries one says "this value: it carries a closure".
             let what = if is_closure {
-                if matches!(module.ty_arena.get(func.ret), crate::ty::MirTy::FuncThick { .. }) {
+                if matches!(
+                    module.ty_arena.get(func.ret),
+                    crate::ty::MirTy::FuncThick { .. }
+                ) {
                     "this closure: it captures"
                 } else {
                     "this value: it carries a closure that captures"
@@ -1396,23 +1448,84 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         .get(local.index())
                         .and_then(|d| d.span.clone())
                         .map(|s| (s, format!("the borrowed local{name} is defined here")));
+                    // FIX-IT (docs/design/closures.md, Diagnostics table:
+                    // E494's "message gains a fix-it suggesting an `escaping`
+                    // or `consuming` owning type"). Fix-its are `notes`
+                    // strings in this data model (plan, decision 7). The kind
+                    // is spelled in the EXPECTED type, never on the literal —
+                    // that is the whole inference rule, so the note names the
+                    // return/expected type as the place to change.
+                    let mut notes = vec![
+                        "only parameter-rooted or `Pointer`-derived references can be returned"
+                            .into(),
+                        "Pointer-derived references are not verified by the compiler".into(),
+                    ];
+                    if is_closure {
+                        notes = vec![
+                            "a normal or `mutating` closure holds VIEWS into this frame, so it \
+                             cannot leave it"
+                                .into(),
+                            "write an owning kind in the expected/return type — `escaping (…) \
+                             -> …` (shared environment, callable many times) or `consuming (…) \
+                             -> …` (unique environment, called once) — and the literal is \
+                             rebuilt with owned captures"
+                                .into(),
+                        ];
+                    }
                     push(
                         "E494",
                         format!(
                             "cannot return {what} local{name}, which does not outlive the call"
                         ),
                         secondary,
-                        vec![
-                            "only parameter-rooted or `Pointer`-derived references can be \
-                             returned"
-                                .into(),
-                            "Pointer-derived references are not verified by the compiler".into(),
-                        ],
+                        notes,
                     );
                 },
                 RootProvenance::Param(idx) => {
                     let convention = func.params.get(idx as usize).map(|p| p.convention);
-                    if convention == Some(ParamConvention::Consuming) {
+                    // TRUNCATED-VIEW RETURN (plan D5, conversion 2). Coercing
+                    // an owning closure to a VIEW kind produces a non-owning
+                    // `{fn, handle-as-ptr}` view rooted at the source handle —
+                    // it retains nothing. Rooted at a BORROWED parameter it
+                    // would outlive the caller's handle, so a view-kind return
+                    // slot rejects it. Returning the same parameter AT an
+                    // owning kind is a retained copy and stays legal, which is
+                    // exactly the `is_boxed` gate here.
+                    // The value's OWN type is the boxed source; the return
+                    // slot is a view kind. Anything else (a view closure
+                    // returned from a borrowed receiver — `Provider.subscript`
+                    // handing back `self.f`) keeps today's Param acceptance.
+                    if is_closure
+                        && convention != Some(ParamConvention::Consuming)
+                        && matches!(
+                            module.ty_arena.get(vd.ty),
+                            crate::ty::MirTy::FuncThick { kind, .. } if kind.is_boxed()
+                        )
+                        && matches!(
+                            module.ty_arena.get(func.ret),
+                            crate::ty::MirTy::FuncThick { kind, .. } if !kind.is_boxed()
+                        )
+                    {
+                        let pname = func
+                            .params
+                            .get(idx as usize)
+                            .map(|p| format!(" `{}`", p.name))
+                            .unwrap_or_default();
+                        push(
+                            "E494",
+                            format!(
+                                "cannot return {what} borrowed parameter{pname}, which does \
+                                 not outlive the call"
+                            ),
+                            None,
+                            vec![
+                                "a view-kind closure does not own its environment; it cannot \
+                                 outlive the handle it views"
+                                    .into(),
+                                "return it at `escaping` to hand back a retained copy".into(),
+                            ],
+                        );
+                    } else if convention == Some(ParamConvention::Consuming) {
                         let pname = func
                             .params
                             .get(idx as usize)
@@ -1458,8 +1571,10 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                         };
                         push(
                             "E495",
-                            format!("{subject} requires a mutable root; a static is not a \
-                                 mutable root"),
+                            format!(
+                                "{subject} requires a mutable root; a static is not a \
+                                 mutable root"
+                            ),
                             None,
                             vec![],
                         );
@@ -2700,7 +2815,10 @@ mod tests {
     fn escape_param_root_ok() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         b.emit_return(p);
         let (module, _) = finish_fn(b, ref_ty, &[(ParamConvention::Borrow, i64_ty)]);
@@ -2711,7 +2829,10 @@ mod tests {
     fn escape_local_root_rejected() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let local = b.emit_literal(Immediate::i64(7));
         let borrow = b.emit_begin_borrow(local);
         b.emit_return(borrow);
@@ -2719,11 +2840,48 @@ mod tests {
         assert_eq!(escape_codes(&module), vec!["E494"]);
     }
 
+    /// E494's closure-carrier FIX-IT (docs/design/closures.md, Diagnostics
+    /// table: "message gains a fix-it suggesting an `escaping` or `consuming`
+    /// owning type"). Pinned here rather than in testdata because the `.ks`
+    /// harness matches only a diagnostic's message + primary label — a
+    /// diagnostic's `notes` are not visible to `// ERROR:` annotations, and
+    /// the fix-it is a note (plan, decision 7).
+    #[test]
+    fn escape_view_closure_return_note_suggests_owning_kind() {
+        let mut b = OssaBuilder::new("t");
+        let i64_ty = b.i64();
+        let view_fn = b.ty(MirTy::FuncThick {
+            kind: crate::FnKind::Normal,
+            params: vec![],
+            ret: i64_ty,
+        });
+        // A frame-bound closure value: an @owned FuncThick whose root is the
+        // captured local, exactly what `emit_apply_partial` stamps for a view
+        // kind.
+        let cap = b.emit_literal(Immediate::i64(7));
+        let closure = b.new_value(view_fn, Ownership::Owned);
+        b.set_root(closure, RootProvenance::Local(cap));
+        b.emit_return(closure);
+        let (module, _) = finish_fn(b, view_fn, &[]);
+        let errs = check_escapes(&module);
+        assert_eq!(escape_codes(&module), vec!["E494"]);
+        let notes = &errs[0].diag.as_ref().unwrap().notes;
+        assert!(
+            notes
+                .iter()
+                .any(|n| n.contains("escaping (…) -> …") && n.contains("consuming (…) -> …")),
+            "E494 on a closure carrier must suggest an owning kind, got {notes:?}"
+        );
+    }
+
     #[test]
     fn escape_consuming_param_rejected() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Owned);
         let borrow = b.emit_begin_borrow(p);
         b.emit_return(borrow);
@@ -2735,7 +2893,10 @@ mod tests {
     fn escape_mutating_needs_mutable_root() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let mut_ref = b.ty(MirTy::Ref { pointee: i64_ty, mutating: true });
+        let mut_ref = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: true,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         b.emit_return(p);
         // Shared Borrow param rooting a `-> &mutating` return: const-cast guard.
@@ -2747,7 +2908,10 @@ mod tests {
     fn escape_mut_param_root_ok_for_mutating() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let mut_ref = b.ty(MirTy::Ref { pointee: i64_ty, mutating: true });
+        let mut_ref = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: true,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         b.emit_return(p);
         let (module, _) = finish_fn(b, mut_ref, &[(ParamConvention::MutBorrow, i64_ty)]);
@@ -2760,7 +2924,10 @@ mod tests {
         for (mutating, expect) in [(false, vec![]), (true, vec!["E495"])] {
             let mut b = OssaBuilder::new("t");
             let i64_ty = b.i64();
-            let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating });
+            let ref_ty = b.ty(MirTy::Ref {
+                pointee: i64_ty,
+                mutating,
+            });
             let local = b.emit_literal(Immediate::i64(7));
             let borrow = b.emit_begin_borrow(local);
             b.set_root(borrow, RootProvenance::Static);
@@ -2782,7 +2949,10 @@ mod tests {
         for (mutable, mutating, expect) in cases {
             let mut b = OssaBuilder::new("t");
             let i64_ty = b.i64();
-            let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating });
+            let ref_ty = b.ty(MirTy::Ref {
+                pointee: i64_ty,
+                mutating,
+            });
             let local = b.emit_literal(Immediate::i64(7));
             let borrow = b.emit_begin_borrow(local);
             b.set_root(borrow, RootProvenance::PointerDerived { mutable });
@@ -2801,7 +2971,10 @@ mod tests {
         // Borrow of a borrow of a param still roots at the param.
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         let b1 = b.emit_begin_borrow(p);
         let b2 = b.emit_begin_borrow(b1);
@@ -2834,7 +3007,10 @@ mod tests {
     fn owned_return_in_ret_borrow_fn_is_error() {
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let v = b.emit_literal(Immediate::i64(7));
         b.emit_return(v);
         let (module, entity) = finish_fn(b, ref_ty, &[]);
@@ -2853,7 +3029,10 @@ mod tests {
         // The returned borrow is exempt from "still active at block exit".
         let mut b = OssaBuilder::new("t");
         let i64_ty = b.i64();
-        let ref_ty = b.ty(MirTy::Ref { pointee: i64_ty, mutating: false });
+        let ref_ty = b.ty(MirTy::Ref {
+            pointee: i64_ty,
+            mutating: false,
+        });
         let p = b.new_param_value(i64_ty, Ownership::Guaranteed);
         let borrow = b.emit_begin_borrow(p);
         b.emit_return(borrow);

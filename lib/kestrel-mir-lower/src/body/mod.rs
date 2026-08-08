@@ -1,5 +1,6 @@
 pub mod call;
 pub mod closure;
+pub mod closure_box;
 pub mod control;
 pub mod expr;
 pub mod literal;
@@ -79,6 +80,20 @@ impl std::ops::Deref for TypedRef<'_> {
 pub(crate) enum LocalBinding {
     Ssa(ValueId),
     Var(ValueId),
+}
+
+/// How a captured *projected place* (`self.cap`) is presented inside a closure
+/// body — the place-capture twin of [`LocalBinding`].
+///
+/// - `Value`: the env field holds the place's VALUE (a snapshot taken at
+///   creation). Owning tiers, and the historical single tier.
+/// - `Addr`: the env field holds a `Pointer[T]` INTO the enclosing frame — the
+///   view tier. Reads load through it at each use (so a write between calls,
+///   or reentrantly during one, is observed) and writes store back through it.
+#[derive(Clone, Copy)]
+pub(crate) enum PlaceCapture {
+    Value(ValueId),
+    Addr(ValueId),
 }
 
 impl LocalBinding {
@@ -315,12 +330,12 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// `HirExprId`. Computed once (post-inference) and consumed by
     /// `lower_closure_expr`. Arc-shared with the query memo cache.
     pub(crate) captures: Arc<ClosureCaptureMap>,
-    /// Inside a closure body: the env value loaded for each captured *place*
-    /// (e.g. `self.cap`). Consulted when lowering reads/borrows so projected
-    /// captures read the env value instead of projecting from a (non-captured)
+    /// Inside a closure body: how each captured *place* (e.g. `self.cap`) is
+    /// presented. Consulted when lowering reads/borrows so projected captures
+    /// go through the env instead of projecting from a (non-captured)
     /// receiver. Whole-local captures use `local_map` instead. Saved/restored
     /// across nested closure bodies like `local_map`.
-    pub(crate) place_capture_map: HashMap<PlaceKey, ValueId>,
+    pub(crate) place_capture_map: HashMap<PlaceKey, PlaceCapture>,
     /// Per-droppable-`self`-field drop-flag tracking in an init body: one entry
     /// per droppable stored field, as `(field index, substituted field type,
     /// drop-flag pointer)`. Populated for EVERY init with droppable fields (see
@@ -604,12 +619,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     // its signature type; the entry peel into the let-ref
                     // VIEW representation is deferred below the loop — the
                     // first `params_len` ValueIds must be exactly the params.
-                    let sig_ref = param_sig_tys.get(i).and_then(|&t| {
-                        match self.ctx.module.ty_arena.get(t) {
-                            MirTy::Ref { pointee, .. } => Some((t, *pointee)),
-                            _ => None,
-                        }
-                    });
+                    let sig_ref =
+                        param_sig_tys
+                            .get(i)
+                            .and_then(|&t| match self.ctx.module.ty_arena.get(t) {
+                                MirTy::Ref { pointee, .. } => Some((t, *pointee)),
+                                _ => None,
+                            });
                     if let Some((ref_ty, pointee)) = sig_ref {
                         let val = self.body.alloc_value(ValueDef {
                             ty: ref_ty,
@@ -1223,6 +1239,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     ///   value via expand — no runtime flag needed);
     /// - `MaybeUninit` → flag-guarded drop + `store_init` (reaching edges
     ///   disagree, or inside a loop where the store re-executes).
+    ///
     /// Afterwards the field is `DefInit` and its drop flag is set.
     fn store_init_self_field(&mut self, field_idx: FieldIdx, field_addr: ValueId, rhs: ValueId) {
         let Some(state) = self.field_init(field_idx) else {
@@ -1250,7 +1267,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     .map(|(_, ty, f)| (*ty, *f))
                     .expect("tracked field has a drop flag");
                 // Guard threads `rhs` + `field_addr` through the diamond.
-                let remapped = self.emit_guarded_destroy(flag, field_addr, field_ty, &[rhs, field_addr]);
+                let remapped =
+                    self.emit_guarded_destroy(flag, field_addr, field_ty, &[rhs, field_addr]);
                 self.emit_store_init(remapped[1], remapped[0]);
             },
         }
@@ -1534,7 +1552,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     _ => None,
                 })
                 .collect();
-            scope.entries.retain(|e| !matches!(e, ScopeEntry::Borrow(_)));
+            scope
+                .entries
+                .retain(|e| !matches!(e, ScopeEntry::Borrow(_)));
             for v in borrows {
                 self.push_inst(InstKind::EndBorrow { operand: v });
             }
@@ -1608,9 +1628,8 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             })
             .collect();
         for v in borrow_entries {
-            let binding_at_exit = target_depth == 0
-                && self.ref_binding_vals.contains_key(&v)
-                && !keep.contains(&v);
+            let binding_at_exit =
+                target_depth == 0 && self.ref_binding_vals.contains_key(&v) && !keep.contains(&v);
             if !self.ref_results.contains(&v) || binding_at_exit {
                 self.emit_end_borrow(v);
             }
@@ -1763,9 +1782,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     self.ctx.module.ty_arena.get(ty),
                     MirTy::Pointer(p) if self.ctx.module.ty_arena.contains_ref(*p)
                 );
-            if ownership == Ownership::Owned
-                && root != RootProvenance::Local(old)
-                && carries_taint
+            if ownership == Ownership::Owned && root != RootProvenance::Local(old) && carries_taint
             {
                 let remapped = match root {
                     RootProvenance::Local(w) => RootProvenance::Local(
@@ -2282,13 +2299,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .into_iter()
             .map(|(idx, v)| {
                 if self.slot_is_ref(&slot_tys, idx.index()) {
-                    (idx, self.prep_ref_slot_element(v, &mut taint, &mut end_after))
+                    (
+                        idx,
+                        self.prep_ref_slot_element(v, &mut taint, &mut end_after),
+                    )
                 } else {
                     // A by-value field carrying an escape root — a captured
                     // closure or a nested ref-bearing aggregate — taints the
                     // whole struct: returning it would let the field's
                     // frame-bound storage escape (#174 struct-field laundering).
-                    self.collect_by_value_escape_taint(v, slot_tys.get(idx.index()).copied(), &mut taint);
+                    self.collect_by_value_escape_taint(
+                        v,
+                        slot_tys.get(idx.index()).copied(),
+                        &mut taint,
+                    );
                     (idx, self.own_aggregate_element(v))
                 }
             })
@@ -2507,6 +2531,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     /// Consume an @owned struct value, moving ALL fields out as @owned results.
+    /// Each result is an INDEPENDENTLY tracked owner — which is what lets a
+    /// `consuming` closure body move one capture out while the ordinary scope
+    /// teardown drops the rest.
     pub fn emit_destructure_struct(
         &mut self,
         operand: ValueId,
@@ -2787,36 +2814,81 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         captures: Vec<ValueId>,
         result_ty: TyId,
     ) -> ValueId {
+        self.emit_apply_partial_shimmed(callee, captures, result_ty, None)
+    }
+
+    /// `emit_apply_partial` plus the owning tier's type-erased share/release
+    /// pair (`Some` only for a boxed closure — see `lower_closure_expr`).
+    pub fn emit_apply_partial_shimmed(
+        &mut self,
+        callee: Callee,
+        captures: Vec<ValueId>,
+        result_ty: TyId,
+        shims: Option<(Callee, Callee)>,
+    ) -> ValueId {
         let result = self.alloc_value(result_ty, Ownership::Owned);
 
-        // Escape provenance (#174): a capturing closure's environment is
-        // stack-allocated in THIS frame (codegen `alloc_stack_slot`), so the
-        // closure value points into the frame and cannot outlive it — exactly
-        // like a `&local`. Root it at the join over its captures: today every
-        // captured value's storage moves into the stack env, so each
-        // contributes `Local(cap)` and any capture makes the closure
-        // frame-bound. A no-capture closure is a bare function pointer (`Static`,
-        // returnable). FUTURE (heap-owned env): swap `Local(cap)` for the
-        // capture's OWN root — by-value copies become self-rooted (returnable),
-        // and only `&local` captures keep tainting. The escape check never
-        // changes; only this stamp does.
-        if let Some((&first, rest)) = captures.split_first() {
-            let convs = self.current_param_convs();
-            let root = rest.iter().fold(RootProvenance::Local(first), |acc, &c| {
-                acc.join(RootProvenance::Local(c), &convs)
-            });
-            self.stamp_root(result, root);
+        // Escape provenance (#174), gated on the closure KIND (plan D5/D7).
+        //
+        // VIEW kinds: the environment holds addresses into THIS frame, so the
+        // closure value cannot outlive it — exactly like a `&local`. Root it at
+        // the join over `Local(cap)` for every capture; a no-capture closure is
+        // a bare function pointer (`Static`, returnable).
+        //
+        // OWNING kinds: the environment is heap-boxed and owns snapshots. A
+        // self-rooted capture (`value(c).root == Local(c)`) is a fresh owned
+        // copy that contributes nothing — filter it out and join only the
+        // survivors, so a closure over pure snapshots is `Static` (returnable)
+        // while one that still carries a frame-derived value stays tainted.
+        // Joining the captures' own `Local(copy_id)` roots instead would never
+        // return: a fresh copy self-roots and `join` can never rank below
+        // `Local`.
+        let owning = matches!(
+            self.ctx.module.ty_arena.get(result_ty),
+            MirTy::FuncThick { kind, .. } if kind.is_boxed()
+        );
+        let roots: Vec<RootProvenance> = if owning {
+            captures
+                .iter()
+                .map(|&c| self.body.value(c).root)
+                .filter(|r| !matches!(r, RootProvenance::Local(l) if captures.contains(l)))
+                .collect()
         } else {
-            self.stamp_root(result, RootProvenance::Static);
+            captures.iter().map(|&c| RootProvenance::Local(c)).collect()
+        };
+        match roots.split_first() {
+            Some((&first, rest)) => {
+                let convs = self.current_param_convs();
+                let root = rest.iter().fold(first, |acc, &r| acc.join(r, &convs));
+                self.stamp_root(result, root);
+            },
+            None => self.stamp_root(result, RootProvenance::Static),
         }
 
         for &v in &captures {
             self.consume(v);
         }
+        // Representation conversion (1), bare → owning (plan D5): a named
+        // function or enum-case constructor used at an `escaping` slot has no
+        // environment, so it widens 2→4 words with a null handle and the
+        // shared NO-OP shim pair. Every boxed closure VALUE must carry a
+        // callable share/release pair — the erased dispatch calls them
+        // unconditionally.
+        let shims = match (shims, owning) {
+            (Some(s), _) => Some(s),
+            (None, true) => Some(crate::body::closure_box::nop_shims(self.ctx)),
+            (None, false) => None,
+        };
+        let (retain, release) = match shims {
+            Some((r, d)) => (Some(r), Some(d)),
+            None => (None, None),
+        };
         self.push_inst(InstKind::ApplyPartial {
             result,
             callee,
             captures,
+            retain,
+            release,
         });
         self.track_owned(result);
         result
@@ -2900,10 +2972,12 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 return None;
             };
             let kestrel_hir::ty::HirTy::Param(p, _) =
-                self.ctx.query.query(kestrel_hir_lower::LowerCallableReturnType {
-                    entity: *func,
-                    root: self.ctx.root,
-                })
+                self.ctx
+                    .query
+                    .query(kestrel_hir_lower::LowerCallableReturnType {
+                        entity: *func,
+                        root: self.ctx.root,
+                    })
             else {
                 return None;
             };
@@ -2967,9 +3041,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     Some(src) => {
                         let v = self.alloc_guaranteed(ty, src);
                         if ret_pointer_derived {
-                            self.stamp_root(v, RootProvenance::PointerDerived {
-                                mutable: mutating,
-                            });
+                            self.stamp_root(
+                                v,
+                                RootProvenance::PointerDerived { mutable: mutating },
+                            );
                         }
                         v
                     },
@@ -3011,8 +3086,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                             });
                         }
                     }
-                    let root = joined
-                        .unwrap_or(RootProvenance::PointerDerived { mutable: false });
+                    let root = joined.unwrap_or(RootProvenance::PointerDerived { mutable: false });
                     self.stamp_root(v, root);
                 }
                 v
@@ -3112,11 +3186,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 else_args,
                 ..
             } => then_args.iter().chain(else_args.iter()).copied().collect(),
-            TerminatorKind::Switch { cases, .. } => cases
-                .iter()
-                .flat_map(|c| c.args.iter())
-                .copied()
-                .collect(),
+            TerminatorKind::Switch { cases, .. } => {
+                cases.iter().flat_map(|c| c.args.iter()).copied().collect()
+            },
             _ => Default::default(),
         };
         // Threading is keyed by the binding's LOCAL, not the ValueId: arms
@@ -3215,9 +3287,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .with_message(
                     "a reference cannot stay live across a control-flow merge in this version",
                 )
-                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
-                    "this reference would cross an `if`/`match`/loop boundary",
-                )])
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message("this reference would cross an `if`/`match`/loop boundary"),
+                ])
                 .with_notes(vec![
                     "bind the value first (`let x = ...;`) or hoist the branching expression \
                      into its own binding"
@@ -3275,10 +3348,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     // ================================================================
 
     /// Inside a closure body: if `expr_id` is a captured *projected* place
-    /// (e.g. `self.cap`), return the env value loaded for it. Returns `None`
-    /// when not in a closure, when the expr isn't a captured place, or for
-    /// whole-local captures (those bind through `local_map`).
-    pub(crate) fn captured_place_value(&self, expr_id: HirExprId) -> Option<ValueId> {
+    /// (e.g. `self.cap`), return how it is presented (snapshot value, or a
+    /// frame address for the view tier). Returns `None` when not in a closure,
+    /// when the expr isn't a captured place, or for whole-local captures
+    /// (those bind through `local_map`).
+    pub(crate) fn captured_place_value(&self, expr_id: HirExprId) -> Option<PlaceCapture> {
         if self.place_capture_map.is_empty() {
             return None;
         }
@@ -3286,6 +3360,27 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         let key =
             kestrel_type_infer::captures::place_key_of(&self.ctx.query, typed, &self.hir, expr_id)?;
         self.place_capture_map.get(&key).copied()
+    }
+
+    /// The pointee type behind a `PlaceCapture::Addr` (`Pointer[T]` → `T`).
+    pub(crate) fn place_capture_pointee(&self, addr: ValueId) -> TyId {
+        match self.ctx.module.ty_arena.get(self.body.value(addr).ty) {
+            MirTy::Pointer(inner) => *inner,
+            _ => self.body.value(addr).ty,
+        }
+    }
+
+    /// Read a captured projected place in VALUE position. A view capture loads
+    /// through the env pointer AT THIS USE (never a per-call prologue
+    /// snapshot); a snapshot capture reuses the env value.
+    pub(crate) fn lower_captured_place_read(&mut self, expr_id: HirExprId) -> Option<ValueId> {
+        match self.captured_place_value(expr_id)? {
+            PlaceCapture::Value(v) => Some(self.emit_value_use(v)),
+            PlaceCapture::Addr(addr) => {
+                let ty = self.place_capture_pointee(addr);
+                Some(self.emit_copy_addr(addr, ty))
+            },
+        }
     }
 
     /// Lower a ret_borrow function's return expression as a PLACE: the
@@ -3436,9 +3531,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 .with_message(format!(
                     "ref binding '{name}' cannot stay live across a control-flow merge"
                 ))
-                .with_labels(vec![Label::primary(span.file_id, span.range()).with_message(
-                    "this binding is still used after an `if`/`match`/loop boundary",
-                )])
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(
+                        "this binding is still used after an `if`/`match`/loop boundary",
+                    ),
+                ])
                 .with_notes(vec![
                     "a binding's last use must come before the branch; re-borrow inside \
                      the branch or bind the value (`let x = ...;`) instead"
@@ -3645,11 +3742,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         "cannot mutate a non-copyable `{ty_str}` element through get/set \
                          accessors: the writeback copies the element out"
                     ))
-                    .with_labels(vec![kestrel_reporting::Label::primary(
-                        span.file_id,
-                        span.range(),
-                    )
-                    .with_message("this mutation needs an in-place element reference")])
+                    .with_labels(vec![
+                        kestrel_reporting::Label::primary(span.file_id, span.range())
+                            .with_message("this mutation needs an in-place element reference"),
+                    ])
                     .with_notes(vec![
                         "add a `mutating ref` accessor to mutate elements in place".into(),
                     ]),
@@ -3773,7 +3869,10 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 // out, and the subscript's receiver is the FIELD, which has no
                 // HirExprId of its own (#129).
                 HirExpr::MethodCall {
-                    receiver, method, args, ..
+                    receiver,
+                    method,
+                    args,
+                    ..
                 } => {
                     let kestrel_hir::body::HirName::Name(name) = method else {
                         return None;

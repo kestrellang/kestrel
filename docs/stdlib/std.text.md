@@ -3949,7 +3949,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: StringSlice, where: consuming (Char) -> Bool)
+public init(slice: StringSlice, where: consuming escaping (Char) -> Bool)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4027,7 +4027,7 @@ _Defined in `lang/std/text/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: StringSlice, where: consuming (Char) -> Bool)
+public init(slice: StringSlice, where: consuming escaping (Char) -> Bool)
 ```
 
 _Defined in `lang/std/text/views.ks`._
@@ -4495,7 +4495,7 @@ _Defined in `lang/std/text/str.ks`._
 #### function `split`
 
 ```kestrel
-public func split(where: consuming (Char) -> Bool) -> SplitWhereView
+public func split(where: consuming escaping (Char) -> Bool) -> SplitWhereView
 ```
 
 Returns a lazy view that splits at every code point matching

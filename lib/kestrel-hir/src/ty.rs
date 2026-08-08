@@ -38,7 +38,10 @@ pub enum HirTy {
     /// Function type: `(Int, String) -> Bool` or `(mutating Grid) -> Unit`.
     /// `param_conventions` is parallel to `params`; `MutBorrow` marks a
     /// `mutating` parameter, otherwise `Consuming` (the pre-#106 default).
+    /// `kind` is the closure tier named by an optional keyword prefix
+    /// (`escaping (Int) -> Bool`) and is orthogonal to `param_conventions`.
     Function {
+        kind: kestrel_ast::FnTypeKind,
         params: Vec<HirTy>,
         param_conventions: Vec<kestrel_ast::ParamConvention>,
         ret: Box<HirTy>,

@@ -11,6 +11,17 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// before mono expand turns them into clone/drop calls. When the operand's
 /// only remaining use after the copy is its destruction, both are deleted
 /// and the copy result is remapped to the original.
+///
+/// **Boxed (`escaping`) closures are SAFE here** (plan D5's verification item,
+/// re-checked for Phase E2a). The pass runs at `Stage::CopyProp`, strictly
+/// before `expand` turns the pair into `retain(handle)` / `release(handle)`,
+/// and its precondition — the operand's ONLY remaining use is its destruction —
+/// is exactly what makes the elision refcount-neutral: the retain would add one
+/// reference and the matching release would remove it, with no observation in
+/// between (the operand is not borrowed at the copy, is not a terminator
+/// operand, and has no other use). The resulting `MoveValue` transfers the same
+/// handle bits, so the environment's lifetime is unchanged. No exclusion is
+/// needed.
 pub fn eliminate_redundant_copies(mono: &mut MonoModule) {
     let debug = std::env::var("KESTREL_DEBUG_COPYPROP").is_ok();
     let limit: usize = std::env::var("KESTREL_COPYPROP_LIMIT")
@@ -62,7 +73,8 @@ fn optimize_block(body: &mut OssaBody, block_idx: usize) -> usize {
             uses.entry(op).or_default().push(i);
         }
     }
-    let terminator_uses: FxHashSet<ValueId> = block.terminator.kind.operands().into_iter().collect();
+    let terminator_uses: FxHashSet<ValueId> =
+        block.terminator.kind.operands().into_iter().collect();
 
     // Forward scan: track active borrows at each instruction index.
     let mut frozen: FxHashMap<ValueId, u32> = FxHashMap::default();
@@ -456,7 +468,10 @@ pub fn mark_independent_takes(mono: &mut MonoModule) {
             func_total += mark_block_takes(body, block_idx, &prov);
         }
         if debug && func_total > 0 {
-            eprintln!("[take_alias] {}: {func_total} Take(s) marked aliasable", func.name);
+            eprintln!(
+                "[take_alias] {}: {func_total} Take(s) marked aliasable",
+                func.name
+            );
         }
         total += func_total;
     }
@@ -533,8 +548,7 @@ fn mark_block_takes(
             uses.entry(op).or_default().push(i);
         }
     }
-    let term_uses: FxHashSet<ValueId> =
-        block.terminator.kind.operands().into_iter().collect();
+    let term_uses: FxHashSet<ValueId> = block.terminator.kind.operands().into_iter().collect();
 
     // Reinitialization sites in this block: (index, slot the store targets).
     let mut stores: Vec<(usize, Option<ValueId>)> = Vec::new();
@@ -587,9 +601,9 @@ fn mark_block_takes(
         }
         // (3) no reinit of slot `r` while `v` is still live in this block.
         let v_last_use = v_uses.and_then(|u| u.iter().copied().filter(|&k| k > i).max());
-        let conflict = stores.iter().any(|&(j, sr)| {
-            j > i && sr == Some(r) && v_last_use.is_some_and(|k| k >= j)
-        });
+        let conflict = stores
+            .iter()
+            .any(|&(j, sr)| j > i && sr == Some(r) && v_last_use.is_some_and(|k| k >= j));
         if !conflict {
             to_alias.push(i);
         }

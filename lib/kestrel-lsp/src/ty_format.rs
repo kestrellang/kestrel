@@ -50,7 +50,11 @@ fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
             }
             out.push(')');
         },
-        ResolvedTy::Function { params, ret, .. } => {
+        ResolvedTy::Function {
+            kind, params, ret, ..
+        } => {
+            // `FnTypeKind::prefix()` — empty for the unmarked `Normal` kind.
+            out.push_str(kind.prefix());
             out.push('(');
             for (i, p) in params.iter().enumerate() {
                 if i > 0 {

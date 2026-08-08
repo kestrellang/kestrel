@@ -191,16 +191,15 @@ func bad() -> &Int64 {
 The same rule catches indirect escapes:
 
 - Returning a field of a local, or a local laundered through a ref-carrying struct field (`Cursor(item: &local)`) — E494 ("this value: it carries a reference that borrows…").
-- A returned closure capturing anything local — E494 ("this closure: it captures…").
+- A returned **view-kind** closure (normal or `mutating`) capturing anything local — E494 ("this closure: it captures…"). Owning kinds (`escaping` / `consuming`) snapshot their captures and are returnable; see [Closures](closures.md).
 - Wrapping a reference to a local into `Optional[&T]` from an iterator's `next()` — E494.
 
-Related enforcement: a reference cannot stay live across a conditional block merge or loop back-edge (E497 — hoist it into a binding first), the owner cannot be consumed while a reference into it is live (E498), and a closure cannot capture a named ref binding at all today (E212). `return Pointer(to: local).value` earns a warning (E504) rather than an error, because pointer-derived references are unverified by contract.
+Related enforcement: a reference cannot stay live across a conditional block merge or loop back-edge (E497 — hoist it into a binding first), and the owner cannot be consumed while a reference into it is live (E498). A view-kind closure *may* capture a named ref binding — its environment is frame-bound, so the view cannot outlive the borrow — but an owning closure cannot (E624), and a place viewed by a live closure is frozen against destruction (E507). `return Pointer(to: local).value` earns a warning (E504) rather than an error, because pointer-derived references are unverified by contract.
 
 That's the entire model. There are no lifetime parameters, no `'a`, no borrow annotations on types or functions — and there never will be; storable long-lived references were rejected permanently in the design. Provenance is inferred from the code you already wrote.
 
 ## Not Yet Supported
 
-- **Returning closures that capture** — any capture of a local (owned or ref) currently makes the closure non-returnable (E494/E212). A heap-allocated closure environment is planned; today, return capture-free closures only.
 - **Dictionary reference APIs** and `arr(checked: i) -> Optional[&T]` — planned, pending dictionary storage work. Interim: `Dictionary.modify(key) { (mutating v) in ... }` for in-place updates.
 - **`Hashable`/`Matchable` conformances for `&T`** — reject cleanly for now.
 - **Storable references** (escaping the root's scope, lifetime annotations) — permanently out of scope by design.
@@ -228,7 +227,7 @@ That's the entire model. There are no lifetime parameters, no `'a`, no borrow an
 | E209 | Ref binding declared `var` — ref bindings must be `let` |
 | E210 | `&mutating` borrow of an immutable place |
 | E211 | `&` binder pattern outside a match arm |
-| E212 | Closure captures a ref binding (or other non-storable value) |
+| E212 | *Retired* — view-kind closures may capture ref bindings; an owning (`escaping`/`consuming`) closure that tries is E624 |
 | E503 | Decay would move a non-Copyable value out of a borrow |
 | E504 | *Warning:* returning a pointer-derived reference to a local of the same function |
 | E505 | Module-level/static value of a non-storable (reference-carrying) type |

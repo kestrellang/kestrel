@@ -26,12 +26,12 @@ public struct MapIterator[I, U]: Iterator where I: Iterator, I: not Copyable {
     type Item = U
 
     internal var inner: I
-    internal var transform: (I.Item) -> U
+    internal var transform: escaping (I.Item) -> U
 
     /// @name From Source
     /// Builds a `MapIterator` from `inner` and `transform`. Prefer
     /// `inner.map(transform)`.
-    public init(consuming inner inner: I, consuming as transform: (I.Item) -> U) {
+    public init(consuming inner inner: I, consuming as transform: escaping (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -61,11 +61,11 @@ public struct FilterIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
-    internal var predicate: (I.Item) -> Bool
+    internal var predicate: escaping (I.Item) -> Bool
 
     /// @name From Source
     /// Builds a `FilterIterator`. Prefer `inner.filter(predicate)`.
-    public init(consuming inner inner: I, consuming where predicate: (I.Item) -> Bool) {
+    public init(consuming inner inner: I, consuming where predicate: escaping (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
     }
@@ -94,12 +94,12 @@ public struct FilterMapIterator[I, U]: Iterator where I: Iterator, I: not Copyab
     type Item = U
 
     internal var inner: I
-    internal var transform: (I.Item) -> U?
+    internal var transform: escaping (I.Item) -> U?
 
     /// @name From Source
     /// Builds a `FilterMapIterator`. Prefer `inner.filterMap(...)` /
     /// `inner.compactMap()`.
-    public init(consuming inner inner: I, consuming as transform: (I.Item) -> U?) {
+    public init(consuming inner inner: I, consuming as transform: escaping (I.Item) -> U?) {
         self.inner = inner;
         self.transform = transform;
     }
@@ -131,12 +131,12 @@ public struct TakeWhileIterator[I]: Iterator where I: Iterator, I: not Copyable 
     type Item = I.Item
 
     internal var inner: I
-    internal var predicate: (I.Item) -> Bool
+    internal var predicate: escaping (I.Item) -> Bool
     internal var done: Bool
 
     /// @name From Source
     /// Builds a `TakeWhileIterator`. Prefer `inner.takeWhile(predicate)`.
-    public init(consuming inner inner: I, consuming where predicate: (I.Item) -> Bool) {
+    public init(consuming inner inner: I, consuming where predicate: escaping (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.done = false;
@@ -176,12 +176,12 @@ public struct SkipWhileIterator[I]: Iterator where I: Iterator, I: not Copyable 
     type Item = I.Item
 
     internal var inner: I
-    internal var predicate: (I.Item) -> Bool
+    internal var predicate: escaping (I.Item) -> Bool
     internal var doneSkipping: Bool
 
     /// @name From Source
     /// Builds a `SkipWhileIterator`. Prefer `inner.skipWhile(predicate)`.
-    public init(consuming inner inner: I, consuming where predicate: (I.Item) -> Bool) {
+    public init(consuming inner inner: I, consuming where predicate: escaping (I.Item) -> Bool) {
         self.inner = inner;
         self.predicate = predicate;
         self.doneSkipping = false;
@@ -616,12 +616,12 @@ public struct FlatMapIterator[I, U]: Iterator where I: Iterator, U: Iterator, I:
     type Item = U.Item
 
     internal var inner: I
-    internal var transform: (I.Item) -> U
+    internal var transform: escaping (I.Item) -> U
     internal var current: U?
 
     /// @name From Source
     /// Builds a `FlatMapIterator` with no inner iterator buffered.
-    public init(consuming inner inner: I, consuming as transform: (I.Item) -> U) {
+    public init(consuming inner inner: I, consuming as transform: escaping (I.Item) -> U) {
         self.inner = inner;
         self.transform = transform;
         self.current = .None;
@@ -714,11 +714,11 @@ public struct InspectIterator[I]: Iterator where I: Iterator, I: not Copyable {
     type Item = I.Item
 
     internal var inner: I
-    internal var inspector: (I.Item) -> ()
+    internal var inspector: escaping (I.Item) -> ()
 
     /// @name From Source
     /// Builds an `InspectIterator`. Prefer `inner.inspect(inspector)`.
-    public init(consuming inner inner: I, consuming inspector inspector: (I.Item) -> ()) {
+    public init(consuming inner inner: I, consuming inspector inspector: escaping (I.Item) -> ()) {
         self.inner = inner;
         self.inspector = inspector;
     }
@@ -829,11 +829,11 @@ public struct ScanIterator[I, Acc]: Iterator where I: Iterator, I: not Copyable,
 
     internal var inner: I
     internal var state: Acc
-    internal var combine: (Acc, I.Item) -> Acc
+    internal var combine: escaping (Acc, I.Item) -> Acc
 
     /// @name From Source
     /// Builds a `ScanIterator` seeded with `initial`.
-    public init(consuming inner inner: I, consuming from initial: Acc, consuming by combine: (Acc, I.Item) -> Acc) {
+    public init(consuming inner inner: I, consuming from initial: Acc, consuming by combine: escaping (Acc, I.Item) -> Acc) {
         self.inner = inner;
         self.state = initial;
         self.combine = combine;
@@ -915,13 +915,13 @@ public struct IntersperseWithIterator[I]: Iterator where I: Iterator, I: not Cop
     type Item = I.Item
 
     internal var inner: I
-    internal var separator: () -> I.Item
+    internal var separator: escaping () -> I.Item
     internal var needsSeparator: Bool
     internal var pendingItem: I.Item?
 
     /// @name From Source
     /// Builds an `IntersperseWithIterator`.
-    public init(consuming inner inner: I, consuming with separator: () -> I.Item) {
+    public init(consuming inner inner: I, consuming with separator: escaping () -> I.Item) {
         self.inner = inner;
         self.separator = separator;
         self.needsSeparator = false;

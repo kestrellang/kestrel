@@ -28,6 +28,63 @@ pub enum ParamConvention {
     Consuming,
 }
 
+/// The *kind* of a function type — the closure tier it names.
+///
+/// Spelled as an optional keyword prefix on a function type
+/// (`escaping (Int64) -> ()`), never on a closure literal. Lives here next to
+/// [`ParamConvention`] and for the same reason: it is the lowest crate that
+/// AST / HIR / type-infer all depend on, so the kind can ride the type from
+/// parse through inference.
+///
+/// The kind is a whole-type property and is orthogonal to the per-parameter
+/// [`ParamConvention`]: `mutating (T) -> R` is a *mutating-kind* closure,
+/// while `(mutating T) -> R` is a normal-kind closure taking `T` by mutable
+/// borrow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum FnTypeKind {
+    /// `(T) -> R` — views of the frame, Copyable, frame-bound.
+    #[default]
+    Normal,
+    /// `mutating (T) -> R` — `&mutating` views, not Copyable, exclusive calls.
+    Mutating,
+    /// `consuming (T) -> R` — owned captures, not Copyable, one-shot.
+    Consuming,
+    /// `escaping (T) -> R` — owned shared snapshot, Cloneable, may outlive the frame.
+    Escaping,
+}
+
+impl FnTypeKind {
+    /// The **view tier**: the environment holds views into the enclosing frame
+    /// and owns nothing, so the value is frame-bound (E494) and its captures
+    /// are neither copied nor moved. The complement is the *owning* tier
+    /// (`consuming`/`escaping`), whose environment owns its captures and may
+    /// outlive the frame. Single source of truth for the tier split.
+    pub fn is_view(self) -> bool {
+        matches!(self, FnTypeKind::Normal | FnTypeKind::Mutating)
+    }
+
+    /// The source keyword, or `None` for the unmarked `Normal` kind.
+    pub fn keyword(self) -> Option<&'static str> {
+        match self {
+            FnTypeKind::Normal => None,
+            FnTypeKind::Mutating => Some("mutating"),
+            FnTypeKind::Consuming => Some("consuming"),
+            FnTypeKind::Escaping => Some("escaping"),
+        }
+    }
+
+    /// Rendering prefix — `""` for `Normal`, `"<keyword> "` otherwise.
+    /// Single source of truth for every function-type renderer.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            FnTypeKind::Normal => "",
+            FnTypeKind::Mutating => "mutating ",
+            FnTypeKind::Consuming => "consuming ",
+            FnTypeKind::Escaping => "escaping ",
+        }
+    }
+}
+
 /// A single segment in a qualified type path.
 /// Each segment has a name and optional type arguments.
 /// e.g. in `Array[Int].Iterator`, `Array[Int]` and `Iterator` are segments.
@@ -52,7 +109,11 @@ pub enum AstType {
     /// Function type, e.g. `(Int) -> String` or `(mutating Grid) -> Unit`.
     /// `param_conventions` is parallel to `params` (same length); a
     /// `mutating` prefix on a param yields `MutBorrow`, otherwise `Consuming`.
+    /// `kind` is the whole-type closure tier from an optional keyword prefix
+    /// (`escaping (Int) -> String`); it is orthogonal to `param_conventions`.
+    /// `span` covers the keyword when one is present.
     Function {
+        kind: FnTypeKind,
         params: Vec<AstType>,
         param_conventions: Vec<ParamConvention>,
         return_type: Box<AstType>,

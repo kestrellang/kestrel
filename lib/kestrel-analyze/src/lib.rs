@@ -83,6 +83,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::extern_ffi_safe::ExternFfiSafeAnalyzer);
     r.add_decl_check(decl::default_param_ordering::DefaultParamOrderingAnalyzer);
     r.add_decl_check(decl::cloneable_field::CloneableFieldAnalyzer);
+    r.add_decl_check(decl::closure_kind_convention::ClosureKindConventionAnalyzer);
     r.add_decl_check(decl::duplicate_symbol::DuplicateSymbolAnalyzer);
     r.add_decl_check(decl::duplicate_callable::DuplicateCallableAnalyzer);
     r.add_decl_check(decl::field_method_collision::FieldMethodCollisionAnalyzer);

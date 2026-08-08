@@ -1403,6 +1403,15 @@ fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveR
     match unify::unify(ctx, a, b) {
         Ok(()) => SolveResult::Solved,
         Err(UnifyError::Mismatch) => SolveResult::Error(mismatch_error(ctx, a, b, span)),
+        // Structurally identical function types that disagree only on the
+        // closure tier — E624, not a generic "type mismatch".
+        Err(UnifyError::KindMismatch { expected, actual }) => {
+            SolveResult::Error(InferError::KindMismatch {
+                expected,
+                actual,
+                span,
+            })
+        },
         Err(UnifyError::LiteralGuard) => {
             // Literal couldn't unify — could be deferred or error.
             // If both sides are concrete, it's an error.
@@ -1787,6 +1796,17 @@ fn solve_coerce(
         });
     }
 
+    // Closure KINDS (closures.md "Passing: What Fits Where"). Whole-type scalar
+    // check, so it must sit OUTSIDE the per-param convention loop below (which
+    // never executes for a 0-param flex closure) and ABOVE the
+    // `closure_flex`/`closure_it` arity-adaptation arm further down (which
+    // early-returns `Solved` after equating return types only). Handles the
+    // literal retrofit, the bare-value adoption, and the directional table;
+    // returns `Some` only when it has fully decided the coercion.
+    if let Some(result) = reconcile_fn_kinds(ctx, from, to, expr, &span) {
+        return result;
+    }
+
     // #178: a closure literal coerced to an expected function type
     // (`let f: (mutating T) -> () = { (x) in … }`) upgrades its param
     // conventions exactly like a call argument does (reconcile_fn_convention at
@@ -1826,6 +1846,18 @@ fn solve_coerce(
         },
         Err(UnifyError::Mismatch) => {
             // Types don't match structurally — try promotion
+        },
+        // A NESTED kind disagreement (`(mutating (T) -> R) -> U` vs
+        // `((T) -> R) -> U`): the shapes match and only the tier differs, so
+        // report E624 straight away. No `FromValue` promotion can rescue a
+        // function type, so there is nothing to fall through to.
+        Err(UnifyError::KindMismatch { expected, actual }) => {
+            ctx.errored_coerce_exprs.insert(expr);
+            return SolveResult::Error(InferError::KindMismatch {
+                expected,
+                actual,
+                span,
+            });
         },
         Err(UnifyError::OccursCheck) => {
             return SolveResult::Error(InferError::InfiniteType { span });
@@ -2528,12 +2560,15 @@ pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> Co
                 CopySemantics::Copyable
             }
         },
-        // Mirror `hir_type_copy_semantics`: protocol existentials /
-        // functions are Copyable (not known Cloneable).
-        TyKind::Protocol { .. }
-        | TyKind::Function { .. }
-        | TyKind::Never
-        | TyKind::TypeAlias { .. } => CopySemantics::Copyable,
+        // A closure value's copy class is fixed by its KIND (plan D6): normal
+        // views bit-copy, `mutating`/`consuming` are move-only, `escaping`
+        // shares its environment through the box's clone.
+        TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(kind),
+        // Mirror `hir_type_copy_semantics`: protocol existentials are Copyable
+        // (not known Cloneable).
+        TyKind::Protocol { .. } | TyKind::Never | TyKind::TypeAlias { .. } => {
+            CopySemantics::Copyable
+        },
         // Associated projection (`I.Item`) is Copyable-by-default (implicit
         // bound), like a type param — matches `hir_type_copy_semantics` and MIR
         // `ty_query`. Not known to be Cloneable, so only satisfies Copyable.
@@ -2865,8 +2900,156 @@ fn solve_associated(
     }
 }
 
+/// Whether a closure of kind `from` may be passed where kind `to` is expected —
+/// the directional passing table of closures.md ("Passing: What Fits Where"):
+///
+/// | have ↓ \ expected → | normal | mutating | consuming | escaping |
+/// |---|---|---|---|---|
+/// | normal    | ✓ | ✓ | ✗ frame view is not owned | ✗ frame-bound |
+/// | mutating  | ✗ | ✓ | ✗ frame view is not owned | ✗ frame-bound |
+/// | consuming | ✗ | ✗ | ✓ | ✗ one-shot |
+/// | escaping  | ✓ | ✗ shared, not exclusive | ✓ | ✓ |
+///
+/// The diagonal is handled by the caller (equal kinds never reach here).
+fn kind_passes(from: kestrel_ast::FnTypeKind, to: kestrel_ast::FnTypeKind) -> bool {
+    use kestrel_ast::FnTypeKind::*;
+    matches!(
+        (from, to),
+        (Normal, Mutating) | (Escaping, Normal) | (Escaping, Consuming)
+    )
+}
+
+/// Reconcile a closure/function value's KIND against an expected function type.
+///
+/// Three cases, in order:
+/// 1. **Literal retrofit** — a closure literal is always built at `Normal`, and
+///    the expected type selects the environment it is built with, so the
+///    literal's kind is rewritten in place. Whether the *body* supports that
+///    kind (assigning to a capture in a normal body, moving a capture out of a
+///    non-`consuming` body) is a later analyzer's judgement, not this one's.
+/// 2. **Bare value adoption** — a `kind_flex` value (named `Def` / enum-case
+///    ctor) has no environment and satisfies every kind, so it adopts the
+///    expected kind. A cross-kind adoption is still a representation change
+///    (2 words → an owning layout), so it is recorded in `kind_coercions`.
+/// 3. **The passing table** — for a real closure value. Accepted cross-kind
+///    cells unify params/return pairwise and return `Solved` *without*
+///    structurally unifying the two function types (whole-type `unify` demands
+///    kind equality) and record `kind_coercions` for MIR; the source value is
+///    never re-labelled (`escaping → normal` produces a non-owning view, and
+///    bit-copying a relabelled shared handle would skip the share operation).
+///
+/// Returns `None` when the coercion is not (or not yet) a kind decision — the
+/// caller then proceeds with the ordinary convention/unify path. Like
+/// `reconcile_closure_conventions`, an unresolved side yields `None`: `unify`
+/// below either binds it or defers the whole `Coerce`, which re-runs this.
+fn reconcile_fn_kinds(
+    ctx: &mut InferCtx<'_>,
+    from: TyVar,
+    to: TyVar,
+    expr: kestrel_hir::body::HirExprId,
+    span: &Span,
+) -> Option<SolveResult> {
+    let (fr, tr) = (ctx.resolve(from), ctx.resolve(to));
+    let (from_kind, from_params, from_ret) = match ctx.slot(fr) {
+        TySlot::Resolved(TyKind::Function {
+            kind, params, ret, ..
+        }) => (*kind, params.clone(), *ret),
+        _ => return None,
+    };
+    let (to_kind, to_params, to_ret) = match ctx.slot(tr) {
+        TySlot::Resolved(TyKind::Function {
+            kind, params, ret, ..
+        }) => (*kind, params.clone(), *ret),
+        _ => return None,
+    };
+
+    // (1) Literal retrofit. The gate is `closure_literal_exprs`, which
+    // `gen_expr` propagates outward through `Block`/`Sugar` wrappers — a
+    // trailing-closure call site carries the WRAPPER's id in the `Coerce`.
+    if ctx.closure_literal_exprs.contains(&expr) {
+        if from_kind != to_kind {
+            ctx.set_function_kind(fr, to_kind);
+        }
+        return None;
+    }
+
+    // (2) Bare-value adoption (either direction; both bare stays bare).
+    let (from_flex, to_flex) = (ctx.kind_flex.contains(&fr), ctx.kind_flex.contains(&tr));
+    if from_flex || to_flex {
+        if from_flex && !to_flex && from_kind != to_kind {
+            ctx.set_function_kind(fr, to_kind);
+            ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+        } else if to_flex && !from_flex && from_kind != to_kind {
+            ctx.set_function_kind(tr, from_kind);
+        }
+        return None;
+    }
+
+    // (3) The passing table. The diagonal falls through to the ordinary path.
+    if from_kind == to_kind {
+        return None;
+    }
+    if !kind_passes(from_kind, to_kind) {
+        ctx.errored_coerce_exprs.insert(expr);
+        return Some(SolveResult::Error(InferError::KindMismatch {
+            expected: to_kind,
+            actual: from_kind,
+            span: span.clone(),
+        }));
+    }
+
+    // Accepted cross-kind cell: settle params/return ourselves.
+    if from_params.len() != to_params.len() {
+        // A 0-param flex closure adapts to any expected arity (the same rule the
+        // arity-adaptation arm applies); anything else is a real arity mismatch.
+        if from_params.is_empty() && ctx.closure_flex.contains(&fr) {
+            ctx.equal(from_ret, to_ret, span.clone());
+            ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+            return Some(SolveResult::Solved);
+        }
+        ctx.errored_coerce_exprs.insert(expr);
+        return Some(SolveResult::Error(mismatch_error(
+            ctx,
+            to,
+            from,
+            span.clone(),
+        )));
+    }
+    for (a, b) in from_params.into_iter().zip(to_params) {
+        if unify::unify(ctx, a, b).is_err() {
+            ctx.errored_coerce_exprs.insert(expr);
+            return Some(SolveResult::Error(mismatch_error(
+                ctx,
+                to,
+                from,
+                span.clone(),
+            )));
+        }
+    }
+    if unify::unify(ctx, from_ret, to_ret).is_err() {
+        ctx.errored_coerce_exprs.insert(expr);
+        return Some(SolveResult::Error(mismatch_error(
+            ctx,
+            to,
+            from,
+            span.clone(),
+        )));
+    }
+    ctx.kind_coercions.insert(expr, (from_kind, to_kind));
+    Some(SolveResult::Solved)
+}
+
 /// Reconcile a function-typed call argument's param conventions against the
-/// expected parameter type (#106). For a closure *literal*, a non-`MutBorrow`
+/// expected parameter type (#106).
+///
+/// There is deliberately NO kind twin here. Conventions need this hook because
+/// `solve_coerce`'s convention reconcile is gated on `closure_literal_exprs`, so
+/// an opaque function VALUE would otherwise never be checked. The kind check in
+/// `reconcile_fn_kinds` is ungated, and `solve_call`'s `Function` arm routes
+/// every argument through `ctx.coerce` — so calls through a function-typed value
+/// already get the passing table. Adding a second call here would double-report.
+///
+/// For a closure *literal*, a non-`MutBorrow`
 /// param is upgraded to `MutBorrow` when the expected type demands it (the
 /// no-annotation `arr.modify { it.len += 1 }` inference). Passing a `MutBorrow`
 /// closure where a non-mutating param is expected is a hard error. Returns
@@ -3231,6 +3414,7 @@ fn binding_plan_for(
 /// - a result already pinned to a non-ref (an early Coerce ran before the
 ///   member resolved — `let x: Int = late.peek()`) unifies with the pointee
 ///   instead of erroring.
+///
 /// Consequence: a ref-returning call's recorded type is `&T` in the common
 /// solve order but `T` in the pinned/scrutinee orders — consumers key
 /// place-ness on `CallableRefReturn` (entity), never on expr_types alone.
@@ -3551,6 +3735,13 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
                 },
                 _ => return false,
             },
+            // Arity only — deliberately NOT kind-aware. A closure literal is
+            // always generated at `Normal` and only learns its real kind from
+            // the expected type during coercion, so filtering candidates on the
+            // kind here would reject every literal offered to an `escaping` /
+            // `consuming` / `mutating` parameter before the retrofit could run.
+            // Overloads that differ ONLY in a parameter's closure kind stay
+            // ambiguous at this stage and are settled by the argument coercion.
             kestrel_hir::ty::HirTy::Function {
                 params: p_params, ..
             } => match arg_kind {
@@ -3579,6 +3770,7 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
 ///      outer→inner chain for nested wrappers), and
 ///   2. emits an `Associated` constraint binding a fresh TyVar to the
 ///      wrapper's `Indirection.Target` (reusing `solve_associated`),
+///
 /// returning that pointee TyVar for the caller to requeue the member on.
 /// Returns `None` (no peel) when the receiver isn't a nominal or doesn't
 /// conform to `Indirection`.
@@ -3775,6 +3967,22 @@ fn solve_member(
         && idx < elems.len()
     {
         ctx.equal(result, elems[idx], span);
+        return SolveResult::Solved;
+    }
+
+    // `escaping` closures are Cloneable (docs/design/closures.md §"escaping"),
+    // and `clone()` is the environment's SHARE operation — a retain, not an
+    // independent duplicate. A function type has no nominal entity to resolve
+    // a protocol requirement against, so answer the requirement's shape
+    // (`clone() -> Self`) directly here; MIR lowers it to the same `CopyValue`
+    // an implicit copy emits (`body/call/mod.rs`).
+    if let TyKind::Function { kind, .. } = &recv_kind
+        && *kind == kestrel_ast::FnTypeKind::Escaping
+        && name == "clone"
+        && is_call
+        && args.is_empty()
+    {
+        ctx.equal(result, receiver, span);
         return SolveResult::Solved;
     }
 
@@ -5275,6 +5483,7 @@ pub fn kind_to_tyvar_sub(
             ctx.tuple(elem_tvs)
         },
         TyKind::Function {
+            kind: fn_kind,
             params,
             conventions,
             ret,
@@ -5284,8 +5493,9 @@ pub fn kind_to_tyvar_sub(
                 .map(|p| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *p), self_entity, recv_tv))
                 .collect();
             let ret_tv = kind_to_tyvar_sub(ctx, &resolve_kind(ctx, *ret), self_entity, recv_tv);
-            // Preserve per-param conventions through generic instantiation.
-            ctx.function_conv(param_tvs, conventions.clone(), ret_tv)
+            // Preserve the closure kind AND per-param conventions through
+            // generic instantiation.
+            ctx.function_conv(*fn_kind, param_tvs, conventions.clone(), ret_tv)
         },
         TyKind::Opaque {
             origin,
@@ -5640,9 +5850,6 @@ fn lower_opaque_aware(
     }
 }
 
-/// Convert HirTy to TyVar with substitutions.
-/// - Self entity → receiver TyVar
-/// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
 /// Solver-side twin of `generate::emit_copyable_wellformedness`, scoped to
 /// the STATIC bound (the ref-containment soundness line). Pushes a
 /// TypeArg-origin Conforms for each formed arg whose param carries the
@@ -5698,6 +5905,9 @@ fn emit_static_wellformedness(
     }
 }
 
+/// Convert HirTy to TyVar with substitutions.
+/// - Self entity → receiver TyVar
+/// - Type params in `subs` → their mapped TyVars (struct type params + method type params)
 fn lower_hir_ty_sub(
     ctx: &mut InferCtx<'_>,
     ty: &kestrel_hir::ty::HirTy,
@@ -5822,6 +6032,7 @@ fn lower_hir_ty_sub(
             ctx.tuple(elem_tvs)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -5832,7 +6043,7 @@ fn lower_hir_ty_sub(
                 .map(|p| lower_hir_ty_sub(ctx, p, self_entity, recv_tv, subs))
                 .collect();
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
-            ctx.function_conv(param_tvs, param_conventions.clone(), ret_tv)
+            ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
         },
         // Opaque types at call sites: create a fresh TyVar for now.
         // Full `TyKind::Opaque` creation requires the callee entity (origin),

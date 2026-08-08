@@ -205,7 +205,7 @@ extend Iterator {
     /// [1, 2, 3].iter().map { it * 2 }.collect();         // [2, 4, 6]
     /// ["hi", "yo"].iter().map { it.count }.collect();    // [2, 2]
     /// ```
-    public consuming func map[U](consuming as transform: (Item) -> U) -> MapIterator[Self, U] {
+    public consuming func map[U](consuming as transform: escaping (Item) -> U) -> MapIterator[Self, U] {
         MapIterator(inner: self, as: transform)
     }
 
@@ -217,7 +217,7 @@ extend Iterator {
     /// ```
     /// [1, 2, 3, 4, 5].iter().filter { it % 2 == 0 }.collect();   // [2, 4]
     /// ```
-    public consuming func filter(consuming where predicate: (Item) -> Bool) -> FilterIterator[Self] {
+    public consuming func filter(consuming where predicate: escaping (Item) -> Bool) -> FilterIterator[Self] {
         FilterIterator(inner: self, where: predicate)
     }
 
@@ -232,7 +232,7 @@ extend Iterator {
     ///     .filterMap { Int64.parse(it) }
     ///     .collect();   // [1, 3]
     /// ```
-    public consuming func filterMap[U](consuming as transform: (Item) -> U?) -> FilterMapIterator[Self, U] {
+    public consuming func filterMap[U](consuming as transform: escaping (Item) -> U?) -> FilterMapIterator[Self, U] {
         FilterMapIterator(inner: self, as: transform)
     }
 
@@ -280,7 +280,7 @@ extend Iterator {
     ///     .flatMap { if it % 2 == 0 { [it, it].iter() } else { [].iter() } }
     ///     .collect();   // [2, 2]
     /// ```
-    public consuming func flatMap[U](consuming as transform: (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator {
+    public consuming func flatMap[U](consuming as transform: escaping (Item) -> U) -> FlatMapIterator[Self, U] where U: Iterator, U: not Copyable {
         FlatMapIterator(inner: self, as: transform)
     }
 
@@ -296,7 +296,7 @@ extend Iterator {
     ///     .scan(from: 0) { (acc, x) in acc + x }
     ///     .collect();   // [1, 3, 6, 10]
     /// ```
-    public consuming func scan[Acc](consuming from initial: Acc, consuming by combine: (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] where Acc: Copyable {
+    public consuming func scan[Acc](consuming from initial: Acc, consuming by combine: escaping (Acc, Item) -> Acc) -> ScanIterator[Self, Acc] where Acc: Copyable {
         ScanIterator(inner: self, from: initial, by: combine)
     }
 }
@@ -331,7 +331,7 @@ extend Iterator {
     ///     .takeWhile { it < 4 }
     ///     .collect();   // [1, 2, 3]
     /// ```
-    public consuming func takeWhile(consuming where predicate: (Item) -> Bool) -> TakeWhileIterator[Self] {
+    public consuming func takeWhile(consuming where predicate: escaping (Item) -> Bool) -> TakeWhileIterator[Self] {
         TakeWhileIterator(inner: self, where: predicate)
     }
 
@@ -358,7 +358,7 @@ extend Iterator {
     ///     .skipWhile { it < 3 }
     ///     .collect();   // [3, 4, 1, 2]
     /// ```
-    public consuming func skipWhile(consuming where predicate: (Item) -> Bool) -> SkipWhileIterator[Self] {
+    public consuming func skipWhile(consuming where predicate: escaping (Item) -> Bool) -> SkipWhileIterator[Self] {
         SkipWhileIterator(inner: self, where: predicate)
     }
 }
@@ -442,7 +442,7 @@ extend Iterator {
     ///     .inspect { print("after filter: \{it}") }
     ///     .collect();
     /// ```
-    public consuming func inspect(consuming inspector: (Item) -> ()) -> InspectIterator[Self] {
+    public consuming func inspect(consuming inspector: escaping (Item) -> ()) -> InspectIterator[Self] {
         InspectIterator(inner: self, inspector: inspector)
     }
 
@@ -495,7 +495,7 @@ extend Iterator {
     ///     .intersperseWith { counter += 1; counter * 10 }
     ///     .collect();   // [1, 10, 2, 20, 3]
     /// ```
-    public consuming func intersperseWith(consuming with separator: () -> Item) -> IntersperseWithIterator[Self] {
+    public consuming func intersperseWith(consuming with separator: escaping () -> Item) -> IntersperseWithIterator[Self] {
         IntersperseWithIterator(inner: self, with: separator)
     }
 }
@@ -671,8 +671,17 @@ extend Iterator {
     ///     File.delete(path)   // Result[(), IoError]
     /// };   // stops on first failure
     /// ```
-    public mutating func tryForEach[E](consuming action: (Item) -> Result[(), E]) -> Result[(), E] {
-        self.tryFold(from: (), by: { (_, item) in action(item) })
+    public mutating func tryForEach[E](mutating action: mutating (Item) -> Result[(), E]) -> Result[(), E] {
+        // A direct loop, not a `tryFold` forward: forwarding would capture the
+        // `mutating` action in a literal and force `tryFold` (a normal-closure
+        // fold API) to become `mutating` as an implementation artifact.
+        // docs/design/closures-stdlib-audit.md, "mutating: Eager Write-Back".
+        while let .Some(item) = self.next() {
+            if let .Err(err) = action(item) {
+                return .Err(err)
+            }
+        }
+        .Ok(())
     }
 }
 
@@ -691,7 +700,7 @@ extend Iterator {
     /// ```
     /// [1, 2, 3].iter().forEach { print(it) };
     /// ```
-    public consuming func forEach(action: (Item) -> ()) {
+    public consuming func forEach(mutating action: mutating (Item) -> ()) {
         while let .Some(item) = self.next() {
             action(item);
         }

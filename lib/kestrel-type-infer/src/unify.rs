@@ -50,6 +50,15 @@ pub enum UnifyError {
     LiteralGuard,
     /// Occurs check: TyVar appears in its own type (infinite type).
     OccursCheck,
+    /// Two function types agree structurally but disagree on their closure
+    /// KIND, at the top level or nested inside a param/return. Reported as
+    /// E624 rather than a generic "type mismatch": the shapes match and the
+    /// only defect is the tier. `actual` is the LHS of the failing `unify`
+    /// (the value side on a coercion), `expected` the RHS.
+    KindMismatch {
+        expected: kestrel_ast::FnTypeKind,
+        actual: kestrel_ast::FnTypeKind,
+    },
 }
 
 /// Unify two type variables, making them equivalent.
@@ -162,15 +171,25 @@ pub fn unify(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar) -> Result<(), UnifyErro
         },
 
         // Both concrete: structural unification
-        (TySlot::Resolved(kind_a), TySlot::Resolved(kind_b)) => unify_concrete(ctx, kind_a, kind_b),
+        (TySlot::Resolved(kind_a), TySlot::Resolved(kind_b)) => {
+            unify_concrete(ctx, kind_a, kind_b, a, b)
+        },
 
         // Redirect should be resolved by resolve()
         _ => unreachable!("resolve() should have followed redirects"),
     }
 }
 
-/// Structural unification of two concrete types.
-fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), UnifyError> {
+/// Structural unification of two concrete types. `a_tv` / `b_tv` are the
+/// resolved ROOTS the two kinds live in — needed by the `Function` arm, which
+/// consults (and rewrites) the `kind_flex` slots keyed on those roots.
+fn unify_concrete(
+    ctx: &mut InferCtx<'_>,
+    a: &TyKind,
+    b: &TyKind,
+    a_tv: TyVar,
+    b_tv: TyVar,
+) -> Result<(), UnifyError> {
     match (a, b) {
         // Nominal types: same entity + unify type args pairwise. Each nominal
         // category only unifies with itself (Struct with Struct, Enum with Enum, etc.).
@@ -252,14 +271,26 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
             Ok(())
         },
 
-        // Functions: same arity + unify params + unify return
+        // Functions: same arity + EQUAL kind + unify params + unify return.
+        //
+        // Kind equality mirrors the `Ref` mutability rule below: unify is
+        // symmetric, so admitting `normal → mutating` here would also admit
+        // `mutating → normal`. The one-way passing table (closures.md
+        // "Passing: What Fits Where") lives in `solve_coerce`.
+        //
+        // The single exception is a BARE callable value (`kind_flex`): it has
+        // no environment and satisfies every kind, so when exactly one side is
+        // flex it ADOPTS the other side's kind in place. Each `Def` use gets a
+        // fresh instantiation TyVar, so adoption never re-kinds another site.
         (
             TyKind::Function {
+                kind: ka,
                 params: pa,
                 ret: ra,
                 ..
             },
             TyKind::Function {
+                kind: kb,
                 params: pb,
                 ret: rb,
                 ..
@@ -267,6 +298,22 @@ fn unify_concrete(ctx: &mut InferCtx<'_>, a: &TyKind, b: &TyKind) -> Result<(), 
         ) => {
             if pa.len() != pb.len() {
                 return Err(UnifyError::Mismatch);
+            }
+            if ka != kb {
+                match (ctx.kind_flex.contains(&a_tv), ctx.kind_flex.contains(&b_tv)) {
+                    // Exactly one side is bare — it adopts.
+                    (true, false) => ctx.set_function_kind(a_tv, *kb),
+                    (false, true) => ctx.set_function_kind(b_tv, *ka),
+                    // Both bare (both built at Normal, so unreachable today) or
+                    // neither: kinds must already agree.
+                    (true, true) => {},
+                    (false, false) => {
+                        return Err(UnifyError::KindMismatch {
+                            expected: *kb,
+                            actual: *ka,
+                        });
+                    },
+                }
             }
             let pairs: Vec<(TyVar, TyVar)> = pa.iter().copied().zip(pb.iter().copied()).collect();
             for (a, b) in pairs {

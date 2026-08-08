@@ -1599,7 +1599,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(ptr: Pointer[T], remaining: Int64, predicate: consuming (T) -> Bool, done: Bool)
+public init(ptr: Pointer[T], remaining: Int64, predicate: consuming escaping (T) -> Bool, done: Bool)
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -1648,7 +1648,7 @@ _Defined in `lang/std/collections/views.ks`._
 #### initializer `init`
 
 ```kestrel
-public init(slice: ArraySlice[T], predicate: consuming (T) -> Bool)
+public init(slice: ArraySlice[T], predicate: consuming escaping (T) -> Bool)
 ```
 
 _Defined in `lang/std/collections/views.ks`._
@@ -6560,7 +6560,7 @@ _Defined in `lang/std/collections/slice.ks`._
 #### function `split`
 
 ```kestrel
-public func split(where: consuming (T) -> Bool) -> ArraySplitWhereView[T]
+public func split(where: consuming escaping (T) -> Bool) -> ArraySplitWhereView[T]
 ```
 
 Multi-pass lazy view over the segments produced by splitting at

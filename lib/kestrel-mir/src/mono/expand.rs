@@ -51,6 +51,20 @@ pub fn expand_destroy_copy(
         }
     }
 
+    // Pre-intern the type-erased retain/release dispatch's two types: the
+    // opaque environment-handle word and the shim's function-pointer type
+    // (`(handle) -> ()`). Both are needed as `ValueDef.ty`s below, where the
+    // arena is only borrowed immutably.
+    let erased = {
+        let unit = module.ty_arena.unit();
+        let handle = module.ty_arena.pointer(unit);
+        let shim_fn = module.ty_arena.intern(MirTy::FuncThin {
+            params: vec![(handle, ParamConvention::Consuming)],
+            ret: unit,
+        });
+        ErasedShimTys { handle, shim_fn }
+    };
+
     // Collect not-Copyable type *instances* — CopyValue on these is a move,
     // not a copy. Keyed by (nominal, type_args), NOT by nominal alone:
     // conditional Copyable is per-instantiation (`Optional[Int64]` is Copyable
@@ -96,12 +110,79 @@ pub fn expand_destroy_copy(
             skip_self.as_ref(),
             skip_clone_nominal,
             &not_copyable,
+            &erased,
         );
     }
 }
 
 /// Maps (nominal_entity, type_args) -> MonoFuncId for drop shim dispatch.
 type DropShimLookup = HashMap<(Entity, Vec<TyId>), MonoFuncId>;
+
+/// Pre-interned types for the boxed-closure erased retain/release dispatch.
+struct ErasedShimTys {
+    /// Opaque environment handle (word 1) — `Pointer[()]`.
+    handle: TyId,
+    /// Shim function-pointer type (words 2/3) — `(handle) -> ()`.
+    shim_fn: TyId,
+}
+
+/// Word indices in a boxed closure value (mirrors `compile_apply_partial`).
+const CLOSURE_WORD_ENV: u32 = 1;
+const CLOSURE_WORD_RETAIN: u32 = 2;
+const CLOSURE_WORD_RELEASE: u32 = 3;
+
+/// Emit the TYPE-ERASED share/release dispatch for a boxed (`escaping`)
+/// closure value: load the environment handle and the shim pointer out of the
+/// value, then call the shim indirectly.
+///
+/// This is the only compiler-emitted part of the owning tier's lifecycle. All
+/// semantics (allocate, retain, release, destroy the captures) live in the
+/// per-environment shims that mir-lower synthesizes against the
+/// `@builtin(.SharedBox)` binding, so swapping the binding retargets
+/// everything. A capture-free value carries a null handle and NO-OP shims, so
+/// no null check is needed here (post-mono block splitting is unavailable).
+fn emit_closure_erased_op(
+    body: &mut OssaBody,
+    erased: &ErasedShimTys,
+    value: ValueId,
+    retain: bool,
+    span: &Option<kestrel_span::Span>,
+    out: &mut Vec<Instruction>,
+) {
+    let handle = body.alloc_value(ValueDef::owned(erased.handle));
+    out.push(Instruction {
+        kind: InstKind::Op1 {
+            result: handle,
+            op: crate::Op::ClosureWord(CLOSURE_WORD_ENV),
+            arg: value,
+        },
+        span: span.clone(),
+    });
+    let shim = body.alloc_value(ValueDef::owned(erased.shim_fn));
+    out.push(Instruction {
+        kind: InstKind::Op1 {
+            result: shim,
+            op: crate::Op::ClosureWord(if retain {
+                CLOSURE_WORD_RETAIN
+            } else {
+                CLOSURE_WORD_RELEASE
+            }),
+            arg: value,
+        },
+        span: span.clone(),
+    });
+    out.push(Instruction {
+        kind: InstKind::Call {
+            result: None,
+            callee: Callee::Thin(shim),
+            args: vec![CallArg {
+                value: handle,
+                convention: ParamConvention::Consuming,
+            }],
+        },
+        span: span.clone(),
+    });
+}
 
 /// Build func_entity → nominal for the *drop machinery only* — a type's
 /// synthesized `__drop$T` shim and its user-written `deinit`.
@@ -306,6 +387,10 @@ fn ty_needs_drop(ty_arena: &crate::ty::TyArena, shim_lookup: &DropShimLookup, ty
                 .iter()
                 .any(|&e| ty_needs_drop(ty_arena, shim_lookup, e))
         },
+        // A boxed (owning) closure owns a heap environment: destroy →
+        // release, through the type-erased shim in word 3 (lockstep 1, twin of
+        // `ty_query::needs_drop`). A view closure owns nothing.
+        MirTy::FuncThick { kind, .. } => kind.is_boxed(),
         _ => false,
     }
 }
@@ -326,8 +411,15 @@ fn emit_destroy_recursive(
     ty: TyId,
     span: &Option<kestrel_span::Span>,
     out: &mut Vec<Instruction>,
+    erased: &ErasedShimTys,
 ) {
     match ty_arena.get(ty) {
+        // Boxed closure: destroy → release the shared environment through the
+        // erased shim. The last release destroys `E`, which destroys each
+        // capture exactly once.
+        MirTy::FuncThick { kind, .. } if kind.is_boxed() => {
+            emit_closure_erased_op(body, erased, value, false, span, out);
+        },
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
@@ -377,6 +469,7 @@ fn emit_destroy_recursive(
                     e,
                     span,
                     out,
+                    erased,
                 );
             }
         },
@@ -409,8 +502,22 @@ fn emit_clone_recursive(
     result: ValueId,
     span: &Option<kestrel_span::Span>,
     out: &mut Vec<Instruction>,
+    erased: &ErasedShimTys,
 ) {
     match ty_arena.get(ty) {
+        // Shared (escaping) closure: the copy SHARES the environment — keep
+        // the bitwise 4-word copy and add the erased share (retain) so the
+        // extra handle is counted. Bit-copying without the share is the old
+        // double-free bug. `is_shared`, not `is_boxed`: a `consuming` value is
+        // NotCopyable, so no clone of it may ever be elaborated (its `retain`
+        // word is the no-op shim and must stay unreachable).
+        MirTy::FuncThick { kind, .. } if kind.is_shared() => {
+            out.push(Instruction {
+                kind: InstKind::CopyValue { result, operand },
+                span: span.clone(),
+            });
+            emit_closure_erased_op(body, erased, operand, true, span, out);
+        },
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
@@ -468,6 +575,7 @@ fn emit_clone_recursive(
                     cl,
                     span,
                     out,
+                    erased,
                 );
                 cloned.push(cl);
             }
@@ -500,6 +608,7 @@ fn expand_function(
     skip_self: Option<&(Entity, Vec<TyId>)>,
     skip_clone_nominal: Option<Entity>,
     not_copyable: &HashSet<(Entity, Vec<TyId>)>,
+    erased: &ErasedShimTys,
 ) {
     let Some(body) = &mut func.body else { return };
 
@@ -514,12 +623,22 @@ fn expand_function(
     // owned captures; the generic DestroyValue arm below would silently discard
     // a FuncThick destroy (it is neither Named nor Tuple), leaking every owned
     // capture. See the DestroyValue handling below.
+    // LOCKSTEP 3: a BOXED closure (either owning kind) is deliberately absent
+    // from this map — the `retain.is_none()` filter below is what excludes it.
+    // Its captures live in a heap environment the box owns; they are released
+    // by the erased `release` shim (the shared box's last release, or the
+    // unique box's `destroy()`), so walking them here as well would
+    // double-free.
     let mut closure_captures: HashMap<ValueId, Vec<ValueId>> = HashMap::new();
     for block in &body.blocks {
         for inst in &block.insts {
             if let InstKind::ApplyPartial {
-                result, captures, ..
+                result,
+                captures,
+                retain,
+                ..
             } = &inst.kind
+                && retain.is_none()
             {
                 closure_captures.insert(*result, captures.clone());
             }
@@ -611,6 +730,7 @@ fn expand_function(
                                 cap_ty,
                                 &inst.span,
                                 &mut new_insts,
+                                erased,
                             );
                         }
                         continue;
@@ -619,6 +739,19 @@ fn expand_function(
                     let vty = body.values[operand.index()].ty;
 
                     match ty_arena.get(vty) {
+                        // Boxed closure: release the shared environment through
+                        // the erased shim (lockstep 3's other half).
+                        MirTy::FuncThick { kind, .. } if kind.is_boxed() => {
+                            let value = remap_value(operand, &value_remap);
+                            emit_closure_erased_op(
+                                body,
+                                erased,
+                                value,
+                                false,
+                                &inst.span,
+                                &mut new_insts,
+                            );
+                        },
                         MirTy::Named { entity, type_args } => {
                             // Skip only this shim's own self type — expanding it
                             // would recurse into __drop$Self. A payload that is a
@@ -654,6 +787,7 @@ fn expand_function(
                                 vty,
                                 &inst.span,
                                 &mut new_insts,
+                                erased,
                             );
                         },
                         _ => {},
@@ -671,6 +805,21 @@ fn expand_function(
                     let span = inst.span.clone();
 
                     match ty_arena.get(ty) {
+                        // Boxed closure at an address: load the 4-word value,
+                        // then release its environment.
+                        MirTy::FuncThick { kind, .. } if kind.is_boxed() => {
+                            let tmp = body.alloc_value(ValueDef::owned(ty));
+                            new_insts.push(Instruction {
+                                kind: InstKind::Take {
+                                    result: tmp,
+                                    address,
+                                    ty,
+                                    independent: true,
+                                },
+                                span: span.clone(),
+                            });
+                            emit_closure_erased_op(body, erased, tmp, false, &span, &mut new_insts);
+                        },
                         MirTy::Named { entity, type_args } => {
                             if !is_drop_self(skip_self, *entity, type_args) {
                                 let key = (*entity, type_args.clone());
@@ -723,6 +872,7 @@ fn expand_function(
                                     ty,
                                     &span,
                                     &mut new_insts,
+                                    erased,
                                 );
                             }
                         },
@@ -772,6 +922,30 @@ fn expand_function(
                                     expanded = true;
                                 }
                             },
+                            // Boxed closure pointee: reassigning an escaping-closure
+                            // `var` releases its OLD handle before storing the new
+                            // one (docs/design/closures.md §"Copy and Drop").
+                            MirTy::FuncThick { kind, .. } if kind.is_boxed() => {
+                                let tmp = body.alloc_value(ValueDef::owned(pointee));
+                                new_insts.push(Instruction {
+                                    kind: InstKind::Take {
+                                        result: tmp,
+                                        address,
+                                        ty: pointee,
+                                        independent: true,
+                                    },
+                                    span: span.clone(),
+                                });
+                                emit_closure_erased_op(
+                                    body,
+                                    erased,
+                                    tmp,
+                                    false,
+                                    &span,
+                                    &mut new_insts,
+                                );
+                                expanded = true;
+                            },
                             // Tuple pointee: drop the old tuple's members before
                             // the overwrite (mirrors the DestroyAddr tuple arm).
                             // Without this, `t.0 = v` / `s.tupleField = v` into a
@@ -797,6 +971,7 @@ fn expand_function(
                                     pointee,
                                     &span,
                                     &mut new_insts,
+                                    erased,
                                 );
                                 expanded = true;
                             },
@@ -816,6 +991,39 @@ fn expand_function(
                 InstKind::CopyValue { result, operand } => {
                     let result = *result;
                     let operand = *operand;
+
+                    // Shared (escaping) closure: duplication is the box's
+                    // SHARE operation (a retain), never a bare bit-copy — the
+                    // copy/destroy pair stays symmetric with the DestroyValue
+                    // arm above. A `consuming` closure is NotCopyable and never
+                    // reaches here (mono's `not_copyable` set degrades its
+                    // CopyValue to a move-alias first).
+                    let cty = body.values[operand.index()].ty;
+                    // A `consuming` closure is `not Copyable`: reaching a
+                    // CopyValue on one means some classifier answered Bitwise
+                    // for a unique one-shot owner, which would double-free its
+                    // environment. Its `retain` word is the no-op shim, so the
+                    // release build degrades to a harmless alias rather than
+                    // calling a share that does not exist — but the debug build
+                    // must be loud about it (plan D5).
+                    debug_assert!(
+                        !matches!(ty_arena.get(cty), MirTy::FuncThick { kind, .. }
+                            if kind.is_boxed() && !kind.is_shared()),
+                        "ICE: CopyValue on a `consuming` closure value (not Copyable)"
+                    );
+                    if matches!(ty_arena.get(cty), MirTy::FuncThick { kind, .. } if kind.is_shared())
+                    {
+                        let src = remap_value(operand, &value_remap);
+                        new_insts.push(Instruction {
+                            kind: InstKind::CopyValue {
+                                result,
+                                operand: src,
+                            },
+                            span: inst.span.clone(),
+                        });
+                        emit_closure_erased_op(body, erased, src, true, &inst.span, &mut new_insts);
+                        continue;
+                    }
 
                     // Tuples have no nominal clone shim — deep-clone each member
                     // inline (the copy-side mirror of the DestroyValue/DestroyAddr
@@ -852,6 +1060,7 @@ fn expand_function(
                                 result,
                                 &inst.span,
                                 &mut new_insts,
+                                erased,
                             );
                             continue;
                         } else if ty_needs_drop(ty_arena, shim_lookup, vty) {
@@ -870,6 +1079,7 @@ fn expand_function(
                                 result,
                                 &inst.span,
                                 &mut new_insts,
+                                erased,
                             );
                             new_insts
                                 .push(Instruction::new(InstKind::EndBorrow { operand: borrow }));
@@ -1267,6 +1477,7 @@ mod tests {
                 body: None,
                 extern_info: None,
                 is_main: false,
+                provides_protocol_default: false,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);
@@ -1443,6 +1654,7 @@ mod tests {
                 body: None,
                 extern_info: None,
                 is_main: false,
+                provides_protocol_default: false,
             },
         );
         expand_destroy_copy(&mut module, &generic_functions);

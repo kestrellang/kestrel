@@ -525,6 +525,8 @@ impl OssaBuilder {
             result,
             callee,
             captures,
+            retain: None,
+            release: None,
         });
         result
     }

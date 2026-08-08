@@ -300,7 +300,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     ///     .inspect { print("port = \{it}") }
     ///     .map { it + 1 };
     /// ```
-    public consuming func inspect(fn: (T) -> ()) -> Result[T, E] {
+    public consuming func inspect(mutating fn: mutating (T) -> ()) -> Result[T, E] {
         match self {
             .Ok(value) => {
                 fn(value);
@@ -321,7 +321,7 @@ public enum Result[T, E]: Tryable, not Copyable where T: not Static {
     ///     .inspectErr { print("failed: \{it}") }
     ///     .mapErr { AppError.Parse(it) };
     /// ```
-    public consuming func inspectErr(fn: (E) -> ()) -> Result[T, E] {
+    public consuming func inspectErr(mutating fn: mutating (E) -> ()) -> Result[T, E] {
         match self {
             .Ok(value) => .Ok(value),
             .Err(error) => {

@@ -92,6 +92,14 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
 /// fire in a correct build; it converts a silent inconsistency (a bit-copyable
 /// type aliasing a move-only resource) into a loud verification error.
 fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyError>) {
+    // Invariant 3b, closure half (plan D6): a `Bitwise` container may never
+    // hold a droppable closure environment either. A boxed (`escaping`) field
+    // must make its container `Clone(_)` (the `clone_shim.rs` overwrite) so the
+    // copy SHARES the handle; a `Bitwise` container would bit-copy the handle
+    // and skip the share — the exact old double-free class this check exists
+    // to make loud. A `NotCopyable`-kind closure field (`consuming`) must make
+    // its container `None` — a unique one-shot owner has no duplication
+    // operation at all, so neither `Bitwise` nor `Clone(_)` is legal for it.
     let child_copy = |ty: TyId| -> Option<CopyBehavior> {
         if let MirTy::Named { entity, type_args } = module.ty_arena.get(ty) {
             let key = (*entity, type_args.clone());
@@ -104,6 +112,21 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
             None
         }
     };
+    // Closure half: a duplicable container may never own a droppable closure
+    // environment. A shared (`escaping`) field must push its container to
+    // `Clone(_)` (the `clone_shim.rs` overwrite) so a copy SHARES the handle;
+    // a `Bitwise` container would bit-copy the handle and skip the share —
+    // exactly the old double-free class. A `consuming` field is NotCopyable, so
+    // NEITHER `Bitwise` nor `Clone(_)` is legal for its container (a clone of
+    // the container would have to duplicate a unique one-shot owner);
+    // `child_copy` cannot see it because a FuncThick has no nominal entity.
+    let bad_closure_field = |container: &CopyBehavior, ty: TyId| match module.ty_arena.get(ty) {
+        MirTy::FuncThick { kind, .. } if kind.is_shared() => {
+            matches!(container, CopyBehavior::Bitwise)
+        },
+        MirTy::FuncThick { kind, .. } if kind.is_boxed() => true,
+        _ => false,
+    };
 
     for s in module.structs.values() {
         if !matches!(
@@ -113,7 +136,9 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
             continue;
         }
         for f in &s.fields {
-            if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
+            if matches!(child_copy(f.ty), Some(CopyBehavior::None))
+                || bad_closure_field(&s.type_info.copy, f.ty)
+            {
                 errors.push(MonoVerifyError {
                     user_facing: false,
                     func_idx: 0,
@@ -137,7 +162,9 @@ fn verify_copyable_containment(module: &MonoModule, errors: &mut Vec<MonoVerifyE
         }
         for case in &e.cases {
             for f in &case.payload_fields {
-                if matches!(child_copy(f.ty), Some(CopyBehavior::None)) {
+                if matches!(child_copy(f.ty), Some(CopyBehavior::None))
+                    || bad_closure_field(&e.type_info.copy, f.ty)
+                {
                     errors.push(MonoVerifyError { user_facing: false,
                         func_idx: 0,
                         block: None,
@@ -583,7 +610,12 @@ fn check_type_concrete(
                 check_type_concrete(module, fi, block, inst, span, arg, errors, context);
             }
         },
-        MirTy::FuncThin { params, ret } | MirTy::FuncThick { params, ret } => {
+        MirTy::FuncThin { params, ret }
+        | MirTy::FuncThick {
+            params,
+            ret,
+            kind: _,
+        } => {
             for (p, _) in params {
                 check_type_concrete(module, fi, block, inst, span, *p, errors, context);
             }

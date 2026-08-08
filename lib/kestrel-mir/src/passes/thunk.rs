@@ -321,6 +321,7 @@ mod tests {
 
         // ApplyPartial result — simplified as @owned i64 for test purposes
         let thick_ty = module.ty_arena.intern(MirTy::FuncThick {
+            kind: crate::ty::FnKind::Normal,
             params: vec![],
             ret: i64_ty,
         });
@@ -331,6 +332,8 @@ mod tests {
                 result: result_val,
                 callee: Callee::direct(target),
                 captures: vec![],
+                retain: None,
+                release: None,
             }));
 
         let unit_val = body.alloc_value(ValueDef::owned(unit_ty));
@@ -405,6 +408,7 @@ mod tests {
         {
             let unit_ty = module.ty_arena.unit();
             let thick_ty = module.ty_arena.intern(MirTy::FuncThick {
+                kind: crate::ty::FnKind::Normal,
                 params: vec![],
                 ret: i64_ty,
             });
@@ -420,6 +424,8 @@ mod tests {
                     result: r1,
                     callee: Callee::direct(target),
                     captures: vec![],
+                    retain: None,
+                    release: None,
                 }));
             let r2 = body.alloc_value(ValueDef::owned(thick_ty));
             body.block_mut(entry)
@@ -428,6 +434,8 @@ mod tests {
                     result: r2,
                     callee: Callee::direct(target),
                     captures: vec![],
+                    retain: None,
+                    release: None,
                 }));
 
             let uv = body.alloc_value(ValueDef::owned(unit_ty));

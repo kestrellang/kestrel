@@ -13,7 +13,7 @@ Welcome to the Kestrel programming language documentation.
 - **[Structs](structs.md)** - Data structures, fields, and methods
 - **[Enums](enums.md)** - Sum types and pattern matching
 - **[Functions](functions.md)** - Function declarations, parameters, and methods
-- **[Closures](closures.md)** - First-class functions and captures
+- **[Closures](closures.md)** - First-class functions, captures, and the four closure kinds
 - **[Protocols](protocols.md)** - Traits and interfaces
 - **[Generics](generics.md)** - Parametric polymorphism
 - **[Opaque Types](opaque-types.md)** - `some Protocol` return types

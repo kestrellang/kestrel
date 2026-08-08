@@ -1,7 +1,25 @@
 # The Shared Box
 
-**Status: draft — companion to [closures.md](closures.md); answers its open
-question 5 (the shared-object container).**
+**Status: implemented for the closure client (2026-08-08).** Companion to
+[closures.md](closures.md); answers its open question 5 (the shared-object
+container). Shipped: the `SharedBox` protocol (`lang/std/memory/sharedbox.ks`),
+`RcBox`'s conformance and its `@builtin(.SharedBox)` binding
+(`lang/std/memory/rcbox.ks`), and `escaping` closure environments as the first
+client. The other clients — classes, `any` existentials, `indirect enum`
+payloads — remain future work, and the `CowBox` generalization is **deferred**
+(see [Stdlib Changes](#stdlib-changes)).
+
+**Sibling added during implementation: `UniqueBox`.** The consuming tier needs
+the opposite contract — one owner, no refcount, payload movable *out* — so it
+does not use a shared box at all. `@builtin(.UniqueBox)` →
+`std.memory.UniqueBox[T]` is a single allocation holding a liveness word plus
+the payload, with `takeValue()` (move the payload out, mark the block empty)
+and `destroy()` (drop the payload if still present, then free). It is not a
+`SharedBox` conformer and imposes none of this document's constraints; see
+[the plan's D5](../plans/closure-kinds/closure-kinds-plan.md) for why reusing
+`RcBox` with a pinned count of 1 was rejected (its release runs
+`dropInPlace` on the whole environment, double-freeing slots the one-shot body
+moved out).
 
 Several language features need the same thing: a value moved to the heap,
 owned collectively by any number of handles, destroyed exactly once when the
@@ -85,12 +103,17 @@ types (a closure's environment struct, a class's storage struct), so the
 binding is a generic type marked as a lang item — not a conformance search:
 
 ```kestrel
-@lang(sharedBox)
-public struct RcBox[T]: Cloneable, SharedBox { ... }   // stdlib default
+@builtin(.SharedBox)                                       // as shipped; drafted as @lang(sharedBox)
+public struct RcBox[T]: Cloneable where T: not Copyable { ... }   // stdlib default
+extend RcBox[T]: SharedBox { ... }                         // conformance, same file
 ```
 
-Every implicit-boxing site lowers to the `@lang(sharedBox)` type applied to
-the payload type, then touches it only through `SharedBox` requirements.
+Every implicit-boxing site lowers to the bound type applied to the payload
+type, then touches it only through `SharedBox` requirements. As shipped, the
+binding rides the existing `@builtin` machinery (`Builtin::SharedBox`), whose
+`name()` is the non-resolvable sentinel `"SharedBox"` — never `"RcBox"`, or the
+name-based fast path would resolve `RcBox` without the attribute and defeat
+swappability. Everything below that says `@lang(sharedBox)` means this binding.
 
 **Overriding.** v1 has a single global binding, like a global allocator:
 supplying an alternate prelude/build configuration moves `@lang(sharedBox)`
@@ -118,7 +141,7 @@ and keeps it regardless of the binding.
 
 | client | payload | handle semantics | operations used |
 |---|---|---|---|
-| `escaping` closure (now) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
+| `escaping` closure (**shipped**) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
 | class (future) | synthesized storage struct | reference | the above + `isIdentical` for `===` |
 | `any P` (future) | the concrete `T`, when not inline | value facade over shared storage | `init`, `clone`, drop, `pointeeRef` |
 | `indirect enum` (future) | the recursive payload | **value** — copy-on-write | via the CoW layer: `clone` on copy, `isUnique` + fork on mutation |
@@ -203,17 +226,24 @@ The compiler enforces these when a type is bound as `@lang(sharedBox)`:
 
 ## Stdlib Changes
 
-- **Add `protocol SharedBox`** (`std.memory`), as above.
+- **Add `protocol SharedBox`** (`std.memory`), as above. — **shipped**
+  (`lang/std/memory/sharedbox.ks`).
 - **Conform `RcBox`**: it already has `init(consuming:)`, `clone`,
   `isUnique`, and `MutableIndirection`; it gains `sharedMutRef()` (via
   `valuePtr()`, like `modify`) and `isIdentical(to:)` (storage pointer
-  compare), plus the `@lang(sharedBox)` attribute.
+  compare), plus the lang-item attribute. — **shipped**; the attribute is
+  spelled `@builtin(.SharedBox)` (the binding rides the existing `@builtin`
+  machinery rather than a new `@lang` namespace), and the conformance
+  `extend RcBox[T]: SharedBox` lives in `rcbox.ks` because it reads the
+  private `ptr` field.
 - **Generalize `CowBox`** over any `SharedBox` instead of hard-coding
-  `RcBox`, so the CoW layer (used by String/Array/Dictionary today, indirect
-  enums tomorrow) follows the binding. `RcBox`'s refcount-specific extras
+  `RcBox` — **deferred.** No v1 client needs it (escaping closures use the box
+  directly), and indirection peel does not work on bare type parameters, so a
+  `CowBox[T, B: SharedBox]` would lose the `box.field` sugar internally.
+  `CowBox` continues to name `RcBox`. `RcBox`'s refcount-specific extras
   (`deepClone`, `setValue`, `refCount`) stay inherent API outside the
   protocol — a box needs none of them to conform.
-- Later, optionally: `Shared[T]` alias for the current binding.
+- Later, optionally: `Shared[T]` alias for the current binding. — not shipped.
 
 ## Resolved Questions
 

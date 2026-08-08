@@ -310,6 +310,24 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     Label::primary(file_id, range)
                         .with_message("mutating closure not allowed here"),
                 ]),
+            // E624: the closure passing table (closures.md "Passing: What Fits
+            // Where"). ONLY the table reports here — the signature-level
+            // kind/convention pairing is E625 (a DeclCheck) and a non-exclusive
+            // `mutating` call is the E203 mutability family.
+            InferError::KindMismatch {
+                expected, actual, ..
+            } => Diagnostic::error()
+                .with_code("E624")
+                .with_message(format!(
+                    "closure kind mismatch: expected {}, found {}",
+                    kestrel_type_infer::describe_fn_kind(*expected),
+                    kestrel_type_infer::describe_fn_kind(*actual)
+                ))
+                .with_labels(vec![Label::primary(file_id, range).with_message(format!(
+                    "this is {}",
+                    kestrel_type_infer::describe_fn_kind(*actual)
+                ))])
+                .with_notes(vec![kind_mismatch_note(*expected, *actual)]),
             InferError::RefFunctionAsValue { .. } => Diagnostic::error()
                 .with_code("E491")
                 .with_message("a reference-returning function cannot be used as a value")
@@ -331,6 +349,45 @@ impl ToDiagnostic for ResolvedInferError<'_> {
                     "bind the value first (`let x = ...;`) to store an owned copy".into(),
                 ]),
         }
+    }
+}
+
+/// The "why" note for E624 — names the property of the source kind that the
+/// expected slot needs and the source cannot supply. Mirrors the rejected
+/// cells of the passing table in docs/design/closures.md.
+fn kind_mismatch_note(
+    expected: kestrel_ast_builder::FnTypeKind,
+    actual: kestrel_ast_builder::FnTypeKind,
+) -> String {
+    use kestrel_ast_builder::FnTypeKind::*;
+    match (actual, expected) {
+        // Frame views are not owned environments and cannot leave the frame.
+        (Normal | Mutating, Consuming) => {
+            "a frame-view closure does not own its captures; a 'consuming' slot needs an owned \
+             environment"
+                .into()
+        },
+        (Normal | Mutating, Escaping) => {
+            "a frame-view closure is frame-bound and can never flow into an 'escaping' slot".into()
+        },
+        // Exclusive-call values do not weaken to shared calls.
+        (Mutating, Normal) => {
+            "a 'mutating' closure's calls are exclusive, so it cannot be used where shared calls \
+             are allowed"
+                .into()
+        },
+        // One-shot values fit nothing else.
+        (Consuming, _) => {
+            "a 'consuming' closure runs exactly once and is uniquely owned; it fits only a \
+             'consuming' slot"
+                .into()
+        },
+        // Shared handles are not exclusive.
+        (Escaping, Mutating) => {
+            "an 'escaping' closure is shared (aliases may exist), so its calls are not exclusive"
+                .into()
+        },
+        _ => "see the closure passing table in the language reference".into(),
     }
 }
 

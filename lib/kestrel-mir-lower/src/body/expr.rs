@@ -17,8 +17,8 @@ use kestrel_hir::body::{HirCallArg, HirExpr, HirExprId};
 use kestrel_mir::TyId;
 use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
-use kestrel_mir::op::Op;
 use kestrel_mir::item::witness::WitnessMethodKey;
+use kestrel_mir::op::Op;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
 use super::place::{FieldViews, PlaceRepr};
@@ -271,7 +271,11 @@ impl OssaBodyCtx<'_, '_> {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
                             "consuming read of an already-moved var — frontend should reject use-after-move (func {:?} {:?}, local {:?})",
-                            self.ctx.module.functions.get(&self.func_entity).map(|f| f.name.clone()),
+                            self.ctx
+                                .module
+                                .functions
+                                .get(&self.func_entity)
+                                .map(|f| f.name.clone()),
                             self.func_entity,
                             hir_local
                         );
@@ -318,17 +322,17 @@ impl OssaBodyCtx<'_, '_> {
             },
 
             HirExpr::Field { base, name, .. } => {
-                // A captured projected place (e.g. `self.cap`) reads the env
-                // value instead of projecting from a non-captured receiver.
-                if let Some(v) = self.captured_place_value(expr_id) {
-                    return self.emit_value_use(v);
+                // A captured projected place (e.g. `self.cap`) reads through
+                // the env instead of projecting from a non-captured receiver.
+                if let Some(v) = self.lower_captured_place_read(expr_id) {
+                    return v;
                 }
                 self.lower_field_access(expr_id, *base, name.as_str_or_empty())
             },
 
             HirExpr::TupleIndex { base, index, .. } => {
-                if let Some(v) = self.captured_place_value(expr_id) {
-                    return self.emit_value_use(v);
+                if let Some(v) = self.lower_captured_place_read(expr_id) {
+                    return v;
                 }
                 let base_val = self.lower_expr_for_borrow(*base);
                 // Stage 2b ref slot: extract with the SLOT type (the expr
@@ -347,8 +351,7 @@ impl OssaBodyCtx<'_, '_> {
                 // stored-field twin in lower_field). Named bindings stay live.
                 if self.ref_results.contains(&base_val)
                     && !self.ref_binding_vals.contains_key(&base_val)
-                    && self.body.value(result).ownership
-                        == kestrel_mir::value::Ownership::Owned
+                    && self.body.value(result).ownership == kestrel_mir::value::Ownership::Owned
                 {
                     self.emit_end_borrow(base_val);
                 }
@@ -569,7 +572,10 @@ impl OssaBodyCtx<'_, '_> {
             _ => None,
         }
         .unwrap_or_else(|| {
-            debug_assert!(false, "ICE: peeled write field '{field_name}' not on pointee");
+            debug_assert!(
+                false,
+                "ICE: peeled write field '{field_name}' not on pointee"
+            );
             FieldIdx::new(0)
         });
         // PtrTo on the @guaranteed mutable view yields the pointee's address;
@@ -953,11 +959,7 @@ impl OssaBodyCtx<'_, '_> {
                 };
 
             // Lower args with the actual per-param conventions (no receiver slot — offset 0).
-            let call_args = self.lower_call_args(
-                args.unwrap_or(&[]),
-                &conventions,
-                0,
-            );
+            let call_args = self.lower_call_args(args.unwrap_or(&[]), &conventions, 0);
 
             self.emit_call_returning(callee, call_args, result_ty)
         }
@@ -1124,7 +1126,8 @@ impl OssaBodyCtx<'_, '_> {
                     } else {
                         self.emit_store_assign(field_addr, rhs);
                     }
-                } else if self.try_lower_field_assign_through_setter(base, base_ty, field_idx, rhs) {
+                } else if self.try_lower_field_assign_through_setter(base, base_ty, field_idx, rhs)
+                {
                     // `o.proxy.field = v` through a get/set computed property:
                     // handled by a get→modify→set rewrite (#139).
                 } else {
@@ -1361,7 +1364,9 @@ impl OssaBodyCtx<'_, '_> {
                 call_args.push(self.prepare_call_arg_for_expr(base, ParamConvention::MutBorrow));
                 self.prepend_receiver_type_args(receiver_ty, ta)
             };
-            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+            return Some(
+                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
+            );
         }
 
         // Concrete computed property setter
@@ -1516,7 +1521,9 @@ impl OssaBodyCtx<'_, '_> {
             // with defaults yet; add the equivalent `expand_default_args` here when
             // one surfaces (the ref accessor's params are the index params only — no
             // trailing `newValue` — so it'd expand against the full param list).
-            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+            return Some(
+                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
+            );
         }
 
         let setter = self.ctx.find_setter_child(resolved)?;
@@ -1690,7 +1697,9 @@ impl OssaBodyCtx<'_, '_> {
             self.ctx.register_name(accessor);
             let pointee_ty = self.resolve_expr_type(target_id);
             let type_args = self.prepend_receiver_type_args(field_ty, type_args);
-            return Some(self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs));
+            return Some(
+                self.emit_ref_accessor_store(accessor, type_args, call_args, pointee_ty, rhs),
+            );
         }
 
         let setter = setter.expect("setter present when no mutating ref accessor");

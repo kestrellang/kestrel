@@ -373,9 +373,9 @@ public struct ArraySplitWhereView[T]: Iterable {
     type TargetIterator = ArraySplitWhereIterator[T]
 
     private var slice: ArraySlice[T]
-    private var predicate: (T) -> Bool
+    private var predicate: escaping (T) -> Bool
 
-    public init(slice slice: ArraySlice[T], consuming predicate predicate: (T) -> Bool) {
+    public init(slice slice: ArraySlice[T], consuming predicate predicate: escaping (T) -> Bool) {
         self.slice = slice;
         self.predicate = predicate;
     }
@@ -417,10 +417,10 @@ public struct ArraySplitWhereIterator[T]: Iterator {
 
     private var ptr: Pointer[T]
     private var remaining: Int64
-    private var predicate: (T) -> Bool
+    private var predicate: escaping (T) -> Bool
     private var done: Bool
 
-    public init(ptr ptr: Pointer[T], remaining remaining: Int64, consuming predicate predicate: (T) -> Bool, done done: Bool) {
+    public init(ptr ptr: Pointer[T], remaining remaining: Int64, consuming predicate predicate: escaping (T) -> Bool, done done: Bool) {
         self.ptr = ptr;
         self.remaining = remaining;
         self.predicate = predicate;

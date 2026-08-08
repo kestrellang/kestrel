@@ -1,8 +1,13 @@
-// test: diagnostics
+// test: execution
 // stdlib: true
+// expect-exit: 0
 
+// `Iterator.forEach` takes a `mutating` closure (docs/design/closures-stdlib-audit.md,
+// "mutating: Eager Write-Back Callbacks"), so the accumulator write-back below is
+// legal and this file asserts values instead of the old E603 rejection.
 module Test
 
+        @main
         func main() -> lang.i64 {
             var arr = std.collections.Array[std.numeric.Int64]();
             arr.append(1);
@@ -43,7 +48,7 @@ module Test
 
             // Test forEach
             var total: std.numeric.Int64 = 0;
-            arr.iter().forEach({ (x) in total = total + x }); // ERROR: cannot assign to captured variable
+            arr.iter().forEach({ (x) in total = total + x });
             if total != 15 { return 14 }
 
             0

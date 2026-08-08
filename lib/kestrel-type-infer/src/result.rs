@@ -57,6 +57,16 @@ pub struct TypedBody {
     /// Single source of truth — MIR never re-derives the peel (mirrors
     /// `resolutions` / `ClosureCaptures`).
     pub indirection_peels: HashMap<HirExprId, Vec<IndirectionPeel>>,
+
+    /// Accepted CROSS-kind closure coercions: `expr → (source kind, target
+    /// kind)`. Only cells where the two kinds DIFFER are recorded, and the
+    /// source value's own type is never re-labelled (`expr_types[expr]` still
+    /// reports the source kind — `escaping → normal` must not turn a shared
+    /// handle into a bitwise-copyable view). NOTE: currently recorded but
+    /// unconsumed — mir-lower derives the representation conversions from the
+    /// value/slot types (see `InferCtx::kind_coercions`); this map is the
+    /// audit trail of the solver's passing-table decisions.
+    pub kind_coercions: HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 }
 
 /// One level of an `Indirection` member peel: the concrete pointee accessors
@@ -116,6 +126,14 @@ impl std::hash::Hash for TypedBody {
             k.hash(state);
             v.hash(state);
         }
+
+        // Hash kind_coercions (sorted by expr for determinism)
+        let mut kind_pairs: Vec<_> = self.kind_coercions.iter().collect();
+        kind_pairs.sort_by_key(|(k, _)| k.raw());
+        for (k, v) in &kind_pairs {
+            k.hash(state);
+            v.hash(state);
+        }
     }
 }
 
@@ -144,6 +162,11 @@ pub enum ResolvedTy {
     },
     Tuple(Vec<ResolvedTy>),
     Function {
+        /// The closure tier (`escaping (T) -> R`). Participates in the derived
+        /// `Eq`/`Hash`, so witness/conformance signature matching is
+        /// kind-EXACT: a `func f(cb: escaping () -> ())` requirement is not
+        /// witnessed by a `func f(cb: () -> ())` impl.
+        kind: kestrel_ast::FnTypeKind,
         params: Vec<ResolvedTy>,
         /// Parallel to `params`; carries the `mutating` convention to MIR.
         conventions: Vec<kestrel_ast::ParamConvention>,
@@ -229,10 +252,12 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
                 .collect(),
         ),
         TyKind::Function {
+            kind,
             params,
             conventions,
             ret,
         } => ResolvedTy::Function {
+            kind: *kind,
             params: params
                 .iter()
                 .map(|&tv| resolve_to_concrete(ctx, tv))
@@ -347,6 +372,7 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
                 (expr, resolved)
             })
             .collect(),
+        kind_coercions: ctx.kind_coercions.clone(),
     }
 }
 
@@ -430,9 +456,18 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 format!("({})", strs.join(", "))
             }
         },
-        TyKind::Function { params, ret, .. } => {
+        TyKind::Function {
+            kind, params, ret, ..
+        } => {
             let p: Vec<_> = params.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
-            format!("({}) -> {}", p.join(", "), describe_tyvar(ctx, *ret))
+            // `FnTypeKind::prefix()` is the single source of truth for the
+            // rendered keyword (empty for `Normal`).
+            format!(
+                "{}({}) -> {}",
+                kind.prefix(),
+                p.join(", "),
+                describe_tyvar(ctx, *ret)
+            )
         },
         TyKind::Opaque {
             bounds,
@@ -669,6 +704,13 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::ConventionMismatch { .. } => {
             "cannot pass a mutating closure where a non-mutating parameter is expected".into()
         },
+        InferError::KindMismatch {
+            expected, actual, ..
+        } => format!(
+            "expected {}, found {}",
+            crate::error::describe_fn_kind(*expected),
+            crate::error::describe_fn_kind(*actual)
+        ),
     }
 }
 

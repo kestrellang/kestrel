@@ -10,7 +10,7 @@ use kestrel_ast_builder::{Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
-use kestrel_mir::{MirTy, ParamConvention, TyId};
+use kestrel_mir::{FnKind, MirTy, ParamConvention, TyId};
 use kestrel_type_infer::InferBody;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -25,6 +25,18 @@ fn to_mir_convention(c: kestrel_ast::ParamConvention) -> ParamConvention {
         kestrel_ast::ParamConvention::Borrow => ParamConvention::Borrow,
         kestrel_ast::ParamConvention::MutBorrow => ParamConvention::MutBorrow,
         kestrel_ast::ParamConvention::Consuming => ParamConvention::Consuming,
+    }
+}
+
+/// The closure kind rides the type from parse through inference into MIR: the
+/// view tiers (`Normal`/`Mutating`) lower captures as frame addresses, the
+/// owning tiers own their environment. Single mapping point.
+pub(crate) fn to_mir_fn_kind(k: kestrel_ast::FnTypeKind) -> FnKind {
+    match k {
+        kestrel_ast::FnTypeKind::Normal => FnKind::Normal,
+        kestrel_ast::FnTypeKind::Mutating => FnKind::Mutating,
+        kestrel_ast::FnTypeKind::Consuming => FnKind::Consuming,
+        kestrel_ast::FnTypeKind::Escaping => FnKind::Escaping,
     }
 }
 
@@ -123,6 +135,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
             ctx.module.ty_arena.tuple(elems)
         },
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
@@ -142,6 +155,7 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
                 .collect();
             let lowered_ret = lower_type(ctx, ret);
             ctx.intern(MirTy::FuncThick {
+                kind: to_mir_fn_kind(*kind),
                 params: lowered_params,
                 ret: lowered_ret,
             })
@@ -229,6 +243,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             ctx.module.ty_arena.tuple(lowered)
         },
         ResolvedTy::Function {
+            kind,
             params,
             conventions,
             ret,
@@ -247,6 +262,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
                 .collect();
             let lowered_ret = lower_resolved_ty_preserving(ctx, ret);
             ctx.intern(MirTy::FuncThick {
+                kind: to_mir_fn_kind(*kind),
                 params: lowered_params,
                 ret: lowered_ret,
             })
@@ -436,7 +452,9 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
                 .collect();
             ctx.module.ty_arena.tuple(lowered)
         },
-        HirTy::Function { params, ret, .. } => {
+        HirTy::Function {
+            kind, params, ret, ..
+        } => {
             let lowered_params: Vec<(TyId, ParamConvention)> = params
                 .iter()
                 .map(|p| {
@@ -454,6 +472,7 @@ fn lower_type_replacing_opaque(ctx: &mut LowerCtx, ty: &HirTy, concrete: &Resolv
                 lower_type(ctx, ret)
             };
             ctx.intern(MirTy::FuncThick {
+                kind: to_mir_fn_kind(*kind),
                 params: lowered_params,
                 ret: lowered_ret,
             })
@@ -524,10 +543,12 @@ fn substitute_resolved_ty(
                 .collect(),
         ),
         ResolvedTy::Function {
+            kind,
             params: fn_params,
             conventions,
             ret,
         } => ResolvedTy::Function {
+            kind: *kind,
             params: fn_params
                 .iter()
                 .map(|p| substitute_resolved_ty(p, type_params, args))

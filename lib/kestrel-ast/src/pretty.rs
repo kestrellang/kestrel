@@ -660,12 +660,18 @@ fn format_type(ty: &AstType) -> String {
             format!("({})", inner.join(", "))
         },
         AstType::Function {
+            kind,
             params,
             return_type,
             ..
         } => {
             let p: Vec<_> = params.iter().map(format_type).collect();
-            format!("({}) -> {}", p.join(", "), format_type(return_type))
+            format!(
+                "{}({}) -> {}",
+                kind.prefix(),
+                p.join(", "),
+                format_type(return_type)
+            )
         },
         AstType::Array(inner, _) => format!("[{}]", format_type(inner)),
         AstType::Dictionary(k, v, _) => format!("[{}: {}]", format_type(k), format_type(v)),

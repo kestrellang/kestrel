@@ -107,6 +107,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         },
 
         AstType::Function {
+            kind,
             params,
             param_conventions,
             return_type,
@@ -118,6 +119,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                 .collect();
             let lowered_ret = Box::new(lower_ast_type(ctx, owner, root, return_type));
             HirTy::Function {
+                kind: *kind,
                 params: lowered_params,
                 param_conventions: param_conventions.clone(),
                 ret: lowered_ret,
@@ -642,11 +644,13 @@ pub fn reject_ref_types(
             span,
         ),
         HirTy::Function {
+            kind,
             params,
             param_conventions,
             ret,
             span,
         } => HirTy::Function {
+            kind,
             params: params
                 .into_iter()
                 .map(|p| reject_ref_types(ctx, p, RefPosition::Param, policy))
