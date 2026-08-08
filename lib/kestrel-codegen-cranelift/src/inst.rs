@@ -882,20 +882,22 @@ fn compile_op2(
             mem::store_to_repr(builder, repr, lhs, rhs);
             builder.ins().iconst(ptr_ty, 0)
         },
-        Op::AtomicAdd => builder.ins().atomic_rmw(
-            ir::types::I64,
-            MemFlags::new(),
-            ir::AtomicRmwOp::Add,
-            lhs,
-            rhs,
-        ),
-        Op::AtomicSub => builder.ins().atomic_rmw(
-            ir::types::I64,
-            MemFlags::new(),
-            ir::AtomicRmwOp::Sub,
-            lhs,
-            rhs,
-        ),
+        // `lang.atomic_add`/`atomic_sub` are seeded generic over `T`
+        // (ast-builder/lang_module.rs), so the access width must come from the
+        // value operand — hardcoding I64 reads/writes 8 bytes at a narrower
+        // location. Matches the LLVM backend, which infers it from the operand.
+        Op::AtomicAdd => {
+            let ty = builder.func.dfg.value_type(rhs);
+            builder
+                .ins()
+                .atomic_rmw(ty, MemFlags::new(), ir::AtomicRmwOp::Add, lhs, rhs)
+        },
+        Op::AtomicSub => {
+            let ty = builder.func.dfg.value_type(rhs);
+            builder
+                .ins()
+                .atomic_rmw(ty, MemFlags::new(), ir::AtomicRmwOp::Sub, lhs, rhs)
+        },
         Op::FloatCopysign(_) => builder.ins().fcopysign(lhs, rhs),
         _ => {
             return Err(CodegenError::Unsupported(format!("op2 variant: {op:?}")));
