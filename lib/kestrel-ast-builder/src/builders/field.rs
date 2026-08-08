@@ -9,6 +9,23 @@ use crate::ast_type::ast_type_from_cst;
 use crate::components::*;
 use crate::lower;
 
+/// Does this `PropertyAccessors` block provide any accessor *body*?
+///
+/// A bodyless block (`{ get }`, `{ get set }`) declares how storage may be
+/// accessed; only a bodied accessor (`{ get { … } }`, the `{ expr }` shorthand,
+/// `{ set { … } }`, `{ ref { … } }`) replaces storage with computation.
+fn accessor_block_has_body(accessors: &SyntaxNode) -> bool {
+    let clause_has_body = |kind| {
+        find_child(accessors, kind).is_some_and(|c| find_child(&c, SyntaxKind::CodeBlock).is_some())
+    };
+    // The `{ expr }` shorthand puts the CodeBlock directly under the block.
+    find_child(accessors, SyntaxKind::CodeBlock).is_some()
+        || clause_has_body(SyntaxKind::GetterClause)
+        || clause_has_body(SyntaxKind::SetterClause)
+        || find_child(accessors, SyntaxKind::RefClause).is_some()
+        || find_child(accessors, SyntaxKind::MutatingRefClause).is_some()
+}
+
 /// Build a field declaration entity from CST.
 ///
 /// Components: NodeKind::Field, Name, FileId, Vis, TypeAnnotation,
@@ -245,6 +262,28 @@ pub fn build_field(
     if has_static_modifier(node) {
         world.set(entity, Static);
     }
+
+    // Storage classification. Computed here, where the accessor CST is already
+    // in hand, and stored as a component so no downstream site reconstructs it
+    // from the absence of Computed/Callable/Static — see `FieldClass`.
+    let owner = match world.get::<NodeKind>(parent) {
+        Some(NodeKind::Struct | NodeKind::Enum) => FieldOwner::Nominal,
+        Some(NodeKind::Protocol) => FieldOwner::Protocol,
+        Some(NodeKind::Extension) => FieldOwner::Extension,
+        _ => FieldOwner::Module,
+    };
+    let backing = match find_child(node, SyntaxKind::PropertyAccessors) {
+        Some(accessors) if accessor_block_has_body(&accessors) => FieldBacking::Computed,
+        _ => FieldBacking::Stored,
+    };
+    world.set(
+        entity,
+        FieldClass {
+            backing,
+            owner,
+            is_static: has_static_modifier(node),
+        },
+    );
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);

@@ -43,7 +43,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{FieldClass, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
@@ -169,10 +169,14 @@ fn pick_label_field(stack: &OpeningStack, origin: Entity) -> Entity {
         .unwrap_or(origin)
 }
 
-/// True for stored-property fields (non-computed). Skips computed properties,
-/// which are represented as Fields carrying a Callable getter.
+/// True for fields that occupy inline instance storage — the only ones that can
+/// close a containment cycle. A `static` field is a global, so a `static var`
+/// referring to its own type is not a cycle; the old `!Callable` test called it
+/// one and reported a spurious E449.
 fn is_stored_field(cx: &CompilationContext<'_>, e: Entity) -> bool {
-    cx.query.get::<NodeKind>(e) == Some(&NodeKind::Field) && cx.query.get::<Callable>(e).is_none()
+    cx.query
+        .get::<FieldClass>(e)
+        .is_some_and(FieldClass::is_stored_instance)
 }
 
 /// Walk a field's type, following struct references transitively through

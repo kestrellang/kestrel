@@ -201,11 +201,86 @@ pub enum FieldMutability {
     Let,
 }
 
-/// Marker: this Field is a computed property (has a `{ get }` / `{ get set }`
-/// accessor block, possibly bodyless in a protocol). Absence means a stored
-/// property. Set by the field builder when the CST has PropertyAccessors.
+/// Marker: this Field declares an accessor block (`{ get }`, `{ get set }`,
+/// `{ get { … } }`, `{ ref { … } }`, …), bodyless or not. Set by the field
+/// builder when the CST has PropertyAccessors.
+///
+/// This is the *accessor-shape* question (drives E413, E622, doc rendering).
+/// It is NOT the storage question — a bodyless block on a concrete type
+/// declares access to storage, not a replacement for it. For storage, read
+/// [`FieldClass`]; never infer it from the absence of this marker.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Computed;
+
+/// How a [`NodeKind::Field`] is backed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FieldBacking {
+    /// Occupies storage — inline in the instance, or a global for `static` and
+    /// module-level fields. A *bodyless* accessor block (`var b: Int { get set }`)
+    /// on a concrete type is Stored: the block declares access, not a body.
+    Stored,
+    /// Backed by accessor bodies — a bodied `get`/`set`, the `{ expr }`
+    /// shorthand, or a `ref`/`mutating ref` clause. Occupies no storage.
+    Computed,
+}
+
+/// Which kind of container a [`NodeKind::Field`] is declared in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FieldOwner {
+    /// A `struct` or `enum` — the only owner whose stored fields get a FieldIdx.
+    Nominal,
+    /// A `protocol`: a requirement to witness, never storage, whatever its backing.
+    Protocol,
+    /// An `extend` block.
+    Extension,
+    /// Module level. A module-level `var g = 0;` is a global *without* carrying
+    /// [`Static`], which is why global-ness is `is_static || owner == Module`
+    /// rather than a `Static` test.
+    Module,
+}
+
+/// The storage classification of a [`NodeKind::Field`], computed once by the
+/// field builder — the only code that inspects the accessor CST — and stored
+/// rather than re-derived.
+///
+/// Downstream code must read this instead of reconstructing storage-ness from
+/// the *absence* of [`Computed`]/[`Callable`]/[`Static`]. Classification by
+/// absent marker is precisely what caused the F3 divergence: [`Computed`] is
+/// set for any accessor block but [`Callable`] only for a bodied one, so
+/// `!Callable` and `!Computed` disagreed and the layout, memberwise-init and
+/// pattern-arity rosters drifted apart — silently, because struct construction
+/// maps argument position to field index with no name check.
+///
+/// Use the helpers; do not match the fields ad hoc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FieldClass {
+    pub backing: FieldBacking,
+    pub owner: FieldOwner,
+    /// The `static` modifier only. Orthogonal to `owner`.
+    pub is_static: bool,
+}
+
+impl FieldClass {
+    /// Occupies inline storage in an instance, i.e. gets a `FieldIdx` in the
+    /// type's layout. THE storage test — layout, memberwise init, pattern
+    /// arity, and the copy/drop folds must all agree with this and nothing else.
+    pub fn is_stored_instance(&self) -> bool {
+        self.backing == FieldBacking::Stored
+            && !self.is_static
+            && matches!(self.owner, FieldOwner::Nominal)
+    }
+
+    /// Backed by a `GlobalRef` rather than by instance storage.
+    pub fn is_global_storage(&self) -> bool {
+        self.backing == FieldBacking::Stored
+            && (self.is_static || matches!(self.owner, FieldOwner::Module))
+    }
+
+    /// A protocol requirement: witness-dispatched, storage nowhere.
+    pub fn is_protocol_requirement(&self) -> bool {
+        matches!(self.owner, FieldOwner::Protocol)
+    }
+}
 
 // ===== Generics =====
 

@@ -1,6 +1,6 @@
 //! Struct lowering — converts ECS struct entities into MIR StructDefs.
 
-use kestrel_ast_builder::{Callable, NodeKind, Static, TypeParams};
+use kestrel_ast_builder::{FieldClass, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::item::struct_def::{FieldDef, StructDef};
 use kestrel_mir::{CopyBehavior, DropBehavior, TypeInfo, TypeParamDef};
@@ -24,12 +24,16 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         root: ctx.root,
     });
 
-    // Stored fields only — skip computed properties and statics
+    // Stored instance fields only. This loop DEFINES every FieldIdx, so it must
+    // use `FieldClass` and nothing else — the old `!Callable && !Static` test
+    // admitted bodyless `{ get set }` fields that the memberwise-init roster
+    // (type-infer/generate.rs) excluded, shifting every later argument by one.
     for &child in ctx.world.children_of(entity) {
-        if ctx.world.get::<NodeKind>(child) != Some(&NodeKind::Field) {
-            continue;
-        }
-        if ctx.world.get::<Callable>(child).is_some() || ctx.world.get::<Static>(child).is_some() {
+        if !ctx
+            .world
+            .get::<FieldClass>(child)
+            .is_some_and(FieldClass::is_stored_instance)
+        {
             continue;
         }
 

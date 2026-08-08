@@ -20,7 +20,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
-use kestrel_ast_builder::{Callable, IsIndirect, NodeKind, TypeAnnotation};
+use kestrel_ast_builder::{Callable, FieldClass, IsIndirect, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
@@ -181,8 +181,13 @@ fn entity_contains(
         Some(NodeKind::Struct) => {
             // Walk stored fields
             for child in util::children_of_kind(cx.query, entity, NodeKind::Field) {
-                // Skip computed properties (have a Callable for the getter)
-                if cx.query.get::<Callable>(child).is_some() {
+                // Only inline instance storage can close a recursion cycle —
+                // computed properties store nothing and statics are globals.
+                if !cx
+                    .query
+                    .get::<FieldClass>(child)
+                    .is_some_and(FieldClass::is_stored_instance)
+                {
                     continue;
                 }
                 let Some(ann) = cx.query.get::<TypeAnnotation>(child) else {

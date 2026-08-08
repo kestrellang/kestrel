@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Computed, ConformanceItem, Conformances, NodeKind, WhereClause as AstWhereClause,
+    ConformanceItem, Conformances, FieldClass, NodeKind, WhereClause as AstWhereClause,
     WhereConstraint,
 };
 use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
@@ -737,11 +737,14 @@ fn collect_child_types(
     for &child in ctx.children_of(entity) {
         match ctx.get::<NodeKind>(child) {
             Some(NodeKind::Field) => {
-                // Computed properties (`var x: T { get … }`) store nothing —
-                // they read/write through accessors — so they never affect
-                // whether the containing type is bit-copyable. Only stored
-                // fields contribute to copy semantics.
-                if ctx.get::<Computed>(child).is_some() {
+                // Only inline instance storage contributes to copy semantics.
+                // Computed properties store nothing, and a `static` field is a
+                // global — folding one in made the whole type non-copyable
+                // because of storage the instance does not contain.
+                if !ctx
+                    .get::<FieldClass>(child)
+                    .is_some_and(FieldClass::is_stored_instance)
+                {
                     continue;
                 }
                 if let Some(ty) = ctx.query(LowerTypeAnnotation {

@@ -30,7 +30,9 @@
 
 use std::collections::HashSet;
 
-use kestrel_ast_builder::{Callable, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams};
+use kestrel_ast_builder::{
+    Callable, FieldClass, Intrinsic, Name, NodeKind, TypeAnnotation, TypeParams,
+};
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
 use kestrel_name_res::{
@@ -637,12 +639,21 @@ fn is_array_type(query: &QueryContext<'_>, root: Entity, ty: &ResolvedTy) -> boo
         )
 }
 
-/// Collect Field children of an entity, in declaration order.
+/// Collect the stored instance fields of an entity, in declaration order.
+///
+/// Must stay index-aligned with the MIR layout (`items/struct_lower.rs`), since
+/// sub-pattern positions index into the scrutinee's fields. Including computed
+/// properties here made a pattern read past the end of the struct — an OSSA
+/// block-arg type mismatch rather than a diagnostic.
 pub(super) fn collect_fields(query: &QueryContext<'_>, entity: Entity) -> Vec<Entity> {
     query
         .children_of(entity)
         .iter()
-        .filter(|&&child| matches!(query.get::<NodeKind>(child), Some(NodeKind::Field)))
+        .filter(|&&child| {
+            query
+                .get::<FieldClass>(child)
+                .is_some_and(FieldClass::is_stored_instance)
+        })
         .copied()
         .collect()
 }

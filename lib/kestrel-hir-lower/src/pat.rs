@@ -383,12 +383,19 @@ impl LowerCtx<'_> {
         match result {
             TypeResolution::Found(entity) => {
                 // Validate pattern fields against struct's actual fields
-                use kestrel_ast_builder::{Name, NodeKind};
+                // Only stored instance fields are bindable: a pattern destructures
+                // storage, and this set must match the layout roster used to
+                // assign sub-pattern indices.
+                use kestrel_ast_builder::{FieldClass, Name};
                 let struct_field_names: Vec<String> = self
                     .ctx
                     .children_of(entity)
                     .iter()
-                    .filter(|&&c| self.ctx.get::<NodeKind>(c) == Some(&NodeKind::Field))
+                    .filter(|&&c| {
+                        self.ctx
+                            .get::<FieldClass>(c)
+                            .is_some_and(FieldClass::is_stored_instance)
+                    })
                     .filter_map(|&c| self.ctx.get::<Name>(c).map(|n| n.0.clone()))
                     .collect();
 

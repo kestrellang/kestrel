@@ -1331,16 +1331,15 @@ fn gen_struct_init(
         }
     } else {
         // Memberwise init: match args against stored field types (in order).
-        // `NodeKind::Field` also covers computed properties and static stored
-        // vars, neither of which is an instance field — filter them out via the
-        // `Computed`/`Static` markers so the synthesized init takes only
-        // instance storage (mirrors the layout collection in struct_lower.rs).
+        // This list must be index-aligned with the MIR layout in
+        // struct_lower.rs, because struct construction maps argument position
+        // straight to FieldIdx. Both sides read `FieldClass` so they cannot
+        // drift; do not re-derive the predicate here.
         let fields: Vec<Entity> = children
             .iter()
             .filter(|&&c| {
-                qctx.get::<NodeKind>(c) == Some(&NodeKind::Field)
-                    && qctx.get::<kestrel_ast_builder::Computed>(c).is_none()
-                    && qctx.get::<kestrel_ast_builder::Static>(c).is_none()
+                qctx.get::<kestrel_ast_builder::FieldClass>(c)
+                    .is_some_and(kestrel_ast_builder::FieldClass::is_stored_instance)
             })
             .copied()
             .collect();
