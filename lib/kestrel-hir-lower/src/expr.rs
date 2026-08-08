@@ -1400,7 +1400,14 @@ impl LowerCtx<'_> {
             })
             .collect();
 
+        // A closure body is a separate function body: `break`/`continue` in it
+        // cannot target a loop in the *enclosing* body. Without this the
+        // enclosing loop stack stays visible, `validate_break_continue` passes,
+        // and MIR's `lower_break` then finds no loop and emits a unit literal —
+        // the `break` becomes a silent no-op.
+        let saved_loops = std::mem::take(&mut self.loop_labels);
         let mut lowered_body = self.lower_block(body, closure_body);
+        self.loop_labels = saved_loops;
 
         // Prepend destructure statements to closure body
         if !desugar_stmts.is_empty() {

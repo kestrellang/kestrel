@@ -345,6 +345,8 @@ impl OssaBodyCtx<'_, '_> {
             let exit_vals: Vec<ValueId> =
                 exit_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(exit, exit_vals);
+        } else {
+            self.emit_no_enclosing_loop_backstop("break", label);
         }
         self.emit_literal(Immediate::unit())
     }
@@ -376,8 +378,48 @@ impl OssaBodyCtx<'_, '_> {
             let header_vals: Vec<ValueId> =
                 header_vals.iter().map(|v| self.resolve_value(*v)).collect();
             self.emit_jump(header, header_vals);
+        } else {
+            self.emit_no_enclosing_loop_backstop("continue", label);
         }
         self.emit_literal(Immediate::unit())
+    }
+
+    /// Backstop for a `break`/`continue` that reaches MIR with no matching
+    /// enclosing loop.
+    ///
+    /// hir-lower's `validate_break_continue` rejects this first ("'break'
+    /// outside of loop" / "undeclared label"), so this fires only for shapes it
+    /// cannot see. Without it the lowering falls through to a unit literal and
+    /// the `break` becomes a **silent no-op** — the loop runs to completion and
+    /// the program keeps going with a well-formed but wrong body. That is how
+    /// `break` inside a closure inside a loop behaved: the closure body
+    /// inherited the enclosing loop stack, so validation passed, and MIR then
+    /// found no loop to jump to.
+    fn emit_no_enclosing_loop_backstop(&mut self, keyword: &str, label: Option<&str>) {
+        let span = self
+            .current_span
+            .clone()
+            .unwrap_or_else(|| kestrel_span::Span::synthetic(0));
+        let described = match label {
+            Some(l) => format!("`{keyword} {l}`"),
+            None => format!("`{keyword}`"),
+        };
+        self.ctx.query.accumulate(
+            kestrel_reporting::Diagnostic::error()
+                .with_message(format!(
+                    "internal compiler error: {described} reached MIR lowering \
+                     with no matching enclosing loop"
+                ))
+                .with_labels(vec![
+                    kestrel_reporting::Label::primary(span.file_id, span.range())
+                        .with_message("an earlier phase should have diagnosed this"),
+                ])
+                .with_notes(vec![
+                    "this would otherwise compile to a no-op; please file a bug \
+                     with the program that triggered it"
+                        .into(),
+                ]),
+        );
     }
 
     // ================================================================
