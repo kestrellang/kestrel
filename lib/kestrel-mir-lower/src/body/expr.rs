@@ -20,6 +20,7 @@ use kestrel_mir::inst::CallArg;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::op::Op;
 use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
+use kestrel_mir::value::RootProvenance;
 
 use super::place::{FieldViews, PlaceRepr};
 use super::{OssaBodyCtx, expr_span};
@@ -30,6 +31,7 @@ impl OssaBodyCtx<'_, '_> {
     /// Lower an HIR expression to a ValueId, applying promotion if needed.
     pub fn lower_expr(&mut self, expr_id: HirExprId) -> ValueId {
         let value = self.lower_expr_no_promote(expr_id);
+        let value = self.apply_kind_coercion(expr_id, value);
         self.apply_promotion(expr_id, value)
     }
 
@@ -45,6 +47,9 @@ impl OssaBodyCtx<'_, '_> {
     /// netted zero on the shared `RcBox`, so dropping the "clone" over-released
     /// the storage. Moving the local balances the books (no copy, no drop).
     pub fn lower_expr_for_return(&mut self, expr_id: HirExprId) -> ValueId {
+        if self.has_kind_coercion(expr_id) {
+            return self.lower_expr(expr_id);
+        }
         let local = match &self.hir.exprs[expr_id] {
             HirExpr::Local(l, _) if self.is_var_local(l) => Some(*l),
             _ => None,
@@ -214,6 +219,81 @@ impl OssaBodyCtx<'_, '_> {
         // Consume the value so ownership transfers into the wrapped enum.
         let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
         self.emit_call_returning(callee, vec![arg], target_ty)
+    }
+
+    pub(crate) fn has_kind_coercion(&self, expr_id: HirExprId) -> bool {
+        self.typed
+            .as_ref()
+            .is_some_and(|typed| typed.kind_coercions.contains_key(&expr_id))
+    }
+
+    /// Replay the solver's accepted cross-kind conversion at the single value
+    /// boundary shared by every ordinary expression context.
+    fn apply_kind_coercion(&mut self, expr_id: HirExprId, value: ValueId) -> ValueId {
+        let Some((from, to)) = self
+            .typed
+            .as_ref()
+            .and_then(|typed| typed.kind_coercions.get(&expr_id))
+            .copied()
+        else {
+            return value;
+        };
+        let from = crate::ty::to_mir_fn_kind(from);
+        let to = crate::ty::to_mir_fn_kind(to);
+        let value = if matches!(
+            (from, to),
+            (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Consuming)
+        ) && self.body.value(value).ownership == kestrel_mir::value::Ownership::Guaranteed
+        {
+            // A borrowed escaping parameter still owns its handle in the
+            // caller. Retain one independent owner before transferring it to
+            // the consuming representation.
+            self.emit_copy_value(value)
+        } else {
+            value
+        };
+        let (actual, params, ret) = match self.ctx.module.ty_arena.get(self.body.value(value).ty) {
+            MirTy::FuncThick { kind, params, ret } => (*kind, params.clone(), *ret),
+            _ => return value,
+        };
+
+        // Bare function values adopt their destination kind during inference,
+        // so `lower_def` has already emitted the correctly widened ApplyPartial.
+        if actual == to {
+            return value;
+        }
+        debug_assert_eq!(actual, from, "recorded closure-kind source drifted before MIR");
+
+        let result_ty = self.ctx.intern(MirTy::FuncThick {
+            kind: to,
+            params,
+            ret,
+        });
+        let source_root = self.body.value(value).root;
+        let result = self.alloc_value(result_ty, kestrel_mir::value::Ownership::Owned);
+        let root = if matches!((from, to), (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Normal)) {
+            match source_root {
+                RootProvenance::Static => RootProvenance::Static,
+                // A truncated view owns no retain. Root it in this body's
+                // backing value so it cannot escape even when that backing is
+                // a borrowed parameter owned by the caller.
+                _ => RootProvenance::Local(value),
+            }
+        } else {
+            source_root
+        };
+        self.stamp_root(result, root);
+        self.push_inst(kestrel_mir::inst::InstKind::CoerceFnKind {
+            result,
+            operand: value,
+            from,
+            to,
+        });
+        if matches!((from, to), (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Consuming)) {
+            self.consume(value);
+        }
+        self.track_owned(result);
+        result
     }
 
     fn lower_expr_no_promote(&mut self, expr_id: HirExprId) -> ValueId {

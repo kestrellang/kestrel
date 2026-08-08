@@ -751,14 +751,18 @@ mod tests {
     fn cli_skips_e100_keeps_other_errors() {
         let summary = AnalyzeSummary {
             diagnostics: vec![
-                diag("E100", Severity::Error),  // inference error — already in codespan stream
-                diag("E412", Severity::Error),  // genuine analyzer error — must emit
+                diag("E100", Severity::Error), // inference error — already in codespan stream
+                diag("E412", Severity::Error), // genuine analyzer error — must emit
                 diag("E316", Severity::Warning), // warning — emitted elsewhere, not here
             ],
             ..Default::default()
         };
         let emitted = cli_emittable_analyze_errors(&summary);
         let ids: Vec<&str> = emitted.iter().map(|d| d.descriptor_id).collect();
-        assert_eq!(ids, vec!["E412"], "only the non-E100 error should be CLI-emitted");
+        assert_eq!(
+            ids,
+            vec!["E412"],
+            "only the non-E100 error should be CLI-emitted"
+        );
     }
 }

@@ -72,10 +72,7 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
 /// collide with a user-declared member name. Single source of truth for
 /// member-name matching — `member_name_matches` and the build-time
 /// `MemberMap` name index both derive from it.
-pub(crate) fn member_lookup_name<'a>(
-    ctx: &'a QueryContext<'_>,
-    entity: Entity,
-) -> Option<&'a str> {
+pub(crate) fn member_lookup_name<'a>(ctx: &'a QueryContext<'_>, entity: Entity) -> Option<&'a str> {
     if let Some(n) = ctx.get::<Name>(entity) {
         return Some(n.0.as_str());
     }

@@ -1213,6 +1213,7 @@ fn remap_inst_operands(kind: &mut InstKind, remap: &HashMap<ValueId, ValueId>) {
     match kind {
         InstKind::CopyValue { operand, .. }
         | InstKind::MoveValue { operand, .. }
+        | InstKind::CoerceFnKind { operand, .. }
         | InstKind::DestroyValue { operand }
         | InstKind::BeginBorrow { operand, .. }
         | InstKind::EndBorrow { operand }

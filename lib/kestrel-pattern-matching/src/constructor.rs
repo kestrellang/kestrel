@@ -808,7 +808,9 @@ fn resolve_ast_type_with_subs(
                 .map(|seg| {
                     seg.type_args
                         .iter()
-                        .map(|a| resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity))
+                        .map(|a| {
+                            resolve_ast_type_with_subs(query, root, Some(a), subs, scope_entity)
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -830,7 +832,6 @@ fn resolve_ast_type_with_subs(
         _ => ResolvedTy::Error,
     }
 }
-
 
 /// Check if two optional i64 ranges overlap.
 fn ranges_overlap_i64(s1: Option<i64>, e1: Option<i64>, s2: Option<i64>, e2: Option<i64>) -> bool {

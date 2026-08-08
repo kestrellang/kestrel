@@ -3401,6 +3401,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
+        if self.has_kind_coercion(expr_id) {
+            return self.lower_expr(expr_id);
+        }
         // Local/captured places resolve through the place resolver: var
         // locals borrow their address in place (value-mode would
         // `emit_copy_addr` — an illegal copy for a non-Copyable var); owned
@@ -3424,6 +3427,9 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// and consumes it from scope (no bitwise copy_value). Var locals
     /// and complex expressions fall back to lower_expr.
     pub fn lower_expr_for_consuming(&mut self, expr_id: HirExprId) -> ValueId {
+        if self.has_kind_coercion(expr_id) {
+            return self.lower_expr(expr_id);
+        }
         let expr = self.hir.exprs[expr_id].clone();
         match &expr {
             HirExpr::Local(hir_local, _) if !self.is_var_local(hir_local) => {
@@ -3563,6 +3569,13 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         expr_id: HirExprId,
         convention: ParamConvention,
     ) -> CallArg {
+        // Cross-kind replay is a value conversion. Force it through lower_expr
+        // before the place-oriented Borrow/MutBorrow/Consuming fast paths can
+        // return the source-kind local directly.
+        if self.has_kind_coercion(expr_id) {
+            let value = self.lower_expr(expr_id);
+            return self.prepare_call_arg(value, convention);
+        }
         if convention == ParamConvention::MutBorrow {
             // Place-resolved: Addr borrows the address (writes go through);
             // a View (SSA owned receiver like a `consuming` func's self,

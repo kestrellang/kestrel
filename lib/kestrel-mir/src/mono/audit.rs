@@ -280,7 +280,10 @@ fn classify(
         | InstKind::EnumPayload {
             result, operand, ..
         }
-        | InstKind::MoveValue { result, operand } => {
+        | InstKind::MoveValue { result, operand }
+        | InstKind::CoerceFnKind {
+            result, operand, ..
+        } => {
             if owned(*result) && heap(*result) && guaranteed(*operand) {
                 return Some(DupKind::OwnedFromBorrow);
             }
@@ -348,6 +351,12 @@ fn consume_sites(body: &OssaBody) -> HashMap<ValueId, Vec<String>> {
             let loc = format!("bb{bi}:{ii}");
             match &inst.kind {
                 InstKind::MoveValue { operand, .. } => push(&mut sites, *operand, &loc, "move"),
+                InstKind::CoerceFnKind {
+                    operand,
+                    from: crate::FnKind::Escaping,
+                    to: crate::FnKind::Consuming,
+                    ..
+                } => push(&mut sites, *operand, &loc, "fn-kind-coerce"),
                 InstKind::DestroyValue { operand } => push(&mut sites, *operand, &loc, "destroy"),
                 InstKind::StoreInit { value, .. } | InstKind::StoreAssign { value, .. } => {
                     push(&mut sites, *value, &loc, "store")

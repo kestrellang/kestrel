@@ -92,7 +92,10 @@ pub fn lang_ref_mutability(ctx: &QueryContext<'_>, entity: Entity) -> Option<boo
     };
     let parent = ctx.parent_of(entity)?;
     (ctx.get::<NodeKind>(parent) == Some(&NodeKind::Module)
-        && ctx.get::<Name>(parent).map(|n| n.0 == "lang").unwrap_or(false))
+        && ctx
+            .get::<Name>(parent)
+            .map(|n| n.0 == "lang")
+            .unwrap_or(false))
     .then_some(mutating)
 }
 

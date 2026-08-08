@@ -51,7 +51,7 @@ pub struct PlaceKey {
 }
 
 impl PlaceKey {
-    fn whole(root: LocalId) -> Self {
+    pub fn whole(root: LocalId) -> Self {
         PlaceKey {
             root,
             path: Vec::new(),

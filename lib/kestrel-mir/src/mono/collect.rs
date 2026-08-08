@@ -234,50 +234,18 @@ impl<'a> CollectionContext<'a> {
 
         for block in &body.blocks {
             for inst in &block.insts {
+                for (_, callee) in inst.kind.callees() {
+                    self.scan_callee(
+                        callee,
+                        &subst,
+                        parent_self,
+                        caller_entity,
+                        inst.span.as_ref(),
+                    );
+                }
                 match &inst.kind {
-                    InstKind::Call { callee, .. } => {
-                        self.scan_callee(
-                            callee,
-                            &subst,
-                            parent_self,
-                            caller_entity,
-                            inst.span.as_ref(),
-                        );
-                    },
                     InstKind::Literal { value, .. } => {
                         self.scan_immediate(&value.kind, &subst, parent_self);
-                    },
-                    InstKind::ApplyPartial {
-                        callee,
-                        retain,
-                        release,
-                        ..
-                    } => {
-                        // The partial-applied closure/thunk is referenced exactly
-                        // like a Call callee (a `Callee::Direct` after the thunk
-                        // pass), so discover its instantiation the same way — this
-                        // is what binds each `read[T]` to its own thunk instead of
-                        // collapsing to the first.
-                        self.scan_callee(
-                            callee,
-                            &subst,
-                            parent_self,
-                            caller_entity,
-                            inst.span.as_ref(),
-                        );
-                        // The owning tier's per-environment retain/release
-                        // shims are NEW MONO ROOTS: nothing else in the module
-                        // references them, and both `compile_apply_partial`s
-                        // hard-error on an unresolved callee.
-                        for shim in [retain.as_ref(), release.as_ref()].into_iter().flatten() {
-                            self.scan_callee(
-                                shim,
-                                &subst,
-                                parent_self,
-                                caller_entity,
-                                inst.span.as_ref(),
-                            );
-                        }
                     },
                     InstKind::DestroyValue { operand } => {
                         let operand_ty = body.values[operand.index()].ty;

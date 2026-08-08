@@ -2,7 +2,7 @@
 //!
 //! Tracks non-copyable value moves through control flow and reports
 //! use-after-move / maybe-moved errors. Mirrors lib1's `move_tracker` design
-//! on top of lib's HIR/TypedBody: per-local move state, CFG-join on
+//! on top of lib's HIR/TypedBody: place-keyed move state, CFG-join on
 //! if/else/match/loop, `consuming` parameter arguments and `consuming self`
 //! receivers as move triggers.
 //!
@@ -125,7 +125,7 @@ impl BodyCheck for MoveTrackingAnalyzer {
 
         // Place-based capture plan (single source of truth, post-inference).
         // The move checker uses it to model a non-Copyable value captured BY
-        // VALUE into a closure as a move of the root (see the Closure arm).
+        // VALUE into a closure as a move of its effective MIR place.
         let captures = cx.query.query(ClosureCaptures {
             entity: cx.entity,
             root: cx.root,
@@ -199,7 +199,7 @@ enum FreezeReason {
 
 #[derive(Clone, Debug)]
 struct State {
-    moves: HashMap<LocalId, MoveInfo>,
+    moves: HashMap<PlaceKey, MoveInfo>,
     /// Locals already reported once in this body. Subsequent reads don't
     /// re-emit — matches the "one error per offending variable" convention
     /// the tests expect.
@@ -260,8 +260,8 @@ struct MoveCtx<'a> {
     /// function of the binding's pattern, not the dataflow), so it's computed
     /// once up front rather than threaded through `State`.
     borrow_bound: HashSet<LocalId>,
-    /// Per-closure place-based capture plan. A whole-local Read capture of a
-    /// non-Copyable value is a move of the root into the closure environment.
+    /// Per-closure place-based capture plan. A non-Copyable Read capture moves
+    /// its effective MIR place into the closure environment.
     captures: Arc<ClosureCaptureMap>,
     /// Captured non-Copyable roots being analyzed *inside the current closure
     /// body*. Moving one OUT of the body (return/consume/rebind-and-escape) is
@@ -357,11 +357,18 @@ fn analyze_stmt(
                 if let Some(src) = rhs_local(mcx.cx.hir, *val)
                     && local_is_non_copyable(mcx, src)
                 {
-                    record_move(mcx, &mut state, diags, src, *val, FreezeReason::Move);
+                    record_move(
+                        mcx,
+                        &mut state,
+                        diags,
+                        PlaceKey::whole(src),
+                        *val,
+                        FreezeReason::Move,
+                    );
                 }
                 // Freshly bound local is valid — remove any stale move state
                 // under the same id (shouldn't happen, but defensive).
-                state.moves.remove(local);
+                state.moves.retain(|place, _| place.root != *local);
             }
             state.local_depth.insert(*local, state.depth);
         },
@@ -379,10 +386,7 @@ fn analyze_stmt(
                 // directly), so it needs its own consult — and unlike a move
                 // it destroys even a Copyable place, so there is no
                 // copyability gate here.
-                let place = PlaceKey {
-                    root: *local_id,
-                    path: Vec::new(),
-                };
+                let place = PlaceKey::whole(*local_id);
                 check_freeze(
                     &mut state,
                     diags,
@@ -390,7 +394,7 @@ fn analyze_stmt(
                     span.clone(),
                     FreezeReason::Deinit,
                 );
-                if let Some(existing) = state.moves.get(local_id).copied() {
+                if let Some(existing) = state.moves.get(&place).copied() {
                     emit_use_after_move(
                         mcx.cx,
                         diags,
@@ -410,7 +414,7 @@ fn analyze_stmt(
                 // this local read. In practice tests only check _that_ the
                 // diagnostic fires, so any valid site works.
                 state.moves.insert(
-                    *local_id,
+                    place,
                     MoveInfo {
                         kind: MoveKind::Definite,
                         site: deinit_site(mcx.cx.hir, *local_id),
@@ -433,8 +437,9 @@ fn analyze_expr(
     match &hir.exprs[id] {
         // ===== Read of a local =====
         HirExpr::Local(local_id, span) => {
+            let place = PlaceKey::whole(*local_id);
             if !is_assign_target
-                && let Some(info) = state.moves.get(local_id).copied()
+                && let Some(info) = state.moves.get(&place).copied()
                 && state.reported.insert(*local_id)
             {
                 let name = hir.locals[*local_id].name.clone();
@@ -469,12 +474,19 @@ fn analyze_expr(
             if let Some(src) = rhs_local(hir, *value) {
                 let targeting_self = rhs_local(hir, *target) == Some(src);
                 if !targeting_self && local_is_non_copyable(mcx, src) {
-                    record_move(mcx, &mut state, diags, src, *value, FreezeReason::Move);
+                    record_move(
+                        mcx,
+                        &mut state,
+                        diags,
+                        PlaceKey::whole(src),
+                        *value,
+                        FreezeReason::Move,
+                    );
                 }
             }
             // A Local being written to is refreshed (new value lands there).
             if let HirExpr::Local(tid, _) = &hir.exprs[*target] {
-                state.moves.remove(tid);
+                state.moves.retain(|place, _| place.root != *tid);
             }
         },
 
@@ -583,8 +595,8 @@ fn analyze_expr(
                 back_edge.reported = body_state.reported.clone();
                 back_edge.freeze_reported = body_state.freeze_reported.clone();
                 let mut seeded = false;
-                for (local, info) in body_state.moves.iter() {
-                    if pre.moves.contains_key(local) || body_bound.contains(local) {
+                for (place, info) in body_state.moves.iter() {
+                    if pre.moves.contains_key(place) || body_bound.contains(&place.root) {
                         continue;
                     }
                     let kind = if conditional {
@@ -593,7 +605,7 @@ fn analyze_expr(
                         MoveKind::Definite
                     };
                     back_edge.moves.insert(
-                        *local,
+                        place.clone(),
                         MoveInfo {
                             kind,
                             site: info.site,
@@ -630,8 +642,8 @@ fn analyze_expr(
             // - Unconditional `loop { … }`: body runs at least once, and if
             //   the move site is reachable before any `break`, a second
             //   iteration would re-read the moved value. Mark Definite.
-            for (local, info) in body_state.moves.iter() {
-                if pre.moves.contains_key(local) {
+            for (place, info) in body_state.moves.iter() {
+                if pre.moves.contains_key(place) {
                     continue;
                 }
                 let kind = if conditional {
@@ -640,7 +652,7 @@ fn analyze_expr(
                     MoveKind::Definite
                 };
                 state.moves.insert(
-                    *local,
+                    place.clone(),
                     MoveInfo {
                         kind,
                         site: info.site,
@@ -661,7 +673,14 @@ fn analyze_expr(
                 if let Some(src) = rhs_local(hir, *val)
                     && local_is_non_copyable(mcx, src)
                 {
-                    record_move(mcx, &mut state, diags, src, *val, FreezeReason::Move);
+                    record_move(
+                        mcx,
+                        &mut state,
+                        diags,
+                        PlaceKey::whole(src),
+                        *val,
+                        FreezeReason::Move,
+                    );
                 }
                 // NOTE: returning a view-carrying value is the OTHER escape
                 // route, and it already has a single source of truth — the MIR
@@ -677,24 +696,19 @@ fn analyze_expr(
 
         // ===== Closures =====
         HirExpr::Closure { body, .. } => {
-            // Whole-local Read captures of a non-Copyable type: captured BY
-            // VALUE, i.e. MOVED into the closure environment (cannot be copied).
-            // A Copyable read is by-copy; a captured Copyable sub-place of a
-            // non-Copyable value (`self.cap`, an Int64) is its own non-whole
-            // place — neither moves. Write captures are by-reference. Partial
-            // (projected) non-Copyable captures are left to MIR (the checker has
-            // no partial-move model — see `rhs_local`).
-            let captured_nc: HashSet<LocalId> = mcx
+            // Read captures of a non-Copyable type move into an owning closure
+            // environment. MIR currently realizes a projected move by taking
+            // the whole root, while Copyable/Cloneable projections snapshot
+            // only themselves. Write captures remain by-reference.
+            let captured_moves: Vec<PlaceKey> = mcx
                 .captures
                 .get(id)
                 .iter()
-                .filter(|cap| {
-                    cap.kind == CaptureKind::Read
-                        && cap.key.is_whole()
-                        && local_is_non_copyable(mcx, cap.key.root)
-                })
-                .map(|cap| cap.key.root)
+                .filter(|cap| cap.kind == CaptureKind::Read && expr_is_non_copyable(mcx, cap.repr))
+                .map(|cap| effective_move_place(cap.key.clone()))
                 .collect();
+            let captured_roots: HashSet<LocalId> =
+                captured_moves.iter().map(|place| place.root).collect();
 
             // Analyze the body with those roots marked `captured_borrow`, so any
             // move-OUT of one (return/consume/rebind) is rejected as E506: the
@@ -711,13 +725,13 @@ fn analyze_expr(
             // must be an error, not an OSSA ICE.
             let kind = closure_kind_of(mcx, id);
             let captured_borrow: HashSet<LocalId> = if kind == kestrel_ast::FnTypeKind::Consuming {
-                captured_nc
+                captured_roots
                     .iter()
                     .copied()
                     .filter(|&root| !local_is_owned_place(mcx.cx, root))
                     .collect()
             } else {
-                captured_nc.clone()
+                captured_roots.clone()
             };
             let inner_mcx = MoveCtx {
                 cx: mcx.cx,
@@ -733,21 +747,14 @@ fn analyze_expr(
                 State::empty(),
                 diags,
             );
-            // A bare-local tail (`{ () in r }`) is the closure's return value but
-            // is not a `record_move` site (a tail `Local` read records no move),
+            // A place tail (`{ () in r }` / `{ () in r.field }`) is the
+            // closure's return value but is not otherwise a `record_move` site,
             // so flag it explicitly.
             if let Some(tail) = body.tail_expr
-                && let Some(root) = rhs_local(mcx.cx.hir, tail)
-                && captured_nc.contains(&root)
+                && place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, tail)
+                    .is_some_and(|place| captured_roots.contains(&place.root))
             {
-                record_move(
-                    &inner_mcx,
-                    &mut inner,
-                    diags,
-                    root,
-                    tail,
-                    FreezeReason::Move,
-                );
+                record_operand_move(&inner_mcx, &mut inner, diags, tail, FreezeReason::Move);
             }
 
             // THE FREEZE (docs/design/closures.md §"The freeze rule"): a VIEW
@@ -780,8 +787,8 @@ fn analyze_expr(
             // emits no `Take` for a view capture: removing one without the
             // other reopens the "consumed more than once" OSSA ICE.
             if !kind.is_view() {
-                for &root in &captured_nc {
-                    record_move(mcx, &mut state, diags, root, id, FreezeReason::Move);
+                for place in captured_moves {
+                    record_move(mcx, &mut state, diags, place, id, FreezeReason::Move);
                 }
             }
         },
@@ -795,10 +802,8 @@ fn analyze_expr(
             // the second call into a clean E500 instead of an OSSA
             // "consumed twice" ICE in MIR — the lockstep twin of
             // `lower_indirect_call`'s consuming-callee take.
-            if callee_kind_is_consuming(mcx, *callee)
-                && let Some(root) = rhs_local(hir, *callee)
-            {
-                record_move(mcx, &mut state, diags, root, *callee, FreezeReason::Consume);
+            if callee_kind_is_consuming(mcx, *callee) {
+                record_operand_move(mcx, &mut state, diags, *callee, FreezeReason::Consume);
             }
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
@@ -821,8 +826,8 @@ fn analyze_expr(
             } else if stores_operands_by_value(mcx, callee_entity, id) {
                 // Memberwise struct construction (bare `Struct` callee, no
                 // explicit init) or an enum-case payload: each operand is stored
-                // by value into the new aggregate, so a non-Copyable bare local
-                // is moved into it (#162). The synthesized constructor's params
+                // by value into the new aggregate, so a non-Copyable place is
+                // moved into it (#162). The synthesized constructor's params
                 // are always `is_consuming: false`, so the param path can't see
                 // this — record the operand moves directly.
                 for arg in args {
@@ -848,17 +853,8 @@ fn analyze_expr(
             // `consuming`-kind value consumes it. There is no other member on
             // a one-shot closure — it is `not Copyable` and has no `clone()` —
             // so this can only be that path.
-            if callee_kind_is_consuming(mcx, *receiver)
-                && let Some(root) = rhs_local(hir, *receiver)
-            {
-                record_move(
-                    mcx,
-                    &mut state,
-                    diags,
-                    root,
-                    *receiver,
-                    FreezeReason::Consume,
-                );
+            if callee_kind_is_consuming(mcx, *receiver) {
+                record_operand_move(mcx, &mut state, diags, *receiver, FreezeReason::Consume);
             }
             for arg in args {
                 state = analyze_expr(mcx, arg.value, state, false, diags);
@@ -976,8 +972,8 @@ fn analyze_expr(
 
 // ===== Move-trigger helpers =====
 
-/// Apply the move effects of a call: consuming receiver (if any) moves its
-/// base local; each consuming arg moves its base local.
+/// Apply the move effects of a call: the consuming receiver (if any) and each
+/// consuming argument move their effective MIR places.
 fn apply_call_moves(
     mcx: &MoveCtx<'_>,
     callee: Entity,
@@ -1037,8 +1033,8 @@ fn stores_operands_by_value(
     )
 }
 
-/// Record the move of an aggregate/consuming operand: if it is a bare
-/// non-Copyable local, it is moved at `operand`'s site.
+/// Record the move of an aggregate/consuming operand when it resolves to a
+/// non-Copyable place.
 fn record_operand_move(
     mcx: &MoveCtx<'_>,
     state: &mut State,
@@ -1046,24 +1042,27 @@ fn record_operand_move(
     operand: HirExprId,
     reason: FreezeReason,
 ) {
-    // FREEZE FIRST, and place-granularly. `sink(p.b)` destroys a PROJECTION —
-    // `rhs_local` deliberately returns `None` for it (the checker has no
-    // partial-move model), so the move funnel below never sees it, but the
-    // freeze rule must: a view of `p` (or of `p.b`) still dangles. Bare-local
-    // operands are consulted again inside `record_move`; `freeze_reported`
-    // makes that idempotent.
-    if let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, operand)
-        && !place.is_whole()
-        && expr_is_non_copyable(mcx, operand)
-    {
-        let span = util::expr_span(mcx.cx.hir, operand);
-        check_freeze(state, diags, &place, span, reason);
+    let Some(place) = place_key_of(mcx.cx.query, mcx.cx.typed, mcx.cx.hir, operand) else {
+        return;
+    };
+    if !expr_is_non_copyable(mcx, operand) {
+        return;
     }
-    if let Some(src) = rhs_local(mcx.cx.hir, operand)
-        && local_is_non_copyable(mcx, src)
-    {
-        record_move(mcx, state, diags, src, operand, reason);
-    }
+    record_move(
+        mcx,
+        state,
+        diags,
+        effective_move_place(place),
+        operand,
+        reason,
+    );
+}
+
+/// MIR currently moves a non-Copyable projection by taking and destructuring
+/// its whole root. Keep move diagnostics in lockstep until MIR has partial
+/// initialization and drop tracking.
+fn effective_move_place(place: PlaceKey) -> PlaceKey {
+    PlaceKey::whole(place.root)
 }
 
 /// Extract the base local of an expression if it is a bare `HirExpr::Local`.
@@ -1367,7 +1366,7 @@ fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<Loca
     }
 }
 
-/// Record that `src` is moved at `site`. If `src` is a pattern binding rooted in
+/// Record that `place` is moved at `site`. If its root is a pattern binding in
 /// a borrowed scrutinee, the move is illegal — emit E503 (move-out-of-borrow)
 /// rather than just tracking it.
 ///
@@ -1378,20 +1377,17 @@ fn record_move(
     mcx: &MoveCtx<'_>,
     state: &mut State,
     diags: &mut Vec<AnalyzeDiagnostic>,
-    src: LocalId,
+    place: PlaceKey,
     site: HirExprId,
     reason: FreezeReason,
 ) {
-    let whole = PlaceKey {
-        root: src,
-        path: Vec::new(),
-    };
+    let root = place.root;
     let span = util::expr_span(mcx.cx.hir, site);
-    if check_freeze(state, diags, &whole, span, reason) {
+    if check_freeze(state, diags, &place, span, reason) {
         // Still record the move so downstream reads stay consistent; the
         // freeze diagnostic is the one this site earns.
         state.moves.insert(
-            src,
+            place,
             MoveInfo {
                 kind: MoveKind::Definite,
                 site,
@@ -1399,13 +1395,13 @@ fn record_move(
         );
         return;
     }
-    if mcx.captured_borrow.contains(&src) {
+    if mcx.captured_borrow.contains(&root) {
         // Moving a captured non-Copyable value OUT of a closure body (#177):
         // the closure owns the single value and may be called more than once,
         // so returning/consuming it would duplicate it (double-deinit). Borrow
         // it instead. Distinct from E503 (move-out-of-borrowed-scrutinee).
-        if state.reported.insert(src) {
-            let name = mcx.cx.hir.locals[src].name.clone();
+        if state.reported.insert(root) {
+            let name = mcx.cx.hir.locals[root].name.clone();
             let span = util::expr_span(mcx.cx.hir, site);
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: DESCRIPTORS[3].id,
@@ -1424,8 +1420,8 @@ fn record_move(
                 ],
             });
         }
-    } else if mcx.borrow_bound.contains(&src) && state.reported.insert(src) {
-        let name = mcx.cx.hir.locals[src].name.clone();
+    } else if mcx.borrow_bound.contains(&root) && state.reported.insert(root) {
+        let name = mcx.cx.hir.locals[root].name.clone();
         let span = util::expr_span(mcx.cx.hir, site);
         diags.push(AnalyzeDiagnostic {
             descriptor_id: DESCRIPTORS[2].id,
@@ -1444,7 +1440,7 @@ fn record_move(
         });
     }
     state.moves.insert(
-        src,
+        place,
         MoveInfo {
             kind: MoveKind::Definite,
             site,
@@ -2033,12 +2029,12 @@ fn merge_if_else(pre: State, then: State, els: State) -> State {
         (false, true) => (then.moves.clone(), false),
         (false, false) => {
             let mut merged = HashMap::new();
-            let mut all: HashSet<LocalId> = HashSet::new();
-            all.extend(then.moves.keys().copied());
-            all.extend(els.moves.keys().copied());
-            for local in all {
-                let t = then.moves.get(&local).copied();
-                let e = els.moves.get(&local).copied();
+            let mut all: HashSet<PlaceKey> = HashSet::new();
+            all.extend(then.moves.keys().cloned());
+            all.extend(els.moves.keys().cloned());
+            for place in all {
+                let t = then.moves.get(&place).copied();
+                let e = els.moves.get(&place).copied();
                 let info = match (t, e) {
                     (Some(a), Some(b)) => {
                         let kind = match (a.kind, b.kind) {
@@ -2053,7 +2049,7 @@ fn merge_if_else(pre: State, then: State, els: State) -> State {
                     },
                     (None, None) => unreachable!(),
                 };
-                merged.insert(local, info);
+                merged.insert(place, info);
             }
             (merged, false)
         },
@@ -2083,17 +2079,17 @@ fn merge_match(pre: State, arms: Vec<State>) -> State {
         return out;
     }
     let live: Vec<&State> = arms.iter().filter(|s| !s.diverged).collect();
-    let mut all: HashSet<LocalId> = HashSet::new();
+    let mut all: HashSet<PlaceKey> = HashSet::new();
     for s in &live {
-        all.extend(s.moves.keys().copied());
+        all.extend(s.moves.keys().cloned());
     }
     let mut merged = HashMap::new();
-    for local in all {
+    for place in all {
         let mut all_definite = true;
         let mut any_info: Option<MoveInfo> = None;
         let mut present_in_all_live = true;
         for s in &live {
-            match s.moves.get(&local) {
+            match s.moves.get(&place) {
                 Some(info) => {
                     if any_info.is_none() {
                         any_info = Some(*info);
@@ -2115,7 +2111,7 @@ fn merge_match(pre: State, arms: Vec<State>) -> State {
             MoveKind::Maybe
         };
         merged.insert(
-            local,
+            place,
             MoveInfo {
                 kind,
                 site: info.site,

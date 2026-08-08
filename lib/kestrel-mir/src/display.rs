@@ -332,6 +332,23 @@ fn fmt_inst(
         InstKind::DestroyValue { operand } => {
             write!(out, "destroy_value {}", fmt_value(*operand)).unwrap();
         },
+        InstKind::CoerceFnKind {
+            result,
+            operand,
+            from,
+            to,
+        } => {
+            write!(
+                out,
+                "{} = coerce_fn_kind {:?}->{:?} {}",
+                fmt_value(*result),
+                from,
+                to,
+                fmt_value(*operand)
+            )
+            .unwrap();
+            out.push_str(&fmt_type_comment(*result, body, arena, module));
+        },
 
         // -- Borrowing --
         InstKind::BeginBorrow { result, operand } => {

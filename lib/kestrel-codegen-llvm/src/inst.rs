@@ -80,6 +80,19 @@ pub fn compile_inst<'ctx>(
             }
         },
 
+        // Thick-function layouts are prefix-compatible: view kinds are the
+        // first two words of the four-word owning layout.
+        InstKind::CoerceFnKind {
+            result, operand, ..
+        } => {
+            let src = fc.get_value(*operand).into_pointer_value();
+            let ty = fc.body.values[result.index()].ty;
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let slot = fc.alloca(repr.size(), repr.align());
+            mem::copy_aggregate(cx, builder, ptr_size, repr.size(), slot, src);
+            fc.map_value(*result, slot.into());
+        },
+
         InstKind::DestroyValue { .. } => {},
 
         // operand: RAW (custom spill for @owned scalars) → result: ADDR

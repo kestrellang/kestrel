@@ -296,8 +296,13 @@ pub fn flatten(
 
         // Implicit variant — resolve entity from scrutinee type's enum cases
         HirPat::ImplicitVariant { name, args, .. } => {
-            let (entity, field_types) =
-                resolve_implicit_variant(query, root, name.as_str_or_empty(), args.len(), scrutinee_ty);
+            let (entity, field_types) = resolve_implicit_variant(
+                query,
+                root,
+                name.as_str_or_empty(),
+                args.len(),
+                scrutinee_ty,
+            );
             let children: Vec<_> = args
                 .iter()
                 .enumerate()
@@ -379,7 +384,11 @@ pub fn flatten(
             if has_rest {
                 children.push(FlatPat::Wildcard); // rest slot
             }
-            children.extend(suffix.iter().map(|&id| flatten(hir, query, root, id, &elem_ty)));
+            children.extend(
+                suffix
+                    .iter()
+                    .map(|&id| flatten(hir, query, root, id, &elem_ty)),
+            );
 
             FlatPat::Ctor {
                 ctor: Constructor::Array {
@@ -438,7 +447,9 @@ fn flatten_range(start: &Option<HirLiteral>, end: &Option<HirLiteral>, inclusive
             _ => None,
         };
         let e = match end {
-            Some(HirLiteral::Integer(v)) => Some(if inclusive { *v as i64 } else { (v - 1) as i64 }),
+            Some(HirLiteral::Integer(v)) => {
+                Some(if inclusive { *v as i64 } else { (v - 1) as i64 })
+            },
             _ => None,
         };
         Constructor::IntRange { start: s, end: e }

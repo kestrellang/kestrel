@@ -61,6 +61,19 @@ pub fn compile_inst(
             }
         },
 
+        // Thick-function layouts are prefix-compatible: view kinds are the
+        // first two words of the four-word owning layout.
+        InstKind::CoerceFnKind {
+            result, operand, ..
+        } => {
+            let src = fc.get_value(builder, *operand);
+            let ty = fc.body.values[result.index()].ty;
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), fc.ctx.ptr_ty);
+            mem::copy_aggregate(builder, repr.size(), slot, src);
+            fc.map_value(builder, *result, slot);
+        },
+
         InstKind::DestroyValue { .. } => {},
 
         // operand: RAW (custom spill for @owned scalars) → result: ADDR

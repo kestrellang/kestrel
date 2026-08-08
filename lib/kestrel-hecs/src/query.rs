@@ -1,6 +1,6 @@
+use rustc_hash::{FxHashMap, FxHasher};
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
-use rustc_hash::{FxHashMap, FxHasher};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 

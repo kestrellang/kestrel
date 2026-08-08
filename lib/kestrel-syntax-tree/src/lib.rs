@@ -339,9 +339,9 @@ pub enum SyntaxKind {
     // New kinds are appended here (NOT grouped with their family above):
     // rowan green trees store kinds as raw u16 discriminants, so inserting
     // mid-enum would shift every later kind and corrupt cached trees.
-    TyRef,    // &T - shared reference type (parsed, rejected until stage 1)
-    TyMutRef, // &mutating T - mutable reference type
-    RefClause, // ref { ... } place accessor (stage 1.5)
+    TyRef,             // &T - shared reference type (parsed, rejected until stage 1)
+    TyMutRef,          // &mutating T - mutable reference type
+    RefClause,         // ref { ... } place accessor (stage 1.5)
     MutatingRefClause, // mutating ref { ... } place accessor (stage 1.5)
     RefBindingPattern, // &name / &mutating name binder pattern (stage 1.5 item 2)
 }

@@ -735,6 +735,19 @@ impl<'a> BlockVerifier<'a> {
             InstKind::DestroyValue { operand } => {
                 self.try_consume(*operand, idx);
             },
+            InstKind::CoerceFnKind {
+                result,
+                operand,
+                from,
+                to,
+            } => {
+                if matches!((from, to), (crate::FnKind::Escaping, crate::FnKind::Consuming)) {
+                    self.try_consume(*operand, idx);
+                } else {
+                    self.assert_readable(*operand, idx);
+                }
+                self.define_owned(*result);
+            },
 
             // -- Borrowing --
             InstKind::BeginBorrow { result, operand } => {
@@ -1483,49 +1496,7 @@ pub fn check_escapes(module: &MirModule) -> Vec<VerifyError> {
                 },
                 RootProvenance::Param(idx) => {
                     let convention = func.params.get(idx as usize).map(|p| p.convention);
-                    // TRUNCATED-VIEW RETURN (plan D5, conversion 2). Coercing
-                    // an owning closure to a VIEW kind produces a non-owning
-                    // `{fn, handle-as-ptr}` view rooted at the source handle —
-                    // it retains nothing. Rooted at a BORROWED parameter it
-                    // would outlive the caller's handle, so a view-kind return
-                    // slot rejects it. Returning the same parameter AT an
-                    // owning kind is a retained copy and stays legal, which is
-                    // exactly the `is_boxed` gate here.
-                    // The value's OWN type is the boxed source; the return
-                    // slot is a view kind. Anything else (a view closure
-                    // returned from a borrowed receiver — `Provider.subscript`
-                    // handing back `self.f`) keeps today's Param acceptance.
-                    if is_closure
-                        && convention != Some(ParamConvention::Consuming)
-                        && matches!(
-                            module.ty_arena.get(vd.ty),
-                            crate::ty::MirTy::FuncThick { kind, .. } if kind.is_boxed()
-                        )
-                        && matches!(
-                            module.ty_arena.get(func.ret),
-                            crate::ty::MirTy::FuncThick { kind, .. } if !kind.is_boxed()
-                        )
-                    {
-                        let pname = func
-                            .params
-                            .get(idx as usize)
-                            .map(|p| format!(" `{}`", p.name))
-                            .unwrap_or_default();
-                        push(
-                            "E494",
-                            format!(
-                                "cannot return {what} borrowed parameter{pname}, which does \
-                                 not outlive the call"
-                            ),
-                            None,
-                            vec![
-                                "a view-kind closure does not own its environment; it cannot \
-                                 outlive the handle it views"
-                                    .into(),
-                                "return it at `escaping` to hand back a retained copy".into(),
-                            ],
-                        );
-                    } else if convention == Some(ParamConvention::Consuming) {
+                    if convention == Some(ParamConvention::Consuming) {
                         let pname = func
                             .params
                             .get(idx as usize)

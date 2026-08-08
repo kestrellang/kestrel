@@ -66,9 +66,8 @@ where
 fn strip_labels(diagnostic: &Diagnostic<usize>) -> Diagnostic<usize> {
     let mut bare = diagnostic.clone();
     bare.labels.clear();
-    bare.notes.push(
-        "(no source location available — diagnostic attached to a synthesized node)".into(),
-    );
+    bare.notes
+        .push("(no source location available — diagnostic attached to a synthesized node)".into());
     bare
 }
 
@@ -236,7 +235,10 @@ mod tests {
             .with_message("conformance failed on a synthesized node")
             .with_labels(vec![Label::primary(0usize, 0..0)]);
         let out = render(&files, &[diag]);
-        assert!(out.contains("conformance failed on a synthesized node"), "got: {out:?}");
+        assert!(
+            out.contains("conformance failed on a synthesized node"),
+            "got: {out:?}"
+        );
         assert!(out.contains("no source location available"), "got: {out:?}");
     }
 
@@ -255,6 +257,9 @@ mod tests {
         let out = render(&files, &[bad, good]);
         assert!(out.contains("first: synthetic"), "got: {out:?}");
         assert!(out.contains("second: real span"), "got: {out:?}");
-        assert!(out.contains("real.ks"), "real-span diagnostic should show source: {out:?}");
+        assert!(
+            out.contains("real.ks"),
+            "real-span diagnostic should show source: {out:?}"
+        );
     }
 }

@@ -12,7 +12,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::resolve_name::{find_assoc_type, NameResolution, ResolveName};
+use crate::resolve_name::{NameResolution, ResolveName, find_assoc_type};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== TypeResolution =====
@@ -93,11 +93,11 @@ impl QueryFn for ResolveTypePath {
 
         // Resolve first segment via name resolution; single-segment paths
         // and lookup failures resolve fully here.
-        let mut current =
-            match resolve_first_segment(ctx, &self.segments, self.context, self.root) {
-                Ok(entity) => entity,
-                Err(resolution) => return resolution,
-            };
+        let mut current = match resolve_first_segment(ctx, &self.segments, self.context, self.root)
+        {
+            Ok(entity) => entity,
+            Err(resolution) => return resolution,
+        };
 
         // Multi-segment: walk remaining segments
         for segment in &self.segments[1..] {

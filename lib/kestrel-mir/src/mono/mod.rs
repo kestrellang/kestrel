@@ -87,14 +87,7 @@ pub fn monomorphize(
         mono_bodies.push(result);
     }
 
-    // Phase 3a: Resolve Witness -> Direct.
-    // resolved_witnesses is keyed by (block_idx, inst_idx), so it must be
-    // consumed before any pass that could shift instruction indices.
-    for body_result in &mut mono_bodies {
-        resolve_witnesses_to_direct(body_result);
-    }
-
-    // Phase 3b: ID assignment + callee rewriting
+    // Phase 3: ID assignment + callee rewriting
     let func_id_map: HashMap<InstantiationKey, MonoFuncId> = instantiations
         .iter()
         .enumerate()
@@ -390,8 +383,6 @@ struct MonoBodyResult {
     ret: TyId,
     extern_info: Option<crate::item::function::ExternInfo>,
     is_main: bool,
-    /// Resolved witness callees: (block_idx, inst_idx) -> target key
-    resolved_witnesses: HashMap<(usize, usize), InstantiationKey>,
 }
 
 fn monomorphize_body(
@@ -440,14 +431,11 @@ fn monomorphize_body(
             ret,
             extern_info,
             is_main,
-            resolved_witnesses: HashMap::new(),
         };
     };
 
     // Clone and substitute the body
     let mut mono_body = body.clone();
-    let mut resolved_witnesses = HashMap::new();
-
     // Substitute value types
     for value in &mut mono_body.values {
         value.ty = substitute(arena, value.ty, &subst);
@@ -461,8 +449,8 @@ fn monomorphize_body(
     }
 
     // Walk instructions and substitute types
-    for (bi, block) in mono_body.blocks.iter_mut().enumerate() {
-        for (ii, inst) in block.insts.iter_mut().enumerate() {
+    for block in &mut mono_body.blocks {
+        for inst in &mut block.insts {
             substitute_inst(
                 arena,
                 witnesses,
@@ -472,9 +460,6 @@ fn monomorphize_body(
                 &mut inst.kind,
                 &subst,
                 key.self_type,
-                bi,
-                ii,
-                &mut resolved_witnesses,
             );
         }
         // No terminator substitution needed — MIR terminators carry ValueId only
@@ -524,7 +509,6 @@ fn monomorphize_body(
         ret,
         extern_info,
         is_main,
-        resolved_witnesses,
     }
 }
 
@@ -540,9 +524,6 @@ fn substitute_inst(
     kind: &mut InstKind,
     subst: &SubstMap,
     parent_self: Option<TyId>,
-    block_idx: usize,
-    inst_idx: usize,
-    resolved_witnesses: &mut HashMap<(usize, usize), InstantiationKey>,
 ) {
     // Embedded types must be `substitute_and_resolve`d, not just `substitute`d:
     // substitution replaces a projection's TypeParam base with a concrete type
@@ -556,6 +537,19 @@ fn substitute_inst(
     let resolve = |arena: &mut TyArena, ty: TyId| {
         collect::substitute_and_resolve(arena, witnesses, ty, subst)
     };
+    for (_, callee) in kind.callees_mut() {
+        substitute_callee_and_resolve(
+            arena,
+            witnesses,
+            protocols,
+            functions,
+            entity_names,
+            callee,
+            subst,
+            parent_self,
+        );
+    }
+
     match kind {
         // Memory access instructions with embedded type
         InstKind::CopyAddr { ty, .. }
@@ -593,25 +587,6 @@ fn substitute_inst(
         // Constants
         InstKind::Literal { value, .. } => {
             substitute_immediate(arena, witnesses, &mut value.kind, subst);
-        },
-
-        // Calls and partial applications both reference a callable through a
-        // `Callee` — substitute its type args / self_type identically so the
-        // instantiation key matches what `rewrite_callee` later looks up.
-        InstKind::Call { callee, .. } | InstKind::ApplyPartial { callee, .. } => {
-            substitute_callee_and_resolve(
-                arena,
-                witnesses,
-                protocols,
-                functions,
-                entity_names,
-                callee,
-                subst,
-                parent_self,
-                block_idx,
-                inst_idx,
-                resolved_witnesses,
-            );
         },
 
         // All other InstKinds carry only ValueId — no substitution needed
@@ -684,11 +659,8 @@ fn substitute_callee_and_resolve(
     callee: &mut Callee,
     subst: &SubstMap,
     parent_self: Option<TyId>,
-    block_idx: usize,
-    inst_idx: usize,
-    resolved_witnesses: &mut HashMap<(usize, usize), InstantiationKey>,
 ) {
-    match callee {
+    let resolved_witness = match callee {
         Callee::Direct {
             func,
             type_args,
@@ -714,6 +686,7 @@ fn substitute_callee_and_resolve(
             {
                 *self_type = parent_self;
             }
+            None
         },
         Callee::Witness {
             protocol,
@@ -737,49 +710,23 @@ fn substitute_callee_and_resolve(
                 *self_type,
                 method_type_args,
             );
-            if let Ok(resolved) = witness_result {
-                resolved_witnesses.insert(
-                    (block_idx, inst_idx),
-                    InstantiationKey::new(
-                        resolved.func_entity,
-                        resolved.type_args,
-                        resolved.self_type,
-                    ),
-                );
-            }
+            witness_result.ok().map(|resolved| {
+                InstantiationKey::new(resolved.func_entity, resolved.type_args, resolved.self_type)
+            })
         },
-        _ => {},
-    }
-}
-
-// -- Phase 3a: Witness resolution --
-
-/// Resolve Callee::Witness -> Callee::Direct using the resolved_witnesses
-/// map (keyed by pre-expansion block/inst indices). Must run before any
-/// pass that could shift instruction indices.
-fn resolve_witnesses_to_direct(body_result: &mut MonoBodyResult) {
-    let Some(body) = &mut body_result.body else {
-        return;
+        _ => None,
     };
-    for (bi, block) in body.blocks.iter_mut().enumerate() {
-        for (ii, inst) in block.insts.iter_mut().enumerate() {
-            if let InstKind::Call {
-                callee: callee @ Callee::Witness { .. },
-                ..
-            } = &mut inst.kind
-                && let Some(target_key) = body_result.resolved_witnesses.get(&(bi, ii))
-            {
-                *callee = Callee::Direct {
-                    func: target_key.func_entity,
-                    type_args: target_key.type_args.clone(),
-                    self_type: target_key.self_type,
-                };
-            }
-        }
+
+    if let Some(target) = resolved_witness {
+        *callee = Callee::Direct {
+            func: target.func_entity,
+            type_args: target.type_args,
+            self_type: target.self_type,
+        };
     }
 }
 
-// -- Phase 3b: Callee rewriting --
+// -- Phase 3: Callee rewriting --
 
 fn rewrite_callees(
     body_result: &mut MonoBodyResult,
@@ -790,41 +737,12 @@ fn rewrite_callees(
         return;
     };
 
-    for (bi, block) in body.blocks.iter_mut().enumerate() {
-        for (ii, inst) in block.insts.iter_mut().enumerate() {
+    for block in &mut body.blocks {
+        for inst in &mut block.insts {
+            for (_, callee) in inst.kind.callees_mut() {
+                rewrite_callee(callee, func_id_map, functions);
+            }
             match &mut inst.kind {
-                InstKind::Call { callee, .. } => {
-                    rewrite_callee(
-                        callee,
-                        bi,
-                        ii,
-                        &body_result.resolved_witnesses,
-                        func_id_map,
-                        functions,
-                    );
-                },
-                InstKind::ApplyPartial {
-                    callee,
-                    retain,
-                    release,
-                    ..
-                } => {
-                    // The retain/release shims resolve exactly like the closure
-                    // target — codegen packs all three as function addresses.
-                    for c in [Some(callee), retain.as_mut(), release.as_mut()]
-                        .into_iter()
-                        .flatten()
-                    {
-                        rewrite_callee(
-                            c,
-                            bi,
-                            ii,
-                            &body_result.resolved_witnesses,
-                            func_id_map,
-                            functions,
-                        );
-                    }
-                },
                 InstKind::Literal { value, .. } => {
                     if let ImmediateKind::FunctionRef {
                         func,
@@ -846,9 +764,6 @@ fn rewrite_callees(
 
 fn rewrite_callee(
     callee: &mut Callee,
-    block_idx: usize,
-    inst_idx: usize,
-    resolved_witnesses: &HashMap<(usize, usize), InstantiationKey>,
     func_id_map: &HashMap<InstantiationKey, MonoFuncId>,
     functions: &IndexMap<Entity, FunctionDef>,
 ) {
@@ -866,13 +781,6 @@ fn rewrite_callee(
             }
             let key = InstantiationKey::new(*func, targs, *self_type);
             if let Some(&mono_id) = func_id_map.get(&key) {
-                *callee = Callee::Resolved(mono_id);
-            }
-        },
-        Callee::Witness { .. } => {
-            if let Some(target_key) = resolved_witnesses.get(&(block_idx, inst_idx))
-                && let Some(&mono_id) = func_id_map.get(target_key)
-            {
                 *callee = Callee::Resolved(mono_id);
             }
         },
@@ -1365,10 +1273,12 @@ mod tests {
     use crate::inst::{CallArg, InstKind, Instruction};
     use crate::item::TypeParamDef;
     use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
+    use crate::item::protocol::ProtocolDef;
+    use crate::item::witness::{WitnessDef, WitnessMethodBinding};
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
-    use crate::{BlockId, ValueId};
+    use crate::{BlockId, ValueId, WitnessMethodKey};
 
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
@@ -1529,6 +1439,214 @@ mod tests {
                 assert!(matches!(callee, Callee::Resolved(_)));
             },
             _ => panic!("expected call"),
+        }
+    }
+
+    #[test]
+    fn monomorphize_apply_partial_rewrites_every_callee() {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let i64_ty = module.ty_arena.i64();
+        let maker_param = entity(20);
+        let maker_param_ty = module.ty_arena.intern(MirTy::TypeParam(maker_param));
+
+        let generic_stub = |entity, param, name: &str| {
+            let mut body = OssaBody::new();
+            let ret = body.alloc_value(ValueDef::owned(unit));
+            let entry = body.alloc_block();
+            body.entry = entry;
+            body.block_mut(entry).terminator = Terminator::new(TerminatorKind::Return(ret));
+            FunctionDef {
+                entity,
+                name: name.into(),
+                kind: FunctionKind::Free,
+                type_params: vec![TypeParamDef::new(param, "T")],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: Some(body),
+                extern_info: None,
+                is_main: false,
+                provides_protocol_default: false,
+            }
+        };
+
+        let target_entity = entity(2);
+        let retain_entity = entity(3);
+        let release_entity = entity(4);
+        module.add_function(generic_stub(target_entity, entity(21), "target"));
+        module.add_function(generic_stub(retain_entity, entity(22), "retain"));
+        module.add_function(generic_stub(release_entity, entity(23), "release"));
+
+        let result = ValueId::new(0);
+        let maker = FunctionDef {
+            entity: entity(5),
+            name: "maker".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![TypeParamDef::new(maker_param, "T")],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![Instruction::new(InstKind::ApplyPartial {
+                    result,
+                    callee: Callee::direct_with_args(target_entity, vec![maker_param_ty], None),
+                    captures: vec![],
+                    retain: Some(Callee::direct_with_args(
+                        retain_entity,
+                        vec![maker_param_ty],
+                        None,
+                    )),
+                    release: Some(Callee::direct_with_args(
+                        release_entity,
+                        vec![maker_param_ty],
+                        None,
+                    )),
+                })],
+                result,
+                vec![ValueDef::owned(unit)],
+            )),
+            extern_info: None,
+            is_main: false,
+            provides_protocol_default: false,
+        };
+        module.add_function(maker);
+
+        let main_ret = ValueId::new(0);
+        module.add_function(FunctionDef {
+            entity: entity(1),
+            name: "main".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![Instruction::new(InstKind::Call {
+                    result: None,
+                    callee: Callee::direct_with_args(entity(5), vec![i64_ty], None),
+                    args: vec![],
+                })],
+                main_ret,
+                vec![ValueDef::owned(unit)],
+            )),
+            extern_info: None,
+            is_main: false,
+            provides_protocol_default: false,
+        });
+
+        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let maker = mono
+            .functions
+            .iter()
+            .find(|f| f.source == entity(5))
+            .unwrap();
+        let InstKind::ApplyPartial {
+            callee,
+            retain,
+            release,
+            ..
+        } = &maker.body.as_ref().unwrap().blocks[0].insts[0].kind
+        else {
+            panic!("expected ApplyPartial");
+        };
+        assert!(matches!(callee, Callee::Resolved(_)));
+        assert!(matches!(retain, Some(Callee::Resolved(_))));
+        assert!(matches!(release, Some(Callee::Resolved(_))));
+        for source in [target_entity, retain_entity, release_entity] {
+            assert!(
+                mono.functions
+                    .iter()
+                    .any(|f| f.source == source && f.type_args == vec![i64_ty])
+            );
+        }
+    }
+
+    #[test]
+    fn monomorphize_apply_partial_resolves_every_witness_callee() {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let i64_ty = module.ty_arena.i64();
+        let protocol_entity = entity(10);
+        module.add_protocol(ProtocolDef::new(protocol_entity, "ClosureLifecycle"));
+
+        let target_key = WitnessMethodKey::new("target", vec![]);
+        let retain_key = WitnessMethodKey::new("retain", vec![]);
+        let release_key = WitnessMethodKey::new("release", vec![]);
+        let mut witness = WitnessDef::new(protocol_entity, i64_ty);
+        for (key, function) in [
+            (target_key.clone(), entity(2)),
+            (retain_key.clone(), entity(3)),
+            (release_key.clone(), entity(4)),
+        ] {
+            witness.add_method(WitnessMethodBinding::new(key, function, vec![]));
+        }
+        module.add_witness(witness);
+
+        for (function, name) in [
+            (entity(2), "target"),
+            (entity(3), "retain"),
+            (entity(4), "release"),
+        ] {
+            let ret = ValueId::new(0);
+            module.add_function(FunctionDef {
+                entity: function,
+                name: name.into(),
+                kind: FunctionKind::Free,
+                type_params: vec![],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: Some(make_body(vec![], ret, vec![ValueDef::owned(unit)])),
+                extern_info: None,
+                is_main: false,
+                provides_protocol_default: false,
+            });
+        }
+
+        let witness_callee = |method| Callee::Witness {
+            protocol: protocol_entity,
+            method,
+            self_type: i64_ty,
+            method_type_args: vec![],
+        };
+        let result = ValueId::new(0);
+        module.add_function(FunctionDef {
+            entity: entity(1),
+            name: "main".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![Instruction::new(InstKind::ApplyPartial {
+                    result,
+                    callee: witness_callee(target_key),
+                    captures: vec![],
+                    retain: Some(witness_callee(retain_key)),
+                    release: Some(witness_callee(release_key)),
+                })],
+                result,
+                vec![ValueDef::owned(unit)],
+            )),
+            extern_info: None,
+            is_main: false,
+            provides_protocol_default: false,
+        });
+        module.register_name(protocol_entity, "ClosureLifecycle");
+
+        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        let main = mono
+            .functions
+            .iter()
+            .find(|f| f.source == entity(1))
+            .unwrap();
+        for (_, callee) in main.body.as_ref().unwrap().blocks[0].insts[0]
+            .kind
+            .callees()
+        {
+            assert!(matches!(callee, Callee::Resolved(_)));
         }
     }
 

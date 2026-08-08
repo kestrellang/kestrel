@@ -3,7 +3,7 @@ use kestrel_span::Span;
 
 use crate::callee::Callee;
 use crate::immediate::ImmediateKind;
-use crate::inst::InstKind;
+use crate::inst::{CalleeSite, InstKind};
 use crate::mono::types::{MonoFunction, MonoModule};
 use crate::ty::MirTy;
 use crate::{BlockId, CopyBehavior, TyId};
@@ -269,14 +269,12 @@ fn verify_function(
 
         for (ii, inst) in block.insts.iter().enumerate() {
             let inst_span = inst.span.as_ref();
+            for (site, callee) in inst.kind.callees() {
+                check_callee(
+                    module, fi, block_id, ii, inst_span, site, callee, func_count, errors,
+                );
+            }
             match &inst.kind {
-                // Check callees are resolved
-                InstKind::Call { callee, .. } => {
-                    check_callee(
-                        module, fi, block_id, ii, inst_span, callee, func_count, errors,
-                    );
-                },
-
                 // Check FunctionRef is rewritten to MonoFunctionRef
                 InstKind::Literal { value, .. } => {
                     check_literal(
@@ -382,6 +380,7 @@ fn check_callee(
     block: BlockId,
     ii: usize,
     span: Option<&Span>,
+    site: CalleeSite,
     callee: &Callee,
     func_count: usize,
     errors: &mut Vec<MonoVerifyError>,
@@ -410,7 +409,7 @@ fn check_callee(
                 block: Some(block),
                 inst: Some(ii),
                 message: format!(
-                    "Callee::Direct not resolved to Callee::Resolved \
+                    "{site:?} Callee::Direct not resolved to Callee::Resolved \
                      (callee='{name}' {func:?}, type_args=[{}], self_type={stype})",
                     targs.join(", ")
                 ),
@@ -439,8 +438,8 @@ fn check_callee(
                 block: Some(block),
                 inst: Some(ii),
                 message: format!(
-                    "type '{ty}' does not implement '{}' required by '{proto}' \
-                     (no matching conformance for this instantiation)",
+                    "{site:?}: type '{ty}' does not implement '{}' required by '{proto}' \
+                      (no matching conformance for this instantiation)",
                     method.name
                 ),
                 span: span.cloned(),
@@ -462,7 +461,17 @@ fn check_callee(
                 });
             }
         },
-        Callee::Thin(_) | Callee::Thick(_) => {},
+        Callee::Thin(_) | Callee::Thick(_) if site == CalleeSite::Call => {},
+        Callee::Thin(_) | Callee::Thick(_) => {
+            errors.push(MonoVerifyError {
+                user_facing: false,
+                func_idx: fi,
+                block: Some(block),
+                inst: Some(ii),
+                message: format!("{site:?} must be resolved to a mono function: {callee:?}"),
+                span: span.cloned(),
+            });
+        },
     }
 }
 
@@ -839,6 +848,61 @@ mod tests {
         let result = verify_mono(&module);
         assert!(!result.is_ok());
         assert!(result.errors.iter().any(|e| e.message.contains("Direct")));
+    }
+
+    #[test]
+    fn verify_checks_every_apply_partial_callee() {
+        let mut module = make_module();
+        let unit = module.ty_arena.unit();
+        let ret_val = ValueId::new(0);
+        let closure_val = ValueId::new(1);
+        let mut block = BasicBlock::new();
+        block.insts.push(Instruction::new(InstKind::ApplyPartial {
+            result: closure_val,
+            callee: Callee::Resolved(MonoFuncId::new(0)),
+            captures: vec![],
+            retain: Some(Callee::Direct {
+                func: entity(99),
+                type_args: vec![],
+                self_type: None,
+            }),
+            release: Some(Callee::Thin(ret_val)),
+        }));
+        block.terminator = Terminator::new(TerminatorKind::Return(ret_val));
+        let body = OssaBody {
+            values: vec![ValueDef::owned(unit), ValueDef::owned(unit)],
+            blocks: vec![block],
+            entry: BlockId::new(0),
+            param_count: 0,
+            value_names: Default::default(),
+        };
+        module.add_function(MonoFunction {
+            name: "bad".into(),
+            source: entity(1),
+            type_args: vec![],
+            self_type: None,
+            params: vec![],
+            ret: unit,
+            body: Some(body),
+            extern_info: None,
+            is_main: false,
+            ret_borrow: false,
+        });
+
+        let result = verify_mono(&module);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("ApplyPartialRetain") && e.message.contains("Direct"))
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("ApplyPartialRelease")
+                    && e.message.contains("must be resolved"))
+        );
     }
 
     #[test]

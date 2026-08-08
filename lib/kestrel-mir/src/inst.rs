@@ -5,13 +5,21 @@ use smallvec::SmallVec;
 use crate::callee::Callee;
 use crate::immediate::Immediate;
 use crate::op::Op;
-use crate::ty::ParamConvention;
+use crate::ty::{FnKind, ParamConvention};
 use crate::{FieldIdx, TyId, ValueId, VariantIdx};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallArg {
     pub value: ValueId,
     pub convention: ParamConvention,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CalleeSite {
+    Call,
+    ApplyPartialTarget,
+    ApplyPartialRetain,
+    ApplyPartialRelease,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +54,15 @@ pub enum InstKind {
     },
     DestroyValue {
         operand: ValueId,
+    },
+    /// Rebuild a thick function value at another accepted closure kind.
+    /// `Escaping -> Consuming` transfers ownership; the view-tier conversions
+    /// only read the operand, which remains the adapted value's backing owner.
+    CoerceFnKind {
+        result: ValueId,
+        operand: ValueId,
+        from: FnKind,
+        to: FnKind,
     },
 
     // -- Borrowing --
@@ -246,11 +263,60 @@ pub enum InstKind {
 }
 
 impl InstKind {
+    /// Returns every callable referenced by this instruction.
+    pub fn callees(&self) -> SmallVec<[(CalleeSite, &Callee); 3]> {
+        let mut callees = SmallVec::new();
+        match self {
+            InstKind::Call { callee, .. } => callees.push((CalleeSite::Call, callee)),
+            InstKind::ApplyPartial {
+                callee,
+                retain,
+                release,
+                ..
+            } => {
+                callees.push((CalleeSite::ApplyPartialTarget, callee));
+                if let Some(retain) = retain {
+                    callees.push((CalleeSite::ApplyPartialRetain, retain));
+                }
+                if let Some(release) = release {
+                    callees.push((CalleeSite::ApplyPartialRelease, release));
+                }
+            },
+            _ => {},
+        }
+        callees
+    }
+
+    /// Returns every callable referenced by this instruction for mutation.
+    pub fn callees_mut(&mut self) -> SmallVec<[(CalleeSite, &mut Callee); 3]> {
+        let mut callees = SmallVec::new();
+        match self {
+            InstKind::Call { callee, .. } => callees.push((CalleeSite::Call, callee)),
+            InstKind::ApplyPartial {
+                callee,
+                retain,
+                release,
+                ..
+            } => {
+                callees.push((CalleeSite::ApplyPartialTarget, callee));
+                if let Some(retain) = retain {
+                    callees.push((CalleeSite::ApplyPartialRetain, retain));
+                }
+                if let Some(release) = release {
+                    callees.push((CalleeSite::ApplyPartialRelease, release));
+                }
+            },
+            _ => {},
+        }
+        callees
+    }
+
     /// Returns the single result ValueId, if this instruction produces exactly one.
     pub fn result(&self) -> Option<ValueId> {
         match self {
             InstKind::CopyValue { result, .. }
             | InstKind::MoveValue { result, .. }
+            | InstKind::CoerceFnKind { result, .. }
             | InstKind::BeginBorrow { result, .. }
             | InstKind::BeginMutBorrow { result, .. }
             | InstKind::Load { result, .. }
@@ -308,6 +374,7 @@ impl InstKind {
         match self {
             InstKind::CopyValue { operand, .. }
             | InstKind::MoveValue { operand, .. }
+            | InstKind::CoerceFnKind { operand, .. }
             | InstKind::DestroyValue { operand }
             | InstKind::BeginBorrow { operand, .. }
             | InstKind::EndBorrow { operand }
