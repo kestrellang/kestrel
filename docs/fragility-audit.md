@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 4 fixed · 2 partial · 2 blocked · 51 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 4 fixed · 3 partial · 2 blocked · 50 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -59,18 +59,27 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **F2** `high` `fragility` — LSP local rename replaces the whole `let` statement (and inserts at file offset 0 for parameters)
 - [x] **F3** `high` `single-source-of-truth` — "Is this a stored instance field?" is re-derived in ~15 places with three different predicates — **fixed**
   - `FieldClass` component set once by the field builder; storage is stored, not derived from absent markers. Six sites migrated. All four failures (wrong-slot write, E500 FP, E449 FP, OSSA ICE) verified fixed by running. Design + decisions: [`docs/design/f3-stored-field-consolidation.md`](design/f3-stored-field-consolidation.md)
-  - Not yet done: the two fail-loud backstops (name-checked struct construction, `InstKind::Struct` verifier rule) that would make a *future* divergence loud
+  - Fail-loud backstops landed too: struct construction binds labeled args by **name** (unknown label ICEs, never falls back to position), and the OSSA verifier requires every `InstKind::Struct` to supply each `FieldIdx` exactly once. 4 unit tests; neither fires anywhere in the suite, so they only catch new drift
+  - Invariant recorded in `lib/kestrel-ast-builder/AGENTS.md`
 - [ ] **F4** `medium` `fragility` — Escaping-closure box `init` is picked by arity alone; `RcBox` already has two 1-parameter inits
 - [x] **F5** `medium` `fragility` — `break`/`continue` validation leaks across the closure boundary; MIR then silently no-ops the `break` — **fixed**
   - `loop_labels` save/restore in `lower_closure` + MIR backstop diagnostic
 - [x] **F6** `medium` `single-source-of-truth` — `Copyable`/`Cloneable` lang protocols are identified by `name.ends_with(...)` in five MIR sites — **fixed**
   - lang items on MirModule; all 5 `ends_with` sites gone
-- [ ] **F7** `medium` `single-source-of-truth` — "Does T have a user clone?" is answered by witnesses in `clone_shim` but by method name in `expand`; the lookup silently last-write-wins
+- [ ] **F7** `low` `single-source-of-truth` — Four predicates answer "which function is T's clone"; `build_clone_lookup`'s key is lossy and silently last-write-wins — **severity lowered, failure mode corrected** (see Corrections)
 - [ ] **F8** `medium` `single-source-of-truth` — The LLVM backend never received the Bool-discriminant width fix that landed in cranelift (ef3fb801)
 - [ ] **F9** `medium` `incremental-hazard` — `NominalCopySemantics`/`NominalStaticness` memos depend on a thread-local recursion stack that is not part of the cache key
 - [ ] **F10** `medium` `single-source-of-truth` — Static-member lookup truncates to the first `extend` block
 - [ ] **F11** `medium` `single-source-of-truth` — The solver and the move checker ask `TypeParamCopyRequirement` with different `context`
-- [ ] **F12** `medium` `fragility` — Associated types on type params are matched by **name string** against ancestor where-clauses, and E439 can't see extension-target params
+- [x] **F12** `medium` `fragility` — Associated types on type params are matched by **name string** against ancestor where-clauses, and E439 can't see extension-target params — **fixed**
+  - where-clause subjects now resolve through `ResolveName` in the *bearing entity's* scope and are
+    compared by `Entity` (`SubjectParam` / `subject_denotes`); name is only a prefilter
+  - `ExtensionLhsParams` query = THE answer to "which target params does the LHS bind", backed by an
+    `ExtensionLhsParamNames` component written once at build time. Consumed by
+    `check_type_param_shadowing` (E439 now fires for generic extensions) and
+    `resolve_extension_type_param`; the RHS free-param scan shares the same list
+  - closed a latent leak found while fixing it: `T` used to resolve inside `extend Box[Concrete]`
+  - 4 tests under `types/generics/`, incl. a negative guard against false E439
 - [ ] **F13** `medium` `single-source-of-truth` — A missing `;` after an expression statement in a function body is silently accepted
 - [ ] **F14** `medium` `side-table` — Closure lowering's `SavedState` hand-mirrors `OssaBodyCtx`; three per-body fields are unsaved
 
@@ -179,4 +188,22 @@ Established by running the code, not reading it:
 
 - **F41** did not silently corrupt memory. At HEAD a narrow atomic was a hard cranelift verifier error (`arg 1 (v8) has type i32, expected i64`) — narrow atomics were unsupported, not miscompiled.
 - **F28** does not silently degrade. An unlowered intrinsic ICEs at post-mono verify (`Callee::Direct not resolved`). Still an ICE where a diagnostic belongs.
+- **F7's stated failure mode did not reproduce, and it is lowered `medium` → `low`.** The
+  claimed shim-vs-user-clone collision requires an out-of-line `clone()` that surfaces no
+  `WitnessDef`. Four configurations were compiled and run (2026-08-08) with
+  `KESTREL_DEBUG_CLONE=1`: inline `clone()`; `extend Handle { clone }` with conformance on the
+  struct; `extend Handle: Cloneable { clone }`; generic `extend Box[T]: Cloneable where T: Cloneable`;
+  and a cross-module `extend Lib.Handle: Cloneable`. In **every** case exactly one clone function
+  was registered for the nominal, the user `clone()` won, and no shim was synthesized — the
+  `clone_method_self_nominal` fallback at `expand.rs:258` already covers the extend cases. The
+  `clone_shim.rs:218-223` comment ("doesn't *always* surface a witness") is hedged and no longer
+  names a reachable case; **the double-free scenario is unsubstantiated.**
+  What *is* live is a different defect: `build_clone_lookup`'s key `(nominal, type_args)` drops
+  `parent_self`, which `InstantiationKey` carries. A trivial hello-world against the stdlib inserts
+  **97 entries under 78 distinct keys — 19 silent overwrites per build**, e.g. six MonoFuncIds
+  colliding on `(IoError, [])` and six on `(IoErrorKind, [])`. All colliding entries share the same
+  `source` entity, so they are re-instantiations of one generic function and picking any is
+  semantically equivalent — benign today. But it means **the audit's proposed "hard error on
+  duplicate key" fix would ICE on every build**; the guard must fire only when two entries disagree
+  on `source`. Repros: `temp/f7/*.ks`.
 - **F3 was understated, and is raised `medium` → `high`.** All four failure scenarios were reproduced by compiling and *running* programs (2026-08-08): the wrong-slot write on `S(a: 1, c: 3)` (prints `c=0`, no diagnostic at any stage), an E500 copy-fold false positive from a `static var` of a non-`Copyable` type, an E449 "cannot contain itself" false positive from a `static var` self-reference, and an **OSSA ICE** (`block arg 0 to BlockId(1): type mismatch`) on a struct pattern binding a computed property. The site count is ~15 real decision sites, not 8; three the audit missed are `mir-lower/items/mod.rs:60-67`, `mir-lower/body/expr.rs:1699`, and `mir-lower/body/mod.rs:2593`. `mir-lower/src/ty.rs:761` was miscited — it is inside `#[cfg(test)] mod tests`, not a production layout authority. `struct_cycles.rs`/`recursive_enum.rs` are `Field && !Callable`, missing *both* filters rather than just `Static`.

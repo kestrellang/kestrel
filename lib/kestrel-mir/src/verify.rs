@@ -914,7 +914,8 @@ impl<'a> BlockVerifier<'a> {
             },
 
             // -- Aggregate construction: operands that are @owned are consumed --
-            InstKind::Struct { result, fields, .. } => {
+            InstKind::Struct { result, ty, fields } => {
+                self.check_struct_construct_complete(*ty, fields, idx);
                 for (_, v) in fields {
                     if self.body.value(*v).ownership == Ownership::Owned {
                         self.try_consume(*v, idx);
@@ -1074,6 +1075,57 @@ impl<'a> BlockVerifier<'a> {
                         .insert(*result, AddrKind::Whole(InitState::Uninit));
                 }
             },
+        }
+    }
+
+    /// A `Struct` instruction must supply every field of its type exactly once.
+    ///
+    /// Struct construction is where the independently-computed field rosters
+    /// meet: the memberwise-init roster decides the arguments, the MIR layout
+    /// decides the `FieldIdx` space. When those drifted apart (F3) the result
+    /// was a wrong-slot write and an uninitialized field, with no diagnostic at
+    /// any stage. This turns any future divergence — a new member kind, a new
+    /// construction path — into a verifier error at the choke point, whichever
+    /// producer introduced it.
+    ///
+    /// Skipped for types with no lowered struct def (nothing to check against).
+    fn check_struct_construct_complete(
+        &mut self,
+        ty: TyId,
+        fields: &[(FieldIdx, ValueId)],
+        idx: Option<u32>,
+    ) {
+        let Some(count) = self.struct_field_count(ty) else {
+            return;
+        };
+        let mut seen = vec![0usize; count];
+        for (f, _) in fields {
+            match seen.get_mut(f.index()) {
+                Some(slot) => *slot += 1,
+                None => {
+                    let span = self.inst_span(idx);
+                    self.push_err(
+                        idx,
+                        span,
+                        format!(
+                            "struct construction writes field index {} but the type has \
+                             only {count} field(s)",
+                            f.index()
+                        ),
+                    );
+                },
+            }
+        }
+        for (i, n) in seen.iter().enumerate() {
+            if *n != 1 {
+                let span = self.inst_span(idx);
+                let what = if *n == 0 { "never written" } else { "written twice or more" };
+                self.push_err(
+                    idx,
+                    span,
+                    format!("struct construction leaves field index {i} {what}"),
+                );
+            }
         }
     }
 
@@ -2474,6 +2526,115 @@ mod tests {
     // -----------------------------------------------------------------------
     // Category 10: Valid Uninit + FieldAddr + StoreInit + Take passes
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Struct construction completeness (F3 backstop)
+    //
+    // Struct construction is where the independently-computed field rosters
+    // meet. These assert the verifier rejects the shapes a roster divergence
+    // produces, so the next one is a verifier error rather than a wrong-slot
+    // write into uninitialized memory.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn struct_construct_complete_is_accepted() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 3);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let v2 = b.emit_literal(Immediate::i64(3));
+
+        let s = b.emit_struct(
+            struct_ty,
+            vec![
+                (FieldIdx::new(0), v0),
+                (FieldIdx::new(1), v1),
+                (FieldIdx::new(2), v2),
+            ],
+        );
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn struct_construct_missing_field_is_rejected() {
+        // The exact shape of the F3 miscompile: the caller's roster had fewer
+        // fields than the layout, so a slot was never written and was later
+        // read as garbage.
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 3);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+
+        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(1), v1)]);
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("field index 2") && e.message.contains("never written")),
+            "expected a missing-field error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn struct_construct_duplicate_field_is_rejected() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+
+        // Both arguments land in slot 0 — field 1 is left uninitialized.
+        let s = b.emit_struct(struct_ty, vec![(FieldIdx::new(0), v0), (FieldIdx::new(0), v1)]);
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors.iter().any(|e| e.message.contains("written twice")),
+            "expected a duplicate-field error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn struct_construct_out_of_range_field_is_rejected() {
+        let mut b = OssaBuilder::new("test");
+        let (struct_ty, _entity) = make_owned_struct_with_fields(&mut b, 2);
+        let v0 = b.emit_literal(Immediate::i64(1));
+        let v1 = b.emit_literal(Immediate::i64(2));
+        let v2 = b.emit_literal(Immediate::i64(3));
+
+        let s = b.emit_struct(
+            struct_ty,
+            vec![
+                (FieldIdx::new(0), v0),
+                (FieldIdx::new(1), v1),
+                (FieldIdx::new(2), v2),
+            ],
+        );
+        b.emit_destroy_value(s);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let errors = run_verify(b);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("only 2 field(s)")),
+            "expected an out-of-range error, got: {:?}",
+            errors
+        );
+    }
 
     #[test]
     fn valid_uninit_field_store_take() {

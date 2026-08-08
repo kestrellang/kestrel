@@ -765,16 +765,38 @@ impl OssaBodyCtx<'_, '_> {
 
     fn emit_struct_construct(
         &mut self,
-        _struct_entity: Entity,
+        struct_entity: Entity,
         args: &[HirCallArg],
         result_ty: TyId,
     ) -> ValueId {
+        // Bind labeled arguments by NAME. Position-only binding made any
+        // disagreement between the memberwise-init roster (type-infer) and the
+        // MIR layout a silent wrong-slot write — that was F3. An unknown label
+        // must ICE rather than fall back to position: falling back is precisely
+        // the behaviour that hid the divergence.
+        //
+        // A struct missing from `module.structs` never reached the items phase,
+        // so there is no roster to check against; those stay positional.
+        let known_struct = self.ctx.module.structs.contains_key(&struct_entity);
         let fields: Vec<(FieldIdx, ValueId)> = args
             .iter()
             .enumerate()
             .map(|(i, arg)| {
+                let idx = match (&arg.label, known_struct) {
+                    (Some(label), true) => self
+                        .ctx
+                        .resolve_field_idx(struct_entity, label)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "ICE: struct {struct_entity:?} has no field '{label}' \
+                                 (argument {i}); the memberwise-init roster and the MIR \
+                                 layout disagree"
+                            )
+                        }),
+                    _ => FieldIdx::new(i),
+                };
                 let val = self.lower_expr(arg.value);
-                (FieldIdx::new(i), val)
+                (idx, val)
             })
             .collect();
 
