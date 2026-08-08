@@ -564,6 +564,7 @@ impl Builtin {
             "DefaultBooleanLiteralType" => Some(Self::DefaultBooleanLiteralType),
             "DefaultCharLiteralType" => Some(Self::DefaultCharLiteralType),
             "DefaultNullLiteralType" => Some(Self::DefaultNullLiteralType),
+            "DefaultArrayLiteralType" => Some(Self::DefaultArrayLiteralType),
             "DefaultDictionaryLiteralType" => Some(Self::DefaultDictionaryLiteralType),
 
             // Arithmetic operators
@@ -929,5 +930,86 @@ impl Builtin {
             // Well-known types — Bool is resolved by name, doesn't need @builtin
             Self::Bool => BuiltinKind::Struct,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn stdlib_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lang/std")
+    }
+
+    fn ks_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("stdlib dir is readable").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                ks_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "ks") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Every `@builtin(.Name)` occurrence in `text`, ignoring `//` comments —
+    /// the stdlib mentions builtin names in prose doc comments too.
+    fn annotations(text: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for line in text.lines() {
+            let code = line.split_once("//").map_or(line, |(before, _)| before);
+            let mut rest = code;
+            while let Some(at) = rest.find("@builtin(.") {
+                rest = &rest[at + "@builtin(.".len()..];
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                if end > 0 {
+                    found.push(rest[..end].to_string());
+                }
+            }
+        }
+        found
+    }
+
+    /// Every `@builtin(.Name)` written in the stdlib must parse into a `Builtin`.
+    ///
+    /// An unrecognised name is silently inert, not an error: `EntityBuiltin`
+    /// returns `None`, so the entity never enters `BuiltinIndex`, and
+    /// `ResolveBuiltin` falls through to its name-based strategy — the feature
+    /// keeps working by coincidence until the source name stops matching.
+    /// `DefaultArrayLiteralType` sat inert this way, masked by the type being
+    /// findable as `Array`.
+    #[test]
+    fn every_stdlib_builtin_annotation_is_recognized() {
+        let root = stdlib_root();
+        assert!(root.is_dir(), "stdlib not found at {}", root.display());
+
+        let mut files = Vec::new();
+        ks_files(&root, &mut files);
+        files.sort();
+
+        let mut seen = 0usize;
+        let mut inert: Vec<String> = Vec::new();
+        for path in &files {
+            let text = std::fs::read_to_string(path).expect("stdlib file is readable");
+            for name in annotations(&text) {
+                seen += 1;
+                if Builtin::from_attribute_name(&name).is_none() {
+                    let rel = path.strip_prefix(&root).unwrap_or(path);
+                    inert.push(format!("{}: @builtin(.{name})", rel.display()));
+                }
+            }
+        }
+
+        // Guard the guard: a scan that matches nothing would pass vacuously.
+        assert!(seen > 100, "only found {seen} @builtin annotations — scan is broken");
+        assert!(
+            inert.is_empty(),
+            "stdlib annotations with no `Builtin::from_attribute_name` arm \
+             (silently inert — add the arm):\n  {}",
+            inert.join("\n  ")
+        );
     }
 }
