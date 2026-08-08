@@ -26,11 +26,22 @@ pub struct LowerCtx<'w> {
 impl<'w> LowerCtx<'w> {
     pub fn new(world: &'w World, root: Entity, name: &str) -> Self {
         let query = world.query_context();
+        // Resolve the copy/clone lang items once here: MIR has no `World`, so
+        // without this it falls back to matching protocol names by suffix.
+        let mut module = MirModule::new(name);
+        module.copyable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Copyable,
+            root,
+        });
+        module.cloneable_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Cloneable,
+            root,
+        });
         Self {
             world,
             query,
             root,
-            module: MirModule::new(name),
+            module,
             closure_counter: 0,
             synthetic_counter: 0,
             escaping_nop_shim: None,

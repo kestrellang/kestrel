@@ -55,6 +55,8 @@ pub fn monomorphize(
         statics,
         mut ty_arena,
         entity_names,
+        copyable_protocol,
+        cloneable_protocol,
     } = module;
 
     // Phase 1: Instantiation discovery
@@ -108,11 +110,9 @@ pub fn monomorphize(
         target,
         // Inert `Clone(_)` payload for escaping-closure values — matches the
         // pre-mono `ty_query` answer so the two sides of the mono boundary
-        // agree (lockstep 1).
-        protocols
-            .values()
-            .find(|p| p.name.ends_with("Cloneable"))
-            .map(|p| p.entity),
+        // agree (lockstep 1). Same lang item `ty_query::find_cloneable_protocol`
+        // reads, so the two cannot drift.
+        cloneable_protocol,
     );
 
     // Phase 5: Assembly
@@ -134,6 +134,7 @@ pub fn monomorphize(
                 key,
                 &mut mono_module.ty_arena,
                 &protocols,
+                copyable_protocol,
                 &witnesses,
                 &mono_structs,
                 &mono_enums,
@@ -251,6 +252,7 @@ fn violated_copyable_bound(
     key: &InstantiationKey,
     arena: &mut TyArena,
     protocols: &IndexMap<Entity, ProtocolDef>,
+    copyable_protocol: Option<Entity>,
     witnesses: &[WitnessDef],
     mono_structs: &IndexMap<MonoTypeKey, MonoStruct>,
     mono_enums: &IndexMap<MonoTypeKey, MonoEnum>,
@@ -264,12 +266,7 @@ fn violated_copyable_bound(
                 type_param,
                 protocol,
                 ..
-            } if protocols
-                .get(protocol)
-                .is_some_and(|p| p.name.ends_with("Copyable")) =>
-            {
-                Some(*type_param)
-            },
+            } if copyable_protocol == Some(*protocol) => Some(*type_param),
             _ => None,
         })
         .collect();

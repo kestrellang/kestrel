@@ -351,24 +351,19 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
     }
 }
 
+// These three answer "is this the lang `Copyable`/`Cloneable` protocol?" from
+// the `@builtin` lang item recorded on the module (see `MirModule`), not from
+// the protocol's name. A name-suffix test also matched user protocols like
+// `MyCopyable` and would silently match nothing if the stdlib renamed either.
+
 pub fn is_cloneable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module
-        .protocols
-        .get(&entity)
-        .is_some_and(|p| p.name.ends_with("Cloneable"))
+    module.cloneable_protocol == Some(entity)
 }
 
 pub fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
-    module
-        .protocols
-        .get(&entity)
-        .is_some_and(|p| p.name.ends_with("Copyable"))
+    module.copyable_protocol == Some(entity)
 }
 
 pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
-    module
-        .protocols
-        .values()
-        .find(|p| p.name.ends_with("Cloneable"))
-        .map(|p| p.entity)
+    module.cloneable_protocol
 }

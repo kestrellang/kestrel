@@ -78,6 +78,19 @@ pub struct MirModule {
     pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// The `@builtin(.Copyable)` / `@builtin(.Cloneable)` protocol entities,
+    /// resolved once in mir-lower via `ResolveBuiltin`.
+    ///
+    /// MIR has no `World`, so it used to re-derive these with
+    /// `p.name.ends_with("Copyable")` — which also matched any user protocol
+    /// whose name happened to end that way, and silently matched nothing if the
+    /// stdlib protocol were ever renamed. Carrying the entity keeps the lang
+    /// item the single source of truth across the mir-lower → mir boundary.
+    ///
+    /// `None` for hand-built modules (unit tests) and for a build with no
+    /// stdlib — the same answer the name scan gave in those cases.
+    pub copyable_protocol: Option<Entity>,
+    pub cloneable_protocol: Option<Entity>,
 }
 
 impl MirModule {
@@ -92,6 +105,8 @@ impl MirModule {
             statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
+            copyable_protocol: None,
+            cloneable_protocol: None,
         }
     }
 
