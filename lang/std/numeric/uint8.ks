@@ -280,8 +280,8 @@ public struct UInt8:
         Int64(raw: lang.cast_i8_i64(lang.i8_ctz(self.raw)))
     }}
 
-    /// Value with its byte order reversed. Use to convert between big- and
-    /// little-endian; lowered to a `bswap` intrinsic.
+    /// Value with its byte order reversed. A single byte has no byte order,
+    /// so this is the identity — there is no `bswap` intrinsic at this width.
     public var byteSwapped: UInt8 { get {
         self
     }}
