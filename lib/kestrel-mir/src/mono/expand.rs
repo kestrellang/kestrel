@@ -39,7 +39,7 @@ pub fn expand_destroy_copy(
     // Narrow map for the CopyValue→clone guard: only a type's own clone
     // implementation may suppress cloning a copy of itself (to avoid
     // recursion). Ordinary methods that copy `self` must still clone.
-    let clone_impl_to_nominal = build_clone_impl_to_nominal_map(generic_functions);
+    let clone_impl_to_nominal = build_clone_impl_to_nominal_map(module);
 
     // Pre-intern Pointer(Named) types for cloneable types so the expand
     // pass can create BeginBorrow values without mutable arena access.
@@ -211,8 +211,11 @@ fn build_drop_impl_to_nominal_map(
     map
 }
 
-/// Build func_entity → nominal for *clone implementations only* — the
-/// synthesized `__clone$T` shim and the user-written `T.clone()` method.
+/// Build func_entity → nominal for *clone implementations only*, by inverting
+/// the `type_info.clone_impl` the clone-shim pass recorded. `MonoStruct`/
+/// `MonoEnum` clone their `TypeInfo` wholesale from the generic def, so the
+/// per-nominal decision survives monomorphization intact (only `.copy` is
+/// refined per instance).
 ///
 /// CopyValue→clone expansion is suppressed inside a type's own clone
 /// implementation, where expanding a copy of `T` would recurse
@@ -222,50 +225,32 @@ fn build_drop_impl_to_nominal_map(
 /// `RcBox` is bumped. Using the broad `method_to_nominal` map there left the
 /// returned slice as a bitwise alias with no refcount bump → the alias's
 /// later release over-decremented the count → double-free of the storage.
-fn build_clone_impl_to_nominal_map(
-    generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
-) -> HashMap<Entity, Entity> {
+fn build_clone_impl_to_nominal_map(module: &MonoModule) -> HashMap<Entity, Entity> {
     let mut map = HashMap::new();
-    for f in generic_functions.values() {
-        match &f.kind {
-            FunctionKind::CloneShim { nominal } => {
-                map.insert(f.entity, *nominal);
-            },
-            FunctionKind::Method { parent, .. } if f.name.ends_with(".clone") => {
-                map.insert(f.entity, *parent);
-            },
-            _ => {},
+    let structs = module
+        .structs
+        .values()
+        .map(|s| (s.source, &s.type_info));
+    let enums = module.enums.values().map(|e| (e.source, &e.type_info));
+    for (source, type_info) in structs.chain(enums) {
+        if let Some(func) = type_info.clone_impl {
+            map.insert(func, source);
         }
     }
     map
 }
 
-/// Build (nominal_entity, type_args) → MonoFuncId for clone functions.
-/// Finds both synthesized CloneShim functions and user-written .clone() methods
-/// via FunctionKind matching.
+/// Build (nominal_entity, type_args) → MonoFuncId for clone functions, from the
+/// single `type_info.clone_impl` decision. Covers both the synthesized
+/// `__clone$T` and a user-written `T.clone()` — the clone-shim pass already
+/// resolved which one applies, so there is no fallback chain here.
 fn build_clone_lookup(
     module: &MonoModule,
     generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
 ) -> DropShimLookup {
-    // Map clone function entity → nominal parent.
-    // Include ALL clone shims and user .clone() methods regardless of CopyBehavior.
-    let mut clone_func_to_parent: HashMap<Entity, Entity> = HashMap::new();
-    for f in generic_functions.values() {
-        match &f.kind {
-            FunctionKind::CloneShim { nominal } => {
-                clone_func_to_parent.insert(f.entity, *nominal);
-            },
-            FunctionKind::Method { parent, .. } if f.name.ends_with(".clone") => {
-                // Prefer the self-param nominal: an `extend`-defined `clone()`
-                // doesn't reliably set `parent` to the extended type.
-                let nominal = f
-                    .clone_method_self_nominal(&module.ty_arena)
-                    .unwrap_or(*parent);
-                clone_func_to_parent.insert(f.entity, nominal);
-            },
-            _ => {},
-        }
-    }
+    // Clone function entity → nominal, for every nominal regardless of
+    // CopyBehavior (a Bitwise instance is filtered out below, per instance).
+    let clone_func_to_parent = build_clone_impl_to_nominal_map(module);
 
     if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
         eprintln!(

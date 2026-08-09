@@ -283,6 +283,21 @@ No collision check; later mono index wins; `module.functions` order is instantia
 
 **Fix.** Add `FunctionKind::CloneImpl { nominal }` (or `clone_of: Option<Entity>` on `FunctionDef`) stamped once during MIR signature lowering where the Cloneable conformance is known, and have all four sites read it. Make `build_clone_lookup`'s insert a hard error on duplicate key.
 
+> **Verified 2026-08-08 — failure scenario did not reproduce; severity lowered to `low`.**
+> Five configurations (inline `clone()`; `extend` + conformance on the struct; `extend T: Cloneable`;
+> generic `extend Box[T]: Cloneable where T: Cloneable`; cross-module `extend Lib.Handle: Cloneable`)
+> were compiled and run under `KESTREL_DEBUG_CLONE=1`. Every one registered exactly **one** clone
+> function for the nominal and selected the user `clone()`; no shim was synthesized alongside. The
+> `clone_method_self_nominal` fallback already covers the extend cases the `:218-223` comment worries
+> about, so no shim-vs-user collision is currently reachable and the double-free is unsubstantiated.
+>
+> The lossy key is real, though, and fires constantly: `(nominal, type_args)` drops the `parent_self`
+> that `InstantiationKey` carries, so a hello-world against the stdlib inserts **97 entries under 78
+> keys — 19 silent overwrites**, incl. 6-way collisions on `(IoError, [])` and `(IoErrorKind, [])`.
+> All colliding entries share one `source`, making them equivalent re-instantiations. Consequence for
+> this fix: **the "hard error on duplicate key" above would ICE on every build.** Gate the guard on
+> `source` disagreement instead, and prefer the user `CloneImpl` over the `CloneShim` when they differ.
+
 ---
 
 #### 8. The LLVM backend never received the Bool-discriminant width fix that landed in cranelift (ef3fb801)

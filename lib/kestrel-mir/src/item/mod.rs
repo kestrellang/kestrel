@@ -60,6 +60,29 @@ pub struct TypeInfo {
     pub copy: CopyBehavior,
     pub drop: DropBehavior,
     pub layout: Option<Layout>,
+    /// The function that clones this nominal: the synthesized `__clone$T` if one
+    /// was generated, else the user's `clone()`. Written once by
+    /// `passes::clone_shim::synthesize_clone_shims` — the pass that *decides*
+    /// which it is — and read-only thereafter (mono collection, the expand
+    /// pass's `CopyValue` lowering). `None` before that pass runs, and for a
+    /// type that needs no clone at all.
+    ///
+    /// This is a **per-nominal** fact and deliberately NOT folded into
+    /// `CopyBehavior::Clone`, which is per-*instantiation* and gets rewritten by
+    /// `refine_mono_copy_behavior` (`Optional[String]` → Clone, `Optional[Int64]`
+    /// → Bitwise, `Optional[File]` → None). All three instances share this one
+    /// clone impl, so nesting it in the enum would drop it on the refined-away
+    /// instances. The invariant is one-directional:
+    /// `copy == Clone(_)` ⇒ `clone_impl.is_some()`, never the converse — a
+    /// conditionally-Copyable container and a primitive-only struct both get a
+    /// shim while keeping a `None`/`Bitwise` base.
+    pub clone_impl: Option<Entity>,
+    /// The synthesized `__drop$T` for this nominal, on the same terms as
+    /// [`Self::clone_impl`]. Written once by
+    /// `passes::drop_shim::synthesize_drop_shims`. Distinct from
+    /// [`Self::drop`], which is the field-by-field *recipe*; this is the entry
+    /// point that runs it.
+    pub drop_impl: Option<Entity>,
 }
 
 impl TypeInfo {
@@ -68,6 +91,8 @@ impl TypeInfo {
             copy: CopyBehavior::Bitwise,
             drop: DropBehavior::None,
             layout: None,
+            clone_impl: None,
+            drop_impl: None,
         }
     }
 
@@ -76,6 +101,8 @@ impl TypeInfo {
             copy: CopyBehavior::Bitwise,
             drop: DropBehavior::None,
             layout: None,
+            clone_impl: None,
+            drop_impl: None,
         }
     }
 }

@@ -18,6 +18,7 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         copy: lower_copy_behavior(ctx, entity),
         drop: lower_drop_behavior(ctx, entity),
         layout: None,
+        ..TypeInfo::none()
     };
     def.conditionally_copyable = ctx.query.query(ConditionalCopyableParams {
         entity,

@@ -22,6 +22,7 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
         copy: lower_copy_behavior(ctx, entity),
         drop: lower_enum_drop_behavior(ctx, entity),
         layout: None,
+        ..TypeInfo::none()
     };
     def.conditionally_copyable = ctx
         .query

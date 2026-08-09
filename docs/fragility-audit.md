@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 5 fixed · 2 partial · 2 blocked · 50 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 6 fixed · 2 partial · 2 blocked · 49 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -66,7 +66,12 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
   - `loop_labels` save/restore in `lower_closure` + MIR backstop diagnostic
 - [x] **F6** `medium` `single-source-of-truth` — `Copyable`/`Cloneable` lang protocols are identified by `name.ends_with(...)` in five MIR sites — **fixed**
   - lang items on MirModule; all 5 `ends_with` sites gone
-- [ ] **F7** `low` `single-source-of-truth` — Four predicates answer "which function is T's clone"; `build_clone_lookup`'s key is lossy and silently last-write-wins — **severity lowered, failure mode corrected** (see Corrections)
+- [x] **F7** `low` `single-source-of-truth` — Four predicates answered "which function is T's clone" — **fixed** (severity was lowered and the failure mode corrected first; see Corrections)
+  - `TypeInfo::clone_impl` / `drop_impl`, written once by the shim passes that decide them; all four re-derivations deleted, `clone_method_self_nominal` gone
+  - Root cause of the name-based predicate found by instrumenting it: `std.result.Optional.clone()` lived in a bare `extend Optional[T] {}` with **no conformance clause** — the "extend doesn't surface a witness" comment was a misdiagnosis. Declared `extend Optional[T]: Cloneable where T: Copyable` (`T: Cloneable` would be stricter than the body needs and would drop `Optional[Int64].clone()`), and the `.ends_with(".clone")` scan is gone. **A method merely named `clone()` no longer makes a type Cloneable.**
+  - Witness-method key now sourced from the `Cloneable` declaration and compared as a full `WitnessMethodKey`, not by `.name` (that was a partial-key match)
+  - Backstop: `verify_mono` asserts `copy == Clone(_)` ⇒ `clone_impl.is_some()` — one-directional; the converse is false for conditional containers and primitive-only structs
+  - NOT fixed here: `build_clone_lookup`'s key still drops `parent_self` (97 entries / 78 keys — 19 benign overwrites per build, all same-`source`). That is shim over-instantiation, tracked separately below.
 - [ ] **F8** `medium` `single-source-of-truth` — The LLVM backend never received the Bool-discriminant width fix that landed in cranelift (ef3fb801)
 - [ ] **F9** `medium` `incremental-hazard` — `NominalCopySemantics`/`NominalStaticness` memos depend on a thread-local recursion stack that is not part of the cache key
 - [ ] **F10** `medium` `single-source-of-truth` — Static-member lookup truncates to the first `extend` block

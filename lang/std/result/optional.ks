@@ -644,9 +644,16 @@ extend Optional[T]: Hashable where T: Hashable {
 // EXTENSIONS - CLONE
 // ============================================================================
 
-/// Clone helper available for every `Optional[T]` (the inner clone falls
-/// out of value-semantics on `T`).
-extend Optional[T] {
+/// `Cloneable` on the same terms as the `Copyable` conformance above: the
+/// inner clone falls out of value-semantics on `T`, so `T: Copyable` is the
+/// real requirement — the payload copy in `clone` expands to `T`'s own clone
+/// when `T` has one, and to a bitwise copy when it doesn't. Constraining to
+/// `T: Cloneable` instead would be stricter than the body needs and would drop
+/// `Optional[Int64].clone()`.
+///
+/// The conformance must be *declared*: a method merely named `clone()` does not
+/// make a type Cloneable, and the compiler no longer treats it as if it did.
+extend Optional[T]: Cloneable where T: Copyable {
 
     /// Returns an independent copy. For value types this is a shallow
     /// copy of the payload; for COW types, the underlying buffer is

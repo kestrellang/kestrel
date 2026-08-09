@@ -117,6 +117,18 @@ pub fn synthesize_drop_shims(module: &mut MirModule, next_entity: &mut u32) {
         }
     }
 
+    // Store the decision: nominal → its `__drop$T`. Mono collection reads this
+    // instead of scanning every function for a matching `FunctionKind::DropShim`
+    // (F7). Distinct from `type_info.drop`, which is the field-by-field recipe
+    // this function runs.
+    for (&type_entity, &shim_entity) in &shim_map {
+        if let Some(s) = module.structs.get_mut(&type_entity) {
+            s.type_info.drop_impl = Some(shim_entity);
+        } else if let Some(e) = module.enums.get_mut(&type_entity) {
+            e.type_info.drop_impl = Some(shim_entity);
+        }
+    }
+
     patch_shim_callees(module, &shim_map);
 }
 
@@ -607,6 +619,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(inner_def);
 
@@ -623,6 +636,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(outer_def);
 
@@ -675,6 +689,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(inner_def);
 
@@ -695,6 +710,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(my_def);
 
@@ -751,6 +767,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(inner_def);
 
@@ -771,6 +788,7 @@ mod tests {
                 variants: vec![(VariantIdx::new(0), vec![FieldIdx::new(0)])],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_enum(enum_def);
 
@@ -809,6 +827,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(c_def);
 
@@ -824,6 +843,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(b_def);
 
@@ -839,6 +859,7 @@ mod tests {
                 fields: vec![FieldIdx::new(0)],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(a_def);
 
@@ -899,6 +920,7 @@ mod tests {
                 fields: vec![],
             },
             layout: None,
+            ..TypeInfo::none()
         };
         module.add_struct(s_def);
 

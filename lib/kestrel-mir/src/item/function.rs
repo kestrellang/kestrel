@@ -194,27 +194,10 @@ pub struct FunctionDef {
 }
 
 impl FunctionDef {
-    /// For a user `clone()` method, the nominal entity of the type it clones,
-    /// taken from the **self** (first) param's type rather than `kind`'s
-    /// `parent`. A `clone()` defined in an `extend` block does not reliably set
-    /// `parent` to the extended type, so the self-param type is the robust key
-    /// for associating the clone with its nominal (used by clone-shim copy
-    /// behavior, mono collection, and the expand pass's CopyValue→clone lookup).
-    /// Returns `None` if this isn't a `.clone` method or self isn't a nominal.
-    pub fn clone_method_self_nominal(&self, arena: &crate::ty::TyArena) -> Option<Entity> {
-        if !matches!(self.kind, FunctionKind::Method { .. }) || !self.name.ends_with(".clone") {
-            return None;
-        }
-        let self_ty = self.params.first()?.ty;
-        match arena.get(self_ty) {
-            crate::ty::MirTy::Named { entity, .. } => Some(*entity),
-            crate::ty::MirTy::Pointer(p) => match arena.get(*p) {
-                crate::ty::MirTy::Named { entity, .. } => Some(*entity),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
+    // NOTE: `clone_method_self_nominal` used to live here. "Which function is
+    // T's clone" is now decided once by `passes::clone_shim` and stored in
+    // `TypeInfo::clone_impl`; read that instead of re-deriving it from a
+    // function's name or `parent` (F7).
 
     pub fn new(entity: Entity, name: impl Into<String>, ret: TyId) -> Self {
         Self {

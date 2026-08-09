@@ -83,7 +83,45 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
     // be constructed — this is pure defense-in-depth.
     verify_copyable_containment(module, &mut errors);
 
+    verify_clone_impl_present(module, &mut errors);
+
     MonoVerifyResult { errors }
+}
+
+/// `copy == CopyBehavior::Clone(_)` ⇒ `clone_impl.is_some()`.
+///
+/// One-directional on purpose. The converse does NOT hold and must not be
+/// asserted: a conditionally-Copyable container (`Optional`) and a
+/// primitive-only struct both get a `__clone$T` while keeping a `None`/`Bitwise`
+/// base, because `refine_mono_copy_behavior` decides their real behavior per
+/// instantiation. What is always wrong is the other direction — a `Clone`
+/// behavior with no function to call, which expands to a bitwise alias with no
+/// retain and double-frees. Before `TypeInfo::clone_impl` these two facts were
+/// derived independently in four places and could disagree silently (F7); this
+/// makes a disagreement loud.
+fn verify_clone_impl_present(module: &MonoModule, errors: &mut Vec<MonoVerifyError>) {
+    let structs = module
+        .structs
+        .values()
+        .map(|s| ("MonoStruct", s.source, &s.type_args, &s.type_info));
+    let enums = module
+        .enums
+        .values()
+        .map(|e| ("MonoEnum", e.source, &e.type_args, &e.type_info));
+    for (kind, source, type_args, type_info) in structs.chain(enums) {
+        if matches!(type_info.copy, CopyBehavior::Clone(_)) && type_info.clone_impl.is_none() {
+            errors.push(MonoVerifyError {
+                user_facing: false,
+                func_idx: 0,
+                block: None,
+                inst: None,
+                message: format!(
+                    "{kind}({source:?}, {type_args:?}) has CopyBehavior::Clone but no clone_impl"
+                ),
+                span: None,
+            });
+        }
+    }
 }
 
 /// Invariant 3b (defense-in-depth): no `Bitwise`/`Clone` type may contain a

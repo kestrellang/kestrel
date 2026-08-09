@@ -474,16 +474,32 @@ impl<'a> CollectionContext<'a> {
         false
     }
 
+    /// The function that clones `nominal`, as decided once by the clone-shim
+    /// pass. A struct or enum, never both — one lookup, no fallback chain.
+    fn clone_impl_of(&self, nominal: Entity) -> Option<Entity> {
+        self.type_info_of(nominal).and_then(|ti| ti.clone_impl)
+    }
+
+    /// The `__drop$T` for `nominal`, as decided once by the drop-shim pass.
+    fn drop_impl_of(&self, nominal: Entity) -> Option<Entity> {
+        self.type_info_of(nominal).and_then(|ti| ti.drop_impl)
+    }
+
+    fn type_info_of(&self, nominal: Entity) -> Option<&crate::item::TypeInfo> {
+        self.structs
+            .get(&nominal)
+            .map(|s| &s.type_info)
+            .or_else(|| self.enums.get(&nominal).map(|e| &e.type_info))
+    }
+
     /// If `ty` is a Named type with a drop shim, enqueue the shim instantiation.
     fn discover_drop_shim(&mut self, ty: TyId, parent_self: Option<TyId>) {
         match self.arena.get(ty) {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
-                if let Some(shim) = self.functions.values().find(
-                    |f| matches!(f.kind, FunctionKind::DropShim { nominal } if nominal == entity),
-                ) {
-                    let key = InstantiationKey::new(shim.entity, type_args, parent_self);
+                if let Some(shim) = self.drop_impl_of(entity) {
+                    let key = InstantiationKey::new(shim, type_args, parent_self);
                     if self.seen.insert(key.clone()) {
                         self.queue.push_back(key);
                     }
@@ -509,24 +525,8 @@ impl<'a> CollectionContext<'a> {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
-                // Find clone shim or user clone method
-                let clone_func = self
-                    .functions
-                    .values()
-                    .find(
-                        |f| matches!(f.kind, FunctionKind::CloneShim { nominal } if nominal == entity),
-                    )
-                    .or_else(|| {
-                        // Match a user `clone()` by its self-param nominal: an
-                        // `extend`-defined clone doesn't reliably set `parent` to
-                        // the extended type, so `parent == entity` would miss it
-                        // (leaving the clone uncollected and the value bit-copied).
-                        self.functions
-                            .values()
-                            .find(|f| f.clone_method_self_nominal(self.arena) == Some(entity))
-                    });
-                if let Some(func) = clone_func {
-                    let key = InstantiationKey::new(func.entity, type_args, parent_self);
+                if let Some(func) = self.clone_impl_of(entity) {
+                    let key = InstantiationKey::new(func, type_args, parent_self);
                     if self.seen.insert(key.clone()) {
                         self.queue.push_back(key);
                     }

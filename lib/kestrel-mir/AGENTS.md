@@ -88,6 +88,36 @@ returned the overwritten value. See [[expand_not_copyable_nominal_collapse]].
 This is the MIR face of the same per-instantiation invariant the solver / MIR
 ty_query / semantics enforce ([[per_instantiation_copy_semantics]]).
 
+## Per-nominal facts go on `TypeInfo`; the pass that decides one stores it
+
+The complement of the rule above. Some facts are genuinely **per-nominal** —
+`Optional` has exactly one `__clone$Optional` shared by `Optional[String]`,
+`Optional[Int64]`, and `Optional[File]`. Those belong in a `TypeInfo` field
+(`clone_impl`, `drop_impl`, `layout`), *not* nested inside `CopyBehavior` /
+`DropBehavior`, which `refine_mono_copy_behavior` rewrites per instantiation.
+Nesting a per-nominal fact in a per-instance enum drops it on every instance the
+refinement moves off that variant.
+
+`MonoStruct`/`MonoEnum` clone `TypeInfo` wholesale from the generic def, so a
+field set pre-mono survives into mono untouched. Read it there rather than
+re-deriving.
+
+**The general rule: the pass that can compute a fact computes it once and stores
+it; every later pass reads the stored value.** "Which function is `T`'s clone?"
+used to be reconstructed in four places — by Cloneable witness, by
+`name.ends_with(".clone")`, by `FunctionKind::Method`'s `parent`, and by the
+self-param nominal — each with a different fallback, so they could disagree and
+the loser was chosen by `module.functions` order (fragility audit F7). The
+deciding pass (`passes/clone_shim.rs`) had the answer in a local `shim_map` and
+dropped it on return. Now it writes `type_info.clone_impl` and the derivations
+are gone. Same shape as `FieldClass` (F3) and the `copyable_protocol` /
+`cloneable_protocol` lang items on `MirModule` (F6).
+
+Corollary — assert the direction that actually holds. `verify_clone_impl_present`
+checks `copy == Clone(_)` ⇒ `clone_impl.is_some()`, never the converse: a
+conditionally-Copyable container and a primitive-only struct both get a shim
+while keeping a `None`/`Bitwise` base.
+
 ## Copy and destroy elaboration must stay symmetric (`mono/expand.rs`)
 
 The `CopyValue` (copy) and `DestroyValue`/`DestroyAddr` (destroy) arms must agree
