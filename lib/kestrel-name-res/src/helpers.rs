@@ -92,10 +92,14 @@ pub(crate) fn member_name_matches(ctx: &QueryContext<'_>, entity: Entity, query:
 }
 
 /// Search extensions of `target` for visible members named `member_name`,
-/// keeping only those that pass `filter`. Returns the matches from the
-/// first extension that has any (extensions are not merged across), or
-/// empty if none do. Shared by value-path resolution for extension static
-/// methods and associated-type static members.
+/// keeping only those that pass `filter`. Merges across **every** extension
+/// of `target`, in `ExtensionsFor` order — the result is the complete
+/// overload set, matching what `TypeMembers` reports. Truncating to the
+/// first matching extension here is unrecoverable: value-path resolution
+/// hands this straight to `HirExpr::OverloadSet` and inference never
+/// re-widens a single `Def`, so splitting one `extend` block in two would
+/// silently drop overloads. Shared by value-path resolution for extension
+/// static methods and associated-type static members.
 pub(crate) fn find_in_extensions(
     ctx: &QueryContext<'_>,
     target: Entity,
@@ -104,22 +108,17 @@ pub(crate) fn find_in_extensions(
     root: Entity,
     filter: impl Fn(&QueryContext<'_>, Entity) -> bool,
 ) -> Vec<Entity> {
-    let extensions = ctx.query(ExtensionsFor { target, root });
-    for &ext in &extensions {
-        let matches: Vec<Entity> = ctx
-            .query(VisibleChildrenByName {
+    ctx.query(ExtensionsFor { target, root })
+        .iter()
+        .flat_map(|&ext| {
+            ctx.query(VisibleChildrenByName {
                 parent: ext,
                 name: member_name.to_string(),
                 context,
             })
-            .into_iter()
-            .filter(|&e| filter(ctx, e))
-            .collect();
-        if !matches.is_empty() {
-            return matches;
-        }
-    }
-    Vec::new()
+        })
+        .filter(|&e| filter(ctx, e))
+        .collect()
 }
 
 /// Filter discovered members down to those answering to `name` (including

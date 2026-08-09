@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 6 fixed · 2 partial · 2 blocked · 49 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 7 fixed · 2 partial · 2 blocked · 48 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -74,7 +74,12 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
   - NOT fixed here: `build_clone_lookup`'s key still drops `parent_self` (97 entries / 78 keys — 19 benign overwrites per build, all same-`source`). That is shim over-instantiation, tracked separately below.
 - [ ] **F8** `medium` `single-source-of-truth` — The LLVM backend never received the Bool-discriminant width fix that landed in cranelift (ef3fb801)
 - [ ] **F9** `medium` `incremental-hazard` — `NominalCopySemantics`/`NominalStaticness` memos depend on a thread-local recursion stack that is not part of the cache key
-- [ ] **F10** `medium` `single-source-of-truth` — Static-member lookup truncates to the first `extend` block
+- [x] **F10** `medium` `single-source-of-truth` — Static-member lookup truncates to the first `extend` block — **fixed**
+  - `resolve_extension_static_method` now sources candidates from `TypeMembersByName` — the query that already declares itself the single source of truth for "what members does this type have?" — instead of its own staged `ExtensionsFor` + `ConformingProtocols` walk. That deletes the truncation at both levels (first matching extension, and first conforming protocol) in one move
+  - Precedence follows the instance-member rule already shipped in `kestrel_type_infer::resolve_member`: `Direct`/`Extension` candidates compete equally, and a `ProtocolExtension` default joins the set only if its **label signature** is not already taken. A type's own `tag()` beats `extend SomeProtocol { static func tag() }` without the pair going ambiguous, and a protocol default with different labels stays reachable. Suppressing protocol-extension candidates outright would have been F10's mistake in the other direction
+  - Rule recorded in `lib/kestrel-name-res/AGENTS.md` ("Member lookup goes through `TypeMembers`"), along with the inventory of remaining open-coded walks
+  - `find_in_extensions` also merges across extensions now (its one remaining caller, `resolve_assoc_type_static_member`, only uses the result as an existence check — hir-lower discards the entity and re-resolves through `Field { base: Def(assoc_type) }`)
+  - Verified by running: with the old first-extension-wins body restored, `Foo.make(b:)` split into a second `extend` block fails with "no matching overload"; with the fix it compiles and runs. 2 execution tests under `declarations/extensions/`; full suite green
 - [ ] **F11** `medium` `single-source-of-truth` — The solver and the move checker ask `TypeParamCopyRequirement` with different `context`
 - [x] **F12** `medium` `fragility` — Associated types on type params are matched by **name string** against ancestor where-clauses, and E439 can't see extension-target params — **fixed**
   - where-clause subjects now resolve through `ResolveName` in the *bearing entity's* scope and are

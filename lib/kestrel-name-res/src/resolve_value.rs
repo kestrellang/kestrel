@@ -3,15 +3,17 @@
 //! Resolves value names (variables, functions, enum cases, etc.) to
 //! entities. Used by HIR lowering for expression paths.
 
+use std::collections::HashSet;
+
 use kestrel_ast_builder::{
     Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Static, Typed, WhereClause,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
-use crate::conformances::ConformingProtocols;
 use crate::helpers::find_in_extensions;
 use crate::resolve_name::{NameResolution, ResolveName};
 use crate::resolve_type::{ResolveTypePath, TypeResolution};
+use crate::type_members::{TypeMemberSource, TypeMembersByName};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== ValueResolution =====
@@ -400,12 +402,27 @@ fn is_static_method(ctx: &QueryContext<'_>, e: Entity) -> bool {
         && (ctx.has::<Static>(e) || ctx.get::<Callable>(e).is_some_and(|c| c.receiver.is_none()))
 }
 
-/// Static methods from extensions of `current`, then from extensions of
-/// protocols it conforms to. The protocol walk mirrors how instance-method
-/// dispatch already walks conforming protocols (see
-/// `try_resolve_through_protocol` in kestrel-type-infer); without it,
-/// `A.staticMethod()` fails when `staticMethod` lives in
-/// `extend SomeProtocol { ... }` and `A: SomeProtocol`.
+/// Static methods on `current`, sourced from `TypeMembersByName` — the one
+/// query that answers "what members does this type have?" It already merges
+/// every extension of the type and every extension of every protocol it
+/// transitively conforms to, so `A.staticMethod()` finds a method living in
+/// `extend SomeProtocol { ... }` where `A: SomeProtocol`, mirroring how
+/// instance-method dispatch walks conforming protocols
+/// (`try_resolve_through_protocol` in kestrel-type-infer).
+///
+/// The result is the **complete** overload set: `HirExpr::OverloadSet` is
+/// built straight from it and inference never re-widens a single `Def`, so
+/// anything dropped here is unrecoverable — splitting one `extend` block in
+/// two used to silently break a call (F10).
+///
+/// Precedence follows the instance-member rule already shipped in
+/// `kestrel_type_infer::resolve_member`: direct and own-extension candidates
+/// compete equally, and a protocol-extension default joins them only when its
+/// **label signature** is not already taken. So a type's own `tag()` wins over
+/// `extend SomeProtocol { static func tag() }` without making the pair
+/// ambiguous, while a protocol default with different labels stays reachable
+/// as an overload. Dropping it wholesale would repeat F10's mistake in the
+/// other direction — name resolution is the last place the set can be widened.
 fn resolve_extension_static_method(
     ctx: &QueryContext<'_>,
     current: Entity,
@@ -413,22 +430,40 @@ fn resolve_extension_static_method(
     context: Entity,
     root: Entity,
 ) -> Option<ValueResolution> {
-    let methods = find_in_extensions(ctx, current, segment, context, root, is_static_method);
-    if !methods.is_empty() {
-        return Some(classify_value_results(ctx, methods));
-    }
-
-    let protocols = ctx.query(ConformingProtocols {
-        entity: current,
+    let members = ctx.query(TypeMembersByName {
+        type_entity: current,
+        name: segment.to_string(),
+        context,
         root,
     });
-    for &proto in &protocols {
-        let methods = find_in_extensions(ctx, proto, segment, context, root, is_static_method);
-        if !methods.is_empty() {
-            return Some(classify_value_results(ctx, methods));
+
+    let (own, via_protocol): (Vec<_>, Vec<_>) = members
+        .into_iter()
+        .filter(|m| is_static_method(ctx, m.entity))
+        .partition(|m| !matches!(m.source, TypeMemberSource::ProtocolExtension { .. }));
+
+    let mut seen: HashSet<Vec<Option<String>>> =
+        own.iter().map(|m| label_signature(ctx, m.entity)).collect();
+    let mut candidates: Vec<Entity> = own.iter().map(|m| m.entity).collect();
+    for m in via_protocol {
+        if seen.insert(label_signature(ctx, m.entity)) {
+            candidates.push(m.entity);
         }
     }
-    None
+
+    if candidates.is_empty() {
+        return None;
+    }
+    Some(classify_value_results(ctx, candidates))
+}
+
+/// A callable's argument labels, the key overload resolution disambiguates on.
+/// Mirrors `label_signature` in kestrel-type-infer; non-callables collapse to
+/// the empty signature so two of them count as the same member.
+fn label_signature(ctx: &QueryContext<'_>, entity: Entity) -> Vec<Option<String>> {
+    ctx.get::<Callable>(entity)
+        .map(|c| c.params.iter().map(|p| p.label.clone()).collect())
+        .unwrap_or_default()
 }
 
 /// Enum case or gettable field used as an intermediate value (e.g.

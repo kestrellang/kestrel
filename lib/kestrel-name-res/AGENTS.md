@@ -47,6 +47,43 @@ shadowing walk in kestrel-analyze) use the query too.
 Matching is by **name** — `extend Box[U]` binds nothing, because Box declares
 `T`. Making it positional is a deliberate behavior change, not a cleanup.
 
+## Member lookup goes through `TypeMembers`, never a hand-rolled extension walk
+
+"What members does this type have?" has exactly one answer: `TypeMembers` /
+`TypeMembersByName` (`type_members.rs`). It walks direct children, then every
+extension of the type, then every extension of every protocol the type
+*transitively* conforms to, and tags each result with a `TypeMemberSource`
+(`Direct` / `Extension(e)` / `ProtocolExtension { protocol, extension }`) so
+callers can re-impose precedence without re-doing the walk.
+
+Do not open-code `ExtensionsFor + VisibleChildrenByName`. Every hand-rolled
+copy so far has lost something — and lost it silently:
+
+- `find_in_extensions` returned only the first extension that matched, so
+  splitting one `extend` block in two dropped every overload but the first.
+  The set it produces becomes `HirExpr::OverloadSet` verbatim and inference
+  never re-widens a single `Def`, so a drop here is unrecoverable downstream.
+  Audit finding F10.
+- The same function's protocol loop stopped at the first conforming protocol.
+- LSP completion open-codes the walk and misses every protocol-extension
+  member. Audit finding F39, still open.
+
+`ExtensionsFor` on its own is still correct for questions that are *about the
+extension* — which conformances it declares, which witnesses it supplies,
+which target params its LHS binds. The rule is about member lookup by name.
+
+### Precedence: label signature, not shadowing
+
+When candidates from several sources collide, the rule (shipped in
+`kestrel_type_infer::resolve_member`, mirrored in
+`resolve_extension_static_method`) is: `Direct` and `Extension` candidates
+compete equally, and a `ProtocolExtension` default joins the set only if its
+**label signature** is not already taken. A type's own `tag()` therefore wins
+over `extend SomeProtocol { static func tag() }` without the two becoming
+ambiguous, while a protocol default with *different* labels stays reachable as
+an overload. Suppressing protocol-extension candidates outright is the F10
+mistake in the other direction.
+
 ## Cycle discipline
 
 Walks over protocol inheritance or conformance carry a `visited` set —
