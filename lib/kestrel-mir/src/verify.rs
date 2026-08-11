@@ -2,11 +2,24 @@
 //!
 //! Checks that a body satisfies the linear ownership invariant: every @owned
 //! value is consumed exactly once, borrows are properly scoped, and address
-//! init/uninit state is consistent. The algorithm is a single forward BFS walk
-//! over the CFG — no fixpoint needed because the block-parameter live-in
-//! contract guarantees each block can be verified in isolation.
-
-use std::collections::VecDeque;
+//! init/uninit state is consistent.
+//!
+//! The algorithm is a single forward walk over the reachable blocks in RPO,
+//! and each block is verified **in isolation** from an empty `FlowState`.
+//!
+//! That isolation is not justified. This module used to claim "no fixpoint
+//! needed because the block-parameter live-in contract guarantees each block
+//! can be verified in isolation" — there is no such contract. MIR lowering
+//! uses the ordinary SSA dominance rule (a block may reference any definition
+//! that dominates it), which is why `check_operands_defined` pools definitions
+//! across every block. Enforcing the claimed contract was measured against the
+//! suite and rejects the stdlib outright (audit finding F34, and the
+//! "Corrections" section of `docs/fragility-audit.md`).
+//!
+//! The consequence is a real hole: leaks are caught, but a value consumed in
+//! two *different* blocks is invisible, because `owned` starts empty in each.
+//! Closing it means flowing `FlowState` along CFG edges to a fixpoint with a
+//! join at merge points — not reshaping lowering.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -63,29 +76,32 @@ pub fn verify_ossa(
     let mut errors = Vec::new();
 
     // Check 1: ValueId uniqueness — every value defined exactly once.
-    check_value_uniqueness(body, func_name, entity, &mut errors);
+    // Deliberately unused for now: once state flows between blocks, the leak
+    // check has to be scoped to the block that DEFINES a value rather than to
+    // whichever block is in hand, and this is the map that answers that. It is
+    // built here either way, so returning it avoids a second full traversal.
+    let _def_blocks = check_value_uniqueness(body, func_name, entity, &mut errors);
 
     // Check 1b: every operand must have a definition (block param or instruction result).
     check_operands_defined(body, func_name, entity, &mut errors);
 
-    // Forward BFS walk from the entry block.
-    let mut visited = FxHashSet::default();
-    let mut queue = VecDeque::new();
-    queue.push_back(body.entry);
-
-    while let Some(block_id) = queue.pop_front() {
-        if !visited.insert(block_id) {
-            continue;
-        }
-        verify_block(body, module, block_id, func_name, entity, &mut errors);
-
-        // Enqueue successors.
-        let block = body.block(block_id);
-        for succ in block.terminator.kind.successors() {
-            if !visited.contains(&succ) {
-                queue.push_back(succ);
-            }
-        }
+    // Forward walk over reachable blocks in RPO.
+    //
+    // Every block is verified from an EMPTY entry state, i.e. the walk is
+    // block-local: no ownership state crosses a block boundary, so a
+    // cross-block double-consume is invisible (audit finding F34). Making
+    // `FlowState` flow along CFG edges and join at merge points — instead of
+    // starting each block at `default()` here — is what closes that hole.
+    for block_id in reverse_postorder(body) {
+        verify_block(
+            body,
+            module,
+            block_id,
+            func_name,
+            entity,
+            FlowState::default(),
+            &mut errors,
+        );
     }
 
     errors
@@ -95,12 +111,15 @@ pub fn verify_ossa(
 // Check 1: ValueId uniqueness
 // ---------------------------------------------------------------------------
 
+/// Returns the definition map (`ValueId` -> defining block) it builds anyway,
+/// so later checks don't recompute it. On a duplicate definition the *first*
+/// block wins the map entry and the duplicate is reported.
 fn check_value_uniqueness(
     body: &OssaBody,
     func_name: &str,
     entity: Entity,
     errors: &mut Vec<VerifyError>,
-) {
+) -> FxHashMap<ValueId, BlockId> {
     // Map from ValueId -> (block that defined it).
     let mut definitions: FxHashMap<ValueId, BlockId> = FxHashMap::default();
 
@@ -152,6 +171,45 @@ fn check_value_uniqueness(
             }
         }
     }
+
+    definitions
+}
+
+// ---------------------------------------------------------------------------
+// Block ordering
+// ---------------------------------------------------------------------------
+
+/// Reachable blocks in reverse postorder.
+///
+/// RPO visits every block after at least one of its predecessors except across
+/// back edges, which is the order a forward dataflow fixpoint wants: it
+/// minimises the number of times a block has to be re-analysed. Today the walk
+/// carries no state between blocks so any order would do, but the ordering is
+/// the seam the flow-sensitive walk plugs into. Unreachable blocks are
+/// excluded, exactly as the previous BFS excluded them.
+fn reverse_postorder(body: &OssaBody) -> Vec<BlockId> {
+    let mut postorder = Vec::new();
+    let mut visited = FxHashSet::default();
+    // Explicit stack: (block, next successor index) — recursion would blow the
+    // stack on long function bodies.
+    let mut stack: Vec<(BlockId, usize)> = vec![(body.entry, 0)];
+    visited.insert(body.entry);
+
+    while let Some((block_id, succ_idx)) = stack.pop() {
+        let successors = body.block(block_id).terminator.kind.successors();
+        if succ_idx < successors.len() {
+            stack.push((block_id, succ_idx + 1));
+            let succ = successors[succ_idx];
+            if visited.insert(succ) {
+                stack.push((succ, 0));
+            }
+        } else {
+            postorder.push(block_id);
+        }
+    }
+
+    postorder.reverse();
+    postorder
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +309,23 @@ enum AddrKind {
     },
 }
 
-struct BlockVerifier<'a> {
+/// The part of the verifier's state that is a property of a *program point*
+/// rather than of a block: what each `@owned` value's consumption state is and
+/// what each address's init state is.
+///
+/// Split out because these are the two maps that must eventually flow along
+/// CFG edges and be joined at merge points. Everything else on `FlowVerifier`
+/// is either immutable context or genuinely block-scoped (borrows are required
+/// to end or be forwarded within their block, which Check 4 enforces).
+#[derive(Debug, Clone, Default)]
+struct FlowState {
+    /// Tracks @owned values: Live or Consumed.
+    owned: FxHashMap<ValueId, ValueState>,
+    /// Address init states.
+    addrs: FxHashMap<ValueId, AddrKind>,
+}
+
+struct FlowVerifier<'a> {
     body: &'a OssaBody,
     _module: &'a MirModule,
     block_id: BlockId,
@@ -263,8 +337,8 @@ struct BlockVerifier<'a> {
     /// function is an ICE (the copy guards must have copied it to @owned).
     ret_borrow: bool,
 
-    /// Tracks @owned values: Live or Consumed.
-    owned: FxHashMap<ValueId, ValueState>,
+    /// Flowing state (owned/addr maps) — see `FlowState`.
+    state: FlowState,
     /// Active borrows keyed by the @guaranteed result value.
     borrows: FxHashMap<ValueId, BorrowInfo>,
     /// Live references: @guaranteed call results (only ref-returning calls
@@ -273,21 +347,20 @@ struct BlockVerifier<'a> {
     /// borrow that a live ref chains through was kept alive *by* the ref,
     /// so the conflict is the user's (E498), not a lowering bug (ICE).
     refs: FxHashMap<ValueId, ValueId>,
-    /// Address init states.
-    addrs: FxHashMap<ValueId, AddrKind>,
     /// Maps a FieldAddr result -> (base_addr, field_idx).
     field_addr_map: FxHashMap<ValueId, (ValueId, FieldIdx)>,
 
     errors: Vec<VerifyError>,
 }
 
-impl<'a> BlockVerifier<'a> {
+impl<'a> FlowVerifier<'a> {
     fn new(
         body: &'a OssaBody,
         module: &'a MirModule,
         block_id: BlockId,
         func_name: &'a str,
         entity: Entity,
+        state: FlowState,
     ) -> Self {
         let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
             matches!(
@@ -302,10 +375,9 @@ impl<'a> BlockVerifier<'a> {
             func_name,
             entity,
             ret_borrow,
-            owned: FxHashMap::default(),
+            state,
             borrows: FxHashMap::default(),
             refs: FxHashMap::default(),
-            addrs: FxHashMap::default(),
             field_addr_map: FxHashMap::default(),
             errors: Vec::new(),
         }
@@ -353,7 +425,7 @@ impl<'a> BlockVerifier<'a> {
 
     /// Record that an @owned value has been produced.
     fn define_owned(&mut self, v: ValueId) {
-        self.owned.insert(v, ValueState::Live);
+        self.state.owned.insert(v, ValueState::Live);
     }
 
     /// Attempt to consume an @owned value. Returns false if already consumed.
@@ -376,7 +448,7 @@ impl<'a> BlockVerifier<'a> {
         if ownership != Ownership::Owned {
             return true; // not tracked
         }
-        match self.owned.get(&v) {
+        match self.state.owned.get(&v) {
             Some(ValueState::Live) => {
                 // Check borrow provenance: cannot consume while borrowed.
                 let blocking: Vec<ValueId> = self
@@ -407,7 +479,7 @@ impl<'a> BlockVerifier<'a> {
                         );
                     }
                 }
-                self.owned.insert(v, ValueState::Consumed);
+                self.state.owned.insert(v, ValueState::Consumed);
                 true
             },
             Some(ValueState::Consumed) => {
@@ -515,7 +587,7 @@ impl<'a> BlockVerifier<'a> {
         if ownership != Ownership::Owned {
             return;
         }
-        if let Some(ValueState::Consumed) = self.owned.get(&v) {
+        if let Some(ValueState::Consumed) = self.state.owned.get(&v) {
             self.err_val(inst, v, format!("use of consumed value {:?}", v));
         }
     }
@@ -549,7 +621,7 @@ impl<'a> BlockVerifier<'a> {
     fn addr_require_init(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, check the specific field.
         if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get(&base)
+            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get(&base)
                 && let Some(InitState::Uninit) = fields.get(&field)
             {
                 self.err(
@@ -562,7 +634,7 @@ impl<'a> BlockVerifier<'a> {
 
         // Collect error messages first to avoid borrow conflict.
         let mut errs = Vec::new();
-        if let Some(ak) = self.addrs.get(&addr) {
+        if let Some(ak) = self.state.addrs.get(&addr) {
             match ak {
                 AddrKind::Whole(InitState::Uninit) => {
                     errs.push(format!("address {:?} is uninit", addr));
@@ -589,7 +661,7 @@ impl<'a> BlockVerifier<'a> {
         // If this is a field addr, set that specific field.
         if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
             let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base)
+            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
                 && let Some(st) = fields.get_mut(&field)
             {
                 if *st == InitState::Uninit {
@@ -607,7 +679,7 @@ impl<'a> BlockVerifier<'a> {
         }
 
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get_mut(&addr) {
+        if let Some(ak) = self.state.addrs.get_mut(&addr) {
             match ak {
                 AddrKind::Whole(st) => {
                     if *st == InitState::Uninit {
@@ -630,7 +702,7 @@ impl<'a> BlockVerifier<'a> {
         // If this is a field addr, set that specific field.
         if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
             let mut err_msg = None;
-            if let Some(AddrKind::SubField { fields, .. }) = self.addrs.get_mut(&base)
+            if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
                 && let Some(st) = fields.get_mut(&field)
             {
                 if *st == InitState::Init {
@@ -648,7 +720,7 @@ impl<'a> BlockVerifier<'a> {
         }
 
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get_mut(&addr) {
+        if let Some(ak) = self.state.addrs.get_mut(&addr) {
             match ak {
                 AddrKind::Whole(st) => {
                     if *st == InitState::Init {
@@ -671,7 +743,7 @@ impl<'a> BlockVerifier<'a> {
 
     fn addr_store_assign(&mut self, addr: ValueId, inst: Option<u32>) {
         let mut err_msg = None;
-        if let Some(ak) = self.addrs.get(&addr)
+        if let Some(ak) = self.state.addrs.get(&addr)
             && let AddrKind::Whole(InitState::Uninit) = ak
         {
             err_msg = Some(format!(
@@ -1052,7 +1124,7 @@ impl<'a> BlockVerifier<'a> {
                 ..
             } => {
                 self.define_owned(*result);
-                if self.addrs.contains_key(base) {
+                if self.state.addrs.contains_key(base) {
                     self.field_addr_map.insert(*result, (*base, *field));
                 }
             },
@@ -1067,11 +1139,11 @@ impl<'a> BlockVerifier<'a> {
                     for i in 0..count {
                         fields.insert(FieldIdx::new(i), InitState::Uninit);
                     }
-                    self.addrs
+                    self.state.addrs
                         .insert(*result, AddrKind::SubField { ty: *ty, fields });
                 } else {
                     // Non-struct type: whole tracking, starts uninit.
-                    self.addrs
+                    self.state.addrs
                         .insert(*result, AddrKind::Whole(InitState::Uninit));
                 }
             },
@@ -1256,6 +1328,7 @@ impl<'a> BlockVerifier<'a> {
 
         // Check 2: every @owned value must be Consumed or forwarded by now.
         let unconsumed: Vec<ValueId> = self
+            .state
             .owned
             .iter()
             .filter(|(_, state)| **state == ValueState::Live)
@@ -1314,9 +1387,10 @@ fn verify_block(
     block_id: BlockId,
     func_name: &str,
     entity: Entity,
+    entry_state: FlowState,
     errors: &mut Vec<VerifyError>,
 ) {
-    let verifier = BlockVerifier::new(body, module, block_id, func_name, entity);
+    let verifier = FlowVerifier::new(body, module, block_id, func_name, entity, entry_state);
     let block_errors = verifier.verify();
     errors.extend(block_errors);
 }
