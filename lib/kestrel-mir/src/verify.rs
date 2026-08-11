@@ -34,6 +34,52 @@ use crate::value::Ownership;
 use crate::{BlockId, FieldIdx, MirModule, TyId, ValueId};
 
 // ---------------------------------------------------------------------------
+// Flow-sensitivity mode
+// ---------------------------------------------------------------------------
+
+/// How much of the flow-sensitive ownership walk is active.
+///
+/// Staged deliberately: the walk newly reports whole classes of violation that
+/// have never been checked (cross-block double-consume, use-after-consume
+/// across a merge), and any hit inside shipped code is a latent bug that has
+/// to be fixed rather than silenced. `Warn` exists to measure that blast
+/// radius against the suite before anything hard-fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlowMode {
+    /// Block-local walk, exactly as before flow-sensitivity existed.
+    Off,
+    /// State flows; newly-reachable violations are counted and summarised on
+    /// stderr but do NOT fail the build.
+    Warn,
+    /// State flows; newly-reachable violations are hard errors.
+    Enforce,
+}
+
+impl FlowMode {
+    fn current() -> FlowMode {
+        use std::sync::OnceLock;
+        static MODE: OnceLock<FlowMode> = OnceLock::new();
+        *MODE.get_or_init(|| {
+            FlowMode::parse(std::env::var("KESTREL_VERIFY_FLOW").ok().as_deref())
+        })
+    }
+
+    /// Split out from `current` so the parse is testable: `current` memoises
+    /// per process, so a test cannot exercise both settings through it.
+    fn parse(value: Option<&str>) -> FlowMode {
+        match value {
+            Some("warn") => FlowMode::Warn,
+            Some("enforce") => FlowMode::Enforce,
+            _ => FlowMode::Off,
+        }
+    }
+
+    fn flows(self) -> bool {
+        self != FlowMode::Off
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -73,6 +119,19 @@ pub fn verify_ossa(
     func_name: &str,
     entity: Entity,
 ) -> Vec<VerifyError> {
+    verify_ossa_with_mode(body, module, func_name, entity, FlowMode::current())
+}
+
+/// `verify_ossa` with the flow mode supplied rather than read from the
+/// environment. The environment is consulted once per process, so tests that
+/// need a specific mode must inject it here.
+fn verify_ossa_with_mode(
+    body: &OssaBody,
+    module: &MirModule,
+    func_name: &str,
+    entity: Entity,
+    mode: FlowMode,
+) -> Vec<VerifyError> {
     let mut errors = Vec::new();
 
     // Check 1: ValueId uniqueness — every value defined exactly once.
@@ -85,26 +144,100 @@ pub fn verify_ossa(
     // Check 1b: every operand must have a definition (block param or instruction result).
     check_operands_defined(body, func_name, entity, &mut errors);
 
-    // Forward walk over reachable blocks in RPO.
+    let order = reverse_postorder(body);
+
+    // Phase 1: solve for each block's entry state.
     //
-    // Every block is verified from an EMPTY entry state, i.e. the walk is
-    // block-local: no ownership state crosses a block boundary, so a
-    // cross-block double-consume is invisible (audit finding F34). Making
-    // `FlowState` flow along CFG edges and join at merge points — instead of
-    // starting each block at `default()` here — is what closes that hole.
-    for block_id in reverse_postorder(body) {
-        verify_block(
-            body,
-            module,
-            block_id,
-            func_name,
-            entity,
-            FlowState::default(),
-            &mut errors,
-        );
+    // Off: every block starts empty, i.e. the original block-local walk, and
+    // no ownership state crosses a block boundary (audit finding F34).
+    //
+    // Otherwise: forward dataflow to a fixpoint. Termination — the transfer
+    // function is monotone (an instruction either leaves a value's state
+    // untouched, or sets it to a constant independent of the incoming state),
+    // `join` only ever moves a state up the lattice, and each of the finitely
+    // many values has a 3-height lattice, so entry states can change only
+    // finitely often.
+    let mut in_states: FxHashMap<BlockId, FlowState> = FxHashMap::default();
+    if mode.flows() {
+        in_states.insert(body.entry, entry_state(body));
+
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for &block_id in &order {
+                let entry = in_states.get(&block_id).cloned().unwrap_or_default();
+                // `report: false` — findings from a not-yet-settled state are
+                // meaningless, and re-running would duplicate them.
+                let outcome = verify_block(
+                    body, module, block_id, func_name, entity, entry, false, mode,
+                );
+                for succ in body.block(block_id).terminator.kind.successors() {
+                    match in_states.get_mut(&succ) {
+                        Some(existing) => {
+                            if existing.join(&outcome.out_state) {
+                                changed = true;
+                            }
+                        },
+                        None => {
+                            in_states.insert(succ, outcome.out_state.clone());
+                            changed = true;
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: report once, against the settled entry states.
+    let mut flow_findings = Vec::new();
+    for block_id in order {
+        let entry = in_states.get(&block_id).cloned().unwrap_or_default();
+        let outcome =
+            verify_block(body, module, block_id, func_name, entity, entry, true, mode);
+        errors.extend(outcome.errors);
+        flow_findings.extend(outcome.flow_findings);
+    }
+
+    if !flow_findings.is_empty() {
+        report_flow_findings(func_name, &flow_findings);
     }
 
     errors
+}
+
+/// Ownership state on entry to the function.
+///
+/// Consuming parameters arrive owned and un-consumed. They are not block
+/// params, so nothing else would ever track them: without seeding, every
+/// consume of a parameter falls into the untracked `None` arm and the walk is
+/// blind to a parameter consumed twice.
+fn entry_state(body: &OssaBody) -> FlowState {
+    let mut state = FlowState::default();
+    for i in 0..body.param_count {
+        let v = ValueId::new(i);
+        if body
+            .values
+            .get(v.index())
+            .is_some_and(|vd| vd.ownership == Ownership::Owned)
+        {
+            state.owned.insert(v, ValueState::Live);
+        }
+    }
+    state
+}
+
+/// Summarise newly-visible violations on stderr. `Warn` mode only — this is a
+/// measurement aid for staging the flow-sensitive walk, not a diagnostic
+/// surface, so it deliberately bypasses the diagnostic machinery.
+fn report_flow_findings(func_name: &str, findings: &[VerifyError]) {
+    eprintln!(
+        "[KESTREL_VERIFY_FLOW] {} newly-visible ownership violation(s) in '{}':",
+        findings.len(),
+        func_name,
+    );
+    for f in findings {
+        eprintln!("  {:?}[{:?}]: {}", f.block, f.inst, f.message);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +418,21 @@ fn check_operands_defined(
 enum ValueState {
     Live,
     Consumed,
+    /// Consumed on some incoming paths but not others. Legal: this is how a
+    /// conditional move looks once control flow merges, and the runtime drop
+    /// flag is what makes it safe. Every operation on a `Maybe` state is
+    /// therefore PERMITTED — the walk reports only *definite* violations.
+    MaybeConsumed,
+}
+
+impl ValueState {
+    fn join(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            ValueState::MaybeConsumed
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,10 +441,25 @@ struct BorrowInfo {
     is_mut: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InitState {
     Init,
     Uninit,
+    /// Init on some incoming paths, uninit on others — the guarded-destroy
+    /// shape (`emit_guarded_destroy`) that a drop flag resolves at runtime.
+    /// Mirrors lowering's own `VarInit::MaybeUninit`; permissive, like
+    /// `ValueState::MaybeConsumed`.
+    MaybeInit,
+}
+
+impl InitState {
+    fn join(self, other: Self) -> Self {
+        if self == other {
+            self
+        } else {
+            InitState::MaybeInit
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +488,99 @@ struct FlowState {
     addrs: FxHashMap<ValueId, AddrKind>,
 }
 
+impl FlowState {
+    /// Merge `other` (an incoming edge's out-state) into `self`. Returns
+    /// whether anything changed, which is the fixpoint's termination signal.
+    ///
+    /// A key absent from one side keeps the present side's value rather than
+    /// becoming `Maybe`: absence means "this path never mentioned the value",
+    /// not "this path left it in the other state". Values are only reachable
+    /// where they are defined, so a genuine partial-definition would have been
+    /// caught by Check 1b already.
+    fn join(&mut self, other: &FlowState) -> bool {
+        let mut changed = false;
+
+        for (&v, &incoming) in &other.owned {
+            match self.owned.get(&v) {
+                Some(&existing) => {
+                    let merged = existing.join(incoming);
+                    if merged != existing {
+                        self.owned.insert(v, merged);
+                        changed = true;
+                    }
+                },
+                None => {
+                    self.owned.insert(v, incoming);
+                    changed = true;
+                },
+            }
+        }
+
+        for (&a, incoming) in &other.addrs {
+            match self.addrs.get(&a) {
+                Some(existing) => {
+                    if let Some(merged) = existing.join(incoming) {
+                        self.addrs.insert(a, merged);
+                        changed = true;
+                    }
+                },
+                None => {
+                    self.addrs.insert(a, incoming.clone());
+                    changed = true;
+                },
+            }
+        }
+
+        changed
+    }
+}
+
+impl AddrKind {
+    /// Merge two address states, returning `Some(merged)` only when the result
+    /// differs from `self` (so the caller can track fixpoint progress).
+    ///
+    /// A `Whole` meeting a `SubField` collapses to `Whole`: the paths disagree
+    /// about whether the slot is field-tracked at all, and whole-tracking is
+    /// the conservative reading (any `Maybe` field makes the whole `Maybe`).
+    fn join(&self, other: &AddrKind) -> Option<AddrKind> {
+        let merged = match (self, other) {
+            (AddrKind::Whole(a), AddrKind::Whole(b)) => AddrKind::Whole(a.join(*b)),
+            (
+                AddrKind::SubField { ty, fields: fa },
+                AddrKind::SubField { fields: fb, .. },
+            ) => {
+                let mut fields = fa.clone();
+                for (&idx, &b) in fb {
+                    let merged = match fa.get(&idx) {
+                        Some(&a) => a.join(b),
+                        None => b,
+                    };
+                    fields.insert(idx, merged);
+                }
+                AddrKind::SubField { ty: *ty, fields }
+            },
+            // Mixed tracking granularity — collapse to whole.
+            (AddrKind::Whole(a), AddrKind::SubField { fields, .. })
+            | (AddrKind::SubField { fields, .. }, AddrKind::Whole(a)) => {
+                let collapsed = fields
+                    .values()
+                    .copied()
+                    .fold(*a, |acc, f| acc.join(f));
+                AddrKind::Whole(collapsed)
+            },
+        };
+        if merged.same_as(self) { None } else { Some(merged) }
+    }
+
+    fn same_as(&self, other: &AddrKind) -> bool {
+        match (self, other) {
+            (AddrKind::Whole(a), AddrKind::Whole(b)) => a == b,
+            (AddrKind::SubField { fields: a, .. }, AddrKind::SubField { fields: b, .. }) => a == b,
+            _ => false,
+        }
+    }
+}
+
 struct FlowVerifier<'a> {
     body: &'a OssaBody,
     _module: &'a MirModule,
@@ -339,6 +595,20 @@ struct FlowVerifier<'a> {
 
     /// Flowing state (owned/addr maps) — see `FlowState`.
     state: FlowState,
+    /// How to treat violations that only became visible because state flowed
+    /// in from a predecessor.
+    mode: FlowMode,
+    /// Suppress error construction during fixpoint iterations; only the final
+    /// reporting pass records anything.
+    report: bool,
+    /// Values defined by THIS block (params + instruction results). A
+    /// violation naming one of these was already reachable under the
+    /// block-local walk, so it stays a hard error regardless of mode;
+    /// anything else is newly-visible and is gated by `mode`.
+    defined_here: FxHashSet<ValueId>,
+    /// Newly-visible violations, held separately so `Warn` can report a
+    /// summary without failing the build.
+    flow_findings: Vec<VerifyError>,
     /// Active borrows keyed by the @guaranteed result value.
     borrows: FxHashMap<ValueId, BorrowInfo>,
     /// Live references: @guaranteed call results (only ref-returning calls
@@ -376,6 +646,10 @@ impl<'a> FlowVerifier<'a> {
             entity,
             ret_borrow,
             state,
+            mode: FlowMode::current(),
+            report: true,
+            defined_here: FxHashSet::default(),
+            flow_findings: Vec::new(),
             borrows: FxHashMap::default(),
             refs: FxHashMap::default(),
             field_addr_map: FxHashMap::default(),
@@ -410,6 +684,12 @@ impl<'a> FlowVerifier<'a> {
     }
 
     fn push_err(&mut self, inst: Option<u32>, span: Option<Span>, message: String) {
+        // Fixpoint iterations re-run the transfer function; only the final
+        // reporting pass records. Without this, errors are duplicated once per
+        // iteration and their order depends on how fast the fixpoint settles.
+        if !self.report {
+            return;
+        }
         self.errors.push(VerifyError {
             block: self.block_id,
             inst,
@@ -423,9 +703,40 @@ impl<'a> FlowVerifier<'a> {
 
     // -- Ownership helpers --
 
-    /// Record that an @owned value has been produced.
+    /// Record that an @owned value has been produced. A definition OVERWRITES
+    /// any inherited state, which is what makes loops sound: a value defined
+    /// and consumed inside a loop body re-enters via the back edge as
+    /// `Consumed`, and its defining instruction resets it to `Live`.
     fn define_owned(&mut self, v: ValueId) {
         self.state.owned.insert(v, ValueState::Live);
+        self.defined_here.insert(v);
+    }
+
+    /// Report a violation that may only be visible because ownership state
+    /// flowed in from a predecessor block.
+    ///
+    /// If the value was defined in this block the finding was already
+    /// reachable block-locally, so it is a hard error as before. Otherwise it
+    /// is new, and `Warn` collects it for the summary instead of failing.
+    fn flow_err(&mut self, v: ValueId, inst: Option<u32>, message: String) {
+        if self.defined_here.contains(&v) || self.mode == FlowMode::Enforce {
+            self.err_val(inst, v, message);
+            return;
+        }
+        if self.report && self.mode == FlowMode::Warn {
+            let span = self
+                .inst_span(inst)
+                .or_else(|| self.body.value(v).span.clone());
+            self.flow_findings.push(VerifyError {
+                block: self.block_id,
+                inst,
+                message,
+                span,
+                func_name: self.func_name.to_string(),
+                entity: self.entity,
+                diag: None,
+            });
+        }
     }
 
     /// Attempt to consume an @owned value. Returns false if already consumed.
@@ -482,13 +793,22 @@ impl<'a> FlowVerifier<'a> {
                 self.state.owned.insert(v, ValueState::Consumed);
                 true
             },
+            Some(ValueState::MaybeConsumed) => {
+                // Consumed on some incoming paths only — the drop-flag shape.
+                // Permitted; the runtime flag decides. Definitely consumed
+                // from here on, so a *later* consume is still catchable.
+                self.state.owned.insert(v, ValueState::Consumed);
+                true
+            },
             Some(ValueState::Consumed) => {
-                self.err_val(inst, v, format!("value {:?} consumed more than once", v));
+                self.flow_err(v, inst, format!("value {:?} consumed more than once", v));
                 false
             },
             None => {
-                // Value not tracked in this block — likely defined elsewhere.
-                // We still flag it so the caller sees it.
+                // Not reached by any tracked definition. Under the block-local
+                // walk this is the common case (the value was defined in
+                // another block); once state flows it means the value is
+                // genuinely untracked, e.g. a non-consuming function param.
                 true
             },
         }
@@ -587,8 +907,9 @@ impl<'a> FlowVerifier<'a> {
         if ownership != Ownership::Owned {
             return;
         }
+        // MaybeConsumed is permitted — see `ValueState::MaybeConsumed`.
         if let Some(ValueState::Consumed) = self.state.owned.get(&v) {
-            self.err_val(inst, v, format!("use of consumed value {:?}", v));
+            self.flow_err(v, inst, format!("use of consumed value {:?}", v));
         }
     }
 
@@ -639,6 +960,9 @@ impl<'a> FlowVerifier<'a> {
                 AddrKind::Whole(InitState::Uninit) => {
                     errs.push(format!("address {:?} is uninit", addr));
                 },
+                // MaybeInit: init on some paths only (guarded destroy) — the
+                // drop flag decides at runtime. Permitted.
+                AddrKind::Whole(InitState::MaybeInit) => {},
                 AddrKind::SubField { fields, .. } => {
                     for (f, st) in fields {
                         if *st == InitState::Uninit {
@@ -758,7 +1082,7 @@ impl<'a> FlowVerifier<'a> {
 
     // -- Main verification --
 
-    fn verify(mut self) -> Vec<VerifyError> {
+    fn verify(mut self) -> BlockOutcome {
         let block = self.body.block(self.block_id);
 
         // Register block params.
@@ -790,7 +1114,11 @@ impl<'a> FlowVerifier<'a> {
         // Process terminator.
         self.verify_terminator(block);
 
-        self.errors
+        BlockOutcome {
+            errors: self.errors,
+            flow_findings: self.flow_findings,
+            out_state: self.state,
+        }
     }
 
     fn verify_instruction(&mut self, kind: &InstKind, idx: Option<u32>) {
@@ -1327,11 +1655,18 @@ impl<'a> FlowVerifier<'a> {
         }
 
         // Check 2: every @owned value must be Consumed or forwarded by now.
+        //
+        // Scoped to values DEFINED in this block. Under the block-local walk
+        // that was every tracked value, so this filter is a no-op there; once
+        // state flows, a value merely passing through would otherwise be
+        // reported as a leak by every block that inherits it while live.
         let unconsumed: Vec<ValueId> = self
             .state
             .owned
             .iter()
-            .filter(|(_, state)| **state == ValueState::Live)
+            .filter(|(v, state)| {
+                **state == ValueState::Live && self.defined_here.contains(v)
+            })
             .map(|(&v, _)| v)
             .collect();
         for v in unconsumed {
@@ -1381,6 +1716,13 @@ impl<'a> FlowVerifier<'a> {
 // Per-block entry point
 // ---------------------------------------------------------------------------
 
+/// What one block's transfer function produced.
+struct BlockOutcome {
+    errors: Vec<VerifyError>,
+    flow_findings: Vec<VerifyError>,
+    out_state: FlowState,
+}
+
 fn verify_block(
     body: &OssaBody,
     module: &MirModule,
@@ -1388,11 +1730,14 @@ fn verify_block(
     func_name: &str,
     entity: Entity,
     entry_state: FlowState,
-    errors: &mut Vec<VerifyError>,
-) {
-    let verifier = FlowVerifier::new(body, module, block_id, func_name, entity, entry_state);
-    let block_errors = verifier.verify();
-    errors.extend(block_errors);
+    report: bool,
+    mode: FlowMode,
+) -> BlockOutcome {
+    let mut verifier =
+        FlowVerifier::new(body, module, block_id, func_name, entity, entry_state);
+    verifier.report = report;
+    verifier.mode = mode;
+    verifier.verify()
 }
 
 // ---------------------------------------------------------------------------
@@ -1751,6 +2096,196 @@ mod tests {
     fn run_verify(b: OssaBuilder) -> Vec<VerifyError> {
         let (body, module) = b.finish();
         verify_ossa(&body, &module, "test", Entity::from_raw(0))
+    }
+
+    /// Build: entry defines an @owned value, destroys it, then jumps to a
+    /// second block that destroys it AGAIN without it being threaded as a
+    /// block argument. That is a double-consume across a block boundary — a
+    /// double free if it reached codegen.
+    fn cross_block_double_consume() -> (crate::body::OssaBody, MirModule) {
+        let mut b = OssaBuilder::new("test");
+        let (owned_ty, _) = make_owned_type(&mut b);
+
+        let second = b.new_block();
+        let entry = b.current_block();
+
+        let x = b.new_value(owned_ty, Ownership::Owned);
+        {
+            let body = b.body_mut();
+            body.block_mut(entry).params.push(crate::block::BlockParam {
+                value: x,
+                ty: owned_ty,
+                ownership: Ownership::Owned,
+            });
+        }
+        b.emit_destroy_value(x);
+        b.emit_jump(second, vec![]);
+
+        b.switch_to(second);
+        b.emit_destroy_value(x);
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        b.finish()
+    }
+
+    #[test]
+    fn cross_block_double_consume_invisible_when_flow_off() {
+        // Documents F34: with the block-local walk, `second` starts from an
+        // empty state, so the second destroy is unattributable and silent.
+        // (`FlowMode` is read from the environment once per process, so this
+        // asserts the Off-mode transfer rules directly rather than by env.)
+        let (body, module) = cross_block_double_consume();
+        let mut v = FlowVerifier::new(
+            &body,
+            &module,
+            BlockId::new(body.blocks.len() - 1),
+            "test",
+            Entity::from_raw(0),
+            FlowState::default(),
+        );
+        v.mode = FlowMode::Off;
+        let outcome = v.verify();
+        assert!(
+            !outcome
+                .errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "block-local walk should not see the cross-block consume: {:?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn cross_block_double_consume_caught_when_state_flows() {
+        // The F34 payoff: hand the block the state its predecessor actually
+        // left behind, and the second consume is a hard error.
+        let (body, module) = cross_block_double_consume();
+
+        let mut incoming = FlowState::default();
+        incoming
+            .owned
+            .insert(ValueId::new(0), ValueState::Consumed);
+
+        let mut v = FlowVerifier::new(
+            &body,
+            &module,
+            BlockId::new(body.blocks.len() - 1),
+            "test",
+            Entity::from_raw(0),
+            incoming,
+        );
+        v.mode = FlowMode::Enforce;
+        let outcome = v.verify();
+        assert!(
+            outcome
+                .errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "flowed state should catch the cross-block double consume: {:?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn maybe_consumed_is_permitted() {
+        // A conditional move: consumed on one incoming path, live on the
+        // other. The drop flag decides at runtime, so consuming here must NOT
+        // be reported — otherwise every guarded destroy in the stdlib ICEs.
+        let (body, module) = cross_block_double_consume();
+
+        let mut incoming = FlowState::default();
+        incoming
+            .owned
+            .insert(ValueId::new(0), ValueState::MaybeConsumed);
+
+        let mut v = FlowVerifier::new(
+            &body,
+            &module,
+            BlockId::new(body.blocks.len() - 1),
+            "test",
+            Entity::from_raw(0),
+            incoming,
+        );
+        v.mode = FlowMode::Enforce;
+        let outcome = v.verify();
+        assert!(
+            !outcome
+                .errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "MaybeConsumed must be permissive: {:?}",
+            outcome.errors,
+        );
+    }
+
+    #[test]
+    fn driver_off_mode_misses_cross_block_double_consume() {
+        // End-to-end through verify_ossa: the block-local walk is blind.
+        let (body, module) = cross_block_double_consume();
+        let errors = verify_ossa_with_mode(
+            &body,
+            &module,
+            "test",
+            Entity::from_raw(0),
+            FlowMode::Off,
+        );
+        assert!(
+            !errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "Off mode should miss it (that IS F34): {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn driver_enforce_mode_catches_cross_block_double_consume() {
+        // Same body, same entry point, state now flows along the CFG edge.
+        let (body, module) = cross_block_double_consume();
+        let errors = verify_ossa_with_mode(
+            &body,
+            &module,
+            "test",
+            Entity::from_raw(0),
+            FlowMode::Enforce,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("consumed more than once")),
+            "the fixpoint should propagate Consumed across the jump: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn flow_mode_parses_from_env_value() {
+        // Closes the last link: env string -> mode. (mode -> driver -> caught
+        // is covered by the driver_* tests.) An unset or unrecognised value
+        // must fall back to Off so an unrelated build never changes behaviour.
+        assert_eq!(FlowMode::parse(Some("warn")), FlowMode::Warn);
+        assert_eq!(FlowMode::parse(Some("enforce")), FlowMode::Enforce);
+        assert_eq!(FlowMode::parse(None), FlowMode::Off);
+        assert_eq!(FlowMode::parse(Some("")), FlowMode::Off);
+        assert_eq!(FlowMode::parse(Some("1")), FlowMode::Off);
+        assert!(!FlowMode::Off.flows());
+        assert!(FlowMode::Warn.flows());
+        assert!(FlowMode::Enforce.flows());
+    }
+
+    #[test]
+    fn join_disagreeing_states_yields_maybe() {
+        let mut a = FlowState::default();
+        a.owned.insert(ValueId::new(0), ValueState::Live);
+        let mut b = FlowState::default();
+        b.owned.insert(ValueId::new(0), ValueState::Consumed);
+
+        assert!(a.join(&b), "join must report that it changed");
+        assert_eq!(a.owned[&ValueId::new(0)], ValueState::MaybeConsumed);
+
+        // Idempotent: joining again changes nothing (fixpoint termination).
+        assert!(!a.join(&b));
     }
 
     // -----------------------------------------------------------------------
