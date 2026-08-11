@@ -145,6 +145,7 @@ fn verify_ossa_with_mode(
     check_operands_defined(body, func_name, entity, &mut errors);
 
     let order = reverse_postorder(body);
+    let aliases = AddrAliases::build(body);
 
     // Phase 1: solve for each block's entry state.
     //
@@ -169,7 +170,7 @@ fn verify_ossa_with_mode(
                 // `report: false` — findings from a not-yet-settled state are
                 // meaningless, and re-running would duplicate them.
                 let outcome = verify_block(
-                    body, module, block_id, func_name, entity, entry, false, mode,
+                    body, module, block_id, func_name, entity, entry, false, mode, &aliases,
                 );
                 for succ in body.block(block_id).terminator.kind.successors() {
                     match in_states.get_mut(&succ) {
@@ -192,8 +193,9 @@ fn verify_ossa_with_mode(
     let mut flow_findings = Vec::new();
     for block_id in order {
         let entry = in_states.get(&block_id).cloned().unwrap_or_default();
-        let outcome =
-            verify_block(body, module, block_id, func_name, entity, entry, true, mode);
+        let outcome = verify_block(
+            body, module, block_id, func_name, entity, entry, true, mode, &aliases,
+        );
         errors.extend(outcome.errors);
         flow_findings.extend(outcome.flow_findings);
     }
@@ -343,6 +345,107 @@ fn reverse_postorder(body: &OssaBody) -> Vec<BlockId> {
 
     postorder.reverse();
     postorder
+}
+
+// ---------------------------------------------------------------------------
+// Address aliasing
+// ---------------------------------------------------------------------------
+
+/// Which underlying slot each address-typed value refers to.
+///
+/// An address created by `Uninit` in one block and threaded to a successor as
+/// a block argument arrives there under a *different* `ValueId`. Both name the
+/// same storage, and lowering mixes them freely — the guarded-destroy shape
+/// takes through the renamed param but destroys through the original id. A
+/// per-`ValueId` init map is blind to that in both directions: the take
+/// appears to touch an untracked address, and the destroy sees a slot that is
+/// still `Init`.
+///
+/// So collapse every address to the `Uninit` that created it, and key init
+/// state by that root instead. Flow-insensitive and computed once per body.
+#[derive(Debug, Default)]
+struct AddrAliases {
+    /// address value -> the `Uninit` result that created its storage.
+    root: FxHashMap<ValueId, ValueId>,
+    /// Params reachable from two *different* roots. Nothing can be said about
+    /// their storage, so they are untracked — which is exactly how the walk
+    /// behaved for every cross-block address before aliasing existed.
+    poisoned: FxHashSet<ValueId>,
+    /// `FieldAddr` result -> (root address, field). Whole-function, so a
+    /// projection taken in one block is still understood in another.
+    field_of: FxHashMap<ValueId, (ValueId, FieldIdx)>,
+}
+
+impl AddrAliases {
+    fn build(body: &OssaBody) -> AddrAliases {
+        let mut aliases = AddrAliases::default();
+
+        // Roots.
+        for block in &body.blocks {
+            for inst in &block.insts {
+                if let InstKind::Uninit { result, .. } = &inst.kind {
+                    aliases.root.insert(*result, *result);
+                }
+            }
+        }
+
+        // Propagate along block-argument bindings to a fixpoint: a param's
+        // root may only become known after a later terminator is processed,
+        // and back edges mean one pass is not enough.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for block in &body.blocks {
+                for (succ, args) in block.terminator.kind.successor_args() {
+                    let params = &body.block(succ).params;
+                    for (arg, param) in args.iter().zip(params.iter()) {
+                        let Some(&arg_root) = aliases.root.get(arg) else {
+                            continue;
+                        };
+                        if aliases.poisoned.contains(&param.value) {
+                            continue;
+                        }
+                        match aliases.root.get(&param.value) {
+                            Some(&existing) if existing == arg_root => {},
+                            Some(_) => {
+                                // Two different slots reach this param.
+                                aliases.root.remove(&param.value);
+                                aliases.poisoned.insert(param.value);
+                                changed = true;
+                            },
+                            None => {
+                                aliases.root.insert(param.value, arg_root);
+                                changed = true;
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        // Field projections, now that roots are settled.
+        for block in &body.blocks {
+            for inst in &block.insts {
+                if let InstKind::FieldAddr {
+                    result, base, field, ..
+                } = &inst.kind
+                    && let Some(&base_root) = aliases.root.get(base)
+                {
+                    aliases.field_of.insert(*result, (base_root, *field));
+                }
+            }
+        }
+
+        aliases
+    }
+
+    /// The slot `v` names, or `None` when it cannot be attributed to one.
+    fn resolve(&self, v: ValueId) -> Option<ValueId> {
+        if self.poisoned.contains(&v) {
+            return None;
+        }
+        self.root.get(&v).copied()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -617,8 +720,8 @@ struct FlowVerifier<'a> {
     /// borrow that a live ref chains through was kept alive *by* the ref,
     /// so the conflict is the user's (E498), not a lowering bug (ICE).
     refs: FxHashMap<ValueId, ValueId>,
-    /// Maps a FieldAddr result -> (base_addr, field_idx).
-    field_addr_map: FxHashMap<ValueId, (ValueId, FieldIdx)>,
+    /// Whole-function address aliasing: which slot each address names.
+    aliases: &'a AddrAliases,
 
     errors: Vec<VerifyError>,
 }
@@ -631,6 +734,7 @@ impl<'a> FlowVerifier<'a> {
         func_name: &'a str,
         entity: Entity,
         state: FlowState,
+        aliases: &'a AddrAliases,
     ) -> Self {
         let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
             matches!(
@@ -652,7 +756,7 @@ impl<'a> FlowVerifier<'a> {
             flow_findings: Vec::new(),
             borrows: FxHashMap::default(),
             refs: FxHashMap::default(),
-            field_addr_map: FxHashMap::default(),
+            aliases,
             errors: Vec::new(),
         }
     }
@@ -941,7 +1045,7 @@ impl<'a> FlowVerifier<'a> {
 
     fn addr_require_init(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, check the specific field.
-        if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
+        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
             if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get(&base)
                 && let Some(InitState::Uninit) = fields.get(&field)
             {
@@ -954,6 +1058,9 @@ impl<'a> FlowVerifier<'a> {
         }
 
         // Collect error messages first to avoid borrow conflict.
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut errs = Vec::new();
         if let Some(ak) = self.state.addrs.get(&addr) {
             match ak {
@@ -977,13 +1084,13 @@ impl<'a> FlowVerifier<'a> {
             }
         }
         for msg in errs {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     fn addr_set_uninit(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, set that specific field.
-        if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
+        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
             let mut err_msg = None;
             if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
                 && let Some(st) = fields.get_mut(&field)
@@ -1002,10 +1109,14 @@ impl<'a> FlowVerifier<'a> {
             return;
         }
 
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut err_msg = None;
         if let Some(ak) = self.state.addrs.get_mut(&addr) {
             match ak {
                 AddrKind::Whole(st) => {
+                    // MaybeInit is the guarded-destroy arm — permitted.
                     if *st == InitState::Uninit {
                         err_msg = Some(format!("address {:?} already uninit", addr));
                     }
@@ -1018,13 +1129,13 @@ impl<'a> FlowVerifier<'a> {
             }
         }
         if let Some(msg) = err_msg {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     fn addr_store_init(&mut self, addr: ValueId, inst: Option<u32>) {
         // If this is a field addr, set that specific field.
-        if let Some(&(base, field)) = self.field_addr_map.get(&addr) {
+        if let Some(&(base, field)) = self.aliases.field_of.get(&addr) {
             let mut err_msg = None;
             if let Some(AddrKind::SubField { fields, .. }) = self.state.addrs.get_mut(&base)
                 && let Some(st) = fields.get_mut(&field)
@@ -1043,10 +1154,15 @@ impl<'a> FlowVerifier<'a> {
             return;
         }
 
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut err_msg = None;
         if let Some(ak) = self.state.addrs.get_mut(&addr) {
             match ak {
                 AddrKind::Whole(st) => {
+                    // MaybeInit: re-initialising a conditionally-moved slot,
+                    // which is the in-loop reinit shape. Permitted.
                     if *st == InitState::Init {
                         err_msg =
                             Some(format!("store_init on address {:?} but already init", addr,));
@@ -1061,11 +1177,14 @@ impl<'a> FlowVerifier<'a> {
             }
         }
         if let Some(msg) = err_msg {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
     fn addr_store_assign(&mut self, addr: ValueId, inst: Option<u32>) {
+        let Some(addr) = self.aliases.resolve(addr) else {
+            return;
+        };
         let mut err_msg = None;
         if let Some(ak) = self.state.addrs.get(&addr)
             && let AddrKind::Whole(InitState::Uninit) = ak
@@ -1076,7 +1195,7 @@ impl<'a> FlowVerifier<'a> {
             ));
         }
         if let Some(msg) = err_msg {
-            self.err(inst, msg);
+            self.flow_err(addr, inst, msg);
         }
     }
 
@@ -1452,9 +1571,7 @@ impl<'a> FlowVerifier<'a> {
                 ..
             } => {
                 self.define_owned(*result);
-                if self.state.addrs.contains_key(base) {
-                    self.field_addr_map.insert(*result, (*base, *field));
-                }
+                let _ = (base, field); // projections come from `AddrAliases`
             },
 
             // -- Uninit: creates sub-field tracking --
@@ -1732,9 +1849,10 @@ fn verify_block(
     entry_state: FlowState,
     report: bool,
     mode: FlowMode,
+    aliases: &AddrAliases,
 ) -> BlockOutcome {
     let mut verifier =
-        FlowVerifier::new(body, module, block_id, func_name, entity, entry_state);
+        FlowVerifier::new(body, module, block_id, func_name, entity, entry_state, aliases);
     verifier.report = report;
     verifier.mode = mode;
     verifier.verify()
@@ -2136,6 +2254,7 @@ mod tests {
         // (`FlowMode` is read from the environment once per process, so this
         // asserts the Off-mode transfer rules directly rather than by env.)
         let (body, module) = cross_block_double_consume();
+        let aliases = AddrAliases::build(&body);
         let mut v = FlowVerifier::new(
             &body,
             &module,
@@ -2143,6 +2262,7 @@ mod tests {
             "test",
             Entity::from_raw(0),
             FlowState::default(),
+            &aliases,
         );
         v.mode = FlowMode::Off;
         let outcome = v.verify();
@@ -2162,6 +2282,7 @@ mod tests {
         // left behind, and the second consume is a hard error.
         let (body, module) = cross_block_double_consume();
 
+        let aliases = AddrAliases::build(&body);
         let mut incoming = FlowState::default();
         incoming
             .owned
@@ -2174,6 +2295,7 @@ mod tests {
             "test",
             Entity::from_raw(0),
             incoming,
+            &aliases,
         );
         v.mode = FlowMode::Enforce;
         let outcome = v.verify();
@@ -2194,6 +2316,7 @@ mod tests {
         // be reported — otherwise every guarded destroy in the stdlib ICEs.
         let (body, module) = cross_block_double_consume();
 
+        let aliases = AddrAliases::build(&body);
         let mut incoming = FlowState::default();
         incoming
             .owned
@@ -2206,6 +2329,7 @@ mod tests {
             "test",
             Entity::from_raw(0),
             incoming,
+            &aliases,
         );
         v.mode = FlowMode::Enforce;
         let outcome = v.verify();
