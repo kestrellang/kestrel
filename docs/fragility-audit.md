@@ -139,7 +139,9 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Verifier and self-check gaps
 
-- [ ] **F34** `medium` `fragility` — The OSSA verifier's linear-ownership check is block-local, and never runs after mono at all
+- [ ] **F34** `medium` `fragility` — The OSSA verifier's linear-ownership check is block-local, and never runs after mono at all — **the prescribed fix is wrong; see Corrections**
+  - The finding stands (the check *is* block-local and cross-block double-consumes are invisible). What is wrong is the proposed remedy: enforcing a "block-parameter live-in contract" would reject the stdlib. Measured 2026-08-11 — 121 of 354 `memory_model` tests fail, and the violations are in shipped stdlib bodies (e.g. `std.text.ClosedRange.readLines`). Lowering follows the ordinary SSA rule (use any *dominating* definition); the contract asserted at `verify.rs:6` is documentation of an invariant nobody maintains, and it is the reason the ownership walk was written block-local in the first place
+  - Correct direction: make the ownership walk **dominance-aware / whole-function** (carry state along CFG edges, model conditionally-consumed values — Kestrel has drop flags precisely because a value may be consumed on one path only), rather than forcing every cross-block value through a block parameter
 - [ ] **F35** `low` `side-table` — Borrow mutability lives only on the instruction, so threading a mut borrow through a block param downgrades it to shared
 - [ ] **F36** `low` `side-table` — Mono's `WitnessCache` is built at collection cost, discarded with `let _ =`, and keyed by a lossy pair
 - [ ] **F37** `medium` `fragility` — `find_inherited_assoc_type` recurses through protocol inheritance with no cycle guard its sibling has
@@ -216,4 +218,14 @@ Established by running the code, not reading it:
   semantically equivalent — benign today. But it means **the audit's proposed "hard error on
   duplicate key" fix would ICE on every build**; the guard must fire only when two entries disagree
   on `source`. Repros: `temp/f7/*.ks`.
+- **F34's proposed fix does not survive contact.** The audit says to "add a `check_block_local_defs` pass
+  requiring every operand to be defined by that block's params or an earlier instruction in it." That was
+  implemented and measured (2026-08-11): **121 of 354 `memory_model` tests fail**, and the reported
+  violations are inside shipped stdlib bodies (`std.text.ClosedRange.readLines` and friends), not test code.
+  MIR lowering uses the ordinary SSA dominance rule — a block may reference any definition that dominates
+  it — so the "block-parameter live-in contract" claimed at `verify.rs:6` was never an invariant of this
+  compiler. It is the *false premise* that justified a block-local ownership walk, and enforcing it would
+  mean reworking lowering to thread every cross-block value through block parameters. The finding itself is
+  unchanged; only the remedy is wrong. Fix the walk (dominance-aware, whole-function, modelling
+  conditionally-consumed values) instead of the lowering.
 - **F3 was understated, and is raised `medium` → `high`.** All four failure scenarios were reproduced by compiling and *running* programs (2026-08-08): the wrong-slot write on `S(a: 1, c: 3)` (prints `c=0`, no diagnostic at any stage), an E500 copy-fold false positive from a `static var` of a non-`Copyable` type, an E449 "cannot contain itself" false positive from a `static var` self-reference, and an **OSSA ICE** (`block arg 0 to BlockId(1): type mismatch`) on a struct pattern binding a computed property. The site count is ~15 real decision sites, not 8; three the audit missed are `mir-lower/items/mod.rs:60-67`, `mir-lower/body/expr.rs:1699`, and `mir-lower/body/mod.rs:2593`. `mir-lower/src/ty.rs:761` was miscited — it is inside `#[cfg(test)] mod tests`, not a production layout authority. `struct_cycles.rs`/`recursive_enum.rs` are `Field && !Callable`, missing *both* filters rather than just `Static`.
