@@ -135,17 +135,43 @@ fn verify_ossa_with_mode(
     let mut errors = Vec::new();
 
     // Check 1: ValueId uniqueness — every value defined exactly once.
-    // Deliberately unused for now: once state flows between blocks, the leak
-    // check has to be scoped to the block that DEFINES a value rather than to
-    // whichever block is in hand, and this is the map that answers that. It is
-    // built here either way, so returning it avoids a second full traversal.
-    let _def_blocks = check_value_uniqueness(body, func_name, entity, &mut errors);
+    // The returned map (value -> defining block) feeds Check 1c below, which
+    // needs to know where a value was defined to ask whether that definition
+    // dominates the use. Built here either way, so returning it avoids a
+    // second full traversal.
+    let def_blocks = check_value_uniqueness(body, func_name, entity, &mut errors);
 
     // Check 1b: every operand must have a definition (block param or instruction result).
     check_operands_defined(body, func_name, entity, &mut errors);
 
     let order = reverse_postorder(body);
     let aliases = AddrAliases::build(body);
+
+    // Check 1c: definitions must dominate their uses. Gated with the rest of
+    // the flow work so `Off` remains exactly the historical behaviour, and
+    // staged the same way: `Warn` reports without failing the build, only
+    // `Enforce` turns a violation into a hard error. Measured at zero across
+    // the 3573-file corpus, so this is a guard against regressions rather
+    // than a live finding.
+    let mut dominance_findings = Vec::new();
+    if mode.flows() {
+        check_dominance(
+            body,
+            &order,
+            &def_blocks,
+            func_name,
+            entity,
+            &mut dominance_findings,
+        );
+        match mode {
+            FlowMode::Enforce => errors.append(&mut dominance_findings),
+            _ => {
+                if !dominance_findings.is_empty() {
+                    report_flow_findings(func_name, &dominance_findings);
+                }
+            }
+        }
+    }
 
     // Phase 1: solve for each block's entry state.
     //
@@ -345,6 +371,219 @@ fn reverse_postorder(body: &OssaBody) -> Vec<BlockId> {
 
     postorder.reverse();
     postorder
+}
+
+// ---------------------------------------------------------------------------
+// Dominance
+// ---------------------------------------------------------------------------
+
+/// Immediate dominators, indexed by block, for the reachable CFG.
+///
+/// Cooper-Harvey-Kennedy: iterate over blocks in RPO, intersecting the
+/// already-computed idoms of each block's processed predecessors, until
+/// nothing changes. Small and adequate here — bodies are function-sized.
+///
+/// `None` for the entry block and for unreachable blocks.
+fn immediate_dominators(body: &OssaBody, order: &[BlockId]) -> FxHashMap<BlockId, Option<BlockId>> {
+    // Position in RPO; also the "have we processed this yet" test.
+    let mut rpo_index: FxHashMap<BlockId, usize> = FxHashMap::default();
+    for (i, &b) in order.iter().enumerate() {
+        rpo_index.insert(b, i);
+    }
+
+    let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
+    for &b in order {
+        for succ in body.block(b).terminator.kind.successors() {
+            if rpo_index.contains_key(&succ) {
+                preds.entry(succ).or_default().push(b);
+            }
+        }
+    }
+
+    let mut idom: FxHashMap<BlockId, Option<BlockId>> = FxHashMap::default();
+    for &b in order {
+        idom.insert(b, None);
+    }
+    // The entry dominates itself; represented by staying `None` while being
+    // treated as "processed" below.
+    let mut processed: FxHashSet<BlockId> = FxHashSet::default();
+    processed.insert(body.entry);
+
+    let intersect = |mut a: BlockId,
+                     mut b: BlockId,
+                     idom: &FxHashMap<BlockId, Option<BlockId>>,
+                     rpo_index: &FxHashMap<BlockId, usize>|
+     -> BlockId {
+        // Walk both up the dominator tree until they meet.
+        while a != b {
+            while rpo_index[&a] > rpo_index[&b] {
+                match idom.get(&a).copied().flatten() {
+                    Some(next) => a = next,
+                    None => return b,
+                }
+            }
+            while rpo_index[&b] > rpo_index[&a] {
+                match idom.get(&b).copied().flatten() {
+                    Some(next) => b = next,
+                    None => return a,
+                }
+            }
+        }
+        a
+    };
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &b in order {
+            if b == body.entry {
+                continue;
+            }
+            let Some(bpreds) = preds.get(&b) else {
+                continue;
+            };
+            let mut new_idom: Option<BlockId> = None;
+            for &p in bpreds {
+                if !processed.contains(&p) {
+                    continue;
+                }
+                new_idom = Some(match new_idom {
+                    None => p,
+                    Some(cur) => intersect(p, cur, &idom, &rpo_index),
+                });
+            }
+            if let Some(candidate) = new_idom
+                && idom.get(&b).copied().flatten() != Some(candidate)
+            {
+                idom.insert(b, Some(candidate));
+                processed.insert(b);
+                changed = true;
+            }
+            processed.insert(b);
+        }
+    }
+
+    idom
+}
+
+/// Does `a` dominate `b`? Walks `b` up the dominator tree.
+fn dominates(a: BlockId, b: BlockId, idom: &FxHashMap<BlockId, Option<BlockId>>) -> bool {
+    let mut cur = b;
+    loop {
+        if cur == a {
+            return true;
+        }
+        match idom.get(&cur).copied().flatten() {
+            Some(next) => cur = next,
+            None => return false,
+        }
+    }
+}
+
+/// Check 1c: every operand's definition must DOMINATE its use.
+///
+/// This is the sound version of a check the audit originally prescribed for
+/// F34 — "every operand must be defined by this block's params or an earlier
+/// instruction in it". That was implemented and measured, and it rejects the
+/// stdlib: lowering uses the ordinary SSA rule, where a block may reference
+/// any definition that dominates it. Dominance is the property that actually
+/// holds, and the one that makes a definition meaningful at a use site.
+///
+/// `check_operands_defined` only asks whether a definition exists ANYWHERE,
+/// so it accepts a use that a definition cannot reach.
+fn check_dominance(
+    body: &OssaBody,
+    order: &[BlockId],
+    def_blocks: &FxHashMap<ValueId, BlockId>,
+    func_name: &str,
+    entity: Entity,
+    errors: &mut Vec<VerifyError>,
+) {
+    let idom = immediate_dominators(body, order);
+
+    for &block_id in order {
+        let block = body.block(block_id);
+
+        // Values usable at the top of this block without dominance analysis.
+        let mut available: FxHashSet<ValueId> = FxHashSet::default();
+        for param in &block.params {
+            available.insert(param.value);
+        }
+        if block_id == body.entry {
+            for i in 0..body.param_count {
+                available.insert(ValueId::new(i));
+            }
+        }
+
+        let check = |operand: ValueId,
+                         inst: Option<u32>,
+                         span: Option<Span>,
+                         available: &FxHashSet<ValueId>,
+                         errors: &mut Vec<VerifyError>| {
+            if available.contains(&operand) {
+                return;
+            }
+            let Some(&def_block) = def_blocks.get(&operand) else {
+                // No definition at all — check_operands_defined reports that.
+                return;
+            };
+            if def_block == block_id {
+                // Defined in this block but not yet available: used before it
+                // was produced.
+                errors.push(VerifyError {
+                    block: block_id,
+                    inst,
+                    message: format!(
+                        "operand {operand:?} is used before it is defined in {block_id:?}"
+                    ),
+                    span,
+                    func_name: func_name.to_string(),
+                    entity,
+                    diag: None,
+                });
+                return;
+            }
+            if !dominates(def_block, block_id, &idom) {
+                errors.push(VerifyError {
+                    block: block_id,
+                    inst,
+                    message: format!(
+                        "operand {operand:?} is defined in {def_block:?}, which does not \
+                         dominate {block_id:?} — the definition cannot be guaranteed to \
+                         have executed, so it must arrive as a block parameter"
+                    ),
+                    span,
+                    func_name: func_name.to_string(),
+                    entity,
+                    diag: None,
+                });
+            }
+        };
+
+        for (inst_idx, inst) in block.insts.iter().enumerate() {
+            for operand in inst.kind.operands() {
+                check(
+                    operand,
+                    Some(inst_idx as u32),
+                    inst.span.clone(),
+                    &available,
+                    errors,
+                );
+            }
+            for result in inst.kind.results() {
+                available.insert(result);
+            }
+        }
+        for operand in block.terminator.kind.operands() {
+            check(
+                operand,
+                None,
+                block.terminator.span.clone(),
+                &available,
+                errors,
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2245,6 +2484,129 @@ mod tests {
         b.emit_return(unit);
 
         b.finish()
+    }
+
+    /// Build a diamond where a value is defined on ONE arm and used on the
+    /// other. `def` cannot dominate `use` — control can reach the use without
+    /// ever having executed the definition.
+    fn non_dominating_def() -> (crate::body::OssaBody, MirModule) {
+        let mut b = OssaBuilder::new("test");
+
+        let then_b = b.new_block();
+        let else_b = b.new_block();
+
+        let cond = b.emit_literal(Immediate::bool(true));
+        b.emit_branch(cond, then_b, vec![], else_b, vec![]);
+
+        // Defined only on the `then` arm.
+        b.switch_to(then_b);
+        let only_on_then = b.emit_literal(Immediate::i64(1));
+        b.emit_return(only_on_then);
+
+        // Used on the `else` arm, which `then` does not dominate.
+        b.switch_to(else_b);
+        b.emit_return(only_on_then);
+
+        b.finish()
+    }
+
+    #[test]
+    fn dominance_rejects_definition_that_does_not_dominate_its_use() {
+        // Guards against the check going inert. It measures zero across the
+        // whole corpus, which is the desired answer only if it can still say
+        // "no" — this body is the "no".
+        let (body, module) = non_dominating_def();
+        let order = reverse_postorder(&body);
+        let mut errors = Vec::new();
+        let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
+        errors.clear();
+        check_dominance(
+            &body,
+            &order,
+            &def_blocks,
+            "test",
+            Entity::from_raw(0),
+            &mut errors,
+        );
+        assert!(
+            errors.iter().any(|e| e.message.contains("does not dominate")),
+            "a def on one arm of a diamond must not be usable on the other: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn dominance_accepts_the_ordinary_ssa_shape() {
+        // The counterpart: the audit's prescribed Check 1b ("defined by this
+        // block's params or an earlier instruction in it") REJECTS this, which
+        // is why it rejected the stdlib. Dominance accepts it.
+        let mut b = OssaBuilder::new("test");
+        let second = b.new_block();
+
+        let defined_in_entry = b.emit_literal(Immediate::i64(7));
+        b.emit_jump(second, vec![]);
+
+        b.switch_to(second);
+        b.emit_return(defined_in_entry);
+
+        let (body, _module) = b.finish();
+        let order = reverse_postorder(&body);
+        let mut errors = Vec::new();
+        let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
+        errors.clear();
+        check_dominance(
+            &body,
+            &order,
+            &def_blocks,
+            "test",
+            Entity::from_raw(0),
+            &mut errors,
+        );
+        assert!(
+            errors.is_empty(),
+            "entry dominates its successor, so the use is legal: {:?}",
+            errors,
+        );
+    }
+
+    #[test]
+    fn dominance_rejects_use_before_def_within_a_block() {
+        // Dominance alone is not enough: a block dominates itself, so an
+        // operand defined LATER in the same block would slip through if the
+        // walk only asked about blocks. Order within the block matters too.
+        let mut b = OssaBuilder::new("test");
+        let (owned_ty, _) = make_owned_type(&mut b);
+        let v = b.emit_uninit(owned_ty);
+        b.emit_destroy_value(v);
+        {
+            // Swap so the destroy now precedes the definition it consumes.
+            let body = b.body_mut();
+            let entry = body.entry;
+            body.block_mut(entry).insts.swap(0, 1);
+        }
+        let unit = b.emit_literal(Immediate::unit());
+        b.emit_return(unit);
+
+        let (body, _module) = b.finish();
+        let order = reverse_postorder(&body);
+        let mut errors = Vec::new();
+        let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
+        errors.clear();
+        check_dominance(
+            &body,
+            &order,
+            &def_blocks,
+            "test",
+            Entity::from_raw(0),
+            &mut errors,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("used before it is defined")),
+            "a use preceding its definition in the same block must be caught: {:?}",
+            errors,
+        );
     }
 
     #[test]
