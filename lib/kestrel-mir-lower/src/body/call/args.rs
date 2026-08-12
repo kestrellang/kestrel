@@ -167,12 +167,18 @@ impl OssaBodyCtx<'_, '_> {
     /// Lower call args with Borrow convention for all params.
     /// Used for indirect/closure calls where the callee's conventions
     /// aren't known at the call site.
+    ///
+    /// Goes through `prepare_call_arg_for_expr` like every other arg path.
+    /// Lowering the expression to a VALUE first and borrowing the result is
+    /// wrong for a local held in an address slot: the value read is a
+    /// *consuming* read, so it takes the local out of its slot and leaves it
+    /// uninit, and the call then borrows the temporary rather than the slot.
+    /// Any later use of that local reads vacated storage — the shape behind
+    /// `Slice.first(where:)`'s `predicate(elem)` followed by `.Some(elem)`.
+    /// The place path borrows the slot in place and never vacates it.
     pub(crate) fn lower_call_args_default(&mut self, args: &[HirCallArg]) -> Vec<CallArg> {
         args.iter()
-            .map(|arg| {
-                let val = self.lower_expr(arg.value);
-                self.prepare_call_arg(val, ParamConvention::Borrow)
-            })
+            .map(|arg| self.prepare_call_arg_for_expr(arg.value, ParamConvention::Borrow))
             .collect()
     }
 
