@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 7 fixed · 2 partial · 2 blocked · 48 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 8 fixed · 2 partial · 2 blocked · 47 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -139,9 +139,11 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Verifier and self-check gaps
 
-- [ ] **F34** `medium` `fragility` — The OSSA verifier's linear-ownership check is block-local, and never runs after mono at all — **the prescribed fix is wrong; see Corrections**
-  - The finding stands (the check *is* block-local and cross-block double-consumes are invisible). What is wrong is the proposed remedy: enforcing a "block-parameter live-in contract" would reject the stdlib. Measured 2026-08-11 — 121 of 354 `memory_model` tests fail, and the violations are in shipped stdlib bodies (e.g. `std.text.ClosedRange.readLines`). Lowering follows the ordinary SSA rule (use any *dominating* definition); the contract asserted at `verify.rs:6` is documentation of an invariant nobody maintains, and it is the reason the ownership walk was written block-local in the first place
-  - Correct direction: make the ownership walk **dominance-aware / whole-function** (carry state along CFG edges, model conditionally-consumed values — Kestrel has drop flags precisely because a value may be consumed on one path only), rather than forcing every cross-block value through a block parameter
+- [x] **F34** `medium` `fragility` — The OSSA verifier's linear-ownership check is block-local, and never runs after mono at all — **fixed** (the audit's *prescribed* remedy was wrong; see Corrections)
+  - The finding stood (the check *was* block-local and cross-block double-consumes were invisible). What was wrong is the proposed remedy: enforcing a "block-parameter live-in contract" would reject the stdlib. Measured 2026-08-11 — 121 of 354 `memory_model` tests fail, and the violations are in shipped stdlib bodies (e.g. `std.text.ClosedRange.readLines`). Lowering follows the ordinary SSA rule (use any *dominating* definition); the contract asserted at `verify.rs:6` was documentation of an invariant nobody maintained, and it is the reason the ownership walk was written block-local in the first place
+  - Fixed along the corrected direction instead — the walk is now **whole-function and dominance-aware**: an RPO walk to fixpoint over a per-block `FlowState` joined along CFG edges (`fec27941`, `a46c077e`), with address aliasing so a take through a derived address is seen at the storage it came from, and a Cooper-Harvey-Kennedy dominator check replacing the rejected live-in contract. Enforced by default in every build as of `3fc35b88`; `KESTREL_VERIFY_FLOW=off` is the escape hatch. The post-mono half runs via `verify_ossa_mono` (`8390ea5c`), gated by `KESTREL_VERIFY_FLOW_MONO`
+  - It found a real bug: closure-call arguments took a value out of its slot to hand over a borrow, which broke *every* debug build (hello world included) and silently miscompiled in release — 931 files / 4655 violations → 0 (`3662a94e`). A second, related lowering bug (a mono-dependent local taken on every read rather than only its last) was fixed in `5d334b70`
+  - **Caveats, so this isn't read as more than it is.** The post-mono walk currently reports *nothing* — mono IR is well-formed OSSA and the instantiation-specific double-free class is semantic, not an ownership violation; it lands as infrastructure and should be deleted if it is still finding nothing in a few months. And the dominance check is likewise silent corpus-wide, proven non-inert only by unit tests. Suite: 3719 passed, 1 failed (`stdlib.os.os_fs_result`, failing identically in every historical run)
 - [ ] **F35** `low` `side-table` — Borrow mutability lives only on the instruction, so threading a mut borrow through a block param downgrades it to shared
 - [ ] **F36** `low` `side-table` — Mono's `WitnessCache` is built at collection cost, discarded with `let _ =`, and keyed by a lossy pair
 - [ ] **F37** `medium` `fragility` — `find_inherited_assoc_type` recurses through protocol inheritance with no cycle guard its sibling has
