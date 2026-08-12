@@ -66,11 +66,18 @@ impl FlowMode {
 
     /// Split out from `current` so the parse is testable: `current` memoises
     /// per process, so a test cannot exercise both settings through it.
+    ///
+    /// `Enforce` is the DEFAULT. Flow-sensitive ownership checking was staged
+    /// behind this variable while it was measured; the corpus that blocked
+    /// turning it on (931 testdata files reporting 4655 violations, all from
+    /// one argument-lowering bug) is now at zero, so an unset variable means
+    /// the checking is live. `off` remains as an escape hatch for bisecting a
+    /// suspected false positive.
     fn parse(value: Option<&str>) -> FlowMode {
         match value {
+            Some("off") => FlowMode::Off,
             Some("warn") => FlowMode::Warn,
-            Some("enforce") => FlowMode::Enforce,
-            _ => FlowMode::Off,
+            _ => FlowMode::Enforce,
         }
     }
 
@@ -2748,13 +2755,15 @@ mod tests {
     #[test]
     fn flow_mode_parses_from_env_value() {
         // Closes the last link: env string -> mode. (mode -> driver -> caught
-        // is covered by the driver_* tests.) An unset or unrecognised value
-        // must fall back to Off so an unrelated build never changes behaviour.
+        // is covered by the driver_* tests.) Enforce is the default now that
+        // the staging measurements are done, so an unset or unrecognised value
+        // means the flow check is LIVE; only an explicit `off` disables it.
         assert_eq!(FlowMode::parse(Some("warn")), FlowMode::Warn);
         assert_eq!(FlowMode::parse(Some("enforce")), FlowMode::Enforce);
-        assert_eq!(FlowMode::parse(None), FlowMode::Off);
-        assert_eq!(FlowMode::parse(Some("")), FlowMode::Off);
-        assert_eq!(FlowMode::parse(Some("1")), FlowMode::Off);
+        assert_eq!(FlowMode::parse(Some("off")), FlowMode::Off);
+        assert_eq!(FlowMode::parse(None), FlowMode::Enforce);
+        assert_eq!(FlowMode::parse(Some("")), FlowMode::Enforce);
+        assert_eq!(FlowMode::parse(Some("1")), FlowMode::Enforce);
         assert!(!FlowMode::Off.flows());
         assert!(FlowMode::Warn.flows());
         assert!(FlowMode::Enforce.flows());
