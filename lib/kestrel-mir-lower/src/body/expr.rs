@@ -347,7 +347,26 @@ impl OssaBodyCtx<'_, '_> {
                     // StoreAssign then drops — `Optional.take()` returned freed
                     // bits). Moving + init-tracking is correct for the reassign
                     // shape; mirrors the same guard in pattern.rs. (#141 cluster.)
-                    if self.is_non_copyable(ty) || self.copy_behavior_is_mono_dependent(ty) {
+                    //
+                    // ...but ONLY when this is the local's only read. Taking is
+                    // valid for a LAST use; the mono-dependent arm can't tell
+                    // which read is last, so it used to take on every one and a
+                    // second read hit a vacated slot (`generic_local_read_twice`,
+                    // and — before 3662a94e — stdlib `Slice.first(where:)`).
+                    // `is_single_use` is the conservative approximation of "last
+                    // use": one textual read in the whole HIR arena, so branches
+                    // and loops can't make it repeat. A multi-read local copies
+                    // instead, which is what the language says a Copyable-by-
+                    // default `T` does. If such a `T` is instantiated with a
+                    // non-Copyable argument that copy degrades to an alias — but
+                    // that already violates invariant 1 and is what
+                    // `KESTREL_VERIFY_INSTANTIATION=1` reports. The #141
+                    // take/replace shapes read `self` exactly once, so they keep
+                    // taking.
+                    if self.is_non_copyable(ty)
+                        || (self.copy_behavior_is_mono_dependent(ty)
+                            && self.is_single_use(*hir_local))
+                    {
                         debug_assert!(
                             self.var_init(*hir_local) != Some(super::VarInit::DefUninit),
                             "consuming read of an already-moved var — frontend should reject use-after-move (func {:?} {:?}, local {:?})",

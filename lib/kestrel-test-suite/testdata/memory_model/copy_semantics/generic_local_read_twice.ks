@@ -2,38 +2,44 @@
 // stdlib: true
 // expect-exit: 0
 
-// KNOWN BROKEN — documents an open bug, see the analysis below.
+// Regression test for the mono-dependent double-read bug (was KNOWN BROKEN).
 //
 // A local whose type is a bare type parameter has MONO-DEPENDENT copy
 // behavior: pre-mono the compiler cannot know whether `T` is Copyable.
 // Reading such a local twice is legal source — `T` may well be Copyable, so
 // the frontend does not (and must not) reject it.
 //
-// Lowering gets it wrong. `lower_expr_inner`'s `HirExpr::Local` arm treats
-// mono-dependent exactly like definitely-non-Copyable and TAKES the value out
-// of the slot on a consuming read, marking it uninit. Taking is only valid for
-// a LAST use, which single-pass lowering cannot know. The second read then
-// hits a vacated slot:
+// Lowering used to get it wrong. `lower_expr_inner`'s `HirExpr::Local` arm
+// treated mono-dependent exactly like definitely-non-Copyable and TOOK the
+// value out of the slot on every consuming read, marking it uninit. Taking is
+// only valid for a LAST use. The second read then hit a vacated slot:
 //   - debug compiler: `debug_assert!` "consuming read of an already-moved var"
 //   - two reads in ONE block: OSSA verify "address ValueId(N) is uninit"
-//   - two reads in DIFFERENT blocks: slips through, because the OSSA linear
-//     ownership check is block-local (audit finding F34)
+//   - two reads in DIFFERENT blocks: slipped through, because the OSSA linear
+//     ownership check was block-local (audit finding F34, since fixed)
 //
 // The take rule came from #141 (`Optional.take()`/`replace()`, where a clone
 // would bitwise-alias storage the following `self = .None` drops) and was
 // correct for that reassign shape. Commit a30332b2's #107 "let-via-address"
 // then made every plain `let` bind as an address slot, which put ordinary
 // generic locals on the same path — including stdlib `Slice.first(where:)`
-// (`predicate(elem)` then `.Some(elem)`), so a DEBUG compiler cannot build any
-// program at all, hello world included.
+// (`predicate(elem)` then `.Some(elem)`), so a DEBUG compiler could not build
+// any program at all, hello world included. That stdlib shape was a separate
+// argument-lowering bug, fixed in 3662a94e; it is still exercised below.
 //
-// A correct fix needs last-use (liveness) information that MIR lowering does
-// not currently have; the move-vs-clone decision itself belongs in
-// `kestrel-copy-fold`. Two narrower attempts were tried and rejected:
-// restricting the take to inout-borrow slots regressed
+// The fix here: the mono-dependent arm takes only when `is_single_use` says
+// the local has exactly one read in the whole HIR arena — a conservative
+// stand-in for "last use" that branches and loops cannot defeat. A multi-read
+// local copies, which is what the language says a Copyable-by-default `T`
+// does. The #141 take/replace shapes read `self` once and still take.
+//
+// Two narrower attempts were tried and rejected before this one: restricting
+// the take to inout-borrow slots regressed
 // `drop_elab/forin_cloneable_single_clone` (an extra clone per iteration), and
 // falling back to a copy when the slot is already vacated produces IR the OSSA
-// verifier rejects.
+// verifier rejects. A third — making `copy_is_mono_dependent` answer `false`
+// for bare type params — fixes this test and breaks 7 others with
+// double-frees; see the doc comment in `kestrel-mir/src/ty_query.rs`.
 
 module Test
 
