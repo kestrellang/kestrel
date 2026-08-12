@@ -29,7 +29,7 @@ use kestrel_span::Span;
 use crate::body::OssaBody;
 use crate::inst::InstKind;
 use crate::terminator::TerminatorKind;
-use crate::ty::ParamConvention;
+use crate::ty::{ParamConvention, TyArena};
 use crate::value::Ownership;
 use crate::{BlockId, FieldIdx, MirModule, TyId, ValueId};
 
@@ -87,6 +87,61 @@ impl FlowMode {
 }
 
 // ---------------------------------------------------------------------------
+// The module seam
+// ---------------------------------------------------------------------------
+
+/// Everything the ownership walk needs to know about the enclosing module.
+///
+/// The walk itself is pure CFG + ownership reasoning and is identical pre- and
+/// post-monomorphization, but the two modules answer these two questions
+/// differently: `MirModule` keys its structs by `Entity`, `MonoModule` by
+/// `(Entity, type_args)`. Abstracting exactly these two lets the same verifier
+/// run over a `MonoFunction` body, where copyability is CONCRETE and
+/// instantiation-specific violations become visible — a pre-mono sweep reports
+/// zero on programs that double-free, because pre-mono there is only the
+/// generic body.
+///
+/// `ret_borrow` is deliberately NOT here: it is per-function, `MonoFunction`
+/// already stores it as a precomputed bit, and `MirModule` derives it from the
+/// entity — so it is threaded in as an argument instead of looked up.
+pub trait VerifyModule {
+    fn ty_arena(&self) -> &TyArena;
+
+    /// Number of fields for a named struct type, or `None` if `ty` is not one.
+    fn struct_field_count(&self, ty: TyId) -> Option<usize>;
+}
+
+impl VerifyModule for MirModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+
+    fn struct_field_count(&self, ty: TyId) -> Option<usize> {
+        if let crate::ty::MirTy::Named { entity, .. } = self.ty_arena.get(ty)
+            && let Some(s) = self.structs.get(entity)
+        {
+            return Some(s.fields.len());
+        }
+        None
+    }
+}
+
+impl VerifyModule for crate::mono::types::MonoModule {
+    fn ty_arena(&self) -> &TyArena {
+        &self.ty_arena
+    }
+
+    fn struct_field_count(&self, ty: TyId) -> Option<usize> {
+        if let crate::ty::MirTy::Named { entity, type_args } = self.ty_arena.get(ty)
+            && let Some(s) = self.structs.get(&(*entity, type_args.clone()))
+        {
+            return Some(s.fields.len());
+        }
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -126,7 +181,33 @@ pub fn verify_ossa(
     func_name: &str,
     entity: Entity,
 ) -> Vec<VerifyError> {
-    verify_ossa_with_mode(body, module, func_name, entity, FlowMode::current())
+    let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
+        matches!(
+            crate::item::function::ret_convention(&module.ty_arena, f.ret),
+            crate::item::function::RetConvention::RefBorrow { .. }
+        )
+    });
+    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
+}
+
+/// The same ownership walk over a MONOMORPHIZED body.
+///
+/// Worth running even though the pre-mono walk already passed: copyability is
+/// concrete here, so violations that only exist at one instantiation become
+/// visible. A pre-mono sweep is blind to those by construction — it reports
+/// zero across the whole corpus on programs that double-free at runtime,
+/// because pre-mono there is only the one generic body.
+///
+/// `ret_borrow` comes from `MonoFunction::ret_borrow`, which mono already
+/// computed; there is no function table to look it up in here.
+pub fn verify_ossa_mono(
+    body: &OssaBody,
+    module: &crate::mono::types::MonoModule,
+    func_name: &str,
+    entity: Entity,
+    ret_borrow: bool,
+) -> Vec<VerifyError> {
+    verify_ossa_with_mode(body, module, func_name, entity, ret_borrow, FlowMode::current())
 }
 
 /// `verify_ossa` with the flow mode supplied rather than read from the
@@ -134,9 +215,10 @@ pub fn verify_ossa(
 /// need a specific mode must inject it here.
 fn verify_ossa_with_mode(
     body: &OssaBody,
-    module: &MirModule,
+    module: &dyn VerifyModule,
     func_name: &str,
     entity: Entity,
+    ret_borrow: bool,
     mode: FlowMode,
 ) -> Vec<VerifyError> {
     let mut errors = Vec::new();
@@ -203,7 +285,8 @@ fn verify_ossa_with_mode(
                 // `report: false` — findings from a not-yet-settled state are
                 // meaningless, and re-running would duplicate them.
                 let outcome = verify_block(
-                    body, module, block_id, func_name, entity, entry, false, mode, &aliases,
+                    body, module, block_id, func_name, entity, ret_borrow, entry, false, mode,
+                    &aliases,
                 );
                 for succ in body.block(block_id).terminator.kind.successors() {
                     match in_states.get_mut(&succ) {
@@ -227,7 +310,7 @@ fn verify_ossa_with_mode(
     for block_id in order {
         let entry = in_states.get(&block_id).cloned().unwrap_or_default();
         let outcome = verify_block(
-            body, module, block_id, func_name, entity, entry, true, mode, &aliases,
+            body, module, block_id, func_name, entity, ret_borrow, entry, true, mode, &aliases,
         );
         errors.extend(outcome.errors);
         flow_findings.extend(outcome.flow_findings);
@@ -932,7 +1015,7 @@ impl AddrKind {
 
 struct FlowVerifier<'a> {
     body: &'a OssaBody,
-    _module: &'a MirModule,
+    _module: &'a dyn VerifyModule,
     block_id: BlockId,
     func_name: &'a str,
     entity: Entity,
@@ -975,19 +1058,14 @@ struct FlowVerifier<'a> {
 impl<'a> FlowVerifier<'a> {
     fn new(
         body: &'a OssaBody,
-        module: &'a MirModule,
+        module: &'a dyn VerifyModule,
         block_id: BlockId,
         func_name: &'a str,
         entity: Entity,
+        ret_borrow: bool,
         state: FlowState,
         aliases: &'a AddrAliases,
     ) -> Self {
-        let ret_borrow = module.functions.get(&entity).is_some_and(|f| {
-            matches!(
-                crate::item::function::ret_convention(&module.ty_arena, f.ret),
-                crate::item::function::RetConvention::RefBorrow { .. }
-            )
-        });
         Self {
             body,
             _module: module,
@@ -1781,7 +1859,7 @@ impl<'a> FlowVerifier<'a> {
                 }
                 if let Some(r) = result {
                     let ty = self.body.value(*r).ty;
-                    let is_never = matches!(self._module.ty_arena.get(ty), crate::ty::MirTy::Never);
+                    let is_never = matches!(self._module.ty_arena().get(ty), crate::ty::MirTy::Never);
                     if self.body.value(*r).ownership == Ownership::Owned && !is_never {
                         self.define_owned(*r);
                     }
@@ -1892,15 +1970,11 @@ impl<'a> FlowVerifier<'a> {
         }
     }
 
-    /// Returns the number of fields for a named struct type, or None if not a struct.
+    /// Returns the number of fields for a named struct type, or None if not a
+    /// struct. Delegated to the module seam — pre- and post-mono key their
+    /// struct tables differently (`Entity` vs `(Entity, type_args)`).
     fn struct_field_count(&self, ty: TyId) -> Option<usize> {
-        let mir_ty = self._module.ty_arena.get(ty);
-        if let crate::ty::MirTy::Named { entity, .. } = mir_ty
-            && let Some(s) = self._module.structs.get(entity)
-        {
-            return Some(s.fields.len());
-        }
-        None
+        self._module.struct_field_count(ty)
     }
 
     fn verify_terminator(&mut self, block: &crate::block::BasicBlock) {
@@ -2088,20 +2162,92 @@ struct BlockOutcome {
 
 fn verify_block(
     body: &OssaBody,
-    module: &MirModule,
+    module: &dyn VerifyModule,
     block_id: BlockId,
     func_name: &str,
     entity: Entity,
+    ret_borrow: bool,
     entry_state: FlowState,
     report: bool,
     mode: FlowMode,
     aliases: &AddrAliases,
 ) -> BlockOutcome {
-    let mut verifier =
-        FlowVerifier::new(body, module, block_id, func_name, entity, entry_state, aliases);
+    let mut verifier = FlowVerifier::new(
+        body,
+        module,
+        block_id,
+        func_name,
+        entity,
+        ret_borrow,
+        entry_state,
+        aliases,
+    );
     verifier.report = report;
     verifier.mode = mode;
     verifier.verify()
+}
+
+/// Run the ownership walk over every MONOMORPHIZED body.
+///
+/// Opt-in via `KESTREL_VERIFY_FLOW_MONO` — unlike the pre-mono walk (which is
+/// enforced by default and runs once per generic body), this walks every
+/// INSTANTIATION, so a program that instantiates a generic fifty times pays for
+/// fifty walks.
+///
+/// Findings are deduplicated by (source function, block, inst, message). One
+/// bug in one generic body would otherwise be reported once per
+/// monomorphization, which buries the signal — `Slice.first` alone is
+/// instantiated many times in an ordinary program. The count of collapsed
+/// duplicates is preserved in the message so a violation that only affects SOME
+/// instantiations is still distinguishable from one that affects all of them.
+pub fn verify_mono_flow(module: &crate::mono::types::MonoModule) -> Vec<VerifyError> {
+    if std::env::var("KESTREL_VERIFY_FLOW_MONO").is_err() {
+        return Vec::new();
+    }
+
+    // (source entity, block, inst, message) -> (representative error, count)
+    let mut seen: FxHashMap<(Entity, BlockId, Option<u32>, String), (VerifyError, usize)> =
+        FxHashMap::default();
+
+    for func in &module.functions {
+        let Some(body) = &func.body else { continue };
+        if body.values.is_empty() || body.blocks.is_empty() {
+            continue;
+        }
+        for err in verify_ossa_mono(body, module, &func.name, func.source, func.ret_borrow) {
+            let key = (func.source, err.block, err.inst, err.message.clone());
+            seen.entry(key)
+                .and_modify(|(_, n)| *n += 1)
+                .or_insert((err, 1));
+        }
+    }
+
+    let mut out: Vec<VerifyError> = seen
+        .into_values()
+        .map(|(mut err, n)| {
+            if n > 1 {
+                err.message = format!("{} (in {n} instantiations)", err.message);
+            }
+            err
+        })
+        .collect();
+    // Deterministic order — `seen` is a hash map, and this feeds diagnostics.
+    out.sort_by(|a, b| {
+        (a.func_name.as_str(), a.block.index(), a.inst)
+            .cmp(&(b.func_name.as_str(), b.block.index(), b.inst))
+    });
+
+    if !out.is_empty() {
+        eprintln!(
+            "[KESTREL_VERIFY_FLOW_MONO] {} ownership violation(s) visible only after \
+             monomorphization:",
+            out.len(),
+        );
+        for e in &out {
+            eprintln!("  {}: {:?}[{:?}]: {}", e.func_name, e.block, e.inst, e.message);
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -2522,7 +2668,7 @@ mod tests {
         // Guards against the check going inert. It measures zero across the
         // whole corpus, which is the desired answer only if it can still say
         // "no" — this body is the "no".
-        let (body, module) = non_dominating_def();
+        let (body, _module) = non_dominating_def();
         let order = reverse_postorder(&body);
         let mut errors = Vec::new();
         let def_blocks = check_value_uniqueness(&body, "test", Entity::from_raw(0), &mut errors);
@@ -2630,6 +2776,7 @@ mod tests {
             BlockId::new(body.blocks.len() - 1),
             "test",
             Entity::from_raw(0),
+            false,
             FlowState::default(),
             &aliases,
         );
@@ -2663,6 +2810,7 @@ mod tests {
             BlockId::new(body.blocks.len() - 1),
             "test",
             Entity::from_raw(0),
+            false,
             incoming,
             &aliases,
         );
@@ -2697,6 +2845,7 @@ mod tests {
             BlockId::new(body.blocks.len() - 1),
             "test",
             Entity::from_raw(0),
+            false,
             incoming,
             &aliases,
         );
@@ -2721,6 +2870,7 @@ mod tests {
             &module,
             "test",
             Entity::from_raw(0),
+            false,
             FlowMode::Off,
         );
         assert!(
@@ -2741,6 +2891,7 @@ mod tests {
             &module,
             "test",
             Entity::from_raw(0),
+            false,
             FlowMode::Enforce,
         );
         assert!(

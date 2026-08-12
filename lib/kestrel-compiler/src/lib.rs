@@ -365,6 +365,18 @@ impl Compiler {
         // before expand/codegen turn them into memcpys (#219).
         kestrel_mir::passes::copy_propagation::mark_independent_takes(&mut mono);
 
+        // The ownership walk again, now that copyability is CONCRETE, but BEFORE
+        // expand_destroy_copy. The ordering is load-bearing: expand removes and
+        // remaps DestroyValue, so afterwards the walk's leak check ("every
+        // @owned value must be consumed") is no longer true of well-formed IR —
+        // running it after expand reports ~34k false positives on hello world.
+        // Here the types are concrete and the destroys are still intact.
+        //
+        // Diagnostic only; no-op unless KESTREL_VERIFY_FLOW_MONO is set. Walks
+        // every INSTANTIATION, so it stays opt-in rather than riding the
+        // pre-mono default.
+        let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
+
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
 
         // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
@@ -435,9 +447,15 @@ impl Compiler {
             return Ok((mono, Vec::new()));
         }
 
+        // Before expand — see the twin call site above for why the ordering is
+        // load-bearing. Diagnostic only; no-op unless KESTREL_VERIFY_FLOW_MONO
+        // is set.
+        let _mono_flow = kestrel_mir::verify::verify_mono_flow(&mono);
+
         kestrel_mir::mono::expand::expand_destroy_copy(&mut mono, &generic_functions);
         // Diagnostic only; no-op unless KESTREL_AUDIT_DUP is set.
         kestrel_mir::mono::audit::run_audit(&mono);
+
         let mono_verify = kestrel_mir::mono::verify::verify_mono(&mono);
         Ok((mono, mono_verify.errors))
     }
