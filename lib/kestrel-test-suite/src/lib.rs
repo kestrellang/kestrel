@@ -42,9 +42,28 @@ struct StdlibCache {
     errors: Vec<String>,
 }
 
-// Safety: StdlibCache is initialized once (via OnceLock) and then only accessed
-// via world().snapshot() which clones all data into a fresh, independent World.
-// No concurrent mutation occurs — the cached Compiler is read-only after init.
+// UNSOUND — audit finding F42, kept deliberately because no fix is free.
+//
+// The retired justification was: "initialized once via OnceLock, then only
+// accessed via world().snapshot(), which clones all data into a fresh,
+// independent World. No concurrent mutation occurs — the cached Compiler is
+// read-only after init." That reasoning misses where the mutation is.
+// `snapshot()` clones the query memos, one of which is `Parse`, whose
+// `ParseResult` holds a rowan CST behind a NON-ATOMIC refcount. Cloning it
+// mutates a counter shared with the cache, so two threads snapshotting (or one
+// snapshotting while another drops its snapshot) race on that counter. The
+// object graph is shared, not copied.
+//
+// A Mutex around `snapshot()` does NOT fix it: the returned snapshot outlives
+// the lock, and dropping it decrements the same shared counters. Locking
+// narrows the window; it never closes it. The clean fix — `Send + Sync` on
+// `QueryFn::Output` — was probed and fails on `ParseResult`, since rowan's
+// `SyntaxNode` is inherently `!Send`/`!Sync`.
+//
+// Live, not theoretical: libtest_mimic runs trials as parallel threads in one
+// process and triage batches many tests per subprocess. It is why the triage
+// default `-j` is conservative. Fixing it means choosing a cost — isolated
+// processes, re-parsing per test, single-threading, or a thread-local cache.
 unsafe impl Send for StdlibCache {}
 unsafe impl Sync for StdlibCache {}
 
