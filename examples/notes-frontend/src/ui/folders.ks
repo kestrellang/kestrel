@@ -47,7 +47,7 @@ public func folderSidebar(folders: Array[Value], activeFolderId: Int64) -> Docum
 }
 
 func getStr(v: Value, key: String) -> String {
-    match v.value(forKey: key) {
+    match v.value(for: key) {
         .Some(s) => match s {
             .Str(val) => val,
             _ => ""
@@ -57,7 +57,7 @@ func getStr(v: Value, key: String) -> String {
 }
 
 func getInt(v: Value, key: String) -> Int64 {
-    match v.value(forKey: key) {
+    match v.value(for: key) {
         .Some(n) => match n {
             .Int(val) => val,
             _ => 0

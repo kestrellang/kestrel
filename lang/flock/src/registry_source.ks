@@ -219,7 +219,7 @@ struct VersionMeta: Cloneable {
 /// Parses a JSON response containing a version list.
 /// Expected format: { "versions": ["1.0.0", "1.1.0", "2.0.0"] }
 func parseVersionList(json json: Value) -> Result[Array[Version], FlockError] {
-    match json.value(forKey: "versions") {
+    match json.value(for: "versions") {
         .None => .Err(FlockError.RegistryError("missing 'versions' field in response")),
         .Some(versionsVal) => {
             match versionsVal.asArray() {
@@ -250,7 +250,7 @@ func parseVersionList(json json: Value) -> Result[Array[Version], FlockError] {
 /// Expected format: { "checksum": "sha256:...", "archive_url": "/api/v1/..." }
 func parseVersionMeta(json json: Value) -> Result[VersionMeta, FlockError] {
     var checksum = "";
-    match json.value(forKey: "checksum") {
+    match json.value(for: "checksum") {
         .Some(val) => {
             match val.asString() {
                 .Some(s) => checksum = s,
@@ -260,7 +260,7 @@ func parseVersionMeta(json json: Value) -> Result[VersionMeta, FlockError] {
         .None => {}
     }
 
-    match json.value(forKey: "archive_url") {
+    match json.value(for: "archive_url") {
         .None => .Err(FlockError.RegistryError("missing 'archive_url' in version metadata")),
         .Some(val) => {
             match val.asString() {

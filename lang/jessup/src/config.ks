@@ -174,9 +174,9 @@ public func ensureDirectories() -> Result[(), JessupError] {
 
 func parseConfig(root root: Value) -> JessupConfig {
     var channel = "stable";
-    match root.value(forKey: "config") {
+    match root.value(for: "config") {
         .Some(configVal) => {
-            match configVal.value(forKey: "default_channel") {
+            match configVal.value(for: "default_channel") {
                 .Some(channelVal) => {
                     match channelVal.asString() {
                         .Some(s) => channel = s,

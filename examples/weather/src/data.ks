@@ -45,14 +45,14 @@ public func getInt(v: Value) -> Int64 {
 }
 
 public func getField(obj: Value, key: String) -> Value {
-    match obj.value(forKey: key) {
+    match obj.value(for: key) {
         .Some(v) => v,
         .None => Value.Null
     }
 }
 
 public func getArrayField(obj: Value, key: String) -> Array[Value] {
-    match obj.value(forKey: key) {
+    match obj.value(for: key) {
         .Some(v) => {
             match v.asArray() {
                 .Some(arr) => arr,

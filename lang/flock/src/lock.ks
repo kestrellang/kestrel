@@ -104,7 +104,7 @@ public func parseLockFile(source source: String) -> Result[LockFile, FlockError]
             .Err(FlockError.ManifestParse(msg))
         },
         .Ok(root) => {
-            match root.value(forKey: "package") {
+            match root.value(for: "package") {
                 .None => .Ok(LockFile()),
                 .Some(pkgVal) => {
                     match pkgVal.asArray() {
@@ -132,7 +132,7 @@ public func parseLockFile(source source: String) -> Result[LockFile, FlockError]
 func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
     // Required: name
     var name = "";
-    match val.value(forKey: "name") {
+    match val.value(for: "name") {
         .Some(v) => {
             match v.asString() {
                 .Some(s) => name = s,
@@ -144,7 +144,7 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
 
     // Required: version
     var version = Version(major: 0, minor: 0, patch: 0);
-    match val.value(forKey: "version") {
+    match val.value(for: "version") {
         .Some(v) => {
             match v.asString() {
                 .Some(s) => {
@@ -161,7 +161,7 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
 
     // Required: source
     var source = "path";
-    match val.value(forKey: "source") {
+    match val.value(for: "source") {
         .Some(v) => {
             match v.asString() {
                 .Some(s) => source = s,
@@ -173,7 +173,7 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
 
     // Optional: checksum
     var checksum: Optional[String] = .None;
-    match val.value(forKey: "checksum") {
+    match val.value(for: "checksum") {
         .Some(v) => {
             match v.asString() {
                 .Some(s) => checksum = .Some(s),
@@ -185,7 +185,7 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
 
     // Optional: path
     var entryPath: Optional[String] = .None;
-    match val.value(forKey: "path") {
+    match val.value(for: "path") {
         .Some(v) => {
             match v.asString() {
                 .Some(s) => entryPath = .Some(s),

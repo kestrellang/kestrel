@@ -45,9 +45,9 @@ public func resolveRegistryUrl(projectUrl projectUrl: Optional[String]) -> Strin
             .Ok(source) => {
                 match parseToml(source) {
                     .Ok(root) => {
-                        match root.value(forKey: "registry") {
+                        match root.value(for: "registry") {
                             .Some(regVal) => {
-                                match regVal.value(forKey: "url") {
+                                match regVal.value(for: "url") {
                                     .Some(urlVal) => {
                                         match urlVal.asString() {
                                             .Some(url) => return url,

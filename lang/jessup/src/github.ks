@@ -150,7 +150,7 @@ public func fetchJessupRelease(platform platform: Platform) -> Result[String, Je
 /// Expected asset name pattern: kestrel-<target>.tar.gz
 func findAssetInRelease(json json: Value, platform platform: Platform) -> Result[Release, JessupError] {
     var tagName = "";
-    match json.value(forKey: "tag_name") {
+    match json.value(for: "tag_name") {
         .Some(tagVal) => {
             match tagVal.asString() {
                 .Some(s) => tagName = s,
@@ -162,7 +162,7 @@ func findAssetInRelease(json json: Value, platform platform: Platform) -> Result
 
     let target = platform.assetTarget();
 
-    match json.value(forKey: "assets") {
+    match json.value(for: "assets") {
         .None => return .Err(JessupError.ParseError("missing assets in release")),
         .Some(assetsVal) => {
             match assetsVal.asArray() {
@@ -171,7 +171,7 @@ func findAssetInRelease(json json: Value, platform platform: Platform) -> Result
                     var i: Int64 = 0;
                     while i < assets.count {
                         let asset = assets(unchecked: i);
-                        match asset.value(forKey: "name") {
+                        match asset.value(for: "name") {
                             .Some(nameVal) => {
                                 match nameVal.asString() {
                                     .Some(name) => {
@@ -181,7 +181,7 @@ func findAssetInRelease(json json: Value, platform platform: Platform) -> Result
                                         // prefix so we don't grab the jessup binary by mistake.
                                         if stringContains(haystack: name, needle: "kestrel") and stringContains(haystack: name, needle: target) and stringContains(haystack: name, needle: ".tar.gz") {
                                             // Found matching asset — get browser_download_url
-                                            match asset.value(forKey: "browser_download_url") {
+                                            match asset.value(for: "browser_download_url") {
                                                 .Some(urlVal) => {
                                                     match urlVal.asString() {
                                                         .Some(url) => {
@@ -220,7 +220,7 @@ func findChannelRelease(json json: Value, channel channel: String, platform plat
             var i: Int64 = 0;
             while i < arr.count {
                 let release = arr(unchecked: i);
-                match release.value(forKey: "tag_name") {
+                match release.value(for: "tag_name") {
                     .Some(tagVal) => {
                         match tagVal.asString() {
                             .Some(tag) => {
@@ -248,7 +248,7 @@ func findChannelRelease(json json: Value, channel channel: String, platform plat
 func findJessupAsset(json json: Value, platform platform: Platform) -> Result[String, JessupError] {
     let target = platform.assetTarget();
 
-    match json.value(forKey: "assets") {
+    match json.value(for: "assets") {
         .None => return .Err(JessupError.ParseError("missing assets in release")),
         .Some(assetsVal) => {
             match assetsVal.asArray() {
@@ -257,12 +257,12 @@ func findJessupAsset(json json: Value, platform platform: Platform) -> Result[St
                     var i: Int64 = 0;
                     while i < assets.count {
                         let asset = assets(unchecked: i);
-                        match asset.value(forKey: "name") {
+                        match asset.value(for: "name") {
                             .Some(nameVal) => {
                                 match nameVal.asString() {
                                     .Some(name) => {
                                         if stringContains(haystack: name, needle: "jessup") and stringContains(haystack: name, needle: target) {
-                                            match asset.value(forKey: "browser_download_url") {
+                                            match asset.value(for: "browser_download_url") {
                                                 .Some(urlVal) => {
                                                     match urlVal.asString() {
                                                         .Some(url) => return .Ok(url),
@@ -318,7 +318,7 @@ public func fetchVsixRelease(channel channel: String, platform platform: Platfor
 func findVsixAsset(json json: Value, platform platform: Platform) -> Result[String, JessupError] {
     let target = platform.vsceTarget();
 
-    match json.value(forKey: "assets") {
+    match json.value(for: "assets") {
         .None => return .Err(JessupError.ParseError("missing assets in release")),
         .Some(assetsVal) => {
             match assetsVal.asArray() {
@@ -327,12 +327,12 @@ func findVsixAsset(json json: Value, platform platform: Platform) -> Result[Stri
                     var i: Int64 = 0;
                     while i < assets.count {
                         let asset = assets(unchecked: i);
-                        match asset.value(forKey: "name") {
+                        match asset.value(for: "name") {
                             .Some(nameVal) => {
                                 match nameVal.asString() {
                                     .Some(name) => {
                                         if stringContains(haystack: name, needle: ".vsix") and stringContains(haystack: name, needle: target) {
-                                            match asset.value(forKey: "browser_download_url") {
+                                            match asset.value(for: "browser_download_url") {
                                                 .Some(urlVal) => {
                                                     match urlVal.asString() {
                                                         .Some(assetUrl) => return .Ok(assetUrl),
@@ -367,7 +367,7 @@ func parseReleaseTags(json json: Value) -> Result[Array[String], JessupError] {
             var i: Int64 = 0;
             while i < arr.count {
                 let release = arr(unchecked: i);
-                match release.value(forKey: "tag_name") {
+                match release.value(for: "tag_name") {
                     .Some(tagVal) => {
                         match tagVal.asString() {
                             .Some(tag) => tags.append(tag),

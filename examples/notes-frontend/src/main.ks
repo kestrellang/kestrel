@@ -97,7 +97,7 @@ func handleLoginSubmit(req: Request, ctx: Ctx) -> Response {
         return Response.ok(render(doc: loginPage("Unexpected response")))
     }
 
-    let token = match json.value(forKey: "token") {
+    let token = match json.value(for: "token") {
         .Some(t) => match t {
             .Str(s) => s,
             _ => return Response.ok(render(doc: loginPage("Unexpected response")))
@@ -128,7 +128,7 @@ func handleRegisterSubmit(req: Request, ctx: Ctx) -> Response {
     }
     guard apiRes.status.isSuccess() else {
         let msg = match apiRes.json() {
-            .Ok(j) => match j.value(forKey: "error") {
+            .Ok(j) => match j.value(for: "error") {
                 .Some(e) => match e { .Str(s) => s, _ => "Registration failed" },
                 .None => "Registration failed"
             },
@@ -220,7 +220,7 @@ func handleEditNote(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.redirect(to: "/")
     }
-    let noteFolderId = match note.value(forKey: "folderId") {
+    let noteFolderId = match note.value(for: "folderId") {
         .Some(v) => match v { .Int(n) => n, _ => 0 },
         .None => 0
     };
@@ -287,7 +287,7 @@ func handleEditNoteFragment(req: Request, ctx: Ctx) -> Response {
     guard let .Ok(note) = apiRes.json() else {
         return Response.internalServerError()
     }
-    let noteFolderId = match note.value(forKey: "folderId") {
+    let noteFolderId = match note.value(for: "folderId") {
         .Some(v) => match v { .Int(n) => n, _ => 0 },
         .None => 0
     };
@@ -412,7 +412,7 @@ func renderAppPage(token: String, folderId: Int64, title: String) -> Response {
 func loadNotes(token: String) -> Array[Value] {
     guard let .Ok(apiRes) = apiListNotes(token, 1) else { return Array[Value]() }
     guard let .Ok(json) = apiRes.json() else { return Array[Value]() }
-    match json.value(forKey: "data") {
+    match json.value(for: "data") {
         .Some(arr) => match arr.asArray() {
             .Some(items) => items,
             .None => Array[Value]()
@@ -426,7 +426,7 @@ func filterByFolder(notes: Array[Value], folderId: Int64) -> Array[Value] {
     var i: Int64 = 0;
     while i < notes.count {
         let note = notes(unchecked: i);
-        let noteFolderId = match note.value(forKey: "folderId") {
+        let noteFolderId = match note.value(for: "folderId") {
             .Some(v) => match v {
                 .Int(n) => n,
                 _ => 0
@@ -444,7 +444,7 @@ func filterByFolder(notes: Array[Value], folderId: Int64) -> Array[Value] {
 func loadFolders(token: String) -> Array[Value] {
     guard let .Ok(apiRes) = apiListFolders(token) else { return Array[Value]() }
     guard let .Ok(json) = apiRes.json() else { return Array[Value]() }
-    match json.value(forKey: "data") {
+    match json.value(for: "data") {
         .Some(arr) => match arr.asArray() {
             .Some(items) => items,
             .None => Array[Value]()

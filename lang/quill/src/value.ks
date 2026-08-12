@@ -11,7 +11,7 @@
 /// let v = Value.Obj(
 ///     ["name": Value.Str("Alice"), "age": Value.Int(30)]
 /// );
-/// v.value(forKey: "name");  // Some(.Str("Alice"))
+/// v.value(for: "name");  // Some(.Str("Alice"))
 /// v.typeName();             // "object"
 /// ```
 
@@ -200,11 +200,11 @@ extend Value {
     ///
     /// ```
     /// let obj = Value.Obj(["x": Value.Int(1)]);
-    /// obj.value(forKey: "x");        // Some(.Int(1))
-    /// obj.value(forKey: "missing");  // None
-    /// Value.Null.value(forKey: "x"); // None
+    /// obj.value(for: "x");        // Some(.Int(1))
+    /// obj.value(for: "missing");  // None
+    /// Value.Null.value(for: "x"); // None
     /// ```
-    public func value(forKey key: String) -> Optional[Value] {
+    public func value(for key: String) -> Optional[Value] {
         match self {
             .Obj(obj) => obj(key),
             _ => .None

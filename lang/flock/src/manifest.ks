@@ -171,12 +171,12 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
     }
 
     // Extract [package] section
-    let pkgValue = root.value(forKey: "package");
+    let pkgValue = root.value(for: "package");
     match pkgValue {
         .None => return .Err(FlockError.ManifestParse("missing [package] section")),
         .Some(pkg) => {
             // Extract name
-            let nameOpt = pkg.value(forKey: "name");
+            let nameOpt = pkg.value(for: "name");
             var name: String = "";
             match nameOpt {
                 .Some(nameVal) => {
@@ -189,7 +189,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
             }
 
             // Extract version
-            let versionOpt = pkg.value(forKey: "version");
+            let versionOpt = pkg.value(for: "version");
             var version: Version = Version(major: 0, minor: 0, patch: 0);
             match versionOpt {
                 .Some(verVal) => {
@@ -208,7 +208,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract description (optional)
             var description: Optional[String] = .None;
-            match pkg.value(forKey: "description") {
+            match pkg.value(for: "description") {
                 .Some(descVal) => {
                     match descVal.asString() {
                         .Some(s) => description = .Some(s),
@@ -220,7 +220,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract source directory (optional, defaults to "src")
             var sourceDir = "src";
-            match pkg.value(forKey: "source") {
+            match pkg.value(for: "source") {
                 .Some(srcVal) => {
                     match srcVal.asString() {
                         .Some(s) => sourceDir = s,
@@ -232,7 +232,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract author (optional)
             var author: Optional[String] = .None;
-            match pkg.value(forKey: "author") {
+            match pkg.value(for: "author") {
                 .Some(val) => {
                     match val.asString() {
                         .Some(s) => author = .Some(s),
@@ -244,7 +244,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract license (optional)
             var license: Optional[String] = .None;
-            match pkg.value(forKey: "license") {
+            match pkg.value(for: "license") {
                 .Some(val) => {
                     match val.asString() {
                         .Some(s) => license = .Some(s),
@@ -256,7 +256,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract repository (optional)
             var repository: Optional[String] = .None;
-            match pkg.value(forKey: "repository") {
+            match pkg.value(for: "repository") {
                 .Some(val) => {
                     match val.asString() {
                         .Some(s) => repository = .Some(s),
@@ -274,7 +274,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
             );
             // Extract website (optional)
             var website: Optional[String] = .None;
-            match pkg.value(forKey: "website") {
+            match pkg.value(for: "website") {
                 .Some(val) => {
                     match val.asString() {
                         .Some(s) => website = .Some(s),
@@ -286,7 +286,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract documentation (optional)
             var docs: Optional[String] = .None;
-            match pkg.value(forKey: "documentation") {
+            match pkg.value(for: "documentation") {
                 .Some(val) => {
                     match val.asString() {
                         .Some(s) => docs = .Some(s),
@@ -298,7 +298,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract org (optional) — the publish namespace
             var org: Optional[String] = .None;
-            match pkg.value(forKey: "org") {
+            match pkg.value(for: "org") {
                 .Some(val) => {
                     match val.asString() {
                         .Some(s) => org = .Some(s),
@@ -317,7 +317,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract [dependencies] section
             var deps = Array[Dependency]();
-            match root.value(forKey: "dependencies") {
+            match root.value(for: "dependencies") {
                 .Some(depsVal) => {
                     match parseDependencies(depsValue: depsVal) {
                         .Ok(d) => deps = d,
@@ -329,7 +329,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract [build] section
             var buildCfg = BuildConfig();
-            match root.value(forKey: "build") {
+            match root.value(for: "build") {
                 .Some(buildVal) => {
                     buildCfg.cSources = parseStringArray(buildVal, "c-sources");
                     buildCfg.cFlags = parseStringArray(buildVal, "c-flags");
@@ -344,7 +344,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 
             // Extract [registry] section (optional)
             var registryUrl: Optional[String] = .None;
-            match root.value(forKey: "registry") {
+            match root.value(for: "registry") {
                 .Some(regVal) => {
                     registryUrl = parseOptionalString(regVal, "url")
                 },
@@ -367,7 +367,7 @@ public func parseManifest(source source: String) -> Result[Manifest, FlockError]
 /// validation happens later, in discovery).
 func parseBinDecls(root: Value) -> Array[BinDecl] {
     var result = Array[BinDecl]();
-    match root.value(forKey: "bin") {
+    match root.value(for: "bin") {
         .Some(binVal) => {
             match binVal.asArray() {
                 .Some(arr) => {
@@ -375,11 +375,11 @@ func parseBinDecls(root: Value) -> Array[BinDecl] {
                     while i < arr.count {
                         let entry = arr(unchecked: i);
                         i = i + 1;
-                        let nameOpt = match entry.value(forKey: "name") {
+                        let nameOpt = match entry.value(for: "name") {
                             .Some(v) => v.asString(),
                             .None => .None
                         };
-                        let pathOpt = match entry.value(forKey: "path") {
+                        let pathOpt = match entry.value(for: "path") {
                             .Some(v) => v.asString(),
                             .None => .None
                         };
@@ -400,7 +400,7 @@ func parseBinDecls(root: Value) -> Array[BinDecl] {
 /// Parses a string array field from a TOML value.
 func parseStringArray(parent: Value, key: String) -> Array[String] {
     var result = Array[String]();
-    match parent.value(forKey: key) {
+    match parent.value(for: key) {
         .Some(val) => {
             match val.asArray() {
                 .Some(arr) => {
@@ -423,7 +423,7 @@ func parseStringArray(parent: Value, key: String) -> Array[String] {
 
 /// Parses an optional string field from a TOML value.
 func parseOptionalString(parent: Value, key: String) -> Optional[String] {
-    match parent.value(forKey: key) {
+    match parent.value(for: key) {
         .Some(val) => val.asString(),
         .None => .None
     }

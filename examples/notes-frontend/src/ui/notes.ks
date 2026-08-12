@@ -186,7 +186,7 @@ func emptyState() -> Document {
 }
 
 func getOptInt(v: Value, key: String) -> Int64 {
-    match v.value(forKey: key) {
+    match v.value(for: key) {
         .Some(n) => match n {
             .Int(val) => val,
             _ => 0

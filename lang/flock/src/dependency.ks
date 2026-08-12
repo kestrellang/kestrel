@@ -85,7 +85,7 @@ func parseSingleDep(name name: String, value value: Value) -> Result[Dependency,
     }
 
     // Object value: look for "path" key
-    match value.value(forKey: "path") {
+    match value.value(for: "path") {
         .Some(pathVal) => {
             match pathVal.asString() {
                 .Some(pathStr) => return .Ok(Dependency(
@@ -101,7 +101,7 @@ func parseSingleDep(name name: String, value value: Value) -> Result[Dependency,
     }
 
     // Object value: look for "version" key
-    match value.value(forKey: "version") {
+    match value.value(for: "version") {
         .Some(versionVal) => {
             match versionVal.asString() {
                 .Some(versionStr) => {
