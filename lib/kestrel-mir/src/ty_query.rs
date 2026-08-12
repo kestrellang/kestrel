@@ -236,9 +236,36 @@ pub fn copy_behavior(
 ///
 /// Distinct from `copy_behavior == None`: a *conditionally* Copyable container
 /// gated on an unconstrained type param reports `Bitwise` here (its gating args
-/// default to `Bitwise`), yet is unsound to copy. Moving is always correct — the
-/// frontend forbids reusing a value that isn't *guaranteed* Copyable, so a
-/// mono-dependent value is necessarily single-use.
+/// default to `Bitwise`), yet is unsound to copy.
+///
+/// A bare type param reports `true` here even though `copy_behavior` above
+/// answers `Bitwise` for it (type params are Copyable BY DEFAULT). The two are
+/// deliberately different questions: `copy_behavior` is what the LANGUAGE says
+/// about `T`; this query is what is SAFE to emit given that "invariant 1" — a
+/// Copyable-default param is never instantiated with a non-Copyable argument —
+/// is assumed everywhere and **enforced nowhere**.
+///
+/// MEASURED (2026-08-11): making this arm return `false` to match the language
+/// rule fixes `readTwice` (`let a = elem; let b = elem;` on an unbounded `T`)
+/// and breaks 7 tests, every one a double-free / double-deinit / double-drop:
+/// `try_err_noncopyable_no_double_deinit`,
+/// `try_unwrap_noncopyable_payload_no_double_free`,
+/// `aggregate_try_field_no_double_drop`, `forin_cloneable_single_clone`,
+/// `consuming_self_field_moveout_execution` (+ llvm twins). Generic bodies like
+/// `Result.tryExtract[T,E]` ARE instantiated with concrete `not Copyable`
+/// payloads during `try` propagation, so copying a bare `T` duplicates a value
+/// that is then released twice. `mono::expand::InstantiationFinding` detects
+/// exactly that moment (0 findings healthy, 8 findings when this arm is
+/// flipped). The conservatism is load-bearing until invariant 1 is enforced at
+/// INSTANTIATION.
+///
+/// The justification this comment used to carry — "the frontend forbids reusing
+/// a value that isn't *guaranteed* Copyable, so a mono-dependent value is
+/// necessarily single-use" — is FALSE: `readTwice` passes the frontend and
+/// fails only in MIR verify. The right fix is per-USE, not per-type: take on
+/// the LAST use, copy on earlier ones, decided at the one call site that can
+/// see a repeated read (`expr.rs`'s `HirExpr::Local` consuming-read arm). The
+/// other call sites are single-read by construction and must keep moving.
 ///
 /// - bare type param / associated projection: mono-dependent unless a
 ///   `Copyable`/`Cloneable` bound guarantees duplicability;

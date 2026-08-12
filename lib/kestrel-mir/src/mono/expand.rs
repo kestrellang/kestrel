@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use kestrel_hecs::Entity;
+use kestrel_span::Span;
 
 use crate::body::OssaBody;
 use crate::callee::Callee;
@@ -25,7 +26,8 @@ use crate::{MonoFuncId, TyId, ValueId};
 pub fn expand_destroy_copy(
     module: &mut MonoModule,
     generic_functions: &indexmap::IndexMap<Entity, FunctionDef>,
-) {
+) -> Vec<InstantiationFinding> {
+    let mut findings: Vec<InstantiationFinding> = Vec::new();
     let shim_lookup = build_drop_shim_lookup(module, generic_functions);
     let clone_lookup = build_clone_lookup(module, generic_functions);
 
@@ -111,8 +113,70 @@ pub fn expand_destroy_copy(
             skip_clone_nominal,
             &not_copyable,
             &erased,
+            &mut findings,
         );
     }
+
+    report_instantiation_findings(&findings);
+    findings
+}
+
+/// Summarise instantiation findings on stderr when `KESTREL_VERIFY_INSTANTIATION`
+/// is set. Default (unset) is silent, so this is inert until deliberately
+/// switched on — the same staging the F34 flow verifier uses.
+///
+/// These are collected unconditionally (the check is a hash lookup on a set the
+/// pass already builds) and returned to the caller, so promoting them to real
+/// user-facing diagnostics later is a caller-side change, not a rework here.
+fn report_instantiation_findings(findings: &[InstantiationFinding]) {
+    if findings.is_empty() || std::env::var("KESTREL_VERIFY_INSTANTIATION").is_err() {
+        return;
+    }
+    eprintln!(
+        "[KESTREL_VERIFY_INSTANTIATION] {} invariant-1 violation(s) — a Copyable-default type \
+         parameter was instantiated with a `not Copyable` argument, and the generic body \
+         duplicates it:",
+        findings.len(),
+    );
+    for f in findings {
+        eprintln!("  {}: block {} inst {}: {}", f.func_name, f.block, f.inst, f.message);
+    }
+}
+
+/// A `CopyValue` of a SLOT BORROW that monomorphized to a `not Copyable`
+/// instantiation — a detected violation of "invariant 1" (a Copyable-default
+/// type param is never instantiated with a non-Copyable argument), caught at
+/// the instantiation where it actually became wrong.
+///
+/// The trigger is simply REACHING the not-Copyable degrade at all. MEASURED on
+/// `try_err_noncopyable_no_double_deinit`, whose payload is a `not Copyable`
+/// `E2` flowing through `Result.tryExtract[Int64, E2]`:
+///
+/// | build | degrades | result |
+/// |---|---|---|
+/// | pre-mono classifier says "move a bare `T`" | 0 | exit 0 |
+/// | classifier says "a bare `T` is Copyable" | 8 | exit 2 (double deinit) |
+///
+/// Zero in the healthy build and non-zero exactly when the double-free appears,
+/// so the degrade is a precise signal rather than routine housekeeping.
+///
+/// A narrower predicate was tried first — only flag a `CopyValue` whose operand
+/// is a `BeginBorrowAddr` result (the `emit_copy_addr` shape), on the theory
+/// that aliasing a slot borrow leaves the slot's own `DestroyAddr` live. That
+/// predicate is INERT: the real degrades are value-sourced (`copy_value` of a
+/// PARAMETER, in `tryExtract` and `__clone$Result`), so it caught nothing.
+/// Don't reintroduce an operand-shape filter without re-measuring.
+///
+/// Reported rather than silently degraded because a silent degrade is how this
+/// class fails: at RUNTIME, as a double deinit, with the pre-mono verifier
+/// reporting nothing (it cannot see instantiations).
+#[derive(Debug, Clone)]
+pub struct InstantiationFinding {
+    pub func_name: String,
+    pub block: usize,
+    pub inst: usize,
+    pub span: Option<Span>,
+    pub message: String,
 }
 
 /// Maps (nominal_entity, type_args) -> MonoFuncId for drop shim dispatch.
@@ -594,8 +658,10 @@ fn expand_function(
     skip_clone_nominal: Option<Entity>,
     not_copyable: &HashSet<(Entity, Vec<TyId>)>,
     erased: &ErasedShimTys,
+    findings: &mut Vec<InstantiationFinding>,
 ) {
     let Some(body) = &mut func.body else { return };
+
 
     // value_remap tracks CopyValue removals: result -> operand
     let mut value_remap: HashMap<ValueId, ValueId> = HashMap::new();
@@ -664,7 +730,7 @@ fn expand_function(
         let old_insts = std::mem::take(&mut body.blocks[block_idx].insts);
         let mut new_insts: Vec<Instruction> = Vec::with_capacity(old_insts.len());
 
-        for inst in old_insts {
+        for (inst_idx, inst) in old_insts.into_iter().enumerate() {
             match &inst.kind {
                 InstKind::DestroyValue { operand } => {
                     let operand = *operand;
@@ -1138,6 +1204,23 @@ fn expand_function(
                     if let MirTy::Named { entity, type_args } = ty_arena.get(value_def.ty)
                         && not_copyable.contains(&(*entity, type_args.clone()))
                     {
+                        // Reaching this arm at all is the violation signal —
+                        // see `InstantiationFinding` for the measurement.
+                        {
+                            findings.push(InstantiationFinding {
+                                func_name: func.name.clone(),
+                                block: block_idx,
+                                inst: inst_idx,
+                                span: inst.span.clone(),
+                                message: "the generic body duplicates this value, but this \
+                                          monomorphization is `not Copyable` and cannot be \
+                                          duplicated. The type parameter is Copyable-by-default, \
+                                          so this instantiation violates invariant 1 and should \
+                                          have been rejected. Degrading the copy to an alias here \
+                                          releases the payload twice"
+                                    .to_string(),
+                            });
+                        }
                         let target = remap_value(operand, &value_remap);
                         if std::env::var("KESTREL_DEBUG_CLONE").is_ok() {
                             eprintln!(
