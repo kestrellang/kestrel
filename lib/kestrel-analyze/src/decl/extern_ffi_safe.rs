@@ -236,9 +236,43 @@ pub fn is_ffi_safe(
     hir_ty: &HirTy,
     ffi_safe_entity: kestrel_hecs::Entity,
 ) -> bool {
+    // FFISafe declares `tuple_conformance_propagation: true`; read it rather
+    // than assume it, so the flag on `BuiltinKind::Protocol` is load-bearing.
+    conforms_to_builtin_protocol(cx, hir_ty, ffi_safe_entity, tuple_propagates(cx, ffi_safe_entity))
+}
+
+/// Whether `protocol`'s `BuiltinKind` says tuples conform when all their
+/// elements do. Non-builtin protocols do not propagate.
+pub fn tuple_propagates(cx: &DeclContext<'_>, protocol: kestrel_hecs::Entity) -> bool {
+    matches!(
+        cx.query
+            .query(kestrel_name_res::EntityBuiltin { entity: protocol })
+            .map(|b| b.kind()),
+        Some(kestrel_hir::builtin::BuiltinKind::Protocol {
+            tuple_conformance_propagation: true,
+            ..
+        })
+    )
+}
+
+/// Whether `hir_ty` conforms to `protocol`, structurally.
+///
+/// Intrinsics conform implicitly; nominal types conform if the protocol is in
+/// their conformance set; tuples conform elementwise only when the protocol
+/// opts in via `tuple_conformance_propagation`.
+pub fn conforms_to_builtin_protocol(
+    cx: &DeclContext<'_>,
+    hir_ty: &HirTy,
+    ffi_safe_entity: kestrel_hecs::Entity,
+    tuples_propagate: bool,
+) -> bool {
     match hir_ty {
-        // Tuples are FFI-safe if all elements are FFI-safe
-        HirTy::Tuple(elems, _) => elems.iter().all(|e| is_ffi_safe(cx, e, ffi_safe_entity)),
+        HirTy::Tuple(elems, _) => {
+            tuples_propagate
+                && elems.iter().all(|e| {
+                    conforms_to_builtin_protocol(cx, e, ffi_safe_entity, tuples_propagate)
+                })
+        },
         // Nominal types: check intrinsic status or protocol conformance
         HirTy::Struct { entity, .. }
         | HirTy::Enum { entity, .. }

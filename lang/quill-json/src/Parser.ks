@@ -63,74 +63,70 @@ struct JsonCursor: Cloneable {
     ///
     /// Decodes UTF-8 directly from the source byte buffer at `self.pos`,
     /// avoiding the O(N) copy that `substringBytes` would incur.
-    func peekChar() -> Optional[(Char, Int64)] {
-        if self.pos >= self.len {
+    func peekChar() -> (Char, Int64)? {
+        if self.atEnd() {
             return .None
         }
-        match decodeUtf8(self.source.bytes.asRaw(), self.len, at: self.pos) {
-            .Some(decoded) => .Some((decoded.char, decoded.bytesConsumed)),
-            .None => .None
+
+        guard let some decoded = decodeUtf8(self.source.bytes.asRaw(), self.len, at: self.pos) else {
+            return .None
         }
+        .Some((decoded.char, decoded.bytesConsumed))
     }
 
     /// Decodes the next code point, advances past it, and returns it.
     ///
-    /// Returns an error if the cursor is already at end of input.
-    mutating func advanceChar() -> Result[Char, JsonParseError] {
-        match self.peekChar() {
-            .Some(pair) => {
-                self.pos = self.pos + pair.1;
-                .Ok(pair.0)
-            },
-            .None => .Err(JsonParseError("unexpected end of input", self.pos))
+    /// Throws if the cursor is already at end of input.
+    mutating func advanceChar() -> Char throws JsonParseError {
+        guard let some (c, width) = self.peekChar() else {
+            throw JsonParseError("unexpected end of input", self.pos)
         }
+        self.pos = self.pos + width;
+        .Ok(c)
     }
 
     /// Skips ASCII whitespace (space, tab, newline, carriage return).
     mutating func skipWhitespace() {
-        while let .Some(pair) = self.peekChar() {
-            let c = pair.0;
-            if c == ' ' or c == '\t' or c == '\n' or c == '\r' {
-                self.pos = self.pos + pair.1
-            } else {
-                return
+        while let some (c, width) = self.peekChar() {
+            if c != ' ' and c != '\t' and c != '\n' and c != '\r' {
+                return;
             }
+            self.pos = self.pos + width
         }
     }
 
-    /// Advances one code point and returns an error if it doesn't match `c`.
-    mutating func expect(c: Char) -> Result[(), JsonParseError] {
+    /// Advances one code point and throws if it doesn't match `c`.
+    mutating func expect(c: Char) -> () throws JsonParseError {
         let actual = try self.advanceChar();
         if actual == c {
-            .Ok(())
-        } else {
-            var expected = String();
-            expected.append(char: c);
-            var got = String();
-            got.append(char: actual);
-            .Err(JsonParseError("expected '" + expected + "', got '" + got + "'", self.pos - 1))
+            return .Ok(())
         }
+
+        var expected = String();
+        expected.append(char: c);
+        var got = String();
+        got.append(char: actual);
+        throw JsonParseError("expected '" + expected + "', got '" + got + "'", self.pos - 1)
     }
 
-    /// Advances past the exact bytes of `expected`, or errors if they don't match.
+    /// Advances past the exact bytes of `expected`, or throws if they don't match.
     ///
     /// Compares bytes directly at the cursor offset without copying the tail
     /// of the source string.
-    mutating func expectStr(expected: String) -> Result[(), JsonParseError] {
+    mutating func expectStr(expected: String) -> () throws JsonParseError {
         let startPos = self.pos;
         let expectedLen = expected.bytes.count;
         if self.len - self.pos < expectedLen {
-            return .Err(JsonParseError("expected '" + expected + "'", startPos))
+            throw JsonParseError("expected '" + expected + "'", startPos)
         }
+
         let srcBytes = self.source.bytes;
-        let expBytes = expected.bytes;
-        var i: Int64 = 0;
-        while i < expectedLen {
-            if srcBytes(unchecked: self.pos + i) != expBytes(unchecked: i) {
-                return .Err(JsonParseError("expected '" + expected + "'", startPos))
+        for (offset, expectedByte) in expected.bytes.iter().enumerate() {
+            if srcBytes(unchecked: self.pos + offset) != expectedByte {
+                throw JsonParseError("expected '" + expected + "'", startPos)
             }
-            i = i + 1
         }
+
         self.pos = self.pos + expectedLen;
         .Ok(())
     }
@@ -155,15 +151,16 @@ struct JsonCursor: Cloneable {
 ///
 /// # Errors
 ///
-/// Returns `JsonParseError` for any syntax violation, with a byte offset
+/// Throws `JsonParseError` for any syntax violation, with a byte offset
 /// pointing at the problem character.
-public func parseJson(source: String) -> Result[Value, JsonParseError] {
+public func parseJson(source: String) -> Value throws JsonParseError {
     var cursor = JsonCursor(source);
     cursor.skipWhitespace();
     let value = try parseValue(cursor);
     cursor.skipWhitespace();
+
     if not cursor.atEnd() {
-        return .Err(JsonParseError("unexpected trailing content", cursor.pos))
+        throw JsonParseError("unexpected trailing content", cursor.pos)
     }
     .Ok(value)
 }
@@ -173,129 +170,114 @@ public func parseJson(source: String) -> Result[Value, JsonParseError] {
 // ============================================================================
 
 /// Dispatches to the appropriate sub-parser based on the next character.
-func parseValue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
-    match cursor.peekChar() {
-        .Some(pair) => {
-            let c = pair.0;
-            if c == 'n' {
-                parseNull(cursor)
-            } else if c == 't' {
-                parseTrue(cursor)
-            } else if c == 'f' {
-                parseFalse(cursor)
-            } else if c == '"' {
-                parseJsonString(cursor)
-            } else if c == '[' {
-                parseArray(cursor)
-            } else if c == '{' {
-                parseObject(cursor)
-            } else if c == '-' or c.isAsciiDigit {
-                parseNumber(cursor)
-            } else {
-                var got = String();
-                got.append(char: c);
-                .Err(JsonParseError("unexpected character '" + got + "'", cursor.pos))
-            }
-        },
-        .None => .Err(JsonParseError("unexpected end of input", cursor.pos))
+func parseValue(mutating cursor: JsonCursor) -> Value throws JsonParseError {
+    guard let some (c, _) = cursor.peekChar() else {
+        throw JsonParseError("unexpected end of input", cursor.pos)
+    }
+
+    // Numbers are the one production keyed on a character *class*, so they are
+    // tested before the match. (A `digit if digit.isAsciiDigit` arm would be
+    // the natural spelling, but pattern-guard arms currently miscompile — see
+    // the OSSA note in `unexpectedCharacter`.)
+    if c == '-' or c.isAsciiDigit {
+        return parseNumber(cursor)
+    }
+
+    match c {
+        'n' => parseNull(cursor),
+        't' => parseTrue(cursor),
+        'f' => parseFalse(cursor),
+        '"' => parseJsonString(cursor),
+        '[' => parseArray(cursor),
+        '{' => parseObject(cursor),
+        _ => unexpectedCharacter(c, at: cursor.pos)
     }
 }
 
+/// Builds the "unexpected character" error for the byte offset `at`.
+///
+/// NOTE: `match` arms carrying a pattern guard (`x if cond => ...`) currently
+/// fail OSSA verification when the arms produce owned values, so dispatch that
+/// needs a character *class* is written as an `if` before the match.
+func unexpectedCharacter(c: Char, at offset: Int64) -> Value throws JsonParseError {
+    var got = String();
+    got.append(char: c);
+    throw JsonParseError("unexpected character '" + got + "'", offset)
+}
+
 /// Consumes the literal `null`.
-func parseNull(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+func parseNull(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     try cursor.expectStr("null");
     .Ok(Value.Null)
 }
 
 /// Consumes the literal `true`.
-func parseTrue(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+func parseTrue(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     try cursor.expectStr("true");
     .Ok(Value.Boolean(true))
 }
 
 /// Consumes the literal `false`.
-func parseFalse(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+func parseFalse(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     try cursor.expectStr("false");
     .Ok(Value.Boolean(false))
 }
 
 /// Parses a JSON number (integer or float) per RFC 8259 §6.
-func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+///
+/// Validates the grammar while scanning, then hands the matched span to the
+/// stdlib parsers — which also reject values too large for the target type.
+func parseNumber(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     let start = cursor.pos;
     var isFloat = false;
 
     // Optional minus sign
-    if let .Some(pair) = cursor.peekChar() {
-        if pair.0 == '-' {
-            cursor.pos = cursor.pos + pair.1
+    if let some (sign, signWidth) = cursor.peekChar() {
+        if sign == '-' {
+            cursor.pos = cursor.pos + signWidth
         }
     }
 
-    // Integer part
-    match cursor.peekChar() {
-        .Some(pair) => {
-            let c = pair.0;
-            if c == '0' {
-                cursor.pos = cursor.pos + pair.1
-            } else if c.isAsciiDigit {
-                cursor.pos = cursor.pos + pair.1;
-                while let .Some(p) = cursor.peekChar() {
-                    if p.0.isAsciiDigit {
-                        cursor.pos = cursor.pos + p.1
-                    } else {
-                        break
-                    }
-                }
-            } else {
-                return .Err(JsonParseError("invalid number", start))
-            }
-        },
-        .None => return .Err(JsonParseError("unexpected end of input in number", start))
+    // Integer part: a lone `0`, or a digit run with no leading zero.
+    guard let some (first, firstWidth) = cursor.peekChar() else {
+        throw JsonParseError("unexpected end of input in number", start)
+    }
+
+    if not first.isAsciiDigit {
+        throw JsonParseError("invalid number", start)
+    }
+
+    cursor.pos = cursor.pos + firstWidth;
+    // A leading `0` stands alone; any other digit starts a run.
+    if first != '0' {
+        skipDigits(cursor);
     }
 
     // Fractional part
-    if let .Some(pair) = cursor.peekChar() {
-        if pair.0 == '.' {
+    if let some (dot, dotWidth) = cursor.peekChar() {
+        if dot == '.' {
             isFloat = true;
-            cursor.pos = cursor.pos + pair.1;
-            var hasDigit = false;
-            while let .Some(p) = cursor.peekChar() {
-                if p.0.isAsciiDigit {
-                    cursor.pos = cursor.pos + p.1;
-                    hasDigit = true
-                } else {
-                    break
-                }
-            }
-            if not hasDigit {
-                return .Err(JsonParseError("expected digit after '.'", cursor.pos))
+            cursor.pos = cursor.pos + dotWidth;
+            if not skipDigits(cursor) {
+                throw JsonParseError("expected digit after '.'", cursor.pos)
             }
         }
     }
 
     // Exponent
-    if let .Some(pair) = cursor.peekChar() {
-        let c = pair.0;
-        if c == 'e' or c == 'E' {
+    if let some (marker, markerWidth) = cursor.peekChar() {
+        if marker == 'e' or marker == 'E' {
             isFloat = true;
-            cursor.pos = cursor.pos + pair.1;
-            // Optional sign
-            if let .Some(p) = cursor.peekChar() {
-                if p.0 == '+' or p.0 == '-' {
-                    cursor.pos = cursor.pos + p.1
+            cursor.pos = cursor.pos + markerWidth;
+
+            if let some (sign, signWidth) = cursor.peekChar() {
+                if sign == '+' or sign == '-' {
+                    cursor.pos = cursor.pos + signWidth
                 }
             }
-            var hasDigit = false;
-            while let .Some(p) = cursor.peekChar() {
-                if p.0.isAsciiDigit {
-                    cursor.pos = cursor.pos + p.1;
-                    hasDigit = true
-                } else {
-                    break
-                }
-            }
-            if not hasDigit {
-                return .Err(JsonParseError("expected digit in exponent", cursor.pos))
+
+            if not skipDigits(cursor) {
+                throw JsonParseError("expected digit in exponent", cursor.pos)
             }
         }
     }
@@ -303,20 +285,35 @@ func parseNumber(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
     let numStr = cursor.source.asSlice().subslice(from: start, to: cursor.pos).toOwned();
 
     if isFloat {
-        match parseFloat64(numStr) {
-            .Some(f) => .Ok(Value.Float(f)),
-            .None => .Err(JsonParseError("invalid float: " + numStr, start))
+        guard let some f = Float64(parsing: numStr) else {
+            throw JsonParseError("invalid float: " + numStr, start)
         }
-    } else {
-        match parseInt64(numStr) {
-            .Some(n) => .Ok(Value.Int(n)),
-            .None => .Err(JsonParseError("invalid integer: " + numStr, start))
-        }
+        return .Ok(Value.Float(f))
     }
+
+    guard let some n = Int64(parsing: numStr) else {
+        throw JsonParseError("invalid integer: " + numStr, start)
+    }
+    .Ok(Value.Int(n))
+}
+
+/// Consumes a run of ASCII digits; reports whether at least one was consumed.
+func skipDigits(mutating cursor: JsonCursor) -> Bool {
+    var consumed = false;
+
+    while let some (c, width) = cursor.peekChar() {
+        if not c.isAsciiDigit {
+            return consumed;
+        }
+        cursor.pos = cursor.pos + width;
+        consumed = true
+    }
+
+    consumed
 }
 
 /// Parses a JSON string and wraps it in `Value.Str`.
-func parseJsonString(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+func parseJsonString(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     let s = try parseRawString(cursor);
     .Ok(Value.Str(s))
 }
@@ -327,12 +324,12 @@ func parseJsonString(mutating cursor: JsonCursor) -> Result[Value, JsonParseErro
 /// UTF-8 decode/re-encode overhead). Falls back to per-character decoding
 /// only for `\` escape sequences, where `\uXXXX` may produce multi-byte
 /// code points.
-func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseError] {
+func parseRawString(mutating cursor: JsonCursor) -> String throws JsonParseError {
     try cursor.expect('"');
     var result = String();
     let srcBytes = cursor.source.bytes;
 
-    while true {
+    loop {
         // Fast path: scan a run of plain bytes (no '"', no '\').
         let runStart = cursor.pos;
         while cursor.pos < cursor.len {
@@ -347,315 +344,164 @@ func parseRawString(mutating cursor: JsonCursor) -> Result[String, JsonParseErro
         result.append(srcBytes.substring(runStart..<cursor.pos));
 
         if cursor.pos >= cursor.len {
-            return .Err(JsonParseError("unterminated string", cursor.pos))
+            throw JsonParseError("unterminated string", cursor.pos)
         }
 
-        let terminator = srcBytes(unchecked: cursor.pos);
-        if terminator == 34 {
+        if srcBytes(unchecked: cursor.pos) == 34 {
             cursor.pos = cursor.pos + 1;
             return .Ok(result)
         }
 
         // Backslash escape. Step past `\` and decode the next char.
         cursor.pos = cursor.pos + 1;
-        let esc = try cursor.advanceChar();
-        // \" \\ \/ \b \f \n \r \t \uXXXX
-        if esc == '"' {
-            result.append(char: '"')
-        } else if esc == '\\' {
-            result.append(char: '\\')
-        } else if esc == '/' {
-            result.append(char: '/')
-        } else if esc == 'b' {
-            result.append(char: Char(8).unwrap())
-        } else if esc == 'f' {
-            result.append(char: Char(12).unwrap())
-        } else if esc == 'n' {
-            result.append(char: '\n')
-        } else if esc == 'r' {
-            result.append(char: '\r')
-        } else if esc == 't' {
-            result.append(char: '\t')
-        } else if esc == 'u' {
-            let codepoint = try parseUnicodeEscape(cursor);
-            result.append(char: Char(UInt32(from: codepoint)).unwrap())
-        } else {
-            return .Err(JsonParseError("invalid escape sequence", cursor.pos - 1))
-        }
+        result.append(char: try unescape(cursor))
     }
+}
 
-    // Unreachable, but needed for type checker
-    .Err(JsonParseError("unterminated string", cursor.pos))
+/// Decodes one escape sequence, with the leading `\` already consumed.
+func unescape(mutating cursor: JsonCursor) -> Char throws JsonParseError {
+    let esc = try cursor.advanceChar();
+
+    match esc {
+        '"' => .Ok('"'),
+        '\\' => .Ok('\\'),
+        '/' => .Ok('/'),
+        'b' => .Ok('\u{08}'),
+        'f' => .Ok('\u{0C}'),
+        'n' => .Ok('\n'),
+        'r' => .Ok('\r'),
+        't' => .Ok('\t'),
+        'u' => {
+            let codepoint = try parseUnicodeEscape(cursor);
+            // Surrogate halves and out-of-range values have no scalar; reject
+            // them rather than unwrapping a `.None`.
+            guard let some decoded = Char(UInt32(from: codepoint)) else {
+                throw JsonParseError("invalid unicode escape", cursor.pos - 6)
+            }
+            .Ok(decoded)
+        },
+        _ => throw JsonParseError("invalid escape sequence", cursor.pos - 1)
+    }
 }
 
 /// Parses a 4-digit hex escape `\uXXXX` and returns the code point.
-func parseUnicodeEscape(mutating cursor: JsonCursor) -> Result[Int64, JsonParseError] {
+func parseUnicodeEscape(mutating cursor: JsonCursor) -> Int64 throws JsonParseError {
     var value: Int64 = 0;
-    var i: Int64 = 0;
-    while i < 4 {
+
+    for _ in 0..<4 {
         let c = try cursor.advanceChar();
-        let digit = hexDigitValue(c);
-        if digit < 0 {
-            return .Err(JsonParseError("invalid hex digit in unicode escape", cursor.pos - 1))
+        guard let some digit = hexDigitValue(c) else {
+            throw JsonParseError("invalid hex digit in unicode escape", cursor.pos - 1)
         }
-        value = value * 16 + digit;
-        i = i + 1
+        value = value * 16 + digit
     }
+
     .Ok(value)
 }
 
-/// Returns the numeric value of a hex digit, or -1 if not a hex digit.
-func hexDigitValue(c: Char) -> Int64 {
-    if let .Some(d) = c.digitValue() {
-        return Int64(from: d)
+/// Returns the numeric value of a hex digit, or `.None` if not a hex digit.
+func hexDigitValue(c: Char) -> Int64? {
+    if let some d = c.digitValue() {
+        return .Some(Int64(from: d))
     }
     if c >= 'A' and c <= 'F' {
-        return Int64(from: c.value()) - 55
+        return .Some(Int64(from: c.value()) - 55)
     }
     if c >= 'a' and c <= 'f' {
-        return Int64(from: c.value()) - 87
+        return .Some(Int64(from: c.value()) - 87)
     }
-    0 - 1
+    .None
 }
 
 /// Parses a JSON array (`[value, ...]`).
-func parseArray(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+func parseArray(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     try cursor.expect('[');
     cursor.skipWhitespace();
 
-    var items = Array[Value]();
+    var items: [Value] = [];
+
+    guard let some (first, firstWidth) = cursor.peekChar() else {
+        throw JsonParseError("unexpected end of input in array", cursor.pos)
+    }
 
     // Empty array shortcut
-    match cursor.peekChar() {
-        .Some(pair) => {
-            if pair.0 == ']' {
-                cursor.pos = cursor.pos + pair.1;
-                return .Ok(Value.Arr(items))
-            }
-        },
-        .None => return .Err(JsonParseError("unexpected end of input in array", cursor.pos))
+    if first == ']' {
+        cursor.pos = cursor.pos + firstWidth;
+        return .Ok(Value.Arr(items))
     }
 
-    let first = try parseValue(cursor);
-    items.append(first);
+    items.append(try parseValue(cursor));
 
-    while true {
+    loop {
         cursor.skipWhitespace();
-        match cursor.peekChar() {
-            .Some(pair) => {
-                let c = pair.0;
-                if c == ']' {
-                    cursor.pos = cursor.pos + pair.1;
-                    return .Ok(Value.Arr(items))
-                }
-                if c == ',' {
-                    cursor.pos = cursor.pos + pair.1;
-                    cursor.skipWhitespace();
-                    let item = try parseValue(cursor);
-                    items.append(item)
-                } else {
-                    return .Err(JsonParseError("expected ',' or ']' in array", cursor.pos))
-                }
-            },
-            .None => return .Err(JsonParseError("unexpected end of input in array", cursor.pos))
-        }
-    }
 
-    .Err(JsonParseError("unexpected end of input in array", cursor.pos))
+        guard let some (c, width) = cursor.peekChar() else {
+            throw JsonParseError("unexpected end of input in array", cursor.pos)
+        }
+
+        if c == ']' {
+            cursor.pos = cursor.pos + width;
+            return .Ok(Value.Arr(items))
+        }
+
+        if c != ',' {
+            throw JsonParseError("expected ',' or ']' in array", cursor.pos)
+        }
+
+        cursor.pos = cursor.pos + width;
+        cursor.skipWhitespace();
+        items.append(try parseValue(cursor))
+    }
 }
 
 /// Parses a JSON object (`{"key": value, ...}`).
-func parseObject(mutating cursor: JsonCursor) -> Result[Value, JsonParseError] {
+func parseObject(mutating cursor: JsonCursor) -> Value throws JsonParseError {
     try cursor.expect('{');
     cursor.skipWhitespace();
 
-    var obj = Dictionary[String, Value]();
+    var obj: [String: Value] = [:];
 
-    // Empty object shortcut
-    match cursor.peekChar() {
-        .Some(pair) => {
-            if pair.0 == '}' {
-                cursor.pos = cursor.pos + pair.1;
-                return .Ok(Value.Obj(obj))
-            }
-        },
-        .None => return .Err(JsonParseError("unexpected end of input in object", cursor.pos))
+    guard let some (first, firstWidth) = cursor.peekChar() else {
+        throw JsonParseError("unexpected end of input in object", cursor.pos)
     }
 
-    let firstKey = try parseRawString(cursor);
+    // Empty object shortcut
+    if first == '}' {
+        cursor.pos = cursor.pos + firstWidth;
+        return .Ok(Value.Obj(obj))
+    }
+
+    try parseMember(cursor, obj);
+
+    loop {
+        cursor.skipWhitespace();
+
+        guard let some (c, width) = cursor.peekChar() else {
+            throw JsonParseError("unexpected end of input in object", cursor.pos)
+        }
+
+        if c == '}' {
+            cursor.pos = cursor.pos + width;
+            return .Ok(Value.Obj(obj))
+        }
+
+        if c != ',' {
+            throw JsonParseError("expected ',' or '}' in object", cursor.pos)
+        }
+
+        cursor.pos = cursor.pos + width;
+        cursor.skipWhitespace();
+        try parseMember(cursor, obj)
+    }
+}
+
+/// Parses one `"key": value` pair at the cursor and inserts it into `obj`.
+func parseMember(mutating cursor: JsonCursor, mutating obj: [String: Value]) -> () throws JsonParseError {
+    let key = try parseRawString(cursor);
     cursor.skipWhitespace();
     try cursor.expect(':');
     cursor.skipWhitespace();
-    let firstVal = try parseValue(cursor);
-     obj.insert(firstKey, firstVal);
-
-    while true {
-        cursor.skipWhitespace();
-        match cursor.peekChar() {
-            .Some(pair) => {
-                let c = pair.0;
-                if c == '}' {
-                    cursor.pos = cursor.pos + pair.1;
-                    return .Ok(Value.Obj(obj))
-                }
-                if c == ',' {
-                    cursor.pos = cursor.pos + pair.1;
-                    cursor.skipWhitespace();
-                    let key = try parseRawString(cursor);
-                    cursor.skipWhitespace();
-                    try cursor.expect(':');
-                    cursor.skipWhitespace();
-                    let val = try parseValue(cursor);
-                     obj.insert(key, val);
-                } else {
-                    return .Err(JsonParseError("expected ',' or '}' in object", cursor.pos))
-                }
-            },
-            .None => return .Err(JsonParseError("unexpected end of input in object", cursor.pos))
-        }
-    }
-
-    .Err(JsonParseError("unexpected end of input in object", cursor.pos))
-}
-
-// ============================================================================
-// NUMBER PARSING HELPERS
-// ============================================================================
-
-/// Parses a string as an Int64. Returns `.None` on failure.
-func parseInt64(s: String) -> Optional[Int64] {
-    if s.isEmpty {
-        return .None
-    }
-
-    var iter = s.chars.iter();
-    var negative = false;
-    var first = match iter.next() {
-        .Some(c) => c,
-        .None => return .None
-    };
-
-    if first == '-' {
-        negative = true;
-        match iter.next() {
-            .Some(c) => first = c,
-            .None => return .None
-        }
-    }
-
-    var result: Int64 = 0;
-    var current: Optional[Char] = .Some(first);
-    while let .Some(c) = current {
-        match c.digitValue() {
-            .Some(d) => result = result * 10 + Int64(from: d),
-            .None => return .None
-        }
-        current = iter.next()
-    }
-
-    if negative { .Some(0 - result) } else { .Some(result) }
-}
-
-/// Parses a string as a Float64 — integer part, fractional part, exponent.
-func parseFloat64(s: String) -> Optional[Float64] {
-    if s.isEmpty {
-        return .None
-    }
-
-    var iter = s.chars.iter();
-    var negative = false;
-    var pending = match iter.next() {
-        .Some(c) => c,
-        .None => return .None
-    };
-
-    if pending == '-' {
-        negative = true;
-        match iter.next() {
-            .Some(c) => pending = c,
-            .None => return .None
-        }
-    }
-
-    var current: Optional[Char] = .Some(pending);
-
-    // Integer part
-    var intPart: Float64 = 0.0;
-    while let .Some(c) = current {
-        match c.digitValue() {
-            .Some(d) => {
-                intPart = intPart * 10.0 + Float64(from: Int64(from: d));
-                current = iter.next()
-            },
-            .None => break
-        }
-    }
-
-    // Fractional part
-    var fracPart: Float64 = 0.0;
-    var fracDiv: Float64 = 1.0;
-    if let .Some(c) = current {
-        if c == '.' {
-            current = iter.next();
-            while let .Some(d) = current {
-                match d.digitValue() {
-                    .Some(v) => {
-                        fracPart = fracPart * 10.0 + Float64(from: Int64(from: v));
-                        fracDiv = fracDiv * 10.0;
-                        current = iter.next()
-                    },
-                    .None => break
-                }
-            }
-        }
-    }
-
-    var result = intPart + fracPart / fracDiv;
-
-    // Exponent
-    if let .Some(c) = current {
-        if c == 'e' or c == 'E' {
-            current = iter.next();
-            var expNeg = false;
-            if let .Some(s) = current {
-                if s == '+' {
-                    current = iter.next()
-                } else if s == '-' {
-                    expNeg = true;
-                    current = iter.next()
-                }
-            }
-            var exp: Float64 = 0.0;
-            while let .Some(d) = current {
-                match d.digitValue() {
-                    .Some(v) => {
-                        exp = exp * 10.0 + Float64(from: Int64(from: v));
-                        current = iter.next()
-                    },
-                    .None => break
-                }
-            }
-            var multiplier: Float64 = 1.0;
-            var e: Int64 = 0;
-            let expInt = match exp.toInt64() {
-                .Some(n) => n,
-                .None => 0
-            };
-            while e < expInt {
-                multiplier = multiplier * 10.0;
-                e = e + 1
-            }
-            if expNeg {
-                result = result / multiplier
-            } else {
-                result = result * multiplier
-            }
-        }
-    }
-
-    if negative {
-        result = 0.0 - result
-    }
-
-    .Some(result)
+    let value = try parseValue(cursor);
+    obj.insert(key, value);
+    .Ok(())
 }

@@ -20,89 +20,6 @@ module quill.toml.parser
 
 import quill.value.(Value)
 import quill.toml.error.(TomlParseError)
-import std.text.(decodeUtf8)
-
-// ============================================================================
-// TOML CURSOR
-// ============================================================================
-
-/// Mutable cursor tracking the current byte position and line number in a
-/// TOML source string.
-///
-/// Structural scanning decodes characters via `decodeUtf8`. The parser works
-/// line-by-line: `nextLine()` extracts one logical line at a time, handling
-/// `\n`, `\r\n`, and `\r` line endings.
-///
-/// # Representation
-///
-/// Four fields: `source` (the full input), `pos` (current byte offset),
-/// `len` (cached `source.bytes.count`), and `line` (1-based line counter).
-struct TomlCursor: Cloneable {
-    var source: String
-    var pos: Int64
-    var len: Int64
-    var line: Int64
-
-    /// @name Default
-    /// Creates a cursor at the beginning of the given source string.
-    init(source: String) {
-        self.source = source;
-        self.pos = 0;
-        self.len = source.bytes.count;
-        self.line = 1;
-    }
-
-    /// Returns `true` when the cursor has reached or passed the end of input.
-    func atEnd() -> Bool {
-        self.pos >= self.len
-    }
-
-    /// Extracts the next logical line and its 1-based line number.
-    ///
-    /// Recognizes `\n`, `\r\n`, and bare `\r` as line terminators. Returns
-    /// `.None` when the cursor is at end of input.
-    mutating func nextLine() -> Optional[(String, Int64)] {
-        if self.atEnd() {
-            return .None
-        }
-
-        let start = self.pos;
-        let lineNum = self.line;
-        let bytes = self.source.bytes;
-        let slice = self.source.asSlice();
-
-        while self.pos < self.len {
-            let b = bytes(unchecked: self.pos);
-            if b == 10 {
-                let line = slice.subslice(from: start, to: self.pos).toOwned();
-                self.pos = self.pos + 1;
-                self.line = self.line + 1;
-                return .Some((line, lineNum))
-            }
-            if b == 13 {
-                let line = slice.subslice(from: start, to: self.pos).toOwned();
-                self.pos = self.pos + 1;
-                if self.pos < self.len and bytes(unchecked: self.pos) == 10 {
-                    self.pos = self.pos + 1
-                }
-                self.line = self.line + 1;
-                return .Some((line, lineNum))
-            }
-            self.pos = self.pos + 1
-        }
-
-        .Some((slice.subslice(from: start, to: self.len).toOwned(), lineNum))
-    }
-
-    /// Returns a copy of this cursor with the same position and state.
-    func clone() -> TomlCursor {
-        var c = TomlCursor(self.source.clone());
-        c.pos = self.pos;
-        c.len = self.len;
-        c.line = self.line;
-        c
-    }
-}
 
 // ============================================================================
 // PUBLIC API
@@ -123,46 +40,43 @@ struct TomlCursor: Cloneable {
 ///
 /// # Errors
 ///
-/// Returns `TomlParseError` for syntax violations, with a line number
+/// Throws `TomlParseError` for syntax violations, with a line number
 /// pointing at the problem line.
-public func parseToml(source: String) -> Result[Value, TomlParseError] {
-    var root = Dictionary[String, Value]();
+public func parseToml(source: String) -> Value throws TomlParseError {
+    var root: [String: Value] = [:];
     var currentTable = "";
-    var cursor = TomlCursor(source);
 
-    while let .Some(pair) = cursor.nextLine() {
-        let lineNum = pair.1;
-        let line = pair.0.trimmed().toOwned();
+    for (index, rawLine) in source.lines.iter().enumerate() {
+        let lineNum = index + 1;
+        let line = rawLine.trimmed().toOwned();
 
         // Skip empty lines and comments
-        if line.isEmpty or line.starts(with: "#") {
+        guard let some first = line.chars(checked: 0) else { continue }
+        if first == '#' {
             continue
         }
 
         // Table header [section]
-        if line.starts(with: "[") {
+        if first == '[' {
             if line.starts(with: "[[") {
-                return .Err(TomlParseError("array of tables [[...]] not supported", lineNum))
+                throw TomlParseError("array of tables [[...]] not supported", lineNum)
             }
 
-            match findUnquotedChar(line, ']') {
-                .Some(endPos) => {
-                    currentTable = line.asSlice().subslice(from: 1, to: endPos).trimmed().toOwned();
-                    ensureTable(root, currentTable);
-                    continue
-                },
-                .None => return .Err(TomlParseError("unterminated table header", lineNum))
+            guard let some endPos = findUnquotedChar(line, ']') else {
+                throw TomlParseError("unterminated table header", lineNum)
             }
+
+            currentTable = line.asSlice().subslice(from: 1, to: endPos).trimmed().toOwned();
+            ensureTable(root, currentTable);
+            continue
         }
 
-        let parsed = try parseKeyValue(line, lineNum);
-        let key = parsed.0;
-        let val = parsed.1;
+        let (key, value) = try parseKeyValue(line, lineNum);
 
         if currentTable.isEmpty {
-             root.insert(key, val);
+            root.insert(key, value);
         } else {
-            insertIntoTable(root, currentTable, key, val)
+            insertIntoTable(root, currentTable, key, value);
         }
     }
 
@@ -174,21 +88,17 @@ public func parseToml(source: String) -> Result[Value, TomlParseError] {
 // ============================================================================
 
 /// Splits a line on the first unquoted `=` and parses key + value.
-func parseKeyValue(line: String, lineNum: Int64) -> Result[(String, Value), TomlParseError] {
-    let eqPos = match findUnquotedChar(line, '=') {
-        .Some(p) => p,
-        .None => return .Err(TomlParseError("expected '=' in key-value pair", lineNum))
-    };
+func parseKeyValue(line: String, lineNum: Int64) -> (String, Value) throws TomlParseError {
+    guard let some eqPos = findUnquotedChar(line, '=') else {
+        throw TomlParseError("expected '=' in key-value pair", lineNum)
+    }
 
     let lineSlice = line.asSlice();
     let rawKey = lineSlice.subslice(from: lineSlice.start, to: eqPos).trimmed().toOwned();
-    let rawVal = lineSlice.subslice(from: eqPos + 1, to: lineSlice.end).trimmed().toOwned();
-    let valStr = stripInlineComment(rawVal);
+    let rawValue = lineSlice.subslice(from: eqPos + 1, to: lineSlice.end).trimmed().toOwned();
 
-    let key = parseKey(rawKey);
-    let value = try parseTomlValue(valStr, lineNum);
-
-    .Ok((key, value))
+    let value = try parseTomlValue(stripInlineComment(rawValue), lineNum);
+    .Ok((parseKey(rawKey), value))
 }
 
 /// Strips surrounding quotes from a key if present; returns bare keys unchanged.
@@ -201,34 +111,24 @@ func parseKey(s: String) -> String {
 
 /// Finds the byte offset of `target` outside double-quoted regions.
 ///
-/// Decodes UTF-8 characters for comparison but returns byte offsets
-/// suitable for `subslice(from:to:)` calls.
-func findUnquotedChar(s: String, target: Char) -> Optional[Int64] {
-    let bytes = s.bytes;
-    let len = s.bytes.count;
+/// Walks characters but reports byte offsets, so the result can be handed
+/// straight to `subslice(from:to:)`.
+func findUnquotedChar(s: String, target: Char) -> Int64? {
+    var offset: Int64 = 0;
     var inQuote = false;
     var escaped = false;
-    var i: Int64 = 0;
 
-    while i < len {
-        match decodeUtf8(bytes.asRaw(), len, at: i) {
-            .Some(decoded) => {
-                let c = decoded.char;
-                if escaped {
-                    escaped = false
-                } else if inQuote and c == '\\' {
-                    escaped = true
-                } else if c == '"' {
-                    inQuote = not inQuote
-                } else if not inQuote and c == target {
-                    return .Some(i)
-                }
-                i = i + decoded.bytesConsumed
-            },
-            .None => {
-                i = i + 1
-            }
+    for c in s.chars {
+        if escaped {
+            escaped = false
+        } else if inQuote and c == '\\' {
+            escaped = true
+        } else if c == '"' {
+            inQuote = not inQuote
+        } else if not inQuote and c == target {
+            return .Some(offset)
         }
+        offset = offset + c.utf8Length()
     }
 
     .None
@@ -236,10 +136,8 @@ func findUnquotedChar(s: String, target: Char) -> Optional[Int64] {
 
 /// Strips an inline comment (`# ...`) from a value string, respecting quotes.
 func stripInlineComment(s: String) -> String {
-    match findUnquotedChar(s, '#') {
-        .Some(pos) => s.asSlice().subslice(from: 0, to: pos).trimmed().toOwned(),
-        .None => s
-    }
+    guard let some pos = findUnquotedChar(s, '#') else { return s }
+    s.asSlice().subslice(from: 0, to: pos).trimmed().toOwned()
 }
 
 // ============================================================================
@@ -247,24 +145,15 @@ func stripInlineComment(s: String) -> String {
 // ============================================================================
 
 /// Dispatches a trimmed value string to the appropriate sub-parser.
-func parseTomlValue(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
-    if s.isEmpty {
-        return .Err(TomlParseError("empty value", lineNum))
+func parseTomlValue(s: String, lineNum: Int64) -> Value throws TomlParseError {
+    guard let some first = s.chars(checked: 0) else {
+        throw TomlParseError("empty value", lineNum)
     }
 
-    if s.starts(with: "\"") {
-        let str = try parseTomlString(s, lineNum);
-        return .Ok(Value.Str(str))
-    }
-
-    if s.starts(with: "[") {
-        return parseTomlArray(s, lineNum)
-    }
-
-    if s.starts(with: "{") {
-        return parseInlineTable(s, lineNum)
-    }
-
+    // Booleans are whole-string tokens rather than a first-character form, so
+    // they are matched before the character dispatch. (Nesting this as an inner
+    // `match s` inside the `_` arm also trips an OSSA "consumed more than once"
+    // ICE on the in-tree compiler.)
     if s == "true" {
         return .Ok(Value.Boolean(true))
     }
@@ -272,180 +161,160 @@ func parseTomlValue(s: String, lineNum: Int64) -> Result[Value, TomlParseError] 
         return .Ok(Value.Boolean(false))
     }
 
-    parseTomlNumber(s, lineNum)
+    match first {
+        '"' => .Ok(Value.Str(try parseTomlString(s, lineNum))),
+        '[' => .Ok(try parseTomlArray(s, lineNum)),
+        '{' => .Ok(try parseInlineTable(s, lineNum)),
+        _ => .Ok(try parseTomlNumber(s, lineNum))
+    }
 }
 
 /// Parses a basic quoted TOML string, processing escape sequences.
-func parseTomlString(s: String, lineNum: Int64) -> Result[String, TomlParseError] {
+func parseTomlString(s: String, lineNum: Int64) -> String throws TomlParseError {
     if s.bytes.count < 2 or not s.ends(with: "\"") {
-        return .Err(TomlParseError("unterminated string", lineNum))
+        throw TomlParseError("unterminated string", lineNum)
     }
 
+    let body = s.asSlice().subslice(from: 1, to: s.bytes.count - 1).toOwned();
     var result = String();
-    let bytes = s.bytes;
-    let len = s.bytes.count;
-    var i: Int64 = 1;
-    let end = len - 1;
+    var escaped = false;
 
-    while i < end {
-        match decodeUtf8(bytes.asRaw(), len, at: i) {
-            .Some(decoded) => {
-                let c = decoded.char;
-                if c == '\\' {
-                    i = i + decoded.bytesConsumed;
-                    if i >= end {
-                        return .Err(TomlParseError("unterminated escape in string", lineNum))
-                    }
-                    match decodeUtf8(bytes.asRaw(), len, at: i) {
-                        .Some(escDecoded) => {
-                            let esc = escDecoded.char;
-                            if esc == '"' {
-                                result.append(char: '"')
-                            } else if esc == '\\' {
-                                result.append(char: '\\')
-                            } else if esc == 'n' {
-                                result.append(char: '\n')
-                            } else if esc == 't' {
-                                result.append(char: '\t')
-                            } else if esc == 'r' {
-                                result.append(char: '\r')
-                            } else {
-                                return .Err(TomlParseError("invalid escape sequence", lineNum))
-                            }
-                            i = i + escDecoded.bytesConsumed
-                        },
-                        .None => return .Err(TomlParseError("invalid escape sequence", lineNum))
-                    }
-                } else {
-                    result.append(char: c);
-                    i = i + decoded.bytesConsumed
-                }
-            },
-            .None => {
-                i = i + 1
-            }
+    for c in body.chars {
+        if escaped {
+            result.append(char: try unescape(c, lineNum));
+            escaped = false;
+            continue
         }
+        if c == '\\' {
+            escaped = true;
+            continue
+        }
+        result.append(char: c)
+    }
+
+    // A trailing backslash consumed the closing quote's predecessor and never paired up.
+    if escaped {
+        throw TomlParseError("unterminated escape in string", lineNum)
     }
 
     .Ok(result)
 }
 
-/// Parses a TOML number — dispatches to int or float based on `.`/`e`/`E`.
-func parseTomlNumber(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
-    let isFloat = containsFloatMarker(s);
-
-    if isFloat {
-        match tomlParseFloat(s) {
-            .Some(f) => .Ok(Value.Float(f)),
-            .None => .Err(TomlParseError("invalid float: " + s, lineNum))
-        }
-    } else {
-        match tomlParseInt(s) {
-            .Some(n) => .Ok(Value.Int(n)),
-            .None => .Err(TomlParseError("invalid integer: " + s, lineNum))
-        }
+/// Maps the character after a backslash to the character it denotes.
+func unescape(c: Char, lineNum: Int64) -> Char throws TomlParseError {
+    match c {
+        '"' => .Ok('"'),
+        '\\' => .Ok('\\'),
+        'n' => .Ok('\n'),
+        't' => .Ok('\t'),
+        'r' => .Ok('\r'),
+        'b' => .Ok('\u{08}'),
+        _ => throw TomlParseError("invalid escape sequence", lineNum)
     }
+}
+
+/// Parses a TOML number, dispatching to `Int64`/`Float64` parsing.
+func parseTomlNumber(s: String, lineNum: Int64) -> Value throws TomlParseError {
+    // TOML allows `_` as a digit separator; the stdlib parsers do not.
+    let digits = s.replaced("_", with: "");
+
+    if containsFloatMarker(s) or isNonFiniteToken(s) {
+        guard let some f = Float64(parsing: digits) else {
+            throw TomlParseError("invalid float: " + s, lineNum)
+        }
+        return .Ok(Value.Float(f))
+    }
+
+    guard let some n = Int64(parsing: digits) else {
+        throw TomlParseError("invalid integer: " + s, lineNum)
+    }
+    .Ok(Value.Int(n))
 }
 
 /// Returns `true` if the string contains `.`, `e`, or `E` (float indicators).
-func containsFloatMarker(s: String) -> Bool {
+///
+/// Shared with the emitter, which uses it to decide whether a rendered float
+/// needs a trailing `.0` to avoid re-reading as an integer.
+public func containsFloatMarker(s: String) -> Bool {
     s.contains(where: { (c) in c == '.' or c == 'e' or c == 'E' })
 }
 
+/// Returns `true` for TOML's non-finite float tokens, with an optional sign.
+///
+/// These carry no `.`/`e` marker, so they need their own test to reach the
+/// float parser.
+func isNonFiniteToken(s: String) -> Bool {
+    s == "inf" or s == "+inf" or s == "-inf" or s == "nan" or s == "+nan" or s == "-nan"
+}
+
 /// Parses a TOML inline array (`[value, ...]`).
-func parseTomlArray(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
+func parseTomlArray(s: String, lineNum: Int64) -> Value throws TomlParseError {
     if not s.ends(with: "]") {
-        return .Err(TomlParseError("unterminated array", lineNum))
+        throw TomlParseError("unterminated array", lineNum)
     }
 
     let inner = s.asSlice().subslice(from: 1, to: s.bytes.count - 1).trimmed().toOwned();
-    if inner.isEmpty {
-        return .Ok(Value.Arr(Array[Value]()))
-    }
+    var items: [Value] = [];
 
-    var items = Array[Value]();
-    var parts = splitTomlItems(inner);
-    var pi: Int64 = 0;
-    while pi < parts.count {
-        let part = parts(unchecked: pi).trimmed().toOwned();
-        if not part.isEmpty {
-            let val = try parseTomlValue(part, lineNum);
-            items.append(val)
-        }
-        pi = pi + 1
+    for part in splitTomlItems(inner) {
+        let item = part.trimmed().toOwned();
+        if item.isEmpty { continue }
+        items.append(try parseTomlValue(item, lineNum))
     }
 
     .Ok(Value.Arr(items))
 }
 
 /// Parses an inline table: `{ key = value, key2 = value2 }`
-func parseInlineTable(s: String, lineNum: Int64) -> Result[Value, TomlParseError] {
+func parseInlineTable(s: String, lineNum: Int64) -> Value throws TomlParseError {
     if not s.ends(with: "}") {
-        return .Err(TomlParseError("unterminated inline table", lineNum))
+        throw TomlParseError("unterminated inline table", lineNum)
     }
 
     let inner = s.asSlice().subslice(from: 1, to: s.bytes.count - 1).trimmed().toOwned();
-    if inner.isEmpty {
-        return .Ok(Value.Obj(Dictionary[String, Value]()))
-    }
+    var obj: [String: Value] = [:];
 
-    var obj = Dictionary[String, Value]();
-    var parts = splitTomlItems(inner);
-    var pi: Int64 = 0;
-    while pi < parts.count {
-        let part = parts(unchecked: pi).trimmed().toOwned();
-        if not part.isEmpty {
-            let kv = try parseKeyValue(part, lineNum);
-             obj.insert(kv.0, kv.1);
-        }
-        pi = pi + 1
+    for part in splitTomlItems(inner) {
+        let entry = part.trimmed().toOwned();
+        if entry.isEmpty { continue }
+        let (key, value) = try parseKeyValue(entry, lineNum);
+        obj.insert(key, value);
     }
 
     .Ok(Value.Obj(obj))
 }
 
 /// Splits array or inline-table contents by commas, respecting quotes and nesting.
-func splitTomlItems(s: String) -> Array[String] {
-    var parts = Array[String]();
+func splitTomlItems(s: String) -> [String] {
+    var parts: [String] = [];
+    var current = String();
     var depth: Int64 = 0;
     var inQuote = false;
     var escaped = false;
-    var start: Int64 = 0;
-    var i: Int64 = 0;
-    let bytes = s.bytes;
-    let len = s.bytes.count;
-    let slice = s.asSlice();
 
-    while i < len {
-        match decodeUtf8(bytes.asRaw(), len, at: i) {
-            .Some(decoded) => {
-                let c = decoded.char;
-                if escaped {
-                    escaped = false
-                } else if inQuote and c == '\\' {
-                    escaped = true
-                } else if c == '"' {
-                    inQuote = not inQuote
-                } else if not inQuote {
-                    if c == '[' or c == '{' {
-                        depth = depth + 1
-                    } else if c == ']' or c == '}' {
-                        depth = depth - 1
-                    } else if c == ',' and depth == 0 {
-                        parts.append(slice.subslice(from: start, to: i).toOwned());
-                        start = i + decoded.bytesConsumed
-                    }
-                }
-                i = i + decoded.bytesConsumed
-            },
-            .None => {
-                i = i + 1
+    for c in s.chars {
+        if escaped {
+            escaped = false
+        } else if inQuote and c == '\\' {
+            escaped = true
+        } else if c == '"' {
+            inQuote = not inQuote
+        } else if not inQuote {
+            if c == '[' or c == '{' {
+                depth = depth + 1
+            } else if c == ']' or c == '}' {
+                depth = depth - 1
+            } else if c == ',' and depth == 0 {
+                parts.append(current);
+                current = String();
+                continue
             }
         }
+        current.append(char: c)
     }
 
-    if start < len {
-        parts.append(slice.subslice(from: start, to: len).toOwned())
+    if not current.isEmpty {
+        parts.append(current)
     }
 
     parts
@@ -456,209 +325,18 @@ func splitTomlItems(s: String) -> Array[String] {
 // ============================================================================
 
 /// Creates the named table in `root` if it doesn't already exist.
-func ensureTable(mutating root: Dictionary[String, Value], name: String) {
-    match root(name) {
-        .Some(_) => {},
-        .None => {  root.insert(name, Value.Obj(Dictionary[String, Value]())); }
-    }
+func ensureTable(mutating root: [String: Value], name: String) {
+    if root.contains(name) { return; }
+    root.insert(name, Value.Obj([:]));
 }
 
 /// Inserts a key-value pair into the named sub-table within `root`.
-func insertIntoTable(mutating root: Dictionary[String, Value], table: String, key: String, value: Value) {
-    match root(table) {
-        .Some(existing) => {
-            match existing {
-                .Obj(obj) => {
-                    var mutObj = obj;
-                     mutObj.insert(key, value);
-                     root.insert(table, Value.Obj(mutObj));
-                },
-                _ => {
-                    var newObj = Dictionary[String, Value]();
-                     newObj.insert(key, value);
-                     root.insert(table, Value.Obj(newObj));
-                }
-            }
-        },
-        .None => {
-            var newObj = Dictionary[String, Value]();
-             newObj.insert(key, value);
-             root.insert(table, Value.Obj(newObj));
-        }
-    }
-}
-
-// ============================================================================
-// NUMBER PARSING
-// ============================================================================
-
-/// Parses a TOML integer (supports optional leading sign and underscores).
-func tomlParseInt(s: String) -> Optional[Int64] {
-    if s.isEmpty {
-        return .None
-    }
-
-    var iter = s.chars.iter();
-    var negative = false;
-    var first = match iter.next() {
-        .Some(c) => c,
-        .None => return .None
+func insertIntoTable(mutating root: [String: Value], table: String, key: String, value: Value) {
+    // A non-Obj value at `table` is overwritten — TOML forbids reusing a key as a table.
+    var obj: [String: Value] = match root(table) {
+        some .Obj(existing) => existing,
+        _ => [:]
     };
-
-    if first == '-' {
-        negative = true;
-        match iter.next() {
-            .Some(c) => first = c,
-            .None => return .None
-        }
-    } else if first == '+' {
-        match iter.next() {
-            .Some(c) => first = c,
-            .None => return .None
-        }
-    }
-
-    var result: Int64 = 0;
-    var current: Optional[Char] = .Some(first);
-    while let .Some(c) = current {
-        if c == '_' {
-            // TOML allows underscore separators.
-        } else if let .Some(d) = c.digitValue() {
-            result = result * 10 + Int64(from: d)
-        } else {
-            return .None
-        }
-        current = iter.next()
-    }
-
-    if negative { .Some(0 - result) } else { .Some(result) }
-}
-
-/// Parses a TOML float (supports underscores, inf, nan).
-func tomlParseFloat(s: String) -> Optional[Float64] {
-    if s == "inf" or s == "+inf" {
-        return .Some(Float64.infinity)
-    }
-    if s == "-inf" {
-        return .Some(0.0 - Float64.infinity)
-    }
-    if s == "nan" or s == "+nan" or s == "-nan" {
-        return .Some(Float64.nan)
-    }
-
-    var cleaned = String();
-    var iter = s.chars.iter();
-    while let .Some(c) = iter.next() {
-        if c != '_' {
-            cleaned.append(char: c)
-        }
-    }
-
-    parseFloat(cleaned)
-}
-
-/// Shared float scanner — integer part, fractional part, exponent.
-func parseFloat(s: String) -> Optional[Float64] {
-    if s.isEmpty {
-        return .None
-    }
-
-    var iter = s.chars.iter();
-    var negative = false;
-    var pending = match iter.next() {
-        .Some(c) => c,
-        .None => return .None
-    };
-
-    if pending == '-' {
-        negative = true;
-        match iter.next() {
-            .Some(c) => pending = c,
-            .None => return .None
-        }
-    } else if pending == '+' {
-        match iter.next() {
-            .Some(c) => pending = c,
-            .None => return .None
-        }
-    }
-
-    var current: Optional[Char] = .Some(pending);
-
-    var intPart: Float64 = 0.0;
-    while let .Some(c) = current {
-        match c.digitValue() {
-            .Some(d) => {
-                intPart = intPart * 10.0 + Float64(from: Int64(from: d));
-                current = iter.next()
-            },
-            .None => break
-        }
-    }
-
-    var fracPart: Float64 = 0.0;
-    var fracDiv: Float64 = 1.0;
-    if let .Some(c) = current {
-        if c == '.' {
-            current = iter.next();
-            while let .Some(d) = current {
-                match d.digitValue() {
-                    .Some(v) => {
-                        fracPart = fracPart * 10.0 + Float64(from: Int64(from: v));
-                        fracDiv = fracDiv * 10.0;
-                        current = iter.next()
-                    },
-                    .None => break
-                }
-            }
-        }
-    }
-
-    var result = intPart + fracPart / fracDiv;
-
-    if let .Some(c) = current {
-        if c == 'e' or c == 'E' {
-            current = iter.next();
-            var expNeg = false;
-            if let .Some(s) = current {
-                if s == '+' {
-                    current = iter.next()
-                } else if s == '-' {
-                    expNeg = true;
-                    current = iter.next()
-                }
-            }
-            var exp: Float64 = 0.0;
-            while let .Some(d) = current {
-                match d.digitValue() {
-                    .Some(v) => {
-                        exp = exp * 10.0 + Float64(from: Int64(from: v));
-                        current = iter.next()
-                    },
-                    .None => break
-                }
-            }
-            var multiplier: Float64 = 1.0;
-            var e: Int64 = 0;
-            let expInt = match exp.toInt64() {
-                .Some(n) => n,
-                .None => 0
-            };
-            while e < expInt {
-                multiplier = multiplier * 10.0;
-                e = e + 1
-            }
-            if expNeg {
-                result = result / multiplier
-            } else {
-                result = result * multiplier
-            }
-        }
-    }
-
-    if negative {
-        result = 0.0 - result
-    }
-
-    .Some(result)
+    obj.insert(key, value);
+    root.insert(table, Value.Obj(obj));
 }

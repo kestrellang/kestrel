@@ -36,10 +36,9 @@ pub fn build_subscript(
     // Parameters — subscripts inside types have a borrowing receiver
     let params = extract_params(world, node, entity, file_entity, file_id);
     let is_static = has_static_modifier(node);
-    let parent_is_type = matches!(
-        world.get::<NodeKind>(parent),
-        Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-    );
+    let parent_is_type = world
+        .get::<NodeKind>(parent)
+        .is_some_and(NodeKind::is_type_scope);
     let receiver = if is_static || !parent_is_type {
         None
     } else {

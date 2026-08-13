@@ -62,7 +62,7 @@ std.text.unicode.tables.casefolding
 
 Spell it out. No shortcuts, no acronyms (except universally understood ones like UTF8, FFI, IO).
 
-Two-letter initialisms for well-known system domains are allowed in module names: `io`, `fs`, `ffi`.
+Initialisms for well-known system domains are allowed in module names: `io`, `fs`, `ffi`.
 
 ```
 // Good

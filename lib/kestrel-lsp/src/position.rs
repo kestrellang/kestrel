@@ -62,9 +62,20 @@ impl LineIndex {
     }
 
     /// Convert a byte offset to an LSP UTF-16 position. Offsets past EOF clamp
-    /// to the position one past the last character.
+    /// to the position one past the last character, and offsets landing *inside*
+    /// a multi-byte character clamp down to that character's start.
+    ///
+    /// The clamp is a backstop, not a nicety. This is called from `refresh`,
+    /// outside the compiler worker's `catch_unwind`, so a single span whose
+    /// endpoint was derived by byte arithmetic used to panic here and take the
+    /// entire `publish_diagnostics` call with it — every diagnostic for that
+    /// edit disappeared with nothing logged (F24). The producer that made such
+    /// spans is fixed; this makes the class of bug non-fatal.
     pub fn offset_to_position(&self, offset: usize) -> Position {
-        let offset = offset.min(self.text.len());
+        let mut offset = offset.min(self.text.len());
+        while !self.text.is_char_boundary(offset) {
+            offset -= 1;
+        }
         // Binary search for the largest line_start <= offset.
         let line = match self.line_starts.binary_search(&offset) {
             Ok(i) => i.min(self.line_starts.len() - 2),
@@ -94,6 +105,24 @@ mod tests {
 
     fn idx(s: &str) -> LineIndex {
         LineIndex::new(s.to_string())
+    }
+
+    /// A non-boundary offset must clamp, not panic — see the note on
+    /// `offset_to_position`. Before F24 this input reached the server from
+    /// `add_token_or_missing` and killed the whole diagnostic publish.
+    #[test]
+    fn offset_inside_a_multibyte_char_clamps_instead_of_panicking() {
+        let i = idx("let x = café");
+        // "café" is 5 bytes: c a f + 2 for é. The final byte offset is 12;
+        // offset 11 is between é's two bytes.
+        assert_eq!(i.text.len(), 13);
+        assert!(!i.text.is_char_boundary(12));
+        let at_split = i.offset_to_position(12);
+        let at_char_start = i.offset_to_position(11);
+        assert_eq!(at_split, at_char_start);
+        // And a whole range built from such offsets is still well-formed.
+        let r = i.range_for(12, 13);
+        assert!(r.start.character <= r.end.character);
     }
 
     #[test]

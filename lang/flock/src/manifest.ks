@@ -16,19 +16,19 @@ import flock.dependency.(Dependency, parseDependencies)
 public struct PackageInfo: Cloneable {
     public var name: String
     public var version: Version
-    public var description: Optional[String]
-    public var author: Optional[String]
-    public var license: Optional[String]
-    public var repository: Optional[String]
-    public var website: Optional[String]
-    public var documentation: Optional[String]
+    public var description: String?
+    public var author: String?
+    public var license: String?
+    public var repository: String?
+    public var website: String?
+    public var documentation: String?
     /// Organization / namespace this package publishes under, forming the
     /// `org/name` scope. Used by `flock publish`; `FLOCK_ORG` overrides it.
-    public var org: Optional[String]
+    public var org: String?
     /// Source directory relative to the package root. Defaults to "src".
     public var source: String
 
-    public init(name name: String, version version: Version, description description: Optional[String], source source: String) {
+    public init(name name: String, version version: Version, description description: String?, source source: String) {
         self.name = name;
         self.version = version;
         self.description = description;
@@ -42,13 +42,13 @@ public struct PackageInfo: Cloneable {
     }
 
     public func clone() -> PackageInfo {
-        var info = PackageInfo(name: self.name.clone(), version: self.version.clone(), description: cloneOptionalString(self.description), source: self.source.clone());
-        info.author = cloneOptionalString(self.author);
-        info.license = cloneOptionalString(self.license);
-        info.repository = cloneOptionalString(self.repository);
-        info.website = cloneOptionalString(self.website);
-        info.documentation = cloneOptionalString(self.documentation);
-        info.org = cloneOptionalString(self.org);
+        var info = PackageInfo(name: self.name.clone(), version: self.version.clone(), description: self.description.clone(), source: self.source.clone());
+        info.author = self.author.clone();
+        info.license = self.license.clone();
+        info.repository = self.repository.clone();
+        info.website = self.website.clone();
+        info.documentation = self.documentation.clone();
+        info.org = self.org.clone();
         info
     }
 }
@@ -64,33 +64,33 @@ public struct BuildConfig: Cloneable {
     /// Flags passed to cc when compiling C sources.
     public var cFlags: Array[String]
     /// Shell command whose stdout provides additional C flags.
-    public var cFlagsCmd: Optional[String]
+    public var cFlagsCmd: String?
     /// Library names to link (become -l flags).
     public var link: Array[String]
     /// Shell command whose stdout provides additional link flags.
-    public var linkCmd: Optional[String]
+    public var linkCmd: String?
     /// Library search paths (become -L flags).
     public var linkPaths: Array[String]
     /// macOS frameworks (become --framework flags).
     public var frameworks: Array[String]
 
     public init() {
-        self.cSources = Array[String]();
-        self.cFlags = Array[String]();
+        self.cSources = [];
+        self.cFlags = [];
         self.cFlagsCmd = .None;
-        self.link = Array[String]();
+        self.link = [];
         self.linkCmd = .None;
-        self.linkPaths = Array[String]();
-        self.frameworks = Array[String]();
+        self.linkPaths = [];
+        self.frameworks = [];
     }
 
     public func clone() -> BuildConfig {
         var cfg = BuildConfig();
         cfg.cSources = self.cSources.clone();
         cfg.cFlags = self.cFlags.clone();
-        cfg.cFlagsCmd = cloneOptionalString(self.cFlagsCmd);
+        cfg.cFlagsCmd = self.cFlagsCmd.clone();
         cfg.link = self.link.clone();
-        cfg.linkCmd = cloneOptionalString(self.linkCmd);
+        cfg.linkCmd = self.linkCmd.clone();
         cfg.linkPaths = self.linkPaths.clone();
         cfg.frameworks = self.frameworks.clone();
         cfg
@@ -128,7 +128,7 @@ public struct Manifest: Cloneable {
     public var dependencies: Array[Dependency]
     public var build: BuildConfig
     /// Optional registry URL override from [registry] section.
-    public var registryUrl: Optional[String]
+    public var registryUrl: String?
     /// `[[bin]]` declarations — binary targets that override or add to the
     /// convention-discovered ones. Empty for typical lib/single-bin packages.
     public var bins: Array[BinDecl]
@@ -138,19 +138,19 @@ public struct Manifest: Cloneable {
         self.dependencies = dependencies;
         self.build = BuildConfig();
         self.registryUrl = .None;
-        self.bins = Array[BinDecl]();
+        self.bins = [];
     }
 
-    public init(package package: PackageInfo, dependencies dependencies: Array[Dependency], build build: BuildConfig, registryUrl registryUrl: Optional[String]) {
+    public init(package package: PackageInfo, dependencies dependencies: Array[Dependency], build build: BuildConfig, registryUrl registryUrl: String?) {
         self.package = package;
         self.dependencies = dependencies;
         self.build = build;
         self.registryUrl = registryUrl;
-        self.bins = Array[BinDecl]();
+        self.bins = [];
     }
 
     public func clone() -> Manifest {
-        var m = Manifest(package: self.package.clone(), dependencies: self.dependencies.clone(), build: self.build.clone(), registryUrl: cloneOptionalString(self.registryUrl));
+        var m = Manifest(package: self.package.clone(), dependencies: self.dependencies.clone(), build: self.build.clone(), registryUrl: self.registryUrl.clone());
         m.bins = self.bins.clone();
         m
     }
@@ -161,278 +161,116 @@ public struct Manifest: Cloneable {
 // ============================================================================
 
 /// Parses a flock.toml source string into a Manifest.
-public func parseManifest(source source: String) -> Result[Manifest, FlockError] {
-    // Parse TOML
-    let tomlResult = parseToml(source);
-    var root: Value = Value.Null;
-    match tomlResult {
-        .Ok(v) => root = v,
-        .Err(e) => return .Err(FlockError.ManifestParse(e.description()))
+public func parseManifest(source source: String) -> Manifest throws FlockError {
+    let root = match parseToml(source) {
+        .Ok(v) => v,
+        .Err(e) => throw FlockError.ManifestParse(e.description())
+    };
+
+    guard let some pkg = root.value(for: "package") else {
+        throw FlockError.ManifestParse("missing [package] section")
     }
 
-    // Extract [package] section
-    let pkgValue = root.value(for: "package");
-    match pkgValue {
-        .None => return .Err(FlockError.ManifestParse("missing [package] section")),
-        .Some(pkg) => {
-            // Extract name
-            let nameOpt = pkg.value(for: "name");
-            var name: String = "";
-            match nameOpt {
-                .Some(nameVal) => {
-                    match nameVal.asString() {
-                        .Some(s) => name = s,
-                        .None => return .Err(FlockError.ManifestParse("package.name must be a string"))
-                    }
-                },
-                .None => return .Err(FlockError.ManifestParse("missing package.name"))
-            }
+    let name = try requireString(pkg, "name", path: "package.name");
+    let versionText = try requireString(pkg, "version", path: "package.version");
+    let version = try parseVersion(s: versionText);
 
-            // Extract version
-            let versionOpt = pkg.value(for: "version");
-            var version: Version = Version(major: 0, minor: 0, patch: 0);
-            match versionOpt {
-                .Some(verVal) => {
-                    match verVal.asString() {
-                        .Some(verStr) => {
-                            match parseVersion(s: verStr) {
-                                .Ok(v) => version = v,
-                                .Err(e) => return .Err(e)
-                            }
-                        },
-                        .None => return .Err(FlockError.ManifestParse("package.version must be a string"))
-                    }
-                },
-                .None => return .Err(FlockError.ManifestParse("missing package.version"))
-            }
+    var packageInfo = PackageInfo(
+        name: name,
+        version: version,
+        description: parseOptionalString(pkg, "description"),
+        source: parseOptionalString(pkg, "source").unwrap(or: "src")
+    );
+    packageInfo.author = parseOptionalString(pkg, "author");
+    packageInfo.license = parseOptionalString(pkg, "license");
+    packageInfo.repository = parseOptionalString(pkg, "repository");
+    packageInfo.website = parseOptionalString(pkg, "website");
+    packageInfo.documentation = parseOptionalString(pkg, "documentation");
+    packageInfo.org = parseOptionalString(pkg, "org");
 
-            // Extract description (optional)
-            var description: Optional[String] = .None;
-            match pkg.value(for: "description") {
-                .Some(descVal) => {
-                    match descVal.asString() {
-                        .Some(s) => description = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            // Extract source directory (optional, defaults to "src")
-            var sourceDir = "src";
-            match pkg.value(for: "source") {
-                .Some(srcVal) => {
-                    match srcVal.asString() {
-                        .Some(s) => sourceDir = s,
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            // Extract author (optional)
-            var author: Optional[String] = .None;
-            match pkg.value(for: "author") {
-                .Some(val) => {
-                    match val.asString() {
-                        .Some(s) => author = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            // Extract license (optional)
-            var license: Optional[String] = .None;
-            match pkg.value(for: "license") {
-                .Some(val) => {
-                    match val.asString() {
-                        .Some(s) => license = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            // Extract repository (optional)
-            var repository: Optional[String] = .None;
-            match pkg.value(for: "repository") {
-                .Some(val) => {
-                    match val.asString() {
-                        .Some(s) => repository = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            var packageInfo = PackageInfo(
-                name: name,
-                version: version,
-                description: description,
-                source: sourceDir
-            );
-            // Extract website (optional)
-            var website: Optional[String] = .None;
-            match pkg.value(for: "website") {
-                .Some(val) => {
-                    match val.asString() {
-                        .Some(s) => website = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            // Extract documentation (optional)
-            var docs: Optional[String] = .None;
-            match pkg.value(for: "documentation") {
-                .Some(val) => {
-                    match val.asString() {
-                        .Some(s) => docs = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            // Extract org (optional) — the publish namespace
-            var org: Optional[String] = .None;
-            match pkg.value(for: "org") {
-                .Some(val) => {
-                    match val.asString() {
-                        .Some(s) => org = .Some(s),
-                        .None => {}
-                    }
-                },
-                .None => {}
-            }
-
-            packageInfo.author = author;
-            packageInfo.license = license;
-            packageInfo.repository = repository;
-            packageInfo.website = website;
-            packageInfo.documentation = docs;
-            packageInfo.org = org;
-
-            // Extract [dependencies] section
-            var deps = Array[Dependency]();
-            match root.value(for: "dependencies") {
-                .Some(depsVal) => {
-                    match parseDependencies(depsValue: depsVal) {
-                        .Ok(d) => deps = d,
-                        .Err(e) => return .Err(e)
-                    }
-                },
-                .None => {} // No dependencies is fine
-            }
-
-            // Extract [build] section
-            var buildCfg = BuildConfig();
-            match root.value(for: "build") {
-                .Some(buildVal) => {
-                    buildCfg.cSources = parseStringArray(buildVal, "c-sources");
-                    buildCfg.cFlags = parseStringArray(buildVal, "c-flags");
-                    buildCfg.cFlagsCmd = parseOptionalString(buildVal, "c-flags-cmd");
-                    buildCfg.link = parseStringArray(buildVal, "link");
-                    buildCfg.linkCmd = parseOptionalString(buildVal, "link-cmd");
-                    buildCfg.linkPaths = parseStringArray(buildVal, "link-paths");
-                    buildCfg.frameworks = parseStringArray(buildVal, "frameworks");
-                },
-                .None => {}
-            }
-
-            // Extract [registry] section (optional)
-            var registryUrl: Optional[String] = .None;
-            match root.value(for: "registry") {
-                .Some(regVal) => {
-                    registryUrl = parseOptionalString(regVal, "url")
-                },
-                .None => {}
-            }
-
-            var manifest = Manifest(package: packageInfo, dependencies: deps, build: buildCfg, registryUrl: registryUrl);
-            manifest.bins = parseBinDecls(root);
-            .Ok(manifest)
-        }
+    // [dependencies] — a manifest with none is still valid
+    var deps: [Dependency] = [];
+    if let some depsVal = root.value(for: "dependencies") {
+        deps = try parseDependencies(depsValue: depsVal)
     }
+
+    // [build]
+    var buildCfg = BuildConfig();
+    if let some buildVal = root.value(for: "build") {
+        buildCfg.cSources = parseStringArray(buildVal, "c-sources");
+        buildCfg.cFlags = parseStringArray(buildVal, "c-flags");
+        buildCfg.cFlagsCmd = parseOptionalString(buildVal, "c-flags-cmd");
+        buildCfg.link = parseStringArray(buildVal, "link");
+        buildCfg.linkCmd = parseOptionalString(buildVal, "link-cmd");
+        buildCfg.linkPaths = parseStringArray(buildVal, "link-paths");
+        buildCfg.frameworks = parseStringArray(buildVal, "frameworks");
+    }
+
+    // [registry]
+    var registryUrl: String? = .None;
+    if let some regVal = root.value(for: "registry") {
+        registryUrl = parseOptionalString(regVal, "url")
+    }
+
+    var manifest = Manifest(package: packageInfo, dependencies: deps, build: buildCfg, registryUrl: registryUrl);
+    manifest.bins = parseBinDecls(root);
+    .Ok(manifest)
 }
 
 // ============================================================================
 // HELPERS
 // ============================================================================
 
+/// Reads a required string field, keeping "missing" and "wrong type" distinct
+/// so the diagnostic names the actual problem.
+func requireString(parent: Value, key: String, path path: String) -> String throws FlockError {
+    guard let some raw = parent.value(for: key) else {
+        throw FlockError.ManifestParse("missing " + path)
+    }
+
+    guard let some text = raw.asString() else {
+        throw FlockError.ManifestParse(path + " must be a string")
+    }
+
+    .Ok(text)
+}
+
 /// Parses `[[bin]]` array-of-tables from the manifest root. Each table needs a
 /// `name` and a `path`; entries missing either field are skipped (binary-target
 /// validation happens later, in discovery).
-func parseBinDecls(root: Value) -> Array[BinDecl] {
-    var result = Array[BinDecl]();
-    match root.value(for: "bin") {
-        .Some(binVal) => {
-            match binVal.asArray() {
-                .Some(arr) => {
-                    var i: Int64 = 0;
-                    while i < arr.count {
-                        let entry = arr(unchecked: i);
-                        i = i + 1;
-                        let nameOpt = match entry.value(for: "name") {
-                            .Some(v) => v.asString(),
-                            .None => .None
-                        };
-                        let pathOpt = match entry.value(for: "path") {
-                            .Some(v) => v.asString(),
-                            .None => .None
-                        };
-                        match (nameOpt, pathOpt) {
-                            (.Some(name), .Some(path)) => result.append(BinDecl(name: name, path: path)),
-                            _ => {}
-                        }
-                    }
-                },
-                .None => {}
-            }
-        },
-        .None => {}
+func parseBinDecls(root: Value) -> [BinDecl] {
+    var result: [BinDecl] = [];
+
+    guard let some binVal = root.value(for: "bin") else { return result }
+    guard let some entries = binVal.asArray() else { return result }
+
+    for entry in entries {
+        guard let some name = parseOptionalString(entry, "name") else { continue }
+        guard let some path = parseOptionalString(entry, "path") else { continue }
+        result.append(BinDecl(name: name, path: path))
     }
+
     result
 }
 
-/// Parses a string array field from a TOML value.
-func parseStringArray(parent: Value, key: String) -> Array[String] {
-    var result = Array[String]();
-    match parent.value(for: key) {
-        .Some(val) => {
-            match val.asArray() {
-                .Some(arr) => {
-                    var i: Int64 = 0;
-                    while i < arr.count {
-                        match arr(unchecked: i).asString() {
-                            .Some(s) => result.append(s),
-                            .None => {}
-                        }
-                        i = i + 1
-                    }
-                },
-                .None => {}
-            }
-        },
-        .None => {}
+/// Parses a string array field from a TOML value. Non-string entries are skipped.
+func parseStringArray(parent: Value, key: String) -> [String] {
+    var result: [String] = [];
+
+    guard let some val = parent.value(for: key) else { return result }
+    guard let some entries = val.asArray() else { return result }
+
+    for entry in entries {
+        if let some text = entry.asString() {
+            result.append(text)
+        }
     }
+
     result
 }
 
 /// Parses an optional string field from a TOML value.
-func parseOptionalString(parent: Value, key: String) -> Optional[String] {
-    match parent.value(for: key) {
-        .Some(val) => val.asString(),
-        .None => .None
-    }
-}
-
-/// Clones an Optional[String].
-func cloneOptionalString(opt: Optional[String]) -> Optional[String] {
-    match opt {
-        .Some(s) => .Some(s.clone()),
-        .None => .None
-    }
+func parseOptionalString(parent: Value, key: String) -> String? {
+    guard let some val = parent.value(for: key) else { return .None }
+    val.asString()
 }

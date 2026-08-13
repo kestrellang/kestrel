@@ -106,10 +106,10 @@ public func satisfies(version: Version, constraint: VersionConstraint) -> Bool {
 // ============================================================================
 
 /// Parses a version string like "1.2.3".
-public func parseVersion(s s: String) -> Result[Version, FlockError] {
+public func parseVersion(s s: String) -> Version throws FlockError {
     let parts = splitOnDot(s);
     if parts.count != 3 {
-        return .Err(FlockError.InvalidVersion(s))
+        throw FlockError.InvalidVersion(s)
     }
 
     let majorStr = parts(unchecked: 0);
@@ -122,18 +122,18 @@ public func parseVersion(s s: String) -> Result[Version, FlockError] {
                 .Some(minor) => {
                     match parseInt(patchStr) {
                         .Some(patch) => .Ok(Version(major: major, minor: minor, patch: patch)),
-                        .None => .Err(FlockError.InvalidVersion(s))
+                        .None => throw FlockError.InvalidVersion(s)
                     }
                 },
-                .None => .Err(FlockError.InvalidVersion(s))
+                .None => throw FlockError.InvalidVersion(s)
             }
         },
-        .None => .Err(FlockError.InvalidVersion(s))
+        .None => throw FlockError.InvalidVersion(s)
     }
 }
 
 /// Parses a version constraint string like "^1.2.3", "~1.2.3", "1.2.3", or "*".
-public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError] {
+public func parseConstraint(s s: String) -> VersionConstraint throws FlockError {
     let trimmed = s.trimmed().toOwned();
 
     if trimmed == "*" {
@@ -144,7 +144,7 @@ public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError
         let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.bytes.count).toOwned();
         match parseVersion(s: versionStr) {
             .Ok(v) => return .Ok(VersionConstraint.Compatible(v)),
-            .Err(e) => return .Err(e)
+            .Err(e) => throw e
         }
     }
 
@@ -152,14 +152,14 @@ public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError
         let versionStr = trimmed.asSlice().subslice(from: 1, to: trimmed.bytes.count).toOwned();
         match parseVersion(s: versionStr) {
             .Ok(v) => return .Ok(VersionConstraint.TildeCompat(v)),
-            .Err(e) => return .Err(e)
+            .Err(e) => throw e
         }
     }
 
     // Default: exact match
     match parseVersion(s: trimmed) {
         .Ok(v) => .Ok(VersionConstraint.Exact(v)),
-        .Err(e) => .Err(e)
+        .Err(e) => throw e
     }
 }
 
@@ -169,7 +169,7 @@ public func parseConstraint(s s: String) -> Result[VersionConstraint, FlockError
 
 /// Splits a string on '.' characters.
 func splitOnDot(s: String) -> Array[String] {
-    var result = Array[String]();
+    var result = [];
     var start: Int64 = 0;
     var i: Int64 = 0;
     let len = s.bytes.count;
@@ -192,7 +192,7 @@ func splitOnDot(s: String) -> Array[String] {
 }
 
 /// Parses a non-negative integer from a string. Returns None on failure.
-func parseInt(s: String) -> Optional[Int64] {
+func parseInt(s: String) -> Int64? {
     match Int64(parsing: s) {
         .Some(n) => {
             if n >= 0 { .Some(n) } else { .None }

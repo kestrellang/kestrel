@@ -315,8 +315,39 @@ Current allocations:
 - A `CompilationCheck` may gate on `cx.is_executable` (true only when building a binary) for whole-program requirements that must not fire on libraries / `kestrel check` / the LSP — e.g. the entry-point requirement E618. Module entities carry **no `DeclSpan`** (and no `FileId`), so anchor whole-program diagnostics on a declaration's span, not a module's.
 - Use `cx.hir` to iterate the HIR body, `cx.typed` for resolved types
 - Return `Vec<AnalyzeDiagnostic>` — the framework handles accumulation and memoization
-- Use `DESCRIPTORS[N].id` and `DESCRIPTORS[N].default_severity` when constructing diagnostics
+- Select descriptors **by code**, never by position: `descriptor("E210").id`,
+  not `DESCRIPTORS[5].id`. A positional index ties a code to an array slot with
+  nothing to enforce it, so inserting a descriptor in the middle silently
+  reassigns every later code, its severity and its docs link. Copy the two-line
+  `fn descriptor(id: &str)` helper (see `body/access_mode.rs`)
 - Prefer early returns for inapplicable entities (wrong NodeKind, no return type, empty body, etc.)
+
+## Diagnostic codes: the four things that are enforced
+
+`lib.rs::assert_owned` runs on **every** analyzer result, and `registry.rs` has
+the compile-time half. Together they hold four invariants — none of which used
+to be checked beyond descriptor-id uniqueness (F16):
+
+1. **Ownership.** An analyzer may only emit codes it declares. Declare it in
+   your own `DESCRIPTORS`, or — when you legitimately report a code another
+   analyzer owns, from a different position — list the owner's descriptor in
+   `Describe::borrowed_descriptors()`. Precedent: `GenericsAnalyzer` borrows
+   E476 for an unresolved *where-clause* bound, the same "cannot find type 'X'
+   in this scope" fact `type_annotation_resolution` reports for annotations.
+   This is what stopped E436 from meaning two unrelated things at once.
+2. **Uniqueness.** Descriptor ids AND names are unique across all analyzers;
+   `AnalyzerId`s are unique within each list (`find_body_check` is linear
+   first-match, so a duplicate id makes the second analyzer *never run*).
+3. **Reservations are explicit.** A registered code with no emit site goes in
+   `registry.rs::RESERVED_UNEMITTED` with a reason. Reserving is fine;
+   reserving silently is how E600 and E602 came to be documented as live
+   diagnostics with worked examples the compiler cannot produce. The list is
+   checked both ways — a reserved code that fires is an error too.
+4. **Documentation.** Every registered code appears in `docs/error-codes.md`
+   (`every_registered_code_is_documented`). Codespan-emitted codes (E100, the
+   E48x reference-position family from hir-lower, E49x/E5xx from mir-lower) are
+   *not* registry descriptors and are not covered by that test — document them
+   by hand.
 
 ## One analyzer per fact
 
@@ -376,3 +407,16 @@ Precedent: `HirLiteral::String { value, escape_errors }` →
 Do not check for desugared-ness via side-tables on `HirBody`
 (`for_loop_matches` was removed for this reason). Use the enum on the
 node.
+
+## Read the flags on `BuiltinKind::Protocol` — don't hardcode the protocol
+
+`ProtocolFieldConformanceAnalyzer` used to resolve `Builtin::FFISafe` directly,
+which left `requires_fields_conform` and `tuple_conformance_propagation` as
+fields with **zero readers** while the module doc advertised a data-driven rule
+that did not exist. A second protocol setting either flag would have been
+silently ignored.
+
+The pattern to follow is `builtin_marker_protocol.rs` and `conformance_rules.rs`:
+query `EntityBuiltin`, pattern-match the flag you care about, and let the answer
+come from the table. A flag with no reader is not documentation — it is a lie
+that compiles.

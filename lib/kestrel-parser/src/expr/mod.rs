@@ -1305,12 +1305,8 @@ fn is_match_arm_boundary(token: &Token) -> bool {
 fn match_arm_recovery<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, MatchArm, ParserExtra<'tokens>> + Clone {
     let next_is_boundary = any().filter(is_match_arm_boundary).ignored();
-    let recoverable_first = any().filter(|t: &Token| {
-        !matches!(
-            t,
-            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-        ) && !is_match_arm_boundary(t)
-    });
+    let recoverable_first =
+        any().filter(|t: &Token| !t.is_trivia() && !is_match_arm_boundary(t));
     skip_trivia()
         .ignore_then(recoverable_first)
         .then(any().and_is(next_is_boundary.not()).repeated())

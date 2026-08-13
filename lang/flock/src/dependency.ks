@@ -50,16 +50,16 @@ public struct Dependency: Cloneable {
 
 /// Parses the [dependencies] table from a quill Value.
 /// Each entry is either a string version or an object with a "path" key.
-public func parseDependencies(depsValue depsValue: Value) -> Result[Array[Dependency], FlockError] {
+public func parseDependencies(depsValue depsValue: Value) -> Array[Dependency] throws FlockError {
     match depsValue.asObject() {
-        .None => .Ok(Array[Dependency]()),
+        .None => .Ok([]),
         .Some(obj) => {
-            var result = Array[Dependency]();
+            var result = [];
 
             for (key, val) in obj.iter() {
                 match parseSingleDep(name: key, value: val) {
                     .Ok(dep) => result.append(dep),
-                    .Err(e) => return .Err(e)
+                    .Err(e) => throw e
                 }
             }
 
@@ -69,7 +69,7 @@ public func parseDependencies(depsValue depsValue: Value) -> Result[Array[Depend
 }
 
 /// Parses a single dependency value.
-func parseSingleDep(name name: String, value value: Value) -> Result[Dependency, FlockError] {
+func parseSingleDep(name name: String, value value: Value) -> Dependency throws FlockError {
     // String value: version constraint (e.g. "^1.0.0")
     match value.asString() {
         .Some(versionStr) => {
@@ -78,7 +78,7 @@ func parseSingleDep(name name: String, value value: Value) -> Result[Dependency,
                     name: name,
                     spec: DependencySpec.Registry(constraint)
                 )),
-                .Err(e) => return .Err(e)
+                .Err(e) => throw e
             }
         },
         .None => {}
@@ -92,9 +92,9 @@ func parseSingleDep(name name: String, value value: Value) -> Result[Dependency,
                     name: name,
                     spec: DependencySpec.Path(pathStr)
                 )),
-                .None => return .Err(FlockError.ManifestParse(
+                .None => throw FlockError.ManifestParse(
                     "dependency '" + name + "' path must be a string"
-                ))
+                )
             }
         },
         .None => {}
@@ -110,12 +110,12 @@ func parseSingleDep(name name: String, value value: Value) -> Result[Dependency,
                             name: name,
                             spec: DependencySpec.Registry(constraint)
                         )),
-                        .Err(e) => return .Err(e)
+                        .Err(e) => throw e
                     }
                 },
-                .None => return .Err(FlockError.ManifestParse(
+                .None => throw FlockError.ManifestParse(
                     "dependency '" + name + "' version must be a string"
-                ))
+                )
             }
         },
         .None => {}

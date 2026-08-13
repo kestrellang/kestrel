@@ -60,11 +60,9 @@ fn implicit_member_parser<'tokens>()
 /// Parser for path in attribute arguments: `SomeType` or `Module.Type`
 fn path_parser<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, AttributeArgValue, ParserExtra<'tokens>> + Clone {
-    identifier()
-        .separated_by(token(Token::Dot))
-        .at_least(1)
-        .collect::<Vec<_>>()
-        .map(AttributeArgValue::Path)
+    // Shares `module_path_parser_internal` so the `.` spans are the real ones
+    // rather than `prev_segment.end .. + 1` — same defect, same fix (F25).
+    crate::common::module_path_parser_internal().map(AttributeArgValue::Path)
 }
 
 /// Parser for attribute argument value

@@ -523,7 +523,7 @@ Each new `InferError` variant must be mirrored in **five** files:
 1. **`kestrel-type-infer/src/error.rs`** — add variant + span arm
 2. **`kestrel-type-infer/src/result.rs`** — `describe_error()` arm
 3. **`kestrel-compiler/src/diagnostic.rs`** — user-facing `Diagnostic`
-4. **`kestrel-analyze/src/body/type_check.rs`** — `format_error()` arm
+4. ~~`kestrel-analyze/src/body/type_check.rs`~~ — deleted (F15); the wording arm now lives in `InferError::render` (step 3's file)
 5. **`kestrel-compiler-driver/src/lib.rs`** — `describe()` + `format_error()`
 
 Missing any of these produces a non-exhaustive match build error in a
@@ -726,7 +726,7 @@ protocol methods), only the implementation is wrong (it doesn't conform).
 | `kestrel-type-infer/src/error.rs` | New InferError variants + span arms |
 | `kestrel-type-infer/src/result.rs` | describe_error arms for new variants |
 | `kestrel-compiler/src/diagnostic.rs` | User-facing Diagnostic construction |
-| `kestrel-analyze/src/body/type_check.rs` | format_error arms for new variants |
+| ~~`kestrel-analyze/src/body/type_check.rs`~~ | deleted (F15) — `InferError::render` owns the wording |
 | `kestrel-compiler-driver/src/lib.rs` | describe + format_error arms |
 
 ---

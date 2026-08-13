@@ -36,15 +36,15 @@ import quill.error.(SerializeError)
 ///
 /// // Custom type:
 /// // extend MyStruct: Serialize {
-/// //     public func toValue() -> Result[Value, SerializeError] {
-/// //         var obj = Dictionary[String, Value]();
+/// //     public func toValue() -> Value throws SerializeError {
+/// //         var obj: [String: Value] = [:];
 /// //         obj.insert("field", try self.field.toValue());
 /// //         .Ok(Value.Obj(obj))
 /// //     }
 /// // }
 /// ```
 public protocol Serialize {
-    func toValue() -> Result[Value, SerializeError]
+    func toValue() -> Value throws SerializeError
 }
 
 // ============================================================================
@@ -53,35 +53,35 @@ public protocol Serialize {
 
 /// Serializes to `.Boolean`.
 extend Bool: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
+    public func toValue() -> Value throws SerializeError {
         .Ok(Value.Boolean(self))
     }
 }
 
 /// Serializes to `.Int`.
 extend Int64: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
+    public func toValue() -> Value throws SerializeError {
         .Ok(Value.Int(self))
     }
 }
 
 /// Serializes to `.Float`.
 extend Float64: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
+    public func toValue() -> Value throws SerializeError {
         .Ok(Value.Float(self))
     }
 }
 
 /// Serializes to `.Str`.
 extend String: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
+    public func toValue() -> Value throws SerializeError {
         .Ok(Value.Str(self))
     }
 }
 
 /// Serializes to the inner value, or `.Null` for `.None`.
 extend Optional[T]: Serialize where T: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
+    public func toValue() -> Value throws SerializeError {
         match self {
             .Some(inner) => inner.toValue(),
             .None => .Ok(Value.Null)
@@ -91,13 +91,10 @@ extend Optional[T]: Serialize where T: Serialize {
 
 /// Serializes each element in order, producing `.Arr`.
 extend Array[T]: Serialize where T: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
-        var result = Array[Value]();
-        var i: Int64 = 0;
-        while i < self.count {
-            let item = try self(unchecked: i).toValue();
-            result.append(item);
-            i = i + 1
+    public func toValue() -> Value throws SerializeError {
+        var result: [Value] = [];
+        for item in self {
+            result.append(try item.toValue())
         }
         .Ok(Value.Arr(result))
     }
@@ -105,7 +102,7 @@ extend Array[T]: Serialize where T: Serialize {
 
 /// Identity — a `Value` is already a `Value`.
 extend Value: Serialize {
-    public func toValue() -> Result[Value, SerializeError] {
+    public func toValue() -> Value throws SerializeError {
         .Ok(self)
     }
 }

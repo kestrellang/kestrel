@@ -506,22 +506,11 @@ fn node_to_ast_type(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
 }
 
 /// Check if a SyntaxKind is a type-related node.
+///
+/// Delegates to [`SyntaxKind::is_type`]. This used to be a second, shorter
+/// list that had lost `TyRef`/`TyMutRef`.
 pub fn is_type_kind(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Ty
-            | SyntaxKind::TyPath
-            | SyntaxKind::TyTuple
-            | SyntaxKind::TyFunction
-            | SyntaxKind::TyArray
-            | SyntaxKind::TyDictionary
-            | SyntaxKind::TyOptional
-            | SyntaxKind::TyResult
-            | SyntaxKind::TyUnit
-            | SyntaxKind::TyNever
-            | SyntaxKind::TyInferred
-            | SyntaxKind::TySome
-    )
+    kind.is_type()
 }
 
 /// Check if a declaration node has a StaticModifier child.

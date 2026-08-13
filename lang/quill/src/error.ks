@@ -236,13 +236,11 @@ public struct DeserializeError: Cloneable {
             s
         } else {
             var pathStr = String();
-            var i: Int64 = 0;
-            while i < self.path.count {
-                if i > 0 {
+            for (index, segment) in self.path.iter().enumerate() {
+                if index > 0 {
                     pathStr.append(".")
                 }
-                pathStr.append(self.path(unchecked: i));
-                i = i + 1
+                pathStr.append(segment)
             }
             var s = String();
             s.append("deserialize error at ");
@@ -261,7 +259,7 @@ public struct DeserializeError: Cloneable {
     /// DeserializeError.typeMismatch(expected: "bool", got: "int");
     /// ```
     public static func typeMismatch(expected expected: String, got got: String) -> DeserializeError {
-        DeserializeError(DeserializeErrorKind.TypeMismatch(expected, got), Array[String]())
+        DeserializeError(DeserializeErrorKind.TypeMismatch(expected, got), [])
     }
 
     /// Creates a missing-key error with an empty path.
@@ -272,7 +270,7 @@ public struct DeserializeError: Cloneable {
     /// DeserializeError.missingKey("id");
     /// ```
     public static func missingKey(key: String) -> DeserializeError {
-        DeserializeError(DeserializeErrorKind.MissingKey(key), Array[String]())
+        DeserializeError(DeserializeErrorKind.MissingKey(key), [])
     }
 
     /// Creates an invalid-value error with an empty path.
@@ -283,7 +281,7 @@ public struct DeserializeError: Cloneable {
     /// DeserializeError.invalidValue(message: "negative count");
     /// ```
     public static func invalidValue(message: String) -> DeserializeError {
-        DeserializeError(DeserializeErrorKind.InvalidValue(message), Array[String]())
+        DeserializeError(DeserializeErrorKind.InvalidValue(message), [])
     }
 
     /// Creates a free-form deserialization error with an empty path.
@@ -294,6 +292,6 @@ public struct DeserializeError: Cloneable {
     /// DeserializeError.custom(message: "unexpected EOF");
     /// ```
     public static func custom(message: String) -> DeserializeError {
-        DeserializeError(DeserializeErrorKind.Custom(message), Array[String]())
+        DeserializeError(DeserializeErrorKind.Custom(message), [])
     }
 }

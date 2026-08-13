@@ -270,10 +270,7 @@ fn validate_identifier(s: &str) -> Result<(), &'static str> {
         return Err("rename target cannot be empty");
     }
     let mut tokens = lex(s, 0).filter(|t| match t {
-        Ok(spanned) => !matches!(
-            spanned.value,
-            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-        ),
+        Ok(spanned) => !spanned.value.is_trivia(),
         Err(_) => true,
     });
     let first = tokens.next();

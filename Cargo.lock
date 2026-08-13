@@ -926,6 +926,7 @@ name = "kestrel-doc"
 version = "0.17.0"
 dependencies = [
  "clap",
+ "kestrel-ast",
  "kestrel-ast-builder",
  "kestrel-compiler",
  "kestrel-hecs",

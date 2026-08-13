@@ -60,7 +60,7 @@ public struct Toml: Format {
     ///
     /// The value must be `.Obj` at the top level (TOML requires a root table).
     /// Returns a `SerializeError` if the root is any other variant.
-    public static func encode(value: Value) -> Result[String, SerializeError] {
+    public static func encode(value: Value) -> String throws SerializeError {
         emitToml(value)
     }
 
@@ -69,10 +69,10 @@ public struct Toml: Format {
     /// Returns a `DeserializeError` if the input contains unsupported TOML
     /// features or syntax violations. The underlying `TomlParseError` carries
     /// the line number; that detail is folded into the error description.
-    public static func decode(source: String) -> Result[Value, DeserializeError] {
+    public static func decode(source: String) -> Value throws DeserializeError {
         match parseToml(source) {
             .Ok(v) => .Ok(v),
-            .Err(e) => .Err(DeserializeError.custom(e.description()))
+            .Err(e) => throw DeserializeError.custom(e.description())
         }
     }
 
@@ -94,7 +94,7 @@ public struct Toml: Format {
 /// ```
 /// let toml = try toToml(value: myConfig);
 /// ```
-public func toToml[T](value: T) -> Result[String, SerializeError] where T: Serialize {
+public func toToml[T](value: T) -> String throws SerializeError where T: Serialize {
     let v = try value.toValue();
     emitToml(v)
 }

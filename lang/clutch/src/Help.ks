@@ -39,8 +39,8 @@ import clutch.argument.(Argument)
 /// ```
 public func generateHelp(
     name name: String,
-    about about: Optional[String],
-    version version: Optional[String],
+    about about: String?,
+    version version: String?,
     arguments arguments: Array[Argument],
     subcommandNames subcommandNames: Array[String],
     subcommandAbouts subcommandAbouts: Array[String]

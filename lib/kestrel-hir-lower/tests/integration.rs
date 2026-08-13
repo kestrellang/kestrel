@@ -21,7 +21,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
 
     let file_entity = world.spawn();
     let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())

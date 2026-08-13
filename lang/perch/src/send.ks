@@ -22,7 +22,7 @@ import std.io.error.(IoError)
 /// let response = Response.ok(Text("hello"));
 ///  sendResponse(response, to: socketFd);
 /// ```
-public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result[(), IoError] {
+public func sendResponse(response: Response, to fileDescriptor: Int32) -> () throws IoError {
     var resp = String(capacity: 256 + response.bodyContent.bytes.count);
 
     resp.append("HTTP/1.1 \(response.status.code) \(response.status.text())\r\n");
@@ -42,7 +42,7 @@ public func sendResponse(response: Response, to fileDescriptor: Int32) -> Result
 }
 
 /// Writes all bytes of a string to a socket, retrying on partial writes.
-func sendAllBytes(fileDescriptor: Int32, content: String) -> Result[(), IoError] {
+func sendAllBytes(fileDescriptor: Int32, content: String) -> () throws IoError {
     let length = content.bytes.count;
     if length == 0 {
         return .Ok(())
@@ -60,10 +60,10 @@ func sendAllBytes(fileDescriptor: Int32, content: String) -> Result[(), IoError]
         let remaining = length - sent;
         let bytesWritten = send(fileDescriptor, ptr, remaining, 0);
         if bytesWritten < 0 {
-            return .Err(IoError.last())
+            throw IoError.last()
         }
         if bytesWritten == 0 {
-            return .Err(IoError(code: 32))
+            throw IoError(code: 32)
         }
         sent = sent + bytesWritten
     }

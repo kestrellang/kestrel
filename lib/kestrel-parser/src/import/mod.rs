@@ -2,6 +2,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::parsers::ModulePathSpans;
 use crate::common::{emit_module_path, identifier, module_path_parser_internal, token};
 use crate::event::EventSink;
 use crate::input::{ParserExtra, ParserInput};
@@ -95,147 +96,160 @@ where
         tokens,
         sink,
         import_declaration_parser_internal(),
-        |sink,
-         (import_span, path_segments, alias, items): (
-            Span,
-            Vec<Span>,
-            Option<Span>,
-            Option<Vec<(Span, Option<Span>)>>,
-        )| emit_import_declaration(sink, import_span, &path_segments, alias, items)
+        |sink, import: ImportSpans| emit_import_declaration(sink, &import)
     );
+}
+
+/// One entry of an import list: `Name` or `Name as Alias`.
+///
+/// The `as` keyword's span is carried, not reconstructed as
+/// `name.end + 1 .. name.end + 3` — `token()` skips trivia, so `Name   as X`
+/// and a line break before `as` are both grammatical and the arithmetic span
+/// landed on whitespace (F25).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportItemSpans {
+    pub name: Span,
+    /// `(as_keyword, alias_identifier)` when the item is aliased.
+    pub alias: Option<(Span, Span)>,
+}
+
+/// A parenthesised import list with every punctuation span the CST needs.
+///
+/// `lparen` / `rparen` / `commas` used to be invented by byte arithmetic off
+/// the neighbouring identifiers. `lang/std/numeric/int64.ks` is a multi-line
+/// `import std.core.(\n … \n)`, so the fabricated `RParen` range held a
+/// newline and the real `)` came out as a `SyntaxKind::Error` token — the
+/// documented *recovery* marker, emitted for well-formed shipping source (F25).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportItemsSpans {
+    pub lparen: Span,
+    pub items: Vec<ImportItemSpans>,
+    /// Separator `,`s. Always `items.len() - 1` of them — the grammar has no
+    /// trailing comma.
+    pub commas: Vec<Span>,
+    pub rparen: Span,
 }
 
 /// Internal parser for import item (identifier or identifier as alias).
 fn import_item_parser_internal<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (Span, Option<Span>), ParserExtra<'tokens>> + Clone {
+-> impl Parser<'tokens, ParserInput<'tokens>, ImportItemSpans, ParserExtra<'tokens>> + Clone {
     identifier()
-        .then(token(Token::As).ignore_then(identifier()).or_not())
+        .then(token(Token::As).then(identifier()).or_not())
+        .map(|(name, alias)| ImportItemSpans { name, alias })
         .boxed()
 }
 
 /// Internal parser for import items list.
 fn import_items_parser_internal<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, Vec<(Span, Option<Span>)>, ParserExtra<'tokens>> + Clone
-{
+-> impl Parser<'tokens, ParserInput<'tokens>, ImportItemsSpans, ParserExtra<'tokens>> + Clone {
     token(Token::LParen)
-        .ignore_then(
-            import_item_parser_internal()
-                .separated_by(token(Token::Comma))
-                .at_least(1)
-                .collect(),
+        .then(
+            // No trailing comma: `separated_by` did not permit one, and this
+            // rewrite only changes which SPANS are recorded, never the grammar.
+            import_item_parser_internal().then(
+                token(Token::Comma)
+                    .then(import_item_parser_internal())
+                    .repeated()
+                    .collect::<Vec<(Span, ImportItemSpans)>>(),
+            ),
         )
-        .then_ignore(token(Token::RParen))
+        .then(token(Token::RParen))
+        .map(|((lparen, (first, rest)), rparen)| {
+            let mut items = vec![first];
+            let mut commas = Vec::with_capacity(rest.len());
+            for (comma, item) in rest {
+                commas.push(comma);
+                items.push(item);
+            }
+            ImportItemsSpans {
+                lparen,
+                items,
+                commas,
+                rparen,
+            }
+        })
         .boxed()
 }
 
+/// What follows the module path in an `import`: nothing, `as Alias`, or
+/// `.(Item, …)`. Every token span the CST needs is carried here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportTail {
+    /// `import A.B as C` — `(as_keyword, alias_identifier)`.
+    Alias(Span, Span),
+    /// `import A.B.(X, Y)` — `(dot_before_paren, items)`.
+    Items(Span, ImportItemsSpans),
+}
+
+/// Everything an `import` declaration needs to emit a faithful CST.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportSpans {
+    pub import_kw: Span,
+    pub path: ModulePathSpans,
+    pub tail: Option<ImportTail>,
+}
+
 /// Internal Chumsky parser for import declarations.
-pub(crate) fn import_declaration_parser_internal<'tokens>() -> impl Parser<
-    'tokens,
-    ParserInput<'tokens>,
-    (
-        Span,
-        Vec<Span>,
-        Option<Span>,
-        Option<Vec<(Span, Option<Span>)>>,
-    ),
-    ParserExtra<'tokens>,
-> + Clone {
+pub(crate) fn import_declaration_parser_internal<'tokens>()
+-> impl Parser<'tokens, ParserInput<'tokens>, ImportSpans, ParserExtra<'tokens>> + Clone {
     token(Token::Import)
         .then(module_path_parser_internal())
         .then(
             token(Token::As)
-                .ignore_then(identifier())
-                .map(|alias| (Some(alias), None))
+                .then(identifier())
+                .map(|(as_kw, alias)| ImportTail::Alias(as_kw, alias))
                 .or(token(Token::Dot)
-                    .ignore_then(import_items_parser_internal())
-                    .map(|items| (None, Some(items))))
+                    .then(import_items_parser_internal())
+                    .map(|(dot, items)| ImportTail::Items(dot, items)))
                 .or_not(),
         )
-        .map(|((import_span, path_segments), alias_or_items)| {
-            let (alias, items) = match alias_or_items {
-                Some((alias, items)) => (alias, items),
-                None => (None, None),
-            };
-            (import_span, path_segments, alias, items)
+        .map(|((import_kw, path), tail)| ImportSpans {
+            import_kw,
+            path,
+            tail,
         })
         .boxed()
 }
 
 /// Emit events for an import declaration.
-pub(crate) fn emit_import_declaration(
-    sink: &mut EventSink,
-    import_span: Span,
-    path_segments: &[Span],
-    alias: Option<Span>,
-    items: Option<Vec<(Span, Option<Span>)>>,
-) {
+///
+/// Every token comes from a span the parser captured. This function used to
+/// reconstruct the `.`, `(`, `,`, `as` and `)` by byte arithmetic off the
+/// neighbouring identifiers — assuming exactly one byte of separator and zero
+/// trivia. `TreeBuilder` then took the token text from the fabricated range,
+/// hit its non-trivia safety net, and emitted the real punctuation as
+/// `SyntaxKind::Error` (F25).
+pub(crate) fn emit_import_declaration(sink: &mut EventSink, import: &ImportSpans) {
     sink.start_node(SyntaxKind::ImportDeclaration);
-    sink.add_token(SyntaxKind::Import, import_span);
+    sink.add_token(SyntaxKind::Import, import.import_kw.clone());
 
-    emit_module_path(sink, path_segments);
+    emit_module_path(sink, &import.path);
 
-    if let Some(items_list) = &items {
-        let last_segment = path_segments.last().unwrap();
-        let last_segment_end = last_segment.end;
-        let path_file_id = last_segment.file_id;
-        sink.add_token(
-            SyntaxKind::Dot,
-            Span::new(path_file_id, last_segment_end..last_segment_end + 1),
-        );
-        sink.add_token(
-            SyntaxKind::LParen,
-            Span::new(path_file_id, last_segment_end + 1..last_segment_end + 2),
-        );
+    match &import.tail {
+        Some(ImportTail::Items(dot, list)) => {
+            sink.add_token(SyntaxKind::Dot, dot.clone());
+            sink.add_token(SyntaxKind::LParen, list.lparen.clone());
 
-        for (i, (name_span, alias_span)) in items_list.iter().enumerate() {
-            if i > 0 {
-                let prev_span = if let Some(alias_s) =
-                    items_list.get(i - 1).and_then(|(_, alias)| alias.as_ref())
-                {
-                    alias_s
-                } else {
-                    &items_list.get(i - 1).unwrap().0
-                };
-                let prev_end = prev_span.end;
-                sink.add_token(
-                    SyntaxKind::Comma,
-                    Span::new(prev_span.file_id, prev_end..prev_end + 1),
-                );
+            for (i, item) in list.items.iter().enumerate() {
+                if i > 0 {
+                    sink.add_token(SyntaxKind::Comma, list.commas[i - 1].clone());
+                }
+                sink.start_node(SyntaxKind::ImportItem);
+                sink.add_token(SyntaxKind::Identifier, item.name.clone());
+                if let Some((as_kw, alias)) = &item.alias {
+                    sink.add_token(SyntaxKind::As, as_kw.clone());
+                    sink.add_token(SyntaxKind::Identifier, alias.clone());
+                }
+                sink.finish_node();
             }
 
-            sink.start_node(SyntaxKind::ImportItem);
-            sink.add_token(SyntaxKind::Identifier, name_span.clone());
-
-            if let Some(alias_s) = alias_span {
-                let as_start = name_span.end + 1;
-                sink.add_token(
-                    SyntaxKind::As,
-                    Span::new(name_span.file_id, as_start..as_start + 2),
-                );
-                sink.add_token(SyntaxKind::Identifier, alias_s.clone());
-            }
-            sink.finish_node();
-        }
-
-        let last_item = items_list.last().unwrap();
-        let last_item_span = if let Some(alias_s) = &last_item.1 {
-            alias_s
-        } else {
-            &last_item.0
-        };
-        let last_item_end = last_item_span.end;
-        sink.add_token(
-            SyntaxKind::RParen,
-            Span::new(last_item_span.file_id, last_item_end..last_item_end + 1),
-        );
-    } else if let Some(alias_span) = alias {
-        let last_segment = path_segments.last().unwrap();
-        let as_start = last_segment.end + 1;
-        sink.add_token(
-            SyntaxKind::As,
-            Span::new(last_segment.file_id, as_start..as_start + 2),
-        );
-        sink.add_token(SyntaxKind::Identifier, alias_span);
+            sink.add_token(SyntaxKind::RParen, list.rparen.clone());
+        },
+        Some(ImportTail::Alias(as_kw, alias)) => {
+            sink.add_token(SyntaxKind::As, as_kw.clone());
+            sink.add_token(SyntaxKind::Identifier, alias.clone());
+        },
+        None => {},
     }
 
     sink.finish_node();
@@ -267,6 +281,112 @@ mod tests {
         assert_eq!(decl.path().segment_names(), vec!["A", "B", "C"]);
         assert!(decl.is_import_all());
         assert_eq!(decl.syntax.kind(), SyntaxKind::ImportDeclaration);
+    }
+
+    /// Build the CST for `source` and return every token whose kind is `Error`,
+    /// with its text.
+    fn error_tokens(source: &str) -> Vec<(String, std::ops::Range<usize>)> {
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+        let mut sink = EventSink::new(0);
+        parse_import_declaration(source, tokens.into_iter(), &mut sink);
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        fn walk(
+            node: &kestrel_syntax_tree::SyntaxNode,
+            out: &mut Vec<(String, std::ops::Range<usize>)>,
+        ) {
+            for elem in node.descendants_with_tokens() {
+                if let Some(tok) = elem.as_token()
+                    && tok.kind() == SyntaxKind::Error
+                {
+                    let r = tok.text_range();
+                    out.push((
+                        tok.text().to_string(),
+                        usize::from(r.start())..usize::from(r.end()),
+                    ));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&tree, &mut out);
+        out
+    }
+
+    /// `SyntaxKind::Error` is the documented parse-**recovery** marker. Emitting
+    /// it for well-formed source violates the architecture doc's "preserve
+    /// source token order and source spans" contract, and it did: every
+    /// punctuation span in an import was reconstructed by byte arithmetic off a
+    /// neighbouring identifier, assuming one byte of separator and zero trivia.
+    /// `token()` skips trivia, so these three shapes are all grammatical and
+    /// all produced fabricated ranges holding whitespace, with the real
+    /// punctuation re-emitted as `Error` by the tree builder's safety net (F25).
+    ///
+    /// `lang/std/numeric/int64.ks` is the multi-line form, so this fired on
+    /// shipping stdlib source on every build.
+    #[test]
+    fn well_formed_imports_produce_no_error_tokens() {
+        for source in [
+            "import A.B.C",
+            "import A.B.C as D",
+            "import A.B.(X, Y)",
+            // Space before the paren and around the dots.
+            "import A . B . (X, Y)",
+            // Space around `as`, which the `name.end + 1 .. + 3` span missed.
+            "import A.B.(X  as  Y)",
+            // The stdlib shape: multi-line list, so the `)` span was a newline.
+            "import std.core.(\n    Int64,\n    String\n)",
+            "import std.core.(\n    Int64 as I,\n    String as S\n)",
+        ] {
+            assert_eq!(
+                error_tokens(source),
+                vec![],
+                "well-formed import produced Error token(s): {source:?}"
+            );
+        }
+    }
+
+    /// The CST must still be lossless: concatenating it reproduces the source
+    /// byte for byte. This is what kept F25 invisible — the round trip passed
+    /// while the token *kinds* were wrong — so it is asserted alongside, not
+    /// instead of, the Error-token check.
+    #[test]
+    fn multiline_import_cst_round_trips_with_correct_punctuation() {
+        let source = "import std.core.(\n    Int64,\n    String as Str\n)";
+        let tokens: Vec<_> = lex(source, 0)
+            .filter_map(|t| t.ok())
+            .map(|spanned| (spanned.value, spanned.span))
+            .collect();
+        let mut sink = EventSink::new(0);
+        parse_import_declaration(source, tokens.into_iter(), &mut sink);
+        let tree = TreeBuilder::new(source, sink.into_events()).build();
+
+        assert_eq!(tree.text().to_string(), source);
+
+        // The closing paren must be a real `)`, not the newline before it.
+        let rparen = tree
+            .descendants_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::RParen)
+            .expect("import list must have an RParen token");
+        assert_eq!(rparen.text(), ")");
+
+        let commas: Vec<String> = tree
+            .descendants_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| t.kind() == SyntaxKind::Comma)
+            .map(|t| t.text().to_string())
+            .collect();
+        assert_eq!(commas, vec![","]);
+
+        let as_kw = tree
+            .descendants_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::As)
+            .expect("aliased import item must have an As token");
+        assert_eq!(as_kw.text(), "as");
     }
 
     #[test]

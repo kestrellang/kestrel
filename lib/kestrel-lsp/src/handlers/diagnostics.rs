@@ -91,7 +91,9 @@ pub async fn refresh(state: SharedState, client: Client) {
     }
     let files = FileMap { by_id };
 
-    // Group diagnostics by URL.
+    // Group diagnostics by URL. The two streams are disjoint by construction:
+    // inference errors are rendered only by the codespan stream (F15), so
+    // pushing both here cannot produce the double squiggle it used to.
     let mut grouped: HashMap<Url, Vec<LspDiagnostic>> = HashMap::new();
     for diag in &codespan_diags {
         if let Some((file_id, lsp_diag)) = from_codespan(diag, &files)

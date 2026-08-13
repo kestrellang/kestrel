@@ -52,7 +52,7 @@ public enum ArgumentKind: Cloneable {
 ///
 /// Eight fields: a `name` and `kind`, optional long/short flags, optional
 /// help text and placeholder, a required flag, and an optional default
-/// value. All `Optional[String]` fields start as `.None`.
+/// value. All `String?` fields start as `.None`.
 ///
 /// # Examples
 ///
@@ -87,25 +87,25 @@ public struct Argument: Cloneable {
 
     /// The long flag string, without the `--` prefix. `.None` for
     /// positional arguments.
-    public var longFlag: Optional[String]
+    public var longFlag: String?
 
     /// The single-character short flag, without the `-` prefix.
     /// `.None` if no short alias is defined.
-    public var shortFlag: Optional[String]
+    public var shortFlag: String?
 
     /// Human-readable description shown in the help text.
-    public var helpText: Optional[String]
+    public var helpText: String?
 
     /// Placeholder name shown in the help column (e.g., `FILE` renders
     /// as `--output <FILE>`). Defaults to `VALUE` when absent.
-    public var valueName: Optional[String]
+    public var valueName: String?
 
     /// Whether the parser should reject input that omits this argument.
     public var isRequired: Bool
 
     /// Fallback value applied when the argument is absent from input
     /// and `isRequired` is `false`.
-    public var defaultValue: Optional[String]
+    public var defaultValue: String?
 
     /// @name Default
     /// Creates an option argument with the given name.

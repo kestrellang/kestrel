@@ -39,10 +39,9 @@ pub fn build_function(
     // Determine receiver: non-static functions inside type declarations are methods.
     // Explicit keyword (mutating/consuming) overrides, otherwise defaults to Borrowing.
     let is_static = has_static_modifier(node);
-    let parent_is_type = matches!(
-        world.get::<NodeKind>(parent),
-        Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-    );
+    let parent_is_type = world
+        .get::<NodeKind>(parent)
+        .is_some_and(NodeKind::is_type_scope);
     let receiver = if is_static || !parent_is_type {
         None
     } else {

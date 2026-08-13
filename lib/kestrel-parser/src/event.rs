@@ -34,6 +34,63 @@ pub trait EmitSyntax {
     fn emit(self, sink: &mut EventSink);
 }
 
+/// The exact source text a fixed-lexeme `SyntaxKind` must have.
+///
+/// Only punctuation and keywords — kinds whose spelling is fixed. Identifiers,
+/// literals and nodes have no expected text and are absent.
+fn expected_lexeme(kind: SyntaxKind) -> Option<&'static str> {
+    Some(match kind {
+        SyntaxKind::Dot => ".",
+        SyntaxKind::Comma => ",",
+        SyntaxKind::Colon => ":",
+        SyntaxKind::Semicolon => ";",
+        SyntaxKind::LParen => "(",
+        SyntaxKind::RParen => ")",
+        SyntaxKind::LBrace => "{",
+        SyntaxKind::RBrace => "}",
+        SyntaxKind::LBracket => "[",
+        SyntaxKind::RBracket => "]",
+        SyntaxKind::As => "as",
+        SyntaxKind::Import => "import",
+        SyntaxKind::Module => "module",
+        _ => return None,
+    })
+}
+
+/// Reject a token whose emitted span does not actually contain that token.
+///
+/// Emitters used to *invent* punctuation spans by byte arithmetic off a
+/// neighbouring identifier — `last_segment_end + 1 .. + 2` for a `(`, assuming
+/// exactly one byte of separator and zero trivia. But the combinators skip
+/// trivia, so `import A.B. (X, Y)` and multi-line imports are grammatical, and
+/// the fabricated range then held whitespace. The tree still round-tripped
+/// (`emit_trivia_until`'s safety net re-emitted the real punctuation as
+/// `SyntaxKind::Error`), so nothing failed — it just silently marked
+/// well-formed shipping stdlib source as a parse-recovery site (F25).
+///
+/// **Zero-width spans are exempt.** A parser recovery branch may synthesize an
+/// absent token (`or(empty().map_with(...))`); `emit_expression_statement`
+/// does exactly that for a missing `;`, which is why an empty-text `Semicolon`
+/// reaches here on shipping stdlib source. That is not a fabricated span — it
+/// is the documented synthesized-token idiom, and the fact that it is accepted
+/// silently is a separate finding (F13). What this rejects is a **non-empty**
+/// range that holds the wrong bytes.
+///
+/// Debug-only: the check is a string compare per fixed-lexeme token, and a
+/// release build must not pay for it. The suite runs debug, so drift is caught.
+fn debug_assert_token_text(kind: SyntaxKind, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    debug_assert!(
+        expected_lexeme(kind).is_none_or(|expected| expected == text),
+        "token {kind:?} was emitted over the text {text:?}, but that kind is \
+         always spelled {:?} — the span was derived by arithmetic instead of \
+         being captured by the parser (see F25)",
+        expected_lexeme(kind).unwrap_or_default()
+    );
+}
+
 /// Distinct trivia kinds that can appear between syntax tokens. Kept local to
 /// the tree builder so callers don't need to know the enumeration.
 fn is_trivia_kind(kind: SyntaxKind) -> bool {
@@ -171,11 +228,20 @@ impl EventSink {
     /// `)` / `]` / `}` / `;` that has the parser-recovery pattern in
     /// `parser_recovery_pattern.md`.
     ///
-    /// The diagnostic span widens the synthesised zero-width span by one
-    /// byte to the left when possible — VSCode collapses zero-width
-    /// diagnostics to invisible squiggles, so we anchor the underline on
-    /// the character preceding the cursor (where the missing token should
-    /// have appeared).
+    /// The synthesised span is zero-width and VSCode collapses those to an
+    /// invisible squiggle, so the diagnostic is emitted over the **whole last
+    /// real token** instead.
+    ///
+    /// It used to be emitted over `anchor_end - 1 .. anchor_end`, one raw
+    /// **byte**. `anchor_end` is a char boundary; `anchor_end - 1` only is when
+    /// the token's final character is single-byte — and the lexer accepts full
+    /// Unicode XID identifiers, so `let x = café` puts `diag_start` between the
+    /// two bytes of `é`. That span reached the LSP unmodified and panicked
+    /// `offset_to_position`'s slicing, outside the worker's `catch_unwind`, so
+    /// `publish_diagnostics` was never called and *every* diagnostic for that
+    /// edit vanished with no error logged (F24). A token span is a boundary by
+    /// construction; the sink has no source text, so it cannot walk back a
+    /// character even if a narrower underline were wanted.
     pub fn add_token_or_missing(&mut self, kind: SyntaxKind, span: Span, expected_label: &str) {
         if span.start == span.end {
             // Anchor the diagnostic on the last real (non-trivia) token
@@ -185,14 +251,15 @@ impl EventSink {
             // whitespace at the start of the next line because chumsky's
             // `skip_trivia` consumed the newline before the recovery
             // branch fired.
-            let anchor_end = self.last_real_token_end().unwrap_or(span.end);
-            let diag_start = anchor_end.saturating_sub(1);
+            let anchor = self
+                .last_real_token_span()
+                .unwrap_or(span.start..span.end);
             self.error_at_span(
                 format!("expected `{}`", expected_label),
                 // file_id from the sink, not the input span: chumsky
                 // spans use file_id 0, which the LSP's file_id → URL
                 // map would silently drop for any non-zero file.
-                Span::new(self.file_id, diag_start..anchor_end),
+                Span::new(self.file_id, anchor),
             );
             self.missing_token(kind, Span::new(self.file_id, span.start..span.end));
         } else {
@@ -200,18 +267,16 @@ impl EventSink {
         }
     }
 
-    /// End offset of the most recently emitted non-trivia `AddToken`.
-    /// Used by `add_token_or_missing` to anchor diagnostics for parser-
-    /// synthesised tokens at the end of the previous real content.
-    fn last_real_token_end(&self) -> Option<usize> {
-        for ev in self.events.iter().rev() {
-            if let Event::AddToken(k, span) = ev
-                && !is_trivia_kind(*k)
-            {
-                return Some(span.end);
-            }
-        }
-        None
+    /// Byte range of the most recently emitted non-trivia `AddToken`.
+    ///
+    /// Returned whole, never trimmed: both ends are token boundaries and
+    /// therefore char boundaries. Deriving a narrower range by byte arithmetic
+    /// is what F24 was.
+    fn last_real_token_span(&self) -> Option<std::ops::Range<usize>> {
+        self.events.iter().rev().find_map(|ev| match ev {
+            Event::AddToken(k, span) if !is_trivia_kind(*k) => Some(span.start..span.end),
+            _ => None,
+        })
     }
 
     /// Get the collected events
@@ -329,6 +394,7 @@ impl<'src> TreeBuilder<'src> {
                     self.emit_trivia_until(span_start, builder);
 
                     let text = &self.source[span_range];
+                    debug_assert_token_text(kind, text);
                     builder.token(kind.into(), text);
                     self.source_pos = span_end;
                     self.pos += 1;

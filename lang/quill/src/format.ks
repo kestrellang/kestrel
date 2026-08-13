@@ -50,14 +50,14 @@ public protocol Format {
     /// Returns the serialized string on success, or a
     /// `SerializeError` if the value contains data the format
     /// cannot represent.
-    static func encode(value: Value) -> Result[String, SerializeError]
+    static func encode(value: Value) -> String throws SerializeError
 
     /// Decodes a formatted string back into a `Value` tree.
     ///
     /// Returns the parsed `Value` on success, or a
     /// `DeserializeError` if the input is malformed or violates
     /// the format's grammar.
-    static func decode(source: String) -> Result[Value, DeserializeError]
+    static func decode(source: String) -> Value throws DeserializeError
 
     /// Returns the MIME content type for this format
     /// (e.g. `"application/json"`, `"application/toml"`).

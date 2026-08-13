@@ -9,8 +9,11 @@
 //! Ported from lib1's `process_string_escapes`
 //! (lib/kestrel-semantic-tree-binder/src/body_resolver/expressions.rs).
 
+use kestrel_ast::escape::{Escaped, decode_escape};
 use kestrel_ast_builder::string_token::{self, MultilineErrorKind};
-use kestrel_hir::body::{EscapeError, EscapeErrorKind, UnicodeEscapeErrorReason};
+use kestrel_hir::body::{EscapeError, EscapeErrorKind};
+#[cfg(test)]
+use kestrel_hir::body::UnicodeEscapeErrorReason;
 use kestrel_span::Span;
 
 /// Decode the unquoted contents of a string literal.
@@ -34,243 +37,41 @@ pub fn decode_string(
             continue;
         }
 
+        // The escape TABLE lives in `kestrel_ast::escape` — shared with the
+        // char-literal decoder and the interpolated-string segment decoder, so
+        // all three agree on `\u` digit limits, `\x` range and unknown escapes
+        // (F26). What stays here is span arithmetic and error recovery.
         let escape_start = content_start + i;
-        match chars.next() {
-            None => {
-                // Trailing backslash at end of string.
-                errors.push(EscapeError {
-                    span: Span::new(file_id, escape_start..escape_start + 1),
-                    kind: EscapeErrorKind::IncompleteEscape,
-                });
-                result.push('\\');
+        let decoded = decode_escape(&mut chars);
+        let span = Span::new(file_id, escape_start..escape_start + decoded.raw.len());
+
+        match decoded.result {
+            Ok(Escaped::Scalar(cp)) => match char::from_u32(cp) {
+                Some(ch) => result.push(ch),
+                // Unreachable: the decoder range-checks before returning a
+                // scalar. Preserve the text rather than silently dropping it.
+                None => result.push_str(&decoded.raw),
             },
-            Some((j, next_char)) => match next_char {
-                'n' => result.push('\n'),
-                'r' => result.push('\r'),
-                't' => result.push('\t'),
-                '\\' => result.push('\\'),
-                '"' => result.push('"'),
-                '\'' => result.push('\''),
-                '0' => result.push('\0'),
-                // Line continuation: `\` followed by newline + leading whitespace
-                '\n' => skip_continuation_whitespace(&mut chars),
-                '\r' => {
-                    if let Some(&(_, '\n')) = chars.peek() {
-                        chars.next();
-                    }
-                    skip_continuation_whitespace(&mut chars);
+            // The newline and its indentation were consumed by the decoder.
+            Ok(Escaped::LineContinuation) => {},
+            // `\(` is interpolation syntax — the AST builder should have
+            // rerouted this string to InterpolatedString before it reached
+            // literal decoding. Reaching here means it did not.
+            Ok(Escaped::Interpolation) => errors.push(EscapeError {
+                span,
+                kind: EscapeErrorKind::InvalidEscape {
+                    sequence: "\\(".to_string(),
                 },
-                'x' => decode_ascii_escape(
-                    &mut chars,
-                    &mut result,
-                    &mut errors,
-                    file_id,
-                    escape_start,
-                    content_start + j + 1,
-                ),
-                'u' => decode_unicode_escape(
-                    &mut chars,
-                    &mut result,
-                    &mut errors,
-                    file_id,
-                    escape_start,
-                    content_start + j,
-                ),
-                // `\(` is interpolation syntax — the AST builder should have
-                // rerouted this string to InterpolatedString before it
-                // reached literal decoding. If we get here, treat as invalid.
-                '(' => {
-                    let paren_len = '('.len_utf8();
-                    errors.push(EscapeError {
-                        span: Span::new(file_id, escape_start..content_start + j + paren_len),
-                        kind: EscapeErrorKind::InvalidEscape {
-                            sequence: "\\(".to_string(),
-                        },
-                    });
-                },
-                other => {
-                    let other_len = other.len_utf8();
-                    errors.push(EscapeError {
-                        span: Span::new(file_id, escape_start..content_start + j + other_len),
-                        kind: EscapeErrorKind::InvalidEscape {
-                            sequence: format!("\\{}", other),
-                        },
-                    });
-                    result.push('\\');
-                    result.push(other);
-                },
+            }),
+            Err(kind) => {
+                errors.push(EscapeError { span, kind });
+                // Keep the raw text so the decoded value still round-trips.
+                result.push_str(&decoded.raw);
             },
         }
     }
 
     (result, errors)
-}
-
-fn skip_continuation_whitespace(chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>) {
-    while let Some(&(_, ch)) = chars.peek() {
-        if ch == ' ' || ch == '\t' {
-            chars.next();
-        } else {
-            break;
-        }
-    }
-}
-
-fn decode_ascii_escape(
-    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-    result: &mut String,
-    errors: &mut Vec<EscapeError>,
-    file_id: usize,
-    escape_start: usize,
-    hex_start: usize,
-) {
-    let mut hex_str = String::new();
-    for _ in 0..2 {
-        if let Some(&(_, ch)) = chars.peek() {
-            if ch.is_ascii_hexdigit() {
-                hex_str.push(ch);
-                chars.next();
-            } else {
-                break;
-            }
-        }
-    }
-
-    if hex_str.len() != 2 {
-        // Incomplete `\xN` — record the error span over what we read so far.
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..hex_start + hex_str.len()),
-            kind: EscapeErrorKind::InvalidEscape {
-                sequence: format!("\\x{}", hex_str),
-            },
-        });
-        result.push_str(&format!("\\x{}", hex_str));
-        return;
-    }
-
-    let value = u8::from_str_radix(&hex_str, 16).unwrap();
-    if value > 0x7F {
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..hex_start + 2),
-            kind: EscapeErrorKind::AsciiEscapeOutOfRange { value },
-        });
-        result.push_str(&format!("\\x{:02X}", value));
-    } else {
-        result.push(value as char);
-    }
-}
-
-fn decode_unicode_escape(
-    chars: &mut std::iter::Peekable<std::str::CharIndices<'_>>,
-    result: &mut String,
-    errors: &mut Vec<EscapeError>,
-    file_id: usize,
-    escape_start: usize,
-    u_pos: usize,
-) {
-    // Expect opening brace right after `\u`.
-    if chars.peek().map(|&(_, c)| c) != Some('{') {
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..u_pos + 1),
-            kind: EscapeErrorKind::InvalidUnicodeEscape {
-                value: "\\u".to_string(),
-                reason: UnicodeEscapeErrorReason::MissingOpenBrace,
-            },
-        });
-        result.push_str("\\u");
-        return;
-    }
-    chars.next(); // consume '{'
-
-    let mut hex_str = String::new();
-    let mut found_close = false;
-    let mut had_invalid_digit = false;
-    while let Some(&(_, ch)) = chars.peek() {
-        if ch == '}' {
-            chars.next();
-            found_close = true;
-            break;
-        } else if ch.is_ascii_hexdigit() {
-            hex_str.push(ch);
-            chars.next();
-        } else if ch == '"' || ch == '\\' {
-            // Don't consume the terminating quote or another escape.
-            break;
-        } else {
-            had_invalid_digit = true;
-            hex_str.push(ch);
-            chars.next();
-        }
-    }
-
-    let escape_end = u_pos + 2 + hex_str.len() + if found_close { 1 } else { 0 };
-    let escape_seq = format!("\\u{{{}}}", hex_str);
-
-    if !found_close {
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..escape_end),
-            kind: EscapeErrorKind::InvalidUnicodeEscape {
-                value: escape_seq.clone(),
-                reason: UnicodeEscapeErrorReason::MissingCloseBrace,
-            },
-        });
-        result.push_str(&escape_seq);
-    } else if hex_str.is_empty() {
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..escape_end),
-            kind: EscapeErrorKind::InvalidUnicodeEscape {
-                value: escape_seq.clone(),
-                reason: UnicodeEscapeErrorReason::EmptyBraces,
-            },
-        });
-        result.push_str(&escape_seq);
-    } else if had_invalid_digit {
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..escape_end),
-            kind: EscapeErrorKind::InvalidUnicodeEscape {
-                value: escape_seq.clone(),
-                reason: UnicodeEscapeErrorReason::InvalidHexDigit,
-            },
-        });
-        result.push_str(&escape_seq);
-    } else if hex_str.len() > 6 {
-        errors.push(EscapeError {
-            span: Span::new(file_id, escape_start..escape_end),
-            kind: EscapeErrorKind::InvalidUnicodeEscape {
-                value: escape_seq.clone(),
-                reason: UnicodeEscapeErrorReason::TooManyDigits,
-            },
-        });
-        result.push_str(&escape_seq);
-    } else {
-        match u32::from_str_radix(&hex_str, 16) {
-            Ok(code_point) if code_point <= 0x10FFFF => {
-                if let Some(ch) = char::from_u32(code_point) {
-                    result.push(ch);
-                } else {
-                    // Surrogate or otherwise non-scalar.
-                    errors.push(EscapeError {
-                        span: Span::new(file_id, escape_start..escape_end),
-                        kind: EscapeErrorKind::InvalidUnicodeEscape {
-                            value: escape_seq.clone(),
-                            reason: UnicodeEscapeErrorReason::OutOfRange,
-                        },
-                    });
-                    result.push_str(&escape_seq);
-                }
-            },
-            _ => {
-                errors.push(EscapeError {
-                    span: Span::new(file_id, escape_start..escape_end),
-                    kind: EscapeErrorKind::InvalidUnicodeEscape {
-                        value: escape_seq.clone(),
-                        reason: UnicodeEscapeErrorReason::OutOfRange,
-                    },
-                });
-                result.push_str(&escape_seq);
-            },
-        }
-    }
 }
 
 /// Strip delimiters from a string-literal token and (for cooked forms)

@@ -3,6 +3,8 @@
 //! This module contains data types that are used by multiple parsers
 //! to avoid duplication and ensure consistency.
 
+use crate::import::ImportSpans;
+use crate::common::parsers::ModulePathSpans;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
 
@@ -36,7 +38,7 @@ pub enum AttributeArgValue {
     /// Implicit member access: `.option`
     ImplicitMember { dot_span: Span, name_span: Span },
     /// Path: `SomeType` or `Module.Type`
-    Path(Vec<Span>), // segments (identifiers only, dots are implicit between them)
+    Path(ModulePathSpans), // dotted path; the `.` spans are carried, not derived
 }
 
 /// Raw parsed data for a single attribute argument
@@ -228,11 +230,6 @@ pub enum TypeDeclarationBodyItem {
     Enum(Box<EnumDeclarationData>), // Boxed to avoid infinite size
     EnumCase(EnumCaseDeclarationData), // Only valid in enum bodies
     TypeAlias(TypeAliasDeclarationData), // Associated type bindings
-    Module(Span, Vec<Span>),       // module_span, path_segments
-    Import(
-        Span,
-        Vec<Span>,
-        Option<Span>,
-        Option<Vec<(Span, Option<Span>)>>,
-    ), // import_span, path, alias, items
+    Module(Span, ModulePathSpans), // module_span, module path (segments + dot spans)
+    Import(ImportSpans), // the whole `import …`, punctuation spans included
 }

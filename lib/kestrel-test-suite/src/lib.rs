@@ -144,19 +144,14 @@ pub fn test_compiler(with_stdlib: bool) -> Compiler {
 
 /// Locate the stdlib directory.
 ///
-/// Searches: KESTREL_STD env var, then relative to CARGO_MANIFEST_DIR.
+/// Shares `kestrel_compiler::stdlib_path` with the CLI and the LSP. This used
+/// to take `KESTREL_STD` unconditionally: a stale value loaded zero stdlib
+/// files, and every test then failed on unrelated "unknown type" errors.
+/// Panicking here is the right shape for a test harness — a test run with no
+/// stdlib is not a result worth recording.
 fn find_stdlib_path() -> PathBuf {
-    if let Ok(path) = std::env::var("KESTREL_STD") {
-        return PathBuf::from(path);
-    }
-    // lib/kestrel-test-suite/ -> lib/ -> project root -> lang/std
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let project_root = std::path::Path::new(manifest)
-        .parent()
-        .unwrap() // lib/
-        .parent()
-        .unwrap(); // project root
-    project_root.join("lang/std")
+    kestrel_compiler::stdlib_path::default_std_path()
+        .unwrap_or_else(|e| panic!("test suite could not locate the stdlib:\n{e}"))
 }
 
 // trigger rebuild after stdlib substring refactor

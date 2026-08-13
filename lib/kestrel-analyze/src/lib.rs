@@ -42,7 +42,6 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_body_check(body::exhaustive_return::ExhaustiveReturnAnalyzer);
     r.add_body_check(body::dead_code::DeadCodeAnalyzer);
     r.add_body_check(body::guard::GuardDivergenceAnalyzer);
-    r.add_body_check(body::type_check::TypeCheckAnalyzer);
     r.add_body_check(body::condition_check::ConditionCheckAnalyzer);
     r.add_body_check(body::param_pattern::ParamPatternAnalyzer);
     r.add_body_check(body::assignment::AssignmentAnalyzer);
@@ -118,6 +117,49 @@ pub fn default_analyzers() -> AnalyzerRegistry {
 
 /// Run a single analyzer on a single entity.
 ///
+/// Assert every diagnostic an analyzer produced carries a code that analyzer
+/// declares — owned (`descriptors()`) or explicitly borrowed
+/// (`borrowed_descriptors()`).
+///
+/// The registry's docs promised "each code maps to exactly one diagnostic" but
+/// only *uniqueness across descriptor arrays* was checked, so a code could be
+/// declared by one analyzer and hand-written into an unrelated emit site: E436
+/// was allocated `non_protocol_bound` and also emitted with E476's message and
+/// E476's meaning (F16). This is the check that makes the promise true, and it
+/// runs on every analyzer result — the suite's 3700 files are the corpus.
+fn assert_owned(analyzer: &dyn Describe, diags: &[AnalyzeDiagnostic]) {
+    if diags.is_empty() {
+        return;
+    }
+    for d in diags {
+        let owned = analyzer.descriptors().iter().any(|x| x.id == d.descriptor_id);
+        let borrowed = analyzer
+            .borrowed_descriptors()
+            .iter()
+            .any(|x| x.id == d.descriptor_id);
+        assert!(
+            owned || borrowed,
+            "analyzer {:?} emitted {} but declares neither — allocate it in this \
+             analyzer's DESCRIPTORS, or list the owner's descriptor in \
+             `borrowed_descriptors()` (see kestrel-analyze/AGENTS.md)",
+            analyzer.id(),
+            d.descriptor_id,
+        );
+        // The other direction: a code parked in RESERVED_UNEMITTED is one the
+        // docs describe as not-yet-live. If it fires, the reservation is stale
+        // and the docs are lying in the opposite direction.
+        assert!(
+            !crate::registry::RESERVED_UNEMITTED
+                .iter()
+                .any(|(id, _)| *id == d.descriptor_id),
+            "{} is listed in RESERVED_UNEMITTED but {:?} just emitted it — \
+             drop the reservation",
+            d.descriptor_id,
+            analyzer.id(),
+        );
+    }
+}
+
 /// The query key is `(analyzer_id, entity)`, so results are memoized
 /// per analyzer per entity. Changing a body only re-runs that body's
 /// analyzer queries.
@@ -159,7 +201,9 @@ impl QueryFn for Analyze {
                 hir: &hir,
                 typed: &typed,
             };
-            return analyzer.check(&cx);
+            let diags = analyzer.check(&cx);
+            assert_owned(analyzer.as_ref(), &diags);
+            return diags;
         }
 
         // Try decl check
@@ -177,7 +221,9 @@ impl QueryFn for Analyze {
                 root: self.root,
                 kind: kind.clone(),
             };
-            return analyzer.check(&cx);
+            let diags = analyzer.check(&cx);
+            assert_owned(analyzer.as_ref(), &diags);
+            return diags;
         }
 
         // Compilation checks run via `analyze_compilation`, never this query;
@@ -278,7 +324,9 @@ pub fn analyze_compilation(
 
     let mut all_diags = Vec::new();
     for analyzer in &registry.0.compilation_checks {
-        all_diags.extend(analyzer.check(&cx));
+        let diags = analyzer.check(&cx);
+        assert_owned(analyzer.as_ref(), &diags);
+        all_diags.extend(diags);
     }
 
     all_diags

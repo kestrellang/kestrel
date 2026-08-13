@@ -83,7 +83,7 @@ public struct Template: Cloneable {
     /// t.render("{x}");  // "" — no variables set
     /// ```
     public init() {
-        self.vars = Dictionary[String, String]()
+        self.vars = [:]
     }
 
     /// Stores a variable, HTML-escaping the value.
@@ -165,7 +165,7 @@ public struct Template: Cloneable {
     /// t.render("{a}{b}");  // ""
     /// ```
     public mutating func clear() {
-        self.vars = Dictionary[String, String]()
+        self.vars = [:]
     }
 
     /// Renders a pattern string, substituting `{key}` placeholders with

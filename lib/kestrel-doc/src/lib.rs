@@ -624,7 +624,7 @@ fn module_path(world: &World, module: Entity) -> String {
         let Some(name) = world.get::<Name>(e) else {
             break;
         };
-        if name.0 == "<root>" {
+        if name.is_root() {
             break;
         }
         segments.push(name.0.clone());

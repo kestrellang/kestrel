@@ -18,17 +18,17 @@ import jessup.github.(Release, fetchRelease, fetchJessupRelease)
 
 /// Installs a toolchain for the given channel.
 /// channel can be "stable", "nightly", or a specific version like "1.0.0".
-public func installToolchain(channel channel: String) -> Result[String, JessupError] {
+public func installToolchain(channel channel: String) -> String throws JessupError {
     // Ensure directories exist
     match ensureDirectories() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(_) => {}
     }
 
     // Detect platform
     var platform = Platform(os: "", arch: "");
     match detectPlatform() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(p) => platform = p
     }
 
@@ -41,7 +41,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     // Fetch release info from GitHub
     var release = Release(tagName: "", assetUrl: "");
     match fetchRelease(channel: channel, platform: platform) {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(r) => release = r
     }
 
@@ -51,7 +51,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
     // Check if already installed
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -111,7 +111,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         rmCmd.append("rm -rf ");
         rmCmd.append(tmpDir);
          spawn(rmCmd).unwrap(or: -1);
-        return .Err(JessupError.NetworkError("failed to download toolchain"))
+        throw JessupError.NetworkError("failed to download toolchain")
     }
 
     // Create toolchain directory
@@ -137,7 +137,7 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
         rmTcCmd.append("rm -rf ");
         rmTcCmd.append(tcDir);
          spawn(rmTcCmd).unwrap(or: -1);
-        return .Err(JessupError.InstallError("failed to extract toolchain archive"))
+        throw JessupError.InstallError("failed to extract toolchain archive")
     }
 
     // Clean up temp files
@@ -194,10 +194,10 @@ public func installToolchain(channel channel: String) -> Result[String, JessupEr
 // ============================================================================
 
 /// Sets the default toolchain by updating symlinks in ~/.jessup/bin/.
-public func setDefault(toolchainName toolchainName: String) -> Result[(), JessupError] {
+public func setDefault(toolchainName toolchainName: String) -> () throws JessupError {
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -211,12 +211,12 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
         var errMsg = String();
         errMsg.append("toolchain not installed: ");
         errMsg.append(toolchainName);
-        return .Err(JessupError.NotFound(errMsg))
+        throw JessupError.NotFound(errMsg)
     }
 
     var binPath = "";
     match binDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => binPath = dir
     }
 
@@ -290,7 +290,7 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
     var config = readConfig();
     config.defaultChannel = toolchainName;
     match writeConfig(config: config) {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(_) => {}
     }
 
@@ -307,10 +307,10 @@ public func setDefault(toolchainName toolchainName: String) -> Result[(), Jessup
 // ============================================================================
 
 /// Lists all installed toolchains. Marks the active one.
-public func listToolchains() -> Result[(), JessupError] {
+public func listToolchains() -> () throws JessupError {
     var tcDirPath = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => tcDirPath = dir
     }
 
@@ -319,7 +319,7 @@ public func listToolchains() -> Result[(), JessupError] {
         return .Ok(())
     }
 
-    let entries = listDir(tcDirPath).unwrap(or: Array[String]());
+    let entries = listDir(tcDirPath).unwrap(or: []);
     if entries.count == 0 {
          println("No toolchains installed");
         return .Ok(())
@@ -332,9 +332,7 @@ public func listToolchains() -> Result[(), JessupError] {
      println("Installed toolchains:");
      println("");
 
-    var i: Int64 = 0;
-    while i < entries.count {
-        let name = entries(unchecked: i);
+    for name in entries {
         // Skip hidden files
         if name.bytes.count > 0 and name.bytes(unchecked: 0) != 46 {
             if name == activeChannel {
@@ -350,7 +348,6 @@ public func listToolchains() -> Result[(), JessupError] {
                  println(nameMsg);
             }
         }
-        i = i + 1
     }
 
     .Ok(())
@@ -361,10 +358,10 @@ public func listToolchains() -> Result[(), JessupError] {
 // ============================================================================
 
 /// Removes an installed toolchain.
-public func removeToolchain(toolchainName toolchainName: String) -> Result[(), JessupError] {
+public func removeToolchain(toolchainName toolchainName: String) -> () throws JessupError {
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -378,7 +375,7 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
         var errMsg = String();
         errMsg.append("toolchain not installed: ");
         errMsg.append(toolchainName);
-        return .Err(JessupError.NotFound(errMsg))
+        throw JessupError.NotFound(errMsg)
     }
 
     // Check if this is the active toolchain
@@ -430,13 +427,13 @@ public func removeToolchain(toolchainName toolchainName: String) -> Result[(), J
 // ============================================================================
 
 /// Shows the active toolchain and its path.
-public func showActive() -> Result[(), JessupError] {
+public func showActive() -> () throws JessupError {
     let config = readConfig();
     let activeChannel = config.defaultChannel;
 
     var tcDir = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => {
             var s = String();
             s.append(dir);
@@ -482,10 +479,10 @@ public func showActive() -> Result[(), JessupError] {
 // ============================================================================
 
 /// Updates all installed channel toolchains (stable, nightly) to their latest versions.
-public func updateToolchains() -> Result[(), JessupError] {
+public func updateToolchains() -> () throws JessupError {
     var tcDirPath = "";
     match toolchainsDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => tcDirPath = dir
     }
 
@@ -494,12 +491,10 @@ public func updateToolchains() -> Result[(), JessupError] {
         return .Ok(())
     }
 
-    let entries = listDir(tcDirPath).unwrap(or: Array[String]());
+    let entries = listDir(tcDirPath).unwrap(or: []);
     var updated = false;
 
-    var i: Int64 = 0;
-    while i < entries.count {
-        let name = entries(unchecked: i);
+    for name in entries {
         // Update channels (stable-*, preview-*, beta-*, nightly-*)
         if name.starts(with: "stable") or name.starts(with: "preview") or name.starts(with: "beta") or name.starts(with: "nightly") {
             let channel = if name.starts(with: "stable") { "stable" }
@@ -545,7 +540,6 @@ public func updateToolchains() -> Result[(), JessupError] {
                 }
             }
         }
-        i = i + 1
     }
 
     if not updated {
@@ -560,10 +554,10 @@ public func updateToolchains() -> Result[(), JessupError] {
 // ============================================================================
 
 /// Updates jessup itself to the latest version.
-public func selfUpdate() -> Result[(), JessupError] {
+public func selfUpdate() -> () throws JessupError {
     var platform = Platform(os: "", arch: "");
     match detectPlatform() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(p) => platform = p
     }
 
@@ -571,13 +565,13 @@ public func selfUpdate() -> Result[(), JessupError] {
 
     var downloadUrl = "";
     match fetchJessupRelease(platform: platform) {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(url) => downloadUrl = url
     }
 
     var bp = "";
     match binDir() {
-        .Err(e) => return .Err(e),
+        .Err(e) => throw e,
         .Ok(dir) => bp = dir
     }
 
@@ -612,7 +606,7 @@ public func selfUpdate() -> Result[(), JessupError] {
         rmSelfCmd.append("rm -rf ");
         rmSelfCmd.append(tmpDir);
          spawn(rmSelfCmd).unwrap(or: -1);
-        return .Err(JessupError.NetworkError("failed to download jessup update"))
+        throw JessupError.NetworkError("failed to download jessup update")
     }
 
     // Extract and strip top-level directory

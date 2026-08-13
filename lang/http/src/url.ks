@@ -236,7 +236,7 @@ public func encodeQueryString(pairs: Array[(String, String)]) -> String {
 /// splitSegments("/");         // []
 /// ```
 func splitSegments(path: String) -> Array[String] {
-    var segments = Array[String]();
+    var segments = [];
     for part in path.split("/") {
         if part.bytes.count > 0 {
             segments.append(part.toOwned())

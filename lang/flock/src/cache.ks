@@ -14,18 +14,18 @@ import flock.source.(joinPath, flockHome)
 // ============================================================================
 
 /// Returns the cache root directory: ~/.kestrel/packages/
-public func cacheRoot() -> Result[String, FlockError] {
+public func cacheRoot() -> String throws FlockError {
     match getenv("HOME") {
         .Some(home) => .Ok(joinPath(base: home, rel: ".kestrel/packages")),
-        .None => .Err(FlockError.CacheError("HOME environment variable not set"))
+        .None => throw FlockError.CacheError("HOME environment variable not set")
     }
 }
 
 /// Returns the cache path for a specific package version.
 /// e.g., ~/.kestrel/packages/kestrel/swoop/1.0.0/
-public func cachePath(org org: String, pkg pkg: String, version version: Version) -> Result[String, FlockError] {
+public func cachePath(org org: String, pkg pkg: String, version version: Version) -> String throws FlockError {
     match cacheRoot() {
-        .Err(e) => .Err(e),
+        .Err(e) => throw e,
         .Ok(root) => {
             let orgDir = joinPath(base: root, rel: org);
             let pkgDir = joinPath(base: orgDir, rel: pkg);
@@ -54,9 +54,9 @@ public func isCached(org org: String, pkg pkg: String, version version: Version)
 /// Ensures the cache directory exists for a given org/pkg/version.
 /// Creates all intermediate directories if needed.
 /// Returns the full cache path on success.
-public func ensureCacheDir(org org: String, pkg pkg: String, version version: Version) -> Result[String, FlockError] {
+public func ensureCacheDir(org org: String, pkg pkg: String, version version: Version) -> String throws FlockError {
     match cachePath(org: org, pkg: pkg, version: version) {
-        .Err(e) => .Err(e),
+        .Err(e) => throw e,
         .Ok(path) => {
             match mkdirAll(path) {
                 .Ok(_) => .Ok(path),
@@ -74,23 +74,23 @@ public func ensureCacheDir(org org: String, pkg pkg: String, version version: Ve
 // ============================================================================
 
 /// Downloads a file from a URL to a local path using curl.
-public func downloadFile(url url: String, outputPath outputPath: String) -> Result[(), FlockError] {
+public func downloadFile(url url: String, outputPath outputPath: String) -> () throws FlockError {
     var cmd = String(); cmd.append("curl -sL -o "); cmd.append(outputPath); cmd.append(" "); cmd.append(url);
     let exitCode = spawn(cmd).unwrap(or: -1);
     if exitCode != 0 {
         var msg = String(); msg.append("download failed: "); msg.append(url);
-        return .Err(FlockError.RegistryError(msg))
+        throw FlockError.RegistryError(msg)
     }
     .Ok(())
 }
 
 /// Extracts a .tar.gz archive into the target directory.
-public func extractArchive(archivePath archivePath: String, targetDir targetDir: String) -> Result[(), FlockError] {
+public func extractArchive(archivePath archivePath: String, targetDir targetDir: String) -> () throws FlockError {
     var cmd = String(); cmd.append("tar xzf "); cmd.append(archivePath); cmd.append(" -C "); cmd.append(targetDir);
     let exitCode = spawn(cmd).unwrap(or: -1);
     if exitCode != 0 {
         var msg = String(); msg.append("failed to extract archive: "); msg.append(archivePath);
-        return .Err(FlockError.CacheError(msg))
+        throw FlockError.CacheError(msg)
     }
     .Ok(())
 }

@@ -35,11 +35,11 @@ public struct LockEntry: Cloneable {
     /// "registry" or "path"
     public var source: String
     /// Checksum for registry packages (e.g., "sha256:abcdef...")
-    public var checksum: Optional[String]
+    public var checksum: String?
     /// Relative path for path dependencies
-    public var path: Optional[String]
+    public var path: String?
 
-    public init(name name: String, version version: Version, source source: String, checksum checksum: Optional[String], path path: Optional[String]) {
+    public init(name name: String, version version: Version, source source: String, checksum checksum: String?, path path: String?) {
         self.name = name;
         self.version = version;
         self.source = source;
@@ -67,7 +67,7 @@ public struct LockFile: Cloneable {
     public var packages: Array[LockEntry]
 
     public init() {
-        self.packages = Array[LockEntry]();
+        self.packages = [];
     }
 
     public init(packages packages: Array[LockEntry]) {
@@ -79,14 +79,11 @@ public struct LockFile: Cloneable {
     }
 
     /// Finds a locked entry by package name.
-    public func find(name name: String) -> Optional[LockEntry] {
-        var i: Int64 = 0;
-        while i < self.packages.count {
-            let entry = self.packages(unchecked: i);
+    public func find(name name: String) -> LockEntry? {
+        for entry in self.packages {
             if entry.name == name {
                 return .Some(entry)
             }
-            i = i + 1
         }
         .None
     }
@@ -97,7 +94,7 @@ public struct LockFile: Cloneable {
 // ============================================================================
 
 /// Parses a flock.lock file from its TOML source.
-public func parseLockFile(source source: String) -> Result[LockFile, FlockError] {
+public func parseLockFile(source source: String) -> LockFile throws FlockError {
     match parseToml(source) {
         .Err(e) => {
             var msg = String(); msg.append("invalid lock file: "); msg.append(e.description());
@@ -108,16 +105,14 @@ public func parseLockFile(source source: String) -> Result[LockFile, FlockError]
                 .None => .Ok(LockFile()),
                 .Some(pkgVal) => {
                     match pkgVal.asArray() {
-                        .None => .Err(FlockError.ManifestParse("lock file: 'package' is not an array")),
+                        .None => throw FlockError.ManifestParse("lock file: 'package' is not an array"),
                         .Some(arr) => {
-                            var entries = Array[LockEntry]();
-                            var i: Int64 = 0;
-                            while i < arr.count {
-                                match parseLockEntry(val: arr(unchecked: i)) {
-                                    .Err(e) => return .Err(e),
+                            var entries = [];
+                            for element in arr {
+                                match parseLockEntry(val: element) {
+                                    .Err(e) => throw e,
                                     .Ok(entry) => entries.append(entry)
                                 }
-                                i = i + 1
                             }
                             .Ok(LockFile(packages: entries))
                         }
@@ -129,17 +124,17 @@ public func parseLockFile(source source: String) -> Result[LockFile, FlockError]
 }
 
 /// Parses a single [[package]] entry from the lock file.
-func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
+func parseLockEntry(val val: Value) -> LockEntry throws FlockError {
     // Required: name
     var name = "";
     match val.value(for: "name") {
         .Some(v) => {
             match v.asString() {
                 .Some(s) => name = s,
-                .None => return .Err(FlockError.ManifestParse("lock entry: name is not a string"))
+                .None => throw FlockError.ManifestParse("lock entry: name is not a string")
             }
         },
-        .None => return .Err(FlockError.ManifestParse("lock entry: missing name"))
+        .None => throw FlockError.ManifestParse("lock entry: missing name")
     }
 
     // Required: version
@@ -150,13 +145,13 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
                 .Some(s) => {
                     match parseVersion(s: s) {
                         .Ok(ver) => version = ver,
-                        .Err(e) => return .Err(e)
+                        .Err(e) => throw e
                     }
                 },
-                .None => return .Err(FlockError.ManifestParse("lock entry: version is not a string"))
+                .None => throw FlockError.ManifestParse("lock entry: version is not a string")
             }
         },
-        .None => return .Err(FlockError.ManifestParse("lock entry: missing version"))
+        .None => throw FlockError.ManifestParse("lock entry: missing version")
     }
 
     // Required: source
@@ -172,7 +167,7 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
     }
 
     // Optional: checksum
-    var checksum: Optional[String] = .None;
+    var checksum: String? = .None;
     match val.value(for: "checksum") {
         .Some(v) => {
             match v.asString() {
@@ -184,7 +179,7 @@ func parseLockEntry(val val: Value) -> Result[LockEntry, FlockError] {
     }
 
     // Optional: path
-    var entryPath: Optional[String] = .None;
+    var entryPath: String? = .None;
     match val.value(for: "path") {
         .Some(v) => {
             match v.asString() {
@@ -234,7 +229,7 @@ public func generateLockFile(entries entries: Array[LockEntry]) -> String {
 // HELPERS
 // ============================================================================
 
-func cloneOptStr(opt: Optional[String]) -> Optional[String] {
+func cloneOptStr(opt: String?) -> String? {
     match opt {
         .Some(s) => .Some(s.clone()),
         .None => .None

@@ -30,7 +30,7 @@ use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::ast_type::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, Name, NodeKind, TypeAnnotation,
+    Callable, ConformanceItem, Conformances, NodeKind, TypeAnnotation,
 };
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ExtensionsFor, ProtocolMembers, ResolveTypePath, TypeResolution};
@@ -204,15 +204,11 @@ fn collect_from_entity(cx: &DeclContext<'_>, entity: Entity, provided: &mut Prov
     }
 }
 
+/// The name this member answers to. Delegates to name resolution's rule —
+/// this was a fork that keyed subscripts on `NodeKind::Subscript` while the
+/// real lookup keys them on the `Subscript` marker component.
 fn member_lookup_name(cx: &DeclContext<'_>, entity: Entity) -> Option<String> {
-    if let Some(name) = cx.query.get::<Name>(entity) {
-        return Some(name.0.clone());
-    }
-    match cx.query.get::<NodeKind>(entity) {
-        Some(NodeKind::Initializer) => Some("init".into()),
-        Some(NodeKind::Subscript) => Some("subscript".into()),
-        _ => None,
-    }
+    kestrel_name_res::helpers::member_lookup_name(cx.query, entity).map(str::to_owned)
 }
 
 fn signatures_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {

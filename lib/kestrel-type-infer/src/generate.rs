@@ -78,7 +78,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             HirLiteral::Integer(_) => ctx.fresh_literal(LiteralKind::Integer),
             HirLiteral::Float(_) => ctx.fresh_literal(LiteralKind::Float),
             HirLiteral::String { .. } => ctx.fresh_literal(LiteralKind::String),
-            HirLiteral::Char(_) => ctx.fresh_literal(LiteralKind::Char),
+            HirLiteral::Char { .. } => ctx.fresh_literal(LiteralKind::Char),
             HirLiteral::Bool(_) => ctx.fresh_literal(LiteralKind::Bool),
             HirLiteral::Null => ctx.fresh_literal(LiteralKind::Null),
         },
@@ -2128,7 +2128,7 @@ fn literal_kind_for_expr(hir: &HirBody, expr: HirExprId) -> Option<LiteralKind> 
         HirLiteral::Integer(_) => LiteralKind::Integer,
         HirLiteral::Float(_) => LiteralKind::Float,
         HirLiteral::String { .. } => LiteralKind::String,
-        HirLiteral::Char(_) => LiteralKind::Char,
+        HirLiteral::Char { .. } => LiteralKind::Char,
         HirLiteral::Bool(_) => LiteralKind::Bool,
         HirLiteral::Null => LiteralKind::Null,
     })
@@ -2378,7 +2378,7 @@ fn literal_to_tyvar(ctx: &mut InferCtx<'_>, value: &HirLiteral) -> TyVar {
         HirLiteral::Integer(_) => ctx.fresh_literal(LiteralKind::Integer),
         HirLiteral::Float(_) => ctx.fresh_literal(LiteralKind::Float),
         HirLiteral::String { .. } => ctx.fresh_literal(LiteralKind::String),
-        HirLiteral::Char(_) => ctx.fresh_literal(LiteralKind::Char),
+        HirLiteral::Char { .. } => ctx.fresh_literal(LiteralKind::Char),
         HirLiteral::Bool(_) => ctx.fresh_literal(LiteralKind::Bool),
         HirLiteral::Null => ctx.fresh_literal(LiteralKind::Null),
     }

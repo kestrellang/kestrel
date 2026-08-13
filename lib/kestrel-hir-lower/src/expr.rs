@@ -209,7 +209,14 @@ impl LowerCtx<'_> {
                 }
             },
             AstLiteral::Char(s) => {
-                HirLiteral::Char(crate::pat::parse_char_validated(s, span, self.ctx))
+                {
+                    let (value, escape_errors) =
+                        crate::pat::parse_char_validated(s, span, self.ctx);
+                    HirLiteral::Char {
+                        value,
+                        escape_errors,
+                    }
+                }
             },
             AstLiteral::Bool(b) => HirLiteral::Bool(*b),
             AstLiteral::Null => HirLiteral::Null,
@@ -526,10 +533,7 @@ impl LowerCtx<'_> {
             .ctx
             .parent_of(self.owner)
             .and_then(|p| self.ctx.get::<NodeKind>(p).cloned());
-        let in_type = matches!(
-            parent_kind,
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-        );
+        let in_type = parent_kind.as_ref().is_some_and(NodeKind::is_type_scope);
         let message = if in_type {
             "cannot use 'self' in static method"
         } else {

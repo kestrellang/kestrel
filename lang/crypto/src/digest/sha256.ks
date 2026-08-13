@@ -57,7 +57,7 @@ public struct SHA256: Digest {
 
     public func finalize() -> DigestOutput {
         var st = self.state;
-        var buf = Array[UInt8]();
+        var buf: [UInt8] = [];
         buf.append(contentsOf: self.buffer.asSlice());
 
         buf.append(0x80);
@@ -74,7 +74,7 @@ public struct SHA256: Digest {
             offset = offset + 64;
         }
 
-        var result = Array[UInt8]();
+        var result: [UInt8] = [];
         for i in 0..<8 {
             result.append(contentsOf: st(i).toBytesBigEndian().asSlice());
         }

@@ -344,12 +344,347 @@ pub enum SyntaxKind {
     RefClause,         // ref { ... } place accessor (stage 1.5)
     MutatingRefClause, // mutating ref { ... } place accessor (stage 1.5)
     RefBindingPattern, // &name / &mutating name binder pattern (stage 1.5 item 2)
+
+    /// Not a syntax kind — the end-of-enum marker.
+    ///
+    /// Its discriminant is the variant count, which is what lets
+    /// `syntax_kind_table_round_trips` prove `SyntaxKind::ALL` is **complete**
+    /// rather than merely self-consistent (a truncated table round-trips
+    /// happily on its own). Keep it last; never construct it, never emit it —
+    /// it is absent from `ALL`, so `kind_from_raw` reads it back as `Error`.
+    #[doc(hidden)]
+    __NotAKind,
 }
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {
         Self(kind as u16)
     }
+}
+
+impl SyntaxKind {
+    /// Whether this kind is trivia — present in the tree for fidelity, skipped
+    /// by every grammar rule.
+    ///
+    /// The set is owned by [`Token::is_trivia`]; this is its image under
+    /// `From<Token>`, and `trivia_agrees_with_the_lexer` proves the two stay in
+    /// step in both directions. The duplication is unavoidable — the tree is
+    /// built from `SyntaxKind`, not `Token` — but the *drift* is not.
+    pub fn is_trivia(self) -> bool {
+        matches!(
+            self,
+            SyntaxKind::Whitespace
+                | SyntaxKind::Newline
+                | SyntaxKind::LineComment
+                | SyntaxKind::BlockComment
+        )
+    }
+
+    /// Whether this kind is a type node — something `ast_type_from_cst` can
+    /// turn into an `AstType`.
+    ///
+    /// Excludes `TyList`, which *contains* types (a function parameter list)
+    /// but is not one. `every_ty_kind_is_a_type_node` proves the set covers
+    /// every `Ty*` variant except that one, so appending a type kind to the
+    /// enum without listing it here fails the build rather than making the
+    /// new syntax invisible to the AST builder.
+    pub fn is_type(self) -> bool {
+        matches!(
+            self,
+            SyntaxKind::Ty
+                | SyntaxKind::TyPath
+                | SyntaxKind::TyTuple
+                | SyntaxKind::TyFunction
+                | SyntaxKind::TyArray
+                | SyntaxKind::TyDictionary
+                | SyntaxKind::TyOptional
+                | SyntaxKind::TyResult
+                | SyntaxKind::TyUnit
+                | SyntaxKind::TyNever
+                | SyntaxKind::TyInferred
+                | SyntaxKind::TySome
+                | SyntaxKind::TyRef
+                | SyntaxKind::TyMutRef
+        )
+    }
+
+    /// `Ty*` kinds that are deliberately **not** type nodes. Each needs a
+    /// reason — this list is the only way past `every_ty_kind_is_a_type_node`.
+    #[cfg(test)]
+    const NON_TYPE_TY_KINDS: &'static [(SyntaxKind, &'static str)] = &[(
+        SyntaxKind::TyList,
+        "a list of parameter types, not a type itself",
+    )];
+
+    /// Every variant, **in declaration order** — `ALL[n]` is the kind whose
+    /// discriminant is `n`. `SyntaxKind` declares no explicit discriminants, so
+    /// declaration order *is* the raw numbering rowan stores in green trees.
+    ///
+    /// This is the inverse of `kind as u16`, and the only reason it can be
+    /// hand-written is that `syntax_kind_table_round_trips` proves it complete
+    /// and correctly ordered. **Append a new kind at the end of both the enum
+    /// and this table** — inserting mid-list renumbers every later kind and
+    /// corrupts cached trees.
+    pub const ALL: &'static [SyntaxKind] = &[
+        SyntaxKind::Root,
+        SyntaxKind::SourceFile,
+        SyntaxKind::DeclarationItem,
+        SyntaxKind::Attribute,
+        SyntaxKind::AttributeList,
+        SyntaxKind::AttributeArgs,
+        SyntaxKind::AttributeArg,
+        SyntaxKind::ProtocolDeclaration,
+        SyntaxKind::ProtocolBody,
+        SyntaxKind::StructDeclaration,
+        SyntaxKind::StructBody,
+        SyntaxKind::ExtensionDeclaration,
+        SyntaxKind::ExtensionBody,
+        SyntaxKind::EnumDeclaration,
+        SyntaxKind::EnumBody,
+        SyntaxKind::EnumCaseDeclaration,
+        SyntaxKind::EnumCaseParameter,
+        SyntaxKind::EnumCaseParameterList,
+        SyntaxKind::IndirectModifier,
+        SyntaxKind::ImportDeclaration,
+        SyntaxKind::ImportItem,
+        SyntaxKind::ModuleDeclaration,
+        SyntaxKind::ModulePath,
+        SyntaxKind::Name,
+        SyntaxKind::TypeAliasDeclaration,
+        SyntaxKind::AliasedType,
+        SyntaxKind::FieldDeclaration,
+        SyntaxKind::GetterClause,
+        SyntaxKind::SetterClause,
+        SyntaxKind::PropertyAccessors,
+        SyntaxKind::FunctionDeclaration,
+        SyntaxKind::InitializerDeclaration,
+        SyntaxKind::InitEffect,
+        SyntaxKind::DeinitDeclaration,
+        SyntaxKind::SubscriptDeclaration,
+        SyntaxKind::SubscriptBody,
+        SyntaxKind::FunctionBody,
+        SyntaxKind::ParameterList,
+        SyntaxKind::Parameter,
+        SyntaxKind::ReturnType,
+        SyntaxKind::Visibility,
+        SyntaxKind::StaticModifier,
+        SyntaxKind::TypeParameterList,
+        SyntaxKind::TypeParameter,
+        SyntaxKind::TypeArgumentList,
+        SyntaxKind::DefaultType,
+        SyntaxKind::DefaultValue,
+        SyntaxKind::WhereClause,
+        SyntaxKind::TypeBound,
+        SyntaxKind::TypeEquality,
+        SyntaxKind::AssociatedTypeBound,
+        SyntaxKind::AssociatedTypeTarget,
+        SyntaxKind::ConformanceList,
+        SyntaxKind::ConformanceItem,
+        SyntaxKind::NegativeConformance,
+        SyntaxKind::Ty,
+        SyntaxKind::TyUnit,
+        SyntaxKind::TyNever,
+        SyntaxKind::TyTuple,
+        SyntaxKind::TyFunction,
+        SyntaxKind::TyPath,
+        SyntaxKind::TyArray,
+        SyntaxKind::TyDictionary,
+        SyntaxKind::TyOptional,
+        SyntaxKind::TyResult,
+        SyntaxKind::TyList,
+        SyntaxKind::TyInferred,
+        SyntaxKind::TySome,
+        SyntaxKind::Path,
+        SyntaxKind::PathElement,
+        SyntaxKind::CodeBlock,
+        SyntaxKind::Statement,
+        SyntaxKind::ExpressionStatement,
+        SyntaxKind::VariableDeclaration,
+        SyntaxKind::GuardStatement,
+        SyntaxKind::DeinitStatement,
+        SyntaxKind::GuardCondition,
+        SyntaxKind::Expression,
+        SyntaxKind::ExprUnit,
+        SyntaxKind::ExprInteger,
+        SyntaxKind::ExprFloat,
+        SyntaxKind::ExprString,
+        SyntaxKind::ExprRawString,
+        SyntaxKind::ExprInterpolatedString,
+        SyntaxKind::StringLiteralPart,
+        SyntaxKind::StringInterpolation,
+        SyntaxKind::FormatSpecifier,
+        SyntaxKind::ExprChar,
+        SyntaxKind::ExprBool,
+        SyntaxKind::ExprArray,
+        SyntaxKind::ExprDictionary,
+        SyntaxKind::DictionaryEntry,
+        SyntaxKind::ExprTuple,
+        SyntaxKind::ExprGrouping,
+        SyntaxKind::ExprPath,
+        SyntaxKind::ExprUnary,
+        SyntaxKind::ExprPostfix,
+        SyntaxKind::ExprBinary,
+        SyntaxKind::ExprNull,
+        SyntaxKind::ExprCall,
+        SyntaxKind::ExprAssignment,
+        SyntaxKind::ExprCompoundAssignment,
+        SyntaxKind::ExprIf,
+        SyntaxKind::IfLetCondition,
+        SyntaxKind::ElseClause,
+        SyntaxKind::ExprWhile,
+        SyntaxKind::WhileLetCondition,
+        SyntaxKind::ExprFor,
+        SyntaxKind::ForPattern,
+        SyntaxKind::ForIterable,
+        SyntaxKind::ExprLoop,
+        SyntaxKind::ExprBreak,
+        SyntaxKind::ExprContinue,
+        SyntaxKind::ExprReturn,
+        SyntaxKind::ExprThrow,
+        SyntaxKind::ExprTry,
+        SyntaxKind::ExprTupleIndex,
+        SyntaxKind::ExprClosure,
+        SyntaxKind::ClosureParams,
+        SyntaxKind::ClosureParam,
+        SyntaxKind::LoopLabel,
+        SyntaxKind::ArgumentList,
+        SyntaxKind::Argument,
+        SyntaxKind::ExprImplicitMemberAccess,
+        SyntaxKind::ExprMatch,
+        SyntaxKind::MatchArm,
+        SyntaxKind::MatchArmGuard,
+        SyntaxKind::Pattern,
+        SyntaxKind::WildcardPattern,
+        SyntaxKind::BindingPattern,
+        SyntaxKind::TuplePattern,
+        SyntaxKind::TuplePatternElement,
+        SyntaxKind::LiteralPattern,
+        SyntaxKind::RangePattern,
+        SyntaxKind::EnumPattern,
+        SyntaxKind::EnumPatternArg,
+        SyntaxKind::NullPattern,
+        SyntaxKind::SomePattern,
+        SyntaxKind::StructPattern,
+        SyntaxKind::StructPatternField,
+        SyntaxKind::StructPatternRest,
+        SyntaxKind::ArrayPattern,
+        SyntaxKind::ArrayPatternElement,
+        SyntaxKind::ArrayPatternRest,
+        SyntaxKind::AtPattern,
+        SyntaxKind::RestPattern,
+        SyntaxKind::OrPattern,
+        SyntaxKind::ErrorPattern,
+        SyntaxKind::Identifier,
+        SyntaxKind::String,
+        SyntaxKind::RawString,
+        SyntaxKind::Char,
+        SyntaxKind::Integer,
+        SyntaxKind::Float,
+        SyntaxKind::Boolean,
+        SyntaxKind::Null,
+        SyntaxKind::Some,
+        SyntaxKind::As,
+        SyntaxKind::Break,
+        SyntaxKind::Case,
+        SyntaxKind::Consuming,
+        SyntaxKind::Continue,
+        SyntaxKind::Deinit,
+        SyntaxKind::Else,
+        SyntaxKind::Enum,
+        SyntaxKind::Extend,
+        SyntaxKind::For,
+        SyntaxKind::Fileprivate,
+        SyntaxKind::Func,
+        SyntaxKind::If,
+        SyntaxKind::Import,
+        SyntaxKind::Indirect,
+        SyntaxKind::Loop,
+        SyntaxKind::Init,
+        SyntaxKind::Internal,
+        SyntaxKind::Let,
+        SyntaxKind::Module,
+        SyntaxKind::Mutating,
+        SyntaxKind::Private,
+        SyntaxKind::Protocol,
+        SyntaxKind::Public,
+        SyntaxKind::Return,
+        SyntaxKind::Throw,
+        SyntaxKind::Try,
+        SyntaxKind::Throws,
+        SyntaxKind::Static,
+        SyntaxKind::Struct,
+        SyntaxKind::Type,
+        SyntaxKind::Var,
+        SyntaxKind::Where,
+        SyntaxKind::While,
+        SyntaxKind::In,
+        SyntaxKind::Match,
+        SyntaxKind::Guard,
+        SyntaxKind::Get,
+        SyntaxKind::Set,
+        SyntaxKind::Subscript,
+        SyntaxKind::And,
+        SyntaxKind::Not,
+        SyntaxKind::Or,
+        SyntaxKind::LParen,
+        SyntaxKind::RParen,
+        SyntaxKind::LBrace,
+        SyntaxKind::RBrace,
+        SyntaxKind::LBracket,
+        SyntaxKind::RBracket,
+        SyntaxKind::Semicolon,
+        SyntaxKind::Comma,
+        SyntaxKind::Dot,
+        SyntaxKind::Colon,
+        SyntaxKind::Question,
+        SyntaxKind::Bang,
+        SyntaxKind::Underscore,
+        SyntaxKind::DotDotEquals,
+        SyntaxKind::DotDotLess,
+        SyntaxKind::DotDot,
+        SyntaxKind::LessLessEquals,
+        SyntaxKind::GreaterGreaterEquals,
+        SyntaxKind::LessLess,
+        SyntaxKind::GreaterGreater,
+        SyntaxKind::LessEquals,
+        SyntaxKind::GreaterEquals,
+        SyntaxKind::EqualsEquals,
+        SyntaxKind::BangEquals,
+        SyntaxKind::QuestionQuestion,
+        SyntaxKind::Arrow,
+        SyntaxKind::FatArrow,
+        SyntaxKind::PlusEquals,
+        SyntaxKind::MinusEquals,
+        SyntaxKind::StarEquals,
+        SyntaxKind::SlashEquals,
+        SyntaxKind::PercentEquals,
+        SyntaxKind::AmpersandEquals,
+        SyntaxKind::PipeEquals,
+        SyntaxKind::CaretEquals,
+        SyntaxKind::Equals,
+        SyntaxKind::Plus,
+        SyntaxKind::Minus,
+        SyntaxKind::Star,
+        SyntaxKind::Slash,
+        SyntaxKind::Percent,
+        SyntaxKind::Ampersand,
+        SyntaxKind::Pipe,
+        SyntaxKind::Caret,
+        SyntaxKind::Less,
+        SyntaxKind::Greater,
+        SyntaxKind::At,
+        SyntaxKind::Whitespace,
+        SyntaxKind::Newline,
+        SyntaxKind::LineComment,
+        SyntaxKind::BlockComment,
+        SyntaxKind::Error,
+        SyntaxKind::Missing,
+        SyntaxKind::TyRef,
+        SyntaxKind::TyMutRef,
+        SyntaxKind::RefClause,
+        SyntaxKind::MutatingRefClause,
+        SyntaxKind::RefBindingPattern,
+    ];
 }
 
 impl From<Token> for SyntaxKind {
@@ -476,535 +811,19 @@ impl Language for KestrelLanguage {
     type Kind = SyntaxKind;
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
-        // Constants for pattern matching - suppress naming warnings
-        const ROOT: u16 = SyntaxKind::Root as u16;
-        const SOURCE_FILE: u16 = SyntaxKind::SourceFile as u16;
-        const DECLARATION_ITEM: u16 = SyntaxKind::DeclarationItem as u16;
-        // Attribute nodes
-        const ATTRIBUTE: u16 = SyntaxKind::Attribute as u16;
-        const ATTRIBUTE_LIST: u16 = SyntaxKind::AttributeList as u16;
-        const ATTRIBUTE_ARGS: u16 = SyntaxKind::AttributeArgs as u16;
-        const ATTRIBUTE_ARG: u16 = SyntaxKind::AttributeArg as u16;
-        const PROTOCOL_DECLARATION: u16 = SyntaxKind::ProtocolDeclaration as u16;
-        const PROTOCOL_BODY: u16 = SyntaxKind::ProtocolBody as u16;
-        const STRUCT_DECLARATION: u16 = SyntaxKind::StructDeclaration as u16;
-        const STRUCT_BODY: u16 = SyntaxKind::StructBody as u16;
-        const EXTENSION_DECLARATION: u16 = SyntaxKind::ExtensionDeclaration as u16;
-        const EXTENSION_BODY: u16 = SyntaxKind::ExtensionBody as u16;
-        const ENUM_DECLARATION: u16 = SyntaxKind::EnumDeclaration as u16;
-        const ENUM_BODY: u16 = SyntaxKind::EnumBody as u16;
-        const ENUM_CASE_DECLARATION: u16 = SyntaxKind::EnumCaseDeclaration as u16;
-        const ENUM_CASE_PARAMETER: u16 = SyntaxKind::EnumCaseParameter as u16;
-        const ENUM_CASE_PARAMETER_LIST: u16 = SyntaxKind::EnumCaseParameterList as u16;
-        const INDIRECT_MODIFIER: u16 = SyntaxKind::IndirectModifier as u16;
-        const IMPORT_DECLARATION: u16 = SyntaxKind::ImportDeclaration as u16;
-        const IMPORT_ITEM: u16 = SyntaxKind::ImportItem as u16;
-        const MODULE_DECLARATION: u16 = SyntaxKind::ModuleDeclaration as u16;
-        const MODULE_PATH: u16 = SyntaxKind::ModulePath as u16;
-        const NAME: u16 = SyntaxKind::Name as u16;
-        const TYPE_ALIAS_DECLARATION: u16 = SyntaxKind::TypeAliasDeclaration as u16;
-        const ALIASED_TYPE: u16 = SyntaxKind::AliasedType as u16;
-        const FIELD_DECLARATION: u16 = SyntaxKind::FieldDeclaration as u16;
-        const GETTER_CLAUSE: u16 = SyntaxKind::GetterClause as u16;
-        const SETTER_CLAUSE: u16 = SyntaxKind::SetterClause as u16;
-        const PROPERTY_ACCESSORS: u16 = SyntaxKind::PropertyAccessors as u16;
-        const FUNCTION_DECLARATION: u16 = SyntaxKind::FunctionDeclaration as u16;
-        const INITIALIZER_DECLARATION: u16 = SyntaxKind::InitializerDeclaration as u16;
-        const INIT_EFFECT: u16 = SyntaxKind::InitEffect as u16;
-        const DEINIT_DECLARATION: u16 = SyntaxKind::DeinitDeclaration as u16;
-        const SUBSCRIPT_DECLARATION: u16 = SyntaxKind::SubscriptDeclaration as u16;
-        const SUBSCRIPT_BODY: u16 = SyntaxKind::SubscriptBody as u16;
-        const FUNCTION_BODY: u16 = SyntaxKind::FunctionBody as u16;
-        const PARAMETER_LIST: u16 = SyntaxKind::ParameterList as u16;
-        const PARAMETER: u16 = SyntaxKind::Parameter as u16;
-        const RETURN_TYPE: u16 = SyntaxKind::ReturnType as u16;
-        const VISIBILITY: u16 = SyntaxKind::Visibility as u16;
-        const STATIC_MODIFIER: u16 = SyntaxKind::StaticModifier as u16;
-        const TYPE_PARAMETER_LIST: u16 = SyntaxKind::TypeParameterList as u16;
-        const TYPE_PARAMETER: u16 = SyntaxKind::TypeParameter as u16;
-        const TYPE_ARGUMENT_LIST: u16 = SyntaxKind::TypeArgumentList as u16;
-        const DEFAULT_TYPE: u16 = SyntaxKind::DefaultType as u16;
-        const DEFAULT_VALUE: u16 = SyntaxKind::DefaultValue as u16;
-        const WHERE_CLAUSE: u16 = SyntaxKind::WhereClause as u16;
-        const TYPE_BOUND: u16 = SyntaxKind::TypeBound as u16;
-        const TYPE_EQUALITY: u16 = SyntaxKind::TypeEquality as u16;
-        const ASSOCIATED_TYPE_BOUND: u16 = SyntaxKind::AssociatedTypeBound as u16;
-        const ASSOCIATED_TYPE_TARGET: u16 = SyntaxKind::AssociatedTypeTarget as u16;
-        const CONFORMANCE_LIST: u16 = SyntaxKind::ConformanceList as u16;
-        const CONFORMANCE_ITEM: u16 = SyntaxKind::ConformanceItem as u16;
-        const NEGATIVE_CONFORMANCE: u16 = SyntaxKind::NegativeConformance as u16;
-        const TY: u16 = SyntaxKind::Ty as u16;
-        const TY_UNIT: u16 = SyntaxKind::TyUnit as u16;
-        const TY_NEVER: u16 = SyntaxKind::TyNever as u16;
-        const TY_TUPLE: u16 = SyntaxKind::TyTuple as u16;
-        const TY_FUNCTION: u16 = SyntaxKind::TyFunction as u16;
-        const TY_PATH: u16 = SyntaxKind::TyPath as u16;
-        const TY_ARRAY: u16 = SyntaxKind::TyArray as u16;
-        const TY_DICTIONARY: u16 = SyntaxKind::TyDictionary as u16;
-        const TY_RESULT: u16 = SyntaxKind::TyResult as u16;
-        const TY_LIST: u16 = SyntaxKind::TyList as u16;
-        const TY_INFERRED: u16 = SyntaxKind::TyInferred as u16;
-        const TY_SOME: u16 = SyntaxKind::TySome as u16;
-        const PATH: u16 = SyntaxKind::Path as u16;
-        const PATH_ELEMENT: u16 = SyntaxKind::PathElement as u16;
-        const CODE_BLOCK: u16 = SyntaxKind::CodeBlock as u16;
-        const STATEMENT: u16 = SyntaxKind::Statement as u16;
-        const EXPRESSION_STATEMENT: u16 = SyntaxKind::ExpressionStatement as u16;
-        const VARIABLE_DECLARATION: u16 = SyntaxKind::VariableDeclaration as u16;
-        const GUARD_STATEMENT: u16 = SyntaxKind::GuardStatement as u16;
-        const GUARD_CONDITION: u16 = SyntaxKind::GuardCondition as u16;
-        const DEINIT_STATEMENT: u16 = SyntaxKind::DeinitStatement as u16;
-        const EXPRESSION: u16 = SyntaxKind::Expression as u16;
-        const EXPR_UNIT: u16 = SyntaxKind::ExprUnit as u16;
-        const EXPR_INTEGER: u16 = SyntaxKind::ExprInteger as u16;
-        const EXPR_FLOAT: u16 = SyntaxKind::ExprFloat as u16;
-        const EXPR_STRING: u16 = SyntaxKind::ExprString as u16;
-        const EXPR_RAW_STRING: u16 = SyntaxKind::ExprRawString as u16;
-        const EXPR_INTERPOLATED_STRING: u16 = SyntaxKind::ExprInterpolatedString as u16;
-        const STRING_LITERAL_PART: u16 = SyntaxKind::StringLiteralPart as u16;
-        const STRING_INTERPOLATION: u16 = SyntaxKind::StringInterpolation as u16;
-        const FORMAT_SPECIFIER: u16 = SyntaxKind::FormatSpecifier as u16;
-        const EXPR_CHAR: u16 = SyntaxKind::ExprChar as u16;
-        const EXPR_BOOL: u16 = SyntaxKind::ExprBool as u16;
-        const EXPR_ARRAY: u16 = SyntaxKind::ExprArray as u16;
-        const EXPR_DICTIONARY: u16 = SyntaxKind::ExprDictionary as u16;
-        const DICTIONARY_ENTRY: u16 = SyntaxKind::DictionaryEntry as u16;
-        const EXPR_TUPLE: u16 = SyntaxKind::ExprTuple as u16;
-        const EXPR_GROUPING: u16 = SyntaxKind::ExprGrouping as u16;
-        const EXPR_PATH: u16 = SyntaxKind::ExprPath as u16;
-        const EXPR_UNARY: u16 = SyntaxKind::ExprUnary as u16;
-        const EXPR_POSTFIX: u16 = SyntaxKind::ExprPostfix as u16;
-        const EXPR_BINARY: u16 = SyntaxKind::ExprBinary as u16;
-        const EXPR_NULL: u16 = SyntaxKind::ExprNull as u16;
-        const EXPR_CALL: u16 = SyntaxKind::ExprCall as u16;
-        const EXPR_ASSIGNMENT: u16 = SyntaxKind::ExprAssignment as u16;
-        const EXPR_COMPOUND_ASSIGNMENT: u16 = SyntaxKind::ExprCompoundAssignment as u16;
-        const EXPR_IF: u16 = SyntaxKind::ExprIf as u16;
-        const IF_LET_CONDITION: u16 = SyntaxKind::IfLetCondition as u16;
-        const ELSE_CLAUSE: u16 = SyntaxKind::ElseClause as u16;
-        const EXPR_WHILE: u16 = SyntaxKind::ExprWhile as u16;
-        const WHILE_LET_CONDITION: u16 = SyntaxKind::WhileLetCondition as u16;
-        const EXPR_FOR: u16 = SyntaxKind::ExprFor as u16;
-        const FOR_PATTERN: u16 = SyntaxKind::ForPattern as u16;
-        const FOR_ITERABLE: u16 = SyntaxKind::ForIterable as u16;
-        const EXPR_LOOP: u16 = SyntaxKind::ExprLoop as u16;
-        const EXPR_BREAK: u16 = SyntaxKind::ExprBreak as u16;
-        const EXPR_CONTINUE: u16 = SyntaxKind::ExprContinue as u16;
-        const EXPR_RETURN: u16 = SyntaxKind::ExprReturn as u16;
-        const EXPR_THROW: u16 = SyntaxKind::ExprThrow as u16;
-        const EXPR_TRY: u16 = SyntaxKind::ExprTry as u16;
-        const EXPR_TUPLE_INDEX: u16 = SyntaxKind::ExprTupleIndex as u16;
-        const EXPR_CLOSURE: u16 = SyntaxKind::ExprClosure as u16;
-        const CLOSURE_PARAMS: u16 = SyntaxKind::ClosureParams as u16;
-        const CLOSURE_PARAM: u16 = SyntaxKind::ClosureParam as u16;
-        const LOOP_LABEL: u16 = SyntaxKind::LoopLabel as u16;
-        const ARGUMENT_LIST: u16 = SyntaxKind::ArgumentList as u16;
-        const ARGUMENT: u16 = SyntaxKind::Argument as u16;
-        const EXPR_IMPLICIT_MEMBER_ACCESS: u16 = SyntaxKind::ExprImplicitMemberAccess as u16;
-        const EXPR_MATCH: u16 = SyntaxKind::ExprMatch as u16;
-        const MATCH_ARM: u16 = SyntaxKind::MatchArm as u16;
-        const MATCH_ARM_GUARD: u16 = SyntaxKind::MatchArmGuard as u16;
-        // Pattern nodes
-        const PATTERN: u16 = SyntaxKind::Pattern as u16;
-        const WILDCARD_PATTERN: u16 = SyntaxKind::WildcardPattern as u16;
-        const BINDING_PATTERN: u16 = SyntaxKind::BindingPattern as u16;
-        const TUPLE_PATTERN: u16 = SyntaxKind::TuplePattern as u16;
-        const TUPLE_PATTERN_ELEMENT: u16 = SyntaxKind::TuplePatternElement as u16;
-        const LITERAL_PATTERN: u16 = SyntaxKind::LiteralPattern as u16;
-        const RANGE_PATTERN: u16 = SyntaxKind::RangePattern as u16;
-        const ENUM_PATTERN: u16 = SyntaxKind::EnumPattern as u16;
-        const ENUM_PATTERN_ARG: u16 = SyntaxKind::EnumPatternArg as u16;
-        const NULL_PATTERN: u16 = SyntaxKind::NullPattern as u16;
-        const SOME_PATTERN: u16 = SyntaxKind::SomePattern as u16;
-        const STRUCT_PATTERN: u16 = SyntaxKind::StructPattern as u16;
-        const STRUCT_PATTERN_FIELD: u16 = SyntaxKind::StructPatternField as u16;
-        const STRUCT_PATTERN_REST: u16 = SyntaxKind::StructPatternRest as u16;
-        const ARRAY_PATTERN: u16 = SyntaxKind::ArrayPattern as u16;
-        const ARRAY_PATTERN_ELEMENT: u16 = SyntaxKind::ArrayPatternElement as u16;
-        const ARRAY_PATTERN_REST: u16 = SyntaxKind::ArrayPatternRest as u16;
-        const AT_PATTERN: u16 = SyntaxKind::AtPattern as u16;
-        const REST_PATTERN: u16 = SyntaxKind::RestPattern as u16;
-        const OR_PATTERN: u16 = SyntaxKind::OrPattern as u16;
-        const ERROR_PATTERN: u16 = SyntaxKind::ErrorPattern as u16;
-        const IDENTIFIER: u16 = SyntaxKind::Identifier as u16;
-        const STRING: u16 = SyntaxKind::String as u16;
-        const RAW_STRING: u16 = SyntaxKind::RawString as u16;
-        const CHAR: u16 = SyntaxKind::Char as u16;
-        const INTEGER: u16 = SyntaxKind::Integer as u16;
-        const FLOAT: u16 = SyntaxKind::Float as u16;
-        const BOOLEAN: u16 = SyntaxKind::Boolean as u16;
-        const NULL: u16 = SyntaxKind::Null as u16;
-        const SOME: u16 = SyntaxKind::Some as u16;
-        const AS: u16 = SyntaxKind::As as u16;
-        const BREAK: u16 = SyntaxKind::Break as u16;
-        const CASE: u16 = SyntaxKind::Case as u16;
-        const CONSUMING: u16 = SyntaxKind::Consuming as u16;
-        const CONTINUE: u16 = SyntaxKind::Continue as u16;
-        const DEINIT: u16 = SyntaxKind::Deinit as u16;
-        const ELSE: u16 = SyntaxKind::Else as u16;
-        const ENUM: u16 = SyntaxKind::Enum as u16;
-        const EXTEND: u16 = SyntaxKind::Extend as u16;
-        const FOR: u16 = SyntaxKind::For as u16;
-        const FILEPRIVATE: u16 = SyntaxKind::Fileprivate as u16;
-        const FUNC: u16 = SyntaxKind::Func as u16;
-        const IF: u16 = SyntaxKind::If as u16;
-        const IMPORT: u16 = SyntaxKind::Import as u16;
-        const INDIRECT: u16 = SyntaxKind::Indirect as u16;
-        const INIT: u16 = SyntaxKind::Init as u16;
-        const LOOP: u16 = SyntaxKind::Loop as u16;
-        const INTERNAL: u16 = SyntaxKind::Internal as u16;
-        const LET: u16 = SyntaxKind::Let as u16;
-        const MODULE: u16 = SyntaxKind::Module as u16;
-        const MUTATING: u16 = SyntaxKind::Mutating as u16;
-        const PRIVATE: u16 = SyntaxKind::Private as u16;
-        const PROTOCOL: u16 = SyntaxKind::Protocol as u16;
-        const PUBLIC: u16 = SyntaxKind::Public as u16;
-        const RETURN: u16 = SyntaxKind::Return as u16;
-        const THROW: u16 = SyntaxKind::Throw as u16;
-        const TRY: u16 = SyntaxKind::Try as u16;
-        const THROWS: u16 = SyntaxKind::Throws as u16;
-        const STATIC: u16 = SyntaxKind::Static as u16;
-        const STRUCT: u16 = SyntaxKind::Struct as u16;
-        const TYPE: u16 = SyntaxKind::Type as u16;
-        const VAR: u16 = SyntaxKind::Var as u16;
-        const WHERE: u16 = SyntaxKind::Where as u16;
-        const WHILE: u16 = SyntaxKind::While as u16;
-        const IN: u16 = SyntaxKind::In as u16;
-        const MATCH: u16 = SyntaxKind::Match as u16;
-        const GUARD: u16 = SyntaxKind::Guard as u16;
-        const GET: u16 = SyntaxKind::Get as u16;
-        const SET: u16 = SyntaxKind::Set as u16;
-        const SUBSCRIPT: u16 = SyntaxKind::Subscript as u16;
-        // Logical keywords
-        const AND: u16 = SyntaxKind::And as u16;
-        const NOT: u16 = SyntaxKind::Not as u16;
-        const OR: u16 = SyntaxKind::Or as u16;
-        const LPAREN: u16 = SyntaxKind::LParen as u16;
-        const RPAREN: u16 = SyntaxKind::RParen as u16;
-        const LBRACE: u16 = SyntaxKind::LBrace as u16;
-        const RBRACE: u16 = SyntaxKind::RBrace as u16;
-        const LBRACKET: u16 = SyntaxKind::LBracket as u16;
-        const RBRACKET: u16 = SyntaxKind::RBracket as u16;
-        const SEMICOLON: u16 = SyntaxKind::Semicolon as u16;
-        const COMMA: u16 = SyntaxKind::Comma as u16;
-        const DOT: u16 = SyntaxKind::Dot as u16;
-        const COLON: u16 = SyntaxKind::Colon as u16;
-        const QUESTION: u16 = SyntaxKind::Question as u16;
-        const BANG: u16 = SyntaxKind::Bang as u16;
-        const UNDERSCORE: u16 = SyntaxKind::Underscore as u16;
-        // Operators
-        const DOT_DOT_EQUALS: u16 = SyntaxKind::DotDotEquals as u16;
-        const DOT_DOT_LESS: u16 = SyntaxKind::DotDotLess as u16;
-        const LESS_LESS_EQUALS: u16 = SyntaxKind::LessLessEquals as u16;
-        const GREATER_GREATER_EQUALS: u16 = SyntaxKind::GreaterGreaterEquals as u16;
-        const LESS_LESS: u16 = SyntaxKind::LessLess as u16;
-        const GREATER_GREATER: u16 = SyntaxKind::GreaterGreater as u16;
-        const LESS_EQUALS: u16 = SyntaxKind::LessEquals as u16;
-        const GREATER_EQUALS: u16 = SyntaxKind::GreaterEquals as u16;
-        const EQUALS_EQUALS: u16 = SyntaxKind::EqualsEquals as u16;
-        const BANG_EQUALS: u16 = SyntaxKind::BangEquals as u16;
-        const QUESTION_QUESTION: u16 = SyntaxKind::QuestionQuestion as u16;
-        const ARROW: u16 = SyntaxKind::Arrow as u16;
-        const FAT_ARROW: u16 = SyntaxKind::FatArrow as u16;
-        const PLUS_EQUALS: u16 = SyntaxKind::PlusEquals as u16;
-        const MINUS_EQUALS: u16 = SyntaxKind::MinusEquals as u16;
-        const STAR_EQUALS: u16 = SyntaxKind::StarEquals as u16;
-        const SLASH_EQUALS: u16 = SyntaxKind::SlashEquals as u16;
-        const PERCENT_EQUALS: u16 = SyntaxKind::PercentEquals as u16;
-        const AMPERSAND_EQUALS: u16 = SyntaxKind::AmpersandEquals as u16;
-        const PIPE_EQUALS: u16 = SyntaxKind::PipeEquals as u16;
-        const CARET_EQUALS: u16 = SyntaxKind::CaretEquals as u16;
-        const EQUALS: u16 = SyntaxKind::Equals as u16;
-        const PLUS: u16 = SyntaxKind::Plus as u16;
-        const MINUS: u16 = SyntaxKind::Minus as u16;
-        const STAR: u16 = SyntaxKind::Star as u16;
-        const SLASH: u16 = SyntaxKind::Slash as u16;
-        const PERCENT: u16 = SyntaxKind::Percent as u16;
-        const AMPERSAND: u16 = SyntaxKind::Ampersand as u16;
-        const PIPE: u16 = SyntaxKind::Pipe as u16;
-        const CARET: u16 = SyntaxKind::Caret as u16;
-        const LESS: u16 = SyntaxKind::Less as u16;
-        const GREATER: u16 = SyntaxKind::Greater as u16;
-        const AT: u16 = SyntaxKind::At as u16;
-        const WHITESPACE: u16 = SyntaxKind::Whitespace as u16;
-        const NEWLINE: u16 = SyntaxKind::Newline as u16;
-        const LINE_COMMENT: u16 = SyntaxKind::LineComment as u16;
-        const BLOCK_COMMENT: u16 = SyntaxKind::BlockComment as u16;
-        const DOT_DOT: u16 = SyntaxKind::DotDot as u16;
-        const TY_OPTIONAL: u16 = SyntaxKind::TyOptional as u16;
-        const ERROR: u16 = SyntaxKind::Error as u16;
-        const MISSING: u16 = SyntaxKind::Missing as u16;
-        const TY_REF: u16 = SyntaxKind::TyRef as u16;
-        const TY_MUT_REF: u16 = SyntaxKind::TyMutRef as u16;
-        const REF_CLAUSE: u16 = SyntaxKind::RefClause as u16;
-        const MUTATING_REF_CLAUSE: u16 = SyntaxKind::MutatingRefClause as u16;
-        const REF_BINDING_PATTERN: u16 = SyntaxKind::RefBindingPattern as u16;
-
-        match raw.0 {
-            ROOT => SyntaxKind::Root,
-            SOURCE_FILE => SyntaxKind::SourceFile,
-            DECLARATION_ITEM => SyntaxKind::DeclarationItem,
-            // Attribute nodes
-            ATTRIBUTE => SyntaxKind::Attribute,
-            ATTRIBUTE_LIST => SyntaxKind::AttributeList,
-            ATTRIBUTE_ARGS => SyntaxKind::AttributeArgs,
-            ATTRIBUTE_ARG => SyntaxKind::AttributeArg,
-            PROTOCOL_DECLARATION => SyntaxKind::ProtocolDeclaration,
-            PROTOCOL_BODY => SyntaxKind::ProtocolBody,
-            STRUCT_DECLARATION => SyntaxKind::StructDeclaration,
-            STRUCT_BODY => SyntaxKind::StructBody,
-            EXTENSION_DECLARATION => SyntaxKind::ExtensionDeclaration,
-            EXTENSION_BODY => SyntaxKind::ExtensionBody,
-            ENUM_DECLARATION => SyntaxKind::EnumDeclaration,
-            ENUM_BODY => SyntaxKind::EnumBody,
-            ENUM_CASE_DECLARATION => SyntaxKind::EnumCaseDeclaration,
-            ENUM_CASE_PARAMETER => SyntaxKind::EnumCaseParameter,
-            ENUM_CASE_PARAMETER_LIST => SyntaxKind::EnumCaseParameterList,
-            INDIRECT_MODIFIER => SyntaxKind::IndirectModifier,
-            IMPORT_DECLARATION => SyntaxKind::ImportDeclaration,
-            IMPORT_ITEM => SyntaxKind::ImportItem,
-            MODULE_DECLARATION => SyntaxKind::ModuleDeclaration,
-            MODULE_PATH => SyntaxKind::ModulePath,
-            NAME => SyntaxKind::Name,
-            TYPE_ALIAS_DECLARATION => SyntaxKind::TypeAliasDeclaration,
-            ALIASED_TYPE => SyntaxKind::AliasedType,
-            FIELD_DECLARATION => SyntaxKind::FieldDeclaration,
-            GETTER_CLAUSE => SyntaxKind::GetterClause,
-            SETTER_CLAUSE => SyntaxKind::SetterClause,
-            PROPERTY_ACCESSORS => SyntaxKind::PropertyAccessors,
-            FUNCTION_DECLARATION => SyntaxKind::FunctionDeclaration,
-            INITIALIZER_DECLARATION => SyntaxKind::InitializerDeclaration,
-            INIT_EFFECT => SyntaxKind::InitEffect,
-            DEINIT_DECLARATION => SyntaxKind::DeinitDeclaration,
-            SUBSCRIPT_DECLARATION => SyntaxKind::SubscriptDeclaration,
-            SUBSCRIPT_BODY => SyntaxKind::SubscriptBody,
-            FUNCTION_BODY => SyntaxKind::FunctionBody,
-            PARAMETER_LIST => SyntaxKind::ParameterList,
-            PARAMETER => SyntaxKind::Parameter,
-            RETURN_TYPE => SyntaxKind::ReturnType,
-            VISIBILITY => SyntaxKind::Visibility,
-            STATIC_MODIFIER => SyntaxKind::StaticModifier,
-            TYPE_PARAMETER_LIST => SyntaxKind::TypeParameterList,
-            TYPE_PARAMETER => SyntaxKind::TypeParameter,
-            TYPE_ARGUMENT_LIST => SyntaxKind::TypeArgumentList,
-            DEFAULT_TYPE => SyntaxKind::DefaultType,
-            DEFAULT_VALUE => SyntaxKind::DefaultValue,
-            WHERE_CLAUSE => SyntaxKind::WhereClause,
-            TYPE_BOUND => SyntaxKind::TypeBound,
-            TYPE_EQUALITY => SyntaxKind::TypeEquality,
-            ASSOCIATED_TYPE_BOUND => SyntaxKind::AssociatedTypeBound,
-            ASSOCIATED_TYPE_TARGET => SyntaxKind::AssociatedTypeTarget,
-            CONFORMANCE_LIST => SyntaxKind::ConformanceList,
-            CONFORMANCE_ITEM => SyntaxKind::ConformanceItem,
-            NEGATIVE_CONFORMANCE => SyntaxKind::NegativeConformance,
-            TY => SyntaxKind::Ty,
-            TY_UNIT => SyntaxKind::TyUnit,
-            TY_NEVER => SyntaxKind::TyNever,
-            TY_TUPLE => SyntaxKind::TyTuple,
-            TY_FUNCTION => SyntaxKind::TyFunction,
-            TY_PATH => SyntaxKind::TyPath,
-            TY_ARRAY => SyntaxKind::TyArray,
-            TY_DICTIONARY => SyntaxKind::TyDictionary,
-            TY_RESULT => SyntaxKind::TyResult,
-            TY_LIST => SyntaxKind::TyList,
-            TY_INFERRED => SyntaxKind::TyInferred,
-            TY_SOME => SyntaxKind::TySome,
-            TY_OPTIONAL => SyntaxKind::TyOptional,
-            PATH => SyntaxKind::Path,
-            PATH_ELEMENT => SyntaxKind::PathElement,
-            CODE_BLOCK => SyntaxKind::CodeBlock,
-            STATEMENT => SyntaxKind::Statement,
-            EXPRESSION_STATEMENT => SyntaxKind::ExpressionStatement,
-            VARIABLE_DECLARATION => SyntaxKind::VariableDeclaration,
-            GUARD_STATEMENT => SyntaxKind::GuardStatement,
-            GUARD_CONDITION => SyntaxKind::GuardCondition,
-            DEINIT_STATEMENT => SyntaxKind::DeinitStatement,
-            EXPRESSION => SyntaxKind::Expression,
-            EXPR_UNIT => SyntaxKind::ExprUnit,
-            EXPR_INTEGER => SyntaxKind::ExprInteger,
-            EXPR_FLOAT => SyntaxKind::ExprFloat,
-            EXPR_STRING => SyntaxKind::ExprString,
-            EXPR_RAW_STRING => SyntaxKind::ExprRawString,
-            EXPR_INTERPOLATED_STRING => SyntaxKind::ExprInterpolatedString,
-            STRING_LITERAL_PART => SyntaxKind::StringLiteralPart,
-            STRING_INTERPOLATION => SyntaxKind::StringInterpolation,
-            FORMAT_SPECIFIER => SyntaxKind::FormatSpecifier,
-            EXPR_CHAR => SyntaxKind::ExprChar,
-            EXPR_BOOL => SyntaxKind::ExprBool,
-            EXPR_ARRAY => SyntaxKind::ExprArray,
-            EXPR_DICTIONARY => SyntaxKind::ExprDictionary,
-            DICTIONARY_ENTRY => SyntaxKind::DictionaryEntry,
-            EXPR_TUPLE => SyntaxKind::ExprTuple,
-            EXPR_GROUPING => SyntaxKind::ExprGrouping,
-            EXPR_PATH => SyntaxKind::ExprPath,
-            EXPR_UNARY => SyntaxKind::ExprUnary,
-            EXPR_POSTFIX => SyntaxKind::ExprPostfix,
-            EXPR_BINARY => SyntaxKind::ExprBinary,
-            EXPR_NULL => SyntaxKind::ExprNull,
-            EXPR_CALL => SyntaxKind::ExprCall,
-            EXPR_ASSIGNMENT => SyntaxKind::ExprAssignment,
-            EXPR_COMPOUND_ASSIGNMENT => SyntaxKind::ExprCompoundAssignment,
-            EXPR_IF => SyntaxKind::ExprIf,
-            IF_LET_CONDITION => SyntaxKind::IfLetCondition,
-            ELSE_CLAUSE => SyntaxKind::ElseClause,
-            EXPR_WHILE => SyntaxKind::ExprWhile,
-            WHILE_LET_CONDITION => SyntaxKind::WhileLetCondition,
-            EXPR_FOR => SyntaxKind::ExprFor,
-            FOR_PATTERN => SyntaxKind::ForPattern,
-            FOR_ITERABLE => SyntaxKind::ForIterable,
-            EXPR_LOOP => SyntaxKind::ExprLoop,
-            EXPR_BREAK => SyntaxKind::ExprBreak,
-            EXPR_CONTINUE => SyntaxKind::ExprContinue,
-            EXPR_RETURN => SyntaxKind::ExprReturn,
-            EXPR_THROW => SyntaxKind::ExprThrow,
-            EXPR_TRY => SyntaxKind::ExprTry,
-            EXPR_TUPLE_INDEX => SyntaxKind::ExprTupleIndex,
-            EXPR_CLOSURE => SyntaxKind::ExprClosure,
-            CLOSURE_PARAMS => SyntaxKind::ClosureParams,
-            CLOSURE_PARAM => SyntaxKind::ClosureParam,
-            LOOP_LABEL => SyntaxKind::LoopLabel,
-            ARGUMENT_LIST => SyntaxKind::ArgumentList,
-            ARGUMENT => SyntaxKind::Argument,
-            EXPR_IMPLICIT_MEMBER_ACCESS => SyntaxKind::ExprImplicitMemberAccess,
-            EXPR_MATCH => SyntaxKind::ExprMatch,
-            MATCH_ARM => SyntaxKind::MatchArm,
-            MATCH_ARM_GUARD => SyntaxKind::MatchArmGuard,
-            // Pattern nodes
-            PATTERN => SyntaxKind::Pattern,
-            WILDCARD_PATTERN => SyntaxKind::WildcardPattern,
-            BINDING_PATTERN => SyntaxKind::BindingPattern,
-            TUPLE_PATTERN => SyntaxKind::TuplePattern,
-            TUPLE_PATTERN_ELEMENT => SyntaxKind::TuplePatternElement,
-            LITERAL_PATTERN => SyntaxKind::LiteralPattern,
-            RANGE_PATTERN => SyntaxKind::RangePattern,
-            ENUM_PATTERN => SyntaxKind::EnumPattern,
-            ENUM_PATTERN_ARG => SyntaxKind::EnumPatternArg,
-            NULL_PATTERN => SyntaxKind::NullPattern,
-            SOME_PATTERN => SyntaxKind::SomePattern,
-            STRUCT_PATTERN => SyntaxKind::StructPattern,
-            STRUCT_PATTERN_FIELD => SyntaxKind::StructPatternField,
-            STRUCT_PATTERN_REST => SyntaxKind::StructPatternRest,
-            ARRAY_PATTERN => SyntaxKind::ArrayPattern,
-            ARRAY_PATTERN_ELEMENT => SyntaxKind::ArrayPatternElement,
-            ARRAY_PATTERN_REST => SyntaxKind::ArrayPatternRest,
-            AT_PATTERN => SyntaxKind::AtPattern,
-            REST_PATTERN => SyntaxKind::RestPattern,
-            OR_PATTERN => SyntaxKind::OrPattern,
-            ERROR_PATTERN => SyntaxKind::ErrorPattern,
-            IDENTIFIER => SyntaxKind::Identifier,
-            STRING => SyntaxKind::String,
-            RAW_STRING => SyntaxKind::RawString,
-            CHAR => SyntaxKind::Char,
-            INTEGER => SyntaxKind::Integer,
-            FLOAT => SyntaxKind::Float,
-            BOOLEAN => SyntaxKind::Boolean,
-            NULL => SyntaxKind::Null,
-            SOME => SyntaxKind::Some,
-            AS => SyntaxKind::As,
-            BREAK => SyntaxKind::Break,
-            CASE => SyntaxKind::Case,
-            CONSUMING => SyntaxKind::Consuming,
-            CONTINUE => SyntaxKind::Continue,
-            DEINIT => SyntaxKind::Deinit,
-            ELSE => SyntaxKind::Else,
-            ENUM => SyntaxKind::Enum,
-            EXTEND => SyntaxKind::Extend,
-            FOR => SyntaxKind::For,
-            FILEPRIVATE => SyntaxKind::Fileprivate,
-            FUNC => SyntaxKind::Func,
-            IF => SyntaxKind::If,
-            IMPORT => SyntaxKind::Import,
-            INDIRECT => SyntaxKind::Indirect,
-            INIT => SyntaxKind::Init,
-            LOOP => SyntaxKind::Loop,
-            INTERNAL => SyntaxKind::Internal,
-            LET => SyntaxKind::Let,
-            MODULE => SyntaxKind::Module,
-            MUTATING => SyntaxKind::Mutating,
-            PRIVATE => SyntaxKind::Private,
-            PROTOCOL => SyntaxKind::Protocol,
-            PUBLIC => SyntaxKind::Public,
-            RETURN => SyntaxKind::Return,
-            THROW => SyntaxKind::Throw,
-            TRY => SyntaxKind::Try,
-            THROWS => SyntaxKind::Throws,
-            STATIC => SyntaxKind::Static,
-            STRUCT => SyntaxKind::Struct,
-            TYPE => SyntaxKind::Type,
-            VAR => SyntaxKind::Var,
-            WHERE => SyntaxKind::Where,
-            WHILE => SyntaxKind::While,
-            IN => SyntaxKind::In,
-            MATCH => SyntaxKind::Match,
-            GUARD => SyntaxKind::Guard,
-            GET => SyntaxKind::Get,
-            SET => SyntaxKind::Set,
-            SUBSCRIPT => SyntaxKind::Subscript,
-            // Logical keywords
-            AND => SyntaxKind::And,
-            NOT => SyntaxKind::Not,
-            OR => SyntaxKind::Or,
-            LPAREN => SyntaxKind::LParen,
-            RPAREN => SyntaxKind::RParen,
-            LBRACE => SyntaxKind::LBrace,
-            RBRACE => SyntaxKind::RBrace,
-            LBRACKET => SyntaxKind::LBracket,
-            RBRACKET => SyntaxKind::RBracket,
-            SEMICOLON => SyntaxKind::Semicolon,
-            COMMA => SyntaxKind::Comma,
-            DOT => SyntaxKind::Dot,
-            COLON => SyntaxKind::Colon,
-            QUESTION => SyntaxKind::Question,
-            BANG => SyntaxKind::Bang,
-            UNDERSCORE => SyntaxKind::Underscore,
-            // Operators
-            DOT_DOT_EQUALS => SyntaxKind::DotDotEquals,
-            DOT_DOT_LESS => SyntaxKind::DotDotLess,
-            DOT_DOT => SyntaxKind::DotDot,
-            LESS_LESS_EQUALS => SyntaxKind::LessLessEquals,
-            GREATER_GREATER_EQUALS => SyntaxKind::GreaterGreaterEquals,
-            LESS_LESS => SyntaxKind::LessLess,
-            GREATER_GREATER => SyntaxKind::GreaterGreater,
-            LESS_EQUALS => SyntaxKind::LessEquals,
-            GREATER_EQUALS => SyntaxKind::GreaterEquals,
-            EQUALS_EQUALS => SyntaxKind::EqualsEquals,
-            BANG_EQUALS => SyntaxKind::BangEquals,
-            QUESTION_QUESTION => SyntaxKind::QuestionQuestion,
-            ARROW => SyntaxKind::Arrow,
-            FAT_ARROW => SyntaxKind::FatArrow,
-            PLUS_EQUALS => SyntaxKind::PlusEquals,
-            MINUS_EQUALS => SyntaxKind::MinusEquals,
-            STAR_EQUALS => SyntaxKind::StarEquals,
-            SLASH_EQUALS => SyntaxKind::SlashEquals,
-            PERCENT_EQUALS => SyntaxKind::PercentEquals,
-            AMPERSAND_EQUALS => SyntaxKind::AmpersandEquals,
-            PIPE_EQUALS => SyntaxKind::PipeEquals,
-            CARET_EQUALS => SyntaxKind::CaretEquals,
-            EQUALS => SyntaxKind::Equals,
-            PLUS => SyntaxKind::Plus,
-            MINUS => SyntaxKind::Minus,
-            STAR => SyntaxKind::Star,
-            SLASH => SyntaxKind::Slash,
-            PERCENT => SyntaxKind::Percent,
-            AMPERSAND => SyntaxKind::Ampersand,
-            PIPE => SyntaxKind::Pipe,
-            CARET => SyntaxKind::Caret,
-            LESS => SyntaxKind::Less,
-            GREATER => SyntaxKind::Greater,
-            AT => SyntaxKind::At,
-            WHITESPACE => SyntaxKind::Whitespace,
-            NEWLINE => SyntaxKind::Newline,
-            LINE_COMMENT => SyntaxKind::LineComment,
-            BLOCK_COMMENT => SyntaxKind::BlockComment,
-            ERROR => SyntaxKind::Error,
-            MISSING => SyntaxKind::Missing,
-            TY_REF => SyntaxKind::TyRef,
-            TY_MUT_REF => SyntaxKind::TyMutRef,
-            REF_CLAUSE => SyntaxKind::RefClause,
-            MUTATING_REF_CLAUSE => SyntaxKind::MutatingRefClause,
-            REF_BINDING_PATTERN => SyntaxKind::RefBindingPattern,
-            _ => SyntaxKind::Error,
-        }
+        // `kind_to_raw` is `kind as u16`, so the inverse is a plain index into
+        // the declaration-order table. This used to be 258 hand-written
+        // `const NAME: u16 = SyntaxKind::Name as u16;` declarations plus 258
+        // hand-written match arms over `raw.0` — and because the scrutinee was
+        // a `u16`, rustc could not check either list. A kind appended to the
+        // enum without a matching arm silently read back as `Error`, which is
+        // the *recovery* marker, so the tree would look damaged rather than
+        // unknown (F27). `syntax_kind_table_round_trips` proves `ALL` is
+        // complete and in order.
+        SyntaxKind::ALL
+            .get(raw.0 as usize)
+            .copied()
+            .unwrap_or(SyntaxKind::Error)
     }
 
     fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
@@ -1035,6 +854,145 @@ mod tests {
             SyntaxKind::Identifier
         );
         assert_eq!(SyntaxKind::from(kestrel_lexer::Token::Dot), SyntaxKind::Dot);
+    }
+
+    /// `SyntaxKind::ALL` is the hand-written inverse of `kind as u16`. Three
+    /// properties make it safe to hand-write; this test is all three.
+    ///
+    /// 1. **Ordered** — `ALL[n] as u16 == n`, so indexing by a raw value is the
+    ///    correct inverse.
+    /// 2. **Complete** — every kind round-trips through rowan's raw form. A
+    ///    kind appended to the enum but not to `ALL` fails here instead of
+    ///    silently reading back as `Error`, which is the *recovery* marker: the
+    ///    tree would look damaged rather than unknown (F27).
+    /// 3. **Total** — the entry for `Error` itself round-trips, so the
+    ///    out-of-range fallback is not masking a real kind.
+    #[test]
+    fn syntax_kind_table_round_trips() {
+        for (index, &kind) in SyntaxKind::ALL.iter().enumerate() {
+            assert_eq!(
+                kind as usize, index,
+                "SyntaxKind::ALL[{index}] is {kind:?}, whose discriminant is {}. \
+                 The table must be in declaration order — a kind was inserted \
+                 mid-list instead of appended.",
+                kind as usize
+            );
+            let raw = KestrelLanguage::kind_to_raw(kind);
+            assert_eq!(
+                KestrelLanguage::kind_from_raw(raw),
+                kind,
+                "{kind:?} does not round-trip through rowan's raw form"
+            );
+        }
+        // Completeness: `__NotAKind` sits immediately after the last real
+        // variant, so its discriminant IS the count. Without this, a table
+        // missing its final entries still round-trips — every entry it *does*
+        // hold is correct, and the missing kinds are simply never tested.
+        assert_eq!(
+            SyntaxKind::__NotAKind as usize,
+            SyntaxKind::ALL.len(),
+            "SyntaxKind::ALL is missing {} kind(s) — append the new variant(s) \
+             to the table too",
+            SyntaxKind::__NotAKind as usize - SyntaxKind::ALL.len()
+        );
+
+        // Anything past the table is genuinely unknown and must read as Error.
+        let past_end = rowan::SyntaxKind(SyntaxKind::ALL.len() as u16);
+        assert_eq!(
+            KestrelLanguage::kind_from_raw(past_end),
+            SyntaxKind::Error
+        );
+    }
+
+    /// The type-node set is derivable from the enum itself: a `Ty*` variant is
+    /// a type node unless it is explicitly excused. This is the check that was
+    /// missing when `is_type_node` (14 variants) and `is_type_kind` (12) drifted
+    /// apart — `TyRef`/`TyMutRef` were appended to only one of them, and the
+    /// omission was masked only by the parser wrapping `TyRef` inside a `Ty`.
+    #[test]
+    fn every_ty_kind_is_a_type_node() {
+        for &kind in SyntaxKind::ALL {
+            let name = format!("{kind:?}");
+            // `Type*` (TypeBound, TypeParameter, …) are not type *nodes*.
+            if !name.starts_with("Ty") || name.starts_with("Type") {
+                assert!(
+                    !kind.is_type(),
+                    "{kind:?} is marked a type node but is not a `Ty*` kind"
+                );
+                continue;
+            }
+            let excused = SyntaxKind::NON_TYPE_TY_KINDS
+                .iter()
+                .find(|(k, _)| *k == kind);
+            match excused {
+                Some((_, reason)) => assert!(
+                    !kind.is_type(),
+                    "{kind:?} is excused from being a type node ({reason}) \
+                     but `is_type` claims it is one"
+                ),
+                None => assert!(
+                    kind.is_type(),
+                    "{kind:?} is a `Ty*` kind but `SyntaxKind::is_type` does not \
+                     list it. Add it, or add it to NON_TYPE_TY_KINDS with a reason."
+                ),
+            }
+        }
+    }
+
+    /// The trivia set is defined once, on `Token`. `SyntaxKind::is_trivia` is
+    /// its image under `From<Token>`, and the two must not drift: a token the
+    /// grammar skips whose kind is not marked trivia breaks CST navigation,
+    /// and a kind marked trivia with no trivia token behind it can never match.
+    #[test]
+    fn trivia_agrees_with_the_lexer() {
+        // Forward: every trivia token's kind is trivia, and no other token's is.
+        let trivia_tokens = [
+            Token::Whitespace,
+            Token::Newline,
+            Token::LineComment,
+            Token::BlockComment,
+        ];
+        for token in &trivia_tokens {
+            assert!(token.is_trivia(), "{token:?} must be trivia");
+            let kind = SyntaxKind::from(token.clone());
+            assert!(
+                kind.is_trivia(),
+                "{token:?} is trivia but SyntaxKind::{kind:?} is not"
+            );
+        }
+        for token in [Token::Identifier, Token::Func, Token::LBrace, Token::String] {
+            assert!(!token.is_trivia());
+            assert!(!SyntaxKind::from(token).is_trivia());
+        }
+
+        // Backward, and the half that actually catches drift: no kind may be
+        // marked trivia without a trivia token behind it. Splitting `///` out
+        // of `LineComment` adds a fifth trivia kind and fails here, which is
+        // the signal to add the matching `Token` arm rather than teach one
+        // call site about the new kind.
+        let trivia_kinds: Vec<_> = SyntaxKind::ALL
+            .iter()
+            .copied()
+            .filter(|k| k.is_trivia())
+            .collect();
+        let expected: Vec<_> = trivia_tokens
+            .iter()
+            .cloned()
+            .map(SyntaxKind::from)
+            .collect();
+        assert_eq!(
+            trivia_kinds, expected,
+            "SyntaxKind's trivia set drifted from Token's — the set is owned by \
+             Token::is_trivia; update it there and map the new token"
+        );
+
+        // `is_inline_trivia` is a strict subset differing only in `Newline`.
+        for token in &trivia_tokens {
+            assert_eq!(
+                token.is_inline_trivia(),
+                token.is_trivia() && *token != Token::Newline
+            );
+        }
     }
 
     #[test]

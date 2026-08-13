@@ -51,10 +51,10 @@ public func buildGraph(
     root root: ResolvedPackage,
     pathSource pathSource: PathSource,
     registrySource registrySource: RegistrySource
-) -> Result[Array[DepNode], FlockError] {
-    var nodes = Array[DepNode]();
-    var visited = Array[String]();
-    var queue = Array[ResolvedPackage]();
+) -> Array[DepNode] throws FlockError {
+    var nodes = [];
+    var visited = [];
+    var queue = [];
 
     queue.append(root);
     visited.append(root.name);
@@ -64,11 +64,9 @@ public func buildGraph(
         queue = sliceFrom(queue, 1);
 
         // Collect dependency names for this node
-        var depNames = Array[String]();
+        var depNames = [];
         let deps = current.manifest.dependencies;
-        var i: Int64 = 0;
-        while i < deps.count {
-            let dep = deps(unchecked: i);
+        for dep in deps {
             depNames.append(dep.name);
 
             // Resolve and enqueue if not yet visited
@@ -80,10 +78,9 @@ public func buildGraph(
                 };
                 match resolveResult {
                     .Ok(resolved) => queue.append(resolved),
-                    .Err(e) => return .Err(e)
+                    .Err(e) => throw e
                 }
             }
-            i = i + 1
         }
 
         nodes.append(DepNode(
@@ -105,79 +102,52 @@ public func buildGraph(
 
 /// Sorts dependency nodes in build order (dependencies before dependents).
 /// Returns an error if a cycle is detected.
-public func topologicalSort(nodes nodes: Array[DepNode]) -> Result[Array[DepNode], FlockError] {
+public func topologicalSort(nodes nodes: Array[DepNode]) -> Array[DepNode] throws FlockError {
     let count = nodes.count;
     if count == 0 {
-        return .Ok(Array[DepNode]())
+        return .Ok([])
     }
 
     // Compute in-degrees
-    var inDegrees = Array[Int64]();
-    var i: Int64 = 0;
-    while i < count {
-        inDegrees.append(0);
-        i = i + 1
+    var inDegrees: [Int64] = [];
+    for _ in 0..<count {
+        inDegrees.append(0)
     }
 
-    i = 0;
-    while i < count {
-        let node = nodes(unchecked: i);
-        var j: Int64 = 0;
-        while j < node.depNames.count {
-            let depName = node.depNames(unchecked: j);
-            match findIndex(nodes: nodes, name: depName) {
-                .Some(idx) => {
-                    // The dependency (idx) is depended on by node (i)
-                    // But in-degree tracks how many deps each node has
-                },
-                .None => {} // External dep, ignore
-            }
-            j = j + 1
-        }
-        // In-degree = number of deps that are in the graph
+    // In-degree = how many of a node's deps are themselves in the graph.
+    for (index, node) in nodes.iter().enumerate() {
         var depCount: Int64 = 0;
-        j = 0;
-        while j < node.depNames.count {
-            let depName = node.depNames(unchecked: j);
+        for depName in node.depNames {
             if containsNode(nodes: nodes, name: depName) {
                 depCount = depCount + 1
             }
-            j = j + 1
         }
-        inDegrees = setAt(arr: inDegrees, index: i, value: depCount);
-        i = i + 1
+        inDegrees = setAt(arr: inDegrees, index: index, value: depCount)
     }
 
     // Kahn's algorithm: process nodes with 0 in-degree
-    var result = Array[DepNode]();
+    var result: [DepNode] = [];
     var processed: Int64 = 0;
 
     while processed < count {
-        // Find a node with in-degree 0
+        // Find a node with in-degree 0 that hasn't been emitted yet
         var found: Int64 = -1;
-        i = 0;
-        while i < count {
-            if inDegrees(unchecked: i) == 0 {
-                // Check it hasn't been added already
-                if not containsNode(nodes: result, name: nodes(unchecked: i).name) {
-                    found = i;
-                    break
-                }
-            }
-            i = i + 1
+        for index in 0..<count {
+            if inDegrees(unchecked: index) != 0 { continue }
+            if containsNode(nodes: result, name: nodes(unchecked: index).name) { continue }
+            found = index;
+            break
         }
 
         if found < 0 {
             // Cycle detected — collect remaining node names
-            var cycleNames = Array[String]();
-            i = 0;
-            while i < count {
-                if not containsNode(nodes: result, name: nodes(unchecked: i).name) {
-                    cycleNames.append(nodes(unchecked: i).name)
+            var cycleNames: [String] = [];
+            for node in nodes {
+                if not containsNode(nodes: result, name: node.name) {
+                    cycleNames.append(node.name)
                 }
-                i = i + 1
             }
-            return .Err(FlockError.DependencyCycle(cycleNames))
+            throw FlockError.DependencyCycle(cycleNames)
         }
 
         let node = nodes(unchecked: found);
@@ -185,16 +155,15 @@ public func topologicalSort(nodes nodes: Array[DepNode]) -> Result[Array[DepNode
         // Mark as done by setting in-degree to -1
         inDegrees = setAt(arr: inDegrees, index: found, value: -1);
 
-        // Decrease in-degree for nodes that depend on this one
-        i = 0;
-        while i < count {
-            if inDegrees(unchecked: i) > 0 {
-                let otherNode = nodes(unchecked: i);
-                if containsInDeps(depNames: otherNode.depNames, name: node.name) {
-                    inDegrees = setAt(arr: inDegrees, index: i, value: inDegrees(unchecked: i) - 1)
-                }
+        // Decrease in-degree for nodes that depend on this one. Indexed rather
+        // than iterated because `setAt` rebuilds `inDegrees` each time.
+        for index in 0..<count {
+            let degree = inDegrees(unchecked: index);
+            if degree <= 0 { continue }
+            let otherNode = nodes(unchecked: index);
+            if containsInDeps(depNames: otherNode.depNames, name: node.name) {
+                inDegrees = setAt(arr: inDegrees, index: index, value: degree - 1)
             }
-            i = i + 1
         }
 
         processed = processed + 1
@@ -208,23 +177,19 @@ public func topologicalSort(nodes nodes: Array[DepNode]) -> Result[Array[DepNode
 // ============================================================================
 
 func contains(arr arr: Array[String], value value: String) -> Bool {
-    var i: Int64 = 0;
-    while i < arr.count {
-        if arr(unchecked: i) == value {
+    for element in arr {
+        if element == value {
             return true
         }
-        i = i + 1
     }
     false
 }
 
 func containsNode(nodes nodes: Array[DepNode], name name: String) -> Bool {
-    var i: Int64 = 0;
-    while i < nodes.count {
-        if nodes(unchecked: i).name == name {
+    for element in nodes {
+        if element.name == name {
             return true
         }
-        i = i + 1
     }
     false
 }
@@ -233,7 +198,7 @@ func containsInDeps(depNames depNames: Array[String], name name: String) -> Bool
     contains(arr: depNames, value: name)
 }
 
-func findIndex(nodes nodes: Array[DepNode], name name: String) -> Optional[Int64] {
+func findIndex(nodes nodes: Array[DepNode], name name: String) -> Int64? {
     var i: Int64 = 0;
     while i < nodes.count {
         if nodes(unchecked: i).name == name {
@@ -245,17 +210,16 @@ func findIndex(nodes nodes: Array[DepNode], name name: String) -> Optional[Int64
 }
 
 func sliceFrom(arr: Array[ResolvedPackage], start: Int64) -> Array[ResolvedPackage] {
-    var result = Array[ResolvedPackage]();
+    var result = [];
     var i = start;
-    while i < arr.count {
-        result.append(arr(unchecked: i));
-        i = i + 1
+    for element in arr {
+        result.append(element);
     }
     result
 }
 
 func setAt(arr arr: Array[Int64], index index: Int64, value value: Int64) -> Array[Int64] {
-    var result = Array[Int64]();
+    var result = [];
     var i: Int64 = 0;
     while i < arr.count {
         if i == index {

@@ -8,6 +8,7 @@ use crate::ast_type::ast_type_from_cst;
 use crate::builders::helpers::is_type_kind;
 use kestrel_ast::AstType;
 use kestrel_ast::arena::Arena;
+use kestrel_ast::escape::{Escaped, decode_escape};
 use kestrel_ast::ast_body::*;
 use kestrel_span::Span;
 use kestrel_syntax_tree::utils::{find_child, get_node_span, is_trivia};
@@ -491,44 +492,55 @@ impl LowerCtx {
         let mut chars = inner.char_indices().peekable();
         let mut literal = String::new();
         while let Some((i, c)) = chars.next() {
-            if c == '\\' {
-                if let Some(&(_, next)) = chars.peek() {
-                    if next == '(' {
-                        chars.next(); // skip '('
-
-                        // Flush accumulated literal
-                        if !literal.is_empty() {
-                            parts.push(StringPart::Literal(std::mem::take(&mut literal)));
-                        }
-
-                        // Extract expression text + optional format spec.
-                        // `i + 2` is the byte offset of the hole expression
-                        // within `inner` (past the `\(`).
-                        let (expr_text, format_spec, _interp_end) =
-                            extract_interpolation(&mut chars, inner, i + 2);
-
-                        // Rebase hole-expression spans onto the original file.
-                        // Single-line: precise; multi-line: anchor at the
-                        // string token start (see `inner_file_base`).
-                        let hole_offset = if form.is_multiline {
-                            span.start
-                        } else {
-                            inner_file_base + i + 2
-                        };
-
-                        // Re-lex and re-parse the expression
-                        let expr = self.reparse_interpolation_expr(&expr_text, &span, hole_offset);
-                        parts.push(StringPart::Interpolation {
-                            expr,
-                            format: format_spec,
-                        });
-                    } else {
-                        chars.next(); // skip escaped char
-                        literal.push(unescape_char_simple(next));
-                    }
-                }
-            } else {
+            if c != '\\' {
                 literal.push(c);
+                continue;
+            }
+            // The literal segments between holes go through the SAME escape
+            // table as a plain string (`kestrel_ast::escape`). They used to use
+            // a private `unescape_char_simple` with no `\x` arm, no `\u` arm
+            // and no error path, so `"\u{41} \(x)"` silently produced the text
+            // `u{41} ` — a wrong value with no diagnostic, and nothing
+            // re-decoded it downstream (F26).
+            let decoded = decode_escape(&mut chars);
+            match decoded.result {
+                Ok(Escaped::Interpolation) => {
+                    // Flush accumulated literal
+                    if !literal.is_empty() {
+                        parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+                    }
+
+                    // Extract expression text + optional format spec.
+                    // `i + 2` is the byte offset of the hole expression
+                    // within `inner` (past the `\(`).
+                    let (expr_text, format_spec, _interp_end) =
+                        extract_interpolation(&mut chars, inner, i + 2);
+
+                    // Rebase hole-expression spans onto the original file.
+                    // Single-line: precise; multi-line: anchor at the
+                    // string token start (see `inner_file_base`).
+                    let hole_offset = if form.is_multiline {
+                        span.start
+                    } else {
+                        inner_file_base + i + 2
+                    };
+
+                    // Re-lex and re-parse the expression
+                    let expr = self.reparse_interpolation_expr(&expr_text, &span, hole_offset);
+                    parts.push(StringPart::Interpolation {
+                        expr,
+                        format: format_spec,
+                    });
+                },
+                Ok(Escaped::Scalar(cp)) => match char::from_u32(cp) {
+                    Some(ch) => literal.push(ch),
+                    None => literal.push_str(&decoded.raw),
+                },
+                Ok(Escaped::LineContinuation) => {},
+                // Malformed escapes keep their source text. `LowerCtx` has no
+                // diagnostic sink, so reporting is the non-interpolated path's
+                // job — same as the multi-line indent errors above.
+                Err(_) => literal.push_str(&decoded.raw),
             }
         }
 
@@ -844,13 +856,18 @@ impl LowerCtx {
     fn lower_unary(&mut self, node: &SyntaxNode) -> ExprId {
         let span = self.span(node);
 
-        // Operator token comes first
-        let mut op = node
+        // Operator token comes first. An unrecognized one means the CST is
+        // malformed (the parser only emits operators it accepts), so lower to
+        // Error rather than guessing — a fallback here silently rewrites the
+        // program's meaning, and `-` is not a safe default for `not`.
+        let Some(mut op) = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
             .and_then(|t| token_to_unary_op(t.kind()))
-            .unwrap_or(UnaryOp::Neg);
+        else {
+            return self.alloc_expr(AstExpr::Error { span });
+        };
         // `&mutating expr`: the parser puts the `mutating` keyword inside
         // the unary node, right after the `&`.
         if op == UnaryOp::Borrow
@@ -907,12 +924,16 @@ impl LowerCtx {
             .map(|c| self.lower_expr(&c))
             .unwrap_or_else(|| self.alloc_expr(AstExpr::Error { span: span.clone() }));
 
-        // Operator token between them
-        let op = node
+        // Operator token between them. As in `lower_unary`, an unrecognized
+        // operator is a malformed tree — falling back to `Add` would compile a
+        // different program than the one written.
+        let Some(op) = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find_map(|t| token_to_binary_op(t.kind()))
-            .unwrap_or(BinaryOp::Add);
+        else {
+            return self.alloc_expr(AstExpr::Error { span });
+        };
 
         let rhs = exprs
             .next()
@@ -2280,6 +2301,72 @@ mod tests {
     use crate::components::*;
     use kestrel_hecs::World;
 
+    /// Lex `text` and return its non-trivia `SyntaxKind`s.
+    fn kinds_of(text: &str) -> Vec<SyntaxKind> {
+        kestrel_lexer::lex(text, 0)
+            .filter_map(|t| t.ok())
+            .map(|t| SyntaxKind::from(t.value))
+            .filter(|k| !k.is_trivia())
+            .collect()
+    }
+
+    /// Every operator spelling must lex back to the token the parser maps to
+    /// that same operator.
+    ///
+    /// Both directions are derived — the ops come from walking the proven-
+    /// complete `SyntaxKind::ALL` through the parser's own maps, so there is no
+    /// hand-written list to fall out of date. This is the check that was
+    /// missing while `kestrel-hir-lower` carried a second spelling table that
+    /// wrote `&&`, `||` and `...` for operators Kestrel spells `and`, `or` and
+    /// `..=`; none of those three lex to the token they claim.
+    #[test]
+    fn operator_spellings_round_trip_through_the_lexer() {
+        for &kind in SyntaxKind::ALL {
+            if let Some(op) = token_to_binary_op(kind) {
+                assert_eq!(
+                    kinds_of(op.symbol()),
+                    vec![kind],
+                    "BinaryOp::{op:?} is spelled {:?}, which does not lex to \
+                     the single token {kind:?} the parser maps to it",
+                    op.symbol()
+                );
+                assert_eq!(token_to_binary_op(kind), Some(op));
+            }
+            if let Some(op) = token_to_compound_assign_op(kind) {
+                assert_eq!(
+                    kinds_of(op.symbol()),
+                    vec![kind],
+                    "CompoundAssignOp::{op:?} is spelled {:?}, which does not \
+                     lex to {kind:?}",
+                    op.symbol()
+                );
+            }
+            if let Some(op) = token_to_unary_op(kind) {
+                assert_eq!(
+                    kinds_of(op.symbol()),
+                    vec![kind],
+                    "UnaryOp::{op:?} is spelled {:?}, which does not lex to {kind:?}",
+                    op.symbol()
+                );
+            }
+        }
+
+        // `&mutating` is the one spelling that is deliberately two tokens —
+        // `lower_unary` promotes `Borrow` to `BorrowMutating` when it sees the
+        // keyword inside the unary node.
+        assert_eq!(
+            kinds_of(UnaryOp::BorrowMutating.symbol()),
+            vec![SyntaxKind::Ampersand, SyntaxKind::Mutating]
+        );
+
+        // Word-shaped operators need a separator before their operand;
+        // punctuation must not get one, or `-x` pretty-prints as `- x`.
+        assert!(UnaryOp::LogicalNot.needs_space_before_operand());
+        assert!(UnaryOp::BorrowMutating.needs_space_before_operand());
+        assert!(!UnaryOp::Neg.needs_space_before_operand());
+        assert!(!UnaryOp::RangeThrough.needs_space_before_operand());
+    }
+
     /// Parse source, build declarations, find the first function with a Body,
     /// and return its AstBody.
     fn lower_func_body(source: &str) -> AstBody {
@@ -2287,7 +2374,7 @@ mod tests {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".to_string()));
+        world.set(root, Name(Name::ROOT.to_string()));
         let file = world.spawn();
 
         let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
@@ -2771,7 +2858,7 @@ mod tests {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".to_string()));
+        world.set(root, Name(Name::ROOT.to_string()));
         let file = world.spawn();
 
         let source = "module M\nstruct S { var x: Int64 = 42 }";
@@ -2809,7 +2896,7 @@ mod tests {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".to_string()));
+        world.set(root, Name(Name::ROOT.to_string()));
         let file = world.spawn();
 
         let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
@@ -2872,7 +2959,7 @@ mod tests {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".to_string()));
+        world.set(root, Name(Name::ROOT.to_string()));
         let file = world.spawn();
 
         let tokens: Vec<_> = kestrel_lexer::lex(source, file.index())
@@ -3089,16 +3176,3 @@ fn extract_interpolation(
     (expr_text, None, input.len())
 }
 
-/// Minimal escape decoder for literal segments of interpolated strings.
-fn unescape_char_simple(c: char) -> char {
-    match c {
-        'n' => '\n',
-        'r' => '\r',
-        't' => '\t',
-        '\\' => '\\',
-        '"' => '"',
-        '\'' => '\'',
-        '0' => '\0',
-        other => other,
-    }
-}

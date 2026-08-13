@@ -100,4 +100,4 @@ Use default batching unless isolating a crash, hang, or flaky test. Default `-j`
 - Source edits — Rust *or* `.ks` test/stdlib files — create a new build hash and a fresh set of rows.
 - Multiple agents can run triage concurrently; total parallelism is the sum of all `-j` values.
 - `.triage/triage.db` is the source of truth; logs live under `.triage/logs/`.
-- `kestrel dump diagnostics` does NOT include analyzer diagnostics — the compiler CLI only emits codespan-level diagnostics. Analyzer output (E005, E302, etc.) only surfaces via the test harness. To verify an analyzer change, run the target test(s) through `triage`.
+- `kestrel dump diagnostics` **does** include analyzer diagnostics as of the F17 fix — `CompilerDriver::emit_diagnostics` now prints both the accumulator half (lex/parse/infer/MIR) and the analyzer half, and `has_errors` gates the exit code on both. It used to print neither analyzer output nor a non-zero exit. It is still not a substitute for the harness: severity/annotation matching and the diagnostics-test dedup rules only exist there, so verify an analyzer change through `triage`.

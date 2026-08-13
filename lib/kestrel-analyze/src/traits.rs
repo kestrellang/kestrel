@@ -19,7 +19,6 @@ pub enum AnalyzerId {
     ExhaustiveReturn,
     DeadCode,
     GuardDivergence,
-    TypeCheck,
     ConditionCheck,
     ParamPattern,
     Assignment,
@@ -87,7 +86,6 @@ impl AnalyzerId {
             AnalyzerId::ExhaustiveReturn => "exhaustive_return",
             AnalyzerId::DeadCode => "dead_code",
             AnalyzerId::GuardDivergence => "guard_divergence",
-            AnalyzerId::TypeCheck => "type_check",
             AnalyzerId::ConditionCheck => "condition_check",
             AnalyzerId::ParamPattern => "param_pattern",
             AnalyzerId::Assignment => "assignment",
@@ -157,8 +155,20 @@ pub trait Describe: Send + Sync + 'static {
     /// Unique analyzer identifier (e.g. `AnalyzerId::ExhaustiveReturn`).
     fn id(&self) -> AnalyzerId;
 
-    /// Diagnostic descriptors this analyzer can produce.
+    /// Diagnostic descriptors this analyzer OWNS — the codes allocated to it.
     fn descriptors(&self) -> &'static [DiagnosticDescriptor];
+
+    /// Descriptors this analyzer emits but does **not** own — codes allocated
+    /// to another analyzer that report the same fact from a different position.
+    ///
+    /// Sharing is legitimate (`cannot find type 'X' in this scope` is E476
+    /// whether the annotation is a binding's or a where-clause subject's), but
+    /// it has to be declared. Emitting an unlisted code is how E436 came to
+    /// mean two unrelated things at once (F16); `registry.rs`'s ownership test
+    /// walks owned ∪ borrowed and rejects anything outside it.
+    fn borrowed_descriptors(&self) -> &'static [&'static DiagnosticDescriptor] {
+        &[]
+    }
 }
 
 /// Analyze function/init bodies (Roslyn: RegisterOperationBlockAction).

@@ -149,9 +149,7 @@ where
         .map(|(module_span, path)| TypeDeclarationBodyItem::Module(module_span, path));
 
     let import_parser =
-        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
-            TypeDeclarationBodyItem::Import(import_span, path, alias, items)
-        });
+        import_declaration_parser_internal().map(TypeDeclarationBodyItem::Import);
 
     let nested_type_parser = type_parser.map(|data| match data {
         TypeDeclarationData::Struct(s) => TypeDeclarationBodyItem::Struct(Box::new(s)),

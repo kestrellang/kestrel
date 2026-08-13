@@ -62,7 +62,7 @@ func githubClient() -> Swoop {
 /// For "stable": finds the latest non-prerelease release.
 /// For "nightly": finds the latest release tagged "nightly".
 /// For a specific version like "1.0.0": finds that exact tag.
-public func fetchRelease(channel channel: String, platform platform: Platform) -> Result[Release, JessupError] {
+public func fetchRelease(channel channel: String, platform platform: Platform) -> Release throws JessupError {
     let client = githubClient();
 
     // A named channel (stable/preview/beta/nightly) resolves to the most recent
@@ -73,13 +73,13 @@ public func fetchRelease(channel channel: String, platform platform: Platform) -
     if isNamedChannel(channel: channel) {
         let url = repoApi() + "?per_page=100";
         match client.fetch(url) {
-            .Err(_) => return .Err(JessupError.NetworkError("failed to fetch releases")),
+            .Err(_) => throw JessupError.NetworkError("failed to fetch releases"),
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    return .Err(JessupError.NetworkError("GitHub API returned status \(resp.status.code)"))
+                    throw JessupError.NetworkError("GitHub API returned status \(resp.status.code)")
                 }
                 match resp.json() {
-                    .Err(_) => return .Err(JessupError.ParseError("invalid JSON in releases response")),
+                    .Err(_) => throw JessupError.ParseError("invalid JSON in releases response"),
                     .Ok(json) => return findChannelRelease(json: json, channel: channel, platform: platform)
                 }
             }
@@ -88,34 +88,34 @@ public func fetchRelease(channel channel: String, platform platform: Platform) -
         // Specific version tag
         let url = repoApi() + "/tags/v" + channel;
         match client.fetch(url) {
-            .Err(_) => return .Err(JessupError.NetworkError("failed to fetch release v" + channel)),
+            .Err(_) => throw JessupError.NetworkError("failed to fetch release v" + channel),
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    return .Err(JessupError.NotFound("release v" + channel + " not found"))
+                    throw JessupError.NotFound("release v" + channel + " not found")
                 }
                 match resp.json() {
-                    .Err(_) => return .Err(JessupError.ParseError("invalid JSON in release response")),
+                    .Err(_) => throw JessupError.ParseError("invalid JSON in release response"),
                     .Ok(json) => return findAssetInRelease(json: json, platform: platform)
                 }
             }
         }
     };
 
-    return .Err(JessupError.NotFound("no matching release found for channel: " + channel))
+    throw JessupError.NotFound("no matching release found for channel: " + channel)
 }
 
 /// Fetches all available release tags from GitHub.
-public func fetchAllReleases() -> Result[Array[String], JessupError] {
+public func fetchAllReleases() -> Array[String] throws JessupError {
     let client = githubClient();
 
     match client.fetch(repoApi()) {
-        .Err(_) => .Err(JessupError.NetworkError("failed to fetch releases")),
+        .Err(_) => throw JessupError.NetworkError("failed to fetch releases"),
         .Ok(resp) => {
             if not resp.status.isSuccess() {
-                return .Err(JessupError.NetworkError("GitHub API returned status \(resp.status.code)"))
+                throw JessupError.NetworkError("GitHub API returned status \(resp.status.code)")
             };
             match resp.json() {
-                .Err(_) => .Err(JessupError.ParseError("invalid JSON in releases response")),
+                .Err(_) => throw JessupError.ParseError("invalid JSON in releases response"),
                 .Ok(json) => parseReleaseTags(json: json)
             }
         }
@@ -123,18 +123,18 @@ public func fetchAllReleases() -> Result[Array[String], JessupError] {
 }
 
 /// Fetches the latest jessup binary URL for self-update.
-public func fetchJessupRelease(platform platform: Platform) -> Result[String, JessupError] {
+public func fetchJessupRelease(platform platform: Platform) -> String throws JessupError {
     let client = githubClient();
 
     let url = repoApi() + "/latest";
     match client.fetch(url) {
-        .Err(_) => .Err(JessupError.NetworkError("failed to fetch latest release")),
+        .Err(_) => throw JessupError.NetworkError("failed to fetch latest release"),
         .Ok(resp) => {
             if not resp.status.isSuccess() {
-                return .Err(JessupError.NotFound("no release found"))
+                throw JessupError.NotFound("no release found")
             };
             match resp.json() {
-                .Err(_) => .Err(JessupError.ParseError("invalid JSON in release response")),
+                .Err(_) => throw JessupError.ParseError("invalid JSON in release response"),
                 .Ok(json) => findJessupAsset(json: json, platform: platform)
             }
         }
@@ -148,144 +148,110 @@ public func fetchJessupRelease(platform platform: Platform) -> Result[String, Je
 /// Finds the matching kestrel toolchain asset in a release JSON object.
 /// Looks for an asset whose name contains the platform target string.
 /// Expected asset name pattern: kestrel-<target>.tar.gz
-func findAssetInRelease(json json: Value, platform platform: Platform) -> Result[Release, JessupError] {
-    var tagName = "";
-    match json.value(for: "tag_name") {
-        .Some(tagVal) => {
-            match tagVal.asString() {
-                .Some(s) => tagName = s,
-                .None => return .Err(JessupError.ParseError("tag_name is not a string"))
-            }
-        },
-        .None => return .Err(JessupError.ParseError("missing tag_name in release"))
-    }
-
+func findAssetInRelease(json json: Value, platform platform: Platform) -> Release throws JessupError {
+    let tagName = try requireString(json, "tag_name", missing: "missing tag_name in release", wrongType: "tag_name is not a string");
     let target = platform.assetTarget();
 
-    match json.value(for: "assets") {
-        .None => return .Err(JessupError.ParseError("missing assets in release")),
-        .Some(assetsVal) => {
-            match assetsVal.asArray() {
-                .None => return .Err(JessupError.ParseError("assets is not an array")),
-                .Some(assets) => {
-                    var i: Int64 = 0;
-                    while i < assets.count {
-                        let asset = assets(unchecked: i);
-                        match asset.value(for: "name") {
-                            .Some(nameVal) => {
-                                match nameVal.asString() {
-                                    .Some(name) => {
-                                        // Match the kestrel toolchain tarball specifically.
-                                        // Releases also carry a `jessup-<target>.tar.gz`, which
-                                        // shares the same target suffix — require the `kestrel`
-                                        // prefix so we don't grab the jessup binary by mistake.
-                                        if stringContains(haystack: name, needle: "kestrel") and stringContains(haystack: name, needle: target) and stringContains(haystack: name, needle: ".tar.gz") {
-                                            // Found matching asset — get browser_download_url
-                                            match asset.value(for: "browser_download_url") {
-                                                .Some(urlVal) => {
-                                                    match urlVal.asString() {
-                                                        .Some(url) => {
-                                                            return .Ok(Release(tagName: tagName, assetUrl: url))
-                                                        },
-                                                        .None => {}
-                                                    }
-                                                },
-                                                .None => {}
-                                            }
-                                        }
-                                    },
-                                    .None => {}
-                                }
-                            },
-                            .None => {}
-                        }
-                        i = i + 1
-                    }
-                }
-            }
-        }
+    // Match the kestrel toolchain tarball specifically. Releases also carry a
+    // `jessup-<target>.tar.gz`, which shares the same target suffix — require the
+    // `kestrel` prefix so we don't grab the jessup binary by mistake.
+    if let some url = try findAssetUrl(json: json, matching: ["kestrel", target, ".tar.gz"]) {
+        return .Ok(Release(tagName: tagName, assetUrl: url))
     }
 
-    .Err(JessupError.NotFound("no asset found for platform " + target + " in release " + tagName))
+    throw JessupError.NotFound("no asset found for platform " + target + " in release " + tagName)
+}
+
+/// Reads a required string field, keeping the "missing" and "wrong type"
+/// diagnostics distinct.
+func requireString(
+    parent: Value,
+    key: String,
+    missing missing: String,
+    wrongType wrongType: String
+) -> String throws JessupError {
+    guard let some raw = parent.value(for: key) else {
+        throw JessupError.ParseError(missing)
+    }
+
+    guard let some text = raw.asString() else {
+        throw JessupError.ParseError(wrongType)
+    }
+
+    .Ok(text)
+}
+
+/// Reads an optional string field — `.None` for both "absent" and "not a string".
+func stringField(parent: Value, key: String) -> String? {
+    guard let some raw = parent.value(for: key) else { return .None }
+    raw.asString()
 }
 
 /// Scans a `/releases` array (newest first) and returns the most recent
 /// release whose tag matches `channel` *and* carries an asset for this
 /// platform. Releases that match the channel but lack a platform asset are
 /// skipped, so we land on the newest actually-installable one.
-func findChannelRelease(json json: Value, channel channel: String, platform platform: Platform) -> Result[Release, JessupError] {
-    match json.asArray() {
-        .None => return .Err(JessupError.ParseError("releases response is not an array")),
-        .Some(arr) => {
-            var i: Int64 = 0;
-            while i < arr.count {
-                let release = arr(unchecked: i);
-                match release.value(for: "tag_name") {
-                    .Some(tagVal) => {
-                        match tagVal.asString() {
-                            .Some(tag) => {
-                                if tagMatchesChannel(tag: tag, channel: channel) {
-                                    match findAssetInRelease(json: release, platform: platform) {
-                                        .Ok(found) => return .Ok(found),
-                                        .Err(_) => {}
-                                    }
-                                }
-                            },
-                            .None => {}
-                        }
-                    },
-                    .None => {}
-                }
-                i = i + 1
-            }
+func findChannelRelease(json json: Value, channel channel: String, platform platform: Platform) -> Release throws JessupError {
+    guard let some releases = json.asArray() else {
+        throw JessupError.ParseError("releases response is not an array")
+    }
+
+    for release in releases {
+        guard let some tag = stringField(release, "tag_name") else { continue }
+        if not tagMatchesChannel(tag: tag, channel: channel) { continue }
+
+        // A release can match the channel but carry no asset for this platform;
+        // keep scanning so we land on the newest installable one.
+        match findAssetInRelease(json: release, platform: platform) {
+            .Ok(found) => return .Ok(found),
+            .Err(_) => {}
         }
     }
 
     .Err(JessupError.NotFound("no " + channel + " release found for platform " + platform.assetTarget()))
 }
 
-/// Finds the jessup binary asset in a release (for self-update).
-func findJessupAsset(json json: Value, platform platform: Platform) -> Result[String, JessupError] {
-    let target = platform.assetTarget();
-
-    match json.value(for: "assets") {
-        .None => return .Err(JessupError.ParseError("missing assets in release")),
-        .Some(assetsVal) => {
-            match assetsVal.asArray() {
-                .None => return .Err(JessupError.ParseError("assets is not an array")),
-                .Some(assets) => {
-                    var i: Int64 = 0;
-                    while i < assets.count {
-                        let asset = assets(unchecked: i);
-                        match asset.value(for: "name") {
-                            .Some(nameVal) => {
-                                match nameVal.asString() {
-                                    .Some(name) => {
-                                        if stringContains(haystack: name, needle: "jessup") and stringContains(haystack: name, needle: target) {
-                                            match asset.value(for: "browser_download_url") {
-                                                .Some(urlVal) => {
-                                                    match urlVal.asString() {
-                                                        .Some(url) => return .Ok(url),
-                                                        .None => {}
-                                                    }
-                                                },
-                                                .None => {}
-                                            }
-                                        }
-                                    },
-                                    .None => {}
-                                }
-                            },
-                            .None => {}
-                        }
-                        i = i + 1
-                    }
-                }
-            }
-        }
+/// Scans a release's `assets` array for the first asset whose name contains
+/// every fragment in `matching`, and returns its download URL.
+///
+/// Shared by the toolchain, jessup-binary, and .vsix lookups — they differ only
+/// in which name fragments they require.
+func findAssetUrl(json json: Value, matching fragments: [String]) -> String? throws JessupError {
+    guard let some assetsVal = json.value(for: "assets") else {
+        throw JessupError.ParseError("missing assets in release")
     }
 
-    .Err(JessupError.NotFound("no jessup binary found for platform " + target))
+    guard let some assets = assetsVal.asArray() else {
+        throw JessupError.ParseError("assets is not an array")
+    }
+
+    for asset in assets {
+        guard let some name = stringField(asset, "name") else { continue }
+
+        var matchesAll = true;
+        for fragment in fragments {
+            if not stringContains(haystack: name, needle: fragment) {
+                matchesAll = false
+            }
+        }
+        if not matchesAll { continue }
+
+        guard let some url = stringField(asset, "browser_download_url") else { continue }
+        return .Ok(.Some(url))
+    }
+
+    .Ok(.None)
+}
+
+/// Finds the jessup binary asset in a release (for self-update).
+func findJessupAsset(json json: Value, platform platform: Platform) -> String throws JessupError {
+    let target = platform.assetTarget();
+
+    guard let some url = try findAssetUrl(json: json, matching: ["jessup", target]) else {
+        throw JessupError.NotFound("no jessup binary found for platform " + target)
+    }
+
+    .Ok(url)
 }
 
 func vsixRepoApi() -> String {
@@ -293,20 +259,20 @@ func vsixRepoApi() -> String {
 }
 
 /// Fetches the VS Code extension (.vsix) URL for the given platform from the latest release.
-public func fetchVsixRelease(channel channel: String, platform platform: Platform) -> Result[String, JessupError] {
+public func fetchVsixRelease(channel channel: String, platform platform: Platform) -> String throws JessupError {
     let client = githubClient();
 
     // The VSIX is published on the kestrel-vscode repo.
     var url = vsixRepoApi() + "/latest";
 
     match client.fetch(url) {
-        .Err(_) => .Err(JessupError.NetworkError("failed to fetch release for extension")),
+        .Err(_) => throw JessupError.NetworkError("failed to fetch release for extension"),
         .Ok(resp) => {
             if not resp.status.isSuccess() {
-                return .Err(JessupError.NotFound("no release found"))
+                throw JessupError.NotFound("no release found")
             };
             match resp.json() {
-                .Err(_) => .Err(JessupError.ParseError("invalid JSON in release response")),
+                .Err(_) => throw JessupError.ParseError("invalid JSON in release response"),
                 .Ok(json) => findVsixAsset(json: json, platform: platform)
             }
         }
@@ -315,58 +281,23 @@ public func fetchVsixRelease(channel channel: String, platform platform: Platfor
 
 /// Finds the .vsix asset in a release for the given platform.
 /// VSIX files use VS Code target names (e.g. darwin-arm64, linux-x64).
-func findVsixAsset(json json: Value, platform platform: Platform) -> Result[String, JessupError] {
+func findVsixAsset(json json: Value, platform platform: Platform) -> String throws JessupError {
     let target = platform.vsceTarget();
 
-    match json.value(for: "assets") {
-        .None => return .Err(JessupError.ParseError("missing assets in release")),
-        .Some(assetsVal) => {
-            match assetsVal.asArray() {
-                .None => return .Err(JessupError.ParseError("assets is not an array")),
-                .Some(assets) => {
-                    var i: Int64 = 0;
-                    while i < assets.count {
-                        let asset = assets(unchecked: i);
-                        match asset.value(for: "name") {
-                            .Some(nameVal) => {
-                                match nameVal.asString() {
-                                    .Some(name) => {
-                                        if stringContains(haystack: name, needle: ".vsix") and stringContains(haystack: name, needle: target) {
-                                            match asset.value(for: "browser_download_url") {
-                                                .Some(urlVal) => {
-                                                    match urlVal.asString() {
-                                                        .Some(assetUrl) => return .Ok(assetUrl),
-                                                        .None => {}
-                                                    }
-                                                },
-                                                .None => {}
-                                            }
-                                        }
-                                    },
-                                    .None => {}
-                                }
-                            },
-                            .None => {}
-                        }
-                        i = i + 1
-                    }
-                }
-            }
-        }
+    guard let some url = try findAssetUrl(json: json, matching: [".vsix", target]) else {
+        throw JessupError.NotFound("no .vsix extension found for platform " + target)
     }
 
-    .Err(JessupError.NotFound("no .vsix extension found for platform " + target))
+    .Ok(url)
 }
 
 /// Parses an array of releases and extracts tag names.
-func parseReleaseTags(json json: Value) -> Result[Array[String], JessupError] {
+func parseReleaseTags(json json: Value) -> Array[String] throws JessupError {
     match json.asArray() {
-        .None => .Err(JessupError.ParseError("releases response is not an array")),
+        .None => throw JessupError.ParseError("releases response is not an array"),
         .Some(arr) => {
-            var tags = Array[String]();
-            var i: Int64 = 0;
-            while i < arr.count {
-                let release = arr(unchecked: i);
+            var tags = [];
+            for release in arr {
                 match release.value(for: "tag_name") {
                     .Some(tagVal) => {
                         match tagVal.asString() {
@@ -376,7 +307,6 @@ func parseReleaseTags(json json: Value) -> Result[Array[String], JessupError] {
                     },
                     .None => {}
                 }
-                i = i + 1
             }
             .Ok(tags)
         }

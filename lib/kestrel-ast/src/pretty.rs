@@ -205,7 +205,7 @@ impl PrettyCtx<'_> {
                 }
             },
             AstExpr::Unary { op, operand, .. } => {
-                self.buf.push_str(format_unary_op(op));
+                self.buf.push_str(&format_unary_op(op));
                 self.print_expr(*operand, depth);
             },
             AstExpr::Postfix { operand, op, .. } => {
@@ -641,7 +641,14 @@ fn format_lit_pat(lit: &LitPatKind) -> String {
     }
 }
 
-fn format_type(ty: &AstType) -> String {
+/// Render an `AstType` as the Kestrel syntax that produced it.
+///
+/// **The only type renderer.** `kestrel-doc` used to carry a fork of this
+/// function; both copies printed the never type as `Never`, which is not
+/// Kestrel syntax — the language writes `!` — so the generated stdlib
+/// reference published `func fatalError(String) -> Never`, a signature that
+/// does not parse. Callers outside this crate use this; do not re-implement.
+pub fn format_type(ty: &AstType) -> String {
     match ty {
         AstType::Named { segments, .. } => segments
             .iter()
@@ -680,7 +687,7 @@ fn format_type(ty: &AstType) -> String {
             format!("{} throws {}", format_type(ok), format_type(err))
         },
         AstType::Unit(_) => "()".into(),
-        AstType::Never(_) => "Never".into(),
+        AstType::Never(_) => "!".into(),
         AstType::Inferred(_) => "_".into(),
         AstType::Some {
             bounds, negative, ..
@@ -700,63 +707,26 @@ fn format_type(ty: &AstType) -> String {
     }
 }
 
-fn format_unary_op(op: &UnaryOp) -> &'static str {
-    match op {
-        UnaryOp::Neg => "-",
-        UnaryOp::BitNot => "!",
-        UnaryOp::LogicalNot => "not ",
-        UnaryOp::Pos => "+",
-        UnaryOp::RangeUpTo => "..<",
-        UnaryOp::RangeThrough => "..=",
-        UnaryOp::Borrow => "&",
-        UnaryOp::BorrowMutating => "&mutating ",
-    }
+/// The operator plus the separator its spelling needs. Spellings themselves
+/// live on [`UnaryOp::symbol`] — this only adds the space that `not x` and
+/// `&mutating x` require and `-x` does not.
+fn format_unary_op(op: &UnaryOp) -> String {
+    let space = if op.needs_space_before_operand() {
+        " "
+    } else {
+        ""
+    };
+    format!("{}{space}", op.symbol())
 }
 
 fn format_postfix_op(op: &PostfixOp) -> &'static str {
-    match op {
-        PostfixOp::Unwrap => "!",
-        PostfixOp::RangeFrom => "..",
-    }
+    op.symbol()
 }
 
 fn format_binary_op(op: &BinaryOp) -> &'static str {
-    match op {
-        BinaryOp::Add => "+",
-        BinaryOp::Sub => "-",
-        BinaryOp::Mul => "*",
-        BinaryOp::Div => "/",
-        BinaryOp::Rem => "%",
-        BinaryOp::BitAnd => "&",
-        BinaryOp::BitOr => "|",
-        BinaryOp::BitXor => "^",
-        BinaryOp::Shl => "<<",
-        BinaryOp::Shr => ">>",
-        BinaryOp::Eq => "==",
-        BinaryOp::Ne => "!=",
-        BinaryOp::Lt => "<",
-        BinaryOp::Gt => ">",
-        BinaryOp::Le => "<=",
-        BinaryOp::Ge => ">=",
-        BinaryOp::And => "and",
-        BinaryOp::Or => "or",
-        BinaryOp::Coalesce => "??",
-        BinaryOp::RangeInclusive => "..=",
-        BinaryOp::RangeExclusive => "..<",
-    }
+    op.symbol()
 }
 
 fn format_compound_op(op: &CompoundAssignOp) -> &'static str {
-    match op {
-        CompoundAssignOp::AddAssign => "+=",
-        CompoundAssignOp::SubAssign => "-=",
-        CompoundAssignOp::MulAssign => "*=",
-        CompoundAssignOp::DivAssign => "/=",
-        CompoundAssignOp::RemAssign => "%=",
-        CompoundAssignOp::BitAndAssign => "&=",
-        CompoundAssignOp::BitOrAssign => "|=",
-        CompoundAssignOp::BitXorAssign => "^=",
-        CompoundAssignOp::ShlAssign => "<<=",
-        CompoundAssignOp::ShrAssign => ">>=",
-    }
+    op.symbol()
 }

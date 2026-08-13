@@ -27,7 +27,7 @@ public func parseCommand(
     arguments arguments: Array[Argument],
     subcommands subcommands: Array[CommandDefinition],
     tokens tokens: Array[String]
-) -> Result[ArgumentMatches, ParseError] {
+) -> ArgumentMatches throws ParseError {
     var matches = ArgumentMatches();
     var pos: Int64 = 0;
     var positionalIndex: Int64 = 0;
@@ -64,7 +64,7 @@ public func parseCommand(
                         msg.append("flag --");
                         msg.append(name);
                         msg.append(" does not accept a value");
-                        return .Err(ParseError.Message(msg))
+                        throw ParseError.Message(msg)
                     }
                     matches.setValue(name: argDef.name, value: value)
                 },
@@ -79,7 +79,7 @@ public func parseCommand(
                             var msg = String();
                             msg.append("--");
                             msg.append(rest);
-                            return .Err(ParseError.MissingValue(msg))
+                            throw ParseError.MissingValue(msg)
                         }
                         matches.setValue(name: argDef.name, value: tokens(unchecked: pos))
                     }
@@ -112,7 +112,7 @@ public func parseCommand(
                             var msg = String();
                             msg.append("-");
                             msg.append(flagChar);
-                            return .Err(ParseError.MissingValue(msg))
+                            throw ParseError.MissingValue(msg)
                         }
                         matches.setValue(name: argDef.name, value: tokens(unchecked: pos));
                         charPos = token.bytes.count
@@ -185,7 +185,7 @@ public struct CommandDefinition: Cloneable {
 // ============================================================================
 
 /// Looks up an argument definition by its long flag name.
-func findByLong(arguments: Array[Argument], name: String) -> Result[Argument, ParseError] {
+func findByLong(arguments: Array[Argument], name: String) -> Argument throws ParseError {
     for arg in arguments {
         guard let .Some(long) = arg.longFlag else { continue; }
         if long == name { return .Ok(arg) }
@@ -197,7 +197,7 @@ func findByLong(arguments: Array[Argument], name: String) -> Result[Argument, Pa
 }
 
 /// Looks up an argument definition by its short flag character.
-func findByShort(arguments: Array[Argument], flag: String) -> Result[Argument, ParseError] {
+func findByShort(arguments: Array[Argument], flag: String) -> Argument throws ParseError {
     for arg in arguments {
         guard let .Some(short) = arg.shortFlag else { continue; }
         if short == flag { return .Ok(arg) }
@@ -209,7 +209,7 @@ func findByShort(arguments: Array[Argument], flag: String) -> Result[Argument, P
 }
 
 /// Looks up a subcommand definition by name.
-func findSubcommand(definitions: Array[CommandDefinition], name: String) -> Optional[CommandDefinition] {
+func findSubcommand(definitions: Array[CommandDefinition], name: String) -> CommandDefinition? {
     for def in definitions {
         if def.name == name { return .Some(def) }
     }
@@ -222,7 +222,7 @@ func handlePositional(
     mutating matches: ArgumentMatches,
     value: String,
     index: Int64
-) -> Result[ArgumentMatches, ParseError] {
+) -> ArgumentMatches throws ParseError {
     var positionalCount: Int64 = 0;
     for arg in arguments {
         if not arg.isPositional { continue; }
@@ -237,7 +237,7 @@ func handlePositional(
 
 /// Returns a tail slice of the array starting at `start`.
 func sliceFrom(arr: Array[String], start: Int64) -> Array[String] {
-    var result = Array[String]();
+    var result = [];
     for i in start..<arr.count {
         result.append(arr(unchecked: i));
     }
@@ -249,7 +249,7 @@ func sliceFrom(arr: Array[String], start: Int64) -> Array[String] {
 func applyDefaultsAndCheck(
     arguments: Array[Argument],
     mutating matches: ArgumentMatches
-) -> Result[ArgumentMatches, ParseError] {
+) -> ArgumentMatches throws ParseError {
     for arg in arguments {
         if arg.isFlag { continue; }
 
@@ -265,7 +265,7 @@ func applyDefaultsAndCheck(
         }
 
         if arg.isRequired {
-            return .Err(ParseError.MissingRequired(arg.name))
+            throw ParseError.MissingRequired(arg.name)
         }
     }
     .Ok(matches)

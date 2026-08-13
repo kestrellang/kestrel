@@ -164,7 +164,7 @@ mod tests {
     fn direct_match_in_context() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let p = spawn_protocol(&mut world, root, "P");
         let owner = spawn_module(&mut world, Some(root), "Owner");
         let t = spawn_type_param(&mut world, owner, "T");
@@ -188,7 +188,7 @@ mod tests {
         // Q: P  via `extend P: Q`. Context says T: P. Constraint asks T: Q.
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let p = spawn_protocol(&mut world, root, "P");
         let q = spawn_protocol(&mut world, root, "Q");
 
@@ -226,7 +226,7 @@ mod tests {
     fn unsatisfiable_when_no_path() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let p = spawn_protocol(&mut world, root, "P");
         let q = spawn_protocol(&mut world, root, "Q");
         let owner = spawn_module(&mut world, Some(root), "Owner");
@@ -250,7 +250,7 @@ mod tests {
     fn wrong_param_does_not_match() {
         let mut world = World::new();
         world.begin_revision();
-        let root = spawn_module(&mut world, None, "<root>");
+        let root = spawn_module(&mut world, None, Name::ROOT);
         let p = spawn_protocol(&mut world, root, "P");
         let owner = spawn_module(&mut world, Some(root), "Owner");
         let t = spawn_type_param(&mut world, owner, "T");

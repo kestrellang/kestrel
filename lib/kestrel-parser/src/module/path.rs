@@ -3,6 +3,7 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::common::module_path_parser_internal;
+use crate::common::parsers::ModulePathSpans;
 use crate::event::{EventSink, TreeBuilder};
 use crate::parse_and_emit;
 
@@ -25,9 +26,9 @@ impl ModulePath {
 
     /// Create a new ModulePath from segments, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
-    pub fn new(source: &str, segments: Vec<Span>) -> Self {
+    pub fn new(source: &str, path: ModulePathSpans) -> Self {
         let mut sink = EventSink::new(0);
-        crate::common::emit_module_path(&mut sink, &segments);
+        crate::common::emit_module_path(&mut sink, &path);
         Self::from_events(source, sink.into_events())
     }
 
@@ -85,6 +86,6 @@ where
         tokens,
         sink,
         module_path_parser_internal(),
-        |sink, segments: Vec<Span>| crate::common::emit_module_path(sink, &segments)
+        |sink, path: ModulePathSpans| crate::common::emit_module_path(sink, &path)
     );
 }

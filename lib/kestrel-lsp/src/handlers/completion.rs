@@ -463,7 +463,7 @@ fn push_decl_name(
     let Some(name) = world.get::<Name>(entity) else {
         return;
     };
-    if !name.0.starts_with(prefix) || name.0 == "<root>" {
+    if !name.0.starts_with(prefix) || name.is_root() {
         return;
     }
     let kind = world.get::<NodeKind>(entity).cloned();

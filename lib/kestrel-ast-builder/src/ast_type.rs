@@ -254,24 +254,11 @@ fn fn_type_kind(node: &SyntaxNode) -> FnTypeKind {
 }
 
 /// Check if a SyntaxKind is a type node.
+///
+/// The set lives on [`SyntaxKind::is_type`] and is proved complete against the
+/// enum. This crate had two copies that disagreed about `TyRef`/`TyMutRef`.
 pub(crate) fn is_type_node(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Ty
-            | SyntaxKind::TyPath
-            | SyntaxKind::TyTuple
-            | SyntaxKind::TyFunction
-            | SyntaxKind::TyArray
-            | SyntaxKind::TyDictionary
-            | SyntaxKind::TyOptional
-            | SyntaxKind::TyResult
-            | SyntaxKind::TyUnit
-            | SyntaxKind::TyNever
-            | SyntaxKind::TyInferred
-            | SyntaxKind::TySome
-            | SyntaxKind::TyRef
-            | SyntaxKind::TyMutRef
-    )
+    kind.is_type()
 }
 
 /// Get byte-offset span from a syntax node.

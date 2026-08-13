@@ -8,7 +8,7 @@
 /// # Examples
 ///
 /// ```
-/// var buf = Array[UInt8]();
+/// var buf = [];
 /// // ... fill buf with "GET / HTTP/1.1\r\n\r\n" bytes ...
 /// let end = findHeaderEnd(buf);  // byte offset of first \r in \r\n\r\n
 /// ```
@@ -139,7 +139,7 @@ public func hexChar(value: Int64) -> UInt8 {
 /// String.fromUtf8(decoded.asSlice());  // Some("Hello")
 /// ```
 public func dechunk(raw: Array[UInt8]) -> Array[UInt8] {
-    var result = Array[UInt8]();
+    var result = [];
     var pos: Int64 = 0;
     let length = raw.count;
 

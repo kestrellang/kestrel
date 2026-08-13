@@ -105,7 +105,7 @@ fn entity_path(world: &World, entity: Entity) -> String {
     let mut cur = Some(entity);
     while let Some(e) = cur {
         if let Some(n) = name_of(world, e) {
-            if n == "<root>" {
+            if n == Name::ROOT {
                 break;
             }
             parts.push(n);

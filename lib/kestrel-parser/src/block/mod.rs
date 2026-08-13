@@ -11,6 +11,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::parsers::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, IfCondition, emit_expr_variant, emit_if_condition, expr_parser};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
@@ -19,19 +20,6 @@ use crate::pattern::pattern_parser;
 use crate::stmt::{StmtVariant, emit_stmt_variant};
 
 /// Parser that skips trivia tokens (whitespace and comments)
-fn skip_trivia<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
-    any()
-        .filter(|token: &Token| {
-            matches!(
-                token,
-                Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-            )
-        })
-        .repeated()
-        .ignored()
-}
-
 /// Represents a code block
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeBlock {
@@ -762,11 +750,7 @@ fn block_item_recovery<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, BlockItem, ParserExtra<'tokens>> + Clone {
     let next_is_boundary = any().filter(is_block_item_boundary).ignored();
     let recoverable_first = any().filter(|t: &Token| {
-        !matches!(
-            t,
-            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-        ) && !is_block_item_boundary(t)
-            && !is_expr_starter(t)
+        !t.is_trivia() && !is_block_item_boundary(t) && !is_expr_starter(t)
     });
     skip_trivia()
         .ignore_then(recoverable_first)

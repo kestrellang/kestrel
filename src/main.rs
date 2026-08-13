@@ -13,7 +13,7 @@ use kestrel_ast_builder::{Os as AstOs, TargetConfig as AstTargetConfig};
 use kestrel_codegen::TargetConfig as CodegenTargetConfig;
 use kestrel_codegen_cranelift as cranelift_backend;
 use kestrel_codegen_llvm as llvm_backend;
-use kestrel_compiler::{Compiler, Severity};
+use kestrel_compiler::Compiler;
 
 /// Selectable code generation backend.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum, Default)]
@@ -209,13 +209,13 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     driver.infer_all();
     // `build` produces an executable, so analysis enforces the `@main`
     // entry-point requirement (E618).
-    let analyze_summary = driver.analyze_all(true);
+    driver.analyze_all(true);
 
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
+    // `emit_diagnostics`/`has_errors` cover both diagnostic halves (F17).
     driver.emit_diagnostics().ok();
-    emit_analyze_errors(&compiler, &analyze_summary);
-    if has_errors(&compiler) || analyze_summary.errors > 0 {
+    if driver.has_errors() {
         return Err(ExitCode::FAILURE);
     }
 
@@ -279,7 +279,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
         ExitCode::FAILURE
     })?;
 
-    if has_errors(&compiler) {
+    if driver.has_errors() {
         return Err(ExitCode::FAILURE);
     }
     if globals.verbose {
@@ -322,51 +322,51 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     // `dump` is not producing a binary — don't require a `@main`.
     driver.analyze_all(false);
 
-    match args.kind {
-        DumpKind::Mir => {
-            dump_mir(&compiler, args.stage, args.function_filter.as_deref())?;
-        },
-        DumpKind::Cranelift => {
-            let mir = compiler.lower_to_mir().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
-            let mono = compiler.monomorphize_mir(mir).map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
-            let target = globals.codegen_target()?;
-            let options = cranelift_backend::CodegenOptions {
-                emit_clif: true,
-                ..Default::default()
-            };
-            match cranelift_backend::compile(&mono, &target, &options) {
-                Ok(result) => {
-                    for (name, clif) in &result.clif_text {
-                        println!("; function: {name}");
-                        print!("{clif}");
-                        println!();
-                    }
-                },
-                Err(e) => {
-                    driver.emit_diagnostics().ok();
-                    eprintln!("error: {e}");
-                    return Err(ExitCode::FAILURE);
-                },
-            }
-        },
+    // Each arm reports an abort as a message rather than returning: MIR
+    // lowering and codegen *accumulate* rich coded diagnostics (E494-E496) and
+    // then return only a count, so returning early here would construct their
+    // spans, codes and notes and throw them away (F18).
+    let outcome: Result<(), String> = match args.kind {
+        DumpKind::Mir => dump_mir(&compiler, args.stage, args.function_filter.as_deref()),
+        DumpKind::Cranelift => dump_cranelift(globals, &compiler),
         DumpKind::Diagnostics => {
             // Emitted below; no stdout output for this kind.
+            Ok(())
         },
         DumpKind::Tokens | DumpKind::Cst => unreachable!("handled above"),
-    }
+    };
 
+    // Both halves, always — before the summary line, so the coded diagnostic
+    // is what the user reads and the count is just the epilogue.
     driver.emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    if let Err(message) = outcome {
+        eprintln!("error: {message}");
+        return Err(ExitCode::FAILURE);
+    }
+    if driver.has_errors() {
         Err(ExitCode::FAILURE)
     } else {
         Ok(())
     }
+}
+
+/// Print cranelift IR for the whole module. Errors are returned, not printed,
+/// so `dump` can flush accumulated diagnostics first (F18).
+fn dump_cranelift(globals: &Globals, compiler: &Compiler) -> Result<(), String> {
+    let target = globals.codegen_target().map_err(|_| "invalid target".to_string())?;
+    let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+    let mono = compiler.monomorphize_mir(mir).map_err(|e| e.to_string())?;
+    let options = cranelift_backend::CodegenOptions {
+        emit_clif: true,
+        ..Default::default()
+    };
+    let result = cranelift_backend::compile(&mono, &target, &options).map_err(|e| e.to_string())?;
+    for (name, clif) in &result.clif_text {
+        println!("; function: {name}");
+        print!("{clif}");
+        println!();
+    }
+    Ok(())
 }
 
 /// Print the MIR module at the requested `stage` (default `verify`).
@@ -379,34 +379,32 @@ fn dump_mir(
     compiler: &Compiler,
     stage: Option<DumpStage>,
     filter: Option<&str>,
-) -> Result<(), ExitCode> {
+) -> Result<(), String> {
     use kestrel_mir::passes::Stage;
 
     match stage.unwrap_or(DumpStage::Verify).to_mir() {
         // Default / explicit `verify`: keep aborting on verify error.
         Some(Stage::Verify) => {
-            let mir = compiler.lower_to_mir().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
+            let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
             print_mir(&mir, filter);
         },
         // Pre-mono intermediate stages (raw..layout): best-effort, no verify.
         Some(s) if s.is_pre_mono() => {
-            let (mir, _errors) = compiler.lower_to_mir_stage(s);
+            let (mir, errors) = compiler.lower_to_mir_stage(s);
+            // Best-effort stage: show the module, but don't swallow what verify
+            // found (the post-mono arm below does the same) — F18.
+            for e in &errors {
+                eprintln!("warning: verify: {}", e.message);
+            }
             print_mir(&mir, filter);
         },
         // Post-mono stages (mono / copy-prop / expand): best-effort; only a hard
         // monomorphization failure aborts (there'd be no module to print).
         Some(s) => {
-            let mir = compiler.lower_to_mir().map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
-            let (mono, mono_errors) = compiler.monomorphize_mir_until(mir, s).map_err(|e| {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            })?;
+            let mir = compiler.lower_to_mir().map_err(|e| e.to_string())?;
+            let (mono, mono_errors) = compiler
+                .monomorphize_mir_until(mir, s)
+                .map_err(|e| e.to_string())?;
             for e in &mono_errors {
                 eprintln!("warning: mono-verify: {}", e.message);
             }
@@ -506,8 +504,9 @@ fn dump_syntax(kind: DumpKind, files: &[String], verbose: bool) -> Result<(), Ex
         }
     }
 
-    CompilerDriver::new(&compiler).emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    let driver = CompilerDriver::new(&compiler);
+    driver.emit_diagnostics().ok();
+    if driver.has_errors() {
         Err(ExitCode::FAILURE)
     } else {
         Ok(())
@@ -528,7 +527,7 @@ impl Globals {
         if !self.no_std {
             let std_dir = match self.std_path.as_deref() {
                 Some(p) => PathBuf::from(p),
-                None => default_std_path().map_err(|e| {
+                None => kestrel_compiler::stdlib_path::default_std_path().map_err(|e| {
                     eprintln!("error: could not locate the Kestrel stdlib");
                     for (source, path) in &e.tried {
                         eprintln!("  tried {} -> {}", source, path.display());
@@ -590,65 +589,9 @@ impl Globals {
 // Small helpers
 // ============================================================================
 
-struct StdLookupError {
-    tried: Vec<(&'static str, PathBuf)>,
-}
-
-/// Locate the stdlib via, in priority order:
-///   1. `KESTREL_STD` env var (matches kestrel-test-suite convention)
-///   2. `<canonicalized-exe>/../lib/std` (jessup-installed toolchain layout;
-///      the exe is canonicalized so the `~/.jessup/bin/kestrel` symlink resolves
-///      to the active toolchain's `lib/std` rather than `~/.jessup/lib/std`)
-///   3. `<CARGO_MANIFEST_DIR>/lang/std` baked at build time (in-repo dev)
-///
-/// Each candidate must `exists()` to win; otherwise we fall through and
-/// surface every path we tried so the user can see what went wrong.
-/// Order must stay fixed: explicit override > installed toolchain > repo dev.
-fn default_std_path() -> Result<PathBuf, StdLookupError> {
-    let mut tried = Vec::new();
-
-    if let Some(p) = std::env::var_os("KESTREL_STD") {
-        let p = PathBuf::from(p);
-        if p.exists() {
-            return Ok(p);
-        }
-        tried.push(("KESTREL_STD", p));
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        // Resolve symlinks first: jessup installs `~/.jessup/bin/kestrel` as a
-        // symlink into `~/.jessup/toolchains/<name>/bin/`, and `flock` invokes us
-        // through that link. Without canonicalizing, `<exe>/../../lib/std` points at
-        // the non-existent `~/.jessup/lib/std` instead of the toolchain's stdlib.
-        let real = std::fs::canonicalize(&exe).unwrap_or(exe);
-        if let Some(p) = real
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("lib/std"))
-        {
-            if p.exists() {
-                return Ok(p);
-            }
-            tried.push(("exe-relative", p));
-        }
-    }
-
-    let baked = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lang/std");
-    if baked.exists() {
-        return Ok(baked);
-    }
-    tried.push(("CARGO_MANIFEST_DIR", baked));
-
-    Err(StdLookupError { tried })
-}
-
 /// Collect .c files from the stdlib directory that need to be compiled and linked.
 fn collect_stdlib_c_sources(std_dir: Option<&Path>) -> Vec<PathBuf> {
-    let Some(std_dir) = std_dir else {
-        return vec![];
-    };
-    let shim = std_dir.join("io/libc_shims.c");
-    if shim.exists() { vec![shim] } else { vec![] }
+    kestrel_compiler::stdlib_path::stdlib_c_sources(std_dir)
 }
 
 fn default_output_path(files: &[String]) -> PathBuf {
@@ -660,109 +603,5 @@ fn default_output_path(files: &[String]) -> PathBuf {
         PathBuf::from(format!("{}.exe", stem))
     } else {
         PathBuf::from(stem.as_ref())
-    }
-}
-
-fn has_errors(compiler: &Compiler) -> bool {
-    compiler
-        .diagnostics()
-        .iter()
-        .any(|d| d.severity >= Severity::Error)
-}
-
-/// Select the analyzer diagnostics the CLI should print to stderr.
-///
-/// Errors only, minus E100. The `TypeCheckAnalyzer` re-surfaces every inference
-/// error as an E100 analyzer diagnostic, but those same errors were already
-/// accumulated as codespan diagnostics by the `InferWithDiagnostics` query and
-/// printed by `emit_diagnostics`. Emitting both makes every inference error
-/// render twice — an uncoded codespan copy and a coded `[E100]` copy (#209).
-/// The codespan stream is the canonical renderer for inference errors;
-/// `kestrel dump diagnostics` and the lib test harness (which skips analyzer
-/// E100 for exactly this reason) both rely on it.
-fn cli_emittable_analyze_errors(
-    summary: &kestrel_compiler_driver::AnalyzeSummary,
-) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
-    summary
-        .diagnostics
-        .iter()
-        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
-        .filter(|d| d.descriptor_id != "E100")
-        .collect()
-}
-
-/// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
-fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::AnalyzeSummary) {
-    use codespan_reporting::diagnostic::{Diagnostic, Label};
-    use kestrel_compiler::diagnostic::WorldFiles;
-
-    let error_diags = cli_emittable_analyze_errors(summary);
-
-    if error_diags.is_empty() {
-        return;
-    }
-
-    let files = WorldFiles::from_world(compiler.world(), compiler.files());
-    let codespan_diags: Vec<Diagnostic<usize>> = error_diags
-        .iter()
-        .map(|d| {
-            let labels = d
-                .labels
-                .iter()
-                .map(|l| {
-                    let label = if l.is_primary {
-                        Label::primary(l.span.file_id, l.span.range())
-                    } else {
-                        Label::secondary(l.span.file_id, l.span.range())
-                    };
-                    label.with_message(&l.message)
-                })
-                .collect();
-            Diagnostic::error()
-                .with_message(format!("{} [{}]", d.message, d.descriptor_id))
-                .with_labels(labels)
-                .with_notes(d.notes.clone())
-        })
-        .collect();
-
-    kestrel_reporting::emit_all(&files, &codespan_diags).ok();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cli_emittable_analyze_errors;
-    use kestrel_analyze::{AnalyzeDiagnostic, Severity};
-    use kestrel_compiler_driver::AnalyzeSummary;
-
-    fn diag(id: &'static str, sev: Severity) -> AnalyzeDiagnostic {
-        AnalyzeDiagnostic {
-            descriptor_id: id,
-            severity: sev,
-            message: format!("{id} message"),
-            labels: vec![],
-            notes: vec![],
-        }
-    }
-
-    // #209: the CLI must not re-emit E100 analyzer diagnostics — inference
-    // errors are already printed via the canonical codespan stream, so
-    // re-emitting them as E100 prints every inference error twice.
-    #[test]
-    fn cli_skips_e100_keeps_other_errors() {
-        let summary = AnalyzeSummary {
-            diagnostics: vec![
-                diag("E100", Severity::Error), // inference error — already in codespan stream
-                diag("E412", Severity::Error), // genuine analyzer error — must emit
-                diag("E316", Severity::Warning), // warning — emitted elsewhere, not here
-            ],
-            ..Default::default()
-        };
-        let emitted = cli_emittable_analyze_errors(&summary);
-        let ids: Vec<&str> = emitted.iter().map(|d| d.descriptor_id).collect();
-        assert_eq!(
-            ids,
-            vec!["E412"],
-            "only the non-E100 error should be CLI-emitted"
-        );
     }
 }

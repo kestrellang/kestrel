@@ -69,15 +69,15 @@ let result = apply({ it * 2 }, 21);  // Returns 42
 ### Rules for `it`
 
 - `it` is only available when the expected function type has exactly 1 parameter
-- Using `it` when arity is 0 or 2+ is an error (E600)
+- Using `it` when arity is 0 or 2+ is an error (reported by the solver under **E100**)
 - Explicit parameters shadow `it` — you cannot use both
 - `it` in nested closures refers to the innermost closure's parameter
 
 ```kestrel
-// ERROR[E600]: it used but arity is 0
+// ERROR[E100]: it used but arity is 0
 let f: () -> Int64 = { it };
 
-// ERROR[E600]: it used but arity is 2
+// ERROR[E100]: it used but arity is 2
 let g: (Int64, Int64) -> Int64 = { it };
 
 // ERROR: it not available with explicit params
@@ -905,7 +905,7 @@ let g: (Int64) -> Int64 = { (x, y) in x + y };
 // ERROR: return type mismatch
 let h: (Int64) -> String = { (x) in x * 2 };
 
-// ERROR[E602]: parameter type mismatch
+// ERROR[E100]: parameter type mismatch (E602 is reserved and not implemented)
 let i: (Int64) -> Int64 = { (x: String) in 42 };
 
 // ERROR: closure assigned to non-function type
@@ -1047,14 +1047,14 @@ closure_kind ::= 'mutating' | 'consuming' | 'escaping'
 | Code | Meaning |
 |---|---|
 | [E203](../error-codes.md#e200e211--mutability-access-modes--assignment) | Calling a `mutating`-kind closure held in a `let` — calls are exclusive, so hold it in a `var` |
-| [E494](../error-codes.md#e488e499--references--escape-checking) | A view-kind closure (or a value carrying one) would leave its frame — use `escaping` / `consuming` |
+| [E494](../error-codes.md#e480e499--references--escape-checking) | A view-kind closure (or a value carrying one) would leave its frame — use `escaping` / `consuming` |
 | [E500](../error-codes.md#e500e507--moves--ownership) | Use after an owning capture moved a non-`Copyable`; also a second call of a `consuming` closure |
 | [E503](../error-codes.md#e500e507--moves--ownership) | Owning capture of a non-`Copyable` value the frame only borrows |
 | [E506](../error-codes.md#e500e507--moves--ownership) | Moving a capture out of a normal / `mutating` / `escaping` body (lifted in `consuming`) |
 | [E507](../error-codes.md#e500e507--moves--ownership) | The freeze rule: destroying a viewed place, or letting a view outlive it |
-| [E600](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | `it` used where the expected arity isn't 1 |
+| [E100](../error-codes.md#e100e121--type-checking-parameters--literals) | `it` used where the expected arity isn't 1 — caught by the solver (the E600 descriptor is reserved and never fires) |
 | [E601](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Closure parameter count doesn't match the expected type |
-| [E602](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Annotated closure parameter conflicts with the expected type |
+
 | [E603](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Assigning to a capture in a normal body — the note points at `mutating` |
 | [E604](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Assigning to a closure parameter |
 | [E606](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Could not infer a closure parameter type — add an annotation or context |

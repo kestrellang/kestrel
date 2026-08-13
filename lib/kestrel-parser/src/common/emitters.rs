@@ -15,6 +15,7 @@ use super::data::{
 };
 use crate::block::emit_code_block;
 use crate::enum_decl::{emit_enum_case, emit_enum_declaration};
+use crate::common::parsers::ModulePathSpans;
 use crate::event::EventSink;
 use crate::expr::emit_expr_variant;
 use crate::field::emit_field_declaration;
@@ -54,16 +55,16 @@ pub fn emit_accessor_clause(sink: &mut EventSink, clause: &AccessorClauseData) {
 
 /// Emit events for a module path
 ///
-/// Emits a ModulePath node containing identifier tokens separated by dot tokens.
-pub fn emit_module_path(sink: &mut EventSink, segments: &[Span]) {
+/// Emits a ModulePath node containing identifier tokens separated by dot
+/// tokens, using the **real** span of each `.` as captured by the parser. It
+/// used to reconstruct them as `segment.start - 1 .. segment.start`, which is
+/// only the dot when there is exactly one byte of separator and no trivia
+/// (F25).
+pub fn emit_module_path(sink: &mut EventSink, path: &ModulePathSpans) {
     sink.start_node(SyntaxKind::ModulePath);
-    for (i, span) in segments.iter().enumerate() {
+    for (i, span) in path.segments.iter().enumerate() {
         if i > 0 {
-            // Emit dot token between segments
-            sink.add_token(
-                SyntaxKind::Dot,
-                Span::new(span.file_id, span.start - 1..span.start),
-            );
+            sink.add_token(SyntaxKind::Dot, path.dots[i - 1].clone());
         }
         sink.add_token(SyntaxKind::Identifier, span.clone());
     }
@@ -96,15 +97,10 @@ fn emit_attribute_arg_value(sink: &mut EventSink, value: &AttributeArgValue) {
             sink.add_token(SyntaxKind::Dot, dot_span.clone());
             sink.add_token(SyntaxKind::Identifier, name_span.clone());
         },
-        AttributeArgValue::Path(segments) => {
-            for (i, span) in segments.iter().enumerate() {
+        AttributeArgValue::Path(path) => {
+            for (i, span) in path.segments.iter().enumerate() {
                 if i > 0 {
-                    // Emit dot between segments (approximate span)
-                    let prev_end = segments[i - 1].end;
-                    sink.add_token(
-                        SyntaxKind::Dot,
-                        Span::new(segments[i - 1].file_id, prev_end..prev_end + 1),
-                    );
+                    sink.add_token(SyntaxKind::Dot, path.dots[i - 1].clone());
                 }
                 sink.add_token(SyntaxKind::Identifier, span.clone());
             }
@@ -384,8 +380,8 @@ pub(crate) fn emit_type_declaration_body_item(sink: &mut EventSink, item: TypeDe
         TypeDeclarationBodyItem::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
         },
-        TypeDeclarationBodyItem::Import(import_span, path_segments, alias, items) => {
-            emit_import_declaration(sink, import_span, &path_segments, alias, items);
+        TypeDeclarationBodyItem::Import(import) => {
+            emit_import_declaration(sink, &import);
         },
     }
 }

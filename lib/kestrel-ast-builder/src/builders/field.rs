@@ -115,10 +115,9 @@ pub fn build_field(
         // `static` fields and module-level computed globals have no receiver
         // (the latter have no parent type to bind `self` to).
         let is_static_field = has_static_modifier(node);
-        let parent_is_type = matches!(
-            world.get::<NodeKind>(parent),
-            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension)
-        );
+        let parent_is_type = world
+            .get::<NodeKind>(parent)
+            .is_some_and(NodeKind::is_type_scope);
         let receiver = if is_static_field || !parent_is_type {
             None
         } else {

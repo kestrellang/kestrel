@@ -27,20 +27,17 @@ use crate::pattern::{PatternVariant, StructPatternFieldData};
 use crate::ty::{TyVariant, ty_parser};
 use crate::type_param::{type_parameter_list_parser, where_clause_parser};
 
-/// Check if a token is trivia (whitespace or comment)
+/// Check if a token is trivia (whitespace or comment).
+///
+/// The set lives on [`Token::is_trivia`]; this is the by-reference spelling the
+/// chumsky `.filter` combinators want. Never re-state the set at a call site.
 pub fn is_trivia(token: &Token) -> bool {
-    matches!(
-        token,
-        Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-    )
+    token.is_trivia()
 }
 
 /// Check if a token is inline trivia (whitespace/comments, excluding explicit newline tokens)
 pub fn is_inline_trivia(token: &Token) -> bool {
-    matches!(
-        token,
-        Token::Whitespace | Token::LineComment | Token::BlockComment
-    )
+    token.is_inline_trivia()
 }
 
 /// Parser that skips trivia tokens
@@ -171,20 +168,43 @@ pub fn identifier_or_keyword<'tokens>()
     )
 }
 
+/// A dotted module path with the spans of its separators.
+///
+/// The `.`s are carried, not re-derived. `separated_by(token(Token::Dot))`
+/// discards the separator, and the emitter used to invent each dot as
+/// `segment.start - 1 .. segment.start` — one byte, assuming zero trivia. But
+/// `token()`/`identifier()` skip trivia, so `A . B` and multi-line paths are
+/// grammatical, and the fabricated range then held whitespace instead of the
+/// dot (F25).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModulePathSpans {
+    /// Identifier segments, at least one.
+    pub segments: Vec<Span>,
+    /// Separator `.`s. Always `segments.len() - 1` of them.
+    pub dots: Vec<Span>,
+}
+
 /// Internal Chumsky parser for module path segments
 ///
 /// Parses identifier sequences separated by dots: A.B.C
-/// Returns a vector of spans for each identifier segment.
+/// Returns the identifier spans together with the real separator spans.
 ///
 /// # Examples
-/// - `A` → `[span(A)]`
-/// - `A.B.C` → `[span(A), span(B), span(C)]`
+/// - `A` → segments `[A]`, dots `[]`
+/// - `A.B.C` → segments `[A, B, C]`, dots `[., .]`
 pub fn module_path_parser_internal<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, Vec<Span>, ParserExtra<'tokens>> + Clone {
+-> impl Parser<'tokens, ParserInput<'tokens>, ModulePathSpans, ParserExtra<'tokens>> + Clone {
     identifier()
-        .separated_by(token(Token::Dot))
-        .at_least(1)
-        .collect()
+        .then(token(Token::Dot).then(identifier()).repeated().collect())
+        .map(|(first, rest): (Span, Vec<(Span, Span)>)| {
+            let mut segments = vec![first];
+            let mut dots = Vec::with_capacity(rest.len());
+            for (dot, segment) in rest {
+                dots.push(dot);
+                segments.push(segment);
+            }
+            ModulePathSpans { segments, dots }
+        })
         .boxed()
 }
 

@@ -120,10 +120,7 @@ impl DeclCheck for DuplicateSymbolAnalyzer {
 
         // For types that have members, also check member-level duplicates.
         // Function-to-function with the same name is allowed (overloading by labels).
-        if matches!(
-            cx.kind,
-            NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension
-        ) {
+        if cx.kind.is_type_scope() {
             check_member_duplicates(cx, &mut diags);
         }
 

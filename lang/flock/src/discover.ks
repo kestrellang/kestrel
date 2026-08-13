@@ -35,8 +35,8 @@ public struct BinTarget: Cloneable {
 ///                                 or adds a new target (path relative to root)
 ///
 /// Two targets resolving to the same name is a hard error (`DuplicateBinary`).
-public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, packageName packageName: String, bins bins: Array[BinDecl]) -> Result[Array[BinTarget], FlockError] {
-    var result = Array[BinTarget]();
+public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, packageName packageName: String, bins bins: Array[BinDecl]) -> Array[BinTarget] throws FlockError {
+    var result = [];
     let srcDir = joinPath(base: rootDir, rel: sourceDir);
 
     // src/main.ks -> default bin named after the package.
@@ -48,7 +48,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     // src/bin/*.ks -> one bin each (direct children only).
     let binDir = joinPath(base: srcDir, rel: "bin");
     if isDirectory(binDir) {
-        let entries = listDir(binDir).unwrap(or: Array[String]());
+        let entries = listDir(binDir).unwrap(or: []);
         var i: Int64 = 0;
         while i < entries.count {
             let entry = entries(unchecked: i);
@@ -68,7 +68,7 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     // Apply [[bin]] (Cargo merge): a decl whose name matches a convention bin
     // overrides it; a new name adds a target. Rebuild to avoid subscript-set.
     if bins.count > 0 {
-        var merged = Array[BinTarget]();
+        var merged = [];
         var i: Int64 = 0;
         while i < result.count {
             let target = result(unchecked: i);
@@ -91,11 +91,10 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
     var i: Int64 = 0;
     while i < result.count {
         var j = i + 1;
-        while j < result.count {
-            if result(unchecked: i).name == result(unchecked: j).name {
-                return .Err(FlockError.DuplicateBinary(result(unchecked: i).name))
+        for element in result {
+            if result(unchecked: i).name == element.name {
+                throw FlockError.DuplicateBinary(result(unchecked: i).name)
             }
-            j = j + 1
         }
         i = i + 1
     }
@@ -105,12 +104,10 @@ public func discoverBins(rootDir rootDir: String, sourceDir sourceDir: String, p
 
 /// True if any `[[bin]]` declaration carries the given name.
 func declsContainName(bins bins: Array[BinDecl], name name: String) -> Bool {
-    var i: Int64 = 0;
-    while i < bins.count {
-        if bins(unchecked: i).name == name {
+    for element in bins {
+        if element.name == name {
             return true
         }
-        i = i + 1
     }
     false
 }
@@ -122,8 +119,8 @@ func declsContainName(bins bins: Array[BinDecl], name name: String) -> Bool {
 /// Recursively discovers all .ks files in a package directory.
 /// Skips hidden directories (starting with ".") and "target" directories.
 public func discoverSources(rootDir rootDir: String) -> Array[String] {
-    var result = Array[String]();
-    let entries = listDir(rootDir).unwrap(or: Array[String]());
+    var result = [];
+    let entries = listDir(rootDir).unwrap(or: []);
     var i: Int64 = 0;
     while i < entries.count {
         let entry = entries(unchecked: i);
@@ -138,10 +135,8 @@ public func discoverSources(rootDir rootDir: String) -> Array[String] {
             if isDirectory(fullPath) {
                 // Recurse into subdirectories
                 let subFiles = discoverSources(rootDir: fullPath);
-                var j: Int64 = 0;
-                while j < subFiles.count {
-                    result.append(subFiles(unchecked: j));
-                    j = j + 1
+                for element in subFiles {
+                    result.append(element);
                 }
             } else if entry.ends(with: ".ks") {
                 result.append(fullPath)

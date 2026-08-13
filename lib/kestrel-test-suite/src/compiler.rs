@@ -106,20 +106,18 @@ impl TestCompiler {
         let codespan_diags = self.compiler.diagnostics();
         result.extend(from_codespan_diagnostics(&codespan_diags, &sources));
 
-        // Analyzer diagnostics. Two dedup passes:
-        //  1. Skip E100 — duplicates an inference error already in the codespan stream.
-        //  2. Skip any analyzer diag whose (file_id, line, severity, message) is
-        //     a prefix of a codespan diag already collected. HIR lowering and the
-        //     analyzer both independently emit "cannot find type 'X' in this scope"
-        //     for the same unresolved annotation; the codespan version appends a
-        //     label suffix (": not found (failed at 'X')"), so prefix-match catches it.
-        let analyzer_diags: Vec<_> = analyze_summary
-            .diagnostics
-            .iter()
-            .filter(|d| d.descriptor_id != "E100")
-            .cloned()
-            .collect();
-        let analyzer_test_diags = from_analyze_diagnostics_with_source(&analyzer_diags, &sources);
+        // Analyzer diagnostics. One dedup pass: skip any analyzer diag whose
+        // (file_id, line, severity, message) is a prefix of a codespan diag
+        // already collected. HIR lowering and the analyzer both independently
+        // emit "cannot find type 'X' in this scope" for the same unresolved
+        // annotation; the codespan version appends a label suffix (": not found
+        // (failed at 'X')"), so prefix-match catches it.
+        //
+        // The old "skip E100" pass is gone with the duplicate renderer it
+        // guarded (F15): inference errors are now rendered exactly once, by the
+        // codespan stream, and no analyzer re-surfaces them.
+        let analyzer_test_diags =
+            from_analyze_diagnostics_with_source(&analyze_summary.diagnostics, &sources);
         for a in analyzer_test_diags {
             let duplicate = result.iter().any(|c| {
                 c.file_id == a.file_id

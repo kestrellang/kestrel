@@ -24,12 +24,12 @@ import flock.error.(FlockError)
 public func invokeCompiler(
     mode mode: String,
     sources sources: Array[String],
-    output output: Optional[String],
+    output output: String?,
     linkLibs linkLibs: Array[String],
     linkPaths linkPaths: Array[String],
     frameworks frameworks: Array[String],
     release release: Bool
-) -> Result[(), FlockError] {
+) -> () throws FlockError {
     if mode == "run" {
         return invokeRun(sources: sources, linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks, release: release)
     }
@@ -45,12 +45,12 @@ public func invokeCompiler(
 
 func invokeBuild(
     sources sources: Array[String],
-    output output: Optional[String],
+    output output: String?,
     linkLibs linkLibs: Array[String],
     linkPaths linkPaths: Array[String],
     frameworks frameworks: Array[String],
     release release: Bool
-) -> Result[(), FlockError] {
+) -> () throws FlockError {
     var cmd = String();
     cmd.append(compilerPath());
     cmd.append(" build");
@@ -86,7 +86,7 @@ func invokeBuild(
 
     let exitCode = spawn(cmd).unwrap(or: -1);
     if exitCode != 0 {
-        return .Err(FlockError.CompilerFailed(exitCode))
+        throw FlockError.CompilerFailed(exitCode)
     }
     .Ok(())
 }
@@ -101,17 +101,17 @@ func invokeRun(
     linkPaths linkPaths: Array[String],
     frameworks frameworks: Array[String],
     release release: Bool
-) -> Result[(), FlockError] {
+) -> () throws FlockError {
     // `mktemp -t flock-run` works on both macOS and Linux.
     let tempPath = captureOutput("mktemp -t flock-run").unwrap(or: String());
     if tempPath.bytes.count == 0 {
-        return .Err(FlockError.IoError("failed to create temp file for run"))
+        throw FlockError.IoError("failed to create temp file for run")
     }
 
     match invokeBuild(sources: sources, output: .Some(tempPath), linkLibs: linkLibs, linkPaths: linkPaths, frameworks: frameworks, release: release) {
         .Err(e) => {
             cleanupTemp(path: tempPath);
-            return .Err(e)
+            throw e
         },
         .Ok(_) => {}
     }
@@ -120,7 +120,7 @@ func invokeRun(
     cleanupTemp(path: tempPath);
 
     if exitCode != 0 {
-        return .Err(FlockError.CompilerFailed(exitCode))
+        throw FlockError.CompilerFailed(exitCode)
     }
     .Ok(())
 }
@@ -136,7 +136,7 @@ func cleanupTemp(path path: String) {
 // check: `kestrel dump diagnostics ...` (exits non-zero if any errors)
 // ----------------------------------------------------------------------------
 
-func invokeCheck(sources sources: Array[String]) -> Result[(), FlockError] {
+func invokeCheck(sources sources: Array[String]) -> () throws FlockError {
     var cmd = String();
     cmd.append(compilerPath());
     cmd.append(" dump diagnostics");
@@ -148,7 +148,7 @@ func invokeCheck(sources sources: Array[String]) -> Result[(), FlockError] {
 
     let exitCode = spawn(cmd).unwrap(or: -1);
     if exitCode != 0 {
-        return .Err(FlockError.CompilerFailed(exitCode))
+        throw FlockError.CompilerFailed(exitCode)
     }
     .Ok(())
 }
@@ -178,12 +178,10 @@ func quoteArg(s: String) -> String {
 }
 
 func containsSpace(s: String) -> Bool {
-    var i: Int64 = 0;
-    while i < s.bytes.count {
-        if s.bytes(unchecked: i) == 32 { // space
+    for element in s.bytes {
+        if element == 32 { // space
             return true
         }
-        i = i + 1
     }
     false
 }

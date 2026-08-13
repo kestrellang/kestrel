@@ -16,7 +16,7 @@ fn build_from_source(source: &str) -> (World, Entity, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
 
     let file_entity = world.spawn();
 
@@ -37,7 +37,7 @@ fn build_two_files(source_a: &str, source_b: &str) -> (World, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
 
     // Build first file
     let file_a = world.spawn();
@@ -238,7 +238,7 @@ fn resolve_lang_types() {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
 
     seed_lang_module(&mut world, root);
     let ctx = world.query_context();
@@ -762,7 +762,7 @@ fn auto_import_across_std_modules() {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
 
     // std.core with Int64
     let f1 = world.spawn();

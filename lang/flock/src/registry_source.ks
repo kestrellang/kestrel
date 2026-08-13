@@ -27,7 +27,7 @@ public struct RegistrySource: PackageSource, Cloneable {
         self.config = config;
     }
 
-    public func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> Result[ResolvedPackage, FlockError] {
+    public func resolve(name name: String, spec spec: DependencySpec, baseDir baseDir: String) -> ResolvedPackage throws FlockError {
         match spec {
             .Path(_) => {
                 .Err(FlockError.DependencyNotFound("\(name) (path dependency sent to registry source)"))
@@ -42,33 +42,33 @@ public struct RegistrySource: PackageSource, Cloneable {
     // RESOLUTION
     // ========================================================================
 
-    func resolveRegistry(name name: String, constraint constraint: VersionConstraint) -> Result[ResolvedPackage, FlockError] {
+    func resolveRegistry(name name: String, constraint constraint: VersionConstraint) -> ResolvedPackage throws FlockError {
         // 1. Split org/pkg
         match splitPackageName(name: name) {
             .None => {
-                return .Err(FlockError.DependencyNotFound("\(name) (registry packages must use org/pkg format)"))
+                throw FlockError.DependencyNotFound("\(name) (registry packages must use org/pkg format)")
             },
             .Some(parts) => {
                 let org = parts.0;
                 let pkg = parts.1;
 
                 // 2. Fetch available versions from registry
-                var versions = Array[Version]();
+                var versions = [];
                 match self.fetchVersions(org: org, pkg: pkg) {
-                    .Err(e) => return .Err(e),
+                    .Err(e) => throw e,
                     .Ok(v) => versions = v
                 }
 
                 // 3. Select best version satisfying constraint
                 match selectBestVersion(versions: versions, constraint: constraint) {
                     .None => {
-                        return .Err(FlockError.DependencyNotFound("\(name) (no version satisfies constraint)"))
+                        throw FlockError.DependencyNotFound("\(name) (no version satisfies constraint)")
                     },
                     .Some(bestVersion) => {
                         // 4. Check local cache
                         if isCached(org: org, pkg: pkg, version: bestVersion) {
                             match cachePath(org: org, pkg: pkg, version: bestVersion) {
-                                .Err(e) => return .Err(e),
+                                .Err(e) => throw e,
                                 .Ok(pkgDir) => {
                                     return loadCachedPackage(pkgDir: pkgDir)
                                 }
@@ -91,7 +91,7 @@ public struct RegistrySource: PackageSource, Cloneable {
     ///
     /// API: GET /api/v1/packages/{org}/{pkg}
     /// Response: { "name": "org/pkg", "versions": ["1.0.0", "1.1.0", ...] }
-    func fetchVersions(org org: String, pkg pkg: String) -> Result[Array[Version], FlockError] {
+    func fetchVersions(org org: String, pkg pkg: String) -> Array[Version] throws FlockError {
         let url = "\(self.config.url)/api/v1/packages/\(org)/\(pkg)";
 
         var client = Swoop();
@@ -99,16 +99,16 @@ public struct RegistrySource: PackageSource, Cloneable {
 
         match client.fetch(url) {
             .Err(_) => {
-                return .Err(FlockError.RegistryError("failed to fetch package info for \(org)/\(pkg)"))
+                throw FlockError.RegistryError("failed to fetch package info for \(org)/\(pkg)")
             },
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    return .Err(FlockError.RegistryError("\(org)/\(pkg): registry returned status \(resp.status.code)"))
+                    throw FlockError.RegistryError("\(org)/\(pkg): registry returned status \(resp.status.code)")
                 }
 
                 match resp.json() {
                     .Err(_) => {
-                        return .Err(FlockError.RegistryError("invalid JSON response for \(org)/\(pkg)"))
+                        throw FlockError.RegistryError("invalid JSON response for \(org)/\(pkg)")
                     },
                     .Ok(json) => {
                         parseVersionList(json: json)
@@ -123,7 +123,7 @@ public struct RegistrySource: PackageSource, Cloneable {
     /// API: GET /api/v1/packages/{org}/{pkg}/{version}
     /// Response: { "name": "org/pkg", "version": "1.2.3", "checksum": "sha256:...",
     ///             "archive_url": "/api/v1/packages/{org}/{pkg}/{version}/download" }
-    func fetchVersionMeta(org org: String, pkg pkg: String, version version: Version) -> Result[VersionMeta, FlockError] {
+    func fetchVersionMeta(org org: String, pkg pkg: String, version version: Version) -> VersionMeta throws FlockError {
         let versionStr = version.toString();
         let url = "\(self.config.url)/api/v1/packages/\(org)/\(pkg)/\(versionStr)";
 
@@ -132,16 +132,16 @@ public struct RegistrySource: PackageSource, Cloneable {
 
         match client.fetch(url) {
             .Err(_) => {
-                return .Err(FlockError.RegistryError("failed to fetch version info for \(org)/\(pkg)@\(versionStr)"))
+                throw FlockError.RegistryError("failed to fetch version info for \(org)/\(pkg)@\(versionStr)")
             },
             .Ok(resp) => {
                 if not resp.status.isSuccess() {
-                    return .Err(FlockError.RegistryError("\(org)/\(pkg)@\(versionStr): registry returned status \(resp.status.code)"))
+                    throw FlockError.RegistryError("\(org)/\(pkg)@\(versionStr): registry returned status \(resp.status.code)")
                 }
 
                 match resp.json() {
                     .Err(_) => {
-                        return .Err(FlockError.RegistryError("invalid JSON response for \(org)/\(pkg)@\(versionStr)"))
+                        throw FlockError.RegistryError("invalid JSON response for \(org)/\(pkg)@\(versionStr)")
                     },
                     .Ok(json) => {
                         parseVersionMeta(json: json)
@@ -155,18 +155,18 @@ public struct RegistrySource: PackageSource, Cloneable {
     // DOWNLOAD & CACHE
     // ========================================================================
 
-    func downloadAndCache(org org: String, pkg pkg: String, version version: Version) -> Result[ResolvedPackage, FlockError] {
+    func downloadAndCache(org org: String, pkg pkg: String, version version: Version) -> ResolvedPackage throws FlockError {
         // 1. Fetch version metadata (contains checksum and download URL)
         var meta = VersionMeta(checksum: "", archiveUrl: "");
         match self.fetchVersionMeta(org: org, pkg: pkg, version: version) {
-            .Err(e) => return .Err(e),
+            .Err(e) => throw e,
             .Ok(m) => meta = m
         }
 
         // 2. Ensure cache directory exists
         var pkgDir = "";
         match ensureCacheDir(org: org, pkg: pkg, version: version) {
-            .Err(e) => return .Err(e),
+            .Err(e) => throw e,
             .Ok(p) => pkgDir = p
         }
 
@@ -174,13 +174,13 @@ public struct RegistrySource: PackageSource, Cloneable {
         let archivePath = "\(pkgDir)/archive.tar.gz";
         let downloadUrl = "\(self.config.url)\(meta.archiveUrl)";
         match downloadFile(url: downloadUrl, outputPath: archivePath) {
-            .Err(e) => return .Err(e),
+            .Err(e) => throw e,
             .Ok(_) => {}
         }
 
         // 4. Extract archive
         match extractArchive(archivePath: archivePath, targetDir: pkgDir) {
-            .Err(e) => return .Err(e),
+            .Err(e) => throw e,
             .Ok(_) => {}
         }
 
@@ -218,17 +218,16 @@ struct VersionMeta: Cloneable {
 
 /// Parses a JSON response containing a version list.
 /// Expected format: { "versions": ["1.0.0", "1.1.0", "2.0.0"] }
-func parseVersionList(json json: Value) -> Result[Array[Version], FlockError] {
+func parseVersionList(json json: Value) -> Array[Version] throws FlockError {
     match json.value(for: "versions") {
-        .None => .Err(FlockError.RegistryError("missing 'versions' field in response")),
+        .None => throw FlockError.RegistryError("missing 'versions' field in response"),
         .Some(versionsVal) => {
             match versionsVal.asArray() {
-                .None => .Err(FlockError.RegistryError("'versions' is not an array")),
+                .None => throw FlockError.RegistryError("'versions' is not an array"),
                 .Some(arr) => {
-                    var result = Array[Version]();
-                    var i: Int64 = 0;
-                    while i < arr.count {
-                        match arr(unchecked: i).asString() {
+                    var result = [];
+                    for element in arr {
+                        match element.asString() {
                             .Some(vStr) => {
                                 match parseVersion(s: vStr) {
                                     .Ok(v) => result.append(v),
@@ -237,7 +236,6 @@ func parseVersionList(json json: Value) -> Result[Array[Version], FlockError] {
                             },
                             .None => {}
                         }
-                        i = i + 1
                     }
                     .Ok(result)
                 }
@@ -248,7 +246,7 @@ func parseVersionList(json json: Value) -> Result[Array[Version], FlockError] {
 
 /// Parses version metadata JSON.
 /// Expected format: { "checksum": "sha256:...", "archive_url": "/api/v1/..." }
-func parseVersionMeta(json json: Value) -> Result[VersionMeta, FlockError] {
+func parseVersionMeta(json json: Value) -> VersionMeta throws FlockError {
     var checksum = "";
     match json.value(for: "checksum") {
         .Some(val) => {
@@ -261,10 +259,10 @@ func parseVersionMeta(json json: Value) -> Result[VersionMeta, FlockError] {
     }
 
     match json.value(for: "archive_url") {
-        .None => .Err(FlockError.RegistryError("missing 'archive_url' in version metadata")),
+        .None => throw FlockError.RegistryError("missing 'archive_url' in version metadata"),
         .Some(val) => {
             match val.asString() {
-                .None => .Err(FlockError.RegistryError("'archive_url' is not a string")),
+                .None => throw FlockError.RegistryError("'archive_url' is not a string"),
                 .Some(url) => {
                     .Ok(VersionMeta(checksum: checksum, archiveUrl: url))
                 }
@@ -278,11 +276,9 @@ func parseVersionMeta(json json: Value) -> Result[VersionMeta, FlockError] {
 // ============================================================================
 
 /// Selects the highest version that satisfies the given constraint.
-func selectBestVersion(versions versions: Array[Version], constraint constraint: VersionConstraint) -> Optional[Version] {
-    var best: Optional[Version] = .None;
-    var i: Int64 = 0;
-    while i < versions.count {
-        let v = versions(unchecked: i);
+func selectBestVersion(versions versions: Array[Version], constraint constraint: VersionConstraint) -> Version? {
+    var best: Version? = .None;
+    for v in versions {
         if satisfies(v, constraint) {
             match best {
                 .None => best = .Some(v),
@@ -293,7 +289,6 @@ func selectBestVersion(versions versions: Array[Version], constraint constraint:
                 }
             }
         }
-        i = i + 1
     }
     best
 }
@@ -303,14 +298,14 @@ func selectBestVersion(versions versions: Array[Version], constraint constraint:
 // ============================================================================
 
 /// Loads a package from its cached directory.
-func loadCachedPackage(pkgDir pkgDir: String) -> Result[ResolvedPackage, FlockError] {
+func loadCachedPackage(pkgDir pkgDir: String) -> ResolvedPackage throws FlockError {
     let manifestPath = joinPath(base: pkgDir, rel: "flock.toml");
 
     match readFileString(manifestPath) {
-        .Err(_) => .Err(FlockError.ManifestNotFound(manifestPath)),
+        .Err(_) => throw FlockError.ManifestNotFound(manifestPath),
         .Ok(source) => {
             match parseManifest(source: source) {
-                .Err(e) => .Err(e),
+                .Err(e) => throw e,
                 .Ok(manifest) => {
                     .Ok(ResolvedPackage(
                         name: manifest.package.name,

@@ -18,6 +18,7 @@
 pub mod components;
 pub mod diagnostic;
 pub mod queries;
+pub mod stdlib_path;
 
 pub use components::{FilePath, SourceText};
 pub use diagnostic::ThrowDiagnostic;
@@ -54,7 +55,10 @@ impl Compiler {
         world.begin_revision();
         let root = world.spawn();
         world.set(root, kestrel_ast_builder::NodeKind::Module);
-        world.set(root, kestrel_ast_builder::Name("<root>".to_string()));
+        world.set(
+            root,
+            kestrel_ast_builder::Name(kestrel_ast_builder::Name::ROOT.to_string()),
+        );
         // Seed the lang module so lang.* builtins (lang.i64, lang.alloc, etc.) are available
         kestrel_ast_builder::seed_lang_module(&mut world, root);
         // Register default analyzers on the root entity
@@ -251,8 +255,13 @@ impl Compiler {
     /// Best-effort lowering to a PRE-MONO `Stage` for inspection (`kestrel dump
     /// mir -s <stage>`). Runs passes up to `stop`; runs verify only at
     /// `Stage::Verify`. Returns the module plus any verify errors (empty unless
-    /// `stop == Verify`). Never aborts and never accumulates diagnostics — the
-    /// caller decides whether/how to surface errors.
+    /// `stop == Verify`). Never aborts.
+    ///
+    /// It does **not** accumulate the *verify* errors it returns — the caller
+    /// decides how to surface those. It does not follow that nothing is
+    /// accumulated: `lower_module` deposits its own coded diagnostics (the
+    /// move-out-of-borrow E503 backstop, E497) straight into the context, so a
+    /// caller must still flush the accumulator (F18).
     pub fn lower_to_mir_stage(
         &self,
         stop: kestrel_mir::passes::Stage,
@@ -505,6 +514,31 @@ mod tests {
     use super::*;
     use kestrel_lexer::Token;
     use kestrel_syntax_tree::SyntaxKind;
+
+    /// The one producer of the root name must satisfy the predicate every
+    /// consumer uses. These sit in different crates (`kestrel-compiler` writes
+    /// it; `kestrel-name-res`, `kestrel-mir-lower`, `kestrel-doc` and the LSP
+    /// read it), so nothing but a test connects them — and the visibility
+    /// consumer fails *open*, silently publishing every `internal` declaration.
+    #[test]
+    fn the_root_entity_is_recognized_as_root() {
+        let compiler = Compiler::new();
+        let name = compiler
+            .world()
+            .get::<kestrel_ast_builder::Name>(compiler.root())
+            .expect("root entity has a Name");
+        assert!(
+            name.is_root(),
+            "Compiler::new spawned root named {name:?}, which Name::is_root rejects"
+        );
+        // Unspellable by construction: no source identifier can collide.
+        assert!(
+            kestrel_ast_builder::Name::ROOT
+                .chars()
+                .any(|c| !c.is_alphanumeric() && c != '_'),
+            "Name::ROOT must not be a legal identifier"
+        );
+    }
 
     /// Helper: extract non-trivia token kinds from a token stream.
     fn structural_tokens(tokens: &[SpannedToken]) -> Vec<Token> {

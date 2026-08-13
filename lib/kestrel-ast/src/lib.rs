@@ -5,6 +5,7 @@
 //! consumers can depend on this crate without pulling in the syntax tree.
 
 pub mod arena;
+pub mod escape;
 pub mod ast_body;
 pub mod ast_type;
 pub mod pretty;

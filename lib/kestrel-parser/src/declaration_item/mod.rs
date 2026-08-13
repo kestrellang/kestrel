@@ -7,6 +7,8 @@
 //! - Each declaration type has its parser and emitter in its own module
 //! - This module aggregates all declaration types and routes to them
 
+use crate::import::ImportSpans;
+use crate::common::parsers::{ModulePathSpans, skip_trivia};
 use chumsky::prelude::*;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
@@ -101,13 +103,8 @@ impl DeclarationItem {
 /// Parsed data for a declaration item - routes to the appropriate module's data type
 #[derive(Debug, Clone)]
 enum DeclarationItemData {
-    Module(Span, Vec<Span>),
-    Import(
-        Span,
-        Vec<Span>,
-        Option<Span>,
-        Option<Vec<(Span, Option<Span>)>>,
-    ),
+    Module(Span, ModulePathSpans),
+    Import(ImportSpans),
     Protocol(ProtocolDeclarationData),
     Struct(StructDeclarationData),
     Enum(EnumDeclarationData),
@@ -154,19 +151,6 @@ fn is_declaration_starter(token: &Token) -> bool {
 }
 
 /// Parser that skips trivia tokens
-fn skip_trivia<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
-    any()
-        .filter(|token: &Token| {
-            matches!(
-                token,
-                Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-            )
-        })
-        .repeated()
-        .ignored()
-}
-
 /// Internal Chumsky parser for a single declaration item
 ///
 /// This parser ROUTES to the module-specific parsers - it does not implement
@@ -177,10 +161,7 @@ fn declaration_item_parser_internal<'tokens>()
     let module_parser = module_declaration_parser_internal()
         .map(|(span, path)| DeclarationItemData::Module(span, path));
 
-    let import_parser =
-        import_declaration_parser_internal().map(|(import_span, path, alias, items)| {
-            DeclarationItemData::Import(import_span, path, alias, items)
-        });
+    let import_parser = import_declaration_parser_internal().map(DeclarationItemData::Import);
 
     let protocol_parser = protocol_declaration_parser_internal().map(DeclarationItemData::Protocol);
 
@@ -229,12 +210,7 @@ fn declaration_item_parser_internal<'tokens>()
 fn declaration_recovery<'tokens>()
 -> impl Parser<'tokens, ParserInput<'tokens>, DeclarationItemData, ParserExtra<'tokens>> + Clone {
     let next_is_starter = any().filter(is_declaration_starter).ignored();
-    let non_trivia = any().filter(|t: &Token| {
-        !matches!(
-            t,
-            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-        )
-    });
+    let non_trivia = any().filter(|t: &Token| !t.is_trivia());
     skip_trivia()
         .ignore_then(non_trivia)
         .then(any().and_is(next_is_starter.not()).repeated())
@@ -268,8 +244,8 @@ fn emit_declaration_item(sink: &mut EventSink, data: DeclarationItemData) {
         DeclarationItemData::Module(module_span, path_segments) => {
             emit_module_declaration(sink, module_span, &path_segments);
         },
-        DeclarationItemData::Import(import_span, path_segments, alias, items) => {
-            emit_import_declaration(sink, import_span, &path_segments, alias, items);
+        DeclarationItemData::Import(import) => {
+            emit_import_declaration(sink, &import);
         },
         DeclarationItemData::Protocol(data) => {
             emit_protocol_declaration(sink, data);

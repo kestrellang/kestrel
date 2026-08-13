@@ -25,7 +25,7 @@ public struct JsonBody: Content, Cloneable {
     public init[T](value: T) throws SerializeError where T: Serialize {
         self.raw = match value.toValue() {
             .Ok(v) => emitJson(v),
-            .Err(e) => return .Err(e)
+            .Err(e) => throw e
         };
     }
 

@@ -30,6 +30,34 @@ The parser owns syntax recognition only. It should:
 Downstream crates may depend on CST shape and parser diagnostics, but should not
 depend on parser-internal Chumsky combinators or temporary parse-data structs.
 
+#### Never reconstruct a token span
+
+"Preserve source spans" means the span an emitter hands to `add_token` must be
+the span the *parser* captured for that token. Do not derive one by arithmetic
+off a neighbour — `segment.start - 1 .. segment.start` for a `.`,
+`name.end + 1 .. + 3` for an `as`, `last_item.end .. + 1` for a `)`.
+
+Those all assume exactly one byte of separator and zero trivia, and neither
+holds: `token()` and `identifier()` are trivia-skipping wrappers, so `A . B`,
+`X  as  Y` and multi-line lists are all grammatical. The fabricated range then
+holds whitespace, `TreeBuilder` hits its non-trivia safety net, and the real
+punctuation is emitted as `SyntaxKind::Error` — the documented *recovery*
+marker — for well-formed source. This shipped for a long time on
+`lang/std/numeric/int64.ks` and friends because `tree.text()` still round-trips,
+so every round-trip assertion passed while the token kinds were wrong (F25).
+
+If a combinator discards the punctuation (`separated_by`, `ignore_then`,
+`then_ignore`), change it to capture the span and thread it to the emitter in a
+data struct — `ModulePathSpans` and `ImportSpans` are the precedent.
+`TreeBuilder::debug_assert_token_text` enforces this for every fixed-lexeme
+kind; a **zero-width** span is exempt, because that is the separate and
+deliberate synthesized-token idiom used by error recovery.
+
+The same rule covers diagnostic spans: anchor on a whole token, never on
+`end - 1`. A token boundary is a UTF-8 char boundary; `end - 1` only is when the
+last character is single-byte, and the lexer accepts full Unicode identifiers
+(F24).
+
 ### Trivia
 
 The target CST contract is lossless with respect to source text. Whitespace,

@@ -302,7 +302,7 @@ for i in 1..=3 {
 |---|---|
 | [E203](../error-codes.md#e200e211--mutability-access-modes--assignment) | calling a `mutating`-kind closure held in a `let` (calls are exclusive) |
 | [E212](../error-codes.md#e200e211--mutability-access-modes--assignment) | *retired* — view capture of ref bindings / non-`Static` values is legal |
-| [E494](../error-codes.md#e488e499--references--escape-checking) | a view-kind closure would leave its frame; note suggests `escaping` / `consuming` |
+| [E494](../error-codes.md#e480e499--references--escape-checking) | a view-kind closure would leave its frame; note suggests `escaping` / `consuming` |
 | [E500](../error-codes.md#e500e507--moves--ownership) | use after an owning capture moved a non-Copyable; second call of a `consuming` closure |
 | [E503](../error-codes.md#e500e507--moves--ownership) | owning capture of a non-Copyable value the frame only borrows (nothing durable to own) |
 | [E506](../error-codes.md#e500e507--moves--ownership) | moving a capture out of a normal / `mutating` / `escaping` body (lifted in `consuming`) |

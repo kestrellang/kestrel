@@ -38,7 +38,7 @@ use crate::traits::{AnalyzerId, CompilationCheck, Describe};
 use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, InitEffect, Name, NodeKind, QualifiedTarget, Settable,
+    Callable, ConformanceItem, Conformances, InitEffect, NodeKind, QualifiedTarget, Settable,
     TypeAnnotation, TypeParams, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::Entity;
@@ -1452,15 +1452,11 @@ fn receivers_match(proto: Option<&Callable>, imp: Option<&Callable>) -> bool {
     }
 }
 
+/// The name this member answers to. Delegates to name resolution's rule —
+/// this was a fork that keyed subscripts on `NodeKind::Subscript` while the
+/// real lookup keys them on the `Subscript` marker component.
 fn member_lookup_name(cx: &CompilationContext<'_>, entity: Entity) -> Option<String> {
-    if let Some(name) = cx.query.get::<Name>(entity) {
-        return Some(name.0.clone());
-    }
-    match cx.query.get::<NodeKind>(entity) {
-        Some(NodeKind::Initializer) => Some("init".into()),
-        Some(NodeKind::Subscript) => Some("subscript".into()),
-        _ => None,
-    }
+    kestrel_name_res::helpers::member_lookup_name(cx.query, entity).map(str::to_owned)
 }
 
 /// Check if an entity has a TypeAlias child with the given name (regardless of binding).

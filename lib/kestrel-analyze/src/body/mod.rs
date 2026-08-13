@@ -7,7 +7,6 @@ pub mod dead_code;
 pub mod exhaustive_return;
 pub mod guard;
 pub mod param_pattern;
-pub mod type_check;
 
 // Wave 5: Complex body checks
 pub mod access_mode;

@@ -98,7 +98,7 @@ func queryOnDb[R](db: RawPointer, sql: SQL) -> Array[R] throws SqliteError where
 
     try bindParams(stmtRaw, sql.bindings);
 
-    var results = Array[R]();
+    var results = [];
     loop {
         let stepResult = ffi.sqlite3_step(stmtRaw);
         if stepResult == ffi.SQLITE_ROW() {
@@ -184,7 +184,7 @@ func queryCachedOnDb[R](
 ) -> Array[R] throws SqliteError where R: FromRow {
     let stmt = try getCachedStmt(db, cache, sql.template);
     try bindParams(stmt, sql.bindings);
-    var results = Array[R]();
+    var results = [];
     loop {
         let stepResult = ffi.sqlite3_step(stmt);
         if stepResult == ffi.SQLITE_ROW() {
@@ -239,7 +239,7 @@ func lastInsertRowIdOnDb(db: RawPointer) -> Int64 {
 // Helper: read all columns from the current row into an owned Row
 func readRow(stmt: RawPointer) -> Row {
     let colCount = Int64(from: ffi.sqlite3_column_count(stmt));
-    var columns = Array[SqliteValue]();
+    var columns = [];
     var i: Int64 = 0;
     while i < colCount {
         let col = Int32(from: i);
@@ -268,7 +268,7 @@ func readRow(stmt: RawPointer) -> Row {
 struct Connection: not Copyable {
     var db: RawPointer
 
-    static func open(path: String) -> Result[Connection, SqliteError] {
+    static func open(path: String) -> Connection throws SqliteError {
         var dbRaw = RawPointer.nullPointer();
         let cpath = path.toCString();
         let result = ffi.sqlite3_open(cpath.raw.asRaw(), Pointer(to: dbRaw).asRaw());
@@ -278,7 +278,7 @@ struct Connection: not Copyable {
             if not dbRaw.isNull {
                  ffi.sqlite3_close(dbRaw);
             }
-            return .Err(SqliteError.Error("failed to open database: " + path));
+            throw SqliteError.Error("failed to open database: " + path);
         }
         .Ok(Connection(db: dbRaw))
     }

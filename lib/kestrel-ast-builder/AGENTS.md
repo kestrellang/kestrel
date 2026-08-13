@@ -81,3 +81,35 @@ A setter with a body lives on a spawned `NodeKind::Setter` **child**, not on the
 field, and `ref`/`mutating ref` spawn `NodeKind::RefAccessor` children. Code
 that enumerates a type's members must not assume every accessor-related entity
 is the field itself.
+
+## Predicates over `NodeKind`: exhaustive `match`, never `matches!`
+
+`NodeKind::is_type_scope()` is written as a full `match` with no wildcard arm.
+That is deliberate and worth copying for any new `NodeKind` predicate.
+
+It replaced 7 copies of `matches!(k, Struct | Enum | Protocol | Extension)`
+spread across this crate, HIR lowering, two analyzers and the LSP. Adding a kind
+meant 7 lockstep edits; missing one reports *"cannot use 'self' in a static
+method"* on correct code. With the wildcard gone, a new variant is a compile
+error in exactly one place and the answer has to be given deliberately.
+
+## `Name::ROOT`, never `"<root>"`
+
+The root entity's name is a constant with an `is_root()` predicate. Compare with
+those, never a literal — `kestrel-name-res`'s visibility check decides
+top-level-ness by asking whether a parent is root, and it fails **open**: a miss
+publishes every `internal` declaration with no diagnostic. `Name::ROOT` is
+unspellable (`<` and `>` are not identifier characters) so it cannot collide.
+
+## Operator spellings live on the op enums
+
+`BinaryOp::symbol()`, `UnaryOp::symbol()`, and friends (in `kestrel-ast`) are the
+only place an operator's source text is written. `operator_spellings_round_trip_through_the_lexer`
+re-lexes each spelling and requires it to produce exactly the token the parser
+maps back to that operator — so a spelling that is not real Kestrel syntax fails
+the build. A second table in `kestrel-hir-lower` had written `&&`, `||` and `...`
+for `and`, `or` and `..=`.
+
+Relatedly: `token_to_binary_op` and friends return `Option`, and lowering now
+treats `None` as `AstExpr::Error`. Do not reintroduce an `unwrap_or(BinaryOp::Add)`
+— a fallback there compiles a different program than the one written.

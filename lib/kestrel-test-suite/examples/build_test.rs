@@ -68,18 +68,8 @@ fn main() {
 
     // Link the stdlib C shims (libc_shims.c) exactly like the test runner does,
     // otherwise symbols like `_kestrel_open` are undefined at link time.
-    let std_dir = std::env::var("KESTREL_STD")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("lang/std")
-        });
-    let shim = std_dir.join("io/libc_shims.c");
-    let c_sources = if shim.exists() { vec![shim] } else { vec![] };
+    let std_dir = kestrel_compiler::stdlib_path::default_std_path().ok();
+    let c_sources = kestrel_compiler::stdlib_path::stdlib_c_sources(std_dir.as_deref());
 
     let options = kestrel_codegen_cranelift::CodegenOptions {
         libraries,

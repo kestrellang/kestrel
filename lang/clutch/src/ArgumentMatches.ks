@@ -54,7 +54,7 @@ public struct ArgumentMatches: Cloneable {
 
     /// The subcommand that was matched, or `.None` if no subcommand
     /// appeared in the input.
-    public var subcommand: Optional[String]
+    public var subcommand: String?
 
     /// `ArgumentMatches` for the matched subcommand. Empty when no
     /// subcommand was matched; contains exactly one element otherwise.
@@ -63,13 +63,13 @@ public struct ArgumentMatches: Cloneable {
     /// @name Default
     /// Creates an empty result set with no matched values.
     public init() {
-        self.names = Array[String]();
-        self.values = Array[String]();
-        self.flags = Array[String]();
-        self.positionals = Array[String]();
-        self.positionalNames = Array[String]();
+        self.names = [];
+        self.values = [];
+        self.flags = [];
+        self.positionals = [];
+        self.positionalNames = [];
         self.subcommand = .None;
-        self.submatches = Array[ArgumentMatches]();
+        self.submatches = [];
     }
 
     /// Creates a deep copy of all matched data.
@@ -125,7 +125,7 @@ public struct ArgumentMatches: Cloneable {
     /// matches.value(of: "output");  // .Some("out.txt")
     /// matches.value(of: "file");    // .Some("hello.txt")  (positional)
     /// matches.value(of: "missing"); // .None
-    public func value(of name: String) -> Optional[String] {
+    public func value(of name: String) -> String? {
         for i in 0..<self.names.count {
             if self.names(unchecked: i) == name {
                 return .Some(self.values(unchecked: i))
@@ -188,7 +188,7 @@ public struct ArgumentMatches: Cloneable {
     /// matches.allValues(of: "include");  // ["foo", "bar"]
     /// matches.allValues(of: "missing");  // []
     public func allValues(of name: String) -> Array[String] {
-        var result = Array[String]();
+        var result = [];
         for i in 0..<self.names.count {
             if self.names(unchecked: i) == name {
                 result.append(self.values(unchecked: i));

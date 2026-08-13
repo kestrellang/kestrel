@@ -496,7 +496,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let bare_struct = spawn_struct(&mut world, root, "Bare");
 
@@ -517,7 +517,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let equatable = spawn_protocol(&mut world, root, "Equatable");
         let not_equal = spawn_protocol(&mut world, root, "NotEqual");
@@ -544,7 +544,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let eq = spawn_protocol(&mut world, root, "Eq");
         let ord = spawn_protocol(&mut world, root, "Ord");
@@ -578,7 +578,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let equatable = spawn_protocol(&mut world, root, "Equatable");
         let not_equal = spawn_protocol(&mut world, root, "NotEqual");

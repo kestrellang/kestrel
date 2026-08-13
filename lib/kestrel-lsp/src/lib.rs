@@ -535,44 +535,12 @@ impl LanguageServer for Backend {
     }
 }
 
-/// Auto-discover the stdlib directory, in priority order:
-///   1. `KESTREL_STD` env var
-///   2. `<exe>/../lib/std` (jessup-installed toolchain layout)
-///   3. `~/.jessup/bin/kestrel` symlink → resolve to toolchain's lib/std
+/// Auto-discover the stdlib directory.
+///
+/// The chain lives in `kestrel_compiler::stdlib_path` — shared with the
+/// `kestrel` CLI and the test suite, so the server and the compiler can never
+/// disagree about which stdlib is in effect. The LSP has no channel to report
+/// the failure detail, so it drops to `None` and runs without a stdlib.
 fn default_std_path() -> Option<std::path::PathBuf> {
-    if let Some(p) = std::env::var_os("KESTREL_STD") {
-        let p = std::path::PathBuf::from(p);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(p) = exe
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("lib/std"))
-        && p.exists()
-    {
-        return Some(p);
-    }
-
-    // Follow the jessup kestrel symlink to find the active toolchain's stdlib.
-    // Covers the case where a bundled VSIX LSP binary can't use exe-relative.
-    if let Some(home) = std::env::var_os("HOME") {
-        let kestrel_link = std::path::PathBuf::from(home).join(".jessup/bin/kestrel");
-        if let Ok(resolved) = std::fs::read_link(&kestrel_link) {
-            let std_path = resolved
-                .parent()
-                .and_then(|p| p.parent())
-                .map(|p| p.join("lib/std"));
-            if let Some(p) = std_path
-                && p.exists()
-            {
-                return Some(p);
-            }
-        }
-    }
-
-    None
+    kestrel_compiler::stdlib_path::default_std_path().ok()
 }

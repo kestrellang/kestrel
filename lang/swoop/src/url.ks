@@ -76,7 +76,7 @@ public struct ClientUrl: Cloneable {
 /// Parses a URL string into a ClientUrl.
 ///
 /// Supports: http://host/path, https://host/path, with optional :port and ?query
-public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
+public func parseClientUrl(raw: String) -> ClientUrl throws SwoopError {
     let len = raw.bytes.count;
 
     // Determine scheme
@@ -93,7 +93,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
         afterScheme = 7;
         defaultPort = 80
     } else {
-        return .Err(SwoopError.invalidUrl("only http:// and https:// URLs are supported"))
+        throw SwoopError.invalidUrl("only http:// and https:// URLs are supported")
     }
 
     // Find end of host:port (first '/' after scheme, or end of string)
@@ -111,7 +111,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
     let rawSlice = raw.asSlice();
     let hostPort = rawSlice.subslice(from: afterScheme, to: pathStart).toOwned();
     if hostPort.bytes.count == 0 {
-        return .Err(SwoopError.invalidUrl("missing host"))
+        throw SwoopError.invalidUrl("missing host")
     }
 
     var host = hostPort;
@@ -124,7 +124,7 @@ public func parseClientUrl(raw: String) -> Result[ClientUrl, SwoopError] {
         if port64 > 0 and port64 <= 65535 {
             port = UInt16(from: port64)
         } else {
-            return .Err(SwoopError.invalidUrl("invalid port"))
+            throw SwoopError.invalidUrl("invalid port")
         }
     }
 

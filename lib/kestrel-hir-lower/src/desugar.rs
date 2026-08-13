@@ -1199,7 +1199,12 @@ impl LowerCtx<'_> {
         // fill — only if non-default (' ')
         if parsed.fill != ' ' {
             let val = self.alloc_expr(HirExpr::Literal {
-                value: HirLiteral::Char(parsed.fill as u32),
+                // Synthesized from a parsed format spec, not source text —
+                // there is no escape to fail.
+                value: HirLiteral::Char {
+                    value: parsed.fill as u32,
+                    escape_errors: Vec::new(),
+                },
                 span: span.clone(),
             });
             assign_field(self, &mut stmts, "fill", val);
@@ -1352,50 +1357,16 @@ fn lookup_compound_assign_op(
 
 /// Human-readable symbol for a binary operator.
 fn binary_op_symbol(op: &BinaryOp) -> &'static str {
-    match op {
-        BinaryOp::Add => "+",
-        BinaryOp::Sub => "-",
-        BinaryOp::Mul => "*",
-        BinaryOp::Div => "/",
-        BinaryOp::Rem => "%",
-        BinaryOp::BitAnd => "&",
-        BinaryOp::BitOr => "|",
-        BinaryOp::BitXor => "^",
-        BinaryOp::Shl => "<<",
-        BinaryOp::Shr => ">>",
-        BinaryOp::Eq => "==",
-        BinaryOp::Ne => "!=",
-        BinaryOp::Lt => "<",
-        BinaryOp::Gt => ">",
-        BinaryOp::Le => "<=",
-        BinaryOp::Ge => ">=",
-        BinaryOp::And => "&&",
-        BinaryOp::Or => "||",
-        BinaryOp::Coalesce => "??",
-        BinaryOp::RangeInclusive => "...",
-        BinaryOp::RangeExclusive => "..<",
-    }
+    op.symbol()
 }
 
 /// Human-readable symbol for a unary operator.
 fn unary_op_symbol(op: &UnaryOp) -> &'static str {
-    match op {
-        UnaryOp::Neg => "-",
-        UnaryOp::BitNot => "!",
-        UnaryOp::LogicalNot => "not",
-        UnaryOp::Pos => "+",
-        UnaryOp::RangeUpTo => "..<",
-        UnaryOp::RangeThrough => "..=",
-        UnaryOp::Borrow => "&",
-        UnaryOp::BorrowMutating => "&mutating",
-    }
+    op.symbol()
 }
 
 fn postfix_op_symbol(op: &PostfixOp) -> &'static str {
-    match op {
-        PostfixOp::Unwrap => "!",
-        PostfixOp::RangeFrom => "..",
-    }
+    op.symbol()
 }
 
 /// Human-readable symbol for a compound assignment operator.

@@ -44,6 +44,39 @@ pub enum NodeKind {
     ParamDefault,
 }
 
+impl NodeKind {
+    /// Whether a declaration of this kind is a **type scope**: its non-static
+    /// members get a `self` receiver, and it can host methods, fields and
+    /// subscripts.
+    ///
+    /// Written as an exhaustive `match` on purpose. This predicate had seven
+    /// open-coded copies (`matches!(k, Struct | Enum | Protocol | Extension)`)
+    /// across the AST builder, HIR lowering, two analyzers and the LSP; adding
+    /// a kind meant seven lockstep edits, and missing one reports
+    /// "cannot use 'self' in a static method" on correct code. With no
+    /// wildcard arm, a new `NodeKind` fails to compile *here* — one place, and
+    /// the answer has to be given deliberately.
+    pub fn is_type_scope(&self) -> bool {
+        match self {
+            NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol | NodeKind::Extension => true,
+            // `EnumCase` is a member of an enum, not a scope of its own.
+            NodeKind::Module
+            | NodeKind::EnumCase
+            | NodeKind::Function
+            | NodeKind::Initializer
+            | NodeKind::Deinit
+            | NodeKind::Field
+            | NodeKind::Setter
+            | NodeKind::RefAccessor
+            | NodeKind::Subscript
+            | NodeKind::TypeAlias
+            | NodeKind::Import
+            | NodeKind::TypeParameter
+            | NodeKind::ParamDefault => false,
+        }
+    }
+}
+
 /// Source span excluding leading trivia.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DeclSpan(pub Span);
@@ -57,6 +90,26 @@ pub struct CstNode(pub SyntaxNode);
 /// Declared identifier name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Name(pub String);
+
+impl Name {
+    /// The name of the world's root entity — the implicit module every
+    /// top-level declaration hangs under.
+    ///
+    /// Deliberately unspellable: `<` and `>` are not identifier characters, so
+    /// no source module can collide with it.
+    ///
+    /// **Compare with [`Name::is_root`], never with a literal.** The check
+    /// fails *open* — `visibility.rs` decides whether a declaration is
+    /// top-level by asking whether its parent is root, and a miss makes every
+    /// `internal` declaration universally visible with no diagnostic. A
+    /// literal at a call site is a copy that a rename cannot reach.
+    pub const ROOT: &'static str = "<root>";
+
+    /// Whether this is the root entity's name. See [`Name::ROOT`].
+    pub fn is_root(&self) -> bool {
+        self.0 == Self::ROOT
+    }
+}
 
 /// Source file entity this declaration belongs to.
 /// Modules don't get FileId — they span multiple files.

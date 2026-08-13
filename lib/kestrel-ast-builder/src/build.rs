@@ -242,7 +242,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".to_string()));
+        world.set(root, Name(Name::ROOT.to_string()));
 
         let file_entity = world.spawn();
 
@@ -255,6 +255,40 @@ mod tests {
 
         build_declarations(&mut world, file_entity, &result.tree, root, None);
         (world, root, file_entity)
+    }
+
+    /// `NodeKind::Subscript` and the `Subscript` marker component must be set
+    /// together, always.
+    ///
+    /// Member-name lookup keys subscripts on the *marker*; the conformance
+    /// analyzers used to key them on the *NodeKind*. Those three copies were
+    /// collapsed into one, but the pair is still read separately elsewhere, and
+    /// they agree only because this builder sets both. Nothing but this test
+    /// says so.
+    #[test]
+    fn subscripts_carry_both_the_node_kind_and_the_marker() {
+        let (world, _root, _file) = build_from_source(
+            "struct Grid {\n    subscript(i: Int) -> Int { get { 0 } }\n}\n",
+        );
+
+        let by_kind: Vec<_> = world
+            .iter_component::<NodeKind>()
+            .filter_map(|(e, k)| (*k == NodeKind::Subscript).then_some(e))
+            .collect();
+        let by_marker: Vec<_> = world
+            .iter_component::<Subscript>()
+            .map(|(e, _)| e)
+            .collect();
+
+        assert!(
+            !by_kind.is_empty(),
+            "test precondition: the source declares a subscript"
+        );
+        assert_eq!(
+            by_kind, by_marker,
+            "NodeKind::Subscript and the Subscript marker disagree — member \
+             lookup keys on the marker, other code keys on the NodeKind"
+        );
     }
 
     /// Find a child entity with matching NodeKind and Name.
@@ -310,7 +344,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".to_string()));
+        world.set(root, Name(Name::ROOT.to_string()));
 
         // File 1
         let f1 = world.spawn();

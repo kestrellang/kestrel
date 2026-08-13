@@ -2,19 +2,19 @@
 
 ## Adding a new `InferError` variant
 
-A new variant must be mirrored in **five** files — miss any and the build fails with non-exhaustive-match errors only after compiling a dependent crate, which is slow to discover.
+A new variant must be mirrored in **three** files — miss any and the build fails with non-exhaustive-match errors only after compiling a dependent crate, which is slow to discover.
 
 1. **`lib/kestrel-type-infer/src/error.rs`**
    - Add the variant to `pub enum InferError`.
    - Add the span arm in `impl InferError::span()`.
+   - Add the arm in `impl InferError::render()` — code, message, label, notes.
+     This is the ONE place a user-facing inference message lives; the codespan
+     renderer in `kestrel-compiler/src/diagnostic.rs` is a thin wrapper and
+     needs no change (F15).
 
 2. **`lib/kestrel-type-infer/src/result.rs`** — `describe_error()` match arm (short one-liner used as the `detail` string).
 
-3. **`lib/kestrel-compiler/src/diagnostic.rs`** — match arm on `InferError` that builds the user-facing `Diagnostic` (message + labels + notes).
-
-4. **`lib/kestrel-analyze/src/body/type_check.rs`** — `format_error()` match arm returning `(message, label_text)`.
-
-5. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
+3. **`lib/kestrel-compiler-driver/src/lib.rs`** — both `describe()` (short name) and `format_error()` (debug-log string).
 
 ## Reporting diagnostics from the solver
 
@@ -129,3 +129,22 @@ The copy-semantics decision tree lives in `kestrel-copy-fold`
 fold in solver code. Any deliberate divergence from the kernel rule must carry
 a `TODO(copy-drift #n)` comment at its classifier arm — never converge or
 introduce one silently.
+
+## `InferError::render` is the ONLY description of an inference error
+
+Code, headline message, primary-label text and notes all come from
+`error.rs::render`. Adding an `InferError` variant means adding exactly one
+arm, there.
+
+There used to be two full per-variant `match`es — `ResolvedInferError::to_diagnostic`
+in `kestrel-compiler` and `TypeCheckAnalyzer::format_error` in `kestrel-analyze`.
+They drifted in wording *and* in code: the same closure-kind mistake shipped as
+both `E624` and `E100`, and every type error rendered twice (the CLI and the
+test harness each open-coded a "skip E100" filter to hide it; the LSP had none,
+so editors showed two squiggles on the same range). `TypeCheckAnalyzer` is
+deleted; `to_diagnostic` is a thin wrapper (F15).
+
+`E100` is the documented umbrella code for variants with no more specific code
+of their own. A variant that deserves its own code (E624 / E491 / E492) names it
+in its `render` arm — and that code must also be in `docs/error-codes.md`, which
+is *not* covered by the analyzer-registry doc test (it only walks descriptors).

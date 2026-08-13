@@ -136,6 +136,16 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     },
 ];
 
+/// Look a descriptor up by its E-code — see the note in `body/access_mode.rs`:
+/// positional indices silently reassign every later code when a descriptor is
+/// inserted in the middle (F16).
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("descriptor id must be declared in this analyzer's DESCRIPTORS")
+}
+
 pub struct TypeAliasValidationAnalyzer;
 
 impl Describe for TypeAliasValidationAnalyzer {
@@ -172,8 +182,8 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
             let name = util::entity_name(cx.query, cx.entity);
             let span = util::entity_span(cx.query, cx.entity);
             diags.push(AnalyzeDiagnostic {
-                        descriptor_id: DESCRIPTORS[0].id,
-                        severity: DESCRIPTORS[0].default_severity,
+                        descriptor_id: descriptor("E441").id,
+                        severity: descriptor("E441").default_severity,
                         message: format!(
                             "type alias cannot have bounds outside a protocol: '{}'",
                             name
@@ -195,8 +205,8 @@ impl DeclCheck for TypeAliasValidationAnalyzer {
             let name = util::entity_name(cx.query, cx.entity);
             let span = util::entity_span(cx.query, cx.entity);
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E442").id,
+                severity: descriptor("E442").default_severity,
                 message: format!("type alias requires a type definition: '{}'", name),
                 labels: vec![DiagLabel {
                     span,
@@ -325,8 +335,8 @@ fn check_qualified_binding(
     if !conforming.contains(&protocol_entity) {
         let type_name = util::entity_name(cx.query, type_entity);
         diags.push(AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[2].id,
-            severity: DESCRIPTORS[2].default_severity,
+            descriptor_id: descriptor("E443").id,
+            severity: descriptor("E443").default_severity,
             message: format!("'{}' does not conform to '{}'", type_name, proto_name,),
             labels: vec![DiagLabel {
                 span: span.clone(),
@@ -344,8 +354,8 @@ fn check_qualified_binding(
             .is_empty();
     if !has_assoc_type {
         diags.push(AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[3].id,
-            severity: DESCRIPTORS[3].default_severity,
+            descriptor_id: descriptor("E444").id,
+            severity: descriptor("E444").default_severity,
             message: format!(
                 "protocol '{}' does not have associated type '{}'",
                 proto_name, alias_name,
@@ -421,8 +431,8 @@ fn check_unqualified_ambiguity(
     if uncovered.len() > 1 {
         let proto_list = uncovered.join(", ");
         diags.push(AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[4].id,
-            severity: DESCRIPTORS[4].default_severity,
+            descriptor_id: descriptor("E445").id,
+            severity: descriptor("E445").default_severity,
             message: format!(
                 "ambiguous associated type '{}': declared in protocols {}",
                 alias_name, proto_list,

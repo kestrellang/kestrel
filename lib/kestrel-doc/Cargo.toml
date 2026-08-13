@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 kestrel-compiler = { path = "../kestrel-compiler" }
+kestrel-ast = { path = "../kestrel-ast" }
 kestrel-ast-builder = { path = "../kestrel-ast-builder" }
 kestrel-hecs = { path = "../kestrel-hecs" }
 kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

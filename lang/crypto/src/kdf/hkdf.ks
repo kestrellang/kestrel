@@ -46,8 +46,8 @@ public struct HKDF[H] where H: Digest {
         let hashLen = H.digestSize;
         let n = (length + hashLen - 1) / hashLen;
 
-        var okm = Array[UInt8]();
-        var prev = Array[UInt8]();
+        var okm: [UInt8] = [];
+        var prev: [UInt8] = [];
         let prkKey = SymmetricKey(bytes: prk.bytes);
 
         for i in 1..=n {
@@ -62,7 +62,7 @@ public struct HKDF[H] where H: Digest {
             okm.append(contentsOf: prev.asSlice());
         }
 
-        var result = Array[UInt8]();
+        var result: [UInt8] = [];
         for i in 0..<length {
             result.append(okm(i));
         }

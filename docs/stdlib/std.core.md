@@ -5185,7 +5185,7 @@ _Defined in `lang/std/core/literals.ks`._
 ## function `fatalError`
 
 ```kestrel
-public func fatalError(String) -> Never
+public func fatalError(String) -> !
 ```
 
 Aborts the process with `message`.

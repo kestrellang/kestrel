@@ -72,15 +72,15 @@ All user-visible diagnostics are emitted by analyzers or by the inference solver
 
 ### From the type-inference solver
 
-Inference diagnostics go through `InferError`. Adding a variant requires changes in **five** files — `lib/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
+Inference diagnostics go through `InferError`. Adding a variant requires changes in **three** files — `lib/kestrel-type-infer/AGENTS.md` has the canonical list. The short version:
 
 | File | Change |
 |------|--------|
-| `kestrel-type-infer/src/error.rs` | Add the variant + its span arm. |
+| `kestrel-type-infer/src/error.rs` | The variant, its `span()` arm, and its `render()` arm (code + message + label + notes). |
 | `kestrel-type-infer/src/result.rs` | `describe_error()` match arm. |
-| `kestrel-compiler/src/diagnostic.rs` | `InferError` → `Diagnostic` match arm. |
-| `kestrel-analyze/src/body/type_check.rs` | `format_error()` match arm. |
 | `kestrel-compiler-driver/src/lib.rs` | `describe()` and `format_error()` arms. |
+
+`kestrel-compiler/src/diagnostic.rs` is a thin wrapper over `render()` and needs no per-variant change.
 
 Missing any one of these produces a non-exhaustive-match error only when the dependent crate is compiled — so do the whole set in one pass.
 

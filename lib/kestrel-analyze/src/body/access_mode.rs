@@ -71,6 +71,20 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     },
 ];
 
+/// Look a descriptor up by its E-code.
+///
+/// Emit sites name the code, never a position. The positional form
+/// (`DESCRIPTORS[5]`, aliased behind `const E210: usize = 5;`) tied a code to
+/// an array index with nothing but the constant's *name* — inserting a
+/// descriptor in the middle silently reassigned every later code, its severity
+/// and its docs link (F16). `descriptor()` makes that reordering a no-op.
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("descriptor id must be declared in this analyzer's DESCRIPTORS")
+}
+
 pub struct AccessModeAnalyzer;
 
 impl Describe for AccessModeAnalyzer {
@@ -152,8 +166,8 @@ impl BodyCheck for AccessModeAnalyzer {
                         && !matches!(classify_mutability(cx, *scrutinee), MutClass::Mutable)
                     {
                         diags.push(AnalyzeDiagnostic {
-                            descriptor_id: DESCRIPTORS[5].id,
-                            severity: DESCRIPTORS[5].default_severity,
+                            descriptor_id: descriptor("E210").id,
+                            severity: descriptor("E210").default_severity,
                             message: "`&mutating` pattern bindings need a mutable scrutinee place"
                                 .to_string(),
                             labels: vec![DiagLabel {
@@ -187,10 +201,11 @@ fn check_borrow_init(
     span: &kestrel_span::Span,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
-    let push = |diags: &mut Vec<AnalyzeDiagnostic>, d: usize, message: String, note: String| {
+    let push = |diags: &mut Vec<AnalyzeDiagnostic>, code: &str, message: String, note: String| {
+        let d = descriptor(code);
         diags.push(AnalyzeDiagnostic {
-            descriptor_id: DESCRIPTORS[d].id,
-            severity: DESCRIPTORS[d].default_severity,
+            descriptor_id: d.id,
+            severity: d.default_severity,
             message,
             labels: vec![DiagLabel {
                 span: span.clone(),
@@ -200,8 +215,6 @@ fn check_borrow_init(
             notes: vec![note],
         });
     };
-    const E210: usize = 5;
-    const E499: usize = 6;
 
     // A get/set-only member has no mutable place to lend — the writeback
     // temp the lowering would borrow strands every later store made
@@ -220,7 +233,7 @@ fn check_borrow_init(
     {
         push(
             diags,
-            E210,
+            "E210",
             "cannot take a `&mutating` borrow of a get/set member".to_string(),
             "writes through this member go get→set; a borrowable place needs a \
              `mutating ref` accessor"
@@ -232,7 +245,7 @@ fn check_borrow_init(
     match classify_mutability(cx, inner) {
         MutClass::Temporary => push(
             diags,
-            E499,
+            "E499",
             "cannot borrow a temporary value".to_string(),
             "a borrow names an existing place; bind the value first (`let x = ...;`) \
              and borrow that"
@@ -240,19 +253,19 @@ fn check_borrow_init(
         ),
         MutClass::SharedRef if mutating => push(
             diags,
-            E210,
+            "E210",
             "cannot take a `&mutating` borrow through a shared reference".to_string(),
             "the place is reached through `&T`, which permits reads only".to_string(),
         ),
         MutClass::ImmutableLocal(name) if mutating => push(
             diags,
-            E210,
+            "E210",
             format!("cannot take a `&mutating` borrow of immutable variable '{name}'"),
             "declare the variable with `var`, or take a shared `&` borrow".to_string(),
         ),
         MutClass::ImmutableField(name) if mutating => push(
             diags,
-            E210,
+            "E210",
             format!("cannot take a `&mutating` borrow of immutable field '{name}'"),
             "the field is declared with `let`".to_string(),
         ),
@@ -359,8 +372,8 @@ fn check_mutating_kind_call(
         },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!("cannot call `mutating` closure '{name}': it is bound with 'let'"),
                 labels: vec![DiagLabel {
                     span,
@@ -372,8 +385,8 @@ fn check_mutating_kind_call(
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!("cannot call `mutating` closure in immutable field '{name}'"),
                 labels: vec![DiagLabel {
                     span,
@@ -405,8 +418,8 @@ fn check_mutating_receiver(
         },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!(
                     "cannot pass immutable binding '{}' to 'mutating' parameter",
                     name
@@ -421,8 +434,8 @@ fn check_mutating_receiver(
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!(
                     "cannot pass immutable field '{}' to 'mutating' parameter",
                     name
@@ -451,8 +464,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::ImmutableLocal(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[0].id,
-                severity: DESCRIPTORS[0].default_severity,
+                descriptor_id: descriptor("E203").id,
+                severity: descriptor("E203").default_severity,
                 message: format!(
                     "cannot pass immutable binding '{}' to 'mutating' parameter",
                     name
@@ -467,8 +480,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::ImmutableField(name) => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[1].id,
-                severity: DESCRIPTORS[1].default_severity,
+                descriptor_id: descriptor("E204").id,
+                severity: descriptor("E204").default_severity,
                 message: format!(
                     "cannot pass immutable field '{}' to 'mutating' parameter",
                     name
@@ -483,8 +496,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
         },
         MutClass::Temporary => {
             diags.push(AnalyzeDiagnostic {
-                descriptor_id: DESCRIPTORS[2].id,
-                severity: DESCRIPTORS[2].default_severity,
+                descriptor_id: descriptor("E205").id,
+                severity: descriptor("E205").default_severity,
                 message: "cannot pass temporary value to 'mutating' parameter".into(),
                 labels: vec![DiagLabel {
                     span,
@@ -500,8 +513,8 @@ fn check_mutating_arg(cx: &BodyContext<'_>, arg_id: HirExprId, diags: &mut Vec<A
 /// E207: mutating use through a shared `&T` — the const-cast guard.
 fn shared_ref_diag(span: kestrel_span::Span, message: &str) -> AnalyzeDiagnostic {
     AnalyzeDiagnostic {
-        descriptor_id: DESCRIPTORS[4].id,
-        severity: DESCRIPTORS[4].default_severity,
+        descriptor_id: descriptor("E207").id,
+        severity: descriptor("E207").default_severity,
         message: message.into(),
         labels: vec![DiagLabel {
             span,

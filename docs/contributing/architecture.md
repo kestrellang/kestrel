@@ -167,7 +167,7 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
                 the resolved callee entity on the expression, and
                 unifies the result type with String.
 
-6. ANALYZE      TypeCheckAnalyzer etc. run against the typed body.
+6. ANALYZE      Registered analyzers run against the typed body.
                 Any mismatches turn into diagnostics.
 
 7. MIR LOWER    The method call becomes a concrete Call instruction

@@ -94,7 +94,7 @@ public struct FormatAccumulator: Interpolatable, Cloneable {
     var components: Array[FormatComponent]
 
     public init(literalCapacity literalCapacity: Int64, interpolationCount interpolationCount: Int64) {
-        self.components = Array[FormatComponent]();
+        self.components = [];
     }
 
     public func clone() -> FormatAccumulator {

@@ -66,15 +66,9 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                     let range = entity_hover_range(world, file_entity, offset, root, &line_index);
                     // "Defined in" link for members of a type.
                     if let Some(parent) = world.parent_of(entity) {
-                        let parent_is_type = matches!(
-                            world.get::<NodeKind>(parent),
-                            Some(
-                                NodeKind::Struct
-                                    | NodeKind::Enum
-                                    | NodeKind::Protocol
-                                    | NodeKind::Extension
-                            )
-                        );
+                        let parent_is_type = world
+                            .get::<NodeKind>(parent)
+                            .is_some_and(NodeKind::is_type_scope);
                         if parent_is_type && let Some(link) = entity_link(world, &sources, parent) {
                             let name = world
                                 .get::<Name>(parent)

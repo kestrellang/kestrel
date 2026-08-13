@@ -389,10 +389,50 @@ pub enum UnaryOp {
     BorrowMutating,
 }
 
+impl UnaryOp {
+    /// How this operator is spelled in Kestrel source. See [`BinaryOp::symbol`].
+    ///
+    /// Bare — no trailing space. Word-shaped operators (`not`, `&mutating`)
+    /// need a separator before their operand when pretty-printing, which is
+    /// [`UnaryOp::needs_space_before_operand`]'s job, not this one's.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            UnaryOp::Neg => "-",
+            UnaryOp::BitNot => "!",
+            UnaryOp::LogicalNot => "not",
+            UnaryOp::Pos => "+",
+            UnaryOp::RangeUpTo => "..<",
+            UnaryOp::RangeThrough => "..=",
+            UnaryOp::Borrow => "&",
+            UnaryOp::BorrowMutating => "&mutating",
+        }
+    }
+
+    /// Whether pretty-printing must put a space between this operator and its
+    /// operand. True exactly for the spellings that end in a word character —
+    /// `not x`, `&mutating x` — where juxtaposition would lex as one token.
+    pub fn needs_space_before_operand(&self) -> bool {
+        self.symbol()
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PostfixOp {
     Unwrap,
     RangeFrom,
+}
+
+impl PostfixOp {
+    /// How this operator is spelled in Kestrel source. See [`BinaryOp::symbol`].
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            PostfixOp::Unwrap => "!",
+            PostfixOp::RangeFrom => "..",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -444,6 +484,39 @@ impl BinaryOp {
     pub fn is_right_assoc(&self) -> bool {
         matches!(self, BinaryOp::Coalesce)
     }
+
+    /// How this operator is spelled in Kestrel source.
+    ///
+    /// **The only place operator spellings live.** There was a second copy in
+    /// `kestrel-hir-lower::desugar`, and it was wrong in three rows — it wrote
+    /// `&&`, `||` and `...` where Kestrel writes `and`, `or` and `..=` — for
+    /// text that goes straight into a diagnostic message. Pretty-printing adds
+    /// its own spacing; the spelling itself is bare.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Rem => "%",
+            BinaryOp::BitAnd => "&",
+            BinaryOp::BitOr => "|",
+            BinaryOp::BitXor => "^",
+            BinaryOp::Shl => "<<",
+            BinaryOp::Shr => ">>",
+            BinaryOp::Eq => "==",
+            BinaryOp::Ne => "!=",
+            BinaryOp::Lt => "<",
+            BinaryOp::Gt => ">",
+            BinaryOp::Le => "<=",
+            BinaryOp::Ge => ">=",
+            BinaryOp::And => "and",
+            BinaryOp::Or => "or",
+            BinaryOp::Coalesce => "??",
+            BinaryOp::RangeInclusive => "..=",
+            BinaryOp::RangeExclusive => "..<",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -458,6 +531,24 @@ pub enum CompoundAssignOp {
     BitXorAssign,
     ShlAssign,
     ShrAssign,
+}
+
+impl CompoundAssignOp {
+    /// How this operator is spelled in Kestrel source. See [`BinaryOp::symbol`].
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            CompoundAssignOp::AddAssign => "+=",
+            CompoundAssignOp::SubAssign => "-=",
+            CompoundAssignOp::MulAssign => "*=",
+            CompoundAssignOp::DivAssign => "/=",
+            CompoundAssignOp::RemAssign => "%=",
+            CompoundAssignOp::BitAndAssign => "&=",
+            CompoundAssignOp::BitOrAssign => "|=",
+            CompoundAssignOp::BitXorAssign => "^=",
+            CompoundAssignOp::ShlAssign => "<<=",
+            CompoundAssignOp::ShrAssign => ">>=",
+        }
+    }
 }
 
 // ===== Pattern helpers =====

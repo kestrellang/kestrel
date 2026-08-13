@@ -6,6 +6,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::parsers::ModulePathSpans;
 use crate::common::{emit_module_path, module_path_parser_internal, token};
 use crate::event::{EventSink, TreeBuilder};
 use crate::input::{ParserExtra, ParserInput};
@@ -33,13 +34,13 @@ impl ModuleDeclaration {
 
     /// Create a new ModuleDeclaration from spans, building the syntax tree
     /// This is a convenience function that emits events and builds the tree
-    pub fn new(source: &str, module_span: Span, path_segments: Vec<Span>) -> Self {
+    pub fn new(source: &str, module_span: Span, path: ModulePathSpans) -> Self {
         let full_span = Span::new(
             module_span.file_id,
-            module_span.start..path_segments.last().unwrap().end,
+            module_span.start..path.segments.last().unwrap().end,
         );
         let mut sink = EventSink::new(0);
-        emit_module_declaration(&mut sink, module_span, &path_segments);
+        emit_module_declaration(&mut sink, module_span, &path);
         Self::from_events(source, sink.into_events(), full_span)
     }
 
@@ -64,17 +65,17 @@ where
         tokens,
         sink,
         module_declaration_parser_internal(),
-        |sink, (module_span, path_segments): (Span, Vec<Span>)| emit_module_declaration(
+        |sink, (module_span, path): (Span, ModulePathSpans)| emit_module_declaration(
             sink,
             module_span,
-            &path_segments
+            &path
         )
     );
 }
 
 /// Internal Chumsky parser for module declarations.
 pub(crate) fn module_declaration_parser_internal<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (Span, Vec<Span>), ParserExtra<'tokens>> + Clone {
+-> impl Parser<'tokens, ParserInput<'tokens>, (Span, ModulePathSpans), ParserExtra<'tokens>> + Clone {
     token(Token::Module)
         .then(module_path_parser_internal())
         .boxed()
@@ -84,11 +85,11 @@ pub(crate) fn module_declaration_parser_internal<'tokens>()
 pub(crate) fn emit_module_declaration(
     sink: &mut EventSink,
     module_span: Span,
-    path_segments: &[Span],
+    path: &ModulePathSpans,
 ) {
     sink.start_node(SyntaxKind::ModuleDeclaration);
     sink.add_token(SyntaxKind::Module, module_span);
-    emit_module_path(sink, path_segments);
+    emit_module_path(sink, path);
     sink.finish_node();
 }
 

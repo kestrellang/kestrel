@@ -108,7 +108,7 @@ extend Value {
     /// Value.Boolean(true).asBool();   // Some(true)
     /// Value.Int(1).asBool();          // None
     /// ```
-    public func asBool() -> Optional[Bool] {
+    public func asBool() -> Bool? {
         match self {
             .Boolean(b) => .Some(b),
             _ => .None
@@ -123,7 +123,7 @@ extend Value {
     /// Value.Int(42).asInt();       // Some(42)
     /// Value.Float(1.0).asInt();    // None
     /// ```
-    public func asInt() -> Optional[Int64] {
+    public func asInt() -> Int64? {
         match self {
             .Int(n) => .Some(n),
             _ => .None
@@ -138,7 +138,7 @@ extend Value {
     /// Value.Float(3.14).asFloat();   // Some(3.14)
     /// Value.Int(3).asFloat();        // None
     /// ```
-    public func asFloat() -> Optional[Float64] {
+    public func asFloat() -> Float64? {
         match self {
             .Float(f) => .Some(f),
             _ => .None
@@ -153,7 +153,7 @@ extend Value {
     /// Value.Str("hi").asString();    // Some("hi")
     /// Value.Null.asString();         // None
     /// ```
-    public func asString() -> Optional[String] {
+    public func asString() -> String? {
         match self {
             .Str(s) => .Some(s),
             _ => .None
@@ -168,7 +168,7 @@ extend Value {
     /// Value.Arr([Value.Int(1)]).asArray();   // Some([.Int(1)])
     /// Value.Null.asArray();                  // None
     /// ```
-    public func asArray() -> Optional[Array[Value]] {
+    public func asArray() -> [Value]? {
         match self {
             .Arr(arr) => .Some(arr),
             _ => .None
@@ -184,7 +184,7 @@ extend Value {
     /// obj.asObject();            // Some({"k": .Int(1)})
     /// Value.Null.asObject();     // None
     /// ```
-    public func asObject() -> Optional[Dictionary[String, Value]] {
+    public func asObject() -> [String: Value]? {
         match self {
             .Obj(obj) => .Some(obj),
             _ => .None
@@ -204,7 +204,7 @@ extend Value {
     /// obj.value(for: "missing");  // None
     /// Value.Null.value(for: "x"); // None
     /// ```
-    public func value(for key: String) -> Optional[Value] {
+    public func value(for key: String) -> Value? {
         match self {
             .Obj(obj) => obj(key),
             _ => .None

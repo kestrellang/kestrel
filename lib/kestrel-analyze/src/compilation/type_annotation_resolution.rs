@@ -22,7 +22,10 @@ use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ResolveTypePath, TypeResolution};
 
-static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
+/// E476 is also emitted by `decl/generics.rs` for an unresolved where-clause
+/// bound — same fact, different position. It borrows this descriptor rather
+/// than declaring a second one (see `Describe::borrowed_descriptors`).
+pub(crate) static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E476",
     name: "unresolved_type_in_annotation",
     default_severity: Severity::Error,

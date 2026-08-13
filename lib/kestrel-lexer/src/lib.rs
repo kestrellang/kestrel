@@ -745,6 +745,29 @@ pub enum Token {
 }
 
 impl Token {
+    /// Whether this token is trivia — carried through to the CST for fidelity,
+    /// but skipped by every grammar rule.
+    ///
+    /// **This is the only definition of the trivia set.** `SyntaxKind::is_trivia`
+    /// is its image under `From<Token>`, pinned by a test in `kestrel-syntax-tree`.
+    /// Splitting a new kind out of one of these (a `DocComment` distinct from
+    /// `LineComment`, say) is a one-line change here; open-coding the set at a
+    /// call site instead means the new kind stops being skipped at that one site
+    /// only, and the tokens silently vanish from the tree.
+    pub fn is_trivia(&self) -> bool {
+        matches!(
+            self,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        )
+    }
+
+    /// Trivia that does not end a line — everything in [`Token::is_trivia`]
+    /// except `Newline`, for the grammar positions where a line break is
+    /// significant (statement ends, `}` placement).
+    pub fn is_inline_trivia(&self) -> bool {
+        self.is_trivia() && !matches!(self, Token::Newline)
+    }
+
     /// Whether this token is a keyword that can appear as a parameter label.
     /// Excludes `Mutating` and `Consuming` — they're parsed as access modes.
     pub fn is_label_keyword(&self) -> bool {
@@ -821,12 +844,7 @@ mod tests {
         tokens
             .into_iter()
             .filter_map(|t| t.ok())
-            .filter(|t| {
-                !matches!(
-                    t.value,
-                    Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-                )
-            })
+            .filter(|t| !t.value.is_trivia())
             .collect()
     }
 

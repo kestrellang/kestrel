@@ -18,7 +18,7 @@ fn build_from_source(source: &str) -> (World, Entity) {
 
     let root = world.spawn();
     world.set(root, NodeKind::Module);
-    world.set(root, Name("<root>".to_string()));
+    world.set(root, Name(Name::ROOT.to_string()));
     // Seed `lang.*` primitives so literal fallback in `apply_literal_defaults`
     // has `lang.i1` / `lang.i64` / `lang.str` / `lang.f64` to bind to when
     // the test source doesn't load stdlib's `Default<Kind>LiteralType`.

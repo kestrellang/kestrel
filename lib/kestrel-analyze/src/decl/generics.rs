@@ -122,6 +122,9 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     },
 ];
 
+static BORROWED: &[&DiagnosticDescriptor] =
+    &[&crate::compilation::type_annotation_resolution::DESCRIPTORS[0]];
+
 pub struct GenericsAnalyzer;
 
 impl Describe for GenericsAnalyzer {
@@ -130,6 +133,11 @@ impl Describe for GenericsAnalyzer {
     }
     fn descriptors(&self) -> &'static [DiagnosticDescriptor] {
         DESCRIPTORS
+    }
+    fn borrowed_descriptors(&self) -> &'static [&'static DiagnosticDescriptor] {
+        // E476 — an unresolved where-clause bound is the same "cannot find
+        // type" fact `type_annotation_resolution` reports for annotations.
+        BORROWED
     }
 }
 
@@ -610,9 +618,14 @@ fn check_where_clause_bounds(
                         });
                     }
                 },
+                // E476, not E436: this is "cannot find type 'X' in this
+                // scope", the code `type_annotation_resolution` owns. The
+                // literal here was left behind by the 2026-07 renumbering that
+                // moved that meaning off E436, so `where T: NonExistent`
+                // printed E476's message under E436's docs entry (F16).
                 TypeResolution::NotFound(_) => {
                     diags.push(AnalyzeDiagnostic {
-                        descriptor_id: "E436",
+                        descriptor_id: "E476",
                         severity: Severity::Error,
                         message: format!("cannot find type '{}' in this scope", type_name),
                         labels: vec![DiagLabel {

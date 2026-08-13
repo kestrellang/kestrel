@@ -4,6 +4,7 @@
 //! enum/struct pattern names to entities where possible.
 
 use kestrel_ast::ast_body::*;
+use kestrel_ast::escape::{Escaped, decode_escape};
 use kestrel_hir::body::*;
 use kestrel_name_res::{ResolveTypePath, ResolveValuePath, TypeResolution, ValueResolution};
 use kestrel_span::Span;
@@ -131,7 +132,7 @@ impl LowerCtx<'_> {
                                 s >= e
                             }
                         },
-                        (HirLiteral::Char(s), HirLiteral::Char(e)) => {
+                        (HirLiteral::Char { value: s, .. }, HirLiteral::Char { value: e, .. }) => {
                             if *inclusive {
                                 s > e
                             } else {
@@ -546,7 +547,13 @@ fn lower_lit_pat(kind: &LitPatKind, span: &Span) -> HirLiteral {
             }
         },
         LitPatKind::Bool(b) => HirLiteral::Bool(*b),
-        LitPatKind::Char(s) => HirLiteral::Char(parse_char(s)),
+        LitPatKind::Char(s) => {
+            let (value, escape_errors) = parse_char(s, span);
+            HirLiteral::Char {
+                value,
+                escape_errors,
+            }
+        },
     }
 }
 
@@ -577,30 +584,42 @@ pub(crate) fn parse_float(s: &str) -> f64 {
     s.replace('_', "").parse().unwrap_or(0.0)
 }
 
-/// Parse a char literal string to a unicode scalar value (no validation).
-/// Used for pattern literals where we don't have diagnostic context.
-pub(crate) fn parse_char(s: &str) -> u32 {
-    // Strip exactly one quote from each end (trim_matches strips ALL matching chars,
-    // which breaks '\'' by also stripping the escaped quote content)
+/// Strip the surrounding quotes from a char-literal token.
+///
+/// `trim_matches` would strip ALL matching quotes, which breaks `'\''` by also
+/// stripping the escaped quote content — so exactly one comes off each end.
+fn char_literal_body(s: &str) -> &str {
     let inner = s.strip_prefix('\'').unwrap_or(s);
-    let inner = inner.strip_suffix('\'').unwrap_or(inner);
-    let codepoints = unescape_char_content(inner, &Span::synthetic(0), None);
-    codepoints.first().copied().unwrap_or(0)
+    inner.strip_suffix('\'').unwrap_or(inner)
 }
 
-/// Parse and validate a char literal, emitting diagnostics for invalid content.
-/// Used during HIR lowering where diagnostic context is available.
+/// Decode a char literal into its scalar value plus any escape errors.
+///
+/// Both positions — expression and pattern — go through this. They used to
+/// differ: expressions called `parse_char_validated` (which `ctx.accumulate`d
+/// uncoded diagnostics) while patterns called `parse_char` with no diagnostic
+/// sink at all, so `'\u{D800}'` in a `match` arm silently became NUL while the
+/// same literal in an expression errored (F26). Errors are now data on the
+/// literal, exactly like `HirLiteral::String`, and `StringEscapeAnalyzer`
+/// assigns E700-E703 to both.
+pub(crate) fn parse_char(s: &str, span: &Span) -> (u32, Vec<EscapeError>) {
+    let inner = char_literal_body(s);
+    let (codepoints, errors) = unescape_char_content(inner, span);
+    (codepoints.first().copied().unwrap_or(0), errors)
+}
+
+/// `parse_char` plus the arity checks that only make sense for a char literal
+/// written in expression position: it must hold exactly one codepoint.
+///
+/// Those two remain `ctx.accumulate`d — they are not escape errors and have no
+/// E-code of their own.
 pub(crate) fn parse_char_validated(
     s: &str,
     span: &Span,
     ctx: &kestrel_hecs::QueryContext<'_>,
-) -> u32 {
-    // Strip exactly one quote from each end (trim_matches strips ALL matching chars,
-    // which breaks '\'' by also stripping the escaped quote content)
-    let inner = s.strip_prefix('\'').unwrap_or(s);
-    let inner = inner.strip_suffix('\'').unwrap_or(inner);
+) -> (u32, Vec<EscapeError>) {
+    let inner = char_literal_body(s);
 
-    // Empty char literal
     if inner.is_empty() {
         ctx.accumulate(
             kestrel_reporting::Diagnostic::error()
@@ -610,15 +629,10 @@ pub(crate) fn parse_char_validated(
                         .with_message("character literal must contain exactly one codepoint"),
                 ]),
         );
-        return 0;
+        return (0, Vec::new());
     }
 
-    let codepoints = unescape_char_content(inner, span, Some(ctx));
-
-    if codepoints.is_empty() {
-        // Escape processing consumed everything but produced nothing (shouldn't happen)
-        return 0;
-    }
+    let (codepoints, errors) = unescape_char_content(inner, span);
 
     if codepoints.len() > 1 {
         ctx.accumulate(
@@ -631,185 +645,57 @@ pub(crate) fn parse_char_validated(
         );
     }
 
-    codepoints[0]
+    (codepoints.first().copied().unwrap_or(0), errors)
 }
 
-/// Process escape sequences in char literal content, returning codepoints.
-/// If `ctx` is provided, emits diagnostics for invalid escapes.
-fn unescape_char_content(
-    s: &str,
-    span: &Span,
-    ctx: Option<&kestrel_hecs::QueryContext<'_>>,
-) -> Vec<u32> {
+/// Decode the body of a char literal into codepoints plus escape errors.
+///
+/// The escape TABLE is `kestrel_ast::escape` — shared with the string decoder,
+/// so `\u` digit limits, `\x` range and unknown escapes have one answer. This
+/// re-implemented it, and its `\u{` hex loop had neither a close-brace
+/// requirement nor a digit limit, so `'\u{00000041}'` compiled to `'A'` while
+/// `"\u{00000041}"` was rejected (F26).
+///
+/// Spans are relative to the literal's own span: the token text is the quoted
+/// form, so an escape at body offset `k` sits at `span.start + 1 + k`.
+fn unescape_char_content(s: &str, span: &Span) -> (Vec<u32>, Vec<EscapeError>) {
     let mut result = Vec::new();
-    let mut chars = s.chars().peekable();
+    let mut errors = Vec::new();
+    let mut chars = s.char_indices().peekable();
+    // +1 for the opening quote the body was stripped of.
+    let body_start = span.start + 1;
 
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            match chars.next() {
-                Some('n') => result.push('\n' as u32),
-                Some('r') => result.push('\r' as u32),
-                Some('t') => result.push('\t' as u32),
-                Some('\\') => result.push('\\' as u32),
-                Some('\'') => result.push('\'' as u32),
-                Some('"') => result.push('"' as u32),
-                Some('0') => result.push(0),
-                Some('x') => {
-                    // Hex ASCII escape: \xNN (exactly 2 hex digits, value ≤ 0x7F)
-                    let d1 = chars.next();
-                    let d2 = chars.next();
-                    match (d1, d2) {
-                        (Some(h1), Some(h2))
-                            if h1.is_ascii_hexdigit() && h2.is_ascii_hexdigit() =>
-                        {
-                            let hex_str: String = [h1, h2].iter().collect();
-                            let value = u32::from_str_radix(&hex_str, 16).unwrap_or(0);
-                            if value > 0x7F
-                                && let Some(ctx) = ctx
-                            {
-                                ctx.accumulate(
-                                    kestrel_reporting::Diagnostic::error()
-                                        .with_message(format!(
-                                            "ASCII escape \\x{:02X} out of range",
-                                            value
-                                        ))
-                                        .with_labels(vec![
-                                            kestrel_reporting::Label::primary(
-                                                span.file_id,
-                                                span.range(),
-                                            )
-                                            .with_message("must be in range \\x00-\\x7F"),
-                                        ]),
-                                );
-                            }
-                            result.push(value);
-                        },
-                        _ => {
-                            // Incomplete hex escape
-                            if let Some(ctx) = ctx {
-                                ctx.accumulate(
-                                    kestrel_reporting::Diagnostic::error()
-                                        .with_message("invalid escape sequence")
-                                        .with_labels(vec![
-                                            kestrel_reporting::Label::primary(
-                                                span.file_id,
-                                                span.range(),
-                                            )
-                                            .with_message("incomplete hex escape (expected \\xNN)"),
-                                        ]),
-                                );
-                            }
-                            result.push(0);
-                        },
-                    }
-                },
-                Some('u') => {
-                    // Unicode escape: \u{NNNN} (1-6 hex digits)
-                    if chars.next() != Some('{') {
-                        if let Some(ctx) = ctx {
-                            ctx.accumulate(
-                                kestrel_reporting::Diagnostic::error()
-                                    .with_message("invalid Unicode escape")
-                                    .with_labels(vec![
-                                        kestrel_reporting::Label::primary(
-                                            span.file_id,
-                                            span.range(),
-                                        )
-                                        .with_message("expected '{{' after \\u"),
-                                    ]),
-                            );
-                        }
-                        result.push(0);
-                        continue;
-                    }
-                    let mut hex = String::new();
-                    for c in chars.by_ref() {
-                        if c == '}' {
-                            break;
-                        }
-                        hex.push(c);
-                    }
-                    match u32::from_str_radix(&hex, 16) {
-                        Ok(value) if value > 0x10FFFF => {
-                            if let Some(ctx) = ctx {
-                                ctx.accumulate(
-                                    kestrel_reporting::Diagnostic::error()
-                                        .with_message("invalid Unicode escape")
-                                        .with_labels(vec![
-                                            kestrel_reporting::Label::primary(
-                                                span.file_id,
-                                                span.range(),
-                                            )
-                                            .with_message(format!(
-                                                "\\u{{{}}} is out of range (max 10FFFF)",
-                                                hex
-                                            )),
-                                        ]),
-                                );
-                            }
-                            result.push(0);
-                        },
-                        Ok(value) if (0xD800..=0xDFFF).contains(&value) => {
-                            if let Some(ctx) = ctx {
-                                ctx.accumulate(
-                                    kestrel_reporting::Diagnostic::error()
-                                        .with_message("invalid Unicode escape")
-                                        .with_labels(vec![
-                                            kestrel_reporting::Label::primary(
-                                                span.file_id,
-                                                span.range(),
-                                            )
-                                            .with_message(format!(
-                                                "\\u{{{}}} is a surrogate codepoint",
-                                                hex
-                                            )),
-                                        ]),
-                                );
-                            }
-                            result.push(0);
-                        },
-                        Ok(value) => result.push(value),
-                        Err(_) => {
-                            if let Some(ctx) = ctx {
-                                ctx.accumulate(
-                                    kestrel_reporting::Diagnostic::error()
-                                        .with_message("invalid Unicode escape")
-                                        .with_labels(vec![
-                                            kestrel_reporting::Label::primary(
-                                                span.file_id,
-                                                span.range(),
-                                            )
-                                            .with_message("invalid hex digits"),
-                                        ]),
-                                );
-                            }
-                            result.push(0);
-                        },
-                    }
-                },
-                Some(esc) => {
-                    // Unknown escape sequence
-                    if let Some(ctx) = ctx {
-                        ctx.accumulate(
-                            kestrel_reporting::Diagnostic::error()
-                                .with_message(format!("invalid escape sequence '\\{}'", esc))
-                                .with_labels(vec![
-                                    kestrel_reporting::Label::primary(span.file_id, span.range())
-                                        .with_message("unknown escape"),
-                                ]),
-                        );
-                    }
-                    result.push(esc as u32);
-                },
-                None => {
-                    // Backslash at end of literal
-                    result.push('\\' as u32);
-                },
-            }
-        } else {
+    while let Some((i, c)) = chars.next() {
+        if c != '\\' {
             result.push(c as u32);
+            continue;
+        }
+        let escape_start = body_start + i;
+        let decoded = decode_escape(&mut chars);
+        let escape_span = Span::new(span.file_id, escape_start..escape_start + decoded.raw.len());
+
+        match decoded.result {
+            Ok(Escaped::Scalar(cp)) => result.push(cp),
+            // Neither is meaningful inside a char literal.
+            Ok(Escaped::LineContinuation) | Ok(Escaped::Interpolation) => {
+                errors.push(EscapeError {
+                    span: escape_span,
+                    kind: EscapeErrorKind::InvalidEscape {
+                        sequence: decoded.raw.clone(),
+                    },
+                });
+            },
+            Err(kind) => {
+                errors.push(EscapeError {
+                    span: escape_span,
+                    kind,
+                });
+                // A malformed escape still has to yield a codepoint; 0 keeps
+                // downstream code total, and the error is what the user sees.
+                result.push(0);
+            },
         }
     }
 
-    result
+    (result, errors)
 }

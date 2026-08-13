@@ -10,6 +10,7 @@ use kestrel_lexer::Token;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
+use crate::common::parsers::skip_trivia;
 use crate::event::{EventSink, TreeBuilder};
 use crate::expr::{ExprVariant, emit_expr_variant, expr_parser};
 use crate::input::{ParserExtra, ParserInput, to_kestrel_span};
@@ -92,19 +93,6 @@ pub enum StmtVariant {
 }
 
 /// Parser that skips trivia tokens
-fn skip_trivia<'tokens>()
--> impl Parser<'tokens, ParserInput<'tokens>, (), ParserExtra<'tokens>> + Clone {
-    any()
-        .filter(|token: &Token| {
-            matches!(
-                token,
-                Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-            )
-        })
-        .repeated()
-        .ignored()
-}
-
 /// Parser for variable declaration
 ///
 /// Syntax: let/var pattern (: Type)? (= expr)? ;

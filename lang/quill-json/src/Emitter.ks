@@ -70,13 +70,11 @@ func emitValue(value: Value, mutating buf: String) {
         .Str(s) => emitString(s, buf),
         .Arr(arr) => {
             buf.append("[");
-            var i: Int64 = 0;
-            while i < arr.count {
-                if i > 0 {
+            for (index, item) in arr.iter().enumerate() {
+                if index > 0 {
                     buf.append(",")
                 }
-                emitValue(arr(unchecked: i), buf);
-                i = i + 1
+                emitValue(item, buf)
             }
             buf.append("]")
         },
@@ -123,15 +121,13 @@ func emitPretty(value: Value, mutating buf: String, indent: Int64) {
                 buf.append("[");
                 buf.append("\n");
                 let childIndent = indent + 2;
-                var i: Int64 = 0;
-                while i < arr.count {
-                    if i > 0 {
+                for (index, item) in arr.iter().enumerate() {
+                    if index > 0 {
                         buf.append(",");
                         buf.append("\n")
                     }
                     writeIndent(buf, childIndent);
-                    emitPretty(arr(unchecked: i), buf, childIndent);
-                    i = i + 1
+                    emitPretty(item, buf, childIndent)
                 }
                 buf.append("\n");
                 writeIndent(buf, indent);
@@ -168,10 +164,8 @@ func emitPretty(value: Value, mutating buf: String, indent: Int64) {
 
 /// Appends `count` space characters to the buffer.
 func writeIndent(mutating buf: String, count: Int64) {
-    var i: Int64 = 0;
-    while i < count {
-        buf.append(" ");
-        i = i + 1
+    for _ in 0..<count {
+        buf.append(" ")
     }
 }
 
@@ -187,41 +181,31 @@ func writeIndent(mutating buf: String, count: Int64) {
 /// in JSON strings).
 func emitString(s: String, mutating buf: String) {
     buf.append("\"");
-    var i: Int64 = 0;
-    let len = s.bytes.count;
-    while i < len {
-        let b = s.bytes(unchecked: i);
-        if b == 34 {
-            buf.append("\\\"")
-        } else if b == 92 {
-            buf.append("\\\\")
-        } else if b == 8 {
-            buf.append("\\b")
-        } else if b == 12 {
-            buf.append("\\f")
-        } else if b == 10 {
-            buf.append("\\n")
-        } else if b == 13 {
-            buf.append("\\r")
-        } else if b == 9 {
-            buf.append("\\t")
-        } else if b < 32 {
-            buf.append("\\u00\(b:02x)")
-        } else {
-            buf.append(char: Char(UInt32(from: b)).unwrap())
-        }
-        i = i + 1
-    }
-    buf.append("\"")
-}
 
-/// Returns the lowercase hex digit (`0`–`f`) for a value 0–15.
-func hexChar(n: Int64) -> UInt8 {
-    if n < 10 {
-        UInt8(from: n + 48) // '0' + n
-    } else {
-        UInt8(from: n + 87) // 'a' + (n - 10)
+    // Iterate code points, not bytes: appending each byte of a multi-byte
+    // sequence as its own `Char` would re-encode it and mangle the text.
+    for c in s {
+        match c {
+            '"' => buf.append("\\\""),
+            '\\' => buf.append("\\\\"),
+            '\u{08}' => buf.append("\\b"),
+            '\u{0C}' => buf.append("\\f"),
+            '\n' => buf.append("\\n"),
+            '\r' => buf.append("\\r"),
+            '\t' => buf.append("\\t"),
+            // A `control if control.value() < 32` arm would read better, but
+            // pattern-guard arms currently miscompile (OSSA verify failure).
+            _ => {
+                if c.value() < 32 {
+                    buf.append("\\u00\(c.value():02x)")
+                } else {
+                    buf.append(char: c)
+                }
+            }
+        }
     }
+
+    buf.append("\"")
 }
 
 // ============================================================================
@@ -231,24 +215,10 @@ func hexChar(n: Int64) -> UInt8 {
 /// Emits a float, appending `.0` when the formatted representation lacks
 /// a decimal point or exponent (so `3.0` is never confused with integer `3`).
 func emitFloat(f: Float64, mutating buf: String) {
-    let s = "\(f)";
-    buf.append(s);
-    // Check if the formatted string contains a '.' or 'e'
-    // If not, append ".0" to distinguish from integers
-    var hasDot = false;
-    var i: Int64 = 0;
-    let len = s.bytes.count;
-    while i < len {
-        let b = s.bytes(unchecked: i);
-        let dot: UInt8 = 46;
-        let eL: UInt8 = 101;
-        let eU: UInt8 = 69;
-        if b == dot or b == eL or b == eU {
-            hasDot = true
-        }
-        i = i + 1
-    }
-    if not hasDot {
+    let rendered = "\(f)";
+    buf.append(rendered);
+
+    if not rendered.contains(where: { (c) in c == '.' or c == 'e' or c == 'E' }) {
         buf.append(".0")
     }
 }

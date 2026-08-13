@@ -62,7 +62,7 @@ public struct Json: Format {
     /// This always succeeds — every well-formed `Value` maps to valid JSON.
     /// The output uses no indentation or trailing newlines; use `toJsonPretty`
     /// when human readability matters.
-    public static func encode(value: Value) -> Result[String, SerializeError] {
+    public static func encode(value: Value) -> String throws SerializeError {
         .Ok(emitJson(value))
     }
 
@@ -74,13 +74,13 @@ public struct Json: Format {
     ///
     /// # Errors
     ///
-    /// Returns `.Err` for any JSON syntax violation — unterminated strings,
+    /// Throws for any JSON syntax violation — unterminated strings,
     /// trailing commas, unquoted keys, bare identifiers other than `true`,
     /// `false`, or `null`.
-    public static func decode(source: String) -> Result[Value, DeserializeError] {
+    public static func decode(source: String) -> Value throws DeserializeError {
         match parseJson(source) {
             .Ok(v) => .Ok(v),
-            .Err(e) => .Err(DeserializeError.custom(e.description()))
+            .Err(e) => throw DeserializeError.custom(e.description())
         }
     }
 
@@ -103,7 +103,7 @@ public struct Json: Format {
 /// let json = try toJson(value: myUser);
 /// // json == "{\"name\":\"Alice\",\"age\":30}"
 /// ```
-public func toJson[T](value: T) -> Result[String, SerializeError] where T: Serialize {
+public func toJson[T](value: T) -> String throws SerializeError where T: Serialize {
     let v = try value.toValue();
     .Ok(emitJson(v))
 }
@@ -119,7 +119,7 @@ public func toJson[T](value: T) -> Result[String, SerializeError] where T: Seria
 /// let json = try toJsonPretty(value: myUser);
 /// // json == "{\n  \"name\": \"Alice\",\n  \"age\": 30\n}"
 /// ```
-public func toJsonPretty[T](value: T) -> Result[String, SerializeError] where T: Serialize {
+public func toJsonPretty[T](value: T) -> String throws SerializeError where T: Serialize {
     let v = try value.toValue();
     .Ok(emitJsonPretty(v))
 }

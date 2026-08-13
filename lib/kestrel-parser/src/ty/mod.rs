@@ -149,10 +149,7 @@ impl TyExpression {
 
 /// Check if a token is trivia (whitespace or comment)
 fn is_trivia(token: &Token) -> bool {
-    matches!(
-        token,
-        Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
-    )
+    token.is_trivia()
 }
 
 /// Parser that skips trivia tokens

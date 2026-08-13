@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 8 fixed · 2 partial · 2 blocked · 47 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 17 fixed · 2 partial · 2 blocked · 38 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -95,10 +95,27 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Diagnostics infrastructure
 
-- [ ] **F15** `medium` `single-source-of-truth` — Every inference error is rendered twice by two divergent tables; the dedup rule lives in consumers and the LSP has none
-- [ ] **F16** `low` `fragility` — Diagnostic-code registry has no ownership or reachability enforcement
-- [ ] **F17** `low` `side-table` — Analyzer diagnostics bypass the world accumulator; `kestrel dump` drops them and exits 0
-- [ ] **F18** `low` `fragility` — `kestrel dump mir` swallows the MIR-stage diagnostics it just accumulated
+- [x] **F15** `medium` `single-source-of-truth` — Every inference error is rendered twice by two divergent tables; the dedup rule lives in consumers and the LSP has none — **fixed**
+  - `InferError::render(detail) -> RenderedInferError { code, message, label, notes }` in `kestrel-type-infer/src/error.rs` is now the ONE description of an inference error. `ResolvedInferError::to_diagnostic` is a thin wrapper; `kestrel-analyze/src/body/type_check.rs` (the second table, ~200 lines) and `AnalyzerId::TypeCheck` are **deleted**, along with the duplicated `vis_label` and the E624 `kind_mismatch_note`
+  - Both open-coded `E100` filters are gone with the duplicate they guarded — CLI (`src/main.rs`) and test harness (`kestrel-test-suite/src/compiler.rs`). The LSP never had one; the double squiggle is now impossible by construction, not by filtering
+  - Inference errors carry `E100`, the umbrella `docs/error-codes.md` always documented. Previously the codespan copy was **uncoded** and only the analyzer copy carried E100, so the two renderings of one mistake could disagree on code as well as wording (`E624` vs `E100` for a closure-kind mismatch)
+  - Verified by running: `let x: Int64 = "s";` produced two error blocks at the same span before, one now. The five-file "adding an `InferError` variant" checklist is a three-file checklist; `AGENTS.md`, `docs/contributing/workflows.md` and `type-inference.md` updated
+- [x] **F16** `low` `fragility` — Diagnostic-code registry has no ownership or reachability enforcement — **fixed**
+  - **Ownership is enforced at emit time.** `kestrel-analyze/src/lib.rs::assert_owned` runs on every analyzer result: a diagnostic's code must be in that analyzer's `descriptors()`, or in a new `Describe::borrowed_descriptors()` for the legitimate case of two analyzers reporting one fact from different positions. The suite's 3700 files are the corpus
+  - **The E436 collision is fixed.** `decl/generics.rs`'s `TypeResolution::NotFound` arm emitted `E436` (`non_protocol_bound`) carrying E476's message — a leftover from the 2026-07 renumbering that moved that meaning *off* E436. `struct Set[T] where T: NonExistent {}` now reports `error[E476]: cannot find type 'NonExistent' in this scope` (verified by running); `GenericsAnalyzer` declares the borrow
+  - **Positional aliases removed.** `const E210: usize = 5; const E499: usize = 6;` indexing a positional DESCRIPTORS array is gone from `body/access_mode.rs`, and the same pattern from `decl/type_alias_validation.rs`. Both select by code through a `descriptor(id)` helper, so inserting a descriptor mid-array is a no-op instead of silently reassigning every later code, severity and docs link
+  - **Silent reservations are gone.** `registry.rs::RESERVED_UNEMITTED` lists the seven registered-but-unemitted codes with a reason each (E206, E303, E446, E448, E502, E600, E602), checked **both ways** — a reservation naming a nonexistent descriptor fails, and emitting a reserved code fails
+  - **New tests** in `registry.rs`: descriptor `name` uniqueness, `AnalyzerId` uniqueness within each list (a duplicate makes the second analyzer *never run*, since `find_*` is linear first-match), reservations name real descriptors, and every registered code is documented
+  - **Docs made honest.** E480–E487 / E489 (the `RefPosition` family from hir-lower) are documented; E600/E602 are marked reserved instead of shown with worked transcripts they cannot produce; the ~37 fabricated `E05xx`/`E06xx` codes in `docs/language/pattern-matching.md` and `modules.md` are replaced — pattern-matching points at the real E300–E316 table, and modules.md now says plainly that **no diagnostic is emitted at all** for `import Some.Missing.Module` (confirmed by running)
+- [x] **F17** `low` `side-table` — Analyzer diagnostics bypass the world accumulator; `kestrel dump` drops them and exits 0 — **fixed**
+  - `CompilerDriver` now owns both halves: `analyze_all` records its summary, and `emit_diagnostics()` / a new `has_errors()` read the accumulator **and** the analyzer diagnostics. No consumer can see only one half, which is what `kestrel dump` was doing (`driver.analyze_all(false);` with the result unbound, then gating the exit code on the accumulator alone)
+  - Emission is idempotent — the accumulator is append-only within a revision, so `emit_diagnostics` prints only what is new. That also fixes a latent double-print in `build`, which flushes once before codegen and again after and used to repeat every warning
+  - `src/main.rs` loses its own `has_errors`, `cli_emittable_analyze_errors` and `emit_analyze_errors`; analyzer diagnostics now render with `.with_code()` like every other diagnostic (`error[E304]: …`) instead of a hand-appended `" [E304]"` suffix
+  - Verified by running: a file whose only error is an empty `match` printed nothing and exited 0 from `kestrel dump diagnostics`; it now prints `error[E304]` with the span and exits 1
+- [x] **F18** `low` `fragility` — `kestrel dump mir` swallows the MIR-stage diagnostics it just accumulated — **fixed**
+  - `dump`'s arms return `Result<(), String>` instead of returning early, so the accumulator is flushed **before** the summary line in every branch. `dump_mir` and a new `dump_cranelift` no longer print-and-abort
+  - Verified by running: `return &local;` printed `error: compilation failed with 1 error(s)` from `dump mir` and now prints the full `error[E494]` with its span, labels and notes
+  - Two neighbours fixed with it: the pre-mono stage arm discarded its verify errors (`let (mir, _errors) = …`) where the post-mono arm surfaces them as warnings; and `Compiler::lower_to_mir_stage`'s doc comment claimed it "never accumulates diagnostics", which is false — `lower_module` deposits E497/E503 straight into the context
 
 ## Query-framework and incremental hazards
 
@@ -110,10 +127,23 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Parser and CST integrity
 
-- [ ] **F24** `medium` `fragility` — `add_token_or_missing` widens a diagnostic span by one raw **byte**, producing non-UTF-8-boundary offsets that make the LSP drop every diagnostic
-- [ ] **F25** `medium` `fragility` — Module/import emitters re-derive `.` `(` `)` `,` `as` spans by byte arithmetic — and it fires on shipping stdlib source
-- [ ] **F26** `medium` `single-source-of-truth` — Escape-sequence decoding is implemented three times, and one copy silently drops `\u` entirely
-- [ ] **F27** `low` `single-source-of-truth` — `SyntaxKind`'s 258 variants are restated twice in the same file; a miss reads back as `Error`
+- [x] **F24** `medium` `fragility` — `add_token_or_missing` widens a diagnostic span by one raw **byte**, producing non-UTF-8-boundary offsets that make the LSP drop every diagnostic — **fixed**
+  - The diagnostic is emitted over the **whole last real token** (`last_real_token_span`), not `anchor_end - 1 .. anchor_end`. A token span is a char boundary by construction; the sink holds no source text, so it cannot walk back one character even if a narrower underline were wanted
+  - Backstop landed too: `LineIndex::offset_to_position` clamps a non-boundary offset down to the character start instead of panicking on `&self.text[line_start..offset]`. It runs in `refresh`, *outside* the worker's `catch_unwind`, so one bad span took the whole `publish_diagnostics` call with it and nothing was logged
+  - Proven non-inert: reverting the clamp makes `offset_inside_a_multibyte_char_clamps_instead_of_panicking` panic at the exact slice the audit cited
+- [x] **F25** `medium` `fragility` — Module/import emitters re-derive `.` `(` `)` `,` `as` spans by byte arithmetic — and it fires on shipping stdlib source — **fixed**
+  - The parsers **carry** the separator spans instead of the emitters inventing them: `module_path_parser_internal` returns `ModulePathSpans { segments, dots }`, and imports return `ImportSpans` / `ImportItemsSpans` with the real `.` `(` `,` `as` `)`. `AttributeArgValue::Path` had the same defect and now shares `ModulePathSpans`
+  - Grammar is unchanged — only which spans get recorded. (An intermediate version accidentally began accepting a trailing comma in an import list; reverted.)
+  - Fail-loud guard: `TreeBuilder` `debug_assert`s that a fixed-lexeme kind is emitted over text that actually spells it. Restoring the old arithmetic makes it fire with the audit's exact evidence — `token RParen was emitted over the text "\n"`. Zero-width spans are exempt: a recovery branch may legitimately synthesize an absent token, and running the guard over the whole stdlib surfaced exactly one — the missing `;` of an expression statement, which is **independent confirmation of F13** (still open)
+  - 2 regression tests over the shapes that were broken (space around `.` and `as`, the multi-line stdlib form): well-formed imports must produce **no `SyntaxKind::Error` tokens**, and the CST must still round-trip. The round trip alone is what kept this invisible — it passed while the token *kinds* were wrong — so both are asserted
+- [x] **F26** `medium` `single-source-of-truth` — Escape-sequence decoding is implemented three times, and one copy silently drops `\u` entirely — **fixed**
+  - One table: `kestrel_ast::escape::decode_escape`, in the deepest crate both `kestrel-ast-builder` and `kestrel-hir` can reach. `EscapeErrorKind` / `UnicodeEscapeErrorReason` moved there too; `kestrel_hir::body` re-exports them so every existing path still resolves. All three callers keep only what differs — span arithmetic and error recovery. 10 unit tests on the kernel
+  - **Two miscompiles verified fixed by compiling and running.** `"\u{41} \(x)"` printed `u{41} 1` (the interpolation path's private decoder had no `\x` arm, no `\u` arm and no error path) and now prints `A 1`. `'\u{00000041}'` compiled to `'A'` while the string form was rejected — the char decoder read hex with an unbounded loop, no close-brace requirement, no digit limit — and is now `error[E702] … at most 6 hex digits`, spanned on the escape
+  - **Char literals now report E700–E703, in both positions.** Errors are data on `HirLiteral::Char { value, escape_errors }`, exactly as `String` already carried them, and `StringEscapeAnalyzer` reads both through one accessor. They used to be `ctx.accumulate`d ad hoc with no E-code — and skipped entirely in pattern position, where the decoder ran with `ctx: None`, so `'\u{D800}'` in a `match` arm silently became NUL. Confirmed by running: it now reports E702 from a pattern
+- [x] **F27** `low` `single-source-of-truth` — `SyntaxKind`'s 258 variants are restated twice in the same file; a miss reads back as `Error` — **fixed**
+  - The 258 `const NAME: u16` declarations and 258 `match` arms over `raw.0` are deleted (~520 lines). `kind_from_raw` indexes `SyntaxKind::ALL`, a single declaration-order table, because `kind_to_raw` is `kind as u16`
+  - `ALL` is hand-written but **proved**: `syntax_kind_table_round_trips` asserts it is ordered (`ALL[n] as u16 == n`), complete, and that out-of-range still reads `Error`. Completeness needs the variant count, which comes from a `#[doc(hidden)] __NotAKind` end-marker — without it a *truncated* table round-trips happily, since every entry it holds is correct and the missing kinds are simply never tested
+  - Verified non-inert: deleting the last entry fails with "SyntaxKind::ALL is missing 1 kind(s)"
 
 ## Remaining single-source-of-truth duplication
 
@@ -124,18 +154,19 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **F30** `medium` `single-source-of-truth` — `desugar_logical_and` re-encodes the `SHORT_CIRCUIT_OP_PROTOCOLS` row and silently drops the RHS
 - [ ] **F31** `medium` `fragility` — `lower_condition_chain` re-invokes `on_fail` per condition, duplicating diagnostics and lowering `else if` chains exponentially
 - [ ] **F32** `low` `single-source-of-truth` — `substitute_resolved_ty` is a second, non-exhaustive copy of the substitution kernel
-- [ ] **F33** `low` `single-source-of-truth` — Small duplicated predicates and magic strings
-  - [ ] F33a — Trivia-kind set (`Whitespace | Newline | LineComment | BlockComment`) — 9 copies
-  - [ ] F33b — `is_type_node` (14 variants) vs `is_type_kind` (12 — no `TyRef`/`TyMutRef`)
-  - [ ] F33c — Root entity = the magic name `"<root>"`
-  - [ ] F33d — `parent_is_type` (`Struct | Enum | Protocol | Extension`) — 7 copies
-  - [ ] F33e — `member_lookup_name` (init/subscript sentinel)
-  - [ ] F33f — Operator→`BinaryOp` map vs. parser's accepted-token list
-  - [ ] F33g — `BinaryOp`→source text
-  - [ ] F33h — Stdlib location precedence chain
-  - [ ] F33i — Type-sugar `[T]`/`T?`/`[K:V]` binding
-  - [ ] F33j — `BuiltinKind::Protocol`'s `requires_fields_conform` / `tuple_conformance_propagation`
-  - [ ] F33k — kestrel-doc forks `kestrel_ast::pretty::format_type`
+- [x] **F33** `low` `single-source-of-truth` — Small duplicated predicates and magic strings — **fixed** (all 11)
+  - Two sub-items turned out to be live user-visible bugs, not latent duplication; see **Corrections**
+  - [x] F33a — Trivia-kind set — the set lives on `Token::is_trivia`; `SyntaxKind::is_trivia` is its image under `From<Token>`, and `trivia_agrees_with_the_lexer` pins both directions. 9 copies + 3 duplicate `skip_trivia` parsers deleted
+  - [x] F33b — `is_type_node`/`is_type_kind` → one `SyntaxKind::is_type`. `every_ty_kind_is_a_type_node` *derives* the set from the enum: a `Ty*` variant must be a type node or be excused by name in `NON_TYPE_TY_KINDS` (only `TyList`). Re-proved by deleting `TyRef`/`TyMutRef` — reproduces the original divergence exactly
+  - [x] F33c — `Name::ROOT` + `Name::is_root()`; all 5 production consumers and ~40 test literals swept, one spelling left in the tree. `the_root_entity_is_recognized_as_root` connects the producer (kestrel-compiler) to the fail-open consumer (name-res visibility), which live in different crates
+  - [x] F33d — `NodeKind::is_type_scope()`, written as an **exhaustive match with no wildcard**, so the audit's scenario (adding `NodeKind::Class`) is now one compile error instead of 7 silent misses. Verified by adding the variant
+  - [x] F33e — the two analyzer forks now delegate to `kestrel_name_res::helpers::member_lookup_name`. They keyed subscripts on `NodeKind::Subscript` while the real lookup keys the `Subscript` **marker**; `subscripts_carry_both_the_node_kind_and_the_marker` pins the invariant that made them accidentally agree
+  - [x] F33f — the `unwrap_or(BinaryOp::Add)` / `unwrap_or(UnaryOp::Neg)` fallbacks are gone (unrecognized operator → `AstExpr::Error`, not a different program). Map agreement is covered by F33g's round-trip
+  - [x] F33g — one `BinaryOp::symbol()` in `kestrel-ast`. `operator_spellings_round_trip_through_the_lexer` walks the proven-complete `SyntaxKind::ALL` through the parser's own maps and re-lexes each spelling — no hand-written list. Catches the historical `&&`/`||`/`...` rows directly
+  - [x] F33h — one `kestrel_compiler::stdlib_path`. Was **5** copies, not 4 (`examples/build_test.rs` too); the CLI's was the only one with the `exists()` check, so the test suite could take a stale `KESTREL_STD` and load zero files. The `io/libc_shims.c` path is now written once. **The merge itself first shipped a regression — see Corrections**
+  - [x] F33i — **live bug.** `[T]`/`T?`/`[K:V]` now resolve through the `@builtin(.XTypeOperator)` lang item in the *stdlib's* scope. See Corrections
+  - [x] F33j — `requires_fields_conform` and `tuple_conformance_propagation` now have readers: `ProtocolFieldConformanceAnalyzer` iterates conforming protocols and reads the flags instead of hardcoding `Builtin::FFISafe`. Proved load-bearing by flipping the flag (17 passed → 16 passed, 1 failed)
+  - [x] F33k — **live bug.** kestrel-doc's `format_type` fork deleted; `kestrel_ast::pretty::format_type` is now `pub`. See Corrections
 
 ## Verifier and self-check gaps
 
@@ -200,6 +231,9 @@ Refuted during verification. Re-raise only with new evidence.
 
 Established by running the code, not reading it:
 
+- **Unifying duplicated logic by taking the *union* of the copies is a mistake, and F33h proved it on me.** Each of the 5 stdlib-location chains differed, and I merged them by keeping every step. But the LSP's `~/.jessup/bin/kestrel` symlink step exists *only* because a bundled VSIX binary can use neither the exe-relative nor the in-repo candidate — and at the LSP's position (3rd) it outranks in-repo. Result: on any machine with jessup installed, every repo-built `kestrel` silently compiled against the installed **0.16.0** toolchain's stdlib. 27 suite tests failed on stdlib features that toolchain predates (`extend Int64: Exitable` → E616 on `attributes.main.exitable.*`, closure kinds, a missing `Formatter`), with every diagnostic pointing at the *test files* and nothing failing at the resolver. Fixed by moving the symlink step last and pinning the outcome with `a_repo_build_resolves_to_the_repo_stdlib`, which asserts the resolved path *is* `repo_std_path()` — re-proved by swapping the order back. **Before collapsing N copies, diff them and establish what each difference was for.** A difference is a decision someone made, not noise.
+- **F33i was under-rated `low`: it is a live, reproducible miscompile of correct code.** The audit filed it as an unread annotation. It is that, but the same line is also the bug: `lower_sugar_type` resolved the hardcoded string `"Array"` with `context: owner` — the *user's* scope. So `struct Array[T] {}` in a user file captured `[Int]`, and `let xs: [Int] = [1, 2, 3];` failed with `Array[Int64] !: _ExpressibleByArrayLiteral`. The four `@builtin(.*TypeOperator)` items existed precisely to prevent this and had zero readers. Fixed by resolving through the lang item and following the alias in the *stdlib's* scope; regression test `types/type_operators/array_operator/user_type_does_not_shadow_array_sugar.ks`. All four sugars (`[T]`, `T?`, `[K:V]`, `T throws E`) were affected.
+- **F33k's wrong output was shipped, not hypothetical.** `docs/stdlib/std.core.md` published `public func fatalError(String) -> Never` — the language spells the never type `!`, and the source says `-> !`. Both copies of the renderer were wrong, so unifying them was not enough; the canonical one had to be corrected too. Verified by regenerating: the signature now reads `-> !`. Only that one line of the checked-in docs was updated — the other three files differ from a regeneration because of *other* agents' in-flight stdlib edits.
 - **F41** did not silently corrupt memory. At HEAD a narrow atomic was a hard cranelift verifier error (`arg 1 (v8) has type i32, expected i64`) — narrow atomics were unsupported, not miscompiled.
 - **F28** does not silently degrade. An unlowered intrinsic ICEs at post-mono verify (`Callee::Direct not resolved`). Still an ICE where a diagnostic belongs.
 - **F7's stated failure mode did not reproduce, and it is lowered `medium` → `low`.** The

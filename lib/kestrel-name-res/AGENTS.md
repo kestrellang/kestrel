@@ -97,3 +97,17 @@ Known gap: `find_inherited_assoc_type` (`resolve_type.rs`) is the same walk
 Similarly, prefer a narrow lookup over re-entering `ResolveName`/`ResolveTypePath`
 when resolving something *inside* a declaration you are already resolving.
 `search_protocols_for_assoc` resolves from `parent_of(scope)` for this reason.
+
+## `member_lookup_name` is the only answer to "what is this member called?"
+
+`helpers::member_lookup_name` is `pub` because the conformance analyzers in
+`kestrel-analyze` need it. There were three implementations, and they keyed
+subscripts on **different components** — this one on the `Subscript` marker, the
+analyzers on `NodeKind::Subscript`. They agreed only because the AST builder sets
+both; nothing enforced it. `subscripts_carry_both_the_node_kind_and_the_marker`
+(in `kestrel-ast-builder`) now does.
+
+Note the shape of that failure: two representations of the same fact, read by
+different code, kept in sync by nobody. `witness_lower.rs` documents a place
+where the analogous `Callable`-vs-`Computed` split *did* drift. Prefer one
+accessor over "check the marker" plus "check the NodeKind".

@@ -28,7 +28,7 @@ public protocol Routes[T] {
     mutating func addRoute(method: HttpMethod, path: String, handler: (Request, T) -> Response)
 }
 
-extend Routes {
+extend Routes[T] {
     /// Registers a GET route.
     public mutating func route(get path: String, handler: (Request, T) -> Response) {
         self.addRoute(HttpMethod.Get, path, handler)
@@ -296,7 +296,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
         return .None
     }
 
-    var params = Dictionary[String, String]();
+    var params = [:];
     for i in 0..<patternSegments.count {
         let pattern = patternSegments(unchecked: i);
         let actual = requestSegments(unchecked: i);
@@ -314,7 +314,7 @@ func matchPath(requestSegments: Array[String], patternSegments: Array[String]) -
 
 /// Splits a path into non-empty segments.
 func splitPathSegments(path: String) -> Array[String] {
-    var segments = Array[String]();
+    var segments = [];
     for part in path.split("/") {
         if part.bytes.count > 0 {
             segments.append(part.toOwned())

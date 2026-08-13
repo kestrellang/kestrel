@@ -199,13 +199,13 @@ let result = ctx.report_error(InferError::TypeMismatch { … });
 
 ## Adding an `InferError` variant
 
-From `lib/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **five** files:
+From `lib/kestrel-type-infer/AGENTS.md` — the variant must be mirrored in **three** files:
 
-1. `kestrel-type-infer/src/error.rs` — the variant plus its span arm in `InferError::span`.
+1. `kestrel-type-infer/src/error.rs` — the variant, its arm in `InferError::span`, and its arm in `InferError::render` (code, message, label, notes — the single owner of the user-facing wording).
 2. `kestrel-type-infer/src/result.rs` — `describe_error()` match arm (short detail string).
-3. `kestrel-compiler/src/diagnostic.rs` — match arm building the user-facing `Diagnostic` (message, labels, notes).
-4. `kestrel-analyze/src/body/type_check.rs` — `format_error()` match arm returning `(message, label_text)`.
-5. `kestrel-compiler-driver/src/lib.rs` — both `describe()` and `format_error()` arms.
+3. `kestrel-compiler-driver/src/lib.rs` — both `describe()` and `format_error()` arms.
+
+`kestrel-compiler/src/diagnostic.rs` wraps `render()` and needs no per-variant arm.
 
 Missing any one produces a non-exhaustive-match error only in a downstream crate — so do the whole set in one commit.
 

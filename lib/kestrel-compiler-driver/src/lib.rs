@@ -16,13 +16,40 @@ use kestrel_hecs::Entity;
 use kestrel_type_infer::error::InferError;
 
 /// Driver for running whole-program compilation phases on a borrowed `Compiler`.
+///
+/// # The two halves of "the diagnostics of this compilation"
+///
+/// Every phase except analysis deposits into the hECS accumulator, which
+/// `Compiler::diagnostics()` reads. Analyzers instead *return* a
+/// `Vec<AnalyzeDiagnostic>` on their `AnalyzeSummary`. That second home is why
+/// `kestrel dump` printed nothing and exited 0 for a file whose only error was
+/// an analyzer code (F17): the caller has to remember both, and one caller
+/// didn't.
+///
+/// The driver now remembers for them. `analyze_all` records its summary, and
+/// `emit_diagnostics` / `has_errors` read **both** halves, so no consumer can
+/// see only one. Emission is also idempotent: the accumulator is append-only
+/// within a revision, so repeated calls print only what is new (`build` emits
+/// once before codegen and again after).
 pub struct CompilerDriver<'a> {
     compiler: &'a Compiler,
+    /// The analyzer half, recorded by `analyze_all`. `None` until analysis runs
+    /// — an un-analyzed compilation legitimately has no analyzer diagnostics.
+    analyze: std::cell::RefCell<Option<AnalyzeSummary>>,
+    /// How many accumulator diagnostics `emit_diagnostics` has already printed.
+    emitted_accumulated: std::cell::Cell<usize>,
+    /// Whether the analyzer half has already been printed.
+    emitted_analyze: std::cell::Cell<bool>,
 }
 
 impl<'a> CompilerDriver<'a> {
     pub fn new(compiler: &'a Compiler) -> Self {
-        Self { compiler }
+        Self {
+            compiler,
+            analyze: std::cell::RefCell::new(None),
+            emitted_accumulated: std::cell::Cell::new(0),
+            emitted_analyze: std::cell::Cell::new(false),
+        }
     }
 
     /// Run type inference on every entity with a `Body` component.
@@ -162,18 +189,99 @@ impl<'a> CompilerDriver<'a> {
             *summary.by_check.entry(d.descriptor_id).or_insert(0) += 1;
         }
         summary.diagnostics = diags;
+        // Record the analyzer half so `emit_diagnostics` / `has_errors` see it
+        // without every caller having to thread the summary back in (F17).
+        *self.analyze.borrow_mut() = Some(summary.clone());
+        self.emitted_analyze.set(false);
         summary
     }
 
-    /// Emit all accumulated diagnostics to stderr with source context.
+    /// Analyzer diagnostics that belong on stderr: errors only.
+    ///
+    /// Warnings and info are reported through the summary, not printed here.
+    fn emittable_analyze_errors(summary: &AnalyzeSummary) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
+        summary
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == kestrel_analyze::Severity::Error)
+            .collect()
+    }
+
+    /// Emit every diagnostic of this compilation to stderr with source context
+    /// — both the accumulator half (lex, parse, infer, MIR) and the analyzer
+    /// half recorded by `analyze_all`.
+    ///
+    /// Idempotent: only diagnostics not already printed by an earlier call are
+    /// emitted, so a caller may flush at several points without duplicating.
     pub fn emit_diagnostics(&self) -> Result<(), codespan_reporting::files::Error> {
-        let diagnostics = self.compiler.diagnostics();
-        if diagnostics.is_empty() {
+        let accumulated = self.compiler.diagnostics();
+        let already = self.emitted_accumulated.get().min(accumulated.len());
+        let fresh = &accumulated[already..];
+
+        let analyze = self.analyze.borrow();
+        let analyzer_diags = match analyze.as_ref() {
+            Some(s) if !self.emitted_analyze.get() => Self::emittable_analyze_errors(s),
+            _ => Vec::new(),
+        };
+
+        if fresh.is_empty() && analyzer_diags.is_empty() {
             return Ok(());
         }
+
         let files = WorldFiles::from_world(self.compiler.world(), self.compiler.files());
-        kestrel_reporting::emit_all(&files, &diagnostics)
+        let mut to_emit: Vec<codespan_reporting::diagnostic::Diagnostic<usize>> = fresh.to_vec();
+        to_emit.extend(analyzer_diags.iter().map(|d| analyze_to_codespan(d)));
+
+        self.emitted_accumulated.set(accumulated.len());
+        if analyze.is_some() {
+            self.emitted_analyze.set(true);
+        }
+        kestrel_reporting::emit_all(&files, &to_emit)
     }
+
+    /// Does this compilation have an error in **either** diagnostic half?
+    ///
+    /// The single gate for "should this command fail?". Reading only
+    /// `Compiler::diagnostics()` misses every analyzer code (F17).
+    pub fn has_errors(&self) -> bool {
+        let accumulated = self
+            .compiler
+            .diagnostics()
+            .iter()
+            .any(|d| d.severity >= codespan_reporting::diagnostic::Severity::Error);
+        accumulated
+            || self
+                .analyze
+                .borrow()
+                .as_ref()
+                .is_some_and(|s| s.errors > 0)
+    }
+}
+
+/// Render an analyzer diagnostic as a codespan diagnostic, so both halves
+/// print identically. The descriptor id becomes the diagnostic code.
+fn analyze_to_codespan(
+    d: &kestrel_analyze::AnalyzeDiagnostic,
+) -> codespan_reporting::diagnostic::Diagnostic<usize> {
+    use codespan_reporting::diagnostic::{Diagnostic, Label};
+
+    let labels = d
+        .labels
+        .iter()
+        .map(|l| {
+            let label = if l.is_primary {
+                Label::primary(l.span.file_id, l.span.range())
+            } else {
+                Label::secondary(l.span.file_id, l.span.range())
+            };
+            label.with_message(&l.message)
+        })
+        .collect();
+    Diagnostic::error()
+        .with_code(d.descriptor_id)
+        .with_message(&d.message)
+        .with_labels(labels)
+        .with_notes(d.notes.clone())
 }
 
 /// Build a human-readable dotted path for an entity (e.g. "std.core.Bool.init").
@@ -525,7 +633,7 @@ impl fmt::Display for InferSummary {
 }
 
 /// Summary of analysis results across all bodies.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct AnalyzeSummary {
     pub errors: usize,
     pub warnings: usize,

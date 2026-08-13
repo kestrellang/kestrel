@@ -8,6 +8,7 @@ module quill.toml.emitter
 
 import quill.value.(Value)
 import quill.error.(SerializeError, SerializeErrorKind)
+import quill.toml.parser.(containsFloatMarker)
 
 // ============================================================================
 // PUBLIC API
@@ -29,14 +30,14 @@ import quill.error.(SerializeError, SerializeErrorKind)
 /// # Errors
 ///
 /// Returns `.Err` if the root value is not `.Obj`.
-public func emitToml(value: Value) -> Result[String, SerializeError] {
+public func emitToml(value: Value) -> String throws SerializeError {
     match value {
         .Obj(obj) => {
             var buf = String();
             emitTable(obj, buf, "");
             .Ok(buf)
         },
-        _ => .Err(SerializeError.custom("TOML top-level value must be an object"))
+        _ => throw SerializeError.custom("TOML top-level value must be an object")
     }
 }
 
@@ -48,7 +49,7 @@ public func emitToml(value: Value) -> Result[String, SerializeError] {
 ///
 /// Two-pass approach: scalar values first (so they appear before any section
 /// break), then nested objects with their `[prefix.key]` headers.
-func emitTable(obj: Dictionary[String, Value], mutating buf: String, prefix: String) {
+func emitTable(obj: [String: Value], mutating buf: String, prefix: String) {
     // First pass: emit non-table values as key = value
     for (key, val) in obj.iter() {
         match val {
@@ -99,23 +100,15 @@ func emitTomlValue(value: Value, mutating buf: String) {
             }
         },
         .Int(n) => buf.append("\(n)"),
-        .Float(f) => {
-            let s = "\(f)";
-            buf.append(s);
-            if not s.contains(where: { (c) in c == '.' or c == 'e' or c == 'E' }) {
-                buf.append(".0")
-            }
-        },
+        .Float(f) => emitFloat(f, buf),
         .Str(s) => emitTomlString(s, buf),
         .Arr(arr) => {
             buf.append("[");
-            var i: Int64 = 0;
-            while i < arr.count {
-                if i > 0 {
+            for (index, item) in arr.iter().enumerate() {
+                if index > 0 {
                     buf.append(", ")
                 }
-                emitTomlValue(arr(unchecked: i), buf);
-                i = i + 1
+                emitTomlValue(item, buf)
             }
             buf.append("]")
         },
@@ -129,6 +122,30 @@ func emitTomlValue(value: Value, mutating buf: String) {
 // ============================================================================
 // STRING/KEY EMITTING
 // ============================================================================
+
+/// Emits a float in TOML spelling.
+///
+/// Non-finite values use the `inf`/`-inf`/`nan` tokens — `"\(f)"` would render
+/// them as `Infinity`/`NaN`, which no TOML reader accepts. Finite values always
+/// carry a `.` or exponent so they don't re-read as integers.
+func emitFloat(f: Float64, mutating buf: String) {
+    if f.isNaN {
+        buf.append("nan");
+        return;
+    }
+
+    if f.isInfinite {
+        let token = if f < 0.0 { "-inf" } else { "inf" };
+        buf.append(token);
+        return;
+    }
+
+    let rendered = "\(f)";
+    buf.append(rendered);
+    if not containsFloatMarker(rendered) {
+        buf.append(".0")
+    }
+}
 
 /// Emits a TOML key — bare if it contains only `[A-Za-z0-9_-]`, quoted otherwise.
 func emitKey(key: String, mutating buf: String) {
@@ -154,23 +171,16 @@ func isBareKey(s: String) -> Bool {
 
 /// Emits a basic quoted TOML string, escaping `"`, `\`, and control characters.
 func emitTomlString(s: String, mutating buf: String) {
-    let backspace = Char(8).unwrap();
     buf.append("\"");
     for c in s {
-        if c == '"' {
-            buf.append("\\\"")
-        } else if c == '\\' {
-            buf.append("\\\\")
-        } else if c == '\n' {
-            buf.append("\\n")
-        } else if c == '\r' {
-            buf.append("\\r")
-        } else if c == '\t' {
-            buf.append("\\t")
-        } else if c == backspace {
-            buf.append("\\b")
-        } else {
-            buf.append(char: c)
+        match c {
+            '"' => buf.append("\\\""),
+            '\\' => buf.append("\\\\"),
+            '\n' => buf.append("\\n"),
+            '\r' => buf.append("\\r"),
+            '\t' => buf.append("\\t"),
+            '\u{08}' => buf.append("\\b"),
+            _ => buf.append(char: c)
         }
     }
     buf.append("\"")

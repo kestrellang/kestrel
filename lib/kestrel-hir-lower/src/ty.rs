@@ -127,17 +127,32 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             }
         },
 
-        // Sugar types → resolve standard library entity + Struct
-        AstType::Array(elem, span) => {
-            lower_sugar_type(ctx, owner, root, "Array", &[elem.as_ref()], span)
-        },
-        AstType::Optional(inner, span) => {
-            lower_sugar_type(ctx, owner, root, "Optional", &[inner.as_ref()], span)
-        },
+        // Sugar types → resolve standard library entity + Struct.
+        // The `Builtin` is the `@builtin(.XTypeOperator)` lang item that binds
+        // the syntax; the string is only a fallback for worlds without it.
+        AstType::Array(elem, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            Builtin::ArrayTypeOperator,
+            "Array",
+            &[elem.as_ref()],
+            span,
+        ),
+        AstType::Optional(inner, span) => lower_sugar_type(
+            ctx,
+            owner,
+            root,
+            Builtin::OptionalTypeOperator,
+            "Optional",
+            &[inner.as_ref()],
+            span,
+        ),
         AstType::Dictionary(key, val, span) => lower_sugar_type(
             ctx,
             owner,
             root,
+            Builtin::DictionaryTypeOperator,
             "Dictionary",
             &[key.as_ref(), val.as_ref()],
             span,
@@ -146,6 +161,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             ctx,
             owner,
             root,
+            Builtin::ResultTypeOperator,
             "Result",
             &[ok.as_ref(), err.as_ref()],
             span,
@@ -755,6 +771,7 @@ fn lower_sugar_type(
     ctx: &QueryContext<'_>,
     owner: Entity,
     root: Entity,
+    builtin: Builtin,
     name: &str,
     type_args: &[&AstType],
     span: &Span,
@@ -764,7 +781,7 @@ fn lower_sugar_type(
         .map(|t| lower_ast_type(ctx, owner, root, t))
         .collect();
 
-    if let Some(entity) = resolve_std_type(ctx, owner, root, name) {
+    if let Some(entity) = resolve_sugar_type(ctx, owner, root, builtin, name) {
         let args = fill_type_arg_defaults(ctx, root, entity, lowered_args);
         // Dispatch by NodeKind — Optional is an enum, Array/Dictionary are structs.
         match ctx.get::<NodeKind>(entity).cloned() {
@@ -822,6 +839,54 @@ fn fill_type_arg_defaults(
         }
     }
     args
+}
+
+/// Resolve the type that a piece of type sugar (`[T]`, `T?`, `[K: V]`,
+/// `T throws E`) denotes.
+///
+/// Goes through the `@builtin(.XTypeOperator)` lang item, which is what the
+/// stdlib annotation is *for*. Before this, the four annotations in `lang/std`
+/// had zero readers and the sugar resolved the hardcoded name `"Array"` in the
+/// **user's** scope — so `struct Array[T] {}` in a user file silently captured
+/// `[Int]`, and every array literal in that file failed to conform to
+/// `_ExpressibleByArrayLiteral`.
+///
+/// Falls back to the name for worlds built without the stdlib (unit tests,
+/// `--no-std`), where there is no lang item to find.
+fn resolve_sugar_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    builtin: Builtin,
+    name: &str,
+) -> Option<Entity> {
+    if let Some(alias) = ctx.query(ResolveBuiltin { builtin, root })
+        && let Some(target) = sugar_alias_target(ctx, root, alias)
+    {
+        return Some(target);
+    }
+    resolve_std_type(ctx, owner, root, name)
+}
+
+/// Follow `@builtin(.ArrayTypeOperator) type ArrayTypeOperator[T] = Array[T]`
+/// to `Array`.
+///
+/// The target is resolved with the **alias** as context, so it lands in the
+/// stdlib's own scope no matter what the user file declares or imports.
+fn sugar_alias_target(ctx: &QueryContext<'_>, root: Entity, alias: Entity) -> Option<Entity> {
+    let annotation = ctx.get::<TypeAnnotation>(alias)?;
+    let AstType::Named { segments, .. } = &annotation.0 else {
+        return None;
+    };
+    let segments: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    match ctx.query(ResolveTypePath {
+        segments,
+        context: alias,
+        root,
+    }) {
+        TypeResolution::Found(entity) => Some(entity),
+        _ => None,
+    }
 }
 
 /// Resolve a well-known standard library type name (e.g. "Array", "Optional").
@@ -1319,7 +1384,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let iter_proto = world.spawn();
         world.set(iter_proto, NodeKind::Protocol);
@@ -1361,7 +1426,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let alias = world.spawn();
         world.set(alias, NodeKind::TypeAlias);

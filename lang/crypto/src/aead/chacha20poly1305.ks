@@ -38,7 +38,7 @@ public struct SealedBox {
 
     /// Serialized form: nonce (12) || ciphertext || tag (16).
     public var combined: Array[UInt8] {
-        var result = Array[UInt8]();
+        var result: [UInt8] = [];
         result.append(contentsOf: self.nonce.bytes.asSlice());
         result.append(contentsOf: self.ciphertext.asSlice());
         result.append(contentsOf: self.tag.asSlice());
@@ -50,7 +50,7 @@ public struct SealedBox {
     public init(combined combined: Array[UInt8])? {
         if combined.count < 28 { return null; }
 
-        var nonceBytes = Array[UInt8]();
+        var nonceBytes: [UInt8] = [];
         for i in 0..<12 {
             nonceBytes.append(combined(i));
         }
@@ -88,13 +88,13 @@ public struct ChaCha20Poly1305 {
     /// Encrypts with a random nonce.
     public static func seal(message: some Slice[UInt8], using key: SymmetricKey) -> SealedBox {
         let nonce = Nonce();
-        let empty = Array[UInt8]();
+        let empty: [UInt8] = [];
         return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, empty.asSlice());
     }
 
     /// Encrypts with an explicit nonce.
     public static func seal(message: some Slice[UInt8], using key: SymmetricKey, nonce nonce: Nonce) -> SealedBox {
-        let empty = Array[UInt8]();
+        let empty: [UInt8] = [];
         return ChaCha20Poly1305.sealWith(message.asSlice(), key, nonce, empty.asSlice());
     }
 
@@ -111,7 +111,7 @@ public struct ChaCha20Poly1305 {
 
     /// Decrypts and verifies. Throws on authentication failure.
     public static func open(box: SealedBox, using key: SymmetricKey) -> Array[UInt8] throws CryptoError {
-        let empty = Array[UInt8]();
+        let empty: [UInt8] = [];
         return ChaCha20Poly1305.openWith(box, key, empty.asSlice());
     }
 
@@ -134,7 +134,7 @@ public struct ChaCha20Poly1305 {
         // Poly1305 one-time key from block 0
         var polyKeyBlock = Array[UInt8](repeating: 0, count: 64);
         ChaCha20Poly1305.chachaBlock(keyBytes, nonceBytes, 0, polyKeyBlock);
-        var polyKey = Array[UInt8]();
+        var polyKey: [UInt8] = [];
         for i in 0..<32 {
             polyKey.append(polyKeyBlock(i));
         }
@@ -159,7 +159,7 @@ public struct ChaCha20Poly1305 {
         // Poly1305 one-time key from block 0
         var polyKeyBlock = Array[UInt8](repeating: 0, count: 64);
         ChaCha20Poly1305.chachaBlock(keyBytes, nonceBytes, 0, polyKeyBlock);
-        var polyKey = Array[UInt8]();
+        var polyKey: [UInt8] = [];
         for i in 0..<32 {
             polyKey.append(polyKeyBlock(i));
         }
@@ -245,7 +245,7 @@ public struct ChaCha20Poly1305 {
         startCounter: UInt32,
         data: ArraySlice[UInt8]
     ) -> Array[UInt8] {
-        var result = Array[UInt8]();
+        var result: [UInt8] = [];
         var block = Array[UInt8](repeating: 0, count: 64);
         var counter = startCounter;
         var offset: Int64 = 0;
@@ -322,7 +322,7 @@ public struct ChaCha20Poly1305 {
         }
 
         // Append lengths
-        var lengths = Array[UInt8]();
+        var lengths: [UInt8] = [];
         lengths.append(contentsOf: UInt64(from: aad.count).toBytesLittleEndian().asSlice());
         lengths.append(contentsOf: UInt64(from: ciphertext.count).toBytesLittleEndian().asSlice());
         ChaCha20Poly1305.poly1305Process(lengths.asSlice(), a0, a1, a2, a3, a4, rr0, rr1, rr2, rr3, ss1, ss2, ss3);
@@ -337,7 +337,7 @@ public struct ChaCha20Poly1305 {
         f = (f >> 32) + a3 + UInt64(from: s3);
         let t3 = UInt32(from: f & 0xffffffff);
 
-        var tag = Array[UInt8]();
+        var tag: [UInt8] = [];
         tag.append(contentsOf: t0.toBytesLittleEndian().asSlice());
         tag.append(contentsOf: t1.toBytesLittleEndian().asSlice());
         tag.append(contentsOf: t2.toBytesLittleEndian().asSlice());

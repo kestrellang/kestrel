@@ -69,10 +69,17 @@ pub fn is_in_std_module(ctx: &QueryContext<'_>, entity: Entity) -> bool {
 /// The entity's `Name` component wins; nameless callables fall back to the
 /// keyword sentinels `"init"` (Initializer NodeKind) and `"subscript"`
 /// (Subscript marker). Both sentinels are reserved keywords, so they can't
-/// collide with a user-declared member name. Single source of truth for
-/// member-name matching — `member_name_matches` and the build-time
-/// `MemberMap` name index both derive from it.
-pub(crate) fn member_lookup_name<'a>(ctx: &'a QueryContext<'_>, entity: Entity) -> Option<&'a str> {
+/// collide with a user-declared member name.
+///
+/// **The single source of truth for member-name matching.** Everything that
+/// asks "what is this member called?" comes here — `member_name_matches`, the
+/// build-time `MemberMap` name index, and the conformance analyzers. There
+/// were three implementations and they keyed subscripts on *different
+/// components*: this one on the `Subscript` marker, the analyzers on
+/// `NodeKind::Subscript`. They happen to agree today only because the builder
+/// sets both; nothing enforced it, and `witness_lower.rs` already documents a
+/// place where the analogous `Callable`-vs-`Computed` split did drift.
+pub fn member_lookup_name<'a>(ctx: &'a QueryContext<'_>, entity: Entity) -> Option<&'a str> {
     if let Some(n) = ctx.get::<Name>(entity) {
         return Some(n.0.as_str());
     }
@@ -156,7 +163,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let std = world.spawn();
         world.set(std, NodeKind::Module);
@@ -236,7 +243,7 @@ mod tests {
 
         let root = world.spawn();
         world.set(root, NodeKind::Module);
-        world.set(root, Name("<root>".into()));
+        world.set(root, Name(Name::ROOT.into()));
 
         let user_mod = world.spawn();
         world.set(user_mod, NodeKind::Module);

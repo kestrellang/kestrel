@@ -548,61 +548,12 @@ fn where_clause_str_filtered(world: &World, entity: Entity, opaque: &OpaqueMap) 
     format!(" where {}", parts.join(", "))
 }
 
-/// Render an `AstType` as readable Kestrel syntax. Mirrors
-/// `kestrel_ast::pretty::format_type` (which is private to that crate).
+/// Render an `AstType` as readable Kestrel syntax.
+///
+/// Delegates to the one renderer. This was a fork; it drifted to the point of
+/// publishing `-> Never` for the never type, which the language spells `!`.
 fn ty(t: &AstType) -> String {
-    match t {
-        AstType::Named { segments, .. } => segments
-            .iter()
-            .map(|s| {
-                if s.type_args.is_empty() {
-                    s.name.clone()
-                } else {
-                    let args: Vec<_> = s.type_args.iter().map(ty).collect();
-                    format!("{}[{}]", s.name, args.join(", "))
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("."),
-        AstType::Tuple(elems, _) => {
-            let inner: Vec<_> = elems.iter().map(ty).collect();
-            format!("({})", inner.join(", "))
-        },
-        AstType::Function {
-            kind,
-            params,
-            return_type,
-            ..
-        } => {
-            let p: Vec<_> = params.iter().map(ty).collect();
-            // `FnTypeKind::prefix()` — empty for the unmarked `Normal` kind.
-            format!("{}({}) -> {}", kind.prefix(), p.join(", "), ty(return_type))
-        },
-        AstType::Array(inner, _) => format!("[{}]", ty(inner)),
-        AstType::Dictionary(k, v, _) => format!("[{}: {}]", ty(k), ty(v)),
-        AstType::Optional(inner, _) => format!("{}?", ty(inner)),
-        AstType::Result { ok, err, .. } => {
-            format!("{} throws {}", ty(ok), ty(err))
-        },
-        AstType::Unit(_) => "()".into(),
-        AstType::Never(_) => "Never".into(),
-        AstType::Inferred(_) => "_".into(),
-        AstType::Some {
-            bounds, negative, ..
-        } => {
-            let b: Vec<_> = bounds.iter().map(ty).collect();
-            match negative {
-                Some(neg) => format!("some {} and not {}", b.join(" and "), ty(neg)),
-                None => format!("some {}", b.join(" and ")),
-            }
-        },
-        AstType::Ref {
-            inner, mutating, ..
-        } => {
-            let kw = if *mutating { "&mutating " } else { "&" };
-            format!("{kw}{}", ty(inner))
-        },
-    }
+    kestrel_ast::pretty::format_type(t)
 }
 
 /// Resolve a conformance type to the protocol entity it refers to, by

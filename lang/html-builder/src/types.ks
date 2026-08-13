@@ -31,20 +31,20 @@ public struct Document: Addable, Cloneable, Defaultable {
     public static var zero: Document { get { Document() } }
 
     public init() {
-        self.parts = Array[String]();
+        self.parts = [];
     }
 
     public init(capacity: Int64) {
         // `capacity` was a byte hint for the old single-String storage. With the
         // fragment list the byte buffer is sized once, in render(); kept only for
         // API compatibility.
-        self.parts = Array[String]();
+        self.parts = [];
     }
 
     // Wraps a single pre-rendered HTML fragment. Internal — callers outside
     // the module must go through text() or raw().
     init(raw value: String) {
-        self.parts = Array[String]();
+        self.parts = [];
         self.parts.append(value);
     }
 

@@ -18,7 +18,7 @@ comes from the type checker.
 - [E200–E211 — Mutability, access modes & assignment](#e200e211--mutability-access-modes--assignment)
 - [E300–E316 — Patterns & exhaustiveness](#e300e316--patterns--exhaustiveness)
 - [E411–E478 — Declarations, generics & protocol conformance](#e411e478--declarations-generics--protocol-conformance)
-- [E488–E499 — References & escape checking](#e488e499--references--escape-checking)
+- [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
@@ -215,15 +215,32 @@ extend Point: Describable { }  // error[E454]: type 'Point' does not implement
                                // method 'describe' from protocol 'Describable'
 ```
 
-## E488–E499 — References & escape checking
+## E480–E499 — References & escape checking
 
 References (`&T` / `&mutating T`) are second-class: they can't be stored, and
 a returned reference must outlive the call. The escape checker (E494–E498)
 runs on MIR and tracks each reference's *root provenance* — including
 references and closures laundered through structs, enums, and tuples.
 
+**E480–E487 and E489 are positional rejections** — "a reference type is not
+allowed *here*". They are emitted from HIR lowering
+(`kestrel-hir-lower/src/ty.rs`, `RefPosition::code_and_message`), not by an
+analyzer, so they carry a codespan code rather than a registry descriptor.
+Which of them can fire depends on the entry point's `RefPolicy`: aggregate
+positions are legal since stage 2b except from STRICT entries (type-alias RHS,
+protocol/extension-target arguments, where-clause types).
+
 | Code | Message | Explanation |
 |---|---|---|
+| E480 | parameters are not reference-typed; spell the convention instead | **Permanent.** `x: T` borrows and `mutating x: T` mutably borrows — conventions are the only spelling. Covers function-type and closure parameters too. |
+| E481 | reference return types are not supported yet | Legal since stage 1; the code is retained for the positions still rejected. |
+| E482 | references cannot be stored in bindings | A `var`/`let` annotation may not be `&T`. An aggregate that *wraps* a reference is legal. |
+| E483 | references cannot be stored in fields | Struct/enum fields, including enum case payloads (payloads classify as Field, not Param). Legal since 2b except from STRICT entries. |
+| E484 | references cannot be stored in tuples | Tuple elements. Legal since 2b except from STRICT entries. |
+| E485 | references cannot be used as type arguments | Generic arguments (`Array[&T]`). Legal since 2b except from STRICT entries. See also E492, the inference-time form. |
+| E486 | reference returns are not supported in function types yet | `() -> &T` as a *type*, not a declaration. |
+| E487 | a reference cannot reference a reference | `&&T` / `&mutating &T`. Reported once for the whole cluster; fixing the nesting then surfaces the positional error, if any. |
+| E489 | reference types cannot be used here | The catch-all position — alias RHS, where-clause types, protocol bounds. |
 | E488 | a borrow expression is only allowed as a \`let\` initializer | `&x` is not a free-standing expression; parameters already borrow by signature. |
 | E490 | a throwing function cannot return a reference | `throws` wraps the return in `Result`, and a reference can't live in an enum payload. |
 | E491 | a reference-returning function cannot be used as a value | `-> &T` is a return convention, not part of a function type; call it instead of storing it. |
@@ -341,9 +358,9 @@ func outlives() -> Int64 {
 
 | Code | Message | Explanation |
 |---|---|---|
-| E600 | implicit 'it' parameter used in closure expecting {n} parameters | `it` only works when the closure takes exactly one parameter. |
+| E600 | *(reserved — not emitted)* | The check moved into the constraint solver, where an arity-mismatched `it` surfaces as an inference error under **E100**. The code is held so it is not reallocated. |
 | E601 | closure has {actual} parameters, but expected {expected} | The closure's parameter count doesn't match the expected function type. |
-| E602 | closure parameter type mismatch at position {index} | An annotated closure parameter conflicts with the expected function type. |
+| E602 | *(reserved — not implemented)* | Closure escape analysis; the descriptor is registered but no emit site exists yet. |
 | E603 | cannot assign to captured variable '{name}' | A **normal** closure captures read-only views, so any assignment target rooted at a capture — the bare local or a projection like `c.n = 5` — is rejected. The note points at the fix: give the closure a `mutating` expected type (e.g. `mutating () -> ()`) to write back to the original, or fold the value and return it. Lifted for `mutating` (its views are `&mutating`) and for `consuming` / `escaping` (they own their captures). |
 | E604 | cannot assign to closure parameter '{name}' | Closure parameters are immutable. |
 | E605 | parameter/return type does not conform to FFISafe | `@extern` signatures may only use FFI-safe types. |
@@ -358,15 +375,15 @@ func outlives() -> Int64 {
 | E614 | default value cannot reference parameter '{name}' | Defaults are evaluated at each call site and can't see other parameters. |
 | E623 | function '{name}' requires a body | A non-protocol, non-extern function was declared without a body. |
 
-### Example — E600 / E601 (closure arity)
+### Example — E601 (closure arity)
 
 ```kestrel
-let add: (Int64, Int64) -> Int64 = { it + 1 }
-// error[E600]: implicit 'it' parameter used in closure expecting 2 parameters
-
 let inc: (Int64) -> Int64 = { (a, b) in a }
 // error[E601]: closure has 2 parameters, but expected 1
 ```
+
+`{ it + 1 }` against a two-parameter type is the same mistake, but it is caught
+by the solver and reported as **E100**, not E600.
 
 ## E615–E618 — Entry point
 

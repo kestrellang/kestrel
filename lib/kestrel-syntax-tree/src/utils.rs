@@ -28,14 +28,11 @@ pub fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
 }
 
 /// Check if a `SyntaxKind` is trivia (whitespace, newline, or comment).
+///
+/// Free-function spelling of [`SyntaxKind::is_trivia`], kept for the call sites
+/// that read better that way. It carries no set of its own.
 pub fn is_trivia(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Whitespace
-            | SyntaxKind::Newline
-            | SyntaxKind::LineComment
-            | SyntaxKind::BlockComment
-    )
+    kind.is_trivia()
 }
 
 /// Extract visibility modifier from a node with a `Visibility` child.
