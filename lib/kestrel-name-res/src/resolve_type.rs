@@ -11,8 +11,11 @@ use kestrel_ast_builder::{
     ConformanceItem, Conformances, Name, NodeKind, TypeParams, Typed, WhereClause, WhereConstraint,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
+use std::collections::HashSet;
 
-use crate::resolve_name::{NameResolution, ResolveName, find_assoc_type};
+use crate::resolve_name::{
+    NameResolution, ResolveName, find_assoc_type, resolve_inherited_protocol_member,
+};
 use crate::visibility::VisibleChildrenByName;
 
 // ===== TypeResolution =====
@@ -509,6 +512,11 @@ fn search_protocols_for_assoc(
     scope: Entity,
     root: Entity,
 ) -> Option<Entity> {
+    // One guard shared across the whole search: the conformance graph is static
+    // per revision, so re-walking a protocol we already visited can only find
+    // nothing again (a real match early-returns before it could be re-marked).
+    let mut visited = HashSet::new();
+
     for proto_type in protocols {
         let kestrel_ast::AstType::Named {
             segments: proto_segs,
@@ -545,8 +553,13 @@ fn search_protocols_for_assoc(
             return Some(found);
         }
 
-        // Also check inherited associated types from parent protocols
-        if let Some(found) = find_inherited_assoc_type(ctx, proto_entity, assoc_name, scope, root) {
+        // Also check inherited associated types from parent protocols.
+        // Shared with `ResolveName`'s inherited-member search: same walk, and
+        // its `visited` set is what keeps protocol-inheritance cycles from
+        // recursing forever (the cycle itself is reported as E459 elsewhere).
+        if let Some(found) =
+            resolve_inherited_protocol_member(ctx, proto_entity, assoc_name, root, &mut visited)
+        {
             return Some(found);
         }
     }
@@ -672,58 +685,6 @@ fn is_type_param_name(ctx: &QueryContext<'_>, entity: Entity, name: &str) -> boo
     } else {
         false
     }
-}
-
-/// Find an associated type in a protocol's inherited (parent) protocols.
-fn find_inherited_assoc_type(
-    ctx: &QueryContext<'_>,
-    protocol: Entity,
-    name: &str,
-    scope: Entity,
-    root: Entity,
-) -> Option<Entity> {
-    let conformances = ctx.get::<Conformances>(protocol)?;
-
-    for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_type, _) = item else {
-            continue;
-        };
-
-        let kestrel_ast::AstType::Named { segments, .. } = ast_type else {
-            continue;
-        };
-        if segments.is_empty() {
-            continue;
-        }
-
-        let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
-        // Use scope's parent to avoid cycles when scope is a protocol
-        let resolve_ctx = ctx.parent_of(scope).unwrap_or(scope);
-        let result = ctx.query(ResolveTypePath {
-            segments: seg_names,
-            context: resolve_ctx,
-            root,
-        });
-
-        let TypeResolution::Found(parent_proto) = result else {
-            continue;
-        };
-
-        if ctx.get::<NodeKind>(parent_proto) != Some(&NodeKind::Protocol) {
-            continue;
-        }
-
-        if let Some(found) = find_assoc_type(ctx, parent_proto, name) {
-            return Some(found);
-        }
-
-        // Recursively check grandparent protocols
-        if let Some(found) = find_inherited_assoc_type(ctx, parent_proto, name, resolve_ctx, root) {
-            return Some(found);
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]

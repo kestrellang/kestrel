@@ -91,12 +91,25 @@ Walks over protocol inheritance or conformance carry a `visited` set —
 `conformances.rs`. A cyclic `protocol A: B` / `protocol B: A` otherwise
 stack-overflows on already-invalid source. Add the guard when you add a walk.
 
-Known gap: `find_inherited_assoc_type` (`resolve_type.rs`) is the same walk
-*without* a guard — audit finding F37, still open.
+There is exactly **one** inherited-associated-type walk, and it is
+`resolve_inherited_protocol_member`. `resolve_type.rs` used to carry a copy
+(`find_inherited_assoc_type`) that had drifted: no `visited` set, and an anchor
+that climbed one extra ancestor per level. It stack-overflowed on a qualified
+cycle (`protocol A: Test.B`). F37 deleted it and pointed
+`search_protocols_for_assoc` at the shared function — do not reintroduce a
+second copy. Details: `docs/fragility/F37/`.
+
+Note that E459 does **not** protect these walks: `ProtocolCycleAnalyzer` is a
+`CompilationCheck` that consumes name-res queries, so resolution runs underneath
+the check that reports the cycle.
 
 Similarly, prefer a narrow lookup over re-entering `ResolveName`/`ResolveTypePath`
-when resolving something *inside* a declaration you are already resolving.
-`search_protocols_for_assoc` resolves from `parent_of(scope)` for this reason.
+when resolving something *inside* a declaration you are already resolving. That
+is why the inherited walk resolves each conformance path from
+`parent_of(protocol)` — the protocol's own declaring scope, recomputed per level,
+never accumulated. `search_protocols_for_assoc` still climbs from the caller's
+`scope` for its own where-clause bounds; that anchor is the same anti-pattern and
+is a known follow-up (see `docs/fragility/F37/decisions.md`).
 
 ## `member_lookup_name` is the only answer to "what is this member called?"
 

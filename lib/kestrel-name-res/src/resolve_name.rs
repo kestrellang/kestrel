@@ -223,7 +223,7 @@ fn resolve_protocol_extension_assoc(
 /// it, `protocol Foo: Foo` (or longer cycles) would stack-overflow here. The
 /// dedicated cycle analyzer in `kestrel-analyze` reports the cycle as a
 /// diagnostic; this function just refuses to recurse through it.
-fn resolve_inherited_protocol_member(
+pub(crate) fn resolve_inherited_protocol_member(
     ctx: &QueryContext<'_>,
     protocol: Entity,
     name: &str,
