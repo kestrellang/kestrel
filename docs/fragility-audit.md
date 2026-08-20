@@ -16,7 +16,8 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 45 fixed · 3 partial · 3 blocked · 15 open** — 64 top-level (F1–F43, G1–G21).
+**Progress: 45 fixed · 4 partial · 4 blocked · 16 open** — 64 top-level (F1–F43, G1–G21).
+Partial: F2, F28, F29, F43. Blocked on a maintainer decision: F11, F29, F42, G16.
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -104,7 +105,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Gap round (second pass)
 
-- [ ] **G3** `medium` `fragility` — The thunk pass identifies the closure environment parameter by the magic names `"env"`/`"_env"`; a user function whose first parameter is named `env`, used as a function value, has that parameter replaced by the environment pointer
 - [ ] **G4** `medium` `single-source-of-truth` — `--target` reaches only `@platform` filtering; layout and both codegen backends hardcode the host, so `kestrel build --target <other-os>` silently emits a host binary compiled against the other OS's stdlib
 - [ ] **G5** `medium` `single-source-of-truth` — Two independent pointer widths and two independent size tables: MIR layout is hardcoded to 8 bytes while codegen derives width from the triple; the one path that honors `--target` also compiles with the native ISA
 - [ ] **G6** `medium` `fragility` — `@platform` fails open on every argument it does not recognize, and no validator for the argument exists anywhere — an unparsed or unsupported `--target` triple disables platform filtering entirely
