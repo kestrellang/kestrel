@@ -515,12 +515,9 @@ mod tests {
     fn revision_boundary_does_not_change_diagnostics() {
         use kestrel_compiler::Compiler;
         use kestrel_compiler_driver::CompilerDriver;
-        use std::path::Path;
 
-        let std_dir = Path::new("/Users/dino/Documents/Projects/kestrel/lang/std");
-        if !std_dir.exists() {
-            return; // skip when run outside the dev tree
-        }
+        let std_dir = kestrel_compiler::stdlib_path::repo_std_path();
+        let std_dir = std_dir.as_path();
 
         let user_src = "module hello\n\
                         public func add(x: Int64, y: Int64) -> Int64 { x + y }\n\
@@ -575,10 +572,13 @@ mod tests {
         use kestrel_compiler_driver::CompilerDriver;
         use std::path::Path;
 
-        let std_dir = Path::new("/Users/dino/Documents/Projects/kestrel/lang/std");
-        let user_path = "/Users/dino/Documents/Projects/kestrel/lang/hello/main.ks";
-        if !std_dir.exists() || !Path::new(user_path).exists() {
-            return; // skip when run outside the dev tree
+        let std_dir = kestrel_compiler::stdlib_path::repo_std_path();
+        let std_dir = std_dir.as_path();
+        let hello = std_dir.with_file_name("hello").join("main.ks");
+        let user_path = hello.to_string_lossy().to_string();
+        let user_path = user_path.as_str();
+        if !Path::new(user_path).exists() {
+            return; // this sample is not part of the repo on every checkout
         }
 
         // Walk the stdlib dir to mirror what the LSP does.
@@ -646,12 +646,9 @@ mod tests {
     fn rebuild_user_code_matches_fresh_diagnostics() {
         use kestrel_compiler::Compiler;
         use kestrel_compiler_driver::CompilerDriver;
-        use std::path::Path;
 
-        let std_dir = Path::new("/Users/dino/Documents/Projects/kestrel/lang/std");
-        if !std_dir.exists() {
-            return;
-        }
+        let std_dir = kestrel_compiler::stdlib_path::repo_std_path();
+        let std_dir = std_dir.as_path();
 
         let user_path = "/tmp/repro_rebuild.ks".to_string();
         let v1 = "module hello\n\

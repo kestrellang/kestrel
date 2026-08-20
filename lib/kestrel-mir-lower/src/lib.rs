@@ -37,10 +37,7 @@ mod tests {
     use kestrel_compiler::Compiler;
 
     fn stdlib_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../lang/std")
-            .canonicalize()
-            .expect("stdlib path should exist at lang/std")
+        kestrel_compiler::stdlib_path::repo_std_path()
     }
 
     #[test]

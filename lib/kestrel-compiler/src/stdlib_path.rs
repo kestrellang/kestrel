@@ -110,7 +110,11 @@ pub fn default_std_path() -> Result<PathBuf, StdLookupError> {
 /// `<repo>/lang/std`, derived from this crate's manifest directory at build
 /// time. Every caller gets the same answer — previously each crate walked its
 /// own `CARGO_MANIFEST_DIR` up a different number of levels.
-fn repo_std_path() -> PathBuf {
+///
+/// Public for tests that need the repo stdlib specifically rather than
+/// "whatever this binary should use"; production code wants
+/// [`default_std_path`].
+pub fn repo_std_path() -> PathBuf {
     // lib/kestrel-compiler -> lib -> repo root
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

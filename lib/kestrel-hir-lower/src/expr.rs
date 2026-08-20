@@ -1325,8 +1325,10 @@ impl LowerCtx<'_> {
         let first = self.lower_if_conditions(body, &conditions[..1], source, span);
         let rest = self.lower_if_conditions(body, &conditions[1..], source, span);
 
-        // first && rest — desugar to protocol call
-        self.desugar_logical_and(first, rest, span)
+        // first && rest — through the same table-driven path as a written `&&`,
+        // so a missing `LogicalAndOperator` conformance reports instead of
+        // silently discarding `rest`.
+        self.desugar_binary_hir(BinaryOp::And, first, rest, span)
     }
 
     /// Lower a closure expression.
@@ -1561,11 +1563,20 @@ impl LowerCtx<'_> {
     /// ```
     ///
     /// `on_success` is materialized at the innermost level, inside all the
-    /// pattern scopes, so it sees every binding. `on_fail` is rebuilt per level
-    /// *outside* the scopes (bindings are undefined there) — every caller's fail
-    /// is safe to duplicate: guard/while diverge, and if-let's else runs on only
-    /// one path. `source` tags the generated `let` matches
-    /// (GuardLet/IfLet/WhileLet) for the divergence + exhaustiveness analyzers.
+    /// pattern scopes, so it sees every binding. The fail continuation is
+    /// lowered **once**, here, *outside* every scope (bindings are undefined
+    /// there) and the resulting id is referenced from each level's fail arm.
+    /// `source` tags the generated `let` matches (GuardLet/IfLet/WhileLet) for
+    /// the divergence + exhaustiveness analyzers.
+    ///
+    /// Lowering fail once is load-bearing, not just tidy. It used to be rebuilt
+    /// per level, which duplicated every diagnostic the else body produces (one
+    /// copy per condition) and, because an `else if` is itself lowered through
+    /// this function, lowered the tail of an `else if` chain 2^depth times —
+    /// multiplying the findings of every HIR-walking analyzer with it
+    /// (fragility audit F31). Duplicating was only ever *semantically* safe:
+    /// guard/while fail branches diverge, and if-let's else runs on exactly one
+    /// path, so the arms referencing one shared id are mutually exclusive.
     ///
     /// Do NOT route binding conditions through the boolean-AND
     /// `lower_if_conditions` path: it lowers each pattern to a throwaway
@@ -1580,6 +1591,25 @@ impl LowerCtx<'_> {
         span: &Span,
         on_success: &mut dyn FnMut(&mut Self) -> HirExprId,
         on_fail: &mut dyn FnMut(&mut Self) -> HirExprId,
+    ) -> HirExprId {
+        // Nothing to branch on: no fail arm is reachable, so don't lower one.
+        if conditions.is_empty() {
+            return on_success(self);
+        }
+        let fail = on_fail(self);
+        self.lower_condition_chain_with_fail(body, conditions, source, span, on_success, fail)
+    }
+
+    /// The recursive half of [`Self::lower_condition_chain`], with the fail
+    /// continuation already lowered to a single id shared by every level.
+    fn lower_condition_chain_with_fail(
+        &mut self,
+        body: &AstBody,
+        conditions: &[IfCondition],
+        source: MatchSource,
+        span: &Span,
+        on_success: &mut dyn FnMut(&mut Self) -> HirExprId,
+        fail: HirExprId,
     ) -> HirExprId {
         // No conditions left: materialize the success continuation. It runs
         // inside the scopes opened by the enclosing `let` conditions, so their
@@ -1597,11 +1627,10 @@ impl LowerCtx<'_> {
                 // pattern + continuation so the bindings don't leak into fail.
                 self.push_scope();
                 let pat = self.lower_pat(body, *pattern);
-                let success =
-                    self.lower_condition_chain(body, rest, source, span, on_success, on_fail);
+                let success = self
+                    .lower_condition_chain_with_fail(body, rest, source, span, on_success, fail);
                 self.pop_scope();
 
-                let fail = on_fail(self);
                 let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
 
                 self.alloc_expr(HirExpr::Match {
@@ -1624,9 +1653,8 @@ impl LowerCtx<'_> {
             },
             IfCondition::Expr(expr_id) => {
                 let condition = self.lower_expr(body, *expr_id);
-                let success =
-                    self.lower_condition_chain(body, rest, source, span, on_success, on_fail);
-                let fail = on_fail(self);
+                let success = self
+                    .lower_condition_chain_with_fail(body, rest, source, span, on_success, fail);
 
                 self.alloc_expr(HirExpr::If {
                     condition,

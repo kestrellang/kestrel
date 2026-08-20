@@ -91,42 +91,6 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Error { span: span.clone() })
     }
 
-    /// Desugar && to a ProtocolCall (used by if-condition chains).
-    pub(crate) fn desugar_logical_and(
-        &mut self,
-        lhs: HirExprId,
-        rhs: HirExprId,
-        span: &Span,
-    ) -> HirExprId {
-        // Wrap RHS in closure for short-circuit
-        let rhs_closure = self.alloc_expr(HirExpr::Closure {
-            params: Vec::new(),
-            body: HirBlock {
-                stmts: Vec::new(),
-                tail_expr: Some(rhs),
-            },
-            span: span.clone(),
-        });
-
-        if let Some(protocol) = self.resolve_builtin(Builtin::LogicalAndOperatorProtocol) {
-            self.alloc_expr(HirExpr::ProtocolCall {
-                from_operator: true,
-                receiver: lhs,
-                protocol,
-                method: HirName::name("logicalAnd"),
-                type_args: None,
-                args: vec![HirCallArg {
-                    label: None,
-                    value: rhs_closure,
-                }],
-                span: span.clone(),
-            })
-        } else {
-            // Fallback: just return lhs if protocol not found
-            lhs
-        }
-    }
-
     // ===== Unary operators =====
 
     /// Desugar a unary operator to a ProtocolCall.

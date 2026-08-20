@@ -453,3 +453,65 @@ fn lower_multiple_statements() {
 
 // Scoped locals test: requires nested braces (if { let x... }),
 // tested in unit tests with manually constructed AstBody.
+
+// ===== Tests: condition-chain fail continuation (fragility audit F31) =====
+
+/// How many times the literal `marker` appears in the lowered body.
+///
+/// The fail continuation of an `if let` chain is lowered from the *else* body,
+/// so a marker literal that appears once in the source and N times here is a
+/// direct count of how many times that else body was lowered.
+fn count_int_literal(hir: &HirBody, marker: i128) -> usize {
+    hir.exprs
+        .iter()
+        .filter(|(_, e)| {
+            matches!(
+                e,
+                HirExpr::Literal {
+                    value: HirLiteral::Integer(v),
+                    ..
+                } if i128::from(*v) == marker
+            )
+        })
+        .count()
+}
+
+/// `lower_condition_chain` recurses once per condition. It used to call
+/// `on_fail` at *every* level, so the else body was lowered once per condition
+/// — duplicating every diagnostic it produces, with nothing downstream to
+/// dedup them (fragility audit F31).
+#[test]
+fn a_conditions_else_body_is_lowered_once_per_chain() {
+    let source =
+        "module TestMod\nfunc foo(x: T, y: T) { if let .Some(a) = x, let .Some(b) = y { 1 } else { 999 } }";
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let hir = lower_func(&ctx, root, "TestMod", "foo");
+
+    assert_eq!(
+        count_int_literal(&hir, 999),
+        1,
+        "the else body was lowered once per condition instead of once"
+    );
+}
+
+/// The compounding case: an `else if let` is itself lowered through
+/// `lower_condition_chain`, so a per-level `on_fail` made the cost 2^depth —
+/// the innermost else of a 2-deep chain of 2 conditions was lowered 4 times,
+/// multiplying the findings of every HIR-walking analyzer with it.
+#[test]
+fn an_else_if_let_chain_does_not_lower_its_tail_exponentially() {
+    let source = "module TestMod\nfunc foo(x: T, y: T, z: T, w: T) { if let .Some(a) = x, let .Some(b) = y { 1 } else if let .Some(c) = z, let .Some(d) = w { 2 } else { 999 } }";
+    let (world, root) = build_from_source(source);
+    let ctx = world.query_context();
+    let hir = lower_func(&ctx, root, "TestMod", "foo");
+
+    assert_eq!(
+        count_int_literal(&hir, 999),
+        1,
+        "the innermost else was lowered 2^depth times"
+    );
+    // The middle arm belongs to the inner chain's success continuation, which
+    // is materialized once at the innermost level — it must not multiply either.
+    assert_eq!(count_int_literal(&hir, 2), 1);
+}

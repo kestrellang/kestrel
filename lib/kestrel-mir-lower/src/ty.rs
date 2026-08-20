@@ -510,6 +510,14 @@ fn contains_opaque(ty: &HirTy) -> bool {
 }
 
 /// Substitute type params in a ResolvedTy (for opaque return type resolution).
+///
+/// **Exhaustive on purpose — do not add a `_ =>` arm.** This is the second
+/// substitution kernel in the tree (`kestrel_mir::substitute` is the first, over
+/// `MirTy`, and is exhaustive for the same reason). It used to end in
+/// `_ => ty.clone()`, which silently stopped recursing at `Ref` and `Opaque`
+/// even though both carry nested `ResolvedTy`s, and guaranteed that any future
+/// variant would be skipped rather than be a compile error (fragility audit
+/// F32). Leaf variants are listed by name so adding one is a decision.
 fn substitute_resolved_ty(
     ty: &ResolvedTy,
     type_params: &[Entity],
@@ -560,7 +568,42 @@ fn substitute_resolved_ty(
             base: Box::new(substitute_resolved_ty(base, type_params, args)),
             assoc: *assoc,
         },
-        _ => ty.clone(),
+        ResolvedTy::Ref { pointee, mutating } => ResolvedTy::Ref {
+            pointee: Box::new(substitute_resolved_ty(pointee, type_params, args)),
+            mutating: *mutating,
+        },
+        ResolvedTy::Opaque {
+            origin,
+            bounds,
+            origin_args,
+            index,
+            not_copyable,
+        } => ResolvedTy::Opaque {
+            origin: *origin,
+            // A bound's own arguments can mention the params being substituted
+            // (`some Collection[T]`), as can the args the opaque was produced
+            // with. The bound protocol entity itself is not a type.
+            bounds: bounds
+                .iter()
+                .map(|(protocol, bound_args)| {
+                    (
+                        *protocol,
+                        bound_args
+                            .iter()
+                            .map(|a| substitute_resolved_ty(a, type_params, args))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            origin_args: origin_args
+                .iter()
+                .map(|a| substitute_resolved_ty(a, type_params, args))
+                .collect(),
+            index: *index,
+            not_copyable: *not_copyable,
+        },
+        // Leaves: no nested types to walk into.
+        ResolvedTy::SelfType { .. } | ResolvedTy::Never | ResolvedTy::Error => ty.clone(),
     }
 }
 
@@ -572,10 +615,7 @@ mod tests {
     use kestrel_mir::MirTy;
 
     fn stdlib_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../lang/std")
-            .canonicalize()
-            .expect("stdlib path should exist at lang/std")
+        kestrel_compiler::stdlib_path::repo_std_path()
     }
 
     #[test]
@@ -661,6 +701,66 @@ mod tests {
         let hir = HirTy::Param(param_entity, kestrel_span::Span::synthetic(0));
         let ty = lower_type(&mut ctx, &hir);
         assert_eq!(ctx.module.ty_arena.get(ty), &MirTy::TypeParam(param_entity));
+    }
+
+    // === substitute_resolved_ty (fragility audit F32) ===
+
+    /// `Ref` and `Opaque` both carry nested `ResolvedTy`s. The kernel used to
+    /// end in `_ => ty.clone()`, so substitution stopped at either of them and
+    /// the type parameter inside survived into MIR unsubstituted.
+    #[test]
+    fn substitution_reaches_inside_refs_and_opaques() {
+        let param = Entity::from_raw(999);
+        let concrete = Entity::from_raw(7);
+        let named = |e| ResolvedTy::Named {
+            entity: e,
+            args: vec![],
+        };
+        let params = [param];
+        let args = [named(concrete)];
+
+        let through_ref = substitute_resolved_ty(
+            &ResolvedTy::Ref {
+                pointee: Box::new(ResolvedTy::Param { entity: param }),
+                mutating: true,
+            },
+            &params,
+            &args,
+        );
+        match through_ref {
+            ResolvedTy::Ref { pointee, mutating } => {
+                assert!(mutating, "substitution must not drop `mutating`");
+                assert_eq!(*pointee, named(concrete), "T survived inside &mutating T");
+            },
+            other => panic!("Ref did not stay a Ref: {other:?}"),
+        }
+
+        let through_opaque = substitute_resolved_ty(
+            &ResolvedTy::Opaque {
+                origin: Entity::from_raw(1),
+                bounds: vec![(Entity::from_raw(2), vec![ResolvedTy::Param { entity: param }])],
+                origin_args: vec![ResolvedTy::Param { entity: param }],
+                index: 3,
+                not_copyable: true,
+            },
+            &params,
+            &args,
+        );
+        match through_opaque {
+            ResolvedTy::Opaque {
+                bounds,
+                origin_args,
+                index,
+                not_copyable,
+                ..
+            } => {
+                assert_eq!(bounds[0].1, vec![named(concrete)], "T survived in a bound");
+                assert_eq!(origin_args, vec![named(concrete)], "T survived in origin_args");
+                assert_eq!(index, 3);
+                assert!(not_copyable, "substitution must not drop `not_copyable`");
+            },
+            other => panic!("Opaque did not stay an Opaque: {other:?}"),
+        }
     }
 
     #[test]

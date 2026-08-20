@@ -669,12 +669,10 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// Path to the stdlib directory (relative to workspace root).
+    /// Path to this repo's stdlib. One resolver — see
+    /// `kestrel_compiler::stdlib_path`.
     fn stdlib_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../lang/std")
-            .canonicalize()
-            .expect("stdlib path should exist at lang/std")
+        kestrel_compiler::stdlib_path::repo_std_path()
     }
 
     #[test]

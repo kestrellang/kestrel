@@ -1158,8 +1158,25 @@ static TABLE: &[IntrinsicEntry] = &[
     },
 ];
 
+/// Split a `<base>_unchecked` intrinsic name into its base entry name and the
+/// guard flag. `<base>_unchecked` reuses the base div/rem `TABLE` entry with its
+/// guards dropped, rather than 16 near-duplicate rows, so it stays in lockstep
+/// with the checked entries.
+///
+/// A function rather than an inline `strip_suffix` because the coverage test
+/// below must resolve names exactly the way `try_intrinsic` does — reading the
+/// rule off the source text instead reported all 16 `_unchecked` names as
+/// unlowerable when every one of them works.
+fn split_unchecked(name: &str) -> (&str, bool) {
+    match name.strip_suffix("_unchecked") {
+        Some(base) => (base, true),
+        None => (name, false),
+    }
+}
+
 #[cfg(test)]
 mod coverage_tests {
+    use super::split_unchecked;
     use kestrel_ast_builder::{Name, NodeKind, seed_lang_module};
     use kestrel_hecs::{Entity, World};
 
@@ -1222,7 +1239,12 @@ mod coverage_tests {
 
         let missing: Vec<&String> = seeded
             .iter()
-            .filter(|n| !source.contains(&format!("\"{n}\"")))
+            .filter(|n| {
+                // Resolve the name the way `try_intrinsic` does before looking
+                // for it, or every `_unchecked` name reads as unlowerable.
+                let (base, _) = split_unchecked(n);
+                !source.contains(&format!("\"{base}\""))
+            })
             .collect();
 
         assert!(
@@ -1425,13 +1447,7 @@ pub(crate) fn try_intrinsic(
         _ => {},
     }
 
-    // `<base>_unchecked` reuses the base div/rem entry but drops its guards.
-    // Handled here (rather than 16 extra table rows) so it stays in lockstep
-    // with the checked entries.
-    let (lookup_name, unchecked) = match name.strip_suffix("_unchecked") {
-        Some(base) => (base, true),
-        None => (name.as_str(), false),
-    };
+    let (lookup_name, unchecked) = split_unchecked(name.as_str());
     let entry = TABLE.iter().find(|e| e.name == lookup_name)?;
     let op = if unchecked {
         match entry.op {
