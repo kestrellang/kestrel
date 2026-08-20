@@ -40,6 +40,28 @@ pub enum FunctionKind {
     ModuleInit,
 }
 
+impl FunctionKind {
+    /// True when this function's params[0] is a synthesized env pointer rather
+    /// than a real parameter — closures (capturing and capture-free) and
+    /// generated thunks. Both producers push it unconditionally (mir-lower
+    /// `closure.rs` pushes `"env"` outside the match that picks
+    /// `Closure`/`ClosureCall`; `passes::thunk` pushes `"_env"` right after
+    /// setting `Thunk`), so the kind and the leading env param are in lockstep.
+    /// This is the one place that answers the question.
+    ///
+    /// It used to be answered by parameter NAME (`p.name == "env" || "_env"`),
+    /// which silently miscompiled any user function whose first parameter was
+    /// called `env` when that function was used as a function value — the
+    /// environment pointer landed in the user's first parameter and the last
+    /// real argument was dropped (fragility audit G3).
+    pub fn takes_env_param(&self) -> bool {
+        matches!(
+            self,
+            Self::Closure { .. } | Self::ClosureCall { .. } | Self::Thunk { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParamDef {
     pub name: String,

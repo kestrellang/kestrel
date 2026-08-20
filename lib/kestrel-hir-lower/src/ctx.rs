@@ -64,6 +64,14 @@ pub(crate) struct LowerCtx<'a> {
     /// the place-mode lowering needs a pinnable scrutinee place).
     pub ref_patterns_allowed: bool,
 
+    /// True while lowering the path in a call's *callee* position. A path
+    /// there names something to invoke, so it is exempt from the
+    /// "instance method used as a value" rejection in `lower_path`
+    /// (`lower_call` already diagnoses the call form). Consumed — and reset
+    /// — by the first `lower_path` that reads it, so nested paths inside a
+    /// callee expression are still checked.
+    pub in_callee_position: bool,
+
     /// While lowering the non-first alternatives of an or-pattern, maps a
     /// binding name to the local the FIRST alternative already created, so
     /// every alternative — and the arm body — share ONE local per name. Each
@@ -91,6 +99,7 @@ impl<'a> LowerCtx<'a> {
             loop_labels: Vec::new(),
             local_depths: HashMap::new(),
             ref_patterns_allowed: false,
+            in_callee_position: false,
             or_reuse: None,
         }
     }

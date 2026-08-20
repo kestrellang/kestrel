@@ -676,12 +676,7 @@ pub fn detect_implicit_protocol(
     // Closures inside protocol default methods inherit self_type but their
     // first param is env pointer, not Self. Scan their types for protocol
     // TypeParams, gated by function kind to avoid scanning every method.
-    if !matches!(
-        func.kind,
-        FunctionKind::Closure { .. }
-            | FunctionKind::ClosureCall { .. }
-            | FunctionKind::Thunk { .. }
-    ) {
+    if !func.kind.takes_env_param() {
         return None;
     }
     for proto in protocols.values() {

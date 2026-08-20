@@ -12,6 +12,17 @@ use kestrel_span::Span;
 
 use crate::ctx::{LowerCtx, name_from_ast};
 
+/// How a `Type.instanceMethod` path was written. Both forms are the same
+/// mistake — an instance method has no receiver when named through its type —
+/// and share one diagnostic; only the wording differs.
+#[derive(Clone, Copy)]
+enum MethodOnTypeUse {
+    /// `Box.doubled(b, 7)`
+    Call,
+    /// `apply(Box.doubled, 7)`
+    Value,
+}
+
 impl LowerCtx<'_> {
     /// Lower an AST expression to an HIR expression.
     pub fn lower_expr(&mut self, body: &AstBody, id: ExprId) -> HirExprId {
@@ -262,6 +273,11 @@ impl LowerCtx<'_> {
         segments: &[ExprPathSegment],
         span: &Span,
     ) -> HirExprId {
+        // Consume the callee-position marker up front so the nested
+        // `lower_path` calls this function makes (and any path lowered inside
+        // a callee expression) are checked as ordinary values.
+        let in_callee_position = std::mem::take(&mut self.in_callee_position);
+
         if segments.is_empty() {
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
@@ -343,6 +359,27 @@ impl LowerCtx<'_> {
             context: self.owner,
             root: self.root,
         });
+
+        // `Box.doubled` — an instance method named through its *type*, used as
+        // a value. Same rule as the call form `Box.doubled(b, 7)` rejected in
+        // `lower_call`, so it shares that emitter; only the wording differs.
+        //
+        // This must be caught here because name resolution's direct-children
+        // walk (`resolve_value.rs::walk_path_from`) returns the method entity
+        // with no receiver bound — the `is_static_method` filter guards only
+        // the *extension* fallback, never direct members. Left through,
+        // inference types it as the method's signature minus `self` and MIR
+        // emits an `apply_partial` over a two-parameter thunk behind a
+        // one-parameter thick type: a silent miscompile (fragility audit
+        // G3 §2b). Static methods keep working — they have no receiver.
+        if !in_callee_position
+            && segments.len() >= 2
+            && let ValueResolution::Def(entity) = result
+            && self.is_instance_method(entity)
+        {
+            let last = &segments[segments.len() - 1];
+            return self.emit_instance_method_on_type(&last.name, span, MethodOnTypeUse::Value);
+        }
 
         // Check for empty type argument brackets (e.g., `identity[]`)
         for seg in segments {
@@ -689,18 +726,12 @@ impl LowerCtx<'_> {
                     // (`Counter.getValue()` on a non-static method). Emit an
                     // error and return Error so downstream phases short-circuit.
                     if self.is_instance_method_on_type(segments, &last.name) {
-                        self.ctx.accumulate(
-                            kestrel_reporting::Diagnostic::error()
-                                .with_message(format!(
-                                    "instance method '{}' cannot be called on a type",
-                                    last.name
-                                ))
-                                .with_labels(vec![
-                                    kestrel_reporting::Label::primary(span.file_id, span.range())
-                                        .with_message("call this on an instance, not the type"),
-                                ]),
+                        let method = last.name.clone();
+                        return self.emit_instance_method_on_type(
+                            &method,
+                            span,
+                            MethodOnTypeUse::Call,
                         );
-                        return self.alloc_expr(HirExpr::Error { span: span.clone() });
                     }
                 }
 
@@ -879,7 +910,7 @@ impl LowerCtx<'_> {
                 }
 
                 // Regular direct call (lowered as-is)
-                let lowered_callee = self.lower_expr(body, callee);
+                let lowered_callee = self.lower_callee(body, callee);
                 self.alloc_expr(HirExpr::Call {
                     callee: lowered_callee,
                     args: lowered_args,
@@ -889,7 +920,7 @@ impl LowerCtx<'_> {
 
             _ => {
                 // Direct call
-                let lowered_callee = self.lower_expr(body, callee);
+                let lowered_callee = self.lower_callee(body, callee);
                 self.alloc_expr(HirExpr::Call {
                     callee: lowered_callee,
                     args: lowered_args,
@@ -899,12 +930,75 @@ impl LowerCtx<'_> {
         }
     }
 
+    /// Lower a call's callee. Identical to `lower_expr` except that a path
+    /// here is in *callee* position: it names something being invoked, so it
+    /// is exempt from `lower_path`'s "instance method used as a value" check.
+    fn lower_callee(&mut self, body: &AstBody, callee: ExprId) -> HirExprId {
+        self.in_callee_position = true;
+        let lowered = self.lower_expr(body, callee);
+        // Cleared by the `lower_path` that consumed it; reset for callees that
+        // are not paths at all (`(f)(x)`, `make()(x)`).
+        self.in_callee_position = false;
+        lowered
+    }
+
+    /// Is `entity` an *instance* method — a Function with a receiver and no
+    /// `Static` marker? The single definition of the predicate; both misuses
+    /// of `Type.instanceMethod` (called, and used as a value) test it.
+    fn is_instance_method(&self, entity: kestrel_hecs::Entity) -> bool {
+        use kestrel_ast_builder::{Callable, NodeKind, Static};
+
+        self.ctx.get::<NodeKind>(entity) == Some(&NodeKind::Function)
+            && !self.ctx.has::<Static>(entity)
+            && self
+                .ctx
+                .get::<Callable>(entity)
+                .is_some_and(|c| c.receiver.is_some())
+    }
+
+    /// One rule, one message, one place: an instance method named through its
+    /// *type* (`Box.doubled`) has no receiver to bind. Reported for both
+    /// misuses — the call `Box.doubled(b, 7)` and the value `apply(Box.doubled, 7)`
+    /// — so the two can never drift apart. Returns the poison node callers
+    /// substitute for the bad expression.
+    fn emit_instance_method_on_type(
+        &mut self,
+        method: &str,
+        span: &Span,
+        use_kind: MethodOnTypeUse,
+    ) -> HirExprId {
+        let (message, label, notes) = match use_kind {
+            MethodOnTypeUse::Call => (
+                format!("instance method '{method}' cannot be called on a type"),
+                "call this on an instance, not the type",
+                Vec::new(),
+            ),
+            MethodOnTypeUse::Value => (
+                format!("instance method '{method}' cannot be used as a value"),
+                "an unbound method reference is not a value",
+                vec![format!(
+                    "methods cannot be used as first-class values; \
+                     call it on an instance instead: 'instance.{method}()'"
+                )],
+            ),
+        };
+        self.ctx.accumulate(
+            Diagnostic::error()
+                .with_code("E100")
+                .with_message(message)
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range()).with_message(label),
+                ])
+                .with_notes(notes),
+        );
+        self.alloc_expr(HirExpr::Error { span: span.clone() })
+    }
+
     /// Whether the path `Type.member` (`segments[..-1]` resolving to a struct
-    /// or enum) names an *instance* method on that type — i.e. a Function
-    /// child with a receiver and no `Static` marker. Used to catch misuses
+    /// or enum) names an *instance* method on that type. Used to catch misuses
     /// like `Counter.getValue()` where `getValue` requires a `self`.
     fn is_instance_method_on_type(&mut self, segments: &[ExprPathSegment], member: &str) -> bool {
-        use kestrel_ast_builder::{Callable, Name, NodeKind, Static};
+        use kestrel_ast_builder::{Name, NodeKind};
 
         if segments.len() < 2 {
             return false;
@@ -930,27 +1024,10 @@ impl LowerCtx<'_> {
         ) {
             return false;
         }
-        for &child in self.ctx.children_of(type_entity) {
-            if self.ctx.get::<NodeKind>(child) != Some(&NodeKind::Function) {
-                continue;
-            }
-            if self.ctx.has::<Static>(child) {
-                continue;
-            }
-            let Some(callable) = self.ctx.get::<Callable>(child) else {
-                continue;
-            };
-            if callable.receiver.is_none() {
-                continue;
-            }
-            let Some(name) = self.ctx.get::<Name>(child) else {
-                continue;
-            };
-            if name.0 == member {
-                return true;
-            }
-        }
-        false
+        self.ctx.children_of(type_entity).iter().any(|&child| {
+            self.is_instance_method(child)
+                && self.ctx.get::<Name>(child).is_some_and(|n| n.0 == member)
+        })
     }
 
     /// Check if a multi-segment path ending in `member` is a static method call.

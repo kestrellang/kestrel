@@ -57,16 +57,31 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         let ret_ty = target_func.ret;
         let type_params = target_func.type_params.clone();
 
-        let needs_env = target_func
-            .params
-            .first()
-            .is_some_and(|p| p.name == "env" || p.name == "_env");
+        // Whether params[0] is a synthesized env pointer is a property of the
+        // function KIND, never of the parameter's spelling — a user function
+        // may legally name its first parameter `env`, `_env` or `self`, and
+        // matching on the name silently forwarded the environment pointer into
+        // it while dropping the last real argument (G3).
+        let needs_env = target_func.kind.takes_env_param();
+        debug_assert!(
+            !needs_env
+                || target_func
+                    .params
+                    .first()
+                    .is_some_and(|p| p.name == "env" || p.name == "_env"),
+            "{}: kind {:?} promises a leading env param but params[0] is {:?} — \
+             the env param must stay at index 0 in mir-lower `closure.rs` / this pass",
+            target_func.name,
+            target_func.kind,
+            target_func.params.first().map(|p| &p.name),
+        );
 
-        // Non-self, non-env params from the target
+        // Every param after the (optional) env pointer is a real parameter and
+        // is forwarded positionally. Structural — no name filtering.
         let target_params: Vec<_> = target_func
             .params
             .iter()
-            .filter(|p| p.name != "self" && p.name != "env" && p.name != "_env")
+            .skip(usize::from(needs_env))
             .cloned()
             .collect();
 
@@ -174,6 +189,37 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
                 value: val,
                 convention: ParamConvention::Consuming,
             });
+        }
+
+        // Fail-loud backstop. The forwarded arg list is built positionally from
+        // the target's own params, so it must match it exactly in both count
+        // and per-position type. The type check is the load-bearing half: G3's
+        // miscompile had a COINCIDENTALLY CORRECT count (the env pointer was
+        // pushed and the same param was filtered out), and only the types
+        // disagreed. These are the same `TyId`s cloned off `target_func.params`
+        // pre-monomorphization, so the comparison is exact — no substitution or
+        // ref-decay gap to reason about.
+        if let Some(target_params_full) = module.functions.get(target).map(|f| &f.params) {
+            debug_assert_eq!(
+                forward_args.len(),
+                target_params_full.len(),
+                "{thunk_name}: forwards {} args to a {}-param target",
+                forward_args.len(),
+                target_params_full.len(),
+            );
+            debug_assert!(
+                forward_args
+                    .iter()
+                    .zip(target_params_full.iter())
+                    .all(|(a, p)| body.value(a.value).ty == p.ty),
+                "{thunk_name}: forwarded arg types do not match the target's params \
+                 (forwarded {:?}, expected {:?})",
+                forward_args
+                    .iter()
+                    .map(|a| body.value(a.value).ty)
+                    .collect::<Vec<_>>(),
+                target_params_full.iter().map(|p| p.ty).collect::<Vec<_>>(),
+            );
         }
 
         let callee = Callee::direct_with_args(*target, forward_type_args, None);
@@ -553,5 +599,77 @@ mod tests {
             )
         });
         assert!(has_call, "thunk should forward call to target");
+    }
+
+    /// G3: whether params[0] is an env pointer is decided by `FunctionKind`,
+    /// not by the parameter's spelling. A plain `FunctionKind::Free` function
+    /// whose first parameter happens to be named `env` must have BOTH of its
+    /// parameters forwarded, with the env pointer forwarded to neither.
+    /// Under the old name-based rule this thunk forwarded (env_ptr, x) into
+    /// (env: Int64, x: Int64) — a same-count, wrong-type miscompile.
+    #[test]
+    fn env_named_user_param_is_not_an_env_pointer() {
+        let mut module = MirModule::new("test");
+        let i64_ty = module.ty_arena.i64();
+
+        let target = Entity::from_raw(1);
+        module.register_name(target, "combine");
+        add_stub_function(
+            &mut module,
+            target,
+            "combine",
+            i64_ty,
+            vec![
+                ("env".into(), i64_ty, ParamConvention::Consuming),
+                ("x".into(), i64_ty, ParamConvention::Consuming),
+            ],
+        );
+        assert_eq!(module.functions[&target].kind, FunctionKind::Free);
+
+        let caller = Entity::from_raw(2);
+        add_caller_with_apply(&mut module, caller, target);
+
+        let mut next_entity = 100;
+        run_thunk_pass(&mut module, &mut next_entity);
+
+        let thunk = module
+            .functions
+            .values()
+            .find(|f| matches!(&f.kind, FunctionKind::Thunk { .. }))
+            .expect("thunk should be generated");
+        let body = thunk.body.as_ref().unwrap();
+
+        let args = body.blocks[0]
+            .insts
+            .iter()
+            .find_map(|i| match &i.kind {
+                InstKind::Call { callee, args, .. }
+                    if matches!(callee, Callee::Direct { func, .. } if *func == target) =>
+                {
+                    Some(args)
+                },
+                _ => None,
+            })
+            .expect("thunk should forward a call to the target");
+
+        assert_eq!(
+            args.len(),
+            2,
+            "both user params must be forwarded, not just `x`"
+        );
+        assert_eq!(
+            body.value(args[0].value).ty,
+            i64_ty,
+            "first forwarded arg must be the user's `env: Int64` param, not the env pointer"
+        );
+        assert_eq!(body.value(args[1].value).ty, i64_ty);
+
+        // The env pointer the thunk itself receives is destroyed, not forwarded.
+        let env_param = &thunk.params[0];
+        assert_eq!(env_param.name, "_env");
+        assert!(
+            args.iter().all(|a| a.value != env_param.value),
+            "the thunk's own env pointer must not be forwarded to a Free target"
+        );
     }
 }

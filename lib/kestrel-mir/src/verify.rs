@@ -27,6 +27,7 @@ use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
 use crate::body::OssaBody;
+use crate::callee::Callee;
 use crate::inst::InstKind;
 use crate::terminator::TerminatorKind;
 use crate::ty::{ParamConvention, TyArena};
@@ -109,6 +110,18 @@ pub trait VerifyModule {
 
     /// Number of fields for a named struct type, or `None` if `ty` is not one.
     fn struct_field_count(&self, ty: TyId) -> Option<usize>;
+
+    /// Declared parameter count of a statically-known callee, or `None` when
+    /// the callee is indirect / a witness / not resolvable in this module.
+    ///
+    /// Backstop for lowering bugs that build a `Call` whose argument list does
+    /// not match the target's signature — the class of bug G3 was (a synthesized
+    /// wrapper dropping a real parameter). Count only: per-argument TYPE
+    /// verification here would need substitution, ref-decay and ByVal/ByRef
+    /// reasoning and would false-positive corpus-wide; the exact per-position
+    /// type check lives in `passes::thunk`, where the types are known to be
+    /// literally the same `TyId`s.
+    fn callee_declared_arity(&self, callee: &Callee) -> Option<usize>;
 }
 
 impl VerifyModule for MirModule {
@@ -124,6 +137,13 @@ impl VerifyModule for MirModule {
         }
         None
     }
+
+    fn callee_declared_arity(&self, callee: &Callee) -> Option<usize> {
+        match callee {
+            Callee::Direct { func, .. } => self.functions.get(func).map(|f| f.params.len()),
+            _ => None,
+        }
+    }
 }
 
 impl VerifyModule for crate::mono::types::MonoModule {
@@ -138,6 +158,13 @@ impl VerifyModule for crate::mono::types::MonoModule {
             return Some(s.fields.len());
         }
         None
+    }
+
+    fn callee_declared_arity(&self, callee: &Callee) -> Option<usize> {
+        match callee {
+            Callee::Resolved(id) => self.functions.get(id.index()).map(|f| f.params.len()),
+            _ => None,
+        }
     }
 }
 
@@ -1846,7 +1873,29 @@ impl<'a> FlowVerifier<'a> {
             },
 
             // -- Calls --
-            InstKind::Call { result, args, .. } => {
+            InstKind::Call {
+                result,
+                args,
+                callee,
+            } => {
+                // Lowering backstop: a statically-resolvable callee must be
+                // handed exactly as many arguments as it declares. Catches
+                // synthesized wrappers built from the wrong parameter list
+                // before the mismatch reaches the backend as a raw Cranelift/
+                // LLVM verifier failure with no Kestrel context (G3).
+                if let Some(declared) = self._module.callee_declared_arity(callee)
+                    && declared != args.len()
+                {
+                    let span = self.inst_span(idx);
+                    self.push_err(
+                        idx,
+                        span,
+                        format!(
+                            "call passes {} argument(s) to a callee declaring {declared}",
+                            args.len()
+                        ),
+                    );
+                }
                 for arg in args {
                     match arg.convention {
                         ParamConvention::Consuming => {

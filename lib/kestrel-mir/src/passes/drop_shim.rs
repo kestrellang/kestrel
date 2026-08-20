@@ -714,13 +714,19 @@ mod tests {
         };
         module.add_struct(my_def);
 
-        // Add a stub FunctionDef for the deinit so the module is consistent
+        // Add a stub FunctionDef for the deinit so the module is consistent.
+        // A real deinit declares `mutating self` (mir-lower `function_sig.rs`)
+        // and the shim forwards a mut borrow to it — declaring it here keeps
+        // the stub's arity honest for `verify_ossa`'s call-arity check.
         let deinit_unit = module.ty_arena.unit();
-        module.add_function(FunctionDef::new(
-            deinit_entity,
-            "MyType.deinit",
-            deinit_unit,
+        let mut deinit = FunctionDef::new(deinit_entity, "MyType.deinit", deinit_unit);
+        deinit.params.push(crate::item::function::ParamDef::new(
+            "self",
+            crate::ValueId::new(0),
+            my_ty,
+            crate::ty::ParamConvention::MutBorrow,
         ));
+        module.add_function(deinit);
 
         let mut next_entity = 100;
         synthesize_drop_shims(&mut module, &mut next_entity);
@@ -924,9 +930,19 @@ mod tests {
         };
         module.add_struct(s_def);
 
-        // Stub deinit function
+        // Stub deinit function. A real deinit declares `mutating self` (see
+        // mir-lower `function_sig.rs`) and the shim forwards a mut borrow to
+        // it, so the stub must declare it too or the module is inconsistent
+        // and `verify_ossa`'s call-arity check rightly rejects the shim.
         let unit_ty = module.ty_arena.unit();
-        module.add_function(FunctionDef::new(deinit_entity, "Handle.deinit", unit_ty));
+        let mut deinit = FunctionDef::new(deinit_entity, "Handle.deinit", unit_ty);
+        deinit.params.push(crate::item::function::ParamDef::new(
+            "self",
+            crate::ValueId::new(0),
+            s_ty,
+            crate::ty::ParamConvention::MutBorrow,
+        ));
+        module.add_function(deinit);
 
         let mut next_entity = 100;
         synthesize_drop_shims(&mut module, &mut next_entity);
