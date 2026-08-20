@@ -19,8 +19,8 @@ use kestrel_mir::callee::Callee;
 use kestrel_mir::inst::CallArg;
 use kestrel_mir::item::witness::WitnessMethodKey;
 use kestrel_mir::op::Op;
-use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 use kestrel_mir::value::RootProvenance;
+use kestrel_mir::{FieldIdx, Immediate, MirTy, ParamConvention, ValueId};
 
 use super::place::{FieldViews, PlaceRepr};
 use super::{OssaBodyCtx, expr_span};
@@ -242,8 +242,12 @@ impl OssaBodyCtx<'_, '_> {
         let to = crate::ty::to_mir_fn_kind(to);
         let value = if matches!(
             (from, to),
-            (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Consuming)
-        ) && self.body.value(value).ownership == kestrel_mir::value::Ownership::Guaranteed
+            (
+                kestrel_mir::FnKind::Escaping,
+                kestrel_mir::FnKind::Consuming
+            )
+        ) && self.body.value(value).ownership
+            == kestrel_mir::value::Ownership::Guaranteed
         {
             // A borrowed escaping parameter still owns its handle in the
             // caller. Retain one independent owner before transferring it to
@@ -262,7 +266,10 @@ impl OssaBodyCtx<'_, '_> {
         if actual == to {
             return value;
         }
-        debug_assert_eq!(actual, from, "recorded closure-kind source drifted before MIR");
+        debug_assert_eq!(
+            actual, from,
+            "recorded closure-kind source drifted before MIR"
+        );
 
         let result_ty = self.ctx.intern(MirTy::FuncThick {
             kind: to,
@@ -271,7 +278,10 @@ impl OssaBodyCtx<'_, '_> {
         });
         let source_root = self.body.value(value).root;
         let result = self.alloc_value(result_ty, kestrel_mir::value::Ownership::Owned);
-        let root = if matches!((from, to), (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Normal)) {
+        let root = if matches!(
+            (from, to),
+            (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Normal)
+        ) {
             match source_root {
                 RootProvenance::Static => RootProvenance::Static,
                 // A truncated view owns no retain. Root it in this body's
@@ -289,7 +299,13 @@ impl OssaBodyCtx<'_, '_> {
             from,
             to,
         });
-        if matches!((from, to), (kestrel_mir::FnKind::Escaping, kestrel_mir::FnKind::Consuming)) {
+        if matches!(
+            (from, to),
+            (
+                kestrel_mir::FnKind::Escaping,
+                kestrel_mir::FnKind::Consuming
+            )
+        ) {
             self.consume(value);
         }
         self.track_owned(result);

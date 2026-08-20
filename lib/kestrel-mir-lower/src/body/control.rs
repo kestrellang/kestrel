@@ -445,14 +445,15 @@ impl OssaBodyCtx<'_, '_> {
     // Helpers
     // ================================================================
 
+    /// Resolve a `break`/`continue` label against the enclosing loop stack.
+    ///
+    /// The rule itself lives in `kestrel_hir::label_selects_loop` so that
+    /// analyze and MIR share it by construction. Searching innermost-first with
+    /// an always-true predicate for `None` is exactly `last()`.
     fn find_loop(&self, label: Option<&str>) -> Option<&LoopInfo> {
-        match label {
-            Some(label) => self
-                .loop_stack
-                .iter()
-                .rev()
-                .find(|l| l.label.as_deref() == Some(label)),
-            None => self.loop_stack.last(),
-        }
+        self.loop_stack
+            .iter()
+            .rev()
+            .find(|l| kestrel_hir::label_selects_loop(label, l.label.as_deref()))
     }
 }

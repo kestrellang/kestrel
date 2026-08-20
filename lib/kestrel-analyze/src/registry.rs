@@ -69,15 +69,24 @@ pub struct AnalyzerRegistryRef(pub Arc<AnalyzerRegistry>);
 /// reserving *silently* is not. Anything here must say why, and anything not
 /// here must be reachable.
 pub(crate) const RESERVED_UNEMITTED: &[(&str, &str)] = &[
-    ("E206", "let_to_consuming — subsumed by the move checker's E50x family"),
+    (
+        "E206",
+        "let_to_consuming — subsumed by the move checker's E50x family",
+    ),
     (
         "E303",
         "irrefutable_pattern_makes_arms_unreachable — E306 labels the dead \
          code and is the one emitted; E303 is held for the degenerate case \
          where no E306 exists (see exhaustiveness.rs)",
     ),
-    ("E446", "associated_type_constraint_not_satisfied — check not written yet"),
-    ("E448", "type_alias_contains_infer — reserved with the type-alias plan"),
+    (
+        "E446",
+        "associated_type_constraint_not_satisfied — check not written yet",
+    ),
+    (
+        "E448",
+        "type_alias_contains_infer — reserved with the type-alias plan",
+    ),
     (
         "E502",
         "cloneable_field_requires_conformance — retired when clone shims \
@@ -89,7 +98,10 @@ pub(crate) const RESERVED_UNEMITTED: &[(&str, &str)] = &[
          where it renders as an InferError; the descriptor is kept so the \
          code is not reallocated under a different meaning",
     ),
-    ("E602", "closure escape analysis — not implemented (closure.rs TODO)"),
+    (
+        "E602",
+        "closure escape analysis — not implemented (closure.rs TODO)",
+    ),
 ];
 
 #[cfg(test)]

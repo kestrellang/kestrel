@@ -19,6 +19,7 @@
 
 use std::collections::HashSet;
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
@@ -312,7 +313,7 @@ fn analyze_expr(
         // Loop: body may not execute (well, it always does at least once, but
         // we conservatively don't trust loop body assignments since break can
         // exit before assignments happen). Analyze body for errors though.
-        HirExpr::Loop { body, .. } => {
+        HirExpr::Loop { label, body, .. } => {
             let mut body_assigned = state.assigned.clone();
             let body_state = analyze_block(
                 cx,
@@ -323,8 +324,12 @@ fn analyze_expr(
                 diags,
             );
 
-            // If the body always returns (not via break), the loop diverges
-            if body_state.diverged && !block_contains_break(cx.hir, body) {
+            // If the body always returns (not via a break targeting *this*
+            // loop), the loop diverges. A `break outer` nested inside an inner
+            // loop still exits this one (G9).
+            if body_state.diverged
+                && !control_flow::block_contains_break_for(cx.hir, body, label.as_deref())
+            {
                 state.diverged = true;
             }
             // Don't merge body assignments — loop body might not fully execute
@@ -488,48 +493,5 @@ fn mark_pattern_assigned(hir: &HirBody, pat_id: HirPatId, assigned: &mut HashSet
         | HirPat::Literal { .. }
         | HirPat::Range { .. }
         | HirPat::Error { .. } => {},
-    }
-}
-
-// ===== Break detection for loop divergence =====
-
-fn block_contains_break(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_contains_break(hir, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_contains_break(hir, tail);
-    }
-    false
-}
-
-fn stmt_contains_break(hir: &HirBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_contains_break(hir, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_contains_break(hir, *v),
-        _ => false,
-    }
-}
-
-fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Break { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            block_contains_break(hir, then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|e| block_contains_break(hir, e))
-        },
-        HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
-        HirExpr::Block { body, .. } => block_contains_break(hir, body),
-        // Don't recurse into nested loops or closures
-        HirExpr::Loop { .. } | HirExpr::Closure { .. } => false,
-        _ => false,
     }
 }

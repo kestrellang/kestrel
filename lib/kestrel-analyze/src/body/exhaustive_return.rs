@@ -22,6 +22,7 @@
 //!
 //! **Notes:** (none)
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
@@ -239,13 +240,14 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             return combined;
         },
 
-        HirExpr::Loop { body, .. } => {
-            // If the body contains a break, the loop may fall through to
-            // its successor — even if the body also contains a return on
-            // some path, the break can exit before that return runs. This
-            // also correctly handles desugared `while`/`for` loops, whose
-            // conditional exit is modelled as a `break`.
-            return if block_contains_break(hir, body) {
+        HirExpr::Loop { label, body, .. } => {
+            // If the body contains a break *targeting this loop*, the loop may
+            // fall through to its successor — even if the body also contains a
+            // return on some path, the break can exit before that return runs.
+            // This also correctly handles desugared `while`/`for` loops, whose
+            // conditional exit is modelled as a `break`, and `break outer` from
+            // inside a nested loop (G9).
+            return if control_flow::block_contains_break_for(hir, body, label.as_deref()) {
                 ReturnState::MayFallThrough
             } else {
                 let body_state = block_part_state(hir, typed, body);
@@ -293,58 +295,5 @@ fn tail_expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnSta
         | HirExpr::Loop { .. }
         | HirExpr::Block { .. } => state,
         _ => ReturnState::Returns,
-    }
-}
-
-// ===== Break detection for loop analysis =====
-//
-// Checks whether a block contains a `break` that would exit the enclosing loop.
-// Does NOT recurse into nested loops (their breaks target the inner loop).
-
-fn block_contains_break(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_contains_break(hir, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_contains_break(hir, tail);
-    }
-    false
-}
-
-fn stmt_contains_break(hir: &HirBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_contains_break(hir, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_contains_break(hir, *v),
-        _ => false,
-    }
-}
-
-fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Break { .. } => true,
-
-        // Recurse into if/else and match — breaks inside target the outer loop
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            block_contains_break(hir, then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|e| block_contains_break(hir, e))
-        },
-        HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
-        HirExpr::Block { body, .. } => block_contains_break(hir, body),
-
-        // Do NOT recurse into nested loops — their breaks target the inner loop
-        HirExpr::Loop { .. } => false,
-
-        // Do NOT recurse into closures — their breaks are local
-        HirExpr::Closure { .. } => false,
-
-        _ => false,
     }
 }

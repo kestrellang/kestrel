@@ -1,5 +1,9 @@
 //! Body-level analyzers — checks that operate on function/init bodies.
 
+// Not an analyzer: pure control-flow predicates shared by several of them.
+// See `AGENTS.md` §5 for when a fact belongs here instead of staying private.
+pub(crate) mod control_flow;
+
 pub mod assignment;
 pub mod condition_check;
 pub mod dangle_ref;

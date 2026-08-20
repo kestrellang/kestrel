@@ -29,9 +29,7 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
 use kestrel_ast::ast_type::AstType;
-use kestrel_ast_builder::{
-    Callable, ConformanceItem, Conformances, NodeKind, TypeAnnotation,
-};
+use kestrel_ast_builder::{Callable, ConformanceItem, Conformances, NodeKind, TypeAnnotation};
 use kestrel_hecs::Entity;
 use kestrel_name_res::{ExtensionsFor, ProtocolMembers, ResolveTypePath, TypeResolution};
 use std::collections::{HashMap, HashSet};

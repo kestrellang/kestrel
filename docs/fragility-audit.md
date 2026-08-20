@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 35 fixed · 3 partial · 3 blocked · 22 open** — 61 top-level (F1–F43, G1–G18).
+**Progress: 38 fixed · 3 partial · 3 blocked · 19 open** — 61 top-level (F1–F43, G1–G18).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -114,9 +114,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **G5** `medium` `single-source-of-truth` — Two independent pointer widths and two independent size tables: MIR layout is hardcoded to 8 bytes while codegen derives width from the triple; the one path that honors `--target` also compiles with the native ISA
 - [ ] **G6** `medium` `fragility` — `@platform` fails open on every argument it does not recognize, and no validator for the argument exists anywhere — an unparsed or unsupported `--target` triple disables platform filtering entirely
 - [ ] **G7** `low` `global-state` — `KESTREL_COPYPROP_LIMIT` silently changes emitted code from inside a MIR pass, and the documented set of output-affecting environment variables does not include it
-- [ ] **G8** `medium` `single-source-of-truth` — "Does this loop diverge?" is decided three ways; `guard.rs` alone omits the break check, punching a hole in the E003 soundness gate
-- [ ] **G9** `medium` `single-source-of-truth` — All three copies of `expr_contains_break` ignore `Break.label`, so a labeled break is attributed to the wrong loop — disagreeing with MIR's `find_loop`, which routes by label
-- [ ] **G10** `medium` `single-source-of-truth` — `initializer.rs` runs a 5th, private loop model (`loop_break_stack`) that pairs every `break` with the innermost loop, so one labeled break disables the entire "all fields initialized" check
 - [ ] **G12** `medium` `single-source-of-truth` — The Never-typed divergence rule is copy-pasted into five analyzers; only `move_tracking` carries the documented `Loop` carve-out, and `dead_code` reads no types at all
 - [ ] **G14** `medium` `single-source-of-truth` — A where-clause param the substitution can't map is a PERMIT in the solver's evaluator and a REJECT in the analyzer's, so every associated-type-subject clause on a protocol extension (`extend Iterator where Item: Equatable`) is unentailable
 - [ ] **G15** `low` `fragility` — `constraint_entailed_by`'s "param-declared bounds" tier queries `WhereClausesOf` on the TypeParameter entity, which never carries a where clause — the whole branch is unreachable
@@ -278,6 +275,16 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Gap round (second pass)
 
+- [x] **G8 + G9 + G10** `medium` `single-source-of-truth` — one label model for loops, replacing four copies and six divergence answers — **fixed as one campaign**
+  - Fixed together because they are one bug wearing three hats, and fixing G8 alone would have created a *fifth* copy of the duplicated predicate. The audit's counts were low: **four** `contains_break` triads (`dead_code`, `exhaustive_return`, `definite_assignment`, `move_tracking`), not three, and **six** independent "does this loop diverge?" answers, not three
+  - **G9** — all four copies did `Break { .. } => true`, ignoring the label, and none recursed into a nested loop. Live consequences: a false E002 on the checked-in `break_from_nested_loop_3_levels.ks`, flagging code that demonstrably runs; and E001 *suppressed* one nesting level down — `func f() -> Int64 { outer: loop { loop { break outer; } } let z = 1; }` compiled clean and returned garbage from a function with no return on any path
+  - **G8** — `guard.rs` had `Loop { .. } => true` with no break check at all, so **any** breakable loop satisfied the divergence gate, not just the desugared `while`. `guard x > 0 else { while true { break; } }` with `x == 0` fell straight through and returned 99
+  - **G10** — a labeled break landed in the innermost frame, the outer frame popped empty, and the "all fields initialized" check was **skipped entirely**, not weakened. `S()` constructed with its field never stored
+  - **Two tiers, deliberately not one.** The atomic fact — `kestrel_hir::label_selects_loop` — goes in the pure-data crate and is now called by *both* `mir-lower`'s `find_loop` and analyze, so the rule is shared by construction rather than by comment. The walk goes in a new `kestrel-analyze/src/body/control_flow.rs`; it needs `Sugar` handling and analyzer stop rules and does not belong in a crate with zero walking logic. G10 keeps its own stack — it is *reachability*-aware (it captures `InitState` at each break), strictly stronger than the syntactic walk — and shares only the predicate
+  - The subtle part is a `crossed` flag that is **not** expressible via the target label alone: it separates "still directly inside this loop" (where an unlabeled break counts) from "inside a nested loop" (where only a matching labeled break still reaches out). Ten unit tests, including the shadow case where a nested loop reuses the target's exact label
+  - **`AGENTS.md` §5 was the real blocker** — it sanctioned exactly this duplication ("control flow analysis lives as private functions in the analyzer file") while the same file's "One analyzer per fact" rule forbade it. Amended, so the next agent doesn't re-fork the helper by the book
+  - The drift had already started: `dead_code.rs` alone had gained a `Sugar` arm from the G11 fix one cycle earlier. That also let this campaign close G11's deliberately-deferred `guard.rs` Sugar arm — safe only once the break check landed, and pinned by a test written *before* the arm so its correctness moved from accidental to principled
+  - Full suite 3758 → 3768, zero new failures. Every new test proven durable by restoring the old analyzers and watching it fail. Left as a noted follow-up: `dead_code.rs`'s divergence arm is still `in_loop && label.is_none()`, so dead code *after* a labeled break is a conservative false negative
 - [x] **G18** `high` `fragility` — **NEW (2026-08-20, found while diagnosing G16).** `BooleanConditional` is analysis-only: conditions branch on the value **raw**, never calling `boolValue()` — **fixed**
   - Reproduced with a conformer whose `boolValue()` inverts its payload: `v=200` took the TRUE branch while `boolValue()` was `false`, `v=0` took FALSE while it was `true`. MIR was `branch %v4` on an `@owned Test.Inverted` — a struct branched on as if it were an `i1`. The witness was always fine; an *explicit* `x.boolValue()` lowered to a real call. Only the implicit path skipped it, and the backends made it silent rather than crashing (`icmp_imm(NotEqual, cond, 0)`)
   - Invisible because the only shipping conformer is `Bool`, a single-field `lang.i1` wrapper whose raw layout *is* its `boolValue()`. All 13 `testdata/builtins/boolean_conditional/` files were `diagnostics`-kind — two of them the exact miscompiling shape, only type-checked. Both are now `execution`

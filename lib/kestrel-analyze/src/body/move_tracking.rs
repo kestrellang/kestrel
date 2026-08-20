@@ -59,6 +59,7 @@ use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::{CaptureKind, ClosureCaptureMap, ClosureCaptures, PlaceKey};
 use std::sync::Arc;
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
@@ -561,11 +562,12 @@ fn analyze_expr(
         },
 
         // ===== Loop =====
-        HirExpr::Loop { body, .. } => {
+        HirExpr::Loop { label, body, .. } => {
+            let target = label.as_deref();
             let pre = state.clone();
             let body_state = analyze_block(mcx, &body.stmts, body.tail_expr, pre.clone(), diags);
 
-            let conditional = loop_is_conditional(hir, body);
+            let conditional = loop_is_conditional(hir, body, target);
 
             // Back-edge re-use (#163): a value moved in the body and carried in
             // from outside the loop is (maybe-)moved on the next iteration. If
@@ -631,7 +633,7 @@ fn analyze_expr(
             join_freeze_state(&mut state, std::iter::once(&body_state));
 
             // Loops that always run to completion without break diverge.
-            if body_state.diverged && !block_contains_break(hir, body) {
+            if body_state.diverged && !control_flow::block_contains_break_for(hir, body, target) {
                 state.diverged = true;
             }
 
@@ -2133,7 +2135,10 @@ fn merge_match(pre: State, arms: Vec<State>) -> State {
 /// Does this loop body start with a conditional `break`? `while` and
 /// `while-let` desugar to `loop { if !cond { break }; body }`; their HIR
 /// body therefore begins with an `if`-stmt whose then-branch breaks.
-fn loop_is_conditional(hir: &HirBody, body: &HirBlock) -> bool {
+///
+/// `target` is the enclosing loop's own label, threaded through so the break
+/// is attributed to *this* loop and not a nested one (G9).
+fn loop_is_conditional(hir: &HirBody, body: &HirBlock, target: Option<&str>) -> bool {
     let Some(&first) = body.stmts.first() else {
         return false;
     };
@@ -2150,50 +2155,10 @@ fn loop_is_conditional(hir: &HirBody, body: &HirBlock) -> bool {
     };
     // Either branch containing a break makes the loop body conditional
     // (it can exit on iteration 1 before the rest of the body runs).
-    block_contains_break(hir, then_body)
+    control_flow::block_contains_break_for(hir, then_body, target)
         || else_body
             .as_ref()
-            .is_some_and(|b| block_contains_break(hir, b))
-}
-
-fn block_contains_break(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_contains_break(hir, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_contains_break(hir, tail);
-    }
-    false
-}
-
-fn stmt_contains_break(hir: &HirBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_contains_break(hir, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_contains_break(hir, *v),
-        _ => false,
-    }
-}
-
-fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Break { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            block_contains_break(hir, then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|b| block_contains_break(hir, b))
-        },
-        HirExpr::Match { arms, .. } => arms.iter().any(|a| expr_contains_break(hir, a.body)),
-        HirExpr::Block { body, .. } => block_contains_break(hir, body),
-        HirExpr::Loop { .. } | HirExpr::Closure { .. } => false,
-        _ => false,
-    }
+            .is_some_and(|b| control_flow::block_contains_break_for(hir, b, target))
 }
 
 // ===== Protocol-method lookup =====

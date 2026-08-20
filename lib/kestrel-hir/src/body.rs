@@ -876,6 +876,25 @@ pub fn lookup_compound_assign_op(
         .map(|(_, proto, method, label)| (*proto, *method, *label))
 }
 
+// ===== Loop-label resolution =====
+
+/// Does a `break`/`continue` carrying `use_label` resolve to the loop labeled
+/// `loop_label`?
+///
+/// This is the single source of truth for Kestrel's one label rule, mirrored by
+/// `kestrel-mir-lower`'s `find_loop` and by `kestrel-analyze`'s control-flow
+/// walk: an **unlabeled** `break` claims the nearest enclosing loop; a
+/// **labeled** `break` claims the nearest loop whose label matches exactly — so
+/// an inner loop reusing the same label shadows the outer one.
+///
+/// Callers apply it to a loop stack, innermost-first, and take the first hit.
+pub fn label_selects_loop(use_label: Option<&str>, loop_label: Option<&str>) -> bool {
+    match use_label {
+        None => true,
+        Some(l) => loop_label == Some(l),
+    }
+}
+
 // ===== Tests =====
 
 #[cfg(test)]
@@ -922,6 +941,27 @@ mod tests {
 
         assert!(matches!(&pats[w], HirPat::Wildcard { .. }));
         assert!(matches!(&pats[err], HirPat::Error { .. }));
+    }
+
+    #[test]
+    fn label_selects_loop_rules() {
+        // (use_label, loop_label, expected)
+        let cases: &[(Option<&str>, Option<&str>, bool)] = &[
+            // Unlabeled break claims the nearest enclosing loop, labeled or not.
+            (None, None, true),
+            (None, Some("outer"), true),
+            // Labeled break claims only an exactly-matching label.
+            (Some("outer"), Some("outer"), true),
+            (Some("outer"), Some("inner"), false),
+            (Some("outer"), None, false),
+        ];
+        for &(use_label, loop_label, expected) in cases {
+            assert_eq!(
+                label_selects_loop(use_label, loop_label),
+                expected,
+                "label_selects_loop({use_label:?}, {loop_label:?})"
+            );
+        }
     }
 
     #[test]

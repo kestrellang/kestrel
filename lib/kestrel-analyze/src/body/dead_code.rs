@@ -18,6 +18,7 @@
 //!
 //! **Notes:** (none)
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
@@ -197,12 +198,14 @@ fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
             in_loop && label.is_none()
         },
 
-        HirExpr::Loop { body, .. } => {
+        HirExpr::Loop { label, body, .. } => {
             // A loop that can exit via `break` does NOT diverge — even if another
             // path inside the body returns. This matches lib1 and also handles
             // desugared `while cond { ... }` whose loop body contains an implicit
-            // break (from the condition check).
-            if block_contains_break(hir, body) {
+            // break (from the condition check). The break must target *this*
+            // loop: a bare break in a nested loop exits the inner one, while a
+            // `break thisLabel` from any depth exits this one (G9).
+            if control_flow::block_contains_break_for(hir, body, label.as_deref()) {
                 return false;
             }
             // No break: if the body always returns, the loop diverges by returning.
@@ -246,20 +249,6 @@ fn block_part_diverges(hir: &HirBody, block: &HirBlock) -> bool {
     false
 }
 
-/// Check if any Loop in the HIR body has the given label.
-/// Used to suppress divergence for break/continue with invalid labels.
-#[allow(dead_code)]
-fn body_has_loop_label(hir: &HirBody, label: &str) -> bool {
-    for (_, expr) in hir.exprs.iter() {
-        if let HirExpr::Loop { label: Some(l), .. } = expr
-            && l == label
-        {
-            return true;
-        }
-    }
-    false
-}
-
 /// Check if a block always returns (via `return`), ignoring break/continue.
 /// Used to determine if a loop body always exits the function, making
 /// code after the loop unreachable.
@@ -298,53 +287,6 @@ fn expr_always_returns(hir: &HirBody, id: HirExprId) -> bool {
         HirExpr::Block { body, .. } => block_always_returns(hir, body),
         // Transparent wrapper — recurse into the desugared subtree.
         HirExpr::Sugar { inner, .. } => expr_always_returns(hir, *inner),
-        _ => false,
-    }
-}
-
-// ===== Break detection for loop analysis =====
-
-/// Check if a block contains a break targeting the enclosing loop.
-/// Does NOT recurse into nested loops (their breaks target the inner loop).
-fn block_contains_break(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_contains_break(hir, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_contains_break(hir, tail);
-    }
-    false
-}
-
-fn stmt_contains_break(hir: &HirBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_contains_break(hir, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_contains_break(hir, *v),
-        _ => false,
-    }
-}
-
-fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Break { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            block_contains_break(hir, then_body)
-                || else_body
-                    .as_ref()
-                    .is_some_and(|e| block_contains_break(hir, e))
-        },
-        HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
-        HirExpr::Block { body, .. } => block_contains_break(hir, body),
-        // Transparent wrapper — recurse into the desugared subtree.
-        HirExpr::Sugar { inner, .. } => expr_contains_break(hir, *inner),
-        // Don't recurse into nested loops or closures
-        HirExpr::Loop { .. } | HirExpr::Closure { .. } => false,
         _ => false,
     }
 }

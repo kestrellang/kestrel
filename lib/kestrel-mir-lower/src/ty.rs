@@ -738,7 +738,10 @@ mod tests {
         let through_opaque = substitute_resolved_ty(
             &ResolvedTy::Opaque {
                 origin: Entity::from_raw(1),
-                bounds: vec![(Entity::from_raw(2), vec![ResolvedTy::Param { entity: param }])],
+                bounds: vec![(
+                    Entity::from_raw(2),
+                    vec![ResolvedTy::Param { entity: param }],
+                )],
                 origin_args: vec![ResolvedTy::Param { entity: param }],
                 index: 3,
                 not_copyable: true,
@@ -755,7 +758,11 @@ mod tests {
                 ..
             } => {
                 assert_eq!(bounds[0].1, vec![named(concrete)], "T survived in a bound");
-                assert_eq!(origin_args, vec![named(concrete)], "T survived in origin_args");
+                assert_eq!(
+                    origin_args,
+                    vec![named(concrete)],
+                    "T survived in origin_args"
+                );
                 assert_eq!(index, 3);
                 assert!(not_copyable, "substitution must not drop `not_copyable`");
             },

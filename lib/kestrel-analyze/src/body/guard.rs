@@ -19,6 +19,7 @@
 //!
 //! **Notes:** (none)
 
+use crate::body::control_flow;
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
@@ -163,9 +164,25 @@ fn expr_diverges(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> bool {
         HirExpr::Match { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, typed, arm.body))
         },
-        // Infinite loop (no break) diverges
-        HirExpr::Loop { .. } => true,
+        // A loop diverges only if it is genuinely infinite — no `break` can
+        // exit it. This arm used to be an unconditional `true`, so *any*
+        // breakable loop in a guard-else was accepted and the guard fell
+        // through with its condition false (G8). The check is not
+        // `while`-specific: `loop { break; }` and a desugared `for` produce the
+        // same `HirExpr::Loop`.
+        HirExpr::Loop { label, body, .. } => {
+            !control_flow::block_contains_break_for(hir, body, label.as_deref())
+        },
         HirExpr::Block { body, .. } => block_diverges(hir, typed, body),
+        // `Sugar` is a transparent wrapper — divergence is whatever the
+        // desugared subtree does. Without this arm the whole subtree fell to
+        // `_ => false`, so a `for` in a guard-else was rejected by accident
+        // (invisible, therefore "does not diverge") rather than because its
+        // loop can exit. Deferred from the G11 fix until the `Loop` arm above
+        // actually checked for a break — added before that, it would have made
+        // the now-visible `Loop` node report `true` and *accept* a `for` in a
+        // guard-else. See `guard_else_for_loop_rejected.ks`.
+        HirExpr::Sugar { inner, .. } => expr_diverges(hir, typed, *inner),
         _ => false,
     }
 }

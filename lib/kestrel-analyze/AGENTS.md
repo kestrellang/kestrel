@@ -81,9 +81,35 @@ impl BodyCheck for <Name>Analyzer {  // or DeclCheck or CompilationCheck
 }
 ```
 
-### 5. Private Helper Functions
+### 5. Helper Functions — private by default, shared when a *fact* is shared
 
-Analysis-specific logic (e.g., divergence checking, control flow analysis) lives as private functions in the analyzer file. Only **span extraction and entity info helpers** go in `util.rs`.
+Logic that only one analyzer needs stays a private function in that analyzer's
+file. That is still the default, and most helpers should be private.
+
+But a **control-flow fact that two or more analyzers ask about is not a private
+helper** — it is one fact with several consumers, and per "One analyzer per
+fact" below, duplicating it guarantees drift. Such a fact goes in
+`body/control_flow.rs` as a `pub(crate)` **pure predicate**: `&HirBody` in,
+`bool` or plain data out. No `TypedBody`, no `BodyContext`, no `QueryContext`,
+no diagnostics — if a helper needs any of those it is analyzer logic, not a
+shared fact.
+
+**Precedent:** `control_flow::block_contains_break_for`. Four analyzers
+(`dead_code`, `exhaustive_return`, `definite_assignment`, `move_tracking`) each
+carried a private `block_contains_break` triad, `guard.rs` carried a fifth
+degenerate version, and all of them ignored `break`'s label while only one ever
+grew a `Sugar` arm. They now share one walk keyed on the loop's label, over the
+one label rule in `kestrel_hir::label_selects_loop`.
+
+**What still stays local:** a fact that needs analyzer-specific state carried
+*alongside* the walk. `initializer.rs`'s `loop_break_stack` collects an
+`InitState` at each reachable break — reachability-aware, strictly stronger
+than the syntactic predicate, and meaningless to any other analyzer. It keeps
+its own stack and shares only the `label_selects_loop` predicate.
+`control_flow.rs` is for shared *facts*, not a dumping ground for walks.
+
+`util.rs` is unchanged and unrelated: **span extraction and entity info
+helpers** only.
 
 ### 6. Registration
 

@@ -245,10 +245,21 @@ struct VerifyCtx {
     all_fields: IndexSet<String>,
     let_fields: HashSet<String>,
     diags: Vec<AnalyzeDiagnostic>,
-    /// Stack of per-loop break-state collectors. When an unlabeled `break` is
-    /// reached inside a loop, its current state is pushed onto the top frame.
-    /// The merge of these frames becomes the outer state after the loop exits.
-    loop_break_stack: Vec<Vec<InitState>>,
+    /// Stack of per-loop break-state collectors, each keyed by its loop's
+    /// label. When a `break` is reached, its current state is pushed onto the
+    /// frame of the loop that break actually exits — resolved innermost-first
+    /// by `kestrel_hir::label_selects_loop`, exactly as MIR lowering resolves
+    /// it. The merge of a frame becomes the outer state after that loop exits.
+    ///
+    /// This stack is reachability-aware (it only sees breaks on live paths),
+    /// which is why `initializer` keeps it instead of using the syntactic
+    /// `control_flow::block_contains_break_for` predicate the other analyzers
+    /// share. It used to push onto `.last_mut()` unconditionally, so a
+    /// `break outer` from a nested loop landed in the *inner* frame; the outer
+    /// frame then popped empty, was called an infinite loop, set `diverged`,
+    /// and the single gate on `diverged` skipped the whole E005 field check
+    /// (G10).
+    loop_break_stack: Vec<(Option<String>, Vec<InitState>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -599,8 +610,8 @@ fn analyze_expr(
         //
         // All loops have HIR type `Never`, so we must skip the unified Never
         // check by returning early.
-        HirExpr::Loop { body, .. } => {
-            vctx.loop_break_stack.push(Vec::new());
+        HirExpr::Loop { label, body, .. } => {
+            vctx.loop_break_stack.push((label.clone(), Vec::new()));
 
             let mut body_state = state.clone();
             for &stmt_id in &body.stmts {
@@ -615,7 +626,7 @@ fn analyze_expr(
                 let _ = analyze_expr(cx, tail, body_state, false, vctx);
             }
 
-            let break_states = vctx.loop_break_stack.pop().unwrap();
+            let (_, break_states) = vctx.loop_break_stack.pop().unwrap();
             if break_states.is_empty() {
                 // No reachable break → infinite loop
                 state.diverged = true;
@@ -634,9 +645,18 @@ fn analyze_expr(
 
         // Break: record current state for the enclosing loop's exit merge.
         // Divergence flag is set by the Never-type check below.
-        HirExpr::Break { .. } => {
-            if let Some(top) = vctx.loop_break_stack.last_mut() {
-                top.push(state.clone());
+        HirExpr::Break { label, .. } => {
+            // Attribute the break to the loop it actually exits, not merely
+            // the innermost one (G10).
+            let frame = vctx
+                .loop_break_stack
+                .iter_mut()
+                .rev()
+                .find(|(loop_label, _)| {
+                    kestrel_hir::label_selects_loop(label.as_deref(), loop_label.as_deref())
+                });
+            if let Some((_, break_states)) = frame {
+                break_states.push(state.clone());
             }
         },
 

@@ -306,7 +306,11 @@ mod tests {
         // The names are not in alphabetical order, so this also rules out a
         // `BTreeMap` masquerading as "declaration order".
         for run in 0..50 {
-            assert_eq!(analyze(source), expected, "emission order changed on run {run}");
+            assert_eq!(
+                analyze(source),
+                expected,
+                "emission order changed on run {run}"
+            );
         }
     }
 }

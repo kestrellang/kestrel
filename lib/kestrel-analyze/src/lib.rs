@@ -132,7 +132,10 @@ fn assert_owned(analyzer: &dyn Describe, diags: &[AnalyzeDiagnostic]) {
         return;
     }
     for d in diags {
-        let owned = analyzer.descriptors().iter().any(|x| x.id == d.descriptor_id);
+        let owned = analyzer
+            .descriptors()
+            .iter()
+            .any(|x| x.id == d.descriptor_id);
         let borrowed = analyzer
             .borrowed_descriptors()
             .iter()

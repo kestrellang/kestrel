@@ -953,7 +953,10 @@ mod tests {
     }
 
     fn ks_files(dir: &Path, out: &mut Vec<PathBuf>) {
-        for entry in std::fs::read_dir(dir).expect("stdlib dir is readable").flatten() {
+        for entry in std::fs::read_dir(dir)
+            .expect("stdlib dir is readable")
+            .flatten()
+        {
             let path = entry.path();
             if path.is_dir() {
                 ks_files(&path, out);
@@ -1014,7 +1017,10 @@ mod tests {
         }
 
         // Guard the guard: a scan that matches nothing would pass vacuously.
-        assert!(seen > 100, "only found {seen} @builtin annotations — scan is broken");
+        assert!(
+            seen > 100,
+            "only found {seen} @builtin annotations — scan is broken"
+        );
         assert!(
             inert.is_empty(),
             "stdlib annotations with no `Builtin::from_attribute_name` arm \

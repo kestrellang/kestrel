@@ -238,7 +238,12 @@ pub fn is_ffi_safe(
 ) -> bool {
     // FFISafe declares `tuple_conformance_propagation: true`; read it rather
     // than assume it, so the flag on `BuiltinKind::Protocol` is load-bearing.
-    conforms_to_builtin_protocol(cx, hir_ty, ffi_safe_entity, tuple_propagates(cx, ffi_safe_entity))
+    conforms_to_builtin_protocol(
+        cx,
+        hir_ty,
+        ffi_safe_entity,
+        tuple_propagates(cx, ffi_safe_entity),
+    )
 }
 
 /// Whether `protocol`'s `BuiltinKind` says tuples conform when all their
@@ -269,9 +274,9 @@ pub fn conforms_to_builtin_protocol(
     match hir_ty {
         HirTy::Tuple(elems, _) => {
             tuples_propagate
-                && elems.iter().all(|e| {
-                    conforms_to_builtin_protocol(cx, e, ffi_safe_entity, tuples_propagate)
-                })
+                && elems
+                    .iter()
+                    .all(|e| conforms_to_builtin_protocol(cx, e, ffi_safe_entity, tuples_propagate))
         },
         // Nominal types: check intrinsic status or protocol conformance
         HirTy::Struct { entity, .. }
