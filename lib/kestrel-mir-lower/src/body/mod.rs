@@ -1304,9 +1304,14 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                 }
                 kestrel_mir::substitute(&mut self.ctx.module.ty_arena, raw_ft, &subst)
             };
-            // `needs_drop` reads `type_info.drop`, which only reflects user
-            // `deinit`s pre-`drop_fix`; OR in `is_non_copyable` to also catch
-            // structs droppable purely via a non-Copyable field. A trivial
+            // `needs_drop` reads `type_info.drop`, which `lower_items` now
+            // finalizes with `fix_drop_behaviors` BEFORE any body is lowered —
+            // so it already answers `true` for a struct droppable only through
+            // a field (audit G1; before that ordering fix this arm was blind to
+            // exactly that case and leaked). The `is_non_copyable` disjunct is
+            // kept as defense in depth, not as coverage for the ordering: a
+            // `Cloneable` or default-`Copyable` wrapper is droppable yet
+            // reports copyable, so it never covered the bug. A trivial
             // `destroy_addr` (e.g. an Int64 field) would no-op in expand anyway,
             // but skipping them avoids a useless flag + guard diamond.
             let droppable = kestrel_mir::ty_query::needs_drop(

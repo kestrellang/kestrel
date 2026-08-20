@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 38 fixed · 3 partial · 3 blocked · 19 open** — 61 top-level (F1–F43, G1–G18).
+**Progress: 41 fixed · 3 partial · 3 blocked · 16 open** — 61 top-level (F1–F43, G1–G18).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -92,7 +92,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Editor and tooling
 
-- [ ] **F40** `medium` `single-source-of-truth` — The two backends' `classify_named` disagree on a newtype over an aggregate field
 - [ ] **F42** `medium` `global-state` — `unsafe impl Sync for StdlibCache` is unsound — **blocked**
   - not fixable by a Mutex — rowan CST refcounts are shared across snapshots; needs a design decision
 - [ ] **F43** `low` `single-source-of-truth` — Smaller tooling defects
@@ -107,7 +106,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Gap round (second pass)
 
-- [ ] **G1** `medium` `ordering-dependency` — Init drop-flag setup reads `needs_drop` at Stage::Raw — before `drop_fix` populates it — and the `is_non_copyable` fallback misses every Cloneable aggregate (String, Array), so init field reassignment and failable-init failure returns silently leak
 - [ ] **G2** `medium` `single-source-of-truth` — The mono layout work-list is seeded only from body VALUE types — it never walks `Op1/Op2/Op3` type operands or struct fields — so a type reachable only that way gets no `MonoStruct` at all, `verify_mono`'s missing-layout guard is structurally unable to fire, and codegen silently answers size 8 / offset 0
 - [ ] **G3** `medium` `fragility` — The thunk pass identifies the closure environment parameter by the magic names `"env"`/`"_env"`; a user function whose first parameter is named `env`, used as a function value, has that parameter replaced by the environment pointer
 - [ ] **G4** `medium` `single-source-of-truth` — `--target` reaches only `@platform` filtering; layout and both codegen backends hardcode the host, so `kestrel build --target <other-os>` silently emits a host binary compiled against the other OS's stdlib
@@ -131,6 +129,13 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Silent miscompilation and wrong behavior
 
+- [x] **G1** `medium` `ordering-dependency` — Init drop-flag setup reads `needs_drop` at Stage::Raw, before `drop_fix` populates it — **fixed**
+  - `lower_items`' doc comment claimed its two-pass split "ensures all TypeInfo (CopyBehavior, DropBehavior) is available when function bodies are lowered". True for `CopyBehavior`; **false for `DropBehavior`** — `fix_drop_behaviors` had exactly one call site, gated on `Stage::DropFix`, strictly after the read. That false comment is what made the ordering bug invisible to review, and correcting it is part of the fix
+  - **Proven with `leaks`**: a `String` field assigned twice in an `init`, 200 iterations → **400 leaks / 265600 bytes**, now **0**. The `init?`-returns-null shape identically. MIR shows the second store was `store_init` where only `StoreAssign` gets the destroy-old expansion, and the failable init's failure block lacked the guarded-destroy diamond entirely
+  - Fixed by hoisting `fix_drop_behaviors` between the two passes — the single-source-of-truth answer, since grepping the whole crate finds exactly **one** consumer of `needs_drop`. The existing later call is **kept**: body lowering synthesizes closure-environment structs mid-pass that the hoisted call cannot see. Both sites now carry a comment saying they are not duplicates. Idempotence is load-bearing and was verified by reading — the pass is monotone and additive, and its outer loop already runs to a no-change fixed point by design
+  - **The audit's suggested `copy_behavior != Bitwise` stopgap was rejected after being compiled**: a `deinit` does not affect copy semantics, so a default-`Copyable` struct droppable only through a field is `Bitwise` and leaks under it too. That counterexample is now a test
+  - The 8 existing fixtures all used `not Copyable` + `deinit`, satisfying both disjuncts — the suite was structurally blind. 6 new fixtures, each verified against a pre-fix compiler built in an isolated worktree
+  - Filed not fixed: `verify_ossa`'s four `addr_*` checks are **inert for every initializer body in the language** — `AddrKind::SubField` state is created only by `InstKind::Uninit`, and an init's `self` is a `@mut_borrow` parameter. That includes the `addr_store_init` rule which would have caught G1's own shape
 - [x] **F4** `medium` `fragility` — Escaping-closure box `init` is picked by arity alone; `RcBox` already has two 1-parameter inits — **fixed** (severity understated: it is a latent silent SIGSEGV, see Corrections)
   - The predicate is now the protocol requirement's *shape*, not its arity: `params.len() == 1 && params[0].label.is_none() && params[0].is_consuming` — exactly `SharedBox.init(consuming value: Target)`. Arity alone could not tell `RcBox`'s `public init(consuming value: T)` from its `private init(inner: Pointer[RcBoxStorage[T]])`, so the right answer came from declaration order in `rcbox.ks` and nothing else
   - **`find_box_member` no longer takes the first of N matches, or returns `None` on zero.** It collects every match and hard-`panic!("ICE: …")`s unless there is exactly one. The distinction that makes this safe: the legitimate "no box → stack environment" fallback is the `ResolveBuiltin` `?` *earlier* in `resolve_box_common` (real for `// stdlib: false`); by the time `find_box_member` runs the box type is already proven resolved, so 0 or 2+ matches is always a broken stdlib. Applied to all four call sites — `sharedMutRef`/`takeValue`/`destroy` had the same first-match-wins hole
@@ -325,6 +330,8 @@ Refuted during verification. Re-raise only with new evidence.
 ## Corrections to earlier severity claims
 
 Established by running the code, not reading it:
+
+- **F40 was under-rated `medium` and is raised to `high`.** The audit filed it as two backends disagreeing — a consistency smell. It is a **live silent data-corruption miscompile on the default backend, in shipped stdlib code**: `IoError` read `errno = 1 1` where the answer is `2 77`, and a newtype over `Optional[Int32]` in an `Array` produced `999 999` and SIGBUS. The suite's one long-standing failure, `stdlib.os.os_fs_result` — failing on every run since 2026-07-23 — was a casualty and now passes.
 
 - **F4 is a latent silent SIGSEGV, not an overload-selection nit.** The audit filed it as "picked by arity alone". Reproduced 2026-08-20 by building two compilers and swapping the order of `RcBox`'s two 1-parameter inits in `rcbox.ks` — nothing else: the old predicate then selects `private init(inner: Pointer[RcBoxStorage[T]])`, hands it the raw environment struct, and **every escaping closure in the program** stores its captured value straight into `RcBox.ptr` as a forged handle. Exit 139, with no diagnostic at any stage. The pre-mono MIR dumps of the two builds are byte-identical (220595 lines, empty `diff`) — both print `call std.memory.RcBox.init[E](...)` — so the wrong pick is invisible until the mangled symbol after mono. Correctness today rests entirely on the declaration order of two lines in a stdlib file with no comment warning against reordering.
 

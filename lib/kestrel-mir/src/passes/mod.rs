@@ -122,6 +122,14 @@ pub fn run_pipeline_until(
         "run_pipeline_until got post-mono stage {stop:?}"
     );
 
+    // NOT a duplicate of the call in `kestrel-mir-lower`'s `lower_items`, which
+    // runs the same pass between the types half and the functions half so that
+    // body lowering can read a final `DropBehavior` (audit G1). This one still
+    // has work to do: body lowering SYNTHESIZES types after that point —
+    // closure-environment structs (`body/closure.rs`'s `add_struct`) — which
+    // the earlier call cannot see. Keep both. The pass is monotone/additive and
+    // internally iterates to a fixed point, so the overlap costs one no-change
+    // sweep and nothing else.
     if stop >= Stage::DropFix {
         drop_fix::fix_drop_behaviors(module);
     }
