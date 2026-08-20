@@ -246,6 +246,39 @@ pub fn compile_inst<'ctx>(
                 discriminant_width(operand_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
             let disc_ty = disc_scalar.llvm(cx).into_int_type();
             let val: BasicValueEnum = match repr {
+                // Twin of the Cranelift `Discriminant` handling in
+                // `kestrel-codegen-cranelift/src/inst.rs` — keep both in sync.
+                TypeRepr::Scalar(scalar_ty) if is_guaranteed && scalar_ty.is_int() => {
+                    // Load the scalar through the borrow at its OWN width, then
+                    // normalize to `disc_ty`. `disc_scalar` is the enum tag width and
+                    // defaults to I32 for a non-enum Named type (e.g. `Bool`, a
+                    // newtype over `lang.i1` stored in 1 byte); loading `disc_ty`
+                    // bytes from a 1-byte value over-reads adjacent stack memory and
+                    // lies about alignment, so `match b { true => .., _ => .. }`
+                    // compared the tag against garbage and always took the default.
+                    // For a pure-discriminant enum `scalar_ty == disc_scalar`, so
+                    // this is a no-op there.
+                    let loaded = builder
+                        .build_load(scalar_ty.llvm(cx), base.into_pointer_value(), "disc")
+                        .unwrap()
+                        .into_int_value();
+                    if scalar_ty.bytes() == disc_scalar.bytes() {
+                        loaded.into()
+                    } else if scalar_ty.bytes() > disc_scalar.bytes() {
+                        builder
+                            .build_int_truncate(loaded, disc_ty, "disc")
+                            .unwrap()
+                            .into()
+                    } else {
+                        builder
+                            .build_int_z_extend(loaded, disc_ty, "disc")
+                            .unwrap()
+                            .into()
+                    }
+                },
+                // A non-integer scalar (`Ptr`/float) has no integer tag to widen:
+                // load at the tag width as before rather than panicking in
+                // `into_int_value`.
                 TypeRepr::Scalar(_) if is_guaranteed => builder
                     .build_load(disc_ty, base.into_pointer_value(), "disc")
                     .unwrap(),

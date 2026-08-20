@@ -246,6 +246,8 @@ pub fn compile_inst(
                 &fc.ctx.tc,
             );
             let val = match repr {
+                // Twin of the LLVM `Discriminant` handling in
+                // `kestrel-codegen-llvm/src/inst.rs` — keep both in sync.
                 TypeRepr::Scalar(scalar_ty) if is_guaranteed => {
                     // Load the scalar through the borrow at its OWN width, then
                     // normalize to `disc_width`. `disc_width` is the enum tag
