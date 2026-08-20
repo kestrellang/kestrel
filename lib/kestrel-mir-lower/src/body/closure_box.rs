@@ -71,6 +71,49 @@ pub(crate) struct BoxBinding {
     pub type_args: Vec<TyId>,
 }
 
+/// Does `c` have the box binding's required initializer shape,
+/// `init(consuming value: Target)` (`lang/std/memory/sharedbox.ks`)?
+///
+/// Three axes, all load-bearing: arity 1, NO label (the requirement's `value`
+/// is a single-name parameter, so call sites are positional) and `consuming`
+/// (the box takes ownership of the payload). `RcBox`'s other one-parameter
+/// init — `init(inner inner: Pointer[RcBoxStorage[T]])` — fails on both of the
+/// last two. `kestrel-analyze`'s conformance-completeness checker already
+/// disambiguates exactly this pair by per-param label
+/// (`conformance_completeness.rs::signatures_match`), so a shape that could
+/// pick the wrong one here would already have failed E454/E458 in the stdlib.
+///
+/// Pure and ECS-free on purpose — this is the part worth unit-testing.
+fn is_box_init_shape(c: &Callable) -> bool {
+    matches!(c.params.as_slice(), [p] if p.label.is_none() && p.is_consuming)
+}
+
+/// Turn a requirement search into the single answer it must have, panicking
+/// loudly otherwise.
+///
+/// Every caller reaches here only AFTER the box type itself resolved, so
+/// "requirement missing" and "requirement ambiguous" both mean the stdlib
+/// binding is broken — there is no legitimate `None` left to fall back on.
+/// Returning `Option` here is what let a mis-selected member reach codegen as
+/// a forged pointer; a `debug_assert!` would not do, because the corruption
+/// this guards happens in release builds.
+fn exactly_one_box_member<T: Copy>(matches: &[T], requirement: &str) -> T {
+    match matches {
+        [one] => *one,
+        [] => panic!(
+            "ICE: box binding is missing its required member `{requirement}` — \
+             the `@builtin(.SharedBox)`/`@builtin(.UniqueBox)` type resolved but \
+             does not implement the requirement"
+        ),
+        many => panic!(
+            "ICE: box binding has {} members matching `{requirement}` — the \
+             requirement must select exactly one; picking arbitrarily silently \
+             corrupts every boxed closure environment",
+            many.len()
+        ),
+    }
+}
+
 impl OssaBodyCtx<'_, '_> {
     /// Resolve the shared-box binding at `payload_ty`, or `None` when the
     /// stdlib supplies no `@builtin(.SharedBox)` type (a `stdlib: false` test):
@@ -81,9 +124,10 @@ impl OssaBodyCtx<'_, '_> {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
         };
-        let shared_mut_ref = self.find_box_member(entity, NodeKind::Function, |c, name| {
-            name == "sharedMutRef" && c.params.is_empty()
-        })?;
+        let shared_mut_ref =
+            self.find_box_member(entity, NodeKind::Function, "sharedMutRef()", |c, name| {
+                name == "sharedMutRef" && c.params.is_empty()
+            });
         self.ctx.register_name(shared_mut_ref);
         b.shared_mut_ref = Some(shared_mut_ref);
         Some(b)
@@ -99,12 +143,13 @@ impl OssaBodyCtx<'_, '_> {
             MirTy::Named { entity, .. } => *entity,
             _ => return None,
         };
-        let take_value = self.find_box_member(entity, NodeKind::Function, |c, name| {
-            name == "takeValue" && c.params.is_empty()
-        })?;
-        let destroy = self.find_box_member(entity, NodeKind::Function, |c, name| {
+        let take_value =
+            self.find_box_member(entity, NodeKind::Function, "takeValue()", |c, name| {
+                name == "takeValue" && c.params.is_empty()
+            });
+        let destroy = self.find_box_member(entity, NodeKind::Function, "destroy()", |c, name| {
             name == "destroy" && c.params.is_empty()
-        })?;
+        });
         self.ctx.register_name(take_value);
         self.ctx.register_name(destroy);
         b.take_value = Some(take_value);
@@ -129,8 +174,19 @@ impl OssaBodyCtx<'_, '_> {
         let handle_ty = self.ctx.module.ty_arena.named(entity, type_args.clone());
         let (wrappers, raw_ty) = self.unwrap_handle_to_pointer(handle_ty)?;
 
-        let init =
-            self.find_box_member(entity, NodeKind::Initializer, |c, _| c.params.len() == 1)?;
+        // Match the requirement's SHAPE, not its arity: a box type is free to
+        // carry other one-parameter inits (`RcBox` has a private
+        // `init(inner inner: Pointer[Storage[T]])` that adopts an
+        // already-counted block). Picking that one stores the payload straight
+        // into the handle field as a forged pointer — a silent SIGSEGV at every
+        // escaping-closure call. Arity alone only worked because the public
+        // init happened to be declared first.
+        let init = self.find_box_member(
+            entity,
+            NodeKind::Initializer,
+            "init(consuming value: Target)",
+            |c, _| is_box_init_shape(c),
+        );
         self.ctx.register_name(init);
 
         Some(BoxBinding {
@@ -177,15 +233,22 @@ impl OssaBodyCtx<'_, '_> {
         None
     }
 
-    /// Find a member of the binding by requirement shape, searching the type
-    /// entity itself and every extension of it (`sharedMutRef` and the
-    /// `SharedBox` conformance live in an extension).
+    /// Find the ONE member of the binding matching a requirement shape,
+    /// searching the type entity itself and every extension of it
+    /// (`sharedMutRef` and the `SharedBox` conformance live in an extension).
+    ///
+    /// Infallible by construction: by the time this runs the box TYPE is
+    /// already resolved (the `ResolveBuiltin` query succeeded and the handle
+    /// peeled to a raw pointer), so a missing or duplicated requirement is a
+    /// broken stdlib, never the legitimate "no box available" case. See
+    /// [`exactly_one_box_member`].
     fn find_box_member(
         &mut self,
         entity: Entity,
         kind: NodeKind,
+        requirement: &str,
         pred: impl Fn(&Callable, &str) -> bool,
-    ) -> Option<Entity> {
+    ) -> Entity {
         let mut parents = vec![entity];
         parents.extend(
             self.ctx
@@ -195,6 +258,9 @@ impl OssaBodyCtx<'_, '_> {
                     root: self.ctx.root,
                 }),
         );
+        // Collect ALL matches rather than taking the first: "first hit wins"
+        // is what made the selection depend on declaration order (F4).
+        let mut matches = Vec::new();
         for parent in parents {
             for &child in self.ctx.query.children_of(parent).iter() {
                 if self.ctx.query.get::<NodeKind>(child) != Some(&kind) {
@@ -212,11 +278,11 @@ impl OssaBodyCtx<'_, '_> {
                     .get::<Callable>(child)
                     .is_some_and(|c| pred(c, &name))
                 {
-                    return Some(child);
+                    matches.push(child);
                 }
             }
         }
-        None
+        exactly_one_box_member(&matches, requirement)
     }
 
     /// Move `env` (an @owned environment struct) into managed storage and
@@ -229,6 +295,18 @@ impl OssaBodyCtx<'_, '_> {
     /// the release shim reconstitutes a handle from the same word to give it
     /// back.
     pub(crate) fn emit_box_env(&mut self, binding: &BoxBinding, env: ValueId) -> ValueId {
+        // The `CallArg` list below is POSITIONAL and unvalidated: it hands the
+        // payload over as the sole non-`self` argument. If the resolved init
+        // ever had a different arity the extra/missing slot would be read as
+        // garbage, so re-check the shape at the point that depends on it.
+        debug_assert!(
+            self.ctx
+                .query
+                .get::<Callable>(binding.init)
+                .is_some_and(is_box_init_shape),
+            "ICE: resolved box initializer is not `init(consuming value: Target)`; \
+             the positional argument list below assumes exactly one payload param"
+        );
         // `Box(consuming: env)` — the `emit_init_literal_call` shape, but the
         // payload argument is CONSUMING (the box takes ownership).
         let ptr_ty = self.ctx.module.ty_arena.pointer(binding.handle_ty);
@@ -674,4 +752,114 @@ pub(crate) fn nop_shims(ctx: &mut crate::LowerCtx<'_>) -> (Callee, Callee) {
         Callee::direct_with_args(entity, Vec::new(), None),
         Callee::direct_with_args(entity, Vec::new(), None),
     )
+}
+
+// ===========================================================================
+// Requirement-selection tests
+// ===========================================================================
+//
+// These pin the two halves of F4 that are pure: the SHAPE predicate and the
+// count→outcome decision. Both are deliberately ECS-free so the order
+// experiment ("swap `RcBox`'s two inits") can be pinned here instead of by
+// editing the shipped stdlib.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_ast_builder::AstParam;
+
+    fn param(label: Option<&str>, is_consuming: bool) -> AstParam {
+        AstParam {
+            label: label.map(str::to_string),
+            name: "value".to_string(),
+            ty: None,
+            default_entity: None,
+            pattern: None,
+            is_mut: false,
+            is_consuming,
+        }
+    }
+
+    fn callable(p: AstParam) -> Callable {
+        Callable {
+            params: vec![p],
+            receiver: None,
+        }
+    }
+
+    /// `RcBox`'s real pair: the public `init(consuming value: T)` and the
+    /// private `init(inner inner: Pointer[RcBoxStorage[T]])`. Both are arity 1,
+    /// so the old `params.len() == 1` predicate matched BOTH and silently took
+    /// whichever came first. The shape predicate must pick the same one in
+    /// either declaration order.
+    #[test]
+    fn box_init_shape_is_declaration_order_independent() {
+        let public_init = callable(param(None, true));
+        let private_init = callable(param(Some("inner"), false));
+
+        for (order, candidates) in [
+            (
+                "declared order",
+                vec![public_init.clone(), private_init.clone()],
+            ),
+            ("reversed", vec![private_init, public_init]),
+        ] {
+            let picked: Vec<usize> = candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| is_box_init_shape(c))
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(picked.len(), 1, "{order}: expected exactly one match");
+            let chosen = &candidates[exactly_one_box_member(&picked, "init")];
+            assert!(
+                chosen.params[0].label.is_none() && chosen.params[0].is_consuming,
+                "{order}: selected the wrong init"
+            );
+        }
+
+        // And the arity-only predicate the fix replaced does NOT discriminate —
+        // this is the bug, stated as an assertion.
+        assert!(callable(param(Some("inner"), false)).params.len() == 1);
+    }
+
+    #[test]
+    fn two_shape_matching_inits_are_rejected_not_guessed() {
+        let candidates = vec![callable(param(None, true)), callable(param(None, true))];
+        let picked: Vec<usize> = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| is_box_init_shape(c))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(picked.len(), 2);
+
+        let err = std::panic::catch_unwind(|| exactly_one_box_member(&picked, "init"))
+            .expect_err("an ambiguous requirement must panic, not pick one");
+        let msg = err
+            .downcast_ref::<String>()
+            .expect("ICE panics carry a formatted String");
+        assert!(msg.contains("ICE"), "unexpected panic message: {msg}");
+        assert!(msg.contains("2 members"), "unexpected panic message: {msg}");
+    }
+
+    #[test]
+    fn a_missing_requirement_is_rejected_not_silently_skipped() {
+        let candidates = vec![callable(param(Some("inner"), false))];
+        let picked: Vec<usize> = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| is_box_init_shape(c))
+            .map(|(i, _)| i)
+            .collect();
+        assert!(picked.is_empty());
+
+        let err = std::panic::catch_unwind(|| exactly_one_box_member(&picked, "init"))
+            .expect_err("a missing requirement must panic, not return None");
+        let msg = err
+            .downcast_ref::<String>()
+            .expect("ICE panics carry a formatted String");
+        assert!(msg.contains("ICE"), "unexpected panic message: {msg}");
+        assert!(msg.contains("missing"), "unexpected panic message: {msg}");
+    }
 }

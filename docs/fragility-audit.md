@@ -15,7 +15,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 20 fixed · 2 partial · 2 blocked · 35 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 24 fixed · 2 partial · 2 blocked · 31 open** — 60 top-level (F1–F43, G1–G17).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -60,8 +60,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 - [ ] **F1** `high` `single-source-of-truth` — Range-overlap correction lives only in `check_match`; decision-tree codegen uses the raw overlap test and misroutes arms
 - [ ] **F2** `high` `fragility` — LSP local rename replaces the whole `let` statement (and inserts at file offset 0 for parameters)
-- [ ] **F4** `medium` `fragility` — Escaping-closure box `init` is picked by arity alone; `RcBox` already has two 1-parameter inits
-- [ ] **F8** `medium` `single-source-of-truth` — The LLVM backend never received the Bool-discriminant width fix that landed in cranelift (ef3fb801)
 - [ ] **F9** `medium` `incremental-hazard` — `NominalCopySemantics`/`NominalStaticness` memos depend on a thread-local recursion stack that is not part of the cache key
 - [ ] **F11** `medium` `single-source-of-truth` — The solver and the move checker ask `TypeParamCopyRequirement` with different `context`
 - [ ] **F13** `medium` `single-source-of-truth` — A missing `;` after an expression statement in a function body is silently accepted
@@ -86,7 +84,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 - [ ] **F35** `low` `side-table` — Borrow mutability lives only on the instruction, so threading a mut borrow through a block param downgrades it to shared
 - [ ] **F36** `low` `side-table` — Mono's `WitnessCache` is built at collection cost, discarded with `let _ =`, and keyed by a lossy pair
-- [ ] **F37** `medium` `fragility` — `find_inherited_assoc_type` recurses through protocol inheritance with no cycle guard its sibling has
 
 ## Editor and tooling
 
@@ -117,7 +114,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **G8** `medium` `single-source-of-truth` — "Does this loop diverge?" is decided three ways; `guard.rs` alone omits the break check, punching a hole in the E003 soundness gate
 - [ ] **G9** `medium` `single-source-of-truth` — All three copies of `expr_contains_break` ignore `Break.label`, so a labeled break is attributed to the wrong loop — disagreeing with MIR's `find_loop`, which routes by label
 - [ ] **G10** `medium` `single-source-of-truth` — `initializer.rs` runs a 5th, private loop model (`loop_break_stack`) that pairs every `break` with the innermost loop, so one labeled break disables the entire "all fields initialized" check
-- [ ] **G11** `low` `fragility` — `dead_code.rs` never handles `HirExpr::Sugar`, so E002 is structurally blind inside every `for`-loop body in the language
 - [ ] **G12** `medium` `single-source-of-truth` — The Never-typed divergence rule is copy-pasted into five analyzers; only `move_tracking` carries the documented `Loop` carve-out, and `dead_code` reads no types at all
 - [ ] **G13** `medium` `single-source-of-truth` — The extension-bound evaluator SKIPS `Copyable`/`Cloneable` clauses because `type_satisfies` cannot answer them; conformance-completeness calls `type_satisfies` on exactly those clauses anyway and gets a hard `false`
 - [ ] **G14** `medium` `single-source-of-truth` — A where-clause param the substitution can't map is a PERMIT in the solver's evaluator and a REJECT in the analyzer's, so every associated-type-subject clause on a protocol extension (`extend Iterator where Item: Equatable`) is unentailable
@@ -133,6 +129,17 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Silent miscompilation and wrong behavior
 
+- [x] **F4** `medium` `fragility` — Escaping-closure box `init` is picked by arity alone; `RcBox` already has two 1-parameter inits — **fixed** (severity understated: it is a latent silent SIGSEGV, see Corrections)
+  - The predicate is now the protocol requirement's *shape*, not its arity: `params.len() == 1 && params[0].label.is_none() && params[0].is_consuming` — exactly `SharedBox.init(consuming value: Target)`. Arity alone could not tell `RcBox`'s `public init(consuming value: T)` from its `private init(inner: Pointer[RcBoxStorage[T]])`, so the right answer came from declaration order in `rcbox.ks` and nothing else
+  - **`find_box_member` no longer takes the first of N matches, or returns `None` on zero.** It collects every match and hard-`panic!("ICE: …")`s unless there is exactly one. The distinction that makes this safe: the legitimate "no box → stack environment" fallback is the `ResolveBuiltin` `?` *earlier* in `resolve_box_common` (real for `// stdlib: false`); by the time `find_box_member` runs the box type is already proven resolved, so 0 or 2+ matches is always a broken stdlib. Applied to all four call sites — `sharedMutRef`/`takeValue`/`destroy` had the same first-match-wins hole
+  - Witness-based lookup (`find_protocol_witness_init`, as used for literal inits) was investigated and rejected: `UniqueBox` declares no protocol at all, so the shared helper would need two strategies for one call. Revisit if a `UniqueBox` protocol is ever added — [`docs/fragility/F4/decisions.md`](fragility/F4/decisions.md)
+  - Proved end-to-end by building two compilers and swapping the two inits in `rcbox.ks`: old → exit 139 (SIGSEGV), fixed → exit 0. 3 unit tests pin order-independence and both panic paths without touching the stdlib; `escaping_primitive_only_capture.ks` covers the bare-primitive capture shape the directory lacked
+  - Found in passing, recorded not fixed: `conformance_completeness.rs::signatures_match` compares arity and labels but **not** `is_consuming`, so a `SharedBox` impl omitting `consuming` passes E454/E458 and then hits the zero-match ICE. Loud, not silent — but the real fix is in the analyzer
+- [x] **F8** `medium` `single-source-of-truth` — The LLVM backend never received the Bool-discriminant width fix that landed in cranelift (ef3fb801) — **fixed**
+  - `discriminant_width()` returns a real width only for a `MonoEnum` and defaults to `I32` for everything else. `Bool` is a struct newtype over `lang.i1`, so LLVM emitted `load i32` off an `alloca [1 x i8], align 1` — three bytes of over-read plus an alignment lie — read adjacent stack garbage and always took the default arm. Now loads at the scalar's own width and truncates/z-extends to the tag width, as cranelift has since `ef3fb801`
+  - One deliberate difference from cranelift: the arm is guarded on `scalar_ty.is_int()`. Cranelift's `ir::Type` makes `Ptr` just `I64`; inkwell would panic in `.into_int_value()` on a pointer or float scalar, so those keep the prior path rather than aborting
+  - Verified by running: `match b { true => 1, _ => 2 }` gave 1 on cranelift and 2 on LLVM; both give 1 now, and the IR reads `load i8 … zext i8 %disc to i32`
+  - **Why it survived 2.5 months**: `bool_match_with_wildcard_default.ks` is the regression test written *for this exact bug*, and it had no `// backends:` header — so it only ever ran cranelift. Now pinned `// backends: cranelift,llvm`. The deeper gap is unfixed and worth naming: `.github/workflows/ci.yml` excludes `kestrel-test-suite` entirely, so **nothing runs the `.ks` suite under LLVM on any PR**. A shared implementation is not feasible (incompatible IR builder types); the two arms carry reciprocal "twin — keep in sync" comments instead
 - [x] **F3** `high` `single-source-of-truth` — "Is this a stored instance field?" is re-derived in ~15 places with three different predicates — **fixed**
   - `FieldClass` component set once by the field builder; storage is stored, not derived from absent markers. Six sites migrated. All four failures (wrong-slot write, E500 FP, E449 FP, OSSA ICE) verified fixed by running. Design + decisions: [`docs/design/f3-stored-field-consolidation.md`](design/f3-stored-field-consolidation.md)
   - Fail-loud backstops landed too: struct construction binds labeled args by **name** (unknown label ICEs, never falls back to position), and the OSSA verifier requires every `InstKind::Struct` to supply each `FieldIdx` exactly once. 4 unit tests; neither fires anywhere in the suite, so they only catch new drift
@@ -236,6 +243,12 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Verifier and self-check gaps
 
+- [x] **F37** `medium` `fragility` — `find_inherited_assoc_type` recurses through protocol inheritance with no cycle guard its sibling has — **fixed**
+  - The two functions were not siblings, they were **one walk duplicated**. `find_inherited_assoc_type` is deleted; `search_protocols_for_assoc` now calls `resolve_name::resolve_inherited_protocol_member` (widened to `pub(crate)`), seeding one `visited` set before its loop. Net −38 lines. Both already bottomed out in the same `find_assoc_type` leaf
+  - **Real crash, not theoretical**: a qualified-path protocol cycle (`protocol A: Test.B` / `protocol B: Test.A`) plus an associated-type reference through it overflowed the stack and aborted — exit 134, 527 frames at the same call site. E459 does not protect this path; `ProtocolCycleAnalyzer` is a `CompilationCheck` that *consumes* name-res queries, so resolution runs underneath it. After the fix all four shapes terminate and report E459 plus a truthful "cannot find type"
+  - **A second bug was hiding inside the first.** The deleted copy computed `parent_of(scope)` and passed the result down as the next level's `scope`, so the resolution anchor climbed one *extra* ancestor per recursion level. That is why the bare-name cycle never crashed — the drift walked out past the module root and `ResolveTypePath` stopped finding the protocol, so the recursion bottomed out **by accident**. Writing the cycle as `Test.B` keeps the target resolvable from any ancestor and removes the accidental brake. The shared function anchors on `parent_of(protocol)`, computed fresh per level, which is what a conformance path should resolve against — where it is *written*
+  - 4 tests under `validation/cycles/`, including the one that matters most: a bare-name cycle whose assoc type genuinely exists must **still resolve**, since `visited` is now the only thing bounding the walk
+  - Deliberately not touched: `resolve_type.rs:528`'s same-shaped `parent_of(scope)` anchor. It does not self-recurse so it cannot be this crash, and changing it moves scope resolution across 5 call sites — [`docs/fragility/F37/decisions.md`](fragility/F37/decisions.md)
 - [x] **F34** `medium` `fragility` — The OSSA verifier's linear-ownership check is block-local, and never runs after mono at all — **fixed** (the audit's *prescribed* remedy was wrong; see Corrections)
   - The finding stood (the check *was* block-local and cross-block double-consumes were invisible). What was wrong is the proposed remedy: enforcing a "block-parameter live-in contract" would reject the stdlib. Measured 2026-08-11 — 121 of 354 `memory_model` tests fail, and the violations are in shipped stdlib bodies (e.g. `std.text.ClosedRange.readLines`). Lowering follows the ordinary SSA rule (use any *dominating* definition); the contract asserted at `verify.rs:6` was documentation of an invariant nobody maintained, and it is the reason the ownership walk was written block-local in the first place
   - Fixed along the corrected direction instead — the walk is now **whole-function and dominance-aware**: an RPO walk to fixpoint over a per-block `FlowState` joined along CFG edges (`fec27941`, `a46c077e`), with address aliasing so a take through a derived address is seen at the storage it came from, and a Cooper-Harvey-Kennedy dominator check replacing the rejected live-in contract. Enforced by default in every build as of `3fc35b88`; `KESTREL_VERIFY_FLOW=off` is the escape hatch. The post-mono half runs via `verify_ossa_mono` (`8390ea5c`), gated by `KESTREL_VERIFY_FLOW_MONO`
@@ -246,6 +259,15 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 - [x] **F41** `low` `single-source-of-truth` — Atomic RMW width is hardcoded `I64` in cranelift but taken from the operand in LLVM — **fixed**
   - width from value operand; 2 execution tests on both backends
+
+### Gap round (second pass)
+
+- [x] **G11** `low` `fragility` — `dead_code.rs` never handles `HirExpr::Sugar`, so E002 is structurally blind inside every `for`-loop body in the language — **fixed**
+  - Four transparent `Sugar { inner, .. }` arms. Only one changes behavior — `check_expr_inner`'s. `for` lowers to `Sugar{ForLoop} → Block → Loop → Match → user body`, so a single arm restores the whole subtree; `while` lowers to a bare `Loop`, which is why `while` always worked
+  - E002 had **zero testdata coverage** — that is how it stayed invisible. 6 files added, including two negatives, one of which pins `expr_diverges(Sugar{ForLoop}) == false` so the fix can't start calling code *after* a `for` unreachable. Two-way matching proven non-vacuous by perturbation, not assumed. The `for` tests need `// stdlib: true`, unlike their siblings: without `Builtin::IterableProtocol` the desugar short-circuits to a `Sugar`-wrapped `Error` and would prove nothing
+  - **The addendum's advice to add the same arm to `guard.rs` was rejected, and following it would have been a regression.** `guard.rs:167` has `HirExpr::Loop { .. } => true` with no break check (that is G8). Today `guard flag else { for … {} }` is correctly rejected *only* because `Sugar` falls into `_ => false`; making it transparent before G8 lands turns a correct rejection into a false acceptance. G8 is a prerequisite, not an unrelated neighbour
+  - Converting the `_` catch-alls to exhaustive matches was also rejected: `HirExpr` has 25 variants, it would take ~76 variant mentions across 4 sites, and five sibling analyzers use the same `_` idiom — hardening one of six identical sites buys false confidence, not safety
+  - Adjacent, filed not fixed: `exhaustive_return.rs` has the same blindness (masked by an inference-error bail), and `check_stmt_inner` never walks `HirStmt::Let { value }` or call arguments, so dead code in a `let`-bound closure is still missed
 
 ---
 
@@ -259,6 +281,8 @@ Refuted during verification. Re-raise only with new evidence.
 ## Corrections to earlier severity claims
 
 Established by running the code, not reading it:
+
+- **F4 is a latent silent SIGSEGV, not an overload-selection nit.** The audit filed it as "picked by arity alone". Reproduced 2026-08-20 by building two compilers and swapping the order of `RcBox`'s two 1-parameter inits in `rcbox.ks` — nothing else: the old predicate then selects `private init(inner: Pointer[RcBoxStorage[T]])`, hands it the raw environment struct, and **every escaping closure in the program** stores its captured value straight into `RcBox.ptr` as a forged handle. Exit 139, with no diagnostic at any stage. The pre-mono MIR dumps of the two builds are byte-identical (220595 lines, empty `diff`) — both print `call std.memory.RcBox.init[E](...)` — so the wrong pick is invisible until the mangled symbol after mono. Correctness today rests entirely on the declaration order of two lines in a stdlib file with no comment warning against reordering.
 
 - **Unifying duplicated logic by taking the *union* of the copies is a mistake, and F33h proved it on me.** Each of the 5 stdlib-location chains differed, and I merged them by keeping every step. But the LSP's `~/.jessup/bin/kestrel` symlink step exists *only* because a bundled VSIX binary can use neither the exe-relative nor the in-repo candidate — and at the LSP's position (3rd) it outranks in-repo. Result: on any machine with jessup installed, every repo-built `kestrel` silently compiled against the installed **0.16.0** toolchain's stdlib. 27 suite tests failed on stdlib features that toolchain predates (`extend Int64: Exitable` → E616 on `attributes.main.exitable.*`, closure kinds, a missing `Formatter`), with every diagnostic pointing at the *test files* and nothing failing at the resolver. Fixed by moving the symlink step last and pinning the outcome with `a_repo_build_resolves_to_the_repo_stdlib`, which asserts the resolved path *is* `repo_std_path()` — re-proved by swapping the order back. **Before collapsing N copies, diff them and establish what each difference was for.** A difference is a decision someone made, not noise.
 - **F33i was under-rated `low`: it is a live, reproducible miscompile of correct code.** The audit filed it as an unread annotation. It is that, but the same line is also the bug: `lower_sugar_type` resolved the hardcoded string `"Array"` with `context: owner` — the *user's* scope. So `struct Array[T] {}` in a user file captured `[Int]`, and `let xs: [Int] = [1, 2, 3];` failed with `Array[Int64] !: _ExpressibleByArrayLiteral`. The four `@builtin(.*TypeOperator)` items existed precisely to prevent this and had zero readers. Fixed by resolving through the lang item and following the alias in the *stdlib's* scope; regression test `types/type_operators/array_operator/user_type_does_not_shadow_array_sugar.ks`. All four sugars (`[T]`, `T?`, `[K:V]`, `T throws E`) were affected.
