@@ -116,9 +116,24 @@ pub fn synthesize_clone_shims(module: &mut MirModule, next_entity: &mut u32) {
         worklist.push(e.entity);
     }
 
-    let mut shim_map: HashMap<Entity, Entity> = HashMap::new();
+    // Nominal → its synthesized shim.
+    //
+    // `IndexMap`, not `HashMap`: this map is iterated below to append witnesses
+    // via `module.add_witness`, which is a plain `Vec::push`. `module.witnesses`
+    // order is load-bearing — `mono::witness::select_most_specific` walks
+    // candidates greedily from index 0 and keeps the first of any tied pair, so
+    // a reordered tail silently changes which witness a genuinely-incomparable
+    // overlap resolves to. That is unobservable today only because every shim
+    // witness's `implementing_type` is a distinct nominal, i.e. no two of them
+    // can ever tie — one invariant deep.
+    //
+    // Insertion order is `worklist` order: `module.structs` then
+    // `module.enums`, both `IndexMap`s in declaration order. Drained front to
+    // back (not `pop()`) so the witness tail and the shim entity numbering both
+    // follow declaration order rather than its reverse.
+    let mut shim_map: indexmap::IndexMap<Entity, Entity> = indexmap::IndexMap::new();
 
-    while let Some(type_entity) = worklist.pop() {
+    for type_entity in worklist {
         if shim_map.contains_key(&type_entity) {
             continue;
         }
@@ -731,4 +746,101 @@ fn needs_clone_shim_enum(e: &crate::item::enum_def::EnumDef, arena: &TyArena) ->
             .iter()
             .any(|f| ty_needs_clone_shim(arena, f.ty))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MirModule;
+    use crate::item::TypeInfo;
+    use crate::item::protocol::{ProtocolDef, ProtocolMethodDef};
+    use crate::item::struct_def::{FieldDef, StructDef};
+
+    /// Build a module with a `Cloneable` protocol and `count` shim-eligible
+    /// structs named `S0..S{count-1}`, declared in that order. Each has one
+    /// `Named` field so `needs_clone_shim_struct` is true.
+    fn module_with_cloneable_structs(count: u32) -> MirModule {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.tuple(vec![]);
+
+        let cloneable = Entity::from_raw(1);
+        let mut proto = ProtocolDef::new(cloneable, "Cloneable");
+        proto
+            .methods
+            .push(ProtocolMethodDef::new("clone", vec![], unit));
+        module.add_protocol(proto);
+        module.cloneable_protocol = Some(cloneable);
+
+        // A payload nominal so every struct has a field that needs deep cloning.
+        let payload = Entity::from_raw(2);
+        module.register_name(payload, "Payload");
+        let payload_ty = module.ty_arena.named(payload, vec![]);
+
+        for i in 0..count {
+            let e = Entity::from_raw(100 + i);
+            let name = format!("S{i}");
+            module.register_name(e, &name);
+            module.ty_arena.named(e, vec![]);
+            let mut def = StructDef::new(e, &name);
+            def.add_field(FieldDef::new("payload", payload_ty));
+            def.type_info = TypeInfo::bitwise();
+            module.add_struct(def);
+        }
+
+        module
+    }
+
+    /// The witnesses appended by this pass must follow `module.structs`
+    /// declaration order.
+    ///
+    /// Asserting the *specific* order, not just "the same every run", is the
+    /// point: `module.witnesses` is a plain `Vec` and
+    /// `mono::witness::select_most_specific` resolves an incomparable overlap
+    /// to whichever candidate comes first in it. A `HashMap` here (F43d) was
+    /// deterministic-per-process at best and reordered the tail between runs;
+    /// a merely-deterministic-but-arbitrary order would pass a "same twice"
+    /// check while still being the wrong answer.
+    #[test]
+    fn shim_witnesses_are_appended_in_module_struct_order() {
+        let mut module = module_with_cloneable_structs(8);
+        let struct_order: Vec<Entity> = module.structs.keys().copied().collect();
+
+        let mut next_entity = 1000;
+        synthesize_clone_shims(&mut module, &mut next_entity);
+
+        let witness_order: Vec<Entity> = module
+            .witnesses
+            .iter()
+            .map(|w| match module.ty_arena.get(w.implementing_type) {
+                MirTy::Named { entity, .. } => *entity,
+                other => panic!("shim witness on a non-nominal type: {other:?}"),
+            })
+            .collect();
+
+        assert_eq!(
+            witness_order, struct_order,
+            "clone-shim witnesses must be appended in `module.structs` order — \
+             witness position decides which candidate an incomparable overlap \
+             resolves to (see mono::witness::select_most_specific)"
+        );
+    }
+
+    /// Two independent builds of the same module produce byte-identical
+    /// witness tails. Complements the order assertion above: that one pins
+    /// *which* order, this one pins that the order is a function of the module
+    /// and nothing else.
+    #[test]
+    fn shim_witness_order_is_reproducible() {
+        let run = || {
+            let mut module = module_with_cloneable_structs(8);
+            let mut next_entity = 1000;
+            synthesize_clone_shims(&mut module, &mut next_entity);
+            module
+                .witnesses
+                .iter()
+                .map(|w| format!("{:?}", module.ty_arena.get(w.implementing_type)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
+    }
 }

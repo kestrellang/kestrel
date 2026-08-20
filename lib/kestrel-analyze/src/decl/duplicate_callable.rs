@@ -25,7 +25,7 @@
 //!
 //! **Notes:** (none)
 
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
@@ -123,8 +123,17 @@ impl DeclCheck for DuplicateCallableAnalyzer {
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
-        // Map from duplicate key to list of (span, kind_name)
-        let mut seen: HashMap<DuplicateKey, Vec<(Span, &'static str)>> = HashMap::new();
+        // Duplicate key → list of (span, kind_name).
+        //
+        // `IndexMap`, not `HashMap`: this map is iterated below to *emit*
+        // diagnostics, so its order is the order E426s appear in the output. A
+        // `HashMap` randomized that per process (20 runs of a two-group repro
+        // gave 14 distinct orderings). Nothing downstream sorts diagnostics —
+        // `kestrel-analyze`'s aggregators just `.extend()` in query-call order
+        // — so this map's order is the user-visible order. It is populated from
+        // `children_of`, i.e. declaration order, so groups now report in source
+        // order.
+        let mut seen: IndexMap<DuplicateKey, Vec<(Span, &'static str)>> = IndexMap::new();
 
         for &child in cx.query.children_of(cx.entity) {
             let Some(child_kind) = cx.query.get::<NodeKind>(child) else {
@@ -218,4 +227,86 @@ fn is_protocol_method_impl(cx: &DeclContext<'_>, name: &str, labels: &[Option<St
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_ast_builder::{Name, build_declarations};
+    use kestrel_hecs::{Entity, World};
+
+    /// Parse `source` and run the duplicate-callable analyzer over every
+    /// declaration in it, returning the diagnostic messages in emission order.
+    fn analyze(source: &str) -> Vec<String> {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name(Name::ROOT.to_string()));
+
+        let file_entity = world.spawn();
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
+            .filter_map(|r| r.ok())
+            .collect();
+        let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
+        let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
+        build_declarations(&mut world, file_entity, &result.tree, root, None);
+
+        let targets: Vec<(Entity, NodeKind)> = world
+            .iter_component::<NodeKind>()
+            .filter(|(_, k)| DuplicateCallableAnalyzer.target_kinds().contains(k))
+            .map(|(e, k)| (e, k.clone()))
+            .collect();
+
+        let ctx = world.query_context();
+        targets
+            .into_iter()
+            .flat_map(|(entity, kind)| {
+                DuplicateCallableAnalyzer.check(&DeclContext {
+                    query: &ctx,
+                    entity,
+                    root,
+                    kind,
+                })
+            })
+            .map(|d| d.message)
+            .collect()
+    }
+
+    /// Two distinct duplicate-key groups under one struct must report in
+    /// declaration order, every run.
+    ///
+    /// A testdata fixture cannot cover this: the harness pairs annotations by
+    /// `(line, message-substring)`, so it is blind to the order diagnostics
+    /// come out in. And nothing downstream sorts — `kestrel-analyze`'s
+    /// aggregators just `.extend()` in query-call order — so this analyzer's
+    /// map iteration order IS the user-visible order. With a `HashMap`, 20 runs
+    /// of this source produced 14 different orderings (F43c).
+    #[test]
+    fn duplicate_groups_report_in_declaration_order_every_run() {
+        let source = "module Test\nstruct S {\n\
+                      func alpha(x: ()) -> () { }\n\
+                      func alpha(x: ()) -> () { }\n\
+                      func beta(y: ()) -> () { }\n\
+                      func beta(y: ()) -> () { }\n\
+                      func gamma(z: ()) -> () { }\n\
+                      func gamma(z: ()) -> () { }\n\
+                      func delta(w: ()) -> () { }\n\
+                      func delta(w: ()) -> () { }\n\
+                      }";
+
+        let expected = vec![
+            "duplicate function signature: alpha(_:)".to_string(),
+            "duplicate function signature: beta(_:)".to_string(),
+            "duplicate function signature: gamma(_:)".to_string(),
+            "duplicate function signature: delta(_:)".to_string(),
+        ];
+
+        // The names are not in alphabetical order, so this also rules out a
+        // `BTreeMap` masquerading as "declaration order".
+        for run in 0..50 {
+            assert_eq!(analyze(source), expected, "emission order changed on run {run}");
+        }
+    }
 }

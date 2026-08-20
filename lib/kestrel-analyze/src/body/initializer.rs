@@ -69,6 +69,8 @@
 
 use std::collections::HashSet;
 
+use indexmap::IndexSet;
+
 use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
@@ -143,7 +145,19 @@ impl BodyCheck for InitializerAnalyzer {
         // fields with Gettable and no Body are stored. Actually the simplest
         // heuristic: a field child that is Gettable is stored. Computed
         // properties have a Body component.
-        let mut all_fields = HashSet::new();
+        // `all_fields` is an `IndexSet`, not a `HashSet`: it is iterated
+        // straight into diagnostic *text* — the E005 message and the E008/E009
+        // notes below all `join(", ")` it. A `HashSet` made that order random
+        // per process (25 runs of one 4-field repro produced 23 distinct
+        // orderings), so the same source printed a different message every
+        // build. `children_of_kind` yields source-declaration order, so an
+        // `IndexSet` preserves it for free — chosen over `BTreeSet` because
+        // "the order you wrote the fields in" reads better than alphabetical.
+        //
+        // `let_fields` stays a `HashSet` deliberately: membership-only, never
+        // iterated for display. Same for `InitState::assigned` /
+        // `let_assigned`.
+        let mut all_fields = IndexSet::new();
         let mut let_fields = HashSet::new();
 
         for child in util::children_of_kind(cx.query, parent, NodeKind::Field) {
@@ -226,7 +240,9 @@ impl BodyCheck for InitializerAnalyzer {
 // ===== Verification state =====
 
 struct VerifyCtx {
-    all_fields: HashSet<String>,
+    /// Source-declaration order. Iterated into diagnostic text — see the
+    /// comment where it is built.
+    all_fields: IndexSet<String>,
     let_fields: HashSet<String>,
     diags: Vec<AnalyzeDiagnostic>,
     /// Stack of per-loop break-state collectors. When an unlabeled `break` is
@@ -727,5 +743,150 @@ fn is_init_failure_value(cx: &BodyContext<'_>, expr_id: HirExprId) -> bool {
         HirExpr::ImplicitMember { name, .. } if name.as_str() == Some("Err") => true,
         HirExpr::ImplicitMember { name, .. } if name.as_str() == Some("None") => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::traits::BodyCheck;
+    use kestrel_ast_builder::{Name, build_declarations, seed_lang_module};
+    use kestrel_hecs::{Entity, World};
+    use kestrel_hir_lower::LowerBody;
+    use kestrel_type_infer::InferBody;
+
+    /// The four field names used by every test here. Deliberately NOT in
+    /// alphabetical order, so declaration order is distinguishable from a
+    /// `BTreeSet`'s ordering as well as from a `HashSet`'s.
+    const FIELDS: &str = "var width: lang.i64; var height: lang.i64; \
+                          var alpha: lang.i64; var depth: lang.i64;";
+    const EXPECTED: &str = "width, height, alpha, depth";
+
+    /// Parse `source`, run the initializer analyzer over every `init` in it, and
+    /// return the diagnostics.
+    fn analyze_inits(source: &str) -> Vec<AnalyzeDiagnostic> {
+        let mut world = World::new();
+        world.begin_revision();
+
+        let root = world.spawn();
+        world.set(root, NodeKind::Module);
+        world.set(root, Name(Name::ROOT.to_string()));
+        seed_lang_module(&mut world, root);
+
+        let file_entity = world.spawn();
+        let tokens: Vec<_> = kestrel_lexer::lex(source, file_entity.index())
+            .filter_map(|r| r.ok())
+            .collect();
+        let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
+        let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
+        build_declarations(&mut world, file_entity, &result.tree, root, None);
+
+        let inits: Vec<Entity> = world
+            .iter_component::<NodeKind>()
+            .filter_map(|(e, k)| (*k == NodeKind::Initializer).then_some(e))
+            .collect();
+        assert!(!inits.is_empty(), "test source declares no initializer");
+
+        let ctx = world.query_context();
+        let mut diags = Vec::new();
+        for entity in inits {
+            let Some(hir) = ctx.query(LowerBody { entity, root }) else {
+                continue;
+            };
+            let Some(typed) = ctx.query(InferBody { entity, root }) else {
+                continue;
+            };
+            diags.extend(InitializerAnalyzer.check(&BodyContext {
+                query: &ctx,
+                entity,
+                root,
+                hir: &hir,
+                typed: &typed,
+            }));
+        }
+        diags
+    }
+
+    fn only<'a>(diags: &'a [AnalyzeDiagnostic], code: &str) -> &'a AnalyzeDiagnostic {
+        let matching: Vec<_> = diags.iter().filter(|d| d.descriptor_id == code).collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "expected exactly one {code}, got {:?}",
+            diags
+                .iter()
+                .map(|d| (d.descriptor_id, &d.message))
+                .collect::<Vec<_>>()
+        );
+        matching[0]
+    }
+
+    /// E005's message lists the uninitialized fields in declaration order.
+    ///
+    /// Covered by a testdata fixture too; kept here because it is the same
+    /// `all_fields` iteration the two note-path tests below exercise, and this
+    /// is the one that fails fastest if `all_fields` regresses to a `HashSet`.
+    #[test]
+    fn e005_message_lists_fields_in_declaration_order() {
+        let diags = analyze_inits(&format!(
+            "module Test\nstruct Config {{ {FIELDS} init() {{ }} }}"
+        ));
+        assert_eq!(
+            only(&diags, "E005").message,
+            "initializer does not initialize all fields: \
+             'width', 'height', 'alpha', 'depth'"
+        );
+    }
+
+    /// E008's *note* lists the uninitialized fields, and the test harness's
+    /// diagnostic matcher does not compare notes at all — it pairs annotations
+    /// by `(line, message-substring)` only. So this path can only be pinned
+    /// here, not by a `.ks` fixture.
+    #[test]
+    fn e008_note_lists_uninitialized_fields_in_declaration_order() {
+        let diags = analyze_inits(&format!(
+            "module Test\nstruct Config {{ {FIELDS} \
+             func helper() -> () {{ }} \
+             init() {{ self.helper(); {} }} }}",
+            "self.width = 0; self.height = 0; self.alpha = 0; self.depth = 0;"
+        ));
+        let e008 = only(&diags, "E008");
+        assert_eq!(
+            e008.notes,
+            vec![format!("uninitialized fields: {EXPECTED}")],
+            "E008's note must list fields in declaration order"
+        );
+    }
+
+    /// Same for E009's note. See the comment on the E008 test for why this
+    /// isn't a testdata fixture.
+    #[test]
+    fn e009_note_lists_uninitialized_fields_in_declaration_order() {
+        let diags = analyze_inits(&format!(
+            "module Test\nstruct Config {{ {FIELDS} init() {{ return; }} }}"
+        ));
+        let e009 = only(&diags, "E009");
+        assert_eq!(
+            e009.notes,
+            vec![format!("uninitialized fields: {EXPECTED}")],
+            "E009's note must list fields in declaration order"
+        );
+    }
+
+    /// Repeated in-process runs produce identical text. An `IndexSet` makes
+    /// this trivially true; a `HashSet` made it false 16 times out of 25 (the
+    /// F43c measurement), and `RandomState` is re-seeded per set, so the
+    /// variation shows up within a single process.
+    #[test]
+    fn field_ordering_is_stable_across_repeated_analyses() {
+        let source = format!("module Test\nstruct Config {{ {FIELDS} init() {{ }} }}");
+        let first = only(&analyze_inits(&source), "E005").message.clone();
+        for _ in 0..50 {
+            assert_eq!(
+                only(&analyze_inits(&source), "E005").message,
+                first,
+                "E005 field order varies between runs"
+            );
+        }
     }
 }

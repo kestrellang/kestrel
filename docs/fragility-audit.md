@@ -88,15 +88,14 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 ## Editor and tooling
 
 - [ ] **F38** `medium` `side-table` — `disk_line_indices` is a second copy of file text that `didOpen`/`didChange`/`didClose` never update
-- [ ] **F39** `medium` `single-source-of-truth` — Completion open-codes member lookup instead of `TypeMembers`, missing every protocol-extension member
 - [ ] **F40** `medium` `single-source-of-truth` — The two backends' `classify_named` disagree on a newtype over an aggregate field
 - [ ] **F42** `medium` `global-state` — `unsafe impl Sync for StdlibCache` is unsound — **blocked**
   - not fixable by a Mutex — rowan CST refcounts are shared across snapshots; needs a design decision
 - [ ] **F43** `low` `single-source-of-truth` — Smaller tooling defects
   - [ ] F43a — `Compiler::build` is call-once-per-entity but nothing enforces it
-  - [ ] F43b — `PARAM_COUNTER` is a process-global counter whose doc claims it is reset
-  - [ ] F43c — Diagnostic **message text** is built by iterating a `std::HashSet`
-  - [ ] F43d — `module.witnesses` tail is appended in `HashMap` order
+  - [x] F43b — `PARAM_COUNTER` is a process-global counter whose doc claims it is reset — **fixed**. Both sentences of its doc comment were false: the names are `_param_N`, not `_0/_1`, and nothing ever reset it — `grep` found only the declaration and the `fetch_add`. Now a local threaded through `extract_params` (3 call sites, one per declaration, never re-entrant — default-value bodies take a different path). It matters because `_param_N` reaches user-visible E611/E613 text: in the LSP's long-lived `Compiler` the same unedited source yielded `_param_0`, then `_param_7`, then `_param_23` across rebuilds. Rule added to `kestrel-ast-builder/AGENTS.md`
+  - [x] F43c — Diagnostic **message text** is built by iterating a `std::HashSet` — **fixed**. `initializer.rs`'s `all_fields` → `IndexSet`: measured 17 distinct field orderings in 25 runs before, 1 in 25 after. Declaration order, not alphabetical — `children_of_kind` already provides it free and it echoes what the user wrote. `duplicate_callable.rs`'s `seen` → `IndexMap`; that one is a **different defect than filed** — the message text was deterministic, the *emission order* was not (14 orderings in 20 runs). `extension_conflict.rs` is **refuted**: neither file of that name has the defect
+  - [x] F43d — `module.witnesses` tail is appended in `HashMap` order — **fixed**. `IndexMap`, plus the worklist drain changed from `pop()` (a reverse iteration) to forward, so the tail follows `module.structs`. Currently unobservable — 12 MIR dumps at 3 stages were byte-identical — because every shim witness's `implementing_type` is a distinct nominal. That is one invariant deep: `select_most_specific`'s doc comment claimed "a deterministic candidate is chosen", which was false as written (it takes whichever tied candidate is first in `witnesses`). Corrected to say so and to name the dependency it cannot enforce itself
   - [ ] F43e — A type-blind copy of the irrefutability rule survives in analyze
   - [ ] F43f — Type-arg conformance failures deduped by a rendered display string
   - [ ] F43g — `ConformingProtocolInstantiations` dedup key embeds source spans
@@ -257,6 +256,12 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Editor and tooling
 
+- [x] **F39** `medium` `single-source-of-truth` — Completion open-codes member lookup instead of `TypeMembers`, missing every protocol-extension member — **fixed**
+  - The hand-rolled `children_of` + `ExtensionsFor` walk is replaced by a dispatch on `NodeKind`: `ProtocolMembers` for a protocol-typed receiver, `TypeMembers` for everything else. They stay **separate on purpose** — `collect_members_transitive` passes `include_parent_direct_children: false` for `TypeMembers`, so unifying would drop an inherited protocol's own direct requirements
+  - Impact was not marginal: every concrete `Comparable` conformer was missing `lessThan`/`greaterThan`/`isAtLeast`/… , and all ~16 `extend Iterator` blocks (`map`, `filter`, `zip`, `sum`, `enumerate`, …) were invisible on every concrete iterator type
+  - **Visibility filtering had to be added, not inherited.** `TypeMembers` is deliberately unfiltered — the filter normally lives in `TypeMembersByName`. Completing across modules used to offer `private` and `fileprivate` members; now every push goes through one `IsVisibleFrom` choke point. Proven non-vacuous by stubbing the gate and watching the test fail
+  - Nested types needed a separate `children_of` pass (neither query's member filter admits them), and direct children suffice — the grammar has no nested-type arm in an extension body
+  - 5 new unit tests; none of the 10 existing ones changed. Open question recorded in [`docs/fragility/F39/decisions.md`](fragility/F39/decisions.md): `TypeMembers` returns constrained-conformance members unconditionally, so completion now *over*-offers where a where-clause is unsatisfied — a false positive replacing a false negative, accepted for an IDE
 - [x] **F41** `low` `single-source-of-truth` — Atomic RMW width is hardcoded `I64` in cranelift but taken from the operand in LLVM — **fixed**
   - width from value operand; 2 execution tests on both backends
 

@@ -799,6 +799,7 @@ dependencies = [
 name = "kestrel-analyze"
 version = "0.17.0"
 dependencies = [
+ "indexmap",
  "kestrel-ast",
  "kestrel-ast-builder",
  "kestrel-copy-fold",

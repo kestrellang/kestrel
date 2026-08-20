@@ -298,9 +298,21 @@ pub fn find_witness_with_method(
 /// the position (into `candidates`) of the most specific one. Greedy over the
 /// specificity partial order ([`witness_more_specific`]): a unique global
 /// minimum (e.g. the chain `X[i64,i64]` ⊏ `X[T,i64]` ⊏ `X[T,U]`) is found
-/// regardless of candidate order. Genuinely incomparable overlaps (no global
-/// minimum) are not yet diagnosed as ambiguous — a deterministic candidate is
-/// chosen; declaration-time overlap-coherence checking is the follow-up.
+/// regardless of candidate order.
+///
+/// **Genuinely incomparable overlaps are resolved by position, not by rule.**
+/// The scan keeps `best` unless a later candidate is *strictly* more specific,
+/// so a tied pair resolves to whichever appears FIRST in `candidates` — i.e.
+/// first in `witnesses`. This function therefore cannot make itself
+/// deterministic and does not try to: it is deterministic only because every
+/// producer of `module.witnesses` is deterministically ordered. Concretely,
+/// `passes::clone_shim` appends its shim witnesses from an `IndexMap` for
+/// exactly this reason; swapping it back to a `HashMap` would silently change
+/// which witness an incomparable overlap picks (F43d).
+///
+/// Overlaps with no global minimum are not yet diagnosed as ambiguous;
+/// declaration-time overlap-coherence checking is the follow-up, and is the
+/// only thing that can turn "first wins" into a real answer.
 fn select_most_specific(
     arena: &TyArena,
     witnesses: &[WitnessDef],
@@ -1050,5 +1062,75 @@ mod tests {
         let witnesses: Vec<WitnessDef> = vec![];
         let result = resolve_associated_type(&mut a, &witnesses, entity(1), i64, entity(2));
         assert!(result.is_none());
+    }
+
+    // -- select_most_specific --
+
+    /// Build `candidates` covering every witness in `witnesses`, in order.
+    fn all_candidates(witnesses: &[WitnessDef]) -> Vec<(usize, HashMap<Entity, TyId>)> {
+        (0..witnesses.len()).map(|i| (i, HashMap::new())).collect()
+    }
+
+    /// A unique global minimum is found regardless of where it sits in the
+    /// candidate list — the greedy scan is order-independent when the
+    /// specificity order actually has an answer.
+    #[test]
+    fn select_most_specific_finds_the_global_minimum_from_any_position() {
+        let mut a = TyArena::new();
+        let proto = entity(1);
+        let wrap = entity(2);
+        let t = a.intern(MirTy::TypeParam(entity(3)));
+        let i64 = a.i64();
+
+        let generic = WitnessDef::new(proto, a.named(wrap, vec![t]));
+        let concrete = WitnessDef::new(proto, a.named(wrap, vec![i64]));
+
+        // Concrete last…
+        let ws = vec![generic.clone(), concrete.clone()];
+        assert_eq!(select_most_specific(&a, &ws, &all_candidates(&ws)), 1);
+
+        // …and concrete first.
+        let ws = vec![concrete, generic];
+        assert_eq!(select_most_specific(&a, &ws, &all_candidates(&ws)), 0);
+    }
+
+    /// A genuinely incomparable overlap resolves to whichever candidate comes
+    /// FIRST — there is no rule, only position.
+    ///
+    /// `Pair[i64, T]` and `Pair[U, str]` both match `Pair[i64, str]` and
+    /// neither is an instance of the other, so `witness_more_specific` is false
+    /// in both directions and the greedy scan never leaves `best = 0`. This
+    /// pins the doc comment on `select_most_specific`: the function is
+    /// deterministic only because `module.witnesses` is deterministically
+    /// ordered by its producers (see `passes::clone_shim`'s `IndexMap`, F43d).
+    #[test]
+    fn select_most_specific_incomparable_overlap_takes_the_first_candidate() {
+        let mut a = TyArena::new();
+        let proto = entity(1);
+        let pair = entity(2);
+        let t = a.intern(MirTy::TypeParam(entity(3)));
+        let u = a.intern(MirTy::TypeParam(entity(4)));
+        let i64 = a.i64();
+        let str_ty = a.str_ty();
+
+        let left = WitnessDef::new(proto, a.named(pair, vec![i64, t]));
+        let right = WitnessDef::new(proto, a.named(pair, vec![u, str_ty]));
+
+        // Precondition: the pair really is incomparable, not merely tied on a
+        // technicality — neither direction is strictly more specific.
+        assert!(!witness_more_specific(&a, &left, &right));
+        assert!(!witness_more_specific(&a, &right, &left));
+
+        let ws = vec![left.clone(), right.clone()];
+        assert_eq!(
+            select_most_specific(&a, &ws, &all_candidates(&ws)),
+            0,
+            "incomparable overlap must resolve to the first candidate"
+        );
+
+        // Swapping the witnesses swaps the answer — the selection is
+        // positional, so witness order is load-bearing.
+        let ws = vec![right, left];
+        assert_eq!(select_most_specific(&a, &ws, &all_candidates(&ws)), 0);
     }
 }

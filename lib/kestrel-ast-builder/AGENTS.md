@@ -75,6 +75,21 @@ observable output. Build these from ordered sources; a `HashSet`/`HashMap`
 iteration order that leaks into a component reorders diagnostics, mangled names,
 or emitted code between runs.
 
+## Never use a process-lifetime `static` counter for a generated name or id
+
+Same class as the rule above, but the source of nondeterminism is process
+history rather than hash order. If a name or id can reach diagnostic text, a
+mangled symbol, or debug output, it must be a pure function of the source —
+scope the counter to the smallest unit that needs it (a local threaded through
+the helpers, like `synth_idx` in `builders/params.rs` or `opaque_index` in
+`builders/function.rs`), never a `static AtomicU32`.
+
+Synthetic parameter names (`_param_N`) were a process-lifetime static (F43b).
+They print verbatim in E611/E613, so the LSP — one long-lived `Compiler` —
+reported `_param_0`, then `_param_7`, then `_param_23` for the same unedited
+file, and the test harness, which runs every test in one process on parallel
+threads, raced on the value.
+
 ## Accessor children
 
 A setter with a body lives on a spawned `NodeKind::Setter` **child**, not on the
