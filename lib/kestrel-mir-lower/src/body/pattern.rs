@@ -782,6 +782,11 @@ impl OssaBodyCtx<'_, '_> {
                     self.emit_bindings_for_guard(bindings, scrutinee, scrutinee_ty);
                 }
                 let guard_val = self.lower_expr(guard_expr);
+                // A match guard is the one condition position that isn't a
+                // `HirExpr::If`, so it needs the same coercion independently.
+                // The synthesized scalar (when one is emitted) is picked up by
+                // the `extra_vals` sweep below like every other guard temporary.
+                let guard_val = self.coerce_condition_to_i1(guard_val, "guard");
                 let guard_live: Vec<ValueId> =
                     self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
                 let guard_descs: Vec<(TyId, Ownership)> = guard_live

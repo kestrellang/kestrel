@@ -460,6 +460,123 @@ mod tests {
         eprintln!("(verifier errors are expected during initial development)");
     }
 
+    // ================================================================
+    // G18 — implicit condition lowering (`coerce_condition_to_i1`)
+    // ================================================================
+
+    /// Lower `source` on top of the real stdlib and return the MIR module.
+    fn lower_with_stdlib(source: &str) -> MirModule {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let mut c = Compiler::new();
+        c.load_dir(&stdlib_path());
+        let file = c.set_source("g18_test.ks", source.to_string());
+        c.build(file);
+        CompilerDriver::new(&c).infer_all();
+        lower_module(c.world(), c.root())
+    }
+
+    /// Count `boolValue()` witness calls in the named function's body.
+    fn boolvalue_witness_calls(mir: &MirModule, func_name: &str) -> usize {
+        let func = mir
+            .functions
+            .values()
+            .find(|f| f.name == func_name)
+            .unwrap_or_else(|| panic!("no function named `{func_name}` in the module"));
+        let body = func
+            .body
+            .as_ref()
+            .unwrap_or_else(|| panic!("`{func_name}` has no body"));
+        body.blocks
+            .iter()
+            .flat_map(|b| &b.insts)
+            .filter(|inst| {
+                matches!(
+                    &inst.kind,
+                    kestrel_mir::inst::InstKind::Call {
+                        callee: kestrel_mir::callee::Callee::Witness { method, .. },
+                        ..
+                    } if method.name == "boolValue"
+                )
+            })
+            .count()
+    }
+
+    /// The performance half of G18: a condition of type `Bool` must branch on
+    /// its scalar directly, with NO `boolValue()` witness call anywhere in the
+    /// function.
+    ///
+    /// This is the assertion that actually verifies the `is_bool_struct` gate.
+    /// `Bool` is a nominal struct, not `MirTy::Bool`, so "skip when already
+    /// `lang.i1`" does not cover it — and `Bool` is the condition type of
+    /// essentially every `if` ever written. There is no MIR inliner, so a call
+    /// here would be a real cost in cranelift and debug builds.
+    #[test]
+    fn bool_condition_emits_no_boolvalue_witness_call() {
+        let mir = lower_with_stdlib(
+            "module G18\n\
+             func pick(b: Bool) -> lang.i64 {\n\
+                 if b { 1 } else { 0 }\n\
+             }\n",
+        );
+        assert_eq!(
+            boolvalue_witness_calls(&mir, "G18.pick"),
+            0,
+            "a `Bool` condition must branch on its scalar directly"
+        );
+    }
+
+    /// The correctness half: a non-`Bool` `BooleanConditional` conformer MUST
+    /// dispatch through the witness, or the branch reads the payload's raw bits
+    /// and silently takes the wrong arm (G18).
+    #[test]
+    fn custom_conditional_emits_boolvalue_witness_call() {
+        let mir = lower_with_stdlib(
+            "module G18\n\
+             struct Inverted: BooleanConditional {\n\
+                 var v: lang.i64\n\
+                 func boolValue() -> lang.i1 { lang.i64_eq(self.v, 0) }\n\
+             }\n\
+             func pick(b: Inverted) -> lang.i64 {\n\
+                 if b { 1 } else { 0 }\n\
+             }\n",
+        );
+        assert_eq!(
+            boolvalue_witness_calls(&mir, "G18.pick"),
+            1,
+            "a non-Bool BooleanConditional condition must dispatch through the witness"
+        );
+    }
+
+    /// `Builtin::Bool` forward/reverse consistency.
+    ///
+    /// `ResolveBuiltin` finds `Bool` by source name (strategy 1). Name lookup
+    /// alone cannot tell you it found the *right* entity — only that it found
+    /// something called "Bool". Round-tripping the resolved entity back through
+    /// `EntityBuiltin` proves it carries `@builtin(.Bool)`, which is what the
+    /// `is_bool_struct` gate is really asserting. Without the
+    /// `from_attribute_name` arm this round-trip returns `None`.
+    #[test]
+    fn bool_builtin_round_trips_through_entity_builtin() {
+        let mut c = Compiler::new();
+        c.load_dir(&stdlib_path());
+        let ctx = LowerCtx::new(c.world(), c.root(), "test");
+
+        let entity = ctx
+            .module
+            .bool_struct
+            .expect("`Bool` must resolve with the stdlib loaded");
+        assert_eq!(
+            ctx.query.query(kestrel_name_res::EntityBuiltin { entity }),
+            Some(kestrel_hir::Builtin::Bool),
+            "the entity `ResolveBuiltin` found for `Bool` must itself carry @builtin(.Bool)"
+        );
+        assert!(
+            ctx.module.boolean_conditional_protocol.is_some(),
+            "`BooleanConditional` must resolve with the stdlib loaded"
+        );
+    }
+
     #[test]
     fn stdlib_passes_pipeline() {
         use kestrel_compiler_driver::CompilerDriver;

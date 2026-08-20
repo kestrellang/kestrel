@@ -25,6 +25,25 @@ impl OssaBodyCtx<'_, '_> {
     ) -> ValueId {
         let mark = self.ref_watermark();
         let cond_val = self.lower_expr(condition);
+        // `HirExpr::If` is the single shape that `if`, `else if`, desugared
+        // `while` / `guard … else`, and the non-binding link of both
+        // `if let p = e, cond` and multi-condition `while let p = e, cond` all
+        // lower into — so this one call covers six condition positions.
+        // Must run BEFORE `end_stale_refs_since`: the witness call is part of
+        // computing the condition, so any ref it borrows is still in use here.
+        let kind = if self.hir.while_conditions.contains(&condition) {
+            "while"
+        } else {
+            "if"
+        };
+        // The synthesized scalar is left scope-tracked on purpose. `consume`ing
+        // it here fails OSSA verify ("@owned value is live at block exit but
+        // never consumed" at bb0) because the branch terminator reads it but
+        // does not consume it. Leaving it tracked lets `lower_if`'s existing
+        // liveness threading carry it through both arms to the merge and
+        // destroy it there — no `extra_vals` mechanism needed. It is a trivial
+        // `lang.i1` scalar, and it only exists on the non-`Bool` path.
+        let cond_val = self.coerce_condition_to_i1(cond_val, kind);
         // The condition is a complete expression: any ref (single-use) born
         // inside it and still tracked was fully used — end it now, or the
         // branch terminator reports a false E497

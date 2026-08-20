@@ -794,6 +794,120 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.ctx.module.ty_arena.error()
     }
 
+    /// Lower an implicit condition value to the raw `lang.i1` that a `branch`
+    /// terminator (and both backends) actually read.
+    ///
+    /// Every condition position — `if`, `else if`, desugared `while` and
+    /// `guard … else`, the non-binding link of `if let p = e, cond` and of
+    /// multi-condition `while let p = e, cond`, and a `match` arm guard —
+    /// accepts any `BooleanConditional` value in source, but the
+    /// terminator branches on the value's scalar bits: LLVM does
+    /// `resolve_scalar(cond) != 0`, cranelift `icmp_imm(NotEqual, cond, 0)`.
+    /// Without this coercion the witness is never called, so a conformer whose
+    /// `boolValue()` is not the identity on its payload silently branches the
+    /// wrong way (G18).
+    ///
+    /// Returns the value to branch on. When a witness call is emitted the
+    /// result is a fresh scalar the caller owns and must retire; see `lower_if`
+    /// and the `DecisionTree::Guard` arm.
+    ///
+    /// `kind` is only the E101 backstop's wording ("if" / "while" / "guard").
+    pub(crate) fn coerce_condition_to_i1(&mut self, cond_val: ValueId, kind: &str) -> ValueId {
+        let cond_ty = self.body.value(cond_val).ty;
+        // Copy out of the arena before touching `self.ctx` mutably again.
+        let named_entity = match self.ctx.module.ty_arena.get(cond_ty) {
+            // Already the raw i1 a branch wants: `lang.*` intrinsic conditions
+            // and compiler-synthesized drop-flag guards.
+            MirTy::Bool => return cond_val,
+            // Don't cascade off an already-broken or diverging condition —
+            // `condition_check.rs` skips `Error` and `Never` for the same
+            // reason, and the two must admit exactly the same set.
+            MirTy::Error | MirTy::Never => return cond_val,
+            MirTy::Named { entity, .. } => Some(*entity),
+            // Still-generic `T: BooleanConditional` / `Self.Assoc`. Conformance
+            // was proved by the where clause; monomorphization resolves the
+            // witness. Fall through to the call.
+            MirTy::TypeParam(_) | MirTy::AssociatedProjection { .. } => None,
+            // Tuples, functions, pointers, … can never conform.
+            _ => {
+                self.emit_condition_not_bool_backstop(cond_ty, kind);
+                return cond_val;
+            },
+        };
+
+        // `std.core.Bool` is a nominal struct, NOT `MirTy::Bool`, and it is the
+        // condition type of essentially every `if` ever written. Its
+        // `boolValue()` is by construction `{ self.value }` over its single
+        // `lang.i1` field and both backends already scalarize `Bool` to i1, so
+        // branching on it directly computes exactly what the witness would.
+        // There is no MIR inliner, so without this gate every condition in the
+        // language would grow a real call in cranelift and debug builds.
+        // Gated on the resolved `@builtin(.Bool)` ENTITY, never structurally: a
+        // "single-field struct wrapping `lang.i1`" test would also swallow a
+        // user's own `struct MyFlag { var value: lang.i1 }`, whose
+        // `boolValue()` need not be the identity.
+        if let Some(entity) = named_entity
+            && kestrel_mir::ty_query::is_bool_struct(&self.ctx.module, entity)
+        {
+            return cond_val;
+        }
+
+        // No stdlib (or a hand-built unit-test module): branch raw, exactly as
+        // before. Mirrors `emit_array_match_length`'s stdlib fallback.
+        let Some(protocol) = self.ctx.module.boolean_conditional_protocol else {
+            return cond_val;
+        };
+
+        // A non-conforming condition is normally rejected by the analyzer
+        // (E101), but `lower_to_mir_raw` / `lower_to_mir_stage` are reachable
+        // from the LSP and `kestrel dump mir` with no guarantee the analyzer
+        // ran. Re-raise the front-end's own diagnostic (same conformance
+        // definition as `condition_check.rs`, so the two always agree) and fall
+        // back to the raw branch rather than emitting a call to nothing.
+        if let Some(entity) = named_entity {
+            let conforming = self.ctx.query.query(kestrel_name_res::ConformingProtocols {
+                entity,
+                root: self.ctx.root,
+            });
+            if !conforming.contains(&protocol) {
+                self.emit_condition_not_bool_backstop(cond_ty, kind);
+                return cond_val;
+            }
+        }
+
+        self.ctx.register_name(protocol);
+        let bool_ty = self.ctx.module.ty_arena.bool();
+        let callee = Callee::Witness {
+            protocol,
+            method: kestrel_mir::WitnessMethodKey::simple("boolValue"),
+            self_type: cond_ty,
+            method_type_args: vec![],
+        };
+        let arg = self.prepare_call_arg(cond_val, ParamConvention::Borrow);
+        self.emit_call_returning(callee, vec![arg], bool_ty)
+    }
+
+    /// Backstop for a condition whose type doesn't conform to
+    /// `BooleanConditional`. Reuses the analyzer's E101 with the same
+    /// user-facing wording — this is a real source error the analyzer would
+    /// have caught, not an internal inconsistency.
+    fn emit_condition_not_bool_backstop(&mut self, cond_ty: TyId, kind: &str) {
+        let span = self
+            .current_span
+            .clone()
+            .unwrap_or_else(|| Span::synthetic(0));
+        let ty_str = kestrel_mir::display::ty_to_string(cond_ty, &self.ctx.module);
+        self.ctx.query.accumulate(
+            Diagnostic::error()
+                .with_code("E101")
+                .with_message(format!("{kind} condition must be Bool"))
+                .with_labels(vec![
+                    Label::primary(span.file_id, span.range())
+                        .with_message(format!("expected Bool, found {ty_str}")),
+                ]),
+        );
+    }
+
     pub fn resolve_local_type(&mut self, hir_id: HirLocalId) -> TyId {
         if let Some(typed) = self.typed.as_ref()
             && let Some(resolved) = typed.local_types.get(&hir_id)

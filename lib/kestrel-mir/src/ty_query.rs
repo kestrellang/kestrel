@@ -394,3 +394,11 @@ pub fn is_copyable_protocol(module: &MirModule, entity: Entity) -> bool {
 pub fn find_cloneable_protocol(module: &MirModule) -> Option<Entity> {
     module.cloneable_protocol
 }
+
+/// Is this entity the stdlib `Bool` struct (`@builtin(.Bool)`)?
+///
+/// Identity, not structure: see `MirModule::bool_struct` for why a structural
+/// "wraps one `lang.i1`" test is not an acceptable substitute.
+pub fn is_bool_struct(module: &MirModule, entity: Entity) -> bool {
+    module.bool_struct == Some(entity)
+}

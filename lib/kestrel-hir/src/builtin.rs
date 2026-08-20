@@ -628,6 +628,15 @@ impl Builtin {
             // Boolean conditional
             "BooleanConditional" => Some(Self::BooleanConditional),
 
+            // Well-known types. `Bool` also resolves by source name (strategy 1
+            // in `ResolveBuiltin`), but without this arm the `@builtin(.Bool)`
+            // annotation is silently inert: `EntityBuiltin` returns `None`, the
+            // struct never enters `BuiltinIndex`, and there is no strategy-2
+            // fallback if the name lookup ever stops finding it. This arm also
+            // makes `every_stdlib_builtin_annotation_is_recognized` a live guard
+            // over the annotation.
+            "Bool" => Some(Self::Bool),
+
             // Range operators
             "ExclusiveRangeOperatorProtocol" => Some(Self::ExclusiveRangeOperatorProtocol),
             "ExclusiveRangeOperatorMethod" => Some(Self::ExclusiveRangeOperatorMethod),
@@ -927,7 +936,8 @@ impl Builtin {
             // compiler instantiates (`UniqueBox`).
             Self::UniqueBox => BuiltinKind::Struct,
 
-            // Well-known types — Bool is resolved by name, doesn't need @builtin
+            // Well-known types — `Bool` resolves by name first, but carries
+            // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.
             Self::Bool => BuiltinKind::Struct,
         }
     }

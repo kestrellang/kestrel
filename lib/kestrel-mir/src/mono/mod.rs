@@ -57,6 +57,11 @@ pub fn monomorphize(
         entity_names,
         copyable_protocol,
         cloneable_protocol,
+        // Condition lowering is complete before mono: mir-lower has already
+        // decided raw-branch vs `boolValue()` witness call, and the resulting
+        // `Callee::Witness` is resolved by the ordinary witness machinery.
+        boolean_conditional_protocol: _,
+        bool_struct: _,
     } = module;
 
     // Phase 1: Instantiation discovery

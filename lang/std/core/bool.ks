@@ -30,6 +30,7 @@ import std.memory.(ArraySlice, Pointer)
 ///
 /// Wraps a single `lang.i1`. The runtime promotes to a byte at FFI
 /// boundaries (`FFISafe` conformance).
+@builtin(.Bool)
 public struct Bool:
     Equatable,
     Matchable,

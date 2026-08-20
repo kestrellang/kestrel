@@ -91,6 +91,25 @@ pub struct MirModule {
     /// stdlib — the same answer the name scan gave in those cases.
     pub copyable_protocol: Option<Entity>,
     pub cloneable_protocol: Option<Entity>,
+    /// The `@builtin(.BooleanConditional)` protocol and the `@builtin(.Bool)`
+    /// struct entities, resolved once in mir-lower via `ResolveBuiltin`.
+    ///
+    /// Same reasoning as `copyable_protocol` above: MIR has no `World`, so
+    /// carrying the entity keeps the lang item the single source of truth
+    /// across the mir-lower → mir boundary. These drive implicit-condition
+    /// lowering (`coerce_condition_to_i1`): the protocol names the witness to
+    /// dispatch, and `bool_struct` identifies the one nominal type that may
+    /// skip that dispatch and branch on its scalar directly.
+    ///
+    /// `bool_struct` must be matched by *entity*, never structurally: a
+    /// "single-field struct wrapping `lang.i1`" test would also swallow a
+    /// user's own `struct MyFlag { var value: lang.i1 }` whose `boolValue()`
+    /// need not be the identity.
+    ///
+    /// `None` for hand-built modules (unit tests) and for a build with no
+    /// stdlib — implicit conditions then branch raw, as they always did.
+    pub boolean_conditional_protocol: Option<Entity>,
+    pub bool_struct: Option<Entity>,
 }
 
 impl MirModule {
@@ -107,6 +126,8 @@ impl MirModule {
             entity_names: IndexMap::new(),
             copyable_protocol: None,
             cloneable_protocol: None,
+            boolean_conditional_protocol: None,
+            bool_struct: None,
         }
     }
 

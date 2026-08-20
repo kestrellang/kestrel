@@ -37,6 +37,17 @@ impl<'w> LowerCtx<'w> {
             builtin: kestrel_hir::Builtin::Cloneable,
             root,
         });
+        // Implicit-condition lowering needs both of these at *every* branch
+        // site (~1835 in a trivial stdlib program), so resolve them once here
+        // rather than re-querying per branch.
+        module.boolean_conditional_protocol = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::BooleanConditional,
+            root,
+        });
+        module.bool_struct = query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Bool,
+            root,
+        });
         Self {
             world,
             query,
