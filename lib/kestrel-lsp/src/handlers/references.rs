@@ -106,9 +106,14 @@ fn target_at(
         }
     }
 
-    // Fallback: cursor is on a declaration's identifier (function name, struct
-    // field decl, etc). Use the smallest enclosing decl.
-    let decl = semantic::enclosing_decl_at(world, file_entity, offset)?;
+    // Fallback: cursor is on a declaration's own identifier (function name,
+    // struct field decl, etc). `decl_at_name_offset`, not bare
+    // `enclosing_decl_at`: the latter maps every offset inside a decl to that
+    // decl, so a cursor on a `let` binding or a parameter name (neither is an
+    // `HirExpr`, so the branch above can't see them) would report the
+    // enclosing function's references instead. Same root cause as the rename
+    // corruption in F2; here it is merely wrong, not destructive.
+    let decl = crate::references::decl_at_name_offset(world, file_entity, offset)?;
     Some(Target::Entity(decl))
 }
 

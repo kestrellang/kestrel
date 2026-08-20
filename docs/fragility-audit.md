@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 30 fixed · 2 partial · 3 blocked · 27 open** — 61 top-level (F1–F43, G1–G18).
+**Progress: 33 fixed · 3 partial · 3 blocked · 24 open** — 61 top-level (F1–F43, G1–G18).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -60,7 +60,11 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 ## Silent miscompilation and wrong behavior
 
 - [ ] **F1** `high` `single-source-of-truth` — Range-overlap correction lives only in `check_match`; decision-tree codegen uses the raw overlap test and misroutes arms
-- [ ] **F2** `high` `fragility` — LSP local rename replaces the whole `let` statement (and inserts at file offset 0 for parameters)
+- [ ] **F2** `high` `fragility` — LSP local rename replaces the whole `let` statement (and inserts at file offset 0 for parameters) — **partial: it now fails closed**
+  - Stage 1 landed. Rename writes to the user's real files, so the first job was to stop the corruption, not to make it work. Reproduced **three** defects, not the two filed: (1) renaming a `let` local replaces the whole statement; (2) renaming a parameter inserts at file offset 0 and never touches the declaration, leaving a file that starts `renamedmodule Test`; (3) **renaming *from* a declaration site silently renames the enclosing function workspace-wide** — `hir_expr_at` only sees `Local` *use* sites, so a binding's own identifier falls through to `enclosing_decl_at`. That is the most natural rename gesture. A fourth was found by running: clicking a type reference in a body does the same, because `rename`'s `target_at` is the only one of its three copies lacking a `type_at_cursor` pre-check
+  - Guard A: the edit span must literally spell the symbol's name. Chosen over the proposed `is_synthetic() || starts_with('$')` heuristic, which misses closure-destructure synthetics (`_cparam_N` gets a non-synthetic span and an ordinary name — both heuristics pass, the text does not match). Guard B: `enclosing_decl_at` results are kept only when the offset lands on the decl's own name span, copied to the two hand-rolled twins in `references.rs` and `document_highlight.rs`
+  - 7 tests on what was **entirely untested surface**, each documenting that refusal is the *stage 1* target so a later reader flips the assertion rather than deleting it. Non-vacuity proved by stubbing each guard and watching the corrupting edit reappear
+  - Stages 2-4 (`Local::name_span`, `AstParam::name_span`, then declaration-site resolution) are planned in [`docs/fragility/F2/decisions.md`](fragility/F2/decisions.md), along with a Stage-2 trap: `AstPat::Binding.span` covers `"var count"`, not `"count"` — the audit's "exact" example was a non-`mut` binding. `Local::name_span` also repairs go-to-definition, document-highlight, find-references, and the `let`→`var` quickfix, whose backward 20-char search for `"let"` can never find its own keyword and may rewrite a *previous* one
 - [ ] **F9** `medium` `incremental-hazard` — `NominalCopySemantics`/`NominalStaticness` memos depend on a thread-local recursion stack that is not part of the cache key
 - [ ] **F11** `medium` `single-source-of-truth` — The solver and the move checker ask `TypeParamCopyRequirement` with different `context`
 - [ ] **F13** `medium` `single-source-of-truth` — A missing `;` after an expression statement in a function body is silently accepted
@@ -88,7 +92,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Editor and tooling
 
-- [ ] **F38** `medium` `side-table` — `disk_line_indices` is a second copy of file text that `didOpen`/`didChange`/`didClose` never update
 - [ ] **F40** `medium` `single-source-of-truth` — The two backends' `classify_named` disagree on a newtype over an aggregate field
 - [ ] **F42** `medium` `global-state` — `unsafe impl Sync for StdlibCache` is unsound — **blocked**
   - not fixable by a Mutex — rowan CST refcounts are shared across snapshots; needs a design decision
@@ -271,11 +274,22 @@ Completed findings, moved here from their original sections. Grouped by the sect
   - **Visibility filtering had to be added, not inherited.** `TypeMembers` is deliberately unfiltered — the filter normally lives in `TypeMembersByName`. Completing across modules used to offer `private` and `fileprivate` members; now every push goes through one `IsVisibleFrom` choke point. Proven non-vacuous by stubbing the gate and watching the test fail
   - Nested types needed a separate `children_of` pass (neither query's member filter admits them), and direct children suffice — the grammar has no nested-type arm in an extension body
   - 5 new unit tests; none of the 10 existing ones changed. Open question recorded in [`docs/fragility/F39/decisions.md`](fragility/F39/decisions.md): `TypeMembers` returns constrained-conformance members unconditionally, so completion now *over*-offers where a where-clause is unsatisfied — a false positive replacing a false negative, accepted for an IDE
+- [x] **F38** `medium` `side-table` — `disk_line_indices` is a second copy of file text that `didOpen`/`didChange`/`didClose` never update — **fixed**
+  - **Deleted, not synchronized.** A hand-synced second copy of text that `sources` already owns is the bug class itself: its four writers were all path-derived while the three editor-driven handlers never touched it. Indices are now built on demand in `refresh` — live `docs` buffer first, else from `sources`
+  - The audit's "7-ish read sites" did not hold up: there was exactly **one** genuine read, and its plumbing deep-cloned ≥1.4 MB of `String` on every debounced keystroke. Building on demand is therefore strictly *cheaper* than what it replaced — and only for files a diagnostic actually points at, verified by checking that every `FileMap::lookup` call site is label-derived. The 84-file stdlib is no longer indexed at all
+  - Two reproduced failures, both closed: after `didClose` on an unsaved buffer, diagnostics re-anchored to the stale disk text (a 5-line slide, plus a range spanning 3 lines because F24's clamp turned the overrun into a plausible position rather than a panic — which is exactly why it was invisible); and a file opened but never visited by the workspace walk had its diagnostics **dropped entirely**. Both new integration tests were proven non-vacuous by restoring the old sources and watching them fail with the documented symptoms
+  - `convert.rs` untouched — `FileMap` stays a borrow over an owning local. Unresolvable ids now produce a WARNING naming them instead of vanishing at a `?`
 - [x] **F41** `low` `single-source-of-truth` — Atomic RMW width is hardcoded `I64` in cranelift but taken from the operand in LLVM — **fixed**
   - width from value operand; 2 execution tests on both backends
 
 ### Gap round (second pass)
 
+- [x] **G3** `medium` `fragility` — The thunk pass identifies the closure environment parameter by the magic names `"env"`/`"_env"` — **fixed**
+  - `FunctionKind::takes_env_param()` replaces both name sniffs; forwarding is now a structural `.skip(1)`, so **no name-based filtering survives in the pass**. The discriminator already existed — `mono/collect.rs:679` used exactly this `matches!` for the same question — and the env `ParamDef` is pushed unconditionally for both closure kinds, so kind ⟺ leading-env-param with no gap. No new `ParamDef` field
+  - Four silently miscompiled shapes, all legal code: `func combine(env: Int64, x: Int64)` used as a function value returned **3 instead of 307** (the value lands in the wrong slot, the last argument is dropped, and `env` receives the environment pointer). `_env` the same; `env` at position 2 and `self` as a parameter name were hard backend-verifier failures. All six repros now give 307
+  - The audit addendum's claim that the `self` twin "is safe only because `self` is reserved" is **wrong** — `self` is not a keyword and `func combine(self: Int64, ..)` is legal. Corrected in place
+  - **The design's reachability claim was false, and following it would have shipped a fifth miscompile.** `Type.instanceMethod` *can* reach `ApplyPartial`: the old `self` filter was accidentally turning it into a hard error, so removing the filter made `apply(Box.doubled, 7)` compile and print garbage. Root cause is in name-res — `walk_path_from`'s direct-children branch applies no member-kind filter, and `is_static_method` guards only the *extension* fallback, so an instance method declared in the type's own body sails through. Closed in hir-lower by sharing the predicate and emitter that already rejected the *call* form `Box.doubled(b, 7)`; the value form is the same rule with the parens removed. That also gave the call form the `E100` code it always should have carried, and turned `P.hop`-as-a-value from an ICE into a diagnostic
+  - Backstops: a per-position **type** check on the thunk's forwarded arguments (a pure arity check would NOT have caught the repro — the count coincidentally matched), plus a general `InstKind::Call` arity check in `verify_ossa`. That one fired immediately on two `drop_shim` test fixtures which stubbed a zero-parameter deinit while a real deinit declares `mutating self` — the fixtures asserted an inconsistent module verified, and were corrected
 - [x] **G11** `low` `fragility` — `dead_code.rs` never handles `HirExpr::Sugar`, so E002 is structurally blind inside every `for`-loop body in the language — **fixed**
   - Four transparent `Sugar { inner, .. }` arms. Only one changes behavior — `check_expr_inner`'s. `for` lowers to `Sugar{ForLoop} → Block → Loop → Match → user body`, so a single arm restores the whole subtree; `while` lowers to a bare `Loop`, which is why `while` always worked
   - E002 had **zero testdata coverage** — that is how it stayed invisible. 6 files added, including two negatives, one of which pins `expr_diverges(Sugar{ForLoop}) == false` so the fix can't start calling code *after* a `for` unreachable. Two-way matching proven non-vacuous by perturbation, not assumed. The `for` tests need `// stdlib: true`, unlike their siblings: without `Builtin::IterableProtocol` the desugar short-circuits to a `Sugar`-wrapped `Error` and would prove nothing

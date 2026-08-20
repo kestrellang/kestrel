@@ -23,12 +23,13 @@
 //!   entity isn't kept on the AST node. Add a `ResolveTypeRefs { file }`
 //!   query in `kestrel-name-res` when needed.
 
-use kestrel_ast_builder::{Body, FileId};
+use kestrel_ast_builder::{Body, CstNode, DeclSpan, FileId};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirExpr, HirPat};
 use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_span::Span;
+use kestrel_syntax_tree::utils::get_name_span;
 use kestrel_type_infer::InferBody;
 
 use crate::semantic::hir_expr_span;
@@ -210,6 +211,49 @@ pub fn clip_to_identifier(source: &str, span: &Span, kind: RefKind) -> Span {
 
 pub fn is_ident_char(c: char) -> bool {
     c == '_' || c.is_alphanumeric()
+}
+
+/// Does `span` literally spell `name` in `source`?
+///
+/// The single fail-closed predicate for "is this span actually the identifier
+/// it claims to name?". Renaming rewrites the bytes under a span, so any span
+/// that does not spell its own name will corrupt source when edited. Today the
+/// offenders are all `HirBody::locals`:
+/// - a `let`/`var` binding's `Local::span` is the whole *statement*
+///   (`kestrel-hir-lower/src/stmt.rs:126`),
+/// - a parameter's and `self`'s is `Span::synthetic(0)` = `0..0`
+///   (`kestrel-hir-lower/src/lib.rs:71,79`),
+/// - every desugaring temp (`$iter`, `$try_value`, `$dsi`, `$opts`,
+///   `$let_tmp`, `_cparam_N`) borrows the span of the construct it came from.
+///
+/// Deliberately *not* a `is_synthetic() || name.starts_with('$')` heuristic:
+/// closure-destructure params (`_cparam_N`,
+/// `kestrel-hir-lower/src/expr.rs:1445`) get a real, non-synthetic span (the
+/// closure's) and a name with no `$`, so both heuristics wave them through.
+/// Text equality is the property we actually need, and it stays correct for
+/// spans and synthetic names that don't exist yet.
+pub fn span_spells_name(source: &str, span: &Span, name: &str) -> bool {
+    source.get(span.start..span.end) == Some(name)
+}
+
+/// The `enclosing_decl_at` fallback, restricted to the decl's *own name*.
+///
+/// `semantic::enclosing_decl_at` resolves any offset inside a declaration's
+/// extent to that declaration — including every offset in its body. Handlers
+/// that use it as the "cursor is on a declaration's identifier" fallback must
+/// therefore re-check that the cursor really is on the identifier: otherwise a
+/// cursor on a `let` binding or a parameter name (neither of which is an
+/// `HirExpr`, so `hir_expr_at` can't see them) silently resolves to the
+/// enclosing function — and rename then renames *that* workspace-wide.
+///
+/// `get_name_span` is the same function `rename::identifier_for_target` uses
+/// to find the text it would edit, so the two agree by construction.
+pub fn decl_at_name_offset(world: &World, file_entity: Entity, offset: usize) -> Option<Entity> {
+    let decl = crate::semantic::enclosing_decl_at(world, file_entity, offset)?;
+    let cst = world.get::<CstNode>(decl)?;
+    let decl_span = world.get::<DeclSpan>(decl)?;
+    let name_span = get_name_span(&cst.0, decl_span.0.file_id)?;
+    (name_span.start <= offset && offset <= name_span.end).then_some(decl)
 }
 
 pub fn entity_file(world: &World, entity: Entity) -> Option<Entity> {
