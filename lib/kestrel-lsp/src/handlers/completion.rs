@@ -134,7 +134,18 @@ fn member_completion(
 
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    push_members_for_type(ctx, world, root, &receiver_ty, &mut out, &mut seen);
+    // `body_entity` is the visibility context: the enclosing body is where
+    // the member is being named from. Same convention `signature_help` uses
+    // when it passes `context` to `TypeMembersByName`.
+    push_members_for_type(
+        ctx,
+        world,
+        root,
+        &receiver_ty,
+        body_entity,
+        &mut out,
+        &mut seen,
+    );
     if !prefix.is_empty() {
         out.retain(|it| it.label.starts_with(prefix));
     }
@@ -266,11 +277,22 @@ fn body_entity_containing(
     }
 }
 
+/// Push every member of `ty` that is visible from `context`.
+///
+/// Member discovery is delegated to name-res rather than hand-rolled: the
+/// old walk (direct children + extension children) missed every
+/// protocol-extension default on a concrete conformer — `map`/`filter` on
+/// an `Iterator` type, the whole `Comparable` family, etc.
+///
+/// Only `ResolvedTy::Named` is handled. Type-parameter, opaque and `&T`
+/// receivers are a separate gap (`TypeMembers` measures empty for a bare
+/// type parameter) and are deliberately out of scope here.
 fn push_members_for_type(
     ctx: &QueryContext<'_>,
     world: &World,
     root: Entity,
     ty: &ResolvedTy,
+    context: Entity,
     out: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
@@ -279,33 +301,73 @@ fn push_members_for_type(
         _ => return,
     };
 
-    // Direct children (fields, methods, init) of the nominal type.
+    // Nested type declarations first: neither member query carries them
+    // (`TypeMembers` accepts Callable/Gettable/TypeAlias/EnumCase,
+    // `ProtocolMembers` only Callable/Gettable), so `Outer.Inner` would
+    // vanish without this pass. Direct children only — the grammar makes a
+    // nested type in an extension body unparseable (`ExtensionBodyItem` =
+    // Function | Subscript | Initializer | TypeAlias | Field).
     for &child in world.children_of(entity) {
-        push_member_entity(world, child, out, seen);
-    }
-
-    // Extensions targeting this type, then their children.
-    let exts = ctx.query(kestrel_name_res::ExtensionsFor {
-        target: entity,
-        root,
-    });
-    for ext in exts {
-        for &child in world.children_of(ext) {
-            push_member_entity(world, child, out, seen);
+        if matches!(
+            world.get::<NodeKind>(child),
+            Some(NodeKind::Struct | NodeKind::Enum | NodeKind::Protocol)
+        ) {
+            push_member_if_visible(ctx, world, child, context, out, seen);
         }
     }
 
-    // Protocol conformances aren't expanded here; M3 keeps it simple.
-    // Methods provided by extensions are already covered above.
+    // Two queries, deliberately not unified: they disagree on
+    // `include_parent_direct_children`. A protocol inherits its parents'
+    // *direct* requirements (`ProtocolMembers(Comparable)` includes
+    // `Equatable::isEqual`); a conforming type does not — it only picks up
+    // protocol-*extension* defaults. Routing a protocol through
+    // `TypeMembers` would silently drop inherited requirements.
     if matches!(world.get::<NodeKind>(entity), Some(&NodeKind::Protocol)) {
         let members = ctx.query(kestrel_name_res::ProtocolMembers {
             protocol: entity,
             root,
         });
         for member in members.iter() {
-            push_member_entity(world, member.entity, out, seen);
+            push_member_if_visible(ctx, world, member.entity, context, out, seen);
         }
+        return;
     }
+
+    // Emission order is Direct → Extension → ProtocolExtension and `seen`
+    // keeps the first entry per key, so a type's own member shadows an
+    // inherited default of the same name.
+    let members = ctx.query(kestrel_name_res::TypeMembers {
+        type_entity: entity,
+        root,
+    });
+    for member in members.iter() {
+        push_member_if_visible(ctx, world, member.entity, context, out, seen);
+    }
+}
+
+/// The single visibility choke point for member completion.
+///
+/// `TypeMembers` / `ProtocolMembers` are deliberately unfiltered ("the
+/// union of every candidate"); the filter normally lives in the
+/// `*MembersByName` wrappers via `filter_members_by_name`. Since we consume
+/// the unfiltered maps directly, the `IsVisibleFrom` check has to be
+/// re-applied here — otherwise `private` / `fileprivate` members leak into
+/// cross-module completion.
+fn push_member_if_visible(
+    ctx: &QueryContext<'_>,
+    world: &World,
+    entity: Entity,
+    context: Entity,
+    out: &mut Vec<CompletionItem>,
+    seen: &mut HashSet<String>,
+) {
+    if !ctx.query(kestrel_name_res::IsVisibleFrom {
+        target: entity,
+        context,
+    }) {
+        return;
+    }
+    push_member_entity(world, entity, out, seen);
 }
 
 fn push_member_entity(
@@ -780,6 +842,194 @@ mod tests {
             labels.contains("x"),
             "expected field x on R; got {:?}",
             labels
+        );
+    }
+
+    /// F39: a protocol-extension default must show up on a concrete
+    /// conformer. The old hand-rolled walk only looked at the type's own
+    /// children and extensions targeting the type itself, so every
+    /// `extend SomeProtocol { ... }` default (`Comparable`'s comparison
+    /// family, all ~16 `extend Iterator` combinators) was invisible.
+    #[test]
+    fn member_completion_includes_protocol_extension_default() {
+        let src = "module T\n\
+                   protocol Greeter { func name() -> lang.i64 }\n\
+                   extend Greeter { public func greet() -> lang.i64 { 7 } }\n\
+                   struct P: Greeter {\n\
+                   \x20   var x: lang.i64;\n\
+                   \x20   func name() -> lang.i64 { 1 }\n\
+                   }\n\
+                   func f(p: P) { p. }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/protoext.ks", src.into());
+        c.build(f);
+        let cur = src.rfind("p. ").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `p.`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("greet"),
+            "protocol-extension default `greet` must be offered on conformer P; got {:?}",
+            labels
+        );
+        assert!(
+            labels.contains("x") && labels.contains("name"),
+            "direct members must still be offered; got {:?}",
+            labels
+        );
+    }
+
+    /// F39: the protocol-extension default must flow through *inherited*
+    /// protocols too — `ConformingProtocols` is transitive, so a default on
+    /// `Base` reaches a type that only declares conformance to `Derived`.
+    #[test]
+    fn member_completion_includes_inherited_protocol_extension_default() {
+        let src = "module T\n\
+                   protocol Base { func baseFn() -> lang.i64 }\n\
+                   extend Base { public func baseDefault() -> lang.i64 { 3 } }\n\
+                   protocol Derived: Base { func derivedFn() -> lang.i64 }\n\
+                   struct S: Derived {\n\
+                   \x20   var x: lang.i64;\n\
+                   \x20   func baseFn() -> lang.i64 { 1 }\n\
+                   \x20   func derivedFn() -> lang.i64 { 2 }\n\
+                   }\n\
+                   func f(s: S) { s. }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/inherited.ks", src.into());
+        c.build(f);
+        let cur = src.rfind("s. ").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `s.`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("baseDefault"),
+            "inherited protocol-extension default `baseDefault` must be offered; got {:?}",
+            labels
+        );
+    }
+
+    /// F39: `TypeMembers` is deliberately *not* visibility-filtered (it is
+    /// "the union of every candidate"), so completion has to apply
+    /// `IsVisibleFrom` itself. Completing from another module must not
+    /// offer `private` / `fileprivate` members.
+    #[test]
+    fn member_completion_hides_cross_module_private_and_fileprivate() {
+        let a_src = "module A\n\
+                     public struct S {\n\
+                     \x20   public var x: lang.i64;\n\
+                     \x20   private func hidden() -> lang.i64 { 1 }\n\
+                     \x20   fileprivate func fp() -> lang.i64 { 2 }\n\
+                     }\n";
+        let b_src = "module B\n\
+                     import A.(S)\n\
+                     func f(s: S) { s. }\n";
+        let mut c = Compiler::new();
+        let fa = c.set_source("/tmp/f39_a.ks", a_src.into());
+        c.build(fa);
+        let fb = c.set_source("/tmp/f39_b.ks", b_src.into());
+        c.build(fb);
+        let cur = b_src.rfind("s. ").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, fb, cur, "")
+            .expect("member completion should fire on `s.` across modules");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("x"),
+            "public field `x` must be offered; got {:?}",
+            labels
+        );
+        assert!(
+            !labels.contains("hidden"),
+            "private member must not leak across modules; got {:?}",
+            labels
+        );
+        assert!(
+            !labels.contains("fp"),
+            "fileprivate member must not leak across files; got {:?}",
+            labels
+        );
+    }
+
+    /// F39 guard: neither `TypeMembers` nor `ProtocolMembers` accepts a
+    /// nested Struct/Enum/Protocol child (their filters are
+    /// Callable/Gettable/TypeAlias/EnumCase and Callable/Gettable), so the
+    /// dedicated nested-types pass is load-bearing — a naive swap to the
+    /// member queries would silently drop `Outer.Inner`.
+    #[test]
+    fn member_completion_includes_nested_type() {
+        let src = "module T\n\
+                   struct Outer {\n\
+                   \x20   var x: lang.i64;\n\
+                   \x20   struct Inner { var y: lang.i64 }\n\
+                   }\n\
+                   func f(o: Outer) { o. }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/nested.ks", src.into());
+        c.build(f);
+        let cur = src.rfind("o. ").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `o.`");
+        let labels: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+        assert!(
+            labels.contains("Inner"),
+            "nested type `Inner` must be offered; got {:?}",
+            labels
+        );
+        assert!(
+            labels.contains("x"),
+            "direct field `x` must still be offered; got {:?}",
+            labels
+        );
+    }
+
+    /// F39: `TypeMembers` emits Direct → Extension → ProtocolExtension and
+    /// `seen` keeps the first entry per `name::kind` key, so a type's own
+    /// method shadows a same-named protocol-extension default — exactly
+    /// once, with the direct declaration's signature.
+    #[test]
+    fn member_completion_direct_member_shadows_protocol_default() {
+        let src = "module T\n\
+                   protocol Greeter { func name() -> lang.i64 }\n\
+                   extend Greeter { public func greet() -> lang.i64 { 7 } }\n\
+                   struct P: Greeter {\n\
+                   \x20   var x: lang.i64;\n\
+                   \x20   func name() -> lang.i64 { 1 }\n\
+                   \x20   func greet(loudly: lang.i64) -> lang.i64 { loudly }\n\
+                   }\n\
+                   func f(p: P) { p. }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/shadow.ks", src.into());
+        c.build(f);
+        let cur = src.rfind("p. ").unwrap() + 2;
+        let world = c.world();
+        let root = c.root();
+        let ctx = world.query_context();
+        let items = member_completion(&ctx, world, root, f, cur, "")
+            .expect("member completion should fire on `p.`");
+        let greets: Vec<&CompletionItem> = items.iter().filter(|i| i.label == "greet").collect();
+        assert_eq!(
+            greets.len(),
+            1,
+            "exactly one `greet` item expected; got {:?}",
+            greets
+        );
+        // The struct's own `greet` takes a parameter; the protocol default
+        // takes none. Direct-wins means we see the parameterised signature.
+        assert_eq!(
+            greets[0].detail.as_deref(),
+            Some("(loudly)"),
+            "the direct declaration must win over the protocol-extension default"
         );
     }
 
