@@ -158,8 +158,9 @@ impl TypeCache {
     ) -> TypeRepr {
         let key = (entity, type_args.to_vec());
 
-        // `is_single_field`: this Named type is carried as a single scalar — a one-field
-        // struct (newtype) or a pure-discriminant enum.
+        // `is_single_field`: this Named type has at most one runtime component — a
+        // one-field struct (newtype) or a pure-discriminant enum. It is carried as a
+        // single scalar only when that component is itself scalar (see below).
         // `single_field_ty`: the field type of a one-field struct, when applicable. A
         // newtype's value *is* its field's value, so its representation must delegate to
         // the field's repr (the single source of truth — see the collapse branch below).
@@ -213,17 +214,26 @@ impl TypeCache {
         if is_single_field && size <= 8 {
             // A single-field newtype's value is exactly its field's value (see
             // `compile_struct` / `compile_struct_extract` in inst.rs), so its
-            // representation must be the field's representation. Collapsing by byte size
-            // alone would mis-type e.g. `Float64` (an f64 newtype) as I64 while the body
-            // carries an f64 — making the auto clone-shim's signature disagree with its
-            // body and fail Cranelift verification. Delegating keeps layout single-
-            // sourced. Pure-discriminant enums and one-field structs over a non-scalar
-            // field fall through to the integer-by-size mapping below.
-            if let Some(field_ty) = single_field_ty
-                && let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module)
-            {
-                return TypeRepr::Scalar(t);
+            // representation must be the field's representation. Collapsing by
+            // byte size alone would mis-type e.g. `Float64` (an f64 newtype) as
+            // I64 while the body carries an f64 — making the auto clone-shim's
+            // signature disagree with its body and fail Cranelift verification.
+            // Delegating keeps layout single-sourced.
+            if let Some(field_ty) = single_field_ty {
+                // Delegate to a SCALAR field (Float64 -> f64, Pointer[T] -> ptr).
+                // A newtype over an AGGREGATE field is itself carried by address:
+                // collapsing it to an integer would mismatch its by-memory clone/
+                // construction (the body builds a slot and returns its `ptr`, which
+                // is not an integer scalar) and every by-repr copy would move 8
+                // bytes of ADDRESS instead of contents. See IoError (a newtype over
+                // a payload-carrying enum). Must stay in lockstep with
+                // `kestrel_codegen_llvm::ty::TypeCache::classify_named`.
+                if let TypeRepr::Scalar(t) = self.repr(field_ty, arena, module) {
+                    return TypeRepr::Scalar(t);
+                }
+                return TypeRepr::Aggregate { size, align };
             }
+            // Pure-discriminant enum: a small integer discriminant.
             let cl_ty = match size {
                 1 => ir::types::I8,
                 2 => ir::types::I16,

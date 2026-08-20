@@ -964,6 +964,22 @@ fn compile_struct(
                     fc.ctx.module,
                     &fc.ctx.tc,
                 );
+                // This is where F40's wrong value was minted, so this is where the
+                // layout authorities are cross-checked. `resolve_slot_value` on an
+                // AGGREGATE field yields that field's stack-slot ADDRESS — fine as
+                // a value only if the struct is itself carried by address. A
+                // `Scalar` struct repr over an aggregate field therefore returns a
+                // pointer typed as an integer, and every by-repr copy downstream
+                // moves 8 bytes of address instead of contents. `classify_named`
+                // must answer `Aggregate` for a newtype over an aggregate field.
+                debug_assert!(
+                    !fc.ctx
+                        .tc
+                        .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module)
+                        .is_aggregate(),
+                    "scalar-repr struct over an aggregate field: the constructed \
+                     value would be a stack-slot address (F40)"
+                );
                 return Ok(resolve_slot_value(fc, builder, field_ty, fields[0].1));
             }
             let slot = mem::alloc_stack_slot(builder, repr.size(), repr.align(), ptr_ty);
@@ -1356,6 +1372,27 @@ fn compile_struct_extract(
         .tc
         .repr(field_ty, &fc.ctx.module.ty_arena, fc.ctx.module);
 
+    // Layout-authority cross-check, deliberately ABOVE the @guaranteed early
+    // return so it is reached on BOTH ownership paths. A scalar-repr struct
+    // whose field is carried by address cannot be consistent: the "value" of
+    // such a struct can only be a smuggled pointer, and every by-repr copy
+    // downstream then moves the address instead of the contents. This is F40 —
+    // `classify_named` must classify a newtype over an aggregate field as
+    // `Aggregate`.
+    //
+    // The previous guard lived below as an `if let (Scalar, Scalar)`, which
+    // does not MATCH a mixed pair and so silently fell through on the one input
+    // it named. An assertion must not be spelled as a pattern that the failure
+    // case fails to match.
+    debug_assert!(
+        !matches!(
+            (operand_repr, field_repr),
+            (TypeRepr::Scalar(_), TypeRepr::Aggregate { .. })
+        ),
+        "scalar-repr struct with an aggregate field {field:?} — classify_named must \
+         carry a newtype over an aggregate by address (F40)"
+    );
+
     // @guaranteed operands are always pointers (Option B invariant).
     // Return the field address — CopyValue handles the load.
     if is_borrowed {
@@ -1395,8 +1432,8 @@ fn compile_struct_extract(
     // @owned: single-field scalar newtype — value IS the field. A newtype's
     // representation IS its field's (classify_named delegates to it), so the @owned
     // value already carries the field's scalar; no load or bitcast coercion is needed.
-    // The assert pins that single-source-of-truth invariant — if it ever fires, a
-    // layout authority has diverged from classify_named again.
+    // The mixed (Scalar, Aggregate) case is asserted against above; any other
+    // combination falls through to the offset+load below, which is correct for it.
     if let (TypeRepr::Scalar(base_cl), TypeRepr::Scalar(field_cl)) = (operand_repr, field_repr) {
         debug_assert_eq!(
             base_cl, field_cl,

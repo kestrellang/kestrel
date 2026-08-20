@@ -80,17 +80,42 @@ impl<'a, 'm> FuncCompiler<'a, 'm> {
     /// Debug-only check: the Cranelift value type must match the MIR ownership.
     ///
     /// @guaranteed scalars are pointers (ptr_ty). @owned scalars are the scalar
-    /// type itself. A mismatch means a pointer leaked through without deref
-    /// (or a deref happened where a pointer was expected).
+    /// type itself. Aggregates are always carried by address, so their IR type is
+    /// ptr_ty regardless of ownership. A mismatch means a pointer leaked through
+    /// without deref (or a deref happened where a pointer was expected).
+    ///
+    /// LIMITATION — self-consistency only. This checks a value against
+    /// `classify_named`'s own answer, so it inherits any error that function
+    /// makes: if classification says a type is `Scalar(I64)` when it should be
+    /// `Aggregate`, an address smuggled as an I64 satisfies every test here. On a
+    /// 64-bit target `expected_scalar != ptr_ty` cannot distinguish a real I64
+    /// from a pointer at all. Do NOT extend this into a general pointer-leak
+    /// detector — classification bugs (F40) are out of its reach by construction;
+    /// they are caught by cross-backend execution tests instead.
     fn verify_value_repr(&self, builder: &FunctionBuilder, id: ValueId, val: Value) {
         let vd = &self.body.values[id.index()];
         let repr = self.ctx.tc.cached_repr(vd.ty);
+        let ptr_ty = self.ctx.ptr_ty;
+
+        // The one honest check available: an aggregate is carried by address.
+        if let Some(TypeRepr::Aggregate { .. }) = repr {
+            let cl_ty = builder.func.dfg.value_type(val);
+            if cl_ty != ptr_ty {
+                eprintln!(
+                    "VERIFY: aggregate value {} mapped to {:?} (expected ptr_ty) in {}",
+                    id.index(),
+                    cl_ty,
+                    self.func.name,
+                );
+            }
+            return;
+        }
+
         let Some(TypeRepr::Scalar(expected_scalar)) = repr else {
             return;
         };
 
         let cl_ty = builder.func.dfg.value_type(val);
-        let ptr_ty = self.ctx.ptr_ty;
 
         match vd.ownership {
             kestrel_mir::value::Ownership::Owned => {
