@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 use kestrel_ast_builder::{Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
+use kestrel_hecs::guard::OnDrop;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_mir::{FnKind, MirTy, ParamConvention, TyId};
@@ -274,20 +275,36 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
         } => {
             let is_cycle = OPAQUE_RESOLVE_STACK.with(|stack| !stack.borrow_mut().insert(*origin));
             if is_cycle {
+                // Early-out *before* the insert took effect for us, so no
+                // guard is owed here.
                 return ctx.module.ty_arena.error();
             }
+            // Remove on every exit path including an unwind: a leaked entry
+            // makes this origin look like a cycle forever, so every later
+            // lowering of the same opaque type on this thread silently
+            // yields `error()` (F22 — see `kestrel_hecs::guard`).
+            let origin = *origin;
+            let _stack_guard = OnDrop::new(move || {
+                OPAQUE_RESOLVE_STACK.with(|stack| {
+                    stack.borrow_mut().remove(&origin);
+                });
+            });
 
             let body = ctx.query.query(InferBody {
-                entity: *origin,
+                entity: origin,
                 root: ctx.root,
             });
-            let concrete = body
+            let Some(concrete) = body
                 .as_ref()
                 .and_then(|b| b.opaque_concrete_type.as_ref())
                 .cloned()
-                .unwrap_or_else(|| {
-                    panic!("ICE: opaque type origin {:?} has no concrete type", origin)
-                });
+            else {
+                // Fail soft, like `resolve_callable_return_type` does for the
+                // identical question: an opaque whose body never produced a
+                // concrete type is an upstream inference failure that already
+                // reported, and `error()` lets the rest of the module lower.
+                return ctx.module.ty_arena.error();
+            };
 
             // `origin_args` is built parallel to the opaque origin's
             // substitution list: the origin's OWN type params first, then the
@@ -301,10 +318,10 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             // that `origin_args` doesn't carry.
             let mut type_params: Vec<Entity> = ctx
                 .world
-                .get::<TypeParams>(*origin)
+                .get::<TypeParams>(origin)
                 .map(|tp| tp.0.clone())
                 .unwrap_or_default();
-            let mut ancestor = ctx.world.parent_of(*origin);
+            let mut ancestor = ctx.world.parent_of(origin);
             while let Some(p) = ancestor {
                 if let Some(tp) = ctx.world.get::<TypeParams>(p) {
                     type_params.extend(tp.0.iter().copied());
@@ -313,10 +330,7 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             }
 
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
-            let result = lower_resolved_ty_preserving(ctx, &substituted);
-
-            OPAQUE_RESOLVE_STACK.with(|stack| stack.borrow_mut().remove(origin));
-            result
+            lower_resolved_ty_preserving(ctx, &substituted)
         },
         ResolvedTy::Never => ctx.module.ty_arena.never(),
         ResolvedTy::Error => ctx.module.ty_arena.error(),

@@ -24,6 +24,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use kestrel_ast_builder::{TypeParams, WhereClause as AstWhereClause, WhereConstraint};
+use kestrel_hecs::guard::OnDrop;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::{Builtin, HirTy};
 use kestrel_name_res::ResolveBuiltin;
@@ -206,11 +207,15 @@ impl QueryFn for NominalStaticness {
     fn execute(&self, ctx: &QueryContext<'_>) -> StaticnessInfo {
         let key = (self.entity, self.root);
         COMPUTING_STATICNESS.with(|stack| stack.borrow_mut().push(key));
-        let result = nominal_staticness_impl(ctx, self.entity, self.root);
-        COMPUTING_STATICNESS.with(|stack| {
-            stack.borrow_mut().retain(|entry| *entry != key);
+        // Unwind-safe pop — same reasoning as COMPUTING_COPY_SEMANTICS in
+        // lib.rs: a leaked entry would make this nominal answer `Static`
+        // for the rest of the thread's life (F22).
+        let _guard = OnDrop::new(|| {
+            COMPUTING_STATICNESS.with(|stack| {
+                stack.borrow_mut().pop();
+            });
         });
-        result
+        nominal_staticness_impl(ctx, self.entity, self.root)
     }
 
     fn describe(&self) -> String {

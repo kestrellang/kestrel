@@ -9,6 +9,7 @@ use crate::change::ChangeSet;
 use crate::component::{Component, ComponentStore};
 use crate::entity::Entity;
 use crate::fingerprint::Fingerprint;
+use crate::guard::OnDrop;
 use crate::world::Revision;
 
 /// Identifies a specific query invocation (type + key hash).
@@ -334,6 +335,22 @@ impl<'a> QueryContext<'a> {
                 .borrow_mut()
                 .update_verified::<Q>(q, self.revision);
 
+            // The mark is a *promise*, made good either by `deps_unchanged`
+            // agreeing or by `execute_query` rewriting the memo. If anything
+            // between here and one of those panics and a host catches it, the
+            // promise is never kept: the memo keeps its OLD value behind a
+            // `verified_at` that says "confirmed this revision", so every
+            // later reader in this revision silently takes a stale value.
+            // Roll the mark back on the unwind path only — the normal path
+            // legitimately keeps it (F22). The guard must outlive the
+            // re-execution below, not just the verification.
+            let queries = self.queries;
+            let _verify_guard = OnDrop::new(|| {
+                if std::thread::panicking() {
+                    queries.borrow_mut().update_verified::<Q>(q, verified_at);
+                }
+            });
+
             // Check if all deps are still valid (may recursively verify sub-queries)
             if self.deps_unchanged(&deps, verified_at) {
                 // Memo still valid — clone the value only now; cloning it
@@ -348,7 +365,8 @@ impl<'a> QueryContext<'a> {
                 // Memo unexpectedly gone — fall through to re-execute.
             }
 
-            // Deps changed — fall through to re-execute
+            // Deps changed — re-execute, still under the guard.
+            return self.execute_query(q, qk);
         }
 
         // Phase 2: Execute the query
@@ -379,19 +397,48 @@ impl<'a> QueryContext<'a> {
             key: qk.clone(),
             label: q.describe(),
         });
+        // The pop MUST also happen when `q.execute` panics. Hosts catch
+        // per-unit-of-work panics and keep using the same context (see
+        // `kestrel_hecs::guard`); a leaked entry makes every later query
+        // that touches this key report a fabricated cycle, and misfiles
+        // top-level `accumulate` calls under the dead key. Pushes/pops are
+        // strictly LIFO (a nested execute completes inside this one), and
+        // guards unwind innermost-first, so `pop` removes our own entry.
+        let active = &self.active;
+        let _active_guard = OnDrop::new(|| {
+            active.borrow_mut().pop();
+        });
 
-        // Clear old accumulators for this query
-        self.accumulators.borrow_mut().clear_for_query(qk);
+        // Take (don't drop) this query's old accumulated values: the
+        // execution about to replace them can panic partway through, and
+        // losing previously-valid diagnostics to a caught ICE is worse than
+        // keeping stale ones for a revision.
+        let accumulators = self.accumulators;
+        let saved_acc = Cell::new(Some(accumulators.borrow_mut().take_for_query(qk)));
+        let acc_key = qk.clone();
+        let _acc_guard = OnDrop::new(|| {
+            if std::thread::panicking()
+                && let Some(snapshot) = saved_acc.take()
+            {
+                accumulators
+                    .borrow_mut()
+                    .restore_for_query(&acc_key, snapshot);
+            }
+        });
 
-        // Execute in a fresh dependency scope
-        let saved_deps = self.deps.take();
+        // Execute in a fresh dependency scope. The caller's list is restored
+        // by the guard on both paths — `execute_query` records no deps of
+        // its own after `q.execute` returns.
+        let deps = &self.deps;
+        let saved_deps = Cell::new(Some(deps.take()));
+        let _deps_guard = OnDrop::new(|| {
+            if let Some(saved) = saved_deps.take() {
+                deps.replace(saved);
+            }
+        });
         self.exec_count.set(self.exec_count.get() + 1);
         let result = q.execute(self);
         let new_deps = self.deps.take();
-        self.deps.replace(saved_deps);
-
-        // Pop from active stack
-        self.active.borrow_mut().pop();
 
         // Backdating: if the result fingerprint matches the old memo,
         // keep the old changed_at so dependents skip re-execution.

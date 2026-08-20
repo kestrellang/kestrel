@@ -21,6 +21,7 @@ use kestrel_ast_builder::{
     WhereConstraint,
 };
 use kestrel_copy_fold::{CopyLayer, fold_members, instance_semantics};
+use kestrel_hecs::guard::OnDrop;
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::builtin::BuiltinKind;
 use kestrel_hir::{Builtin, HirTy};
@@ -501,11 +502,19 @@ impl QueryFn for NominalCopySemantics {
         // before invoking the query (see `hir_type_copy_semantics`).
         let key = (self.entity, self.root);
         COMPUTING_COPY_SEMANTICS.with(|stack| stack.borrow_mut().push(key));
-        let result = nominal_copy_semantics_impl(ctx, self.entity, self.root);
-        COMPUTING_COPY_SEMANTICS.with(|stack| {
-            stack.borrow_mut().retain(|entry| *entry != key);
+        // The pop must survive an unwind: hosts catch ICEs per body and keep
+        // the thread (the test harness even reuses worker threads across
+        // `.ks` files), and a leaked entry makes `computing_contains` answer
+        // yes forever — i.e. this nominal reports `Copyable` for the rest of
+        // the process. `pop` is exact: the query framework panics on
+        // re-entering the same key, so `key` is on the stack at most once,
+        // and pushes nest strictly (F22).
+        let _guard = OnDrop::new(|| {
+            COMPUTING_COPY_SEMANTICS.with(|stack| {
+                stack.borrow_mut().pop();
+            });
         });
-        result
+        nominal_copy_semantics_impl(ctx, self.entity, self.root)
     }
 
     fn describe(&self) -> String {

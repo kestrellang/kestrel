@@ -42,6 +42,7 @@ pub mod change;
 pub mod component;
 pub mod entity;
 pub mod fingerprint;
+pub mod guard;
 pub mod query;
 pub mod world;
 
