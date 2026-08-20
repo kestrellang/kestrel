@@ -1,0 +1,168 @@
+# G14 + G17 — open decisions
+
+Collaboration surface for the where-clause-subject work. Ground truth and
+evidence live in [`problem.md`](problem.md); this file holds **questions,
+options, and answers**.
+
+## How to use this file
+
+- Every decision gets a `D<n>` heading, a **Status** line, and options with
+  their real costs. Do not delete an option — mark it rejected and say why.
+- **Record who decided and on what evidence.** "Maintainer, 2026-08-20" or
+  "measured: suite run under `KESTREL_AUDIT_SUBJECT`". A decision with no
+  evidence line is a guess and should be labelled one.
+- If you find something that **refutes** a claim in `problem.md`, edit that
+  file directly and note it here under *Refutations landed*. Being corrected is
+  cheaper before implementation than after — three of the original audit claims
+  and three of the first-pass analysis claims have already fallen.
+- Claim a decision by putting your name/agent on the **Owner** line before
+  working on it, so two agents don't design the same thing twice.
+
+## Coordination
+
+| | |
+| --- | --- |
+| **Audit IDs** | `G14`, `G17` (= addendum `A15`), `A16`; interacts with `G16`, `F9` |
+| **Primary crates** | `kestrel-type-infer` (`conformance.rs`, `where_clauses.rs`, `resolve.rs`, `entailment.rs`), `kestrel-analyze` (`compilation/conformance_completeness.rs`) |
+| **Shared branch** | `arch/fixes` — multiple agents. **Never bare `git commit`; scope every commit to explicit paths.** |
+| **Tests** | `/triage` skill only. Never `cargo test -p kestrel-test-suite`. Never edit a test to make it pass. |
+| **Build** | `cargo build --release --bin kestrel` (the binary is owned by the root crate, not `kestrel-compiler-driver`) |
+
+**Danger zone for concurrent edits:** `conformance.rs:313-373`
+(`extension_bounds_hold_impl`) and `conformance_completeness.rs:1550-1660`
+(`collect_provided_members_for_conformance` / `extension_clauses_entailed`).
+If you are touching either, say so here first.
+
+---
+
+## D1 — Is the third evaluator in scope?
+
+**Status:** OPEN — blocking. **Owner:** unclaimed.
+
+`conformance_completeness.rs:266-271` + `:369` decides the same-protocol default
+case and **never reads where clauses**. It is why §A13's scenario does not
+reproduce.
+
+| option | cost | consequence |
+| --- | --- | --- |
+| **(a) In scope** | largest; touches `E454`'s main path | The only version where "the clauses are evaluated" is true for the common case |
+| **(b) Out of scope, filed separately** | smallest | G14 gets fixed on two paths most programs never take. Honest only if the new finding is filed and the audit says so |
+| **(c) Out of scope, unfiled** | — | **Rejected.** Leaves the audit claiming a fix that does not cover the reachable path |
+
+**Recommendation:** (a), because (b) means shipping a fix whose own repro is
+the case it does not cover. Note this makes G14 materially bigger than
+"delete the second evaluator".
+
+---
+
+## D2 — What is `recv` when the analyzer asks whether a protocol-extension member is provided?
+
+**Status:** OPEN — blocks D5. **Owner:** unclaimed.
+
+The analyzer holds a `ResolvedTy` for the conformer. `extension_bounds_hold`
+wants an `HirTy`.
+
+Per `problem.md`, `resolved_ty_to_hir` + `self_type_for_compare` is **safe**
+(an `Infer` arg excludes a specialized extension rather than selecting one) but
+**weak** (a generic conformer degrades to today's permit).
+
+| option | cost | consequence |
+| --- | --- | --- |
+| **(a) Reify via `resolved_ty_to_hir`, accept the ceiling** | ~0 | Concrete conformers get real answers; generic ones stay permissive. Ceiling must be documented at the call site, not just here |
+| **(b) Thread a real `HirTy` for the conformer** | unknown — needs a survey of what the analyzer has at `:1578` | Removes the ceiling |
+| **(c) Give the binder a `ResolvedTy` arm** | medium | A third representation in the family the work exists to shrink. Weak option |
+
+**Recommendation:** (a) for the first change, with the ceiling written into the
+function's doc comment as a known limit and a follow-up filed — **provided D3
+does not depend on beating it.**
+
+---
+
+## D3 — Does the binder handle projections (`I.Item`) in the first change?
+
+**Status:** OPEN. **Owner:** unclaimed.
+
+`WhereClause::ProjectionBound` keeps `{ base, assoc }`, and one real consumer
+exists (`type-infer/src/lib.rs:348`, method-level bounds). Evaluating it means
+resolving `base` to a concrete type and projecting `assoc` on it.
+
+| option | cost | consequence |
+| --- | --- | --- |
+| **(a) `None` in the first change** | ~0 | G17 becomes "add one arm to a function that already exists" — a much better position than today. Unsoundness stays open meanwhile |
+| **(b) Include it** | larger; needs the projection path *and* `resolve_projection_subject`'s `TypeParameter`-only restriction lifted so `Self.Item` stops collapsing | Closes the only unsound-accept in the audit |
+
+**Recommendation:** (a). G17 is the more serious bug, but bundling the audit's
+one soundness fix into a change that also rewires three evaluators makes both
+harder to verify. Sequence them.
+
+---
+
+## D4 — Does `bind_clause_subject` also fix A16's parent walk?
+
+**Status:** OPEN — low stakes. **Owner:** unclaimed.
+
+A16's tier 2 is inert because bounds live on the *parent* decl. A binder that
+owns the ancestor walk subsumes it. But no live wrong answer has been
+constructed from A16 (see *Inferred, not observed* in `problem.md`).
+
+**Recommendation:** let it fall out if the binder needs the parent walk anyway;
+do not add scope for it. Re-check whether A16 can be closed *after* D1–D3 land.
+
+---
+
+## D5 — How do we prove the evaluators agree?
+
+**Status:** OPEN. **Owner:** unclaimed.
+
+A direct differential test **cannot be written before D2 is decided** — pairing
+the two functions requires manufacturing a `recv`, which is D2. Build it the
+obvious way and both sides permit, so the test proves nothing. A two-way
+differential would also report "agree" on cases the third evaluator decides
+(D1).
+
+| option | cost | value |
+| --- | --- | --- |
+| **(a) Env-gated audit at `conformance_completeness.rs:1578`** | ~30 lines, no fixtures | `extension_clauses_entailed` already runs there with `extension` and `type_entity` in hand — also call `extension_bounds_hold` and log disagreements. Follow the `KESTREL_AUDIT_DUP` precedent in `kestrel-mir`. Running the existing suite under it enumerates every reachable `(extension, receiver)` pair for free: ~118 files in `declarations/extensions`, 40 containing `extend … where` |
+| **(b) `.ks` pairs per shape** | ~0 Rust | Repros `c_assoc_witness.ks` (diagnostics) and `d_solver_permit.ks` (execution) already are this pair. Not exhaustive; pins the specific divergence |
+| **(c) Rust differential test** | needs `pub(crate)` on `extension_clauses_entailed` | Only meaningful after D2 |
+
+**Recommendation:** (a) **first** — it is the only option that produces the pair
+list the others need, and it is the cheapest way to find out whether the blast
+radius is what `problem.md` claims. Then (b) as the permanent regression tests.
+
+---
+
+## D6 — Audit-doc corrections
+
+**Status:** OPEN — should land with the first commit. **Owner:** unclaimed.
+
+Per `docs/fragility-audit.md`'s own "keeping this current" rule:
+
+1. §A13's failure scenario does not reproduce — replace it with the
+   cross-protocol witness shape (`c_assoc_witness.ks`).
+2. G14's statement is too narrow — it is not bare-assoc-specific; restate as
+   the arity mismatch between `LowerExtensionTargetTypeArgs` and
+   `hir_args(recv)`.
+3. A16's "Correction to the finder's title" is itself wrong —
+   `type Item: Equatable` is stored as `Conformances`, not `AstWhereClause`.
+4. File the third evaluator as a new finding if D1 lands as (b).
+
+---
+
+## Decided
+
+*(nothing yet)*
+
+## Refutations landed
+
+- **2026-08-20** — §A13's scenario does not reproduce; a third evaluator masks
+  it. Source: diagnosis agent, repro `temp/g14/a_assoc_subject.ks`.
+- **2026-08-20** — G14 is not bare-assoc-specific; a plain `TypeParameter`
+  subject fails identically. Source: repro `temp/g14/g_param_subject_control.ks`.
+- **2026-08-20** — A16's counter-example is wrong (`Conformances`, not
+  `AstWhereClause`). Source: `type_alias.rs:80-83`, repro `temp/g14/j_assoc_bounded.ks`.
+- **2026-08-20** — "`extension_bounds_hold` is the canonical evaluator, just
+  delete the other one" is wrong: it permits unconditionally for protocol
+  extensions, so deleting the analyzer's evaluator converts a false-reject into
+  a blanket permit. Source: `conformance.rs:332`/`:366` traced against
+  `LowerExtensionTargetTypeArgs` returning `Some(vec![])`.
