@@ -631,25 +631,13 @@ fn substitute_op_type(
     op: &mut crate::op::Op,
     subst: &SubstMap,
 ) {
-    use crate::op::Op;
-    let resolve = |arena: &mut TyArena, ty: TyId| {
-        collect::substitute_and_resolve(arena, witnesses, ty, subst)
+    // The variant list lives once, in `op::op_ty_variants!` — see the comment
+    // there. Hand-rolling it here is what let `collect_named_types` drift out of
+    // lockstep with this function (G2).
+    let Some(ty) = crate::op::op_type_mut(op) else {
+        return;
     };
-    match op {
-        Op::PtrFromAddress(ty)
-        | Op::PtrRead(ty)
-        | Op::PtrWrite(ty)
-        | Op::PtrNull(ty)
-        | Op::PtrTo(ty)
-        | Op::PtrCast(ty)
-        | Op::PtrBitcast(ty)
-        | Op::SizeOf(ty)
-        | Op::AlignOf(ty)
-        | Op::StackAlloc(ty) => {
-            *ty = resolve(arena, *ty);
-        },
-        _ => {},
-    }
+    *ty = collect::substitute_and_resolve(arena, witnesses, *ty, subst);
 }
 
 fn substitute_callee_and_resolve(
@@ -818,9 +806,27 @@ fn resolve_types_and_layouts(
     let mut mono_enums: IndexMap<MonoTypeKey, MonoEnum> = IndexMap::new();
     let mut layout_cache: HashMap<(Entity, Vec<TyId>), (u64, u64)> = HashMap::new();
 
-    // Fixed-point: loop until no progress (handles dependency chains)
+    // Fixed-point: loop until no progress (handles dependency chains).
+    //
+    // Two things can advance a pass: a layout gets resolved (`progress`), or a
+    // *field* type is discovered that no body ever mentioned (`discovered`).
+    // The latter must be staged in a separate map because the `for` below holds
+    // a shared borrow of `concrete_types` — before G2 that borrow made the loop
+    // structurally unable to grow its own worklist, so a struct whose field
+    // type was never seeded got `all_resolved = false` and was dropped from
+    // `mono_structs` entirely, with no diagnostic and a pointer-sized fallback
+    // layout at both backends.
+    //
+    // Termination: every pass either resolves a layout (finite: one per key) or
+    // inserts a key that was not already in `concrete_types`. The key universe
+    // is finite for any program mono can compile at all — unbounded field-type
+    // growth needs polymorphic recursion, which is impossible by value and
+    // already diverges in function collection when hidden behind a `Pointer`.
     loop {
         let mut progress = false;
+        // Field types found this pass. Populated unconditionally — a field
+        // whose own layout is still unknown is exactly the one we must seed.
+        let mut discovered: IndexMap<(Entity, Vec<TyId>), ConcreteTypeKind> = IndexMap::new();
 
         for ((entity, type_args), kind) in &concrete_types {
             let cache_key = (*entity, type_args.clone());
@@ -842,6 +848,13 @@ fn resolve_types_and_layouts(
                         let concrete_ty =
                             collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                         fields.push(MonoField::new(&field.name, concrete_ty));
+                        collect_named_type_from_ty(
+                            arena,
+                            concrete_ty,
+                            &mut discovered,
+                            structs,
+                            enums,
+                        );
 
                         if let Some((size, align)) =
                             mono_size_and_align(arena, concrete_ty, target, &layout_cache)
@@ -880,6 +893,13 @@ fn resolve_types_and_layouts(
                             let concrete_ty =
                                 collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                             mono_fields.push(MonoField::new(&field.name, concrete_ty));
+                            collect_named_type_from_ty(
+                                arena,
+                                concrete_ty,
+                                &mut discovered,
+                                structs,
+                                enums,
+                            );
                             if let Some((size, align)) =
                                 mono_size_and_align(arena, concrete_ty, target, &layout_cache)
                             {
@@ -917,7 +937,16 @@ fn resolve_types_and_layouts(
             }
         }
 
-        if !progress {
+        // Legal only outside the shared-borrow iteration above.
+        let mut added_new = false;
+        for (key, kind) in discovered {
+            if !concrete_types.contains_key(&key) {
+                concrete_types.insert(key, kind);
+                added_new = true;
+            }
+        }
+
+        if !progress && !added_new {
             break;
         }
     }
@@ -1171,6 +1200,16 @@ fn collect_named_types(
                     },
                     _ => {},
                 },
+                // Op type operands. Mirrors `substitute_op_type` via the one
+                // canonical variant list in `op::op_ty_variants!`. `SizeOf`/
+                // `AlignOf` are the ops whose type genuinely escapes — nothing
+                // else in the body mentions it — but seeding all ten costs
+                // nothing and keeps the two walks in lockstep by construction.
+                InstKind::Op1 { op, .. } | InstKind::Op2 { op, .. } | InstKind::Op3 { op, .. } => {
+                    if let Some(ty) = crate::op::op_type(op) {
+                        collect_named_type_from_ty(arena, ty, out, structs, enums);
+                    }
+                },
                 // CopyAddr/Take/BeginBorrowAddr/BeginMutBorrowAddr/DestroyAddr/FieldAddr/Uninit
                 // carry ty but those are address types (Pointer), not Named
                 _ => {},
@@ -1280,6 +1319,7 @@ mod tests {
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
+    use crate::op::Op;
     use crate::{BlockId, ValueId, WitnessMethodKey};
 
     fn entity(id: u32) -> Entity {
@@ -1328,6 +1368,157 @@ mod tests {
         assert_eq!(mono.functions.len(), 1);
         assert!(mono.functions[0].body.is_some());
         assert!(mono.functions[0].name.starts_with("_K0"));
+    }
+
+    /// `struct Name[T] { a: T, b: T, c: T }` — three words wide at `T = i64`.
+    fn three_word_generic(module: &mut MirModule, ent: u32, tp: u32, name: &str) -> Entity {
+        let tp_ty = module.ty_arena.intern(MirTy::TypeParam(entity(tp)));
+        let mut sdef = StructDef::new(entity(ent), name);
+        sdef.type_params = vec![TypeParamDef::new(entity(tp), "T")];
+        for f in ["a", "b", "c"] {
+            sdef.add_field(crate::item::struct_def::FieldDef::new(f, tp_ty));
+        }
+        module.add_struct(sdef);
+        module.register_name(entity(ent), name);
+        entity(ent)
+    }
+
+    fn mono_struct_size(mono: &MonoModule, key: (Entity, Vec<TyId>)) -> Option<u64> {
+        match &mono.structs.get(&key)?.type_info.layout {
+            Some(Layout::Struct(sl)) => Some(sl.size),
+            _ => None,
+        }
+    }
+
+    /// G2, Op half — correlation-free. `collect_named_types` walked value types,
+    /// block params, `Struct`/`Enum`/`Array` type fields and `Literal`
+    /// immediates, but ZERO `Op` type operands, while `substitute_op_type`
+    /// handled all ten. Only `SizeOf`/`AlignOf` genuinely escape; the other
+    /// eight normally produce a `Pointer[T]` value that the `Pointer` recursion
+    /// re-seeds — an incidental correlation, not an invariant.
+    ///
+    /// This test breaks the correlation on purpose: the `PtrCast` result value
+    /// is typed `i64`, not `Pointer[Ghost[i64]]`, so the ONLY mention of
+    /// `Ghost[i64]` anywhere in the body is the op operand.
+    #[test]
+    fn op_type_operand_seeds_named_type() {
+        for op_of in [
+            Op::SizeOf as fn(TyId) -> Op,
+            Op::AlignOf as fn(TyId) -> Op,
+            Op::PtrCast as fn(TyId) -> Op,
+            Op::PtrTo as fn(TyId) -> Op,
+        ] {
+            let mut module = MirModule::new("test");
+            let unit = module.ty_arena.unit();
+            let i64_ty = module.ty_arena.i64();
+            let ghost = three_word_generic(&mut module, 10, 11, "Ghost");
+            let ghost_i64 = module.ty_arena.intern(MirTy::Named {
+                entity: ghost,
+                type_args: vec![i64_ty],
+            });
+
+            // main() { %1 = op[Ghost[i64]] %0; return %0 }
+            // Note the deliberately non-`Pointer` result type on %1.
+            let arg = ValueId::new(0);
+            let result = ValueId::new(1);
+            let body = make_body(
+                vec![Instruction::new(InstKind::Op1 {
+                    result,
+                    op: op_of(ghost_i64),
+                    arg,
+                })],
+                arg,
+                vec![ValueDef::owned(unit), ValueDef::owned(i64_ty)],
+            );
+            module.add_function(FunctionDef {
+                entity: entity(1),
+                name: "main".into(),
+                kind: FunctionKind::Free,
+                type_params: vec![],
+                params: vec![],
+                ret: unit,
+                where_clause: None,
+                body: Some(body),
+                extern_info: None,
+                is_main: true,
+                provides_protocol_default: false,
+            });
+            module.register_name(entity(1), "main");
+
+            let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+            assert_eq!(
+                mono_struct_size(&mono, (ghost, vec![i64_ty])),
+                Some(24),
+                "op operand did not seed Ghost[i64]",
+            );
+        }
+    }
+
+    /// G2, field half. `Inner[i64]` is reachable ONLY as a field type of
+    /// `Outer[i64]`; `collect_named_type_from_ty` never descends into fields,
+    /// and the layout fixed-point loop iterated its worklist by shared borrow so
+    /// it could not add what it found there. `mono_size_and_align` then returned
+    /// `None`, `all_resolved` went false, and the CONTAINING `Outer[i64]` was
+    /// dropped from `mono_structs` too — silently.
+    #[test]
+    fn field_type_seeds_nested_generic() {
+        let mut module = MirModule::new("test");
+        let unit = module.ty_arena.unit();
+        let i64_ty = module.ty_arena.i64();
+
+        let inner = three_word_generic(&mut module, 20, 21, "Inner");
+        let u_ty = module.ty_arena.intern(MirTy::TypeParam(entity(23)));
+        let inner_u = module.ty_arena.intern(MirTy::Named {
+            entity: inner,
+            type_args: vec![u_ty],
+        });
+
+        // struct Outer[U] { i: Inner[U], x: U }
+        let mut outer_def = StructDef::new(entity(22), "Outer");
+        outer_def.type_params = vec![TypeParamDef::new(entity(23), "U")];
+        outer_def.add_field(crate::item::struct_def::FieldDef::new("i", inner_u));
+        outer_def.add_field(crate::item::struct_def::FieldDef::new("x", u_ty));
+        let outer = module.add_struct(outer_def);
+        module.register_name(entity(22), "Outer");
+
+        let outer_i64 = module.ty_arena.intern(MirTy::Named {
+            entity: outer,
+            type_args: vec![i64_ty],
+        });
+
+        // A concrete function is an unconditional mono root, so its value seeds
+        // `Outer[i64]` — and nothing else ever mentions `Inner[i64]`.
+        let ret_val = ValueId::new(0);
+        module.add_function(FunctionDef {
+            entity: entity(1),
+            name: "main".into(),
+            kind: FunctionKind::Free,
+            type_params: vec![],
+            params: vec![],
+            ret: unit,
+            where_clause: None,
+            body: Some(make_body(
+                vec![],
+                ret_val,
+                vec![ValueDef::owned(unit), ValueDef::owned(outer_i64)],
+            )),
+            extern_info: None,
+            is_main: true,
+            provides_protocol_default: false,
+        });
+        module.register_name(entity(1), "main");
+
+        let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
+        assert_eq!(
+            mono_struct_size(&mono, (inner, vec![i64_ty])),
+            Some(24),
+            "field type Inner[i64] was never seeded",
+        );
+        assert_eq!(
+            mono_struct_size(&mono, (outer, vec![i64_ty])),
+            Some(32),
+            "Outer[i64] was dropped because its field type was unresolved",
+        );
     }
 
     #[test]

@@ -27,7 +27,10 @@ pub use immediate::{Immediate, ImmediateKind};
 pub use item::WitnessMethodKey;
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
 pub use layout::{EnumLayout, StructLayout};
-pub use op::{DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness};
+pub use op::{
+    DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness, op_type,
+    op_type_mut,
+};
 pub use substitute::{SubstMap, substitute};
 pub use terminator::SwitchCase;
 pub use ty::{FnKind, MirTy, ParamConvention, TyArena, func_thick_words};

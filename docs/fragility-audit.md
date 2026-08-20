@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 42 fixed · 3 partial · 3 blocked · 18 open** — 64 top-level (F1–F43, G1–G21).
+**Progress: 45 fixed · 3 partial · 3 blocked · 15 open** — 64 top-level (F1–F43, G1–G21).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -67,7 +67,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
   - Stages 2-4 (`Local::name_span`, `AstParam::name_span`, then declaration-site resolution) are planned in [`docs/fragility/F2/decisions.md`](fragility/F2/decisions.md), along with a Stage-2 trap: `AstPat::Binding.span` covers `"var count"`, not `"count"` — the audit's "exact" example was a non-`mut` binding. `Local::name_span` also repairs go-to-definition, document-highlight, find-references, and the `let`→`var` quickfix, whose backward 20-char search for `"let"` can never find its own keyword and may rewrite a *previous* one
 - [ ] **F9** `medium` `incremental-hazard` — `NominalCopySemantics`/`NominalStaticness` memos depend on a thread-local recursion stack that is not part of the cache key
 - [ ] **F11** `medium` `single-source-of-truth` — The solver and the move checker ask `TypeParamCopyRequirement` with different `context`
-- [ ] **F13** `medium` `single-source-of-truth` — A missing `;` after an expression statement in a function body is silently accepted
 - [ ] **F14** `medium` `side-table` — Closure lowering's `SavedState` hand-mirrors `OssaBodyCtx`; three per-body fields are unsaved
 
 ## Query-framework and incremental hazards
@@ -75,7 +74,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **F19** `medium` `incremental-hazard` — `TypedBody`'s hand-written `Hash` omits five output fields and hashes `errors` by length only
 - [ ] **F20** `medium` `ordering-dependency` — The LSP despawns *before* `begin_revision()`, erasing the only invalidation despawn produces
 - [ ] **F21** `medium` `incremental-hazard` — `World::snapshot` clones query memos but resets the accumulator store — and both docs say the opposite
-- [ ] **F22** `medium` `global-state` — Push/pop guards are not unwind-safe, and two hosts catch panics and keep the thread
 - [ ] **F23** `low` `incremental-hazard` — Accumulated values are never pruned by revision or despawn
 
 ## Remaining single-source-of-truth duplication
@@ -106,7 +104,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Gap round (second pass)
 
-- [ ] **G2** `medium` `single-source-of-truth` — The mono layout work-list is seeded only from body VALUE types — it never walks `Op1/Op2/Op3` type operands or struct fields — so a type reachable only that way gets no `MonoStruct` at all, `verify_mono`'s missing-layout guard is structurally unable to fire, and codegen silently answers size 8 / offset 0
 - [ ] **G3** `medium` `fragility` — The thunk pass identifies the closure environment parameter by the magic names `"env"`/`"_env"`; a user function whose first parameter is named `env`, used as a function value, has that parameter replaced by the environment pointer
 - [ ] **G4** `medium` `single-source-of-truth` — `--target` reaches only `@platform` filtering; layout and both codegen backends hardcode the host, so `kestrel build --target <other-os>` silently emits a host binary compiled against the other OS's stdlib
 - [ ] **G5** `medium` `single-source-of-truth` — Two independent pointer widths and two independent size tables: MIR layout is hardcoded to 8 bytes while codegen derives width from the triple; the one path that honors `--target` also compiles with the native ISA
@@ -138,6 +135,13 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Silent miscompilation and wrong behavior
 
+- [x] **F13** `medium` `single-source-of-truth` — A missing `;` after an expression statement in a function body is silently accepted — **fixed**
+  - Two discard points: the parser collapsed a real and a synthesized `;` into one arm, and the emitter called plain `add_token` where the sibling *var-decl* path already called `add_token_or_missing`. The CST carried `Semicolon@69..69 ""` — a zero-width token with no `Missing` node and no error
+  - **The audit's proposed fix — carry a synth flag on `StmtVariant::Expression` — was unnecessary.** `add_token_or_missing` keys off `span.start == span.end`; the working var-decl path carries no flag either
+  - **The real missing piece was the boundary.** A `;` is legitimately absent for the block's final expression *and* for statement-like expressions (`if`/`while`/`loop`/`for`/`match`) **anywhere** in the block — but that branch was only reachable at block end, so a *mid-block* `if` was mislabeled as an expression statement with a fake `;`. Swapping in `add_token_or_missing` alone would have emitted **1439 false errors across `lang/`**
+  - Measured, not estimated: a classifier over all 191 `lang/` files found 1439 zero-width spans and **zero** genuine missing semicolons — so **no stdlib edit was needed**, and the F25 guard's "exactly one" was an artifact of `debug_assert!` aborting on first fire. Across 3646 testdata files: 8 genuine sites in 7 files, all `self.field = …` in initializers. Post-fix the `lang/` count is **0**
+  - 9 tests, in both directions — there was no coverage that a missing `;` is rejected mid-block *or* that a statement-like expression is accepted there. The negative five matter more: they guard the 1439-site population
+  - Recorded not fixed: nested blocks and closure bodies have no synth branch at all and hard-fail with a misdirected cascade, so F13's *silence* was specific to the outermost function body; `is_statement_like_expr` and `is_inline_statement_like` are two disagreeing lists, but unifying them would newly *accept* `{ return foo }` without `;` — a grammar change, not a cleanup; and `t = a` / `-b;` maximal-munches into `a - b`, which no fix at this site can reach
 - [x] **G1** `medium` `ordering-dependency` — Init drop-flag setup reads `needs_drop` at Stage::Raw, before `drop_fix` populates it — **fixed**
   - `lower_items`' doc comment claimed its two-pass split "ensures all TypeInfo (CopyBehavior, DropBehavior) is available when function bodies are lowered". True for `CopyBehavior`; **false for `DropBehavior`** — `fix_drop_behaviors` had exactly one call site, gated on `Stage::DropFix`, strictly after the read. That false comment is what made the ordering bug invisible to review, and correcting it is part of the fix
   - **Proven with `leaks`**: a `String` field assigned twice in an `init`, 200 iterations → **400 leaks / 265600 bytes**, now **0**. The `init?`-returns-null shape identically. MIR shows the second store was `store_init` where only `StoreAssign` gets the destroy-old expansion, and the failable init's failure block lacked the guarded-destroy diamond entirely
@@ -259,6 +263,14 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Verifier and self-check gaps
 
+- [x] **F22** `medium` `global-state` — Push/pop guards are not unwind-safe, and two hosts catch panics and keep the thread — **fixed**
+  - **Five** panic-catching hosts, not two. The one the audit missed matters most: `CompilerDriver::infer_all` builds **one** `QueryContext` and then wraps *each body* in `catch_unwind`, which is what makes the field-scoped `active` stack dangerous. Also the LSP worker (keeps the thread, `World` persists a whole session) and the test harness — libtest-mimic uses a fixed worker **pool**, not thread-per-test, so a leaked thread-local survives into the next `.ks`, and every stdlib test snapshots the *same* cached world, so a leaked `Entity(n)` names the identical entity next time
+  - Consequences of a leak: a stuck opaque-resolve entry makes that origin return `ty_arena.error()` forever; a stuck copy-semantics entry makes that nominal answer `Copyable` forever. And one ICE became a fabricated `Query cycle detected` for every later body touching that key — defeating the isolation `catch_unwind` exists for
+  - One shared `kestrel_hecs::guard::OnDrop` primitive covers a field and three thread-locals, because a stack-specific RAII type cannot reach into a `LocalKey` without re-entering `.with()` anyway
+  - **The audit's `clear_for_query` fix text was wrong**: values are pushed *during* `execute`, so "clear after execute" would delete exactly what execute produced. It is an **independent** defect — a panic mid-execute permanently dropped that query's previously-valid diagnostics even with the stack guard fixed. Replaced with `take_for_query`/`restore_for_query`, restoring only `if thread::panicking()`
+  - **A real live bug the audit didn't file**: `ensure_fresh` marks a memo `verified_at = revision` *before* verifying it, so a panic in `deps_unchanged` left it permanently marked-but-unconfirmed for the rest of the revision. Scoping the guard to `deps_unchanged` alone was **not enough** — the promise breaks equally when the re-execution panics, so it spans the whole memo arm
+  - `ctx.deps` was found to be self-healing by accident (every entry does `deps.take()`); guarded anyway, since that is an unenforced property of today's call topology
+  - 5 integration tests, all confirmed failing at a clean `HEAD` in a scratch worktree first. `query_exec_count` invariance holds — the existing exact-count assertions pass unedited
 - [x] **F37** `medium` `fragility` — `find_inherited_assoc_type` recurses through protocol inheritance with no cycle guard its sibling has — **fixed**
   - The two functions were not siblings, they were **one walk duplicated**. `find_inherited_assoc_type` is deleted; `search_protocols_for_assoc` now calls `resolve_name::resolve_inherited_protocol_member` (widened to `pub(crate)`), seeding one `visited` set before its loop. Net −38 lines. Both already bottomed out in the same `find_assoc_type` leaf
   - **Real crash, not theoretical**: a qualified-path protocol cycle (`protocol A: Test.B` / `protocol B: Test.A`) plus an associated-type reference through it overflowed the stack and aborted — exit 134, 527 frames at the same call site. E459 does not protect this path; `ProtocolCycleAnalyzer` is a `CompilationCheck` that *consumes* name-res queries, so resolution runs underneath it. After the fix all four shapes terminate and report E459 plus a truthful "cannot find type"
@@ -309,6 +321,13 @@ Completed findings, moved here from their original sections. Grouped by the sect
   - **`AGENTS.md` §5 was the real blocker** — it sanctioned exactly this duplication ("control flow analysis lives as private functions in the analyzer file") while the same file's "One analyzer per fact" rule forbade it. Amended, so the next agent doesn't re-fork the helper by the book
   - The drift had already started: `dead_code.rs` alone had gained a `Sugar` arm from the G11 fix one cycle earlier. That also let this campaign close G11's deliberately-deferred `guard.rs` Sugar arm — safe only once the break check landed, and pinned by a test written *before* the arm so its correctness moved from accidental to principled
   - Full suite 3758 → 3768, zero new failures. Every new test proven durable by restoring the old analyzers and watching it fail. Left as a noted follow-up: `dead_code.rs`'s divergence arm is still `in_loop && label.is_none()`, so dead code *after* a labeled break is a conservative false negative
+- [x] **G2** `medium` `single-source-of-truth` — The mono layout work-list is seeded only from body VALUE types — **fixed**. **Live on both backends, silently, and broader than filed**
+  - Two independent halves. The **Op half**: of the ten `Op` variants carrying a `TyId`, only `SizeOf`/`AlignOf` genuinely escape — but that correlation is *incidental, not enforced*. `substitute_op_type` handled all ten and `collect_named_types` handled zero, and they are supposed to be mirrors. The **field half** is worse: the classifier never recursed into a struct's field types, and the fixed-point loop iterated by **shared borrow**, so it structurally could not add newly-discovered ones. An unseeded field type made the *containing* struct silently vanish from `mono_structs` too, with no diagnostic
+  - `Layout.of[GhostG[Int64]]().size` reported **8** for a 24-byte type; `Outer[Int64] { i: Inner[Int64], x: Int64 }` reported **8** for 32. Size 8 is `classify_named`'s missing-entry fallback; `struct_field_offset` returns a bare `0` and `struct_field_type` returns the *container* as the field type. Not cosmetic — `Layout` is the allocator ABI, so an under-reported size feeds `allocate` directly
+  - A plain non-generic struct does **not** reproduce: concrete functions are unconditionally mono roots, so the type must be a generic instantiation no concrete function mentions. That is why it survived
+  - **`verify_mono`'s guard was inert, same class as F40's.** It reported entries whose `layout.is_none()`, but a `MonoStruct` is only inserted inside `if all_resolved`, on the line *after* the layout is set — every entry has one **by construction**. The failure mode is *absence from the map*; the guard checked *presence with a null field*, and its own test hand-built a module to make it fire. Moved into `check_type_concrete`, and `verify_function` gained the `Op1/Op2/Op3` arm it was missing — verify.rs had its **own** independent copy of the op-half gap
+  - `op_type`/`op_type_mut` are macro-generated from one variant list, so the mirror cannot drift again — two hand-written matches is how this happened
+  - The existing coverage could not fail: the one execution test asserts `size == 8` on a single-`Int64` struct, and 8 is both the right answer and the fallback. **The op half also cannot be proven by a `.ks` test** — at source level a cast always yields a `Pointer[T]` value, which the classifier seeds anyway — so it is pinned by a unit test that hand-builds a body breaking the correlation
 - [x] **G18** `high` `fragility` — **NEW (2026-08-20, found while diagnosing G16).** `BooleanConditional` is analysis-only: conditions branch on the value **raw**, never calling `boolValue()` — **fixed**
   - Reproduced with a conformer whose `boolValue()` inverts its payload: `v=200` took the TRUE branch while `boolValue()` was `false`, `v=0` took FALSE while it was `true`. MIR was `branch %v4` on an `@owned Test.Inverted` — a struct branched on as if it were an `i1`. The witness was always fine; an *explicit* `x.boolValue()` lowered to a real call. Only the implicit path skipped it, and the backends made it silent rather than crashing (`icmp_imm(NotEqual, cond, 0)`)
   - Invisible because the only shipping conformer is `Bool`, a single-field `lang.i1` wrapper whose raw layout *is* its `boolValue()`. All 13 `testdata/builtins/boolean_conditional/` files were `diagnostics`-kind — two of them the exact miscompiling shape, only type-checked. Both are now `execution`

@@ -193,3 +193,58 @@ pub enum Op {
     /// float (`i64 -> f64`, `i32 -> f32`).
     BitsToFloat(FloatBits),
 }
+
+/// The single canonical enumeration of the `Op` variants that carry a `TyId`.
+///
+/// Every consumer that needs "which ops name a type" derives from this macro —
+/// `op_type` (read), `op_type_mut` (substitution), the mono collector, and the
+/// mono verifier. Writing the list twice by hand is exactly how G2 happened:
+/// `mono::substitute_op_type` handled all ten while `mono::collect_named_types`
+/// handled zero, so a type reachable only through an op operand was never
+/// seeded and silently fell back to a pointer-sized layout.
+///
+/// When you add an `Op` variant with a `TyId` payload, add it here — nowhere
+/// else.
+macro_rules! op_ty_variants {
+    ($mac:ident) => {
+        $mac! {
+            PtrFromAddress,
+            PtrRead,
+            PtrWrite,
+            PtrNull,
+            PtrTo,
+            PtrCast,
+            PtrBitcast,
+            SizeOf,
+            AlignOf,
+            StackAlloc,
+        }
+    };
+}
+
+macro_rules! define_op_type_accessors {
+    ($($variant:ident),* $(,)?) => {
+        /// The type operand an `Op` names, if it has one.
+        ///
+        /// Only `SizeOf`/`AlignOf` name a type that need not appear anywhere
+        /// else in the body; the rest produce a `Pointer[T]` or `T` value whose
+        /// own type usually re-seeds `T`. That correlation is incidental, so
+        /// callers must consult this rather than relying on it.
+        pub fn op_type(op: &Op) -> Option<TyId> {
+            match op {
+                $(Op::$variant(ty) => Some(*ty),)*
+                _ => None,
+            }
+        }
+
+        /// Mutable twin of [`op_type`], for monomorphization substitution.
+        pub fn op_type_mut(op: &mut Op) -> Option<&mut TyId> {
+            match op {
+                $(Op::$variant(ty) => Some(ty),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+op_ty_variants!(define_op_type_accessors);

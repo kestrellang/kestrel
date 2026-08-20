@@ -405,6 +405,26 @@ fn verify_function(
                     );
                 },
 
+                // Op type operands. verify.rs used to have its own copy of the
+                // op-half gap (this fell through the `_` arm below), so a
+                // `SizeOf(GhostG[Int64])` naming a type absent from the module
+                // was never checked. Shares the one canonical variant list with
+                // `mono::substitute_op_type` and `mono::collect_named_types`.
+                InstKind::Op1 { op, .. } | InstKind::Op2 { op, .. } | InstKind::Op3 { op, .. } => {
+                    if let Some(ty) = crate::op::op_type(op) {
+                        check_type_concrete(
+                            module,
+                            fi,
+                            Some(block_id),
+                            Some(ii),
+                            inst_span,
+                            ty,
+                            errors,
+                            "Op type",
+                        );
+                    }
+                },
+
                 // All other instructions: no additional mono verification needed
                 _ => {},
             }
@@ -652,9 +672,34 @@ fn check_type_concrete(
                 check_type_concrete(module, fi, block, inst, span, elem, errors, context);
             }
         },
-        MirTy::Named { type_args, .. } => {
-            for &arg in type_args {
+        MirTy::Named { entity, type_args } => {
+            let entity = *entity;
+            let type_args = type_args.clone();
+            for &arg in &type_args {
                 check_type_concrete(module, fi, block, inst, span, arg, errors, context);
+            }
+            // The real G2 failure mode is ABSENCE from the mono maps, not
+            // presence with a null layout: `MonoStruct`/`MonoEnum` are only
+            // inserted inside `if all_resolved`, one line after `layout =
+            // Some(..)`, so the `layout.is_none()` checks in `verify_mono` are
+            // inert by construction. A `MirTy::Named` is always a genuine user
+            // struct/enum — every primitive has its own `MirTy` variant (see
+            // `passes::layout::primitive_size_and_align`) — so a body naming one
+            // the module never laid out means codegen will fall back to a
+            // pointer-sized scalar and silently mis-size the value.
+            let key = (entity, type_args.clone());
+            if !module.structs.contains_key(&key) && !module.enums.contains_key(&key) {
+                errors.push(MonoVerifyError {
+                    user_facing: false,
+                    func_idx: fi,
+                    block,
+                    inst,
+                    message: format!(
+                        "Named({entity:?}, {type_args:?}) in {context} has no MonoStruct/MonoEnum \
+                         — layout would silently fall back to a pointer-sized scalar"
+                    ),
+                    span: span.cloned(),
+                });
             }
         },
         MirTy::FuncThin { params, ret }
@@ -750,6 +795,73 @@ mod tests {
             },
         );
 
+        let result = verify_mono(&module);
+        assert!(result.is_ok(), "errors: {:?}", result.errors);
+    }
+
+    /// G2 guard. The pre-existing `layout.is_none()` checks in `verify_mono`
+    /// cannot fire on a real module: a `MonoStruct` is only inserted inside
+    /// `if all_resolved`, on the line after `layout = Some(..)`, so every entry
+    /// has a layout by construction. The failure mode is ABSENCE from the map —
+    /// a body naming a `Named` that mono never laid out, which both backends
+    /// then classify as a pointer-sized scalar.
+    ///
+    /// Body: `%1 = SizeOf(Ghost[]) %0`, with no `MonoStruct` for `Ghost`.
+    #[test]
+    fn named_type_absent_from_module_is_reported() {
+        let mut module = make_module();
+        let unit = module.ty_arena.unit();
+        let i64t = module.ty_arena.i64();
+        let ghost = module.ty_arena.named(entity(9), vec![]);
+
+        let mut block = BasicBlock::new();
+        block.insts = vec![Instruction::new(InstKind::Op1 {
+            result: ValueId::new(1),
+            op: crate::op::Op::SizeOf(ghost),
+            arg: ValueId::new(0),
+        })];
+        block.terminator = Terminator::new(TerminatorKind::Return(ValueId::new(0)));
+        let body = OssaBody {
+            values: vec![ValueDef::owned(unit), ValueDef::owned(i64t)],
+            blocks: vec![block],
+            entry: BlockId::new(0),
+            param_count: 0,
+            value_names: Default::default(),
+        };
+        module.add_function(MonoFunction {
+            name: "_K04_main".into(),
+            source: entity(1),
+            type_args: vec![],
+            self_type: None,
+            params: vec![],
+            ret: unit,
+            body: Some(body),
+            extern_info: None,
+            is_main: false,
+            ret_borrow: false,
+        });
+
+        let result = verify_mono(&module);
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        assert!(
+            result.errors[0].message.contains("no MonoStruct/MonoEnum"),
+            "{:?}",
+            result.errors[0].message
+        );
+
+        // Same module, now with the layout present: clean.
+        module.structs.insert(
+            (entity(9), vec![]),
+            MonoStruct {
+                source: entity(9),
+                type_args: vec![],
+                fields: vec![],
+                type_info: TypeInfo {
+                    layout: Some(Layout::Struct(StructLayout::new())),
+                    ..TypeInfo::none()
+                },
+            },
+        );
         let result = verify_mono(&module);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
     }
