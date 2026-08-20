@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 33 fixed · 3 partial · 3 blocked · 24 open** — 61 top-level (F1–F43, G1–G18).
+**Progress: 34 fixed · 3 partial · 3 blocked · 23 open** — 61 top-level (F1–F43, G1–G18).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -118,7 +118,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **G9** `medium` `single-source-of-truth` — All three copies of `expr_contains_break` ignore `Break.label`, so a labeled break is attributed to the wrong loop — disagreeing with MIR's `find_loop`, which routes by label
 - [ ] **G10** `medium` `single-source-of-truth` — `initializer.rs` runs a 5th, private loop model (`loop_break_stack`) that pairs every `break` with the innermost loop, so one labeled break disables the entire "all fields initialized" check
 - [ ] **G12** `medium` `single-source-of-truth` — The Never-typed divergence rule is copy-pasted into five analyzers; only `move_tracking` carries the documented `Loop` carve-out, and `dead_code` reads no types at all
-- [ ] **G13** `medium` `single-source-of-truth` — The extension-bound evaluator SKIPS `Copyable`/`Cloneable` clauses because `type_satisfies` cannot answer them; conformance-completeness calls `type_satisfies` on exactly those clauses anyway and gets a hard `false`
 - [ ] **G14** `medium` `single-source-of-truth` — A where-clause param the substitution can't map is a PERMIT in the solver's evaluator and a REJECT in the analyzer's, so every associated-type-subject clause on a protocol extension (`extend Iterator where Item: Equatable`) is unentailable
 - [ ] **G15** `low` `fragility` — `constraint_entailed_by`'s "param-declared bounds" tier queries `WhereClausesOf` on the TypeParameter entity, which never carries a where clause — the whole branch is unreachable
 - [ ] **G16** `medium` `single-source-of-truth` — E101's condition-conformance test is a private `ConformingProtocols` lookup that only understands `ResolvedTy::Named`, so `if` on a `T: BooleanConditional` param or on `Self` is a false error — **blocked, do not fix in isolation**
@@ -284,6 +283,13 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Gap round (second pass)
 
+- [x] **G13** `medium` `single-source-of-truth` — The extension-bound evaluator SKIPS `Copyable`/`Cloneable` clauses because `type_satisfies` cannot answer them; conformance-completeness calls `type_satisfies` on exactly those clauses anyway and gets a hard `false` — **fixed**. **Not latent — two live bugs pointing opposite ways**
+  - **False reject**: a protocol extension carrying a `Copyable` where-clause whose member witnesses a requirement gave `error[E454]: type 'BoxC' does not implement method 'dup'`. The same program with `where T: Equatable` compiled clean, and calling `.dup()` directly compiled clean — the solver routed it through the extension and only the analyzer disagreed
+  - **Unsound accept, live in the shipped stdlib**: because the solver's evaluator *skipped* copy bounds, a `Copyable` where-clause did not gate member selection at all. `RcBox[NC].getValue()` on a `not Copyable` payload compiled clean and **exited 132 (SIGILL)** — against `rcbox.ks`'s own comment that "only a box over a non-Copyable payload loses these two methods". `Pointer[NC].pointee` the same
+  - Fixed by teaching `type_satisfies` to answer, not by duplicating the skip. Option (a) would have killed the E454 while cementing the SIGILL as a permanently unenforced language rule. The arm sits beside the existing `Builtin::Static` arm and delegates to `hir_type_copy_semantics` — the same `instance_semantics` kernel `TypeResolver::conforms_to` and the solver already bottom out in, so this takes the count of independent answers to "is this Copyable" from eight down to seven rather than adding a ninth
+  - Abstract positions permit **before** delegating. `HirCopyLayer` is not conservative — it can return a definite `NotCopyable` for a `not Copyable`-bounded `Param` — which would break the module contract. `SelfType` needs the permit for a different reason: at a protocol-extension body it resolves to the *protocol*, not the eventual conformer
+  - **User-facing behavior change**: a runtime SIGILL is now a compile-time diagnostic on public stdlib surface. Full suite 3745 → 3750, delta exactly the 5 new tests, zero new failures
+  - Found not fixed: reaching a `where T: Copyable`-gated member through a *generic protocol bound* fails at mono — `type_conforms_at_mono` evaluates it by searching the witness table for a `Copyable` witness, which structurally never exists. Mono's own independent answer, on a path this fix doesn't touch
 - [x] **G3** `medium` `fragility` — The thunk pass identifies the closure environment parameter by the magic names `"env"`/`"_env"` — **fixed**
   - `FunctionKind::takes_env_param()` replaces both name sniffs; forwarding is now a structural `.skip(1)`, so **no name-based filtering survives in the pass**. The discriminator already existed — `mono/collect.rs:679` used exactly this `matches!` for the same question — and the env `ParamDef` is pushed unconditionally for both closure kinds, so kind ⟺ leading-env-param with no gap. No new `ParamDef` field
   - Four silently miscompiled shapes, all legal code: `func combine(env: Int64, x: Int64)` used as a function value returned **3 instead of 307** (the value lands in the wrong slot, the last argument is dropped, and `env` receives the environment pointer). `_env` the same; `env` at position 2 and `self` as a parameter name were hard backend-verifier failures. All six repros now give 307

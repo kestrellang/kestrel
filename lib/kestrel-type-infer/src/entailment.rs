@@ -48,6 +48,17 @@ pub fn constraint_entailed_by(
     }
 }
 
+/// No `Copyable` / `Cloneable` special case is needed here, and none should be
+/// added. Unlike `conformance::type_satisfies`, this function never touches
+/// `ConformingProtocols` — it does plain `Entity` containment over the
+/// protocols named by `WhereClause::Bound` nodes, and `expand_protocol_closure`
+/// seeds its output with the input set (`conformances.rs`). So a context clause
+/// `where T: Copyable` matches a target clause `where T: Copyable` by protocol-
+/// entity identity; the question "does `T` *declare* Copyable?" — the one
+/// `ConformingProtocols` answers wrongly for structural builtins — is never
+/// asked. That makes this path sound by construction, not incidentally.
+/// Pasting a `type_satisfies`-style "skip the copy builtins" guard in here
+/// would reopen the G13 hole: a `where T: Copyable` bound would stop gating.
 fn bound_entailed(
     qctx: &QueryContext<'_>,
     root: Entity,

@@ -5,12 +5,20 @@
 //! unconditional [`crate::resolve::TypeResolver::conforms_to`] /
 //! `ConformingProtocols`, which only check that a conformance is *declared*.
 //!
-//! It is the single source of truth for conditional-conformance evaluation
-//! outside the hardcoded Copyable/Cloneable path (`type_conforms_copyable` in
-//! the solver). Both the analyzer (E616 / `@main` return checking) and the
-//! solver (`solve_conforms`) call it, so a `Result[NotExitable, E]` used where
-//! `Exitable` is required becomes a clean diagnostic instead of a mono ICE on
-//! the missing `report()` witness.
+//! It is the single source of truth for conditional-conformance evaluation.
+//! Both the analyzer (E616 / `@main` return checking, conformance
+//! completeness) and the solver (`solve_conforms`, extension selection) call
+//! it, so a `Result[NotExitable, E]` used where `Exitable` is required becomes
+//! a clean diagnostic instead of a mono ICE on the missing `report()` witness.
+//!
+//! `Copyable` / `Cloneable` are answered here too, by delegating to the
+//! copy-semantics classifier (`hir_type_copy_semantics`) rather than to
+//! `ConformingProtocols` — see the arm in [`type_satisfies_at_depth`]. That
+//! keeps this query's answer identical to `TypeResolver::conforms_to`'s and
+//! folds a `where T: Copyable` bound into the ordinary bound-evaluation path
+//! instead of leaving it unenforced. The solver's `type_conforms_copyable`
+//! remains the *per-instantiation* authority; this is the completeness gate,
+//! and it permits every abstract position.
 //!
 //! ## Conservative by design
 //!
@@ -74,6 +82,51 @@ fn type_satisfies_at_depth(
         // parent first (same scoping the solver's Param arm uses).
         return kestrel_semantics::hir_type_is_static(ctx, ty, root, root);
     }
+    // Copyable / Cloneable are likewise STRUCTURAL (copy-semantics), never
+    // *declared* conformances. This arm MUST sit at top level, above the
+    // `match ty` below: those arms all route to `nominal_satisfies` ->
+    // `ConformingProtocols`, which only materializes explicit conformances +
+    // inheritance and so never reports the implicit Copyable that every
+    // default type carries. Routing a `where T: Copyable` bound through it
+    // answered `false` for a plain `struct` (the E454 false-reject), while
+    // the solver's `TypeResolver::conforms_to` answered `true` via the
+    // copy-semantics classifier — the two disagreed. Answer with the same
+    // classifier here so there is one story.
+    if let Some(want) = copy_builtin_kind(ctx, protocol, root) {
+        // Abstract positions permit UNCONDITIONALLY, checked BEFORE
+        // delegating. `HirCopyLayer` can return a definite `NotCopyable` for
+        // a `not Copyable`-bounded `Param` or a `some P and not Copyable`
+        // `Opaque`, which would violate this module's conservative contract
+        // (see the module docs) — per-instantiation precision is the
+        // solver's job (`type_conforms_copyable`), not this best-effort
+        // completeness gate's. `SelfType` needs the permit for a distinct
+        // reason: `member_semantics` resolves it to the *declaring* entity's
+        // nominal semantics, which inside a protocol-extension body is the
+        // protocol itself rather than the eventual conformer.
+        // This mirrors the catch-all at the bottom of `match ty`, which
+        // already buckets exactly these as permit for every other protocol.
+        if matches!(
+            ty,
+            HirTy::Param(..)
+                | HirTy::SelfType(..)
+                | HirTy::AssocProjection { .. }
+                | HirTy::Opaque { .. }
+                | HirTy::Infer(..)
+                | HirTy::Error(..)
+        ) {
+            return true;
+        }
+        // `root` as the asking-site context mirrors the Static arm above:
+        // `TypeParamCopyRequirement::execute` pushes `parent_of(param)`
+        // before walking the context chain, so the param's own declaring
+        // parent is always consulted first.
+        let sem = kestrel_semantics::hir_type_copy_semantics(ctx, ty, root, root);
+        // Predicate identical to `TypeResolver::conforms_to` (resolve.rs).
+        return match want {
+            Builtin::Cloneable => sem == kestrel_semantics::CopySemantics::Cloneable,
+            _ => sem != kestrel_semantics::CopySemantics::NotCopyable,
+        };
+    }
     match ty {
         // A REF is concrete: it satisfies Copyable (bit-copy, stage 2b
         // ruling) plus whatever `extend &T: P` / `extend &mutating T: P`
@@ -89,6 +142,11 @@ fn type_satisfies_at_depth(
             inner, mutating, ..
         } => {
             kestrel_debug::ktrace!("ref-gate", "type_satisfies(Ref, {protocol:?})");
+            // SUBSUMED for Copyable/Cloneable by the copy-semantics arm above,
+            // which now intercepts both builtins before this `match` is reached
+            // (`HirCopyLayer` classifies `Ref` as a bit-copy, same answer).
+            // Kept because this arm still owns `&T` routing for every OTHER
+            // protocol; do not fold it away.
             if ctx.query(ResolveBuiltin {
                 builtin: Builtin::Copyable,
                 root,
@@ -292,12 +350,14 @@ fn extension_bounds_hold_impl(
         else {
             continue; // TypeEquality / DirectEquality — out of scope, treat satisfied.
         };
-        // Copyable / Cloneable are copy-semantics, not declared conformances;
-        // `type_satisfies` (which goes through `ConformingProtocols`) can't
-        // answer them. Skip — copyability is enforced by the move checker / mono.
-        if is_copy_builtin(ctx, *pb, root) {
-            continue;
-        }
+        // NOTE: there is deliberately NO Copyable/Cloneable skip here. There
+        // used to be one ("copyability is enforced by the move checker / mono"),
+        // which meant a `where T: Copyable` clause did not gate member
+        // selection at all: `RcBox[NC].getValue()` and `Pointer[NC].pointee`
+        // on a `not Copyable` payload compiled clean and trapped at runtime
+        // (SIGILL). `type_satisfies` now answers both builtins directly via
+        // the copy-semantics classifier, so the clause is evaluated like any
+        // other. Never re-add a blanket skip here.
         let sub_ty = if let Some((_, c)) = subst.iter().find(|(e, _)| e == param) {
             (*c).clone()
         } else if Some(*param) == target_entity {
@@ -388,8 +448,12 @@ fn hir_args(ty: &HirTy) -> &[HirTy] {
     }
 }
 
-fn is_copy_builtin(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) -> bool {
+/// `Some(Builtin::Copyable | Builtin::Cloneable)` when `protocol` IS that
+/// copy-semantics builtin, else `None`. The single place `type_satisfies`
+/// recognizes the two structural builtins it answers via the classifier
+/// rather than via `ConformingProtocols`.
+fn copy_builtin_kind(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) -> Option<Builtin> {
     [Builtin::Copyable, Builtin::Cloneable]
         .into_iter()
-        .any(|builtin| ctx.query(ResolveBuiltin { builtin, root }) == Some(protocol))
+        .find(|&builtin| ctx.query(ResolveBuiltin { builtin, root }) == Some(protocol))
 }
