@@ -5,43 +5,59 @@
 //! (`infer_all`, `analyze_all`) runs against the persistent `Compiler`
 //! owned by [`crate::compiler_worker`]; on cache hits this is essentially
 //! free.
+//!
+//! Line indices are built **here, per pass, for the handful of files a
+//! diagnostic actually points at** — never cached in `ServerState`. A
+//! server-lifetime `path → LineIndex` map is a second copy of text that
+//! `sources` already owns, and any writer that forgets to update it
+//! publishes ranges computed against stale text (F38: `didClose` on an
+//! edited buffer misplaced every squiggle in the file). `sources` is the
+//! single source of truth for file text; indices are derived from it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use codespan_reporting::diagnostic::Diagnostic as CsDiagnostic;
+use kestrel_analyze::AnalyzeDiagnostic;
 use kestrel_compiler_driver::CompilerDriver;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Diagnostic as LspDiagnostic, Url};
+use tower_lsp::lsp_types::{Diagnostic as LspDiagnostic, MessageType, Url};
 
 use crate::convert::{FileMap, from_analyze, from_codespan};
 use crate::position::LineIndex;
-use crate::server::{SharedState, path_to_url};
+use crate::server::{SharedState, path_to_url, url_to_path};
+
+/// Every file id any label in either diagnostic stream points at.
+///
+/// `FileMap::lookup` is only ever reached from a label's `file_id`
+/// (`from_codespan`'s primary + related labels, `from_analyze` via
+/// `label_range` / `span_to_location`), so this is exactly the set of
+/// indices we need to resolve — usually 0-5, versus every compiled file.
+fn referenced_file_ids(
+    codespan: &[CsDiagnostic<usize>],
+    analyze: &[AnalyzeDiagnostic],
+) -> HashSet<usize> {
+    let mut ids = HashSet::new();
+    for diag in codespan {
+        ids.extend(diag.labels.iter().map(|l| l.file_id));
+    }
+    for diag in analyze {
+        ids.extend(diag.labels.iter().map(|l| l.span.file_id));
+    }
+    ids
+}
 
 /// Reanalyze + publish. Idempotent — safe to call from any handler.
 pub async fn refresh(state: SharedState, client: Client) {
     // Snapshot inputs while the lock is held briefly.
-    let (token_at_start, handle, stdlib, user, doc_indices, disk_indices, prev_published) = {
+    let (token_at_start, handle, stdlib, user, prev_published) = {
         let s = state.lock().await;
         let (stdlib, user) = s.partition_sources();
-        let doc_indices: HashMap<String, LineIndex> = s
-            .docs
-            .iter()
-            .map(|(uri, doc)| {
-                (
-                    super::super::server::url_to_path(uri),
-                    doc.line_index.clone(),
-                )
-            })
-            .collect();
-        let disk = s.disk_line_indices.clone();
-        let pub_set = s.published.clone();
         (
             s.revision_token,
             s.compiler_handle.clone(),
             stdlib,
             user,
-            doc_indices,
-            disk,
-            pub_set,
+            s.published.clone(),
         )
     };
 
@@ -55,41 +71,87 @@ pub async fn refresh(state: SharedState, client: Client) {
             let _infer = driver.infer_all();
             let analyze = driver.analyze_all(false);
             let codespan_diags = compiler.diagnostics();
+            // Resolve paths only for the files a diagnostic mentions.
+            let needed = referenced_file_ids(&codespan_diags, &analyze.diagnostics);
             let id_to_path: HashMap<usize, String> = compiler
                 .files()
                 .iter()
+                .filter(|(_, e)| needed.contains(&e.index()))
                 .map(|(p, e)| (e.index(), p.clone()))
                 .collect();
-            (codespan_diags, analyze.diagnostics, id_to_path)
+            (codespan_diags, analyze.diagnostics, id_to_path, needed)
         })
         .await
     else {
         return;
     };
 
-    let (codespan_diags, analyze_diags, id_to_path) = analysis;
+    let (codespan_diags, analyze_diags, id_to_path, needed) = analysis;
 
-    // If another edit landed while we were computing, drop our results.
+    // Build the owning index map: file_id → (Url, LineIndex). Open buffers
+    // win (their text is the one the editor is showing); everything else
+    // derives from `sources`, which holds the right text for disk-loaded
+    // files, closed-but-unsaved buffers, and files the workspace walk never
+    // visited alike. `owned` outlives `files` on this stack, so `FileMap`
+    // can keep borrowing.
+    let mut owned: HashMap<usize, (Url, LineIndex)> = HashMap::new();
+    let mut unresolved: Vec<String> = Vec::new();
     {
         let s = state.lock().await;
+        // If another edit landed while we were computing, drop our results.
         if s.revision_token != token_at_start {
             return;
         }
-    }
-
-    // Build the FileMap: file_id → (Url, &LineIndex). Prefer the open-doc
-    // line index; fall back to the disk index for files not currently open.
-    let mut by_id: HashMap<usize, (Url, &LineIndex)> = HashMap::new();
-    for (id, path) in &id_to_path {
-        let Some(url) = path_to_url(path) else {
-            continue;
-        };
-        let idx = doc_indices.get(path).or_else(|| disk_indices.get(path));
-        if let Some(idx) = idx {
-            by_id.insert(*id, (url, idx));
+        let doc_indices: HashMap<String, &LineIndex> = s
+            .docs
+            .iter()
+            .map(|(uri, doc)| (url_to_path(uri), &doc.line_index))
+            .collect();
+        for id in &needed {
+            let Some(path) = id_to_path.get(id) else {
+                unresolved.push(format!("<file id {id}>"));
+                continue;
+            };
+            let Some(url) = path_to_url(path) else {
+                unresolved.push(path.clone());
+                continue;
+            };
+            if let Some(idx) = doc_indices.get(path) {
+                owned.insert(*id, (url, (*idx).clone()));
+            } else if let Some(text) = s.sources.get(path) {
+                owned.insert(*id, (url, LineIndex::new(text.clone())));
+            } else {
+                unresolved.push(path.clone());
+            }
         }
     }
-    let files = FileMap { by_id };
+
+    // A file can only carry a diagnostic if it was compiled, which means it
+    // was in `sources` — so this should be unreachable. Say so out loud
+    // rather than silently dropping the diagnostic, which is how the same
+    // class of bug hid before (`convert.rs`'s `?` chains have no idea a
+    // lookup was supposed to succeed).
+    if !unresolved.is_empty() {
+        unresolved.sort();
+        unresolved.dedup();
+        client
+            .log_message(
+                MessageType::WARNING,
+                format!(
+                    "Kestrel: dropped diagnostics for {} file(s) with no resolvable source text: {}",
+                    unresolved.len(),
+                    unresolved.join(", ")
+                ),
+            )
+            .await;
+    }
+
+    let files = FileMap {
+        by_id: owned
+            .iter()
+            .map(|(id, (url, idx))| (*id, (url.clone(), idx)))
+            .collect(),
+    };
 
     // Group diagnostics by URL. The two streams are disjoint by construction:
     // inference errors are rendered only by the codespan stream (F15), so

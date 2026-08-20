@@ -148,6 +148,25 @@ impl LspClient {
         resp
     }
 
+    /// Initialize with a real workspace folder, so `load_workspace` walks the
+    /// tree for `flock.toml` and pulls its `.ks` sources in from disk.
+    ///
+    /// `initializationOptions` is deliberately omitted: the server then falls
+    /// through to `default_std_path()`, which for a repo-built binary resolves
+    /// to the in-repo `lang/std`. That makes the workspace compile for real.
+    fn initialize_with_workspace(&mut self, root_uri: &str) -> Value {
+        let resp = self.request(
+            "initialize",
+            json!({
+                "processId": std::process::id(),
+                "capabilities": {},
+                "workspaceFolders": [{"uri": root_uri, "name": "ws"}],
+            }),
+        );
+        self.notify("initialized", json!({}));
+        resp
+    }
+
     fn open(&mut self, uri: &str, text: &str) {
         self.notify(
             "textDocument/didOpen",
@@ -164,6 +183,13 @@ impl LspClient {
                 "textDocument": {"uri": uri, "version": version},
                 "contentChanges": [{"text": text}]
             }),
+        );
+    }
+
+    fn close(&mut self, uri: &str) {
+        self.notify(
+            "textDocument/didClose",
+            json!({"textDocument": {"uri": uri}}),
         );
     }
 
@@ -233,6 +259,37 @@ fn diagnostics_for(notifications: &[Value], uri: &str) -> Vec<Value> {
                 .unwrap_or_default()
         })
         .collect()
+}
+
+/// The diagnostics array of the last `publishDiagnostics` for `uri` that
+/// carried at least one entry. `didClose` publishes an empty array before the
+/// following refresh republishes the real set, so "the last publish" and "the
+/// last publish that said anything" are different questions.
+fn last_non_empty_diagnostics(notifications: &[Value], uri: &str) -> Vec<Value> {
+    notifications
+        .iter()
+        .filter(|n| {
+            n.get("method").and_then(|m| m.as_str()) == Some("textDocument/publishDiagnostics")
+                && n.pointer("/params/uri").and_then(|u| u.as_str()) == Some(uri)
+        })
+        .filter_map(|n| {
+            n.pointer("/params/diagnostics")
+                .and_then(|d| d.as_array())
+                .filter(|a| !a.is_empty())
+                .cloned()
+        })
+        .next_back()
+        .unwrap_or_default()
+}
+
+/// Start lines of every diagnostic in the list, sorted.
+fn start_lines(diags: &[Value]) -> Vec<u64> {
+    let mut lines: Vec<u64> = diags
+        .iter()
+        .filter_map(|d| d.pointer("/range/start/line").and_then(|v| v.as_u64()))
+        .collect();
+    lines.sort_unstable();
+    lines
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +558,135 @@ fn goto_definition_points_to_decl() {
         Some(1),
         "definition should point to line 1 (the decl)"
     );
+    c.shutdown();
+}
+
+/// F38: after `didClose` on an *edited* buffer, diagnostics must still be
+/// positioned against the text the user last typed — not the text that was on
+/// disk when the workspace was walked.
+///
+/// `did_close` deliberately leaves the edited buffer in `sources` (other files
+/// may still need to resolve it) while dropping the `OpenDoc`. The server used
+/// to keep a parallel path-keyed line-index map written only from disk loads,
+/// so the next refresh compiled the *edited* text and rendered its spans
+/// through the *disk* index. With five lines prepended, every squiggle
+/// slid five lines. It never panicked — F24's clamp turned the out-of-range
+/// offset into a plausible-looking position, which is why it stayed invisible.
+///
+/// This is the first workspace-rooted test in this file, so it is noticeably
+/// slower than its neighbours: `initialize` walks the tree, loads the in-repo
+/// stdlib, and the first refresh compiles it. It is *not* exposed to the
+/// recorded worktree duplicate-symbol hazard — that needs two overlapping
+/// `flock.toml` trees visible in one session, and this is a fresh private
+/// tempdir holding exactly one manifest.
+#[test]
+fn diagnostics_stay_put_after_closing_an_edited_buffer() {
+    let dir = tempfile::tempdir().unwrap();
+    // macOS puts tempdirs behind the /var -> /private/var symlink; the server
+    // keys sources by canonical path and publishes canonical URLs, so the test
+    // has to speak the same dialect.
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::write(
+        root.join("flock.toml"),
+        "[package]\nname = \"f38\"\nversion = \"0.1.0\"\nsource = \"src\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    // Error on 0-based line 2: `NotAThingF38` resolves to nothing.
+    let original = "module F38\n\nfunc f() { NotAThingF38(); }\n";
+    let main_ks = root.join("src/main.ks");
+    std::fs::write(&main_ks, original).unwrap();
+    // Tempdir paths are ASCII with no reserved characters, so plain
+    // concatenation is a faithful file URL here.
+    let uri = format!("file://{}", main_ks.display());
+    let root_uri = format!("file://{}", root.display());
+
+    let mut c = LspClient::spawn();
+    c.initialize_with_workspace(&root_uri);
+
+    // 1. Disk load only — nothing open in the editor.
+    let notes = c.flush_notifications();
+    let from_disk = last_non_empty_diagnostics(&notes, &uri);
+    assert!(
+        !from_disk.is_empty(),
+        "expected a diagnostic in {uri} from the workspace walk; got {notes:#?}"
+    );
+    assert_eq!(
+        start_lines(&from_disk),
+        vec![2],
+        "disk-loaded diagnostics should sit on line 2"
+    );
+
+    // 2. Open it unchanged — same answer.
+    c.open(&uri, original);
+    let notes = c.flush_notifications();
+    assert_eq!(
+        start_lines(&last_non_empty_diagnostics(&notes, &uri)),
+        vec![2],
+        "opening the file unchanged must not move the diagnostic"
+    );
+
+    // 3. Prepend five blank lines; the error moves to line 7.
+    let edited = format!("\n\n\n\n\n{original}");
+    c.change(&uri, 2, &edited);
+    let notes = c.flush_notifications();
+    assert_eq!(
+        start_lines(&last_non_empty_diagnostics(&notes, &uri)),
+        vec![7],
+        "after prepending 5 lines the diagnostic should be on line 7"
+    );
+
+    // 4. Close without saving. The buffer stays in `sources`, so the compiler
+    //    still sees the edited text — and so must the position mapping.
+    c.close(&uri);
+    let notes = c.flush_notifications();
+    assert_eq!(
+        start_lines(&last_non_empty_diagnostics(&notes, &uri)),
+        vec![7],
+        "closing an unsaved buffer must not re-anchor its diagnostics to the \
+         stale on-disk text"
+    );
+
+    c.shutdown();
+}
+
+/// F38, second failure mode: a file the workspace walk never visited had no
+/// disk line index at all, so once its `OpenDoc` went away on `didClose` the
+/// `FileMap` lookup returned `None` and `from_codespan` bailed at its `?` —
+/// the diagnostic vanished with nothing logged.
+///
+/// `rootUri: null` keeps `load_workspace` from ever running, which is exactly
+/// the orphan-file situation.
+#[test]
+fn diagnostics_survive_closing_a_file_the_workspace_never_saw() {
+    let mut c = LspClient::spawn();
+    c.initialize();
+    let uri = "file:///tmp/f38_orphan.ks";
+    let text = "module F38Orphan\n\nfunc f() { NotAThingF38(); }\n";
+    c.open(uri, text);
+
+    let notes = c.flush_notifications();
+    let while_open = last_non_empty_diagnostics(&notes, uri);
+    assert!(
+        !while_open.is_empty(),
+        "expected a diagnostic while the file is open; got {notes:#?}"
+    );
+    let open_lines = start_lines(&while_open);
+    assert_eq!(open_lines, vec![2], "error is on line 2 while open");
+
+    c.close(uri);
+    let notes = c.flush_notifications();
+    let while_closed = last_non_empty_diagnostics(&notes, uri);
+    assert!(
+        !while_closed.is_empty(),
+        "closing the file must not make its diagnostic disappear; got {notes:#?}"
+    );
+    assert_eq!(
+        start_lines(&while_closed),
+        open_lines,
+        "closed-file diagnostics must land where the open-file ones did"
+    );
+
     c.shutdown();
 }
 

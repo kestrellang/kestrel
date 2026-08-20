@@ -80,8 +80,9 @@ impl Backend {
 
     /// Walk every workspace folder, find `flock.toml` manifests, and load all
     /// `.ks` sources from those packages (and their path deps) into the
-    /// source map. Disk-loaded files get a `LineIndex` so we can publish
-    /// diagnostics in them even when they're not open in the editor.
+    /// source map. `sources` is the only place the text lands — diagnostics
+    /// in files the editor never opened get their `LineIndex` built from it
+    /// on demand, so there is no second copy to keep in sync.
     async fn load_workspace(&self, folders: Vec<WorkspaceFolder>) {
         // Snapshot settings before scanning so the heavy filesystem walk
         // doesn't hold the state mutex.
@@ -152,9 +153,6 @@ impl Backend {
             state.stdlib_paths.insert(path);
         }
         for (path, text) in new_sources {
-            state
-                .disk_line_indices
-                .insert(path.clone(), position::LineIndex::new(text.clone()));
             state.sources.insert(path, text);
         }
         state.revision_token += 1;
@@ -495,7 +493,6 @@ impl LanguageServer for Backend {
                 let mut state = self.state.lock().await;
                 state.sources.clear();
                 state.stdlib_paths.clear();
-                state.disk_line_indices.clear();
                 let folders = state
                     .workspace_roots
                     .iter()
@@ -519,14 +516,10 @@ impl LanguageServer for Backend {
                 let Ok(text) = std::fs::read_to_string(&canon) else {
                     continue;
                 };
-                state
-                    .disk_line_indices
-                    .insert(key.clone(), position::LineIndex::new(text.clone()));
                 state.sources.insert(key, text);
             }
             for key in to_drop {
                 state.sources.remove(&key);
-                state.disk_line_indices.remove(&key);
             }
             state.revision_token += 1;
         }
