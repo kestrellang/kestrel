@@ -20,8 +20,8 @@ struct TwoResources: not Copyable {
     var b: Resource
 
     init(fail_late fail_late: Int64)? {
-        self.a = Resource(id: 1)
-        self.b = Resource(id: 2)
+        self.a = Resource(id: 1);
+        self.b = Resource(id: 2);
         // Fail after all fields are initialized — both should be deinited
         if fail_late != 0 { return null }
     }

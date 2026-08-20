@@ -935,4 +935,70 @@ public struct B {}
         assert_eq!(recovery_errors.len(), 1);
         assert_eq!(result.tree.text().to_string(), source);
     }
+
+    /// Count the `expected `;`` diagnostics in a parse result.
+    fn missing_semi_errors(result: &ParseResult) -> usize {
+        result
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("expected `;`"))
+            .count()
+    }
+
+    #[test]
+    fn missing_semicolon_on_expression_statement_is_reported() {
+        // F13: a non-statement-like expression statement without its `;` used
+        // to parse to a zero-width `Semicolon` token with no `Missing` node and
+        // no diagnostic — the whole body compiled silently. It must now behave
+        // exactly like the sibling var-decl path.
+        let source = "func f() { foo() bar(); }";
+        let result = parse_source(source, 0);
+
+        assert_eq!(
+            missing_semi_errors(&result),
+            1,
+            "expected exactly one `expected `;`` diagnostic, got {:?}",
+            result.errors
+        );
+        assert_eq!(
+            count_nodes(&result.tree, SyntaxKind::Missing),
+            1,
+            "expected one Missing wrapper for the absent `;`, tree:\n{:#?}",
+            result.tree
+        );
+        assert_eq!(result.tree.text().to_string(), source);
+    }
+
+    #[test]
+    fn mid_block_statement_like_expr_needs_no_semicolon() {
+        // The other half of F13: `if` / `while` / `for` / `match` / `loop`
+        // never need a `;`, mid-block included. The block-end lookahead only
+        // fires at block end, so mid-block forms reach the synth branch — they
+        // must be routed to `BlockItem::StatementExpr`, not reported. `lang/`
+        // has ~1439 of these; a false positive here breaks the whole stdlib.
+        for body in [
+            "if a { b(); } c();",
+            "while a { b(); } c();",
+            "for x in a { b(); } c();",
+            "loop { b(); } c();",
+            "match a { _ => { b(); } } c();",
+        ] {
+            let source = format!("func f() {{ {body} }}");
+            let result = parse_source(&source, 0);
+
+            assert_eq!(
+                missing_semi_errors(&result),
+                0,
+                "statement-like `{body}` must not require a `;`, got {:?}",
+                result.errors
+            );
+            assert_eq!(
+                count_nodes(&result.tree, SyntaxKind::Missing),
+                0,
+                "no Missing node expected for `{body}`, tree:\n{:#?}",
+                result.tree
+            );
+            assert_eq!(result.tree.text().to_string(), source);
+        }
+    }
 }

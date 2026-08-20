@@ -333,7 +333,11 @@ fn emit_expression_statement(sink: &mut EventSink, expr: &ExprVariant, semicolon
     sink.start_node(SyntaxKind::ExpressionStatement);
 
     emit_expr_variant(sink, expr);
-    sink.add_token(SyntaxKind::Semicolon, semicolon);
+    // Semicolon — may be parser-synthesised (zero-width); surface a diagnostic
+    // and a `Missing` node when so, mirroring the var-decl path above. A
+    // synthesised `;` on a *statement-like* expression never reaches here: the
+    // block parser routes those to `BlockItem::StatementExpr`.
+    sink.add_token_or_missing(SyntaxKind::Semicolon, semicolon, ";");
 
     sink.finish_node(); // Finish ExpressionStatement
     sink.finish_node(); // Finish Statement

@@ -20,7 +20,7 @@ struct TwoResources: not Copyable {
     var b: Resource
 
     init(fail_mid fail_mid: Int64)? {
-        self.a = Resource(id: 1)
+        self.a = Resource(id: 1);
         // Fail after first field but before second
         if fail_mid != 0 { return null }
         self.b = Resource(id: 2)

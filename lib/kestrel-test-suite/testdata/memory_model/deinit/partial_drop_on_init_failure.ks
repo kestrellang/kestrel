@@ -22,7 +22,7 @@ struct Container: not Copyable {
     var value: Int64
 
     init(id id: Int64, value value: Int64)? {
-        self.resource = Resource(id: id)
+        self.resource = Resource(id: id);
         if value < 0 { return null }
         self.value = value
     }

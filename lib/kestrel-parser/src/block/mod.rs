@@ -654,6 +654,17 @@ fn code_block_items_parser<'tokens>()
                 .or(empty().map_with(|_, e| Some((to_kestrel_span(e.span()), true)))),
         )
         .try_map(|(expr, maybe_semi), span| match maybe_semi {
+            // Mid-block statement-like expression (`if` / `while` / `for` / …).
+            // These never need a `;`, but the synth branch above fires for them
+            // because `block_end_lookahead` only matches at block end — so the
+            // *mid-block* form used to be mislabelled an expression statement
+            // with a fake `;`. Emit `StatementExpr` (no semicolon token) so the
+            // shape matches the block-end case and no "expected `;`" is raised.
+            // This arm MUST precede the `Some((semi, _synth))` arm below, which
+            // matches every `Some(..)`.
+            Some((_, synth)) if synth && is_statement_like_expr(&expr) => {
+                Ok(BlockItem::StatementExpr(expr))
+            },
             Some((semi, _synth)) => Ok(BlockItem::Statement(StmtVariant::Expression(expr, semi))),
             None if is_statement_like_expr(&expr) => Ok(BlockItem::StatementExpr(expr)),
             // Block end ahead and not statement-like — fail so the
