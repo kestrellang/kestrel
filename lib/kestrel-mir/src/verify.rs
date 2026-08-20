@@ -119,8 +119,11 @@ pub trait VerifyModule {
     /// wrapper dropping a real parameter). Count only: per-argument TYPE
     /// verification here would need substitution, ref-decay and ByVal/ByRef
     /// reasoning and would false-positive corpus-wide; the exact per-position
-    /// type check lives in `passes::thunk`, where the types are known to be
-    /// literally the same `TyId`s.
+    /// type check lives in `passes::thunk`, where the types of the REAL params
+    /// are literally the same `TyId`s. Note the env pointer at index 0 is not —
+    /// a thunk's env param is type-erased to `Pointer[()]` by design, and
+    /// comparing `TyId`s there panicked on every stdlib program; see the
+    /// backstop comment in `passes::thunk`.
     fn callee_declared_arity(&self, callee: &Callee) -> Option<usize>;
 }
 

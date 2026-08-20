@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 41 fixed · 3 partial · 3 blocked · 16 open** — 61 top-level (F1–F43, G1–G18).
+**Progress: 41 fixed · 3 partial · 3 blocked · 19 open** — 64 top-level (F1–F43, G1–G21).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -115,6 +115,16 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **G12** `medium` `single-source-of-truth` — The Never-typed divergence rule is copy-pasted into five analyzers; only `move_tracking` carries the documented `Loop` carve-out, and `dead_code` reads no types at all
 - [ ] **G14** `medium` `single-source-of-truth` — A where-clause param the substitution can't map is a PERMIT in the solver's evaluator and a REJECT in the analyzer's, so every associated-type-subject clause on a protocol extension (`extend Iterator where Item: Equatable`) is unentailable
 - [ ] **G15** `low` `fragility` — `constraint_entailed_by`'s "param-declared bounds" tier queries `WhereClausesOf` on the TypeParameter entity, which never carries a where clause — the whole branch is unreachable
+- [ ] **G19** `high` `fragility` — **NEW (2026-08-20).** Nothing in CI builds a *debug* compiler and compiles Kestrel with it, so `debug_assert!`s in the pipeline are never exercised against the corpus
+  - `ci.yml` runs `cargo build --workspace` (debug) but never invokes the resulting `kestrel` on any `.ks`; the same job excludes `kestrel-test-suite`, and its own comment already concedes "some cases hit debug-only rowan asserts that don't fire in release". `bootstrap` and `triage` both build `--release`. So the release compiler is exercised ~3800 ways and the debug compiler zero ways
+  - This is the **third** recorded debug-only compiler panic, and the **second** where the assert encoded a false invariant. Same shape as F8's "the suite never runs LLVM"
+  - Rule worth adopting, recorded from the G3 follow-up: don't add `#[cfg(debug_assertions)]` invariants to the pipeline — either the property is worth checking in release or it isn't. Promoting an assert to unconditional makes the full-suite run real evidence that it holds, which a `debug_assert` never is
+- [ ] **G20** `medium` `fragility` — **NEW (2026-08-20, found while fixing G1).** `verify_ossa`'s four `addr_*` checks are inert for **every initializer body in the language**
+  - `AddrKind::SubField` state is created only by `InstKind::Uninit`, and an init's `self` is a `@mut_borrow` **parameter**, so it never gets a `state.addrs` entry and all four checks silently no-op. That includes `addr_store_init` ("store_init on field {..} but field already init"), which would have caught G1's own reassignment shape
+  - Seeding it would activate `addr_require_init` across all 253 init-bearing files at once. Run detection-only first to size the impact
+- [ ] **G21** `medium` `fragility` — **NEW (2026-08-20, found while fixing F40).** Aggregate-by-value across `@extern(.C)` is broken in **both** backends, independently
+  - A plain 2-field `FFISafe` struct passed to C returns garbage under each, with *different* garbage (`875371297` cranelift vs `1428004377` llvm, expected `34`); scalars are fine. `abi.rs::build_extern_signature` passes every `Aggregate` as a bare `ptr_ty`, which is neither AAPCS64 nor SysV
+  - Distinct from F40 and not fixed by it. Note `enum`s cannot conform to `FFISafe` (E422), so `IoError` can never cross `@extern` — F40's blast radius was contained by luck, not design
 - [ ] **G16** `medium` `single-source-of-truth` — E101's condition-conformance test is a private `ConformingProtocols` lookup that only understands `ResolvedTy::Named`, so `if` on a `T: BooleanConditional` param or on `Self` is a false error — **blocked, do not fix in isolation**
   - Confirmed and **wider than filed**: `Param`, `SelfType`, `Opaque`, `AssocProjection` *and* `Ref` all get a false E101 (six reproduced shapes). `&Bool` in an `if` is a false E101 with no protocol involved — that one goes through `is_bool`, not `conforms_to_protocol`, so fixing only the filed predicate leaves it
   - **G18, its stated prerequisite, is now fixed** — `lower_if` calls `boolValue()`. The remaining blockers are the three below, all in type-infer

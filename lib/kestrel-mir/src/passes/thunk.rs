@@ -63,7 +63,12 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         // matching on the name silently forwarded the environment pointer into
         // it while dropping the last real argument (G3).
         let needs_env = target_func.kind.takes_env_param();
-        debug_assert!(
+        // Hard `assert!`, not `debug_assert!`: nothing in CI builds a debug
+        // compiler and compiles Kestrel with it, so a `debug_assert` in the
+        // pipeline is effectively dead code that only bites whoever next runs
+        // `cargo build` without `--release`. These are O(params) once per
+        // thunk — cheap enough to always be live.
+        assert!(
             !needs_env
                 || target_func
                     .params
@@ -192,33 +197,72 @@ pub fn run_thunk_pass(module: &mut MirModule, next_entity: &mut u32) {
         }
 
         // Fail-loud backstop. The forwarded arg list is built positionally from
-        // the target's own params, so it must match it exactly in both count
-        // and per-position type. The type check is the load-bearing half: G3's
-        // miscompile had a COINCIDENTALLY CORRECT count (the env pointer was
-        // pushed and the same param was filtered out), and only the types
-        // disagreed. These are the same `TyId`s cloned off `target_func.params`
-        // pre-monomorphization, so the comparison is exact — no substitution or
-        // ref-decay gap to reason about.
+        // the target's own params, so it must match it exactly in count, and in
+        // per-position type for every REAL parameter. The type check is the
+        // load-bearing half: G3's miscompile had a COINCIDENTALLY CORRECT count
+        // (the env pointer was pushed and the same param was filtered out), and
+        // only the types disagreed.
+        //
+        // Index 0 under `needs_env` is the one position where the two types
+        // legitimately differ, and comparing `TyId`s there was a regression that
+        // panicked on every stdlib program in a debug compiler. The thunk's env
+        // param is deliberately TYPE-ERASED — `Pointer[()]` — because the thunk
+        // is what an indirect closure call lands on and its signature must be
+        // uniform across every closure; the target closure declares the concrete
+        // env it wants (`Pointer[<synthesized env struct>]`, or the box binding's
+        // raw pointer for a boxed closure — see mir-lower `closure.rs` `env_ty`
+        // and `closure_box.rs::unwrap_handle_to_pointer`, both of which always
+        // bottom out in `MirTy::Pointer`). Two different pointees, one machine
+        // word; codegen reinterprets. So the strongest check that is still
+        // correct at index 0 is "the target's env param is pointer-shaped".
+        //
+        // That is still enough to catch G3: its repro was `combine(env: Int, ...)`
+        // mistaken for a closure, and `Int` is not a pointer, so this fires. What
+        // it cannot distinguish is a wrong-slot forward into a param that is
+        // itself a pointer — the arity check plus the kind-derived `needs_env`
+        // (rather than the old name sniff) covers that shape.
+        //
+        // Every position after the env is an exact `TyId` cloned off
+        // `target_func.params` pre-monomorphization, so equality there is exact —
+        // no substitution or ref-decay gap to reason about.
         if let Some(target_params_full) = module.functions.get(target).map(|f| &f.params) {
-            debug_assert_eq!(
+            assert_eq!(
                 forward_args.len(),
                 target_params_full.len(),
                 "{thunk_name}: forwards {} args to a {}-param target",
                 forward_args.len(),
                 target_params_full.len(),
             );
-            debug_assert!(
+            let env_positions = usize::from(needs_env);
+            if let Some(env_param) = target_params_full.first().filter(|_| needs_env) {
+                assert!(
+                    matches!(module.ty_arena.get(env_param.ty), MirTy::Pointer(_)),
+                    "{thunk_name}: target's kind {:?} promises a leading env pointer but \
+                     params[0] `{}` is {:?} — the thunk forwards a type-erased `Pointer[()]` \
+                     into that slot, so a non-pointer there is a miscompile",
+                    module.functions.get(target).map(|f| &f.kind),
+                    env_param.name,
+                    module.ty_arena.get(env_param.ty),
+                );
+            }
+            assert!(
                 forward_args
                     .iter()
                     .zip(target_params_full.iter())
+                    .skip(env_positions)
                     .all(|(a, p)| body.value(a.value).ty == p.ty),
                 "{thunk_name}: forwarded arg types do not match the target's params \
                  (forwarded {:?}, expected {:?})",
                 forward_args
                     .iter()
-                    .map(|a| body.value(a.value).ty)
+                    .skip(env_positions)
+                    .map(|a| module.ty_arena.get(body.value(a.value).ty))
                     .collect::<Vec<_>>(),
-                target_params_full.iter().map(|p| p.ty).collect::<Vec<_>>(),
+                target_params_full
+                    .iter()
+                    .skip(env_positions)
+                    .map(|p| (&p.name, module.ty_arena.get(p.ty)))
+                    .collect::<Vec<_>>(),
             );
         }
 

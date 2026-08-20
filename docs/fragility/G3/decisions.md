@@ -307,3 +307,89 @@ Testdata added under
 and `instance_method_reference_without_call.ks` (pins the `instance.method`
 E100 on a *struct* receiver — `primitive_methods_errors.ks` only covered the
 primitive-receiver path).
+
+---
+
+## 5. Correction (2026-08-20): the per-position type check was too strict at index 0
+
+§3's claim that "the compared `TyId`s are the same interned ids cloned straight
+off `target_func.params`" is true for every REAL parameter and **false for the
+env pointer at index 0**. As shipped, the check panicked on *every* stdlib
+program under a debug-built compiler:
+
+```
+thread 'main' panicked at lib/kestrel-mir/src/passes/thunk.rs:210:
+std.collections.Array.subscript.closure.3.thunk: forwarded arg types do not
+match the target's params (forwarded [TyId(488)], expected [TyId(509)])
+```
+
+Resolving both ids through the arena settles it — this is not `TyId` interning
+noise, the two types are genuinely different and are *supposed* to be:
+
+| side | `MirTy` |
+| --- | --- |
+| thunk's forwarded arg 0 | `Pointer(Tuple([]))` — i.e. `Pointer[()]` |
+| target's `params[0]` (`env`) | `Pointer(Named { entity: 2147483644, type_args: [TyId(3)] })` |
+
+The thunk's env param is **deliberately type-erased**. A thunk is what an
+indirect closure call lands on, so its signature has to be uniform across every
+closure; `run_thunk_pass` has built `env_ty = ty_arena.pointer(unit_ty)` since
+the pass was introduced (`336f577b`). The target closure declares the concrete
+environment it wants — `Pointer[<synthesized env struct>]` (mir-lower
+`closure.rs`, `env_ty`), or, for a boxed closure, the box binding's `raw_ty`,
+which `closure_box.rs::unwrap_handle_to_pointer` guarantees is also a
+`MirTy::Pointer`. Two different pointees, one machine word; codegen
+reinterprets. So index 0 can never satisfy `TyId` equality.
+
+**Fix.** Split the check rather than delete it:
+
+- index 0 under `needs_env` — assert the target's env param is *pointer-shaped*
+  (`matches!(.., MirTy::Pointer(_))`). That is the strongest property that is
+  actually invariant there.
+- every position after it — keep the exact `TyId` equality, which really is
+  exact.
+
+**This still catches G3.** Verified by re-introducing the old name sniff
+(`needs_env = params[0].name == "env" | "_env"`) and compiling
+`codegen/closures/env_named_param_used_as_value.ks`:
+
+```
+Test.combine.thunk: target's kind Some(Free) promises a leading env pointer but
+params[0] `env` is Named { entity: Entity(2942), type_args: [] } — the thunk
+forwards a type-erased `Pointer[()]` into that slot, so a non-pointer there is
+a miscompile
+```
+
+G3's repro passed an `Int` in the env slot, and `Int` is not a pointer. What the
+weakened check can no longer distinguish is a wrong-slot forward into a param
+that is *itself* a pointer; the arity check plus the kind-derived `needs_env`
+(the actual G3 fix) covers that shape.
+
+### 5a. `debug_assert!` was the wrong severity — it is now a hard `assert!`
+
+§3 argued "a release build cannot encounter it without a debug build
+encountering it first." That is exactly backwards for this repo. **Nothing in
+CI builds a debug compiler and compiles Kestrel with it**, so a `debug_assert!`
+in the pipeline is closer to dead code than to a backstop:
+
+- `.github/workflows/ci.yml` runs `cargo build --workspace` (debug) but never
+  *invokes* the resulting `kestrel` on any `.ks` file.
+- the same job runs `cargo test --workspace --exclude kestrel-test-suite` — the
+  `.ks` suite is explicitly excluded (`47d2714b`), and its own comment already
+  concedes "some cases hit debug-only rowan asserts that don't fire in release."
+- the `bootstrap` job builds with `profile: release`.
+- `triage` builds `--release` per `.triage/config.toml`.
+
+So the release corpus is exercised ~3800 ways and the debug compiler is
+exercised zero ways. Same shape as F8 ("the suite never runs LLVM"). Both thunk
+checks are therefore plain `assert!` now — they are O(params) once per thunk,
+and being live in release is what makes them a backstop at all. The full suite
+(3795 passed, 0 failed) is now real evidence that they hold corpus-wide, which
+it was not before.
+
+This is the third recorded debug-only compiler panic
+(`Slice.first` / `a30332b2`, `Pointer[CopyableStruct]` / `ty_query.rs:174`), and
+the second where the assert itself encoded a false invariant. The pattern is
+consistent enough to be worth a rule: **do not add `#[cfg(debug_assertions)]`
+invariants to the compiler pipeline — either the invariant is worth checking in
+release, or it is not worth checking.**
