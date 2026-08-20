@@ -165,6 +165,13 @@ fn check_expr_inner(
             // Closures start a new context — break/continue aren't valid
             check_block(hir, &body.stmts, body.tail_expr, false, diags);
         },
+        // `Sugar` is a transparent wrapper (see `HirExpr::Sugar` in
+        // `kestrel-hir::body` — all consumers must recurse into `inner`).
+        // Without this arm the whole desugared subtree was invisible here,
+        // so E002 was structurally blind inside every `for` body: `for`
+        // lowers to `Sugar{ForLoop} → Block → Loop → Match → user body`,
+        // whereas `while` lowers to a bare `Loop` and worked. (G11)
+        HirExpr::Sugar { inner, .. } => check_expr_inner(hir, *inner, in_loop, diags),
         _ => {},
     }
 }
@@ -221,6 +228,8 @@ fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
             !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, arm.body, in_loop))
         },
         HirExpr::Block { body, .. } => block_part_diverges(hir, body),
+        // Transparent wrapper — divergence is whatever the desugared subtree does.
+        HirExpr::Sugar { inner, .. } => expr_diverges(hir, *inner, in_loop),
         _ => false,
     }
 }
@@ -287,6 +296,8 @@ fn expr_always_returns(hir: &HirBody, id: HirExprId) -> bool {
             !arms.is_empty() && arms.iter().all(|arm| expr_always_returns(hir, arm.body))
         },
         HirExpr::Block { body, .. } => block_always_returns(hir, body),
+        // Transparent wrapper — recurse into the desugared subtree.
+        HirExpr::Sugar { inner, .. } => expr_always_returns(hir, *inner),
         _ => false,
     }
 }
@@ -330,6 +341,8 @@ fn expr_contains_break(hir: &HirBody, id: HirExprId) -> bool {
         },
         HirExpr::Match { arms, .. } => arms.iter().any(|arm| expr_contains_break(hir, arm.body)),
         HirExpr::Block { body, .. } => block_contains_break(hir, body),
+        // Transparent wrapper — recurse into the desugared subtree.
+        HirExpr::Sugar { inner, .. } => expr_contains_break(hir, *inner),
         // Don't recurse into nested loops or closures
         HirExpr::Loop { .. } | HirExpr::Closure { .. } => false,
         _ => false,
