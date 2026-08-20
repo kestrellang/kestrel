@@ -5,6 +5,7 @@ Status of every confirmed finding from the 2026-08-08 fragility / single-source-
 
 - Full findings with evidence and repro: [`fragility-audit-detail.md`](fragility-audit-detail.md) (1-43)
 - Gap round + high-severity verdicts: [`fragility-audit-addendum.md`](fragility-audit-addendum.md) (G1-G17)
+- Per-finding diagnosis + decision records for the harder ones: [`fragility/`](fragility/)
 
 **Method.** 18 auditors across crate clusters and 6 cross-cutting dimensions, each finding
 adversarially re-verified by an independent agent; then a completeness critic and 4 targeted
@@ -15,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 24 fixed · 2 partial · 2 blocked · 31 open** — 60 top-level (F1–F43, G1–G17).
+**Progress: 30 fixed · 2 partial · 3 blocked · 27 open** — 61 top-level (F1–F43, G1–G18).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -117,7 +118,15 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **G13** `medium` `single-source-of-truth` — The extension-bound evaluator SKIPS `Copyable`/`Cloneable` clauses because `type_satisfies` cannot answer them; conformance-completeness calls `type_satisfies` on exactly those clauses anyway and gets a hard `false`
 - [ ] **G14** `medium` `single-source-of-truth` — A where-clause param the substitution can't map is a PERMIT in the solver's evaluator and a REJECT in the analyzer's, so every associated-type-subject clause on a protocol extension (`extend Iterator where Item: Equatable`) is unentailable
 - [ ] **G15** `low` `fragility` — `constraint_entailed_by`'s "param-declared bounds" tier queries `WhereClausesOf` on the TypeParameter entity, which never carries a where clause — the whole branch is unreachable
-- [ ] **G16** `medium` `single-source-of-truth` — E101's condition-conformance test is a private `ConformingProtocols` lookup that only understands `ResolvedTy::Named`, so `if` on a `T: BooleanConditional` param or on `Self` is a false error
+- [ ] **G16** `medium` `single-source-of-truth` — E101's condition-conformance test is a private `ConformingProtocols` lookup that only understands `ResolvedTy::Named`, so `if` on a `T: BooleanConditional` param or on `Self` is a false error — **blocked, do not fix in isolation**
+  - Confirmed and **wider than filed**: `Param`, `SelfType`, `Opaque`, `AssocProjection` *and* `Ref` all get a false E101 (six reproduced shapes). `&Bool` in an `if` is a false E101 with no protocol involved — that one goes through `is_bool`, not `conforms_to_protocol`, so fixing only the filed predicate leaves it
+  - **Fixing it alone converts six false errors into six silent miscompiles.** See G18 — the false positive is currently the only thing keeping generic code away from a garbage branch. `lower_if` must call `boolValue()` first
+  - All three candidate fixes fail today: blanket-permitting abstract positions also destroys the one *true* positive (`func f[T](flag: T)` with no bound); `type_satisfies` can't be routed to because the private `resolved_ty_to_hir` bridge collapses every abstract variant to `HirTy::Infer`, which permits unconditionally; and `TypeResolver::conforms_to` — the semantically right predicate — takes `&TyKind`, whose `TyVar` is `pub(crate)` and whose `AssocProjection` variant cannot be constructed outside the crate at all. The right shape is a `ResolvedTy`-taking `conforms_to_resolved` entry point on the type-infer side. Sequence after G13. Full evidence: [`docs/fragility/G16/`](fragility/G16/)
+- [ ] **G18** `high` `fragility` — **NEW (2026-08-20, found while diagnosing G16).** `BooleanConditional` is analysis-only: `lower_if` branches on the condition value **raw**, never calling `boolValue()`, so every non-`Bool` conformer silently miscompiles
+  - Reproduced with a conformer whose `boolValue()` inverts its payload: `Inverted(v: 200)` takes the TRUE branch while `boolValue()` is `false`, and `Inverted(v: 0)` takes FALSE while `boolValue()` is `true`. MIR is `%v4 = copy_value %v3 // @owned Test.Inverted` then `branch %v4` — a struct branched on as if it were an `i1`. A two-word conformer reproduces too
+  - The witness is fine: an *explicit* `x.boolValue()` three blocks later lowers to a real call. Only the implicit `if` path skips it
+  - Invisible because the only shipping conformer is `Bool`, a single-field `lang.i1` wrapper whose raw layout *is* its `boolValue()`, so raw-branching is accidentally correct there. All 13 files under `testdata/builtins/boolean_conditional/` are `// test: diagnostics` — zero execution tests — and two of them (`custom_type_in_if_condition.ks`, `optional_in_if_condition.ks`) are the exact miscompiling shape, only type-checked
+  - Blocks G16
 - [ ] **G17** `medium` `single-source-of-truth` — `TypeResolver` re-derives where-clause bounds from raw `AstWhereClause` instead of `WhereClausesOf`, collapsing `T.Assoc: P` onto the bare associated type and resolving subjects in the ambient `body_owner` scope
 
 ---
