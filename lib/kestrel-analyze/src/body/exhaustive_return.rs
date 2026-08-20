@@ -30,7 +30,6 @@ use crate::util;
 use kestrel_ast::AstType;
 use kestrel_ast_builder::{NodeKind, TypeAnnotation};
 use kestrel_hir::body::*;
-use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E001",
@@ -81,7 +80,7 @@ impl BodyCheck for ExhaustiveReturnAnalyzer {
 
         // Run the CFG over the full body (statements + tail expression).
         // If any path can fall through without returning, emit E001.
-        let state = block_state(cx.hir, cx.typed, &cx.hir.statements, cx.hir.tail_expr);
+        let state = block_state(cx, &cx.hir.statements, cx.hir.tail_expr);
         if state.definitely_returns() {
             return vec![];
         }
@@ -167,13 +166,12 @@ impl ReturnState {
 ///   treated as producing the block's value → `Returns` for the purpose
 ///   of exhaustive-return analysis.
 fn block_state(
-    hir: &HirBody,
-    typed: &TypedBody,
+    cx: &BodyContext<'_>,
     stmts: &[HirStmtId],
     tail: Option<HirExprId>,
 ) -> ReturnState {
     for &stmt_id in stmts {
-        let state = stmt_state(hir, typed, stmt_id);
+        let state = stmt_state(cx, stmt_id);
         if state.definitely_returns() {
             return state;
         }
@@ -181,11 +179,11 @@ fn block_state(
     let Some(tail) = tail else {
         return ReturnState::MayFallThrough;
     };
-    let state = expr_state(hir, typed, tail);
+    let state = expr_state(cx, tail);
     if state.definitely_returns() {
         return state;
     }
-    match &hir.exprs[tail] {
+    match &cx.hir.exprs[tail] {
         HirExpr::If { .. }
         | HirExpr::Match { .. }
         | HirExpr::Loop { .. }
@@ -194,20 +192,28 @@ fn block_state(
     }
 }
 
-fn stmt_state(hir: &HirBody, typed: &TypedBody, id: HirStmtId) -> ReturnState {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_state(hir, typed, *expr),
-        HirStmt::Let { value: Some(v), .. } => expr_state(hir, typed, *v),
+fn stmt_state(cx: &BodyContext<'_>, id: HirStmtId) -> ReturnState {
+    match &cx.hir.stmts[id] {
+        HirStmt::Expr { expr, .. } => expr_state(cx, *expr),
+        HirStmt::Let { value: Some(v), .. } => expr_state(cx, *v),
         _ => ReturnState::MayFallThrough,
     }
 }
 
-fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
-    // Control-flow expressions: use structural analysis and DON'T fall back
-    // to the Never-type heuristic. Type inference gives every `loop` type
-    // `Never` regardless of whether it contains a reachable `break`, so
-    // trusting that here would hide legitimate fall-through cases.
-    match &hir.exprs[id] {
+fn expr_state(cx: &BodyContext<'_>, id: HirExprId) -> ReturnState {
+    // Control-flow expressions decide structurally and must NOT fall back to the
+    // Never-type heuristic. (The old comment here claimed "type inference gives
+    // every `loop` type `Never`" — it does not: `generate.rs` unifies a loop's
+    // `break_tv` with unit at every `break` that targets it, so `loop { break; }`
+    // is unit-typed. The rule is still right, just for a different reason: a
+    // `break`-able loop that inference *did* type `Never` would otherwise be
+    // read as diverging and hide a real fall-through.)
+    //
+    // These arms are also NOT delegated to `control_flow::expr_diverges`: the
+    // three-way `ReturnState` distinguishes "returns a value" from "leaves
+    // abnormally", which a `bool` cannot express. Only the leaf fallback below
+    // is shared (G12).
+    match &cx.hir.exprs[id] {
         HirExpr::Return { .. } => return ReturnState::Returns,
         HirExpr::Break { .. } | HirExpr::Continue { .. } => return ReturnState::Diverges,
 
@@ -216,9 +222,9 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             else_body,
             ..
         } => {
-            let then_s = block_part_state(hir, typed, then_body);
+            let then_s = block_part_state(cx, then_body);
             return match else_body {
-                Some(else_block) => then_s.merge(block_part_state(hir, typed, else_block)),
+                Some(else_block) => then_s.merge(block_part_state(cx, else_block)),
                 None => ReturnState::MayFallThrough,
             };
         },
@@ -233,9 +239,9 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             if arms.is_empty() {
                 return ReturnState::Diverges;
             }
-            let mut combined = tail_expr_state(hir, typed, arms[0].body);
+            let mut combined = tail_expr_state(cx, arms[0].body);
             for arm in &arms[1..] {
-                combined = combined.merge(tail_expr_state(hir, typed, arm.body));
+                combined = combined.merge(tail_expr_state(cx, arm.body));
             }
             return combined;
         },
@@ -247,10 +253,10 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             // This also correctly handles desugared `while`/`for` loops, whose
             // conditional exit is modelled as a `break`, and `break outer` from
             // inside a nested loop (G9).
-            return if control_flow::block_contains_break_for(hir, body, label.as_deref()) {
+            return if control_flow::block_contains_break_for(cx.hir, body, label.as_deref()) {
                 ReturnState::MayFallThrough
             } else {
-                let body_state = block_part_state(hir, typed, body);
+                let body_state = block_part_state(cx, body);
                 if body_state == ReturnState::Returns {
                     ReturnState::Returns
                 } else {
@@ -259,7 +265,7 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
             };
         },
 
-        HirExpr::Block { body, .. } => return block_part_state(hir, typed, body),
+        HirExpr::Block { body, .. } => return block_part_state(cx, body),
 
         // Closures don't cause the enclosing function to return
         HirExpr::Closure { .. } => return ReturnState::MayFallThrough,
@@ -267,29 +273,29 @@ fn expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
         _ => {},
     }
 
-    // Leaf-like expressions (calls, literals, field access, ...): if
-    // inference proved the expression has type `Never` (e.g. a call to
-    // `lang.panic_unwind`), treat it as diverging.
-    if matches!(typed.expr_types.get(&id), Some(ResolvedTy::Never)) {
+    // Leaf-like expressions (calls, literals, field access, ..., and the
+    // transparent `Sugar` wrapper): the shared predicate owns this half of the
+    // rule, which is the Never-type test plus `Sugar` transparency.
+    if control_flow::expr_diverges(cx, id) {
         return ReturnState::Diverges;
     }
 
     ReturnState::MayFallThrough
 }
 
-fn block_part_state(hir: &HirBody, typed: &TypedBody, block: &HirBlock) -> ReturnState {
-    block_state(hir, typed, &block.stmts, block.tail_expr)
+fn block_part_state(cx: &BodyContext<'_>, block: &HirBlock) -> ReturnState {
+    block_state(cx, &block.stmts, block.tail_expr)
 }
 
 /// Like `expr_state`, but applies the same "value-producing leaf counts
 /// as Returns" rule that `block_state` uses for its tail expression.
 /// Used for positions that act like tails (match arm bodies).
-fn tail_expr_state(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> ReturnState {
-    let state = expr_state(hir, typed, id);
+fn tail_expr_state(cx: &BodyContext<'_>, id: HirExprId) -> ReturnState {
+    let state = expr_state(cx, id);
     if state.definitely_returns() {
         return state;
     }
-    match &hir.exprs[id] {
+    match &cx.hir.exprs[id] {
         HirExpr::If { .. }
         | HirExpr::Match { .. }
         | HirExpr::Loop { .. }

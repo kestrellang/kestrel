@@ -16,7 +16,7 @@ merge of 90 confirmed; G1-G17 are the gap round.
 maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
 inflated finder severities).
 
-**Progress: 41 fixed · 3 partial · 3 blocked · 19 open** — 64 top-level (F1–F43, G1–G21).
+**Progress: 42 fixed · 3 partial · 3 blocked · 18 open** — 64 top-level (F1–F43, G1–G21).
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -112,7 +112,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 - [ ] **G5** `medium` `single-source-of-truth` — Two independent pointer widths and two independent size tables: MIR layout is hardcoded to 8 bytes while codegen derives width from the triple; the one path that honors `--target` also compiles with the native ISA
 - [ ] **G6** `medium` `fragility` — `@platform` fails open on every argument it does not recognize, and no validator for the argument exists anywhere — an unparsed or unsupported `--target` triple disables platform filtering entirely
 - [ ] **G7** `low` `global-state` — `KESTREL_COPYPROP_LIMIT` silently changes emitted code from inside a MIR pass, and the documented set of output-affecting environment variables does not include it
-- [ ] **G12** `medium` `single-source-of-truth` — The Never-typed divergence rule is copy-pasted into five analyzers; only `move_tracking` carries the documented `Loop` carve-out, and `dead_code` reads no types at all
 - [ ] **G14** `medium` `single-source-of-truth` — A where-clause param the substitution can't map is a PERMIT in the solver's evaluator and a REJECT in the analyzer's, so every associated-type-subject clause on a protocol extension (`extend Iterator where Item: Equatable`) is unentailable
 - [ ] **G15** `low` `fragility` — `constraint_entailed_by`'s "param-declared bounds" tier queries `WhereClausesOf` on the TypeParameter entity, which never carries a where clause — the whole branch is unreachable
 - [ ] **G19** `high` `fragility` — **NEW (2026-08-20).** Nothing in CI builds a *debug* compiler and compiles Kestrel with it, so `debug_assert!`s in the pipeline are never exercised against the corpus
@@ -290,6 +289,16 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Gap round (second pass)
 
+- [x] **G12** `medium` `single-source-of-truth` — The Never-typed divergence rule is copy-pasted into five analyzers — **fixed**
+  - Worse than filed: **three** different `Loop`-handling mechanisms across the five, and a sixth analyzer (`dead_code`) consulting no types at all. Two live bugs, both reproduced from the CLI
+  - **A false E500.** `move_tracking` is the only analyzer whose flawed formula wasn't accidentally rescued by a trailing Never-check (it explicitly excluded `Loop`), so a breakless `loop { doWork(); }` was called non-diverging and a value consumed after it reported "use of moved value" — on a line `dead_code` simultaneously called unreachable
+  - **Missing E002** after a `-> !` call at top level, inside a `while`, and after an all-arms-diverging `match`
+  - **The carve-outs' stated justification was false.** Two comments claimed "every loop is typed Never", but `generate.rs:590-605` unifies a loop's `break_tv` with unit at every break that targets it. Both corrected
+  - **Ordering is load-bearing and is now pinned**: structural-first, Never as the leaf fallback *only*. `guard.rs` checked Never first, which would let inference override the structural `Loop` verdict — exactly the hazard G8 removed. And the `Loop` rule is `!contains_break_for` **alone**; the `body_state.diverged &&` conjunct two analyzers carried is provably wrong for `loop { doWork(); }`, which is the false-E500 root cause
+  - `control_flow.rs` gains a clearly-marked Tier 2 taking `&BodyContext` — one named exception to the pure-predicate contract, because the `Loop` case of "does this diverge" *is* `block_contains_break_for`, so a separate file would import Tier 1 for its only non-trivial branch. `AGENTS.md` §5 amended consistently with the G8/G9/G10 amendment
+  - `dead_code`'s `in_loop` parameter drops out entirely (break/continue are unconditionally Never-typed), which fixes its labeled-break conservatism for free — the same three lines. `block_always_returns`/`expr_always_returns` were verified provably dead before deletion
+  - Also fixed in passing: only one of the six copies handled `HirStmt::Let { value }`, so `let x = fatalError();` didn't make the rest of the block unreachable
+  - There was **zero** coverage of `-> !` divergence for E002/E001/E004/E005/E500 — only two E003 files. 7 tests added; 9 of the 11 affected tests were proven to fail against the pre-fix analyzers, and the implementer flagged the other two as honestly vacuous rather than dressing them up. Full suite 3795 → 3802, zero failures
 - [x] **G8 + G9 + G10** `medium` `single-source-of-truth` — one label model for loops, replacing four copies and six divergence answers — **fixed as one campaign**
   - Fixed together because they are one bug wearing three hats, and fixing G8 alone would have created a *fifth* copy of the duplicated predicate. The audit's counts were low: **four** `contains_break` triads (`dead_code`, `exhaustive_return`, `definite_assignment`, `move_tracking`), not three, and **six** independent "does this loop diverge?" answers, not three
   - **G9** — all four copies did `Break { .. } => true`, ignoring the label, and none recursed into a nested loop. Live consequences: a false E002 on the checked-in `break_from_nested_loop_3_levels.ks`, flagging code that demonstrably runs; and E001 *suppressed* one nesting level down — `func f() -> Int64 { outer: loop { loop { break outer; } } let z = 1; }` compiled clean and returned garbage from a function with no return on any path

@@ -46,24 +46,24 @@ impl Describe for DeadCodeAnalyzer {
 impl BodyCheck for DeadCodeAnalyzer {
     fn check(&self, cx: &BodyContext<'_>) -> Vec<AnalyzeDiagnostic> {
         let mut diags = Vec::new();
-        check_block(
-            cx.hir,
-            &cx.hir.statements,
-            cx.hir.tail_expr,
-            false,
-            &mut diags,
-        );
+        check_block(cx, &cx.hir.statements, cx.hir.tail_expr, &mut diags);
         diags
     }
 }
 
-/// Check a block for dead code: if a statement diverges, everything after is unreachable.
-/// `in_loop` tracks whether we're inside a loop (break/continue only diverge inside loops).
+/// Check a block for dead code: if a statement diverges, everything after is
+/// unreachable.
+///
+/// Divergence itself comes from `control_flow` (G12) — this walk only decides
+/// *where* to report. There is no `in_loop` flag any more: `break`/`continue`
+/// are unconditionally `Never`-typed whether or not they stand in a loop, so
+/// the shared predicate answers correctly without loop context. That also
+/// retires the old "labeled break/continue are conservatively non-diverging"
+/// carve-out, which suppressed a legitimate warning after `break outer;`.
 fn check_block(
-    hir: &HirBody,
+    cx: &BodyContext<'_>,
     stmts: &[HirStmtId],
     tail: Option<HirExprId>,
-    in_loop: bool,
     diags: &mut Vec<AnalyzeDiagnostic>,
 ) {
     let mut diverged = false;
@@ -76,7 +76,7 @@ fn check_block(
                 severity: DESCRIPTORS[0].default_severity,
                 message: "unreachable code".into(),
                 labels: vec![DiagLabel {
-                    span: util::stmt_span(hir, stmt_id),
+                    span: util::stmt_span(cx.hir, stmt_id),
                     message: "this code will never execute".into(),
                     is_primary: true,
                 }],
@@ -88,12 +88,12 @@ fn check_block(
         }
 
         // Check if this statement diverges
-        if stmt_diverges(hir, stmt_id, in_loop) && (i + 1 < stmts.len() || tail.is_some()) {
+        if control_flow::stmt_diverges(cx, stmt_id) && (i + 1 < stmts.len() || tail.is_some()) {
             diverged = true;
         }
 
         // Recurse into sub-blocks within the statement
-        check_stmt_inner(hir, stmt_id, in_loop, diags);
+        check_stmt_inner(cx, stmt_id, diags);
     }
 
     // Check tail expression for inner dead code
@@ -108,7 +108,7 @@ fn check_block(
                     severity: DESCRIPTORS[0].default_severity,
                     message: "unreachable code".into(),
                     labels: vec![DiagLabel {
-                        span: util::expr_span(hir, tail),
+                        span: util::expr_span(cx.hir, tail),
                         message: "this code will never execute".into(),
                         is_primary: true,
                     }],
@@ -116,55 +116,43 @@ fn check_block(
                 });
             }
         } else {
-            check_expr_inner(hir, tail, in_loop, diags);
+            check_expr_inner(cx, tail, diags);
         }
     }
 }
 
-fn check_stmt_inner(
-    hir: &HirBody,
-    id: HirStmtId,
-    in_loop: bool,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
-    if let HirStmt::Expr { expr, .. } = &hir.stmts[id] {
-        check_expr_inner(hir, *expr, in_loop, diags);
+fn check_stmt_inner(cx: &BodyContext<'_>, id: HirStmtId, diags: &mut Vec<AnalyzeDiagnostic>) {
+    if let HirStmt::Expr { expr, .. } = &cx.hir.stmts[id] {
+        check_expr_inner(cx, *expr, diags);
     }
 }
 
 /// Recurse into expressions that contain blocks to find inner dead code.
-fn check_expr_inner(
-    hir: &HirBody,
-    id: HirExprId,
-    in_loop: bool,
-    diags: &mut Vec<AnalyzeDiagnostic>,
-) {
-    match &hir.exprs[id] {
+fn check_expr_inner(cx: &BodyContext<'_>, id: HirExprId, diags: &mut Vec<AnalyzeDiagnostic>) {
+    match &cx.hir.exprs[id] {
         HirExpr::If {
             then_body,
             else_body,
             ..
         } => {
-            check_block(hir, &then_body.stmts, then_body.tail_expr, in_loop, diags);
+            check_block(cx, &then_body.stmts, then_body.tail_expr, diags);
             if let Some(else_block) = else_body {
-                check_block(hir, &else_block.stmts, else_block.tail_expr, in_loop, diags);
+                check_block(cx, &else_block.stmts, else_block.tail_expr, diags);
             }
         },
         HirExpr::Loop { body, .. } => {
-            // Inside a loop body, break/continue are valid divergence points
-            check_block(hir, &body.stmts, body.tail_expr, true, diags);
+            check_block(cx, &body.stmts, body.tail_expr, diags);
         },
         HirExpr::Match { arms, .. } => {
             for arm in arms {
-                check_expr_inner(hir, arm.body, in_loop, diags);
+                check_expr_inner(cx, arm.body, diags);
             }
         },
         HirExpr::Block { body, .. } => {
-            check_block(hir, &body.stmts, body.tail_expr, in_loop, diags);
+            check_block(cx, &body.stmts, body.tail_expr, diags);
         },
         HirExpr::Closure { body, .. } => {
-            // Closures start a new context — break/continue aren't valid
-            check_block(hir, &body.stmts, body.tail_expr, false, diags);
+            check_block(cx, &body.stmts, body.tail_expr, diags);
         },
         // `Sugar` is a transparent wrapper (see `HirExpr::Sugar` in
         // `kestrel-hir::body` — all consumers must recurse into `inner`).
@@ -172,121 +160,7 @@ fn check_expr_inner(
         // so E002 was structurally blind inside every `for` body: `for`
         // lowers to `Sugar{ForLoop} → Block → Loop → Match → user body`,
         // whereas `while` lowers to a bare `Loop` and worked. (G11)
-        HirExpr::Sugar { inner, .. } => check_expr_inner(hir, *inner, in_loop, diags),
+        HirExpr::Sugar { inner, .. } => check_expr_inner(cx, *inner, diags),
         _ => {},
-    }
-}
-
-// ===== Divergence analysis (local to this analyzer) =====
-
-fn stmt_diverges(hir: &HirBody, id: HirStmtId, in_loop: bool) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_diverges(hir, *expr, in_loop),
-        _ => false,
-    }
-}
-
-fn expr_diverges(hir: &HirBody, id: HirExprId, in_loop: bool) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Return { .. } => true,
-        // break/continue only diverge when inside a loop — outside a loop
-        // they're invalid (already reported as errors), not divergence points.
-        // Unlabeled break/continue inside a loop always diverge.
-        // Labeled break/continue are conservatively treated as non-diverging
-        // for dead code purposes — the label might target a non-enclosing loop.
-        HirExpr::Break { label, .. } | HirExpr::Continue { label, .. } => {
-            in_loop && label.is_none()
-        },
-
-        HirExpr::Loop { label, body, .. } => {
-            // A loop that can exit via `break` does NOT diverge — even if another
-            // path inside the body returns. This matches lib1 and also handles
-            // desugared `while cond { ... }` whose loop body contains an implicit
-            // break (from the condition check). The break must target *this*
-            // loop: a bare break in a nested loop exits the inner one, while a
-            // `break thisLabel` from any depth exits this one (G9).
-            if control_flow::block_contains_break_for(hir, body, label.as_deref()) {
-                return false;
-            }
-            // No break: if the body always returns, the loop diverges by returning.
-            if block_always_returns(hir, body) {
-                return true;
-            }
-            // Otherwise it's an infinite loop — also diverges.
-            true
-        },
-
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            let then_div = block_part_diverges(hir, then_body);
-            match else_body {
-                Some(else_block) => then_div && block_part_diverges(hir, else_block),
-                None => false,
-            }
-        },
-        HirExpr::Match { arms, .. } => {
-            !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, arm.body, in_loop))
-        },
-        HirExpr::Block { body, .. } => block_part_diverges(hir, body),
-        // Transparent wrapper — divergence is whatever the desugared subtree does.
-        HirExpr::Sugar { inner, .. } => expr_diverges(hir, *inner, in_loop),
-        _ => false,
-    }
-}
-
-fn block_part_diverges(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_diverges(hir, stmt_id, true) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_diverges(hir, tail, true);
-    }
-    false
-}
-
-/// Check if a block always returns (via `return`), ignoring break/continue.
-/// Used to determine if a loop body always exits the function, making
-/// code after the loop unreachable.
-fn block_always_returns(hir: &HirBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if let HirStmt::Expr { expr, .. } = &hir.stmts[stmt_id]
-            && expr_always_returns(hir, *expr)
-        {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_always_returns(hir, tail);
-    }
-    false
-}
-
-/// Check if an expression always returns from the function.
-/// Only `return` counts — break/continue exit the loop, not the function.
-fn expr_always_returns(hir: &HirBody, id: HirExprId) -> bool {
-    match &hir.exprs[id] {
-        HirExpr::Return { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            block_always_returns(hir, then_body)
-                && else_body
-                    .as_ref()
-                    .is_some_and(|e| block_always_returns(hir, e))
-        },
-        HirExpr::Match { arms, .. } => {
-            !arms.is_empty() && arms.iter().all(|arm| expr_always_returns(hir, arm.body))
-        },
-        HirExpr::Block { body, .. } => block_always_returns(hir, body),
-        // Transparent wrapper — recurse into the desugared subtree.
-        HirExpr::Sugar { inner, .. } => expr_always_returns(hir, *inner),
-        _ => false,
     }
 }

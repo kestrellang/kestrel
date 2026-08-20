@@ -25,7 +25,6 @@ use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
 use kestrel_hir::body::*;
-use kestrel_type_infer::result::{ResolvedTy, TypedBody};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E003",
@@ -60,7 +59,7 @@ impl BodyCheck for GuardDivergenceAnalyzer {
             let Some(else_block) = else_body else {
                 continue;
             };
-            if !block_diverges(cx.hir, cx.typed, else_block) {
+            if !control_flow::block_diverges(cx, else_block) {
                 let span = non_diverging_span(cx.hir, else_block)
                     .unwrap_or_else(|| util::stmt_span(cx.hir, stmt_id));
                 diags.push(guard_diverge_diagnostic(span));
@@ -76,7 +75,7 @@ impl BodyCheck for GuardDivergenceAnalyzer {
                 ..
             } = expr
                 && let Some(else_arm) = arms.last()
-                && !expr_diverges(cx.hir, cx.typed, else_arm.body)
+                && !control_flow::expr_diverges(cx, else_arm.body)
             {
                 let arm_span = util::expr_span(cx.hir, else_arm.body);
                 diags.push(guard_diverge_diagnostic(arm_span));
@@ -115,74 +114,4 @@ fn non_diverging_span(hir: &HirBody, block: &HirBlock) -> Option<kestrel_span::S
         return Some(util::expr_span(hir, *expr));
     }
     None
-}
-
-// ===== Divergence analysis (private to this analyzer) =====
-
-/// Check if a block definitely diverges.
-fn block_diverges(hir: &HirBody, typed: &TypedBody, block: &HirBlock) -> bool {
-    for &stmt_id in &block.stmts {
-        if stmt_diverges(hir, typed, stmt_id) {
-            return true;
-        }
-    }
-    if let Some(tail) = block.tail_expr {
-        return expr_diverges(hir, typed, tail);
-    }
-    false
-}
-
-fn stmt_diverges(hir: &HirBody, typed: &TypedBody, id: HirStmtId) -> bool {
-    match &hir.stmts[id] {
-        HirStmt::Expr { expr, .. } => expr_diverges(hir, typed, *expr),
-        _ => false,
-    }
-}
-
-fn expr_diverges(hir: &HirBody, typed: &TypedBody, id: HirExprId) -> bool {
-    // Any expression the type system resolved to `!` (Never) diverges — e.g. a
-    // call to `fatalError(...)` or a user `-> !` function. The syntactic forms
-    // below catch divergence that doesn't surface as a Never *type* (an `if`
-    // whose branches both return is typed `()`, not `!`). Mirrors the
-    // never-typed divergence used by exhaustive-return analysis.
-    if matches!(typed.expr_types.get(&id), Some(ResolvedTy::Never)) {
-        return true;
-    }
-    match &hir.exprs[id] {
-        HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. } => true,
-        HirExpr::If {
-            then_body,
-            else_body,
-            ..
-        } => {
-            let then_div = block_diverges(hir, typed, then_body);
-            match else_body {
-                Some(else_block) => then_div && block_diverges(hir, typed, else_block),
-                None => false,
-            }
-        },
-        HirExpr::Match { arms, .. } => {
-            !arms.is_empty() && arms.iter().all(|arm| expr_diverges(hir, typed, arm.body))
-        },
-        // A loop diverges only if it is genuinely infinite — no `break` can
-        // exit it. This arm used to be an unconditional `true`, so *any*
-        // breakable loop in a guard-else was accepted and the guard fell
-        // through with its condition false (G8). The check is not
-        // `while`-specific: `loop { break; }` and a desugared `for` produce the
-        // same `HirExpr::Loop`.
-        HirExpr::Loop { label, body, .. } => {
-            !control_flow::block_contains_break_for(hir, body, label.as_deref())
-        },
-        HirExpr::Block { body, .. } => block_diverges(hir, typed, body),
-        // `Sugar` is a transparent wrapper — divergence is whatever the
-        // desugared subtree does. Without this arm the whole subtree fell to
-        // `_ => false`, so a `for` in a guard-else was rejected by accident
-        // (invisible, therefore "does not diverge") rather than because its
-        // loop can exit. Deferred from the G11 fix until the `Loop` arm above
-        // actually checked for a break — added before that, it would have made
-        // the now-visible `Loop` node report `true` and *accept* a `for` in a
-        // guard-else. See `guard_else_for_loop_rejected.ks`.
-        HirExpr::Sugar { inner, .. } => expr_diverges(hir, typed, *inner),
-        _ => false,
-    }
 }

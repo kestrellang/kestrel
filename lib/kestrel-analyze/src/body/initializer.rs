@@ -608,8 +608,18 @@ fn analyze_expr(
         // initialized on every path that exits via `break`. A loop with no
         // `break` is an infinite loop and therefore diverges.
         //
-        // All loops have HIR type `Never`, so we must skip the unified Never
-        // check by returning early.
+        // The early `return` is what keeps this verdict final: the unified
+        // Never-type check at the bottom of `analyze_expr` must not get a
+        // chance to overrule it. (The old comment justified the return with
+        // "all loops have HIR type `Never`" — that is false. `generate.rs`
+        // unifies a loop's `break_tv` with unit at every `break` that targets
+        // it, so `loop { break; }` is unit-typed. The return is right anyway:
+        // structure decides, inference does not. See `docs/fragility/G12/`.)
+        //
+        // `break_states.is_empty()` is this analyzer's reachability-aware
+        // spelling of `!block_contains_break_for` — strictly stronger, since a
+        // break on an unreachable path never pushes a state. That is why this
+        // one keeps its own walk instead of calling `control_flow`.
         HirExpr::Loop { label, body, .. } => {
             vctx.loop_break_stack.push((label.clone(), Vec::new()));
 

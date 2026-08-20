@@ -101,6 +101,20 @@ degenerate version, and all of them ignored `break`'s label while only one ever
 grew a `Sugar` arm. They now share one walk keyed on the loop's label, over the
 one label rule in `kestrel_hir::label_selects_loop`.
 
+**Tier 2 — typed divergence, the one named exception.** "Does this diverge?"
+cannot be answered from `&HirBody` alone: a call to a `-> !` function is an
+ordinary `HirExpr::Call` and only its *type* says it never returns. So
+`control_flow.rs` also holds `expr_diverges` / `stmt_diverges` /
+`block_diverges` / `block_parts_diverge`, which take `&BodyContext<'_>`. They
+share the file because the `Loop` case of "does this diverge" **is**
+`block_contains_break_for`. This is an exception by name, not a new category:
+anything else that wants `BodyContext` in here is analyzer logic and stays in
+its analyzer. Six analyzers had copy-pasted the divergence rule with three
+different `Loop` mechanisms and a seventh consulted no types at all; see
+`docs/fragility/G12/`. **Structure is matched before the Never type** in those
+functions — reversing it lets inference overrule the structural `Loop` verdict,
+the same hazard G8 removed.
+
 **What still stays local:** a fact that needs analyzer-specific state carried
 *alongside* the walk. `initializer.rs`'s `loop_break_stack` collects an
 `InitState` at each reachable break — reachability-aware, strictly stronger

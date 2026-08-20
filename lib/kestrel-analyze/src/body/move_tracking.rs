@@ -632,8 +632,18 @@ fn analyze_expr(
             // that endpoint rule to `body_state`, so a union is right here.
             join_freeze_state(&mut state, std::iter::once(&body_state));
 
-            // Loops that always run to completion without break diverge.
-            if body_state.diverged && !control_flow::block_contains_break_for(hir, body, target) {
+            // A loop diverges exactly when no `break` targeting *this* loop can
+            // exit it.
+            //
+            // The `body_state.diverged &&` conjunct this used to carry was
+            // wrong, and here it was not masked: for `loop { doWork(); }` the
+            // body completes normally, so `diverged` was false and an infinite
+            // loop was called non-diverging. Every other analyzer's copy of the
+            // same broken formula got accidentally rescued by a trailing
+            // Never-type check; this one excluded `Loop` from that check, so a
+            // value consumed after a breakless loop reported a false E500 on a
+            // line `dead_code` simultaneously called unreachable (G12).
+            if !control_flow::block_contains_break_for(hir, body, target) {
                 state.diverged = true;
             }
 
@@ -661,6 +671,10 @@ fn analyze_expr(
                     },
                 );
             }
+            // The structural verdict above is final — inference must not
+            // overrule it, so skip the Never-type fallback entirely rather than
+            // carve `Loop` out of it (G12).
+            return state;
         },
 
         // ===== Block expression =====
@@ -957,15 +971,10 @@ fn analyze_expr(
         },
     }
 
-    // Unified divergence: any Never-typed expr diverges, with one exception:
-    // a Loop expression with a reachable `break` has its type inferred to
-    // Never in some cases even though post-loop code is reachable. Rely on
-    // the Loop arm above (which only sets `diverged` when the body actually
-    // runs to completion without break) — don't let the Never-type shortcut
-    // override that.
-    if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id)
-        && !matches!(&hir.exprs[id], HirExpr::Loop { .. })
-    {
+    // Leaf divergence: any Never-typed expr diverges. The `Loop` carve-out that
+    // used to guard this is gone — the `Loop` arm returns early, so a loop can
+    // no longer reach here at all (G12).
+    if let Some(ResolvedTy::Never) = mcx.cx.typed.expr_types.get(&id) {
         state.diverged = true;
     }
 

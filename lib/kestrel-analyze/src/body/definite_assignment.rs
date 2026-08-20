@@ -315,7 +315,7 @@ fn analyze_expr(
         // exit before assignments happen). Analyze body for errors though.
         HirExpr::Loop { label, body, .. } => {
             let mut body_assigned = state.assigned.clone();
-            let body_state = analyze_block(
+            let _ = analyze_block(
                 cx,
                 &body.stmts,
                 body.tail_expr,
@@ -324,15 +324,22 @@ fn analyze_expr(
                 diags,
             );
 
-            // If the body always returns (not via a break targeting *this*
-            // loop), the loop diverges. A `break outer` nested inside an inner
-            // loop still exits this one (G9).
-            if body_state.diverged
-                && !control_flow::block_contains_break_for(cx.hir, body, label.as_deref())
-            {
+            // A loop diverges exactly when no `break` targeting *this* loop can
+            // exit it. A `break outer` nested inside an inner loop still exits
+            // this one (G9).
+            //
+            // The `body_state.diverged &&` conjunct this used to carry was
+            // wrong: for `loop { doWork(); }` the body completes normally, so
+            // `diverged` is false and the formula answered "does not diverge"
+            // about an infinite loop. It only ever looked right because the
+            // Never-type fallback at the bottom of `analyze_expr` re-decided
+            // the same question. Return early so the structural verdict is the
+            // final one — inference must not overrule it (G12).
+            if !control_flow::block_contains_break_for(cx.hir, body, label.as_deref()) {
                 state.diverged = true;
             }
             // Don't merge body assignments — loop body might not fully execute
+            return state;
         },
 
         // Block expression

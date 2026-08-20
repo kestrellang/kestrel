@@ -1,8 +1,11 @@
 //! # Shared Control-Flow Predicates
 //!
-//! Pure, diagnostic-free control-flow facts about a `HirBody` that more than
-//! one analyzer needs. Nothing in here emits, reads `TypedBody`, or touches
-//! `BodyContext` — `&HirBody` in, plain data out.
+//! Control-flow facts about a body that more than one analyzer needs, in two
+//! tiers.
+//!
+//! **Tier 1 — pure syntactic predicates.** `&HirBody` in, plain data out. No
+//! `TypedBody`, no `BodyContext`, no diagnostics. `block_contains_break_for` is
+//! the whole tier today.
 //!
 //! It exists because five analyzers (`dead_code`, `exhaustive_return`,
 //! `definite_assignment`, `move_tracking`, `guard`) each had their own private
@@ -10,8 +13,21 @@
 //! drifted: all four ignored `break`'s label, none recursed into nested loops,
 //! and only `dead_code`'s copy ever grew the `Sugar` arm. See
 //! `docs/fragility/G8-G9-G10/`.
+//!
+//! **Tier 2 — typed divergence.** `expr_diverges` / `stmt_diverges` /
+//! `block_diverges` take a `&BodyContext<'_>` because the *leaf* case of "does
+//! this diverge?" is "did inference give it type `!`?" — a `-> !` call carries
+//! no syntactic marker. This is the one named exception to the Tier-1 purity
+//! rule, not a licence for arbitrary typed logic in this file; see
+//! `docs/fragility/G12/`.
+//!
+//! The two tiers are one file because the `Loop` case of Tier 2 *is*
+//! `block_contains_break_for`: splitting them would mean a new module whose
+//! only non-trivial branch imports this one.
 
+use crate::context::BodyContext;
 use kestrel_hir::{HirBlock, HirBody, HirExpr, HirExprId, HirStmt, HirStmtId, label_selects_loop};
+use kestrel_type_infer::result::ResolvedTy;
 
 /// Does `block` — the body of a loop labeled `target` — contain a `break` that
 /// exits *that* loop?
@@ -124,6 +140,89 @@ fn contains_break_in_expr(
 
         _ => false,
     }
+}
+
+// ===== Tier 2 — typed divergence =====
+//
+// "Does control ever fall out the bottom of this?" Answering it needs both the
+// structure (a `loop` with no `break`, an `if` whose arms both `return`) and the
+// types (a call to a `-> !` function is a plain `HirExpr::Call`).
+//
+// **The match order below is load-bearing: structure first, the Never type only
+// as the leaf fallback.** Inference types a `loop` `Never` whenever no `break`
+// unifies its `break_tv` with unit — but it also types some *breakable* loops
+// `Never`, and `Break`/`Continue`/`Return` are unconditionally `Never` whether
+// or not they are valid where they stand. Testing the type first (what `guard.rs`
+// used to do) therefore lets inference overrule the structural `Loop` verdict,
+// which is exactly the "any breakable loop counts as diverging" hazard G8
+// removed. Every arm that can decide structurally must decide structurally, and
+// only expressions with no control-flow structure of their own reach `_`.
+
+/// Does evaluating `id` never fall through to whatever follows it?
+pub(crate) fn expr_diverges(cx: &BodyContext<'_>, id: HirExprId) -> bool {
+    match &cx.hir.exprs[id] {
+        HirExpr::Return { .. } | HirExpr::Break { .. } | HirExpr::Continue { .. } => true,
+
+        HirExpr::If {
+            then_body,
+            else_body,
+            ..
+        } => match else_body {
+            // No `else` means the false path falls straight through.
+            None => false,
+            Some(else_block) => block_diverges(cx, then_body) && block_diverges(cx, else_block),
+        },
+
+        // An arm-less match is either on a `!`-typed scrutinee or already an
+        // E304; either way nothing follows it.
+        HirExpr::Match { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|arm| expr_diverges(cx, arm.body))
+        },
+
+        // A loop falls through exactly when some `break` targeting *it* can run.
+        // This is the whole rule — deliberately NOT `body_diverges && !break`,
+        // which answers "does not diverge" for `loop { doWork(); }` (the body
+        // completes, so it is not itself diverging) and produced a false E500 on
+        // code after an infinite loop.
+        HirExpr::Loop { label, body, .. } => {
+            !block_contains_break_for(cx.hir, body, label.as_deref())
+        },
+
+        HirExpr::Block { body, .. } => block_diverges(cx, body),
+        // Transparent wrapper — divergence is whatever the desugared subtree does.
+        HirExpr::Sugar { inner, .. } => expr_diverges(cx, *inner),
+
+        // Leaf fallback: a call to `fatalError()` or any `-> !` function has no
+        // syntactic tell, only a type.
+        _ => matches!(cx.typed.expr_types.get(&id), Some(ResolvedTy::Never)),
+    }
+}
+
+/// Does executing `id` never fall through to the next statement?
+pub(crate) fn stmt_diverges(cx: &BodyContext<'_>, id: HirStmtId) -> bool {
+    match &cx.hir.stmts[id] {
+        HirStmt::Expr { expr, .. } => expr_diverges(cx, *expr),
+        // `let x = fatalError();` never binds `x`, so the rest of the block is
+        // unreachable. The initializer is evaluated before the binding exists.
+        HirStmt::Let { value: Some(v), .. } => expr_diverges(cx, *v),
+        _ => false,
+    }
+}
+
+/// Does `block` never fall out its bottom?
+pub(crate) fn block_diverges(cx: &BodyContext<'_>, block: &HirBlock) -> bool {
+    block_parts_diverge(cx, &block.stmts, block.tail_expr)
+}
+
+/// `block_diverges` for the function body itself, whose statements and tail live
+/// directly on `HirBody` rather than in a `HirBlock`.
+pub(crate) fn block_parts_diverge(
+    cx: &BodyContext<'_>,
+    stmts: &[HirStmtId],
+    tail: Option<HirExprId>,
+) -> bool {
+    stmts.iter().any(|&s| stmt_diverges(cx, s))
+        || tail.is_some_and(|t| expr_diverges(cx, t))
 }
 
 #[cfg(test)]
