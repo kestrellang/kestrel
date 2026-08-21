@@ -230,9 +230,27 @@ root crate.
 | `d_solver_permit.ks` | same extension, unsatisfiable, direct call | clean, exit 0 — wrong accept |
 | `e_self_q.ks` | `where Self: Q`, member witnesses `Equatable` | **E454** — twin is live in the witness shape |
 | `h_selfq_neg.ks` | shipped negative | correctly rejects |
-| `g_param_subject_control.ks`, `g2.ks` | **`TypeParameter`** subject, unsatisfiable | wrong accept → post-mono failure |
+| `g2.ks` | **`TypeParameter`** subject, unsatisfiable, body *uses* the bound | wrong accept → post-mono failure |
+| `g_param_subject_control.ks` | same, body does **not** use the bound | **clean build, exit 0 — no diagnostic at any stage** |
 | `f_stdlib_iter.ks` | shipped `extend Iterator where Item: Equatable` | wrong accept → post-mono, span in stdlib |
 | `i_a15_projection.ks`, `i2_control.ks` | G17 projection collapse | wrong accept; control gives correct `E100` |
+| ~~`control.ks`, `leak.ks`~~ | superseded | **UNRUNNABLE — invalid when written.** Both use `func get()`; `get` is a lexer keyword (`kestrel-lexer/src/lib.rs:588`), so the protocol never parses and everything after is cascade. Not a compiler change. The author's own `leak2`–`leak5`/`control2` replacements use `produce()`; no audit claim cites these two |
+
+**Corpus re-verified in full at `296e3076`: 22 CONFIRMED, 1 DIVERGED
+(`g_param_subject_control`, split above), 2 UNRUNNABLE (`control`, `leak`).**
+Both findings survive; G14's stdlib-anchored span still lands at
+`lang/std/iter/iterator.ks:857:37` exactly as documented.
+
+### What the divergence means
+
+`g_param_subject_control.ks` and `g2.ks` differ **only** in the extension body —
+`g2` writes `self.item() == other.item()`, the control returns `true`. Post-mono
+only fires if the body actually *uses* the unsatisfied bound.
+
+So G14 is **worse** than filed, not better: a `TypeParameter`-subject wrong
+accept whose body never exercises the bound reaches a **shipped binary with no
+diagnostic at any stage**. The post-mono error everyone has been treating as
+G14's safety net is contingent on the body, not guaranteed.
 
 ## Inferred, not observed — do not treat as verified
 
@@ -282,8 +300,15 @@ Everything in the VERIFIED group was **run**, not read. Binary
 ## G17 emits wrong code
 
 ```
-leak5.ks  →  builds clean, exit 0, prints  result=int:4352464672
+leak5.ks  →  builds clean, exit 0, prints  result=int:<heap pointer>
 ```
+
+> **Do not cite a specific number here.** The value is a heap address under
+> ASLR and differs every run (`4352464672`, `4373960480`, … all observed for
+> the same binary). Two agents reporting "the same" repro with different
+> numbers should have been the tell that this was a pointer, not a value. Any
+> regression test for G17 must assert **that the build is rejected**, never
+> what the miscompiled program prints.
 
 `bad[A, B](…) where A: Producer, B: Producer, A.Item: Show` calls
 `needsShow(b.produce())`. `B.Item` is `String`, which has no `Show` witness.
@@ -362,19 +387,25 @@ adapters.ks:866  IntersperseIterator[I] … I: not Copyable, I.Item: Copyable
 The *conclusion* survives — `Copyable`/`Cloneable` are answered structurally at
 the top of `conforms_to`, before the arm — but "only one exists" is false.
 
-## Two findings that need their own IDs
+## Two findings that needed their own IDs — one was a fourth staleness artifact
 
-**One unrenderable diagnostic destroys every diagnostic.** The stdlib
-rejection carries `Span::synthetic(0)`; `file_id 0` is not in the file DB, so
-codespan returns `FileMissing`, the `?` in `emit_all`
-(`kestrel-reporting/src/lib.rs:24-26`) aborts the **whole** loop, and
-`main.rs:201` `.ok()`s the error. Net: `kestrel build` exits 1 with **zero
-output**. This is the known synthetic-span failure mode, live.
+~~**One unrenderable diagnostic destroys every diagnostic.**~~ **STRUCK
+2026-08-20 — not live at HEAD, never filed.** The claim was that
+`Span::synthetic(0)` → `FileMissing` → the `?` in `emit_all` aborts the whole
+loop → `kestrel build` exits 1 with zero output. `emit_all` no longer `?`s;
+HEAD has `emit_one`, which strips labels and retries on any span-lookup error.
+Observed working at `296e3076`: `e_self_q.ks` and `h_selfq_neg.ks` each print
+a spanless `E100` rendered as *"(no source location available…)"* **alongside**
+their other diagnostics — nothing is swallowed. `emit_one` does not exist in
+`v0.16.0`, so this is the same worktree-staleness as the withdrawn G22
+(finding **G24**) — the fourth artifact from it.
 
-**The suite cannot see stdlib-anchored diagnostics.** Every test passed while
-every real `kestrel build` was broken — the file_id-anchored matcher discards
-the stdlib diagnostic and execution tests still codegen and run. Sibling of
-G19: a genuine regression here ships green.
+**The suite cannot see stdlib-anchored diagnostics.** Independent of the above
+and **still open** — filed as **G23**. The `file_id`-anchored matcher
+(`diagnostic_matcher.rs:191`) discards a diagnostic anchored in `lang/std`, and
+execution tests still codegen and run. Sibling of G19: a genuine regression
+here ships green. Note this one needs a *suite run* to demonstrate, not a repro
+build, so it remains unverified on this branch.
 
 ## Unverified — do not rely on
 
