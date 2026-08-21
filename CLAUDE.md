@@ -5,7 +5,9 @@ Information on the project structure, workflows, quick references, and patterns 
 - Never change a test in order to cajole it to pass, unless I tell you explicitly to, or it uses invalid kestrel syntax. Don't add #[ignore] to tests
 - Tests should document the state of the compiler, they don't need to all pass. If a behavior is not working yet, you should add a test to ensure it gets fixed.
 - If you hit a roadblock, stop and ask for guidance. Don't revert your changes, throw away changes, or anything. After 3 failed attempts at the same class of fix, STOP. List what was tried, what was ruled out, and ask for guidance before continuing.
-- There will be multiple agents working at the same time in this codebase, you will have to share the same branch with them.wh
+- There will be multiple agents working at the same time in this codebase, you will have to share the same branch with them.
+- **Before reporting any measurement, establish what you measured.** Run `pwd`, `git log --oneline -1`, and `git rev-parse HEAD`, and report them with the result. If `pwd` is under `.claude/worktrees/`, you are on `main` — currently ~173 commits behind the working branch — and your measurement is about a different compiler. Build fresh (`cargo build --release --bin kestrel`) before measuring; a stale `target/` is the same trap one layer down. A number reported without its base commit is unusable. See [`docs/contributing/verifying-claims.md`](docs/contributing/verifying-claims.md).
+- **Don't relay an agent's measurement you haven't reproduced.** Either re-run the load-bearing ones yourself, or attribute them and mark them unverified.
 
 
 ## Debugging

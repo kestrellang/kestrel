@@ -13,6 +13,7 @@ Welcome. This guide orients new contributors to the Kestrel compiler — the act
 | Work on the type system, inference, generics | [Type Inference](type-inference.md) |
 | Understand or change how symbols are mangled | [Mangling](mangling.md) |
 | Branches, the release train, the Project board, PRs, issues | [Workflow](git.md) |
+| Report a measurement, a repro, or an audit finding others will trust | [Verifying Claims](verifying-claims.md) |
 
 ## Codebase overview
 

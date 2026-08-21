@@ -13,8 +13,15 @@ follow-ups. 118 candidates filed, 107 confirmed, 11 refuted. Findings 1-43 are t
 merge of 90 confirmed; G1-G17 are the gap round.
 
 **Legend.** `fixed` done and verified · `partial` some sub-items done · `blocked` needs a
-maintainer decision · `open` untouched. Severity is post-verification (verifiers corrected
-inflated finder severities).
+maintainer decision · `open` untouched · `withdrawn` filed then refuted, ID retained because
+other documents reference it. Severity is post-verification (verifiers corrected inflated
+finder severities).
+
+**Before adding or trusting a finding here, read
+[`contributing/verifying-claims.md`](contributing/verifying-claims.md).** Every empirical
+claim needs a reproduction and the commit it was measured at; anything else is a hypothesis.
+G22/G24 are what this costs when skipped — a `high` finding filed against a compiler
+173 commits stale.
 
 **Progress: 45 fixed · 4 partial · 4 blocked · 18 open · 1 withdrawn** — 67 top-level (F1–F43, G1–G24).
 Partial: F2, F28, F29, F43. Blocked on a maintainer decision: F11, F29, F42, G16.
