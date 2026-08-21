@@ -43,16 +43,22 @@ Order:
 
 | # | work | who | may run concurrently with |
 | --- | --- | --- | --- |
-| 1 | **G22** — `emit_all` discards every diagnostic on one bad span | orchestrator (in progress) | everything; different crate |
+| 1 | ~~G22~~ — **withdrawn, does not exist on this branch** | — | — |
 | 2 | **D7 type change**, behaviour-preserving | orchestrator | nothing else in `kestrel-type-infer` |
 | 3a | G17 behavioural rewire | unclaimed | 3b |
 | 3b | G14 (arity zip + D1) | unclaimed | 3a |
 
-**Why G22 is first, not a nicety.** Until `emit_all` stops aborting on the
-first unrenderable diagnostic, anyone working in type-infer is debugging blind:
-a rejection anchored in the stdlib makes `kestrel build` print *nothing* and
-exit 1. That cost the G17 probe an hour before it patched the reporter to see
-its own errors.
+**G22 was withdrawn the day it was filed.** It was going to be step 1 on the
+reasoning that `emit_all` aborting on the first unrenderable diagnostic left
+anyone in type-infer debugging blind. That code was replaced by `e0cb32cb` on
+2026-06-18; `emit_all` already collects-and-continues and `emit_one` already
+degrades to a spanless render, with two passing tests. The finding came from a
+probe running in a worktree pinned to `v0.16.0` — audit finding **G24**.
+
+**Before you measure anything for this work, check your base.** `git log -1`
+in an agent worktree may show a commit 173 behind `arch/fixes`. Everything in
+`problem.md`'s second pass is tagged VERIFIED or MEASURED-ON-v0.16.0 for this
+reason; do not promote a MEASURED claim without re-running it here.
 
 **Step 2 must not fix the four skip sites.** Collapsing `Bound` and
 `ProjectionBound` into one variant forces every `ProjectionBound { .. } => {}`

@@ -250,8 +250,34 @@ root crate.
 
 # Second pass (2026-08-20) — G17 is a silent miscompile, not an unsound accept
 
-Everything in this section was **run**, not read. Binary
-`target/release/kestrel`, repros in `scratchpad/g17/` (untracked).
+> ## ⚠ Provenance — read before citing anything below
+>
+> This section has **two sources with different trust levels**, and they were
+> conflated when first written. Corrected same day.
+>
+> **VERIFIED on `arch/fixes`** — run by the orchestrator against
+> `target/release/kestrel` built from the parent checkout at `HEAD`:
+> the miscompile (`leak5.ks`), both A/B controls
+> (`distinct_samename`/`distinct`, `structcase`/`structcase_nobound`), and the
+> three stdlib projection-bound sites. **These stand.** G17's severity re-rating
+> rests only on these.
+>
+> **MEASURED ON `v0.16.0`, NOT THIS BRANCH** — everything sourced from the
+> instrumented probe: the 6124-fire sweep, the fabrication chain through
+> `get_or_create_subject_tv`, the `param_tyvars` aliasing claim, the strict-mode
+> suite runs, and the line numbers it cites (`resolve.rs:512`). The probe ran in
+> `.claude/worktrees/agent-*`, which is pinned at `789bb779` = `v0.16.0` = `main`
+> — **173 commits behind** (see audit finding **G24**). Those claims are
+> *plausible and unverified here*. Re-run them on `arch/fixes` before building on
+> them.
+>
+> This already produced one false `high` finding (G22, withdrawn) and explains
+> three anomalies logged below as unexplained: the 3062-vs-3815 suite count, the
+> "only one stdlib projection bound" claim, and the `:512` line number.
+
+Everything in the VERIFIED group was **run**, not read. Binary
+`target/release/kestrel` from the parent checkout, repros in `scratchpad/g17/`
+(untracked).
 
 ## G17 emits wrong code
 
@@ -352,10 +378,15 @@ G19: a genuine regression here ships green.
 
 ## Unverified — do not rely on
 
-- The probe reports **3062 passed** under strict matching. The full suite ran
-  **3815** earlier the same day. 753 tests unaccounted for; the "suite is
-  green under strict" claim needs re-running before anyone leans on it. It is
-  the claim that makes this fix look cheap.
+- **RESOLVED: the 3062-vs-3815 discrepancy was staleness.** The probe reported
+  3062 passing; the full suite ran 3815 the same day. Cause: the probe's
+  worktree is `v0.16.0`, which has fewer testdata files. The "suite is green
+  under strict" claim is therefore about a 10-week-old compiler and says
+  nothing about this branch. Re-run before leaning on it — it is the claim
+  that makes this fix look cheap.
+- **The "only one stdlib projection bound" claim was also staleness**, not a
+  bad grep: `v0.16.0`'s `adapters.ks` differs from this branch's, which has
+  three (`:397`, `:666`, `:866`, verified here).
 - `Iterator.flatten()` reported as already unusable in-tree (mangler ICE on
   `AssociatedProjection`, `mono/mangle.rs:229`), independent of any change
   here. Not reproduced by me.
