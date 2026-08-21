@@ -149,9 +149,120 @@ Per `docs/fragility-audit.md`'s own "keeping this current" rule:
 
 ---
 
+---
+
+## D7 — What represents a where-clause subject?
+
+**Status:** **DECIDED — recursive, arbitrary depth.** Maintainer, 2026-08-20.
+**Owner:** orchestrator (this session).
+
+The subject has four spellings — `T`, `Self`, `T.Item`, `T.Iter.Item` — and
+today three different types try to hold it, each dropping something:
+
+| holder | drops |
+| --- | --- |
+| `WhereClause::Bound { param: Entity }` | the base, for any projection |
+| `WhereClause::ProjectionBound { base: Entity, assoc: Entity }` | depth > 2 |
+| `TypeEquality { param, assoc_name: String }` | keys the assoc by **name string** |
+
+### Decision
+
+One recursive type, in `kestrel-type-infer/src/resolve.rs` beside `WhereClause`:
+
+```rust
+/// What a where-clause bound is *about*.
+///
+/// One type for every spelling, so no code path can hold a subject whose
+/// receiver it has silently dropped. Nests to arbitrary depth.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum WhereSubject {
+    /// `T`
+    Param(Entity),
+    /// The `Self` position. NOT collapsed to the enclosing entity: in a
+    /// protocol extension `Self` is the *conformer*, resolved per-conformance.
+    /// Pinning it to the protocol entity is the same receiver-loss bug one
+    /// level up.
+    SelfType,
+    /// `<base>.<assoc>`, to any depth.
+    Projection { base: Box<WhereSubject>, assoc: Entity },
+}
+```
+
+and the clause enum collapses 4 variants → 2:
+
+```rust
+pub enum WhereClause {
+    Bound    { subject: WhereSubject, protocol: Entity, protocol_type_args: Vec<HirTy> },
+    Equality { subject: WhereSubject, rhs: HirTy },
+}
+```
+
+### Why this shape
+
+**It deletes the bug class rather than fixing an instance.** `ProjectionBound`
+exists *only* because `Bound`'s subject couldn't express a projection. Every
+one of the seven `WhereClause::ProjectionBound { .. } => {}` sites is a place
+someone handled `Bound` and skipped the sibling — and four of those seven are
+live bugs (`solver.rs:3565`, `:4485`, `lib.rs:812`, `generate.rs:1972`). With
+one variant **there is nothing to skip**: the match arm is the same arm.
+
+Depth falls out for free. `T.Iter.Item` is
+`Projection { base: Projection { base: Param(T), assoc: Iter }, assoc: Item }`.
+That matters immediately — the fabrication chain in `problem.md` *generates* a
+depth-3 projection (`I.Item.Item`), so a flat pair cannot represent the very
+shape the bug produces.
+
+`Equality` absorbs both `TypeEquality` and `DirectEquality`, killing the
+name-string key: `T.Item = X` is `Projection { Param(T), Item }`, `V = X` is
+`Param(V)`.
+
+`SelfType` stays explicit rather than resolving to the enclosing entity, which
+makes `Self.Item: P` representable — shipped at
+`protocol_extension_mixed_self_constraints.ks:15`, and today it silently
+collapses to bare-assoc (G14's shape).
+
+### One bridge replaces three ad-hoc keys
+
+```rust
+fn lower_subject(ctx, &WhereSubject, subs) -> TyVar
+```
+`Param` → `subs.find`; `SelfType` → `self_tv`; `Projection` →
+`ctx.assoc_projection(lower_subject(base), assoc)`.
+
+That is `lib.rs:457-459` generalized. It replaces `get_or_create_subject_tv`'s
+`Self` guess, the `param_tyvars` aliasing, and the `where_clause_assoc_subs`
+name fallback with one recursion.
+
+### Costs and risks, stated up front
+
+- **Path resolution needs an order.** Resolving `T.Iter.Item` requires knowing
+  `T: HasIter` to find `Iter`, then `Iter`'s bound to find `Item` — subject
+  resolution consults bounds while bounds are what is being resolved. Resolve
+  breadth-first by depth, or take a fixed point. Today's code sidesteps this by
+  refusing depth > 2. **This is the main implementation risk.**
+- **`SelfType` explicit touches the one branch that works** —
+  `conformance.rs:363`'s `Some(*param) == target_entity`, pinned by
+  `h_selfq_neg.ks`. Keep that test green or explain the change.
+- `NegativeBound` (`where T: not Copyable`) stays unmodeled, as today
+  (`where_clauses.rs:122-124`). Not this change's job, but note that three
+  stdlib projection bounds are `I.Item: not Copyable` / `: Copyable`.
+- Interning `WhereSubject` to a `SubjectId` is available later if `Box` +
+  derived `Hash` ever shows up in a profile. Not now.
+
+### Rejected
+
+| option | why |
+| --- | --- |
+| Flat `{ base: Entity, assoc: Entity }` | cannot represent `I.Item.Item`, which is the shape the fabrication bug emits; cements the `segments.len() != 2` bail |
+| Keep `Bound` + `ProjectionBound` separate | preserves the skip-the-sibling failure mode that produced four of the live bugs |
+| `Root(Entity)` with `Self` resolved to the enclosing entity | re-introduces receiver loss one level up; `Self` in a protocol extension is the conformer, not the protocol |
+
+---
+
 ## Decided
 
-*(nothing yet)*
+- **D7** — `WhereSubject` is recursive, arbitrary depth; `Bound` and
+  `ProjectionBound` collapse into one variant. Maintainer, 2026-08-20.
 
 ## Refutations landed
 
@@ -161,6 +272,19 @@ Per `docs/fragility-audit.md`'s own "keeping this current" rule:
   subject fails identically. Source: repro `temp/g14/g_param_subject_control.ks`.
 - **2026-08-20** — A16's counter-example is wrong (`Conformances`, not
   `AstWhereClause`). Source: `type_alias.rs:80-83`, repro `temp/g14/j_assoc_bounded.ks`.
+- **2026-08-20** — **D3's premise.** D3 recommends deferring projections to a
+  later change, reasoning that G17 is "the more serious bug" but bundling it
+  hurts verification. Sound reasoning, understated severity: G17 **emits wrong
+  code** (`leak5.ks`, verified by running), and the damage is not in the
+  `conforms_to` arm D3 is about — it is `param_tyvars` aliasing every `_.Item`
+  to one `TyVar`. Resequence: the subject fix lands **first and alone**, before
+  either evaluator is touched. It is the smallest change, the only one that
+  stops emitting bad code, and independent of the whole G14 evaluator question.
+  Source: `problem.md` second pass.
+- **2026-08-20** — "only one projection bound ships in the stdlib" is wrong;
+  there are three (`adapters.ks:397`, `:666`, `:866`). Conclusion unaffected —
+  `Copyable` is answered structurally before the arm — but the count is not.
+  Source: re-grep of `lang/std`.
 - **2026-08-20** — "`extension_bounds_hold` is the canonical evaluator, just
   delete the other one" is wrong: it permits unconditionally for protocol
   extensions, so deleting the analyzer's evaluator converts a false-reject into

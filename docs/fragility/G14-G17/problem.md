@@ -245,3 +245,117 @@ root crate.
 - `resolve_conformance_type_arg` (`conformance_completeness.rs:1204`) recurses
   **uncapped**. Surfaced in the sweep, not triggered. Out of scope here, but it
   sits directly in the substitution path a unified binder would use.
+
+---
+
+# Second pass (2026-08-20) — G17 is a silent miscompile, not an unsound accept
+
+Everything in this section was **run**, not read. Binary
+`target/release/kestrel`, repros in `scratchpad/g17/` (untracked).
+
+## G17 emits wrong code
+
+```
+leak5.ks  →  builds clean, exit 0, prints  result=int:4352464672
+```
+
+`bad[A, B](…) where A: Producer, B: Producer, A.Item: Show` calls
+`needsShow(b.produce())`. `B.Item` is `String`, which has no `Show` witness.
+The clause on `A.Item` makes `B.Item` type as `A.Item` (`Int64`), mono selects
+`Int64`'s witness, and the `String` pointer is reinterpreted as an integer.
+**Type confusion in a shipped binary**, not a missing diagnostic.
+
+Re-rate G17 `medium` → `high`. It is the only silent miscompile left in the
+audit.
+
+| repro | shape | observed |
+| --- | --- | --- |
+| `leak5.ks` | `A.Item: Show`, call on `B.Item` | **clean build, garbage output** |
+| `distinct_samename.ks` | two *unrelated* protocols, both aliases named `Item` | **clean build** — wrong accept |
+| `distinct.ks` | same, aliases renamed `ItemA`/`ItemB` | correct `E100` |
+| `structcase.ks` | container-level `A.Item: Show` | frontend accepts, post-mono failure |
+| `structcase_nobound.ks` | same, clause deleted | correct `E100` |
+
+Two independent statements of the bug, both verified: **renaming an unrelated
+protocol's associated type changes whether your program compiles**, and
+**adding a constraint silences a correct error**.
+
+## Three independent aliasing mechanisms, not one
+
+The `conforms_to` arm (`resolve.rs:589`) is the *least* damaging of them.
+
+1. **`param_tyvars`** — `emit_where_clauses` calls `ctx.param(alias_entity)`
+   (`lib.rs:314`), memoized. Every `_.Item` in a body becomes literally the
+   same `TyVar`. Flows through the `TyKind::Param` arm, not `AssocProjection`.
+   This is the one that produces `leak5.ks`.
+2. **`where_clause_assoc_subs`** — pushed as `(assoc, tv)` with the base
+   dropped (`lib.rs:461`); lookups at `generate.rs:2313`, `solver.rs:2822`,
+   `:3907`, `:6015` ignore it, two with an explicit `let _ = base_tv;`. Worse,
+   `solver.rs:2836` falls back to matching on **`Name` equality across
+   different protocols** — the `distinct_samename.ks` result.
+3. **`collect_assoc_type_protocol_bounds(assoc)`** — the arm itself.
+
+A fix that addresses only (3) leaves the miscompile intact.
+
+## The collapse fabricates the obligation it then discharges
+
+Instrumented sweep over all testdata: **6124 fires of the arm, 6124 leaky, 0
+legitimate** — exactly two per compilation, all from one stdlib site, none
+from any test file. Traced:
+
+1. `adapters.ks:668` declares `where I: Iterator, I.Item: Iterator`
+2. `resolve_where_clauses` collapses the subject to
+   `Bound { param: Iterator.Item }` — base `I` gone
+3. `get_or_create_subject_tv` (`lib.rs:811-843`) receives a bare alias, cannot
+   tell what it was based on, and **re-bases it onto `Self`** via
+   `ctx.associated(self_tv, …)`
+4. For `FlattenIterator`, `Self.Item` *is* `I.Item.Item` — so the obligation
+   becomes `I.Item.Item: Iterator`, a claim the source never makes
+5. the base-blind arm discharges it, because the fabricated projection's
+   `assoc` is the entity the clause collapsed onto
+
+**The arm's entire production use is discharging an obligation the same
+base-blindness invented two passes earlier.** Requiring a matching base costs
+nothing real.
+
+Note this produces a **depth-3** projection, which
+`resolve_projection_subject` cannot even represent (`segments.len() != 2`).
+
+## Correction to the first pass
+
+> "`grep '\.Item:' lang/std` finds exactly one projection bound"
+
+Wrong. There are three, and any fix must account for all of them:
+
+```
+adapters.ks:397  PeekableIterator[I]    … I: not Copyable, I.Item: Copyable
+adapters.ks:666  FlattenIterator[I]     … I.Item: Iterator, I.Item: not Copyable
+adapters.ks:866  IntersperseIterator[I] … I: not Copyable, I.Item: Copyable
+```
+
+The *conclusion* survives — `Copyable`/`Cloneable` are answered structurally at
+the top of `conforms_to`, before the arm — but "only one exists" is false.
+
+## Two findings that need their own IDs
+
+**One unrenderable diagnostic destroys every diagnostic.** The stdlib
+rejection carries `Span::synthetic(0)`; `file_id 0` is not in the file DB, so
+codespan returns `FileMissing`, the `?` in `emit_all`
+(`kestrel-reporting/src/lib.rs:24-26`) aborts the **whole** loop, and
+`main.rs:201` `.ok()`s the error. Net: `kestrel build` exits 1 with **zero
+output**. This is the known synthetic-span failure mode, live.
+
+**The suite cannot see stdlib-anchored diagnostics.** Every test passed while
+every real `kestrel build` was broken — the file_id-anchored matcher discards
+the stdlib diagnostic and execution tests still codegen and run. Sibling of
+G19: a genuine regression here ships green.
+
+## Unverified — do not rely on
+
+- The probe reports **3062 passed** under strict matching. The full suite ran
+  **3815** earlier the same day. 753 tests unaccounted for; the "suite is
+  green under strict" claim needs re-running before anyone leans on it. It is
+  the claim that makes this fix look cheap.
+- `Iterator.flatten()` reported as already unusable in-tree (mangler ICE on
+  `AssociatedProjection`, `mono/mangle.rs:229`), independent of any change
+  here. Not reproduced by me.
