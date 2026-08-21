@@ -33,6 +33,36 @@ options, and answers**.
 (`collect_provided_members_for_conformance` / `extension_clauses_entailed`).
 If you are touching either, say so here first.
 
+## Sequencing — read this before starting anything
+
+**G14 and G17 cannot proceed in parallel.** D7 changes the shape of
+`WhereClause`, and both danger-zone files above *consume* `WhereClause`.
+Whoever lands the type change invalidates the other's working tree mid-edit.
+
+Order:
+
+| # | work | who | may run concurrently with |
+| --- | --- | --- | --- |
+| 1 | **G22** — `emit_all` discards every diagnostic on one bad span | orchestrator (in progress) | everything; different crate |
+| 2 | **D7 type change**, behaviour-preserving | orchestrator | nothing else in `kestrel-type-infer` |
+| 3a | G17 behavioural rewire | unclaimed | 3b |
+| 3b | G14 (arity zip + D1) | unclaimed | 3a |
+
+**Why G22 is first, not a nicety.** Until `emit_all` stops aborting on the
+first unrenderable diagnostic, anyone working in type-infer is debugging blind:
+a rejection anchored in the stdlib makes `kestrel build` print *nothing* and
+exit 1. That cost the G17 probe an hour before it patched the reporter to see
+its own errors.
+
+**Step 2 must not fix the four skip sites.** Collapsing `Bound` and
+`ProjectionBound` into one variant forces every `ProjectionBound { .. } => {}`
+site to handle a case it was skipping — and four of those seven are live bugs
+(`solver.rs:3565`, `:4485`, `lib.rs:812`, `generate.rs:1972`). Preserve today's
+behaviour there with an explicit projection skip and a `TODO(G17 stage 3a)`, so
+the type change reviews as *no behaviour change*. Fixing them inside a 30-file
+refactor buries a semantic change in mechanical noise; they get individual
+commits with individual tests in 3a.
+
 ---
 
 ## D1 — Is the third evaluator in scope?
