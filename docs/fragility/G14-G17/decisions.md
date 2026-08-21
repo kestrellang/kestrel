@@ -254,10 +254,34 @@ pub enum WhereClause {
 
 **It deletes the bug class rather than fixing an instance.** `ProjectionBound`
 exists *only* because `Bound`'s subject couldn't express a projection. Every
-one of the seven `WhereClause::ProjectionBound { .. } => {}` sites is a place
-someone handled `Bound` and skipped the sibling — and four of those seven are
-live bugs (`solver.rs:3565`, `:4485`, `lib.rs:812`, `generate.rs:1972`). With
-one variant **there is nothing to skip**: the match arm is the same arm.
+`WhereClause::ProjectionBound { .. } => {}` arm is a place someone handled
+`Bound` and skipped the sibling. With one variant **there is nothing to skip**:
+the match arm is the same arm.
+
+[verified @ `296e3076`] **8** match sites, **6** no-ops, of which **4** are live
+bugs — see the Sequencing table for the per-site breakdown. (An earlier draft
+of this paragraph said "seven … four of those seven"; that was a survivor of
+the refuted first-pass count.)
+
+**But the explicit arms are a lower bound on the review surface.** A further
+**13** sites match `Bound` *only* and let `ProjectionBound` fall through
+implicitly — `if let`, `let … else { continue }`, `filter_map`, or a `match`
+catch-all. Merging the variants silently **widens every one of them**. The
+sharpest is `collect_context_where_clauses`
+(`conformance_completeness.rs:1811-1817`), which **mutates the subject in
+place**:
+
+```rust
+for clause in &mut clauses {
+    if let ResolvedWhereClause::Bound { param, .. } = clause
+        && let Some(&mapped) = decl_to_struct.get(param) { *param = mapped; }
+}
+```
+
+Today a projection is a different variant and is untouched. After the merge
+this starts rewriting projection *bases* unless it is written to look only at
+the subject root. **Total review surface: 6 explicit + 2 non-`{}` + 13 implicit
+= 21 decision points**, not 6.
 
 Depth falls out for free. `T.Iter.Item` is
 `Projection { base: Projection { base: Param(T), assoc: Iter }, assoc: Item }`.
