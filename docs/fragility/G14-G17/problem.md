@@ -280,18 +280,28 @@ G14's safety net is contingent on the body, not guaranteed.
 > three stdlib projection-bound sites. **These stand.** G17's severity re-rating
 > rests only on these.
 >
-> **MEASURED ON `v0.16.0`, NOT THIS BRANCH** — everything sourced from the
-> instrumented probe: the 6124-fire sweep, the fabrication chain through
-> `get_or_create_subject_tv`, the `param_tyvars` aliasing claim, the strict-mode
-> suite runs, and the line numbers it cites (`resolve.rs:512`). The probe ran in
-> `.claude/worktrees/agent-*`, which is pinned at `789bb779` = `v0.16.0` = `main`
-> — **173 commits behind** (see audit finding **G24**). Those claims are
-> *plausible and unverified here*. Re-run them on `arch/fixes` before building on
-> them.
+> **MEASURED ON `v0.16.0`, NOT THIS BRANCH — now adjudicated.** The probe ran
+> in `.claude/worktrees/agent-*`, pinned at `789bb779` = `v0.16.0` = `main`,
+> **173 commits behind** (audit finding **G24**). Every claim it made has since
+> been re-checked against source at `296e3076`:
 >
-> This already produced one false `high` finding (G22, withdrawn) and explains
-> three anomalies logged below as unexplained: the 3062-vs-3815 suite count, the
-> "only one stdlib projection bound" claim, and the `:512` line number.
+> | probe claim | verdict at HEAD |
+> | --- | --- |
+> | `where_clause_assoc_subs` keyed base-free, incl. the `solver.rs:2836` cross-protocol **name** fallback | **CONFIRMED** — all six cited sites exact |
+> | `conforms_to`'s `AssocProjection` arm discards the base; `WorldResolver` has no `InferCtx` to resolve it | **CONFIRMED** — and `resolve.rs:589` is right, `:512` was the stale line |
+> | the fabrication chain through `get_or_create_subject_tv` | **CONFIRMED mechanism, MOVED to `lib.rs:969-1000` (re-base at `:991`) — but its example is WRONG**: it emits a *depth-2* projection rooted at `Self`, not `I.Item.Item`. No depth-3 shape is produced |
+> | `param_tyvars` aliasing via `emit_where_clauses` (`lib.rs:314`) | **REFUTED** — no such function exists at HEAD *or* at `v0.16.0`; `lib.rs:314` is a comment. The `T.Assoc` path was fixed by #184; the aliasing moved into `where_clause_assoc_subs` (row 1) |
+> | seven `ProjectionBound` match sites, four of them bugs | **REFUTED (counts)** — there are **8** sites and **6** no-ops; it missed `lib.rs:958` and `solver.rs:5798` |
+> | the 6124-fire sweep | **VOID** — `ProjectionBound` and `resolve_projection_subject` **did not exist at `v0.16.0`**, so the sweep measured a compiler without the feature. Says nothing about this branch |
+> | strict-mode suite green (3062) | **still unverified** — needs a `triage` run here |
+>
+> **The root cause of every wrong Group-B claim is one fact:** projection
+> subjects were unconditionally collapsed at `v0.16.0` because the machinery
+> under test had not been written yet.
+>
+> **VERIFIED on `arch/fixes`** [@ `296e3076`] — the behavioural corpus, re-run
+> in full: 22 confirmed, 1 diverged, 2 invalid-when-written. The miscompile and
+> both A/B controls stand. G17's severity rests only on these.
 
 Everything in the VERIFIED group was **run**, not read. Binary
 `target/release/kestrel` from the parent checkout, repros in `scratchpad/g17/`
@@ -331,28 +341,45 @@ Two independent statements of the bug, both verified: **renaming an unrelated
 protocol's associated type changes whether your program compiles**, and
 **adding a constraint silences a correct error**.
 
-## Three independent aliasing mechanisms, not one
+## Two independent aliasing mechanisms — corrected
 
-The `conforms_to` arm (`resolve.rs:589`) is the *least* damaging of them.
+[verified @ `296e3076`] An earlier draft claimed three. `param_tyvars` was one
+of them and is **refuted**: no `emit_where_clauses` exists at HEAD, and
+`lib.rs:314` is a comment. The `T.Assoc` path it described was fixed by #184
+(`lib.rs:447-461`, documented in-source). Two remain, and the first is the one
+that miscompiles:
 
-1. **`param_tyvars`** — `emit_where_clauses` calls `ctx.param(alias_entity)`
-   (`lib.rs:314`), memoized. Every `_.Item` in a body becomes literally the
-   same `TyVar`. Flows through the `TyKind::Param` arm, not `AssocProjection`.
-   This is the one that produces `leak5.ks`.
-2. **`where_clause_assoc_subs`** — pushed as `(assoc, tv)` with the base
-   dropped (`lib.rs:461`); lookups at `generate.rs:2313`, `solver.rs:2822`,
-   `:3907`, `:6015` ignore it, two with an explicit `let _ = base_tv;`. Worse,
-   `solver.rs:2836` falls back to matching on **`Name` equality across
-   different protocols** — the `distinct_samename.ks` result.
-3. **`collect_assoc_type_protocol_bounds(assoc)`** — the arm itself.
+1. **`where_clause_assoc_subs`** — a `Vec<(Entity, TyVar)>` keyed on the
+   **assoc entity alone** (`ctx.rs:178`), pushed at `lib.rs:461` with the base
+   dropped. Six reads ignore the base — `generate.rs:2313`/`:2314`,
+   `solver.rs:2822`, `:3907`, `:6015`/`:6016` — two with an explicit
+   `let _ = base_tv;`. Worst, **`solver.rs:2836`** falls back to matching on
+   **`Name` equality across different protocols**, which is the
+   `distinct_samename.ks` result. `find()` returns first, so two subjects
+   sharing an assoc entity collide.
+2. **`collect_assoc_type_protocol_bounds(assoc)`** — the `conforms_to` arm at
+   `resolve.rs:589`, base discarded. `base` is a `TyVar` and `WorldResolver`
+   (`resolve.rs:214-218`) holds no `InferCtx`, so the arm is *structurally
+   incapable* of comparing bases where it currently sits.
 
-A fix that addresses only (3) leaves the miscompile intact.
+**A fix that addresses only (2) leaves the miscompile intact** — and so does
+D7's `WhereSubject` on its own, because (1) is a *key* defect, not a
+*representation* defect. See the scope limit in `decisions.md` D7.
 
 ## The collapse fabricates the obligation it then discharges
 
-Instrumented sweep over all testdata: **6124 fires of the arm, 6124 leaky, 0
+> **Provenance** [checked @ `296e3076`]: the *mechanism* below is CONFIRMED but
+> has **MOVED** to `lib.rs:969-1000` (re-base at `:991`). Its **example is
+> wrong** — `ctx.associated(self_tv, …)` builds a *depth-2* projection rooted
+> at `Self`, not `I.Item.Item`; no depth-3 shape is produced on this path. The
+> 6124-fire sweep quoted below is **VOID**: it ran on `v0.16.0`, where
+> `ProjectionBound` and `resolve_projection_subject` **did not exist at all**,
+> so it measured a compiler without the feature under test. Re-run it here
+> before quoting a number.
+
+~~Instrumented sweep over all testdata: **6124 fires of the arm, 6124 leaky, 0
 legitimate** — exactly two per compilation, all from one stdlib site, none
-from any test file. Traced:
+from any test file.~~ Traced:
 
 1. `adapters.ks:668` declares `where I: Iterator, I.Item: Iterator`
 2. `resolve_where_clauses` collapses the subject to

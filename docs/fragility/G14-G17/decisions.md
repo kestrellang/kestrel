@@ -60,14 +60,31 @@ in an agent worktree may show a commit 173 behind `arch/fixes`. Everything in
 `problem.md`'s second pass is tagged VERIFIED or MEASURED-ON-v0.16.0 for this
 reason; do not promote a MEASURED claim without re-running it here.
 
-**Step 2 must not fix the four skip sites.** Collapsing `Bound` and
-`ProjectionBound` into one variant forces every `ProjectionBound { .. } => {}`
-site to handle a case it was skipping — and four of those seven are live bugs
-(`solver.rs:3565`, `:4485`, `lib.rs:812`, `generate.rs:1972`). Preserve today's
-behaviour there with an explicit projection skip and a `TODO(G17 stage 3a)`, so
-the type change reviews as *no behaviour change*. Fixing them inside a 30-file
-refactor buries a semantic change in mechanical noise; they get individual
-commits with individual tests in 3a.
+**Step 2 must not fix the skip sites — and there are SIX, not four.**
+[verified @ `296e3076`] Collapsing `Bound` and `ProjectionBound` into one
+variant forces every `ProjectionBound { .. } => {}` site to handle a case it
+was skipping. Preserve today's behaviour at **all six** with an explicit
+projection skip and a `TODO(G17 stage 3a)`:
+
+| site | today | classification |
+| --- | --- | --- |
+| `solver.rs:3565` | `=> {}` | **live bug** — call-site obligation for a direct `Def` call |
+| `solver.rs:4485` | `=> {}` | **live bug** — same, member/method path |
+| `lib.rs:812` | `=> {}` | **live bug** — the only emitter for container-level clauses |
+| `generate.rs:1972` | `=> {}` | **live bug** — call-site / type-formation path |
+| `lib.rs:958` | `=> {}` | inert feature — protocol assoc-type clauses |
+| `solver.rs:5798` | `=> {}` | inert feature — type-alias clauses |
+
+Plus two non-`{}` sites that must keep their current answers: `lib.rs:348`
+(the one real consumer) and `entailment.rs:45` (`false`, correct as-is).
+
+**An earlier draft of this note listed only four.** Missing `lib.rs:958` and
+`solver.rs:5798` would have made step 2 silently *change* behaviour at two
+sites — destroying the "reviews as no behaviour change" property that is the
+entire reason step 2 is sequenced first and reviewed separately.
+
+Fixing any of them inside a multi-file refactor buries a semantic change in
+mechanical noise; they get individual commits with individual tests in 3a.
 
 ---
 
@@ -244,9 +261,20 @@ one variant **there is nothing to skip**: the match arm is the same arm.
 
 Depth falls out for free. `T.Iter.Item` is
 `Projection { base: Projection { base: Param(T), assoc: Iter }, assoc: Item }`.
-That matters immediately — the fabrication chain in `problem.md` *generates* a
-depth-3 projection (`I.Item.Item`), so a flat pair cannot represent the very
-shape the bug produces.
+
+**Justification corrected 2026-08-20** [verified @ `296e3076`]. This originally
+rested on the fabrication chain "generating a depth-3 projection
+(`I.Item.Item`)". **That premise is refuted** — `lib.rs:991` emits
+`ctx.associated(self_tv, …)`, a *depth-2* projection rooted at `Self`; no
+depth-3 shape is produced on that path.
+
+The real justification is simpler and lives in source, not in a bug:
+`resolve_projection_subject` bails at `where_clauses.rs:286`
+(`segments.len() != 2`), so **`where T.Iter.Item: P` written by a user today
+silently collapses** to the bare-assoc path. Shipped at
+`declarations/associated_types/where_clause_on_nested_associated_type.ks:12`.
+A flat pair cements that bail; recursion removes it. Better premise — it
+does not depend on any disputed measurement.
 
 `Equality` absorbs both `TypeEquality` and `DirectEquality`, killing the
 name-string key: `T.Item = X` is `Projection { Param(T), Item }`, `V = X` is
@@ -266,8 +294,23 @@ fn lower_subject(ctx, &WhereSubject, subs) -> TyVar
 `ctx.assoc_projection(lower_subject(base), assoc)`.
 
 That is `lib.rs:457-459` generalized. It replaces `get_or_create_subject_tv`'s
-`Self` guess, the `param_tyvars` aliasing, and the `where_clause_assoc_subs`
-name fallback with one recursion.
+`Self` re-base (`lib.rs:991`) and `solver.rs:2836`'s cross-protocol name
+fallback with one recursion.
+
+**Scope limit — D7 alone does NOT fix the base-free substitution key**
+[verified @ `296e3076`]. `where_clause_assoc_subs` is a `Vec<(Entity, TyVar)>`
+keyed on the **assoc entity alone** (`ctx.rs:178`; 7 pushes, 6 reads). Two
+subjects that share an assoc entity still collide on `find()`-returns-first
+**no matter how the subject is represented** — `lower_subject` builds the right
+TyVar and then the lookup throws the distinction away. Either re-key that
+vector by `WhereSubject` as part of D7, or accept that the miscompile is not
+closed until stage 3a. **Do not let step 2 imply the bug is fixed.**
+
+An earlier draft of this section listed `param_tyvars` aliasing as one of the
+mechanisms `lower_subject` displaces. That claim is **refuted** — no
+`emit_where_clauses` exists at HEAD (or at `v0.16.0`), and `lib.rs:314` is a
+comment. The `T.Assoc` path was fixed by #184; the aliasing did not disappear,
+it moved into `where_clause_assoc_subs`, which is the paragraph above.
 
 ### Costs and risks, stated up front
 
@@ -289,7 +332,7 @@ name fallback with one recursion.
 
 | option | why |
 | --- | --- |
-| Flat `{ base: Entity, assoc: Entity }` | cannot represent `I.Item.Item`, which is the shape the fabrication bug emits; cements the `segments.len() != 2` bail |
+| Flat `{ base: Entity, assoc: Entity }` | cements the `segments.len() != 2` bail at `where_clauses.rs:286`, which silently collapses `where T.Iter.Item: P` — a shape users can write today and one shipped test already uses |
 | Keep `Bound` + `ProjectionBound` separate | preserves the skip-the-sibling failure mode that produced four of the live bugs |
 | `Root(Entity)` with `Self` resolved to the enclosing entity | re-introduces receiver loss one level up; `Self` in a protocol extension is the conformer, not the protocol |
 
