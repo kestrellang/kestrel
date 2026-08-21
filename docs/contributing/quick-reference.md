@@ -92,8 +92,8 @@ triage
 triage <pattern>
 triage --failures
 
-# Verbose debug traces in the compiler
-VERBOSE_DEBUG_OUTPUT=1 triage <pattern>
+# Debug traces in the compiler (comma-separated categories, or `all`)
+KESTREL_DEBUG=infer,solver triage <pattern>
 
 # Format / lint / check
 cargo fmt

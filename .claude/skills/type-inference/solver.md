@@ -191,7 +191,7 @@ dependent crate rebuild, which is slow to discover.
 - `kestrel-name-res` for resolution queries (visibility, extensions, scope).
 - `kestrel-hecs` for the ECS/query infra.
 - `kestrel-ast-builder` for component inspection.
-- `kestrel-debug` for `ktrace!` (enabled via `VERBOSE_DEBUG_OUTPUT=1`).
+- `kestrel-debug` for `ktrace!` (enabled via `KESTREL_DEBUG=<categories>`, e.g. `KESTREL_DEBUG=infer,solver`).
 
 Downstream crates that consume `TypedBody`:
 

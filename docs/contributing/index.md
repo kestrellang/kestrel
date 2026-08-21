@@ -88,13 +88,14 @@ triage --failures
 
 ## Debugging
 
-Verbose debug tracing is available via:
+Debug tracing is the `ktrace!` macro from `kestrel-debug`, gated on `KESTREL_DEBUG` with comma-separated categories:
 
 ```bash
-VERBOSE_DEBUG_OUTPUT=1 triage <pattern>
+KESTREL_DEBUG=infer,solver triage <pattern>
+KESTREL_DEBUG=all triage <pattern>
 ```
 
-This enables `debug_trace!` output from the compiler (member resolution, method calls, where-clause checks, type substitutions). When you need to trace something new, add `debug_trace!` calls — not `eprintln!`/`println!` — so the output stays filterable.
+Categories are free-form strings chosen at each call site. In use today: `infer`, `solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`, `dangle`, `arm-decay`. When you need to trace something new, add `ktrace!` calls — not `eprintln!`/`println!` — so the output stays filterable.
 
 ## Asking for help
 

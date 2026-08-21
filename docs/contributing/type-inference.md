@@ -213,8 +213,8 @@ Emit from the solver via `ctx.report_error(InferError::YourVariant { … })`, no
 
 ## Debugging
 
-- `VERBOSE_DEBUG_OUTPUT=1 triage <test>` enables `debug_trace!` in the solver — member resolution, unification steps, where-clause lookups.
-- Add `debug_trace!` calls rather than `eprintln!` so output stays filterable.
+- `KESTREL_DEBUG=infer,solver triage <test>` enables `ktrace!` in inference and the solver. `KESTREL_DEBUG=all` turns on every category.
+- Add `ktrace!("<category>", …)` calls rather than `eprintln!` so output stays filterable. The category is a free-form string chosen at the call site; reuse `infer` / `solver` here rather than minting a new one for a single session.
 - `kestrel dump` can print the HIR and the inferred types for a `.ks` file. Useful when a constraint never fires or fires with unexpected inputs.
 - **"Cannot infer type"** usually means a `TyVar` stayed `Infer` — the constraint that should have pinned it either wasn't generated, or deferred forever because its own inputs never resolved. Trace back from the unsolved var to the constraint that carries it.
 - **"Type mismatch"** on what looks like compatible types — check that aliases expanded (`TypeAlias` branch in `unify`) and that `Self` substitution happened at the method entry.

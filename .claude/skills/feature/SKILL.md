@@ -224,8 +224,8 @@ House rules (pulled from `CLAUDE.md` and memory):
 - **Never `#[ignore]` a test.** If it's broken, fix it or surface it.
 - **Don't revert changes when stuck.** After 3 failed attempts at the same
   fix, stop, summarize what was tried and ruled out, and ask for guidance.
-- **Debug tracing**: use `debug_trace!` plus `VERBOSE_DEBUG_OUTPUT=1`. Don't
-  add `eprintln!` / `println!` for debugging.
+- **Debug tracing**: use `ktrace!("<category>", …)` plus `KESTREL_DEBUG=<category>`.
+  Don't add `eprintln!` / `println!` for debugging.
 - **Multi-agent safety**: other agents may be running. Use `/triage` patterns
   scoped to your feature; don't assume exclusive access.
 - **Watch for reusable patterns** during implementation — invariants, ordering

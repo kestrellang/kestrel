@@ -1,6 +1,6 @@
 ---
 name: debug
-description: Structured protocol for debugging the lib Kestrel compiler — failing tests, diagnostic mismatches, inference cascades, MIR/codegen bugs, SIGSEGV or stack corruption, and intermittent flakes. Prevents speculative fix spirals by enforcing a reproduce → diagnose → one-hypothesis → fix → verify loop, with a hard stop after 3 failed attempts. Use when a triage run fails, when a `.ks` behaves unexpectedly, when the compiler crashes, or when you need to trace why a specific transformation produced the wrong output. Covers the `kestrel dump` CLI, `debug_trace!`, LLDB, and the project-wide "no `eprintln!`, no test-cajoling" rules.
+description: Structured protocol for debugging the lib Kestrel compiler — failing tests, diagnostic mismatches, inference cascades, MIR/codegen bugs, SIGSEGV or stack corruption, and intermittent flakes. Prevents speculative fix spirals by enforcing a reproduce → diagnose → one-hypothesis → fix → verify loop, with a hard stop after 3 failed attempts. Use when a triage run fails, when a `.ks` behaves unexpectedly, when the compiler crashes, or when you need to trace why a specific transformation produced the wrong output. Covers the `kestrel dump` CLI, `ktrace!`, LLDB, and the project-wide "no `eprintln!`, no test-cajoling" rules.
 ---
 
 # Debugging the lib Kestrel Compiler
@@ -100,25 +100,31 @@ Dumps go to stdout; diagnostics to stderr. Capture with
 
 > **Not available today**: `ast`, `hir`, `types`, `asm` dumps. The `TODO` in
 > `src/main.rs` tracks them. If you reach for one and it's missing, the
-> alternative is `debug_trace!` at the relevant crate boundary.
+> alternative is `ktrace!` at the relevant crate boundary.
 
 Run the repro through adjacent stages and compare — the stage where output
 first goes wrong localizes the bug.
 
-### `debug_trace!` — targeted tracing inside a stage
+### `ktrace!` — targeted tracing inside a stage
 
 When the problem is inside a stage (e.g., "inference picks the wrong
-overload"), add `debug_trace!` calls at the decision points in the relevant
+overload"), add `ktrace!` calls at the decision points in the relevant
 crate, then run with:
 
 ```
-VERBOSE_DEBUG_OUTPUT=1 <repro command>
+KESTREL_DEBUG=<category>[,<category>…] <repro command>
+KESTREL_DEBUG=all <repro command>
 ```
 
-`debug_trace!` output is gated on that env var. Project rule from `CLAUDE.md`:
-**don't use `eprintln!` / `println!` or any other flags for debugging**. Add
-`debug_trace!` to the compiler source instead. Clean them up later (Step 6),
-or leave them if they'd help the next reader — but only on purpose.
+`ktrace!` takes the category as its first argument — `ktrace!("infer", "…")` —
+and output is gated on `KESTREL_DEBUG` naming that category. Categories are
+free-form strings picked at the call site; those in use today are `infer`,
+`solver`, `hir-lower`, `copyable`, `static-wf`, `ref-gate`, `op-shape`,
+`dangle`, `arm-decay`. Prefer an existing one over minting a new category for
+a single session. Project rule from `CLAUDE.md`: **don't use `eprintln!` /
+`println!` or any other flags for debugging**. Add `ktrace!` to the compiler
+source instead. Clean them up later (Step 6), or leave them if they'd help the
+next reader — but only on purpose.
 
 ### LLDB — for crashes and deep stepping
 
@@ -213,7 +219,7 @@ Don't write to DEBUG.md mid-investigation. The record is for what you
 actually learned, not what you suspect.
 
 Also: clean up `temp/repro.ks` (keep only if it's a good regression seed),
-remove any `debug_trace!` calls you added purely for this session (keep the
+remove any `ktrace!` calls you added purely for this session (keep the
 ones that are load-bearing for future readers — mark them as such in the
 surrounding comment if it's not obvious), and check whether a new
 `.ks` belongs under `testdata/` as a permanent regression test. If it does,
@@ -222,7 +228,7 @@ delegate to the `write-tests` skill for format/placement.
 ## Anti-patterns (don't do these)
 
 - Patching symptoms without a stated root cause.
-- Using `eprintln!` / `println!` as a debug channel. Use `debug_trace!`.
+- Using `eprintln!` / `println!` as a debug channel. Use `ktrace!`.
 - Running `cargo test -p kestrel-test-suite` or `file_tests-*` directly.
   Always `/triage`.
 - Changing a test to match buggy behavior. See Step 4.

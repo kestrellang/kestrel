@@ -154,7 +154,7 @@ See the `debug` skill for the full protocol. The headline rules:
 1. **Reproduce first.** `triage <test>` — look at the actual error.
 2. **One hypothesis at a time.** Form a specific hypothesis, test it, evaluate the result before forming the next one.
 3. **Stop after 3 failed attempts of the same class.** List what you tried, what you ruled out, ask for guidance.
-4. **Use `debug_trace!`** in compiler source and rerun with `VERBOSE_DEBUG_OUTPUT=1`. Do not use `eprintln!` / `println!`.
+4. **Use `ktrace!("<category>", …)`** in compiler source and rerun with `KESTREL_DEBUG=<category>` (or `KESTREL_DEBUG=all`). Do not use `eprintln!` / `println!`.
 5. **`kestrel dump`** can print intermediate representations (CST, AST, HIR, types, MIR) for a `.ks` file — handy for narrowing the stage where the bug lives.
 
 ---

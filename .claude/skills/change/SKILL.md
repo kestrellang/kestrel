@@ -90,8 +90,8 @@ touching this feature). Save the full suite for pre-commit.
 ```
 
 Debugging:
-- Use `debug_trace!` plus `VERBOSE_DEBUG_OUTPUT=1`. No `eprintln!` / `println!`
-  in the compiler source; the project rule in `CLAUDE.md` is firm on this.
+- Use `ktrace!("<category>", …)` plus `KESTREL_DEBUG=<category>`. No `eprintln!` /
+  `println!` in the compiler source; the project rule in `CLAUDE.md` is firm on this.
 - After 3 failed fix attempts in the same direction, stop and summarize
   what was tried / ruled out, then ask for guidance. Don't thrash; don't
   revert changes without consent.
