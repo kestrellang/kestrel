@@ -314,11 +314,28 @@ it moved into `where_clause_assoc_subs`, which is the paragraph above.
 
 ### Costs and risks, stated up front
 
-- **Path resolution needs an order.** Resolving `T.Iter.Item` requires knowing
-  `T: HasIter` to find `Iter`, then `Iter`'s bound to find `Item` — subject
-  resolution consults bounds while bounds are what is being resolved. Resolve
-  breadth-first by depth, or take a fixed point. Today's code sidesteps this by
-  refusing depth > 2. **This is the main implementation risk.**
+- ~~**Path resolution needs an order.**~~ **RETRACTED 2026-08-20** [verified @
+  `296e3076`, read directly]. I flagged this as the main implementation risk —
+  that resolving `T.Iter.Item` needs `T: HasIter` to find `Iter`, then `Iter`'s
+  bound to find `Item`, requiring breadth-first-by-depth or a fixed point.
+  **It is already solved.** `ResolveTypePath::execute` walks every segment
+  (`resolve_type.rs:106-111`), and `resolve_segment` (`:154+`) has a dedicated
+  `TypeAlias` arm — *"look for nested associated types via its bounds (e.g.
+  `T.Iter.Item`)"* — with the ordering constraint documented above it
+  (*"type-param associated types are checked before nested alias bounds"*).
+  Arbitrary depth resolves today.
+
+  **The only thing refusing it is `resolve_projection_subject`'s own guard**
+  (`where_clauses.rs:286`), and that guard exists to protect its return type:
+  `Option<(Entity, Entity)>` cannot *express* a chain, so the function refuses
+  the input rather than returning something it has no way to say. The in-source
+  comment concedes it: *"Only the depth-1 `T.Assoc` shape for now … deeper
+  chains fall through to the collapsing path."*
+
+  This is D7's thesis found in the wild, and it **lowers** the estimate: what is
+  needed is not new resolution logic but a walk that returns the *chain* of
+  entities rather than only the last, so the recursive subject can be built
+  from it. Small addition on existing, already-ordered code.
 - **`SelfType` explicit touches the one branch that works** —
   `conformance.rs:363`'s `Some(*param) == target_entity`, pinned by
   `h_selfq_neg.ks`. Keep that test green or explain the change.
