@@ -114,26 +114,64 @@ pub struct AssociatedTypeResolution {
     pub source_extension: Option<Entity>,
 }
 
+/// What a where-clause bound is *about* (decision D7).
+///
+/// One type for every spelling, so no code path can hold a subject whose
+/// receiver it has silently dropped. Nests to arbitrary depth: `T.Iter.Item`
+/// is `Projection { base: Projection { base: Param(T), assoc: Iter }, assoc: Item }`.
+///
+/// Invariant: a `Projection` chain always bottoms out at `Param` or
+/// `SelfType`; there is no baseless projection. Keeping the base is what stops
+/// a method returning `T.Assoc` from resolving to a bare `Param(Assoc)` that
+/// leaks past monomorphization (#184).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum WhereSubject {
+    /// `T`
+    Param(Entity),
+    /// The `Self` position. NOT collapsed to the enclosing entity: in a
+    /// protocol extension `Self` is the *conformer*, resolved per-conformance,
+    /// so pinning it to the protocol entity is receiver loss one level up.
+    ///
+    /// TODO(G17 stage 3a): **not constructed yet** — the resolver still emits
+    /// `Param(<enclosing entity>)` for a bare `Self` (see
+    /// `where_clauses::resolve_bound_subject`). Producing `SelfType` requires
+    /// every reader to know the clause's owning entity, which most do not
+    /// have (`entailment::constraint_entailed_by` gets no owner at all); that
+    /// threading is stage 3a's job. Decided as D8 in
+    /// `docs/fragility/G14-G17/decisions.md`: define it inert rather than give
+    /// it a compatibility payload, so the flip is compiler-enforced.
+    SelfType,
+    /// `<base>.<assoc>`, to any depth.
+    Projection { base: Box<WhereSubject>, assoc: Entity },
+}
+
+impl WhereSubject {
+    /// The subject entity iff this is a bare `Param` — the exact set of
+    /// subjects the pre-D7 `WhereClause::Bound { param }` could hold.
+    ///
+    /// Every site that used to destructure `param` goes through this, so
+    /// "projections are skipped here" is one grep rather than twenty match
+    /// arms. A `None` return is always a projection (or, once stage 3a lands,
+    /// `Self`).
+    pub fn as_param(&self) -> Option<Entity> {
+        match self {
+            WhereSubject::Param(e) => Some(*e),
+            _ => None,
+        }
+    }
+}
+
 /// Where clause on a declaration.
 #[derive(Clone, Debug, Hash)]
 pub enum WhereClause {
-    /// `T: Protocol` or `T: Protocol[Args]`
+    /// `T: Protocol`, `T: Protocol[Args]`, or `T.Assoc: Protocol` — the
+    /// subject carries its own shape, so a projection is the *same* arm as a
+    /// bare param rather than a sibling variant readers can forget to handle.
     Bound {
-        param: Entity,
+        subject: WhereSubject,
         protocol: Entity,
         /// Type arguments applied to the protocol (e.g., `[lang.i64]` in `Factory[lang.i64]`).
         /// Empty for non-generic protocols.
-        protocol_type_args: Vec<HirTy>,
-    },
-    /// `T.Assoc: Protocol` — a bound whose subject is an associated-type
-    /// PROJECTION off a type param, not the bare param. Kept distinct from
-    /// `Bound` so the base (`T`) survives: collapsing the subject to the assoc
-    /// entity (`Assoc`) loses the receiver and makes a method returning
-    /// `T.Assoc` resolve to a bare `Param(Assoc)` that leaks past mono (#184).
-    ProjectionBound {
-        base: Entity,
-        assoc: Entity,
-        protocol: Entity,
         protocol_type_args: Vec<HirTy>,
     },
     /// `T.Item = SomeType` (associated type equality)
@@ -1709,14 +1747,16 @@ impl WorldResolver<'_> {
         });
 
         // Direct match: where clause says T: Protocol[Args]
+        // TODO(G17 stage 3a): `as_param()` skips projection subjects, matching
+        // the pre-D7 behaviour where `ProjectionBound` was a different variant.
         for clause in &clauses {
             if let WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
                 ..
             } = clause
-                && *param == param_entity
+                && subject.as_param() == Some(param_entity)
                 && *protocol == protocol_entity
             {
                 return protocol_type_args.clone();
@@ -1728,9 +1768,9 @@ impl WorldResolver<'_> {
         // E.g., T: IntConverter, IntConverter: Converter[i64] → find [i64] for Converter.
         for clause in &clauses {
             if let WhereClause::Bound {
-                param, protocol, ..
+                subject, protocol, ..
             } = clause
-                && *param == param_entity
+                && subject.as_param() == Some(param_entity)
                 && let Some(args) =
                     self.find_inherited_protocol_type_args(*protocol, protocol_entity)
             {
@@ -2072,11 +2112,16 @@ impl WorldResolver<'_> {
                     });
                     for clause in clauses {
                         if let WhereClause::Bound {
-                            param, protocol, ..
+                            subject, protocol, ..
                         } = clause
                         {
-                            // `Self: Protocol` — param is the target protocol entity
-                            if param == target_protocol {
+                            // `Self: Protocol` — the subject is `Param(<target
+                            // protocol entity>)` because the resolver still
+                            // collapses `Self` to the enclosing entity (D8).
+                            // TODO(G17 stage 3a): once `WhereSubject::SelfType`
+                            // is constructed, this must match it instead; and
+                            // `as_param()` keeps projections skipped as before.
+                            if subject.as_param() == Some(target_protocol) {
                                 protocols.push(protocol);
                             }
                         }

@@ -53,7 +53,7 @@ use kestrel_type_infer::compare::{
 };
 use kestrel_type_infer::conformance::type_satisfies;
 use kestrel_type_infer::entailment::constraint_entailed_by;
-use kestrel_type_infer::resolve::WhereClause as ResolvedWhereClause;
+use kestrel_type_infer::resolve::{WhereClause as ResolvedWhereClause, WhereSubject};
 use kestrel_type_infer::result::ResolvedTy;
 use kestrel_type_infer::where_clauses::WhereClausesOf;
 
@@ -1639,10 +1639,14 @@ fn extension_clauses_entailed(
         // provides `isEqual` to `BoxC: Container[Int64]` exactly when Int64
         // genuinely satisfies Equatable. This is the constrained-protocol-
         // extension witness the stdlib's own Array/Slice idiom relies on (#213).
+        // TODO(G17 stage 3a): `as_param()` keeps projection subjects out of the
+        // concrete-binding check, as when they were a separate clause variant;
+        // they still fall through to `substitute_clause` below.
         if let ResolvedWhereClause::Bound {
-            param, protocol, ..
+            subject, protocol, ..
         } = c
-            && let Some(binding) = proto_subs.get(param)
+            && let Some(param) = subject.as_param()
+            && let Some(binding) = proto_subs.get(&param)
             && !matches!(binding, ResolvedTy::Param { .. })
         {
             return type_satisfies(cx.query, &resolved_ty_to_hir(binding), *protocol, cx.root);
@@ -1665,17 +1669,23 @@ fn substitute_clause(
 ) -> Option<ResolvedWhereClause> {
     match clause {
         ResolvedWhereClause::Bound {
-            param,
+            subject,
             protocol,
             protocol_type_args,
         } => {
-            let new_param = match proto_subs.get(param) {
+            // TODO(G17 stage 3a): only a bare-param subject is substituted. A
+            // projection reproduces the old catch-all below — cloned through
+            // untouched, never rewritten at its base.
+            let Some(param) = subject.as_param() else {
+                return Some(clause.clone());
+            };
+            let new_param = match proto_subs.get(&param) {
                 Some(ResolvedTy::Param { entity }) => *entity,
                 Some(_) => return None,
-                None => *param,
+                None => param,
             };
             Some(ResolvedWhereClause::Bound {
-                param: new_param,
+                subject: WhereSubject::Param(new_param),
                 protocol: *protocol,
                 protocol_type_args: protocol_type_args.clone(),
             })
@@ -1808,8 +1818,14 @@ fn collect_context_where_clauses(
             .zip(struct_params.iter())
             .map(|(&d, &s)| (d, s))
             .collect();
+        // Remap ONLY a bare `Param` root. A projection subject is left
+        // untouched — that is what happened when it was a separate clause
+        // variant this `if let` never matched.
+        // TODO(G17 stage 3a): remapping a projection's base is the desirable
+        // behaviour, but it is a semantic change and belongs in its own commit.
         for clause in &mut clauses {
-            if let ResolvedWhereClause::Bound { param, .. } = clause
+            if let ResolvedWhereClause::Bound { subject, .. } = clause
+                && let WhereSubject::Param(param) = subject
                 && let Some(&mapped) = decl_to_struct.get(param)
             {
                 *param = mapped;

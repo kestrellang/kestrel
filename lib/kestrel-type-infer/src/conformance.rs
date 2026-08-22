@@ -343,12 +343,18 @@ fn extension_bounds_hold_impl(
 
     for clause in &clauses {
         let WhereClause::Bound {
-            param,
+            subject,
             protocol: pb,
             ..
         } = clause
         else {
             continue; // TypeEquality / DirectEquality — out of scope, treat satisfied.
+        };
+        // TODO(G17 stage 3a): projection subjects (`T.Assoc: P`) are permitted
+        // unconditionally here, exactly as when they were a separate clause
+        // variant this `let … else` never saw.
+        let Some(param) = subject.as_param() else {
+            continue;
         };
         // NOTE: there is deliberately NO Copyable/Cloneable skip here. There
         // used to be one ("copyability is enforced by the move checker / mono"),
@@ -358,9 +364,9 @@ fn extension_bounds_hold_impl(
         // (SIGILL). `type_satisfies` now answers both builtins directly via
         // the copy-semantics classifier, so the clause is evaluated like any
         // other. Never re-add a blanket skip here.
-        let sub_ty = if let Some((_, c)) = subst.iter().find(|(e, _)| e == param) {
+        let sub_ty = if let Some((_, c)) = subst.iter().find(|(e, _)| *e == param) {
             (*c).clone()
-        } else if Some(*param) == target_entity {
+        } else if Some(param) == target_entity {
             recv.clone()
         } else {
             continue; // Unknown param — permit (conservative).

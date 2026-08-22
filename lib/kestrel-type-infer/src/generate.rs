@@ -1931,11 +1931,19 @@ fn emit_where_clause_constraints_with_subs(
     for clause in where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
             } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                // Projection bounds (`T.Assoc: P`) are body-inference facts
+                // emitted at body setup; nothing to do at this call-site path
+                // (the assoc entity isn't a call type-arg here).
+                // TODO(G17 stage 3a): this skip is a live bug — deleting the
+                // guard is that stage's job, with its own test.
+                if !matches!(subject, crate::resolve::WhereSubject::Param(_)) {
+                    continue;
+                }
+                if let Some(tv) = lower_subject(ctx, &subject, SubjectRoot::Subs(subs)) {
                     // Call-site where-clause obligation: a TYPE-ARGUMENT
                     // bound (success instantiates witnesses at tv).
                     ctx.conforms_typearg(tv, protocol, site_span.clone());
@@ -1966,10 +1974,6 @@ fn emit_where_clause_constraints_with_subs(
                     ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
                 }
             },
-            // Projection bounds (`T.Assoc: P`) are body-inference facts emitted
-            // at body setup; nothing to do at this call-site path (the assoc
-            // entity isn't a call type-arg here).
-            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -2028,9 +2032,14 @@ fn emit_copyable_wellformedness(
     });
     for clause in where_clauses {
         let crate::resolve::WhereClause::Bound {
-            param, protocol, ..
+            subject, protocol, ..
         } = clause
         else {
+            continue;
+        };
+        // TODO(G17 stage 3a): projection subjects are skipped here, as they
+        // were when `ProjectionBound` was a separate variant.
+        let Some(param) = subject.as_param() else {
             continue;
         };
         if Some(protocol) != copyable
@@ -2052,6 +2061,49 @@ fn emit_copyable_wellformedness(
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.
 pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
     lower_hir_ty_with_subs(ctx, ty, &[])
+}
+
+/// How a `WhereSubject`'s `Param` leaf becomes a TyVar.
+///
+/// An enum rather than a closure: a `FnMut(&mut InferCtx, Entity)` cannot be
+/// held across `lower_subject`'s recursive call without re-borrowing `ctx`.
+/// There are exactly two policies and both already exist in the tree.
+#[derive(Clone, Copy)]
+pub(crate) enum SubjectRoot<'a> {
+    /// Look the entity up in a caller-supplied substitution; `None` on a miss.
+    /// The "skip the clause" policy used by the call-site emitters.
+    Subs(&'a [(Entity, TyVar)]),
+    /// Mint-or-reuse via `InferCtx::param` — the "always succeeds" policy used
+    /// by the method where-clause path.
+    Mint,
+}
+
+/// Lower a where-clause subject to the TyVar the constraints should talk
+/// about, preserving the receiver at every depth.
+///
+/// `Param`      → per `root`
+/// `SelfType`   → `None` (TODO(G17 stage 3a): needs the clause's owning entity)
+/// `Projection` → `ctx.assoc_projection(lower_subject(base)?, assoc)`
+///
+/// `assoc_projection` allocates a fresh TyVar per call and is deliberately not
+/// memoized here: caching would merge projection TyVars that are distinct today.
+pub(crate) fn lower_subject(
+    ctx: &mut InferCtx<'_>,
+    subject: &crate::resolve::WhereSubject,
+    root: SubjectRoot<'_>,
+) -> Option<TyVar> {
+    use crate::resolve::WhereSubject;
+    match subject {
+        WhereSubject::Param(e) => match root {
+            SubjectRoot::Subs(subs) => subs.iter().find(|(s, _)| s == e).map(|&(_, tv)| tv),
+            SubjectRoot::Mint => Some(ctx.param(*e)),
+        },
+        WhereSubject::SelfType => None,
+        WhereSubject::Projection { base, assoc } => {
+            let base_tv = lower_subject(ctx, base, root)?;
+            Some(ctx.assoc_projection(base_tv, *assoc))
+        },
+    }
 }
 
 /// If `tv` resolves to `Array[E]`, return the TyVar for `E`; otherwise None.

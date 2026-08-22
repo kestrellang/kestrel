@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use crate::constraint::{CallArg, ConformsOrigin, Constraint, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
+use crate::generate::SubjectRoot;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 use kestrel_ast_builder::arg_binding::{BindError, BindParam, Binding, bind_arguments};
@@ -3525,11 +3526,20 @@ fn emit_resolved_call(
     for clause in where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
             } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                // `T.Assoc: P` projection bounds are handled at body setup.
+                // TODO(G17 stage 3a): this skip is a live bug — the call-site
+                // obligation for a direct `Def` call is never emitted for a
+                // projection subject. Deleting the guard is that stage's job.
+                if !matches!(subject, crate::resolve::WhereSubject::Param(_)) {
+                    continue;
+                }
+                if let Some(tv) =
+                    crate::generate::lower_subject(ctx, &subject, SubjectRoot::Subs(&subs))
+                {
                     ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
                     // an extension's free TypeParams when projecting through
@@ -3561,8 +3571,6 @@ fn emit_resolved_call(
                     ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
                 }
             },
-            // `T.Assoc: P` projection bounds are handled at body setup.
-            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 
@@ -4418,15 +4426,25 @@ fn solve_member(
     for clause in &resolution.where_clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
             } => {
+                // `T.Assoc: P` projection bounds are body-inference facts; the
+                // member-resolution path doesn't re-emit them.
+                // TODO(G17 stage 3a): this skip is a live bug. It stays here
+                // rather than adopting `lower_subject` because this site does a
+                // two-stage lookup (`resolution.type_params`, then `subs`) that
+                // `SubjectRoot` does not model; unifying them is a fix, not a
+                // refactor.
+                let Some(param) = subject.as_param() else {
+                    continue;
+                };
                 let bound_tv =
-                    if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
+                    if let Some(idx) = resolution.type_params.iter().position(|&p| p == param) {
                         ctx.conforms_typearg(fresh_params[idx], *protocol, span.clone());
                         Some(fresh_params[idx])
-                    } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
+                    } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
                         ctx.conforms_typearg(tv, *protocol, span.clone());
                         Some(tv)
                     } else {
@@ -4480,9 +4498,6 @@ fn solve_member(
                     }
                 }
             },
-            // `T.Assoc: P` projection bounds are body-inference facts; the
-            // member-resolution path doesn't re-emit them.
-            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 
@@ -5763,10 +5778,16 @@ fn emit_type_alias_where_clauses(
     for clause in clauses {
         match clause {
             crate::resolve::WhereClause::Bound {
+                subject,
                 protocol,
                 protocol_type_args,
-                ..
             } => {
+                // `Assoc.Inner: P` projection bounds on a TypeAlias — not
+                // emitted here. TODO(G17 stage 3a): inert feature, not a live
+                // bug, but the skip must stay explicit.
+                if !matches!(subject, crate::resolve::WhereSubject::Param(_)) {
+                    continue;
+                }
                 // Emit conformance: e.g., `Iter: Iterator` → Conforms(alias_tv, Iterator)
                 ctx.conforms_typearg(alias_tv, protocol, span.clone());
                 // Cache protocol args so projecting through this alias's bound
@@ -5794,8 +5815,6 @@ fn emit_type_alias_where_clauses(
             crate::resolve::WhereClause::DirectEquality { .. } => {
                 // Direct equality on TypeAlias — rare, skip for now
             },
-            // `Assoc.Inner: P` projection bounds on a TypeAlias — not emitted here.
-            crate::resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -5884,9 +5903,14 @@ fn emit_static_wellformedness(
     });
     for clause in where_clauses {
         let crate::resolve::WhereClause::Bound {
-            param, protocol, ..
+            subject, protocol, ..
         } = clause
         else {
+            continue;
+        };
+        // TODO(G17 stage 3a): projection subjects are skipped here, as they
+        // were when `ProjectionBound` was a separate variant.
+        let Some(param) = subject.as_param() else {
             continue;
         };
         if protocol != static_proto {

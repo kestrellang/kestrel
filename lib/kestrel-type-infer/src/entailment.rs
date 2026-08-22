@@ -35,16 +35,20 @@ pub fn constraint_entailed_by(
     context: &[WhereClause],
 ) -> bool {
     match constraint {
+        // A projection subject has no `as_param()`, so it falls to `false`
+        // exactly as the old `ProjectionBound` variant did.
+        // TODO(G17 stage 3a): entailment for projection subjects.
         WhereClause::Bound {
-            param, protocol, ..
-        } => bound_entailed(qctx, root, *param, *protocol, context),
+            subject, protocol, ..
+        } => match subject.as_param() {
+            Some(param) => bound_entailed(qctx, root, param, *protocol, context),
+            None => false,
+        },
         // TypeEquality / DirectEquality carry HirTy on the RHS, which has
         // no structural equality. Reject conservatively until a real
         // caller demands proper handling — matches prior behavior in
         // `conformance_completeness::extension_where_clauses_satisfied`.
-        WhereClause::ProjectionBound { .. }
-        | WhereClause::TypeEquality { .. }
-        | WhereClause::DirectEquality { .. } => false,
+        WhereClause::TypeEquality { .. } | WhereClause::DirectEquality { .. } => false,
     }
 }
 
@@ -71,10 +75,10 @@ fn bound_entailed(
         .iter()
         .filter_map(|c| match c {
             WhereClause::Bound {
-                param: cp,
+                subject,
                 protocol: cprot,
                 ..
-            } if *cp == param => Some(*cprot),
+            } if subject.as_param() == Some(param) => Some(*cprot),
             _ => None,
         })
         .collect();
@@ -95,10 +99,10 @@ fn bound_entailed(
         .iter()
         .filter_map(|c| match c {
             WhereClause::Bound {
-                param: cp,
+                subject,
                 protocol: cprot,
                 ..
-            } if *cp == param => Some(*cprot),
+            } if subject.as_param() == Some(param) => Some(*cprot),
             _ => None,
         })
         .collect();
@@ -114,6 +118,7 @@ fn bound_entailed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::resolve::WhereSubject;
     use kestrel_ast::{AstType, PathSegment};
     use kestrel_ast_builder::{
         ConformanceItem, Conformances, ExtensionTarget, Name, NodeKind, Typed, Vis,
@@ -181,12 +186,12 @@ mod tests {
         let t = spawn_type_param(&mut world, owner, "T");
 
         let context = vec![WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: p,
             protocol_type_args: vec![],
         }];
         let constraint = WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: p,
             protocol_type_args: vec![],
         };
@@ -217,12 +222,12 @@ mod tests {
         let t = spawn_type_param(&mut world, owner, "T");
 
         let context = vec![WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: p,
             protocol_type_args: vec![],
         }];
         let constraint = WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: q,
             protocol_type_args: vec![],
         };
@@ -244,12 +249,12 @@ mod tests {
         let t = spawn_type_param(&mut world, owner, "T");
 
         let context = vec![WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: p,
             protocol_type_args: vec![],
         }];
         let constraint = WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: q,
             protocol_type_args: vec![],
         };
@@ -268,12 +273,12 @@ mod tests {
         let u = spawn_type_param(&mut world, owner, "U");
 
         let context = vec![WhereClause::Bound {
-            param: t,
+            subject: WhereSubject::Param(t),
             protocol: p,
             protocol_type_args: vec![],
         }];
         let constraint = WhereClause::Bound {
-            param: u,
+            subject: WhereSubject::Param(u),
             protocol: p,
             protocol_type_args: vec![],
         };

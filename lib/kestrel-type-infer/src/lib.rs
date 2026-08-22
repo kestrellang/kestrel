@@ -332,34 +332,38 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
     // in clause iteration order — exactly as the inline match arms did.
     for clause in clauses {
         match clause {
+            // The one real consumer of a projection subject: dispatch on the
+            // subject's shape rather than on a sibling clause variant.
             resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
-            } => emit_method_bound_constraint(
-                ctx,
-                param,
-                protocol,
-                &protocol_type_args,
-                &type_params,
-                &parent_type_params,
-                &span,
-            ),
-            resolve::WhereClause::ProjectionBound {
-                base,
-                assoc,
-                protocol,
-                protocol_type_args,
-            } => emit_method_projection_bound_constraint(
-                ctx,
-                base,
-                assoc,
-                protocol,
-                &protocol_type_args,
-                &type_params,
-                &parent_type_params,
-                &span,
-            ),
+            } => match &subject {
+                resolve::WhereSubject::Param(param) => emit_method_bound_constraint(
+                    ctx,
+                    *param,
+                    protocol,
+                    &protocol_type_args,
+                    &type_params,
+                    &parent_type_params,
+                    &span,
+                ),
+                resolve::WhereSubject::Projection { assoc, .. } => {
+                    emit_method_projection_bound_constraint(
+                        ctx,
+                        &subject,
+                        *assoc,
+                        protocol,
+                        &protocol_type_args,
+                        &type_params,
+                        &parent_type_params,
+                        &span,
+                    )
+                },
+                // TODO(G17 stage 3a): never constructed today — the resolver
+                // collapses a bare `Self` to `Param(<enclosing entity>)` (D8).
+                resolve::WhereSubject::SelfType => {},
+            },
             resolve::WhereClause::TypeEquality {
                 param,
                 assoc_name,
@@ -446,7 +450,7 @@ fn emit_method_bound_constraint(
 #[allow(clippy::too_many_arguments)]
 fn emit_method_projection_bound_constraint(
     ctx: &mut InferCtx<'_>,
-    base: Entity,
+    subject: &resolve::WhereSubject,
     assoc: Entity,
     protocol: Entity,
     protocol_type_args: &[kestrel_hir::ty::HirTy],
@@ -454,8 +458,12 @@ fn emit_method_projection_bound_constraint(
     parent_type_params: &[Entity],
     span: &Span,
 ) {
-    let base_tv = ctx.param(base);
-    let proj_tv = ctx.assoc_projection(base_tv, assoc);
+    // `SubjectRoot::Mint` reproduces the old `ctx.param(base)` exactly, and
+    // recurses for depth > 1 subjects (which `WhereClausesOf` does not build
+    // yet — see `where_clauses::resolve_projection_subject`).
+    let Some(proj_tv) = generate::lower_subject(ctx, subject, generate::SubjectRoot::Mint) else {
+        return;
+    };
     ctx.conforms_typearg(proj_tv, protocol, span.clone());
     // The body's `T.Assoc` projections reuse this TyVar (preserving the base).
     ctx.where_clause_assoc_subs.push((assoc, proj_tv));
@@ -688,10 +696,17 @@ fn emit_container_where_clauses(
     for clause in clauses {
         match clause {
             resolve::WhereClause::Bound {
-                param,
+                subject,
                 protocol,
                 protocol_type_args,
             } => {
+                // `T.Assoc: P` on an extension — handled at body setup via the
+                // member path; no extra emission needed here yet (#185
+                // follow-up). TODO(G17 stage 3a): this skip is a live bug —
+                // this is the only emitter for container-level clauses.
+                let Some(param) = subject.as_param() else {
+                    continue;
+                };
                 // Skip the implicit `T: Copyable` / `Cloneable` bound that
                 // `WhereClausesOf` injects for every generic param. Those are
                 // call-site obligations, not body-inference facts — emitting
@@ -807,9 +822,6 @@ fn emit_container_where_clauses(
                     ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
                 }
             },
-            // `T.Assoc: P` on an extension — handled at body setup via the
-            // member path; no extra emission needed here yet (#185 follow-up).
-            resolve::WhereClause::ProjectionBound { .. } => {},
         }
     }
 }
@@ -910,10 +922,16 @@ fn emit_protocol_assoc_type_where_clauses(
         for clause in clauses {
             match clause {
                 resolve::WhereClause::Bound {
+                    subject,
                     protocol: bound_proto,
                     protocol_type_args,
-                    ..
                 } => {
+                    // Projection subjects on a protocol's associated-type
+                    // clauses are not emitted here. TODO(G17 stage 3a): inert
+                    // feature, but the skip must stay explicit.
+                    if subject.as_param().is_none() {
+                        continue;
+                    }
                     ctx.conforms_typearg(alias_tv, bound_proto, span.clone());
                     let subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
@@ -955,7 +973,6 @@ fn emit_protocol_assoc_type_where_clauses(
                     }
                 },
                 resolve::WhereClause::DirectEquality { .. } => {},
-                resolve::WhereClause::ProjectionBound { .. } => {},
             }
         }
     }

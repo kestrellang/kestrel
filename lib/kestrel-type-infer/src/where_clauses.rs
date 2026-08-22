@@ -20,7 +20,7 @@ use kestrel_semantics::{
     TypeParamCopyRequirement, TypeParamStaticRequirement,
 };
 
-use crate::resolve::WhereClause;
+use crate::resolve::{WhereClause, WhereSubject};
 
 /// Query: resolved where clauses attached to `entity`, with all names looked
 /// up in `entity`'s own scope.
@@ -60,17 +60,9 @@ pub fn resolve_where_clauses(
                 WhereConstraint::Bound {
                     subject, protocols, ..
                 } => {
-                    // A projection subject (`T.Assoc: P`) must keep its base —
-                    // `resolve_type_entity` would collapse `T.Assoc` to `Assoc`,
-                    // losing the receiver. Prefer the projection form.
-                    let projection = resolve_projection_subject(ctx, subject, entity, root);
-                    let param = match projection {
-                        Some(_) => None,
-                        None => resolve_type_entity(ctx, subject, entity, root),
-                    };
-                    if projection.is_none() && param.is_none() {
+                    let Some(subject) = resolve_bound_subject(ctx, subject, entity, root) else {
                         continue;
-                    }
+                    };
                     for protocol_ty in protocols {
                         let Some(protocol) = resolve_type_entity(ctx, protocol_ty, entity, root)
                         else {
@@ -78,18 +70,10 @@ pub fn resolve_where_clauses(
                         };
                         let protocol_type_args =
                             extract_protocol_type_args(ctx, entity, root, protocol_ty);
-                        result.push(match projection {
-                            Some((base, assoc)) => WhereClause::ProjectionBound {
-                                base,
-                                assoc,
-                                protocol,
-                                protocol_type_args,
-                            },
-                            None => WhereClause::Bound {
-                                param: param.unwrap(),
-                                protocol,
-                                protocol_type_args,
-                            },
+                        result.push(WhereClause::Bound {
+                            subject: subject.clone(),
+                            protocol,
+                            protocol_type_args,
                         });
                     }
                 },
@@ -199,14 +183,17 @@ fn inject_implicit_copyable_bounds(
             CopyRequirement::RequiresCloneable => cloneable.unwrap_or(copyable),
             CopyRequirement::MayBeNonCopyable => continue,
         };
+        // Only a bare-param bound counts as "already bound": a projection
+        // subject can never be equal to `Param(param)`, so the `Eq` derive
+        // preserves the pre-D7 variant split with no extra branch.
         let already_bound = result.iter().any(|wc| {
             matches!(wc,
-                WhereClause::Bound { param: p, protocol: pr, .. }
+                WhereClause::Bound { subject: WhereSubject::Param(p), protocol: pr, .. }
                 if *p == param && (*pr == copyable || Some(*pr) == cloneable))
         });
         if !already_bound {
             result.push(WhereClause::Bound {
-                param,
+                subject: WhereSubject::Param(param),
                 protocol,
                 protocol_type_args: Vec::new(),
             });
@@ -253,19 +240,50 @@ fn inject_implicit_static_bounds(
             StaticRequirement::RequiresStatic => {},
             StaticRequirement::MayBeNonStatic => continue,
         }
+        // See the Copyable injection: bare-param subjects only.
         let already_bound = result.iter().any(|wc| {
             matches!(wc,
-                WhereClause::Bound { param: p, protocol: pr, .. }
+                WhereClause::Bound { subject: WhereSubject::Param(p), protocol: pr, .. }
                 if *p == param && *pr == static_proto)
         });
         if !already_bound {
             result.push(WhereClause::Bound {
-                param,
+                subject: WhereSubject::Param(param),
                 protocol: static_proto,
                 protocol_type_args: Vec::new(),
             });
         }
     }
+}
+
+/// Resolve a where-clause bound subject (`T`, `Self`, `T.Assoc`, …) to a
+/// `WhereSubject`, preserving the receiver where the current resolver can see
+/// it. `None` means unresolvable — the clause is dropped, as before.
+///
+/// A projection subject (`T.Assoc: P`) must keep its base: `resolve_type_entity`
+/// resolves the whole dotted path in one shot and keeps only the last entity,
+/// collapsing `T.Assoc` to `Assoc` and losing the receiver. So the projection
+/// shape is tried first and only falls back to the collapsing path.
+fn resolve_bound_subject(
+    ctx: &QueryContext<'_>,
+    ast_ty: &AstType,
+    entity: Entity,
+    root: Entity,
+) -> Option<WhereSubject> {
+    if let Some((base, assoc)) = resolve_projection_subject(ctx, ast_ty, entity, root) {
+        return Some(WhereSubject::Projection {
+            base: Box::new(WhereSubject::Param(base)),
+            assoc,
+        });
+    }
+    // TODO(G17 stage 3a): a bare `Self` subject resolves through
+    // `resolve_type_entity` to the *enclosing* entity and is stored as
+    // `Param(enclosing)`, never as `WhereSubject::SelfType`. That is today's
+    // behaviour, deliberately preserved (D8 in
+    // `docs/fragility/G14-G17/decisions.md`) — flipping the producer means
+    // flipping ~8 readers that compare against the enclosing entity, and it is
+    // compiler-enforced once this line changes.
+    resolve_type_entity(ctx, ast_ty, entity, root).map(WhereSubject::Param)
 }
 
 /// If `ast_ty` is a `Base.Assoc` projection whose `Base` resolves to a type
@@ -282,7 +300,9 @@ fn resolve_projection_subject(
         return None;
     };
     // Only the depth-1 `T.Assoc` shape for now (covers the assoc-bound cases);
-    // deeper chains fall through to the collapsing path.
+    // deeper chains fall through to the collapsing path. `WhereSubject` can
+    // express any depth — lifting this bail is the next commit, kept out of
+    // the representation change so its suite delta is attributable.
     if segments.len() != 2 {
         return None;
     }

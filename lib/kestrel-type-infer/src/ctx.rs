@@ -175,6 +175,14 @@ pub struct InferCtx<'a> {
     /// Where clause associated type substitutions (e.g., Output_entity → Item_tv
     /// from `Item.Output = Item`). Used by lower_hir_ty_sub to substitute
     /// associated type entities found in protocol member signatures.
+    ///
+    /// TODO(G17 stage 3a): keyed on the **assoc entity alone**, so two subjects
+    /// that share an assoc (`A.Item` and `B.Item`) collide on `find()`-returns-
+    /// first no matter how the subject is represented. `WhereSubject` builds
+    /// the right TyVar and this lookup then throws the distinction away — G17
+    /// (`leak5.ks`) is NOT closed by the D7 representation change. Re-keying
+    /// this by `WhereSubject` is stage 3a's job; see D7's *Scope limit* in
+    /// `docs/fragility/G14-G17/decisions.md`.
     pub(crate) where_clause_assoc_subs: Vec<(Entity, TyVar)>,
 
     /// Maps type parameter entities to their canonical TyVars.
