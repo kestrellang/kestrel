@@ -379,10 +379,68 @@ it moved into `where_clause_assoc_subs`, which is the paragraph above.
 
 ---
 
+---
+
+## D8 — `SelfType` is defined but not constructed in the representation commit
+
+**Status:** **DECIDED — option (a), payload-free, inert until stage 3a.**
+Maintainer, 2026-08-20. **Owner:** orchestrator.
+
+D7's `SelfType` and the behaviour-preserving constraint are in tension.
+Today `Self` resolves to the **enclosing entity**, and ~8 readers depend on
+that — notably `conformance.rs:363`'s `Some(*param) == target_entity`, pinned
+by `h_selfq_neg.ks`. Constructing a distinct `SelfType` removes the entity
+those readers compare, which is a behaviour change in the one commit that must
+not have any.
+
+| option | shape | verdict |
+| --- | --- | --- |
+| **(a) define, don't construct** | `SelfType` (no payload); resolver keeps emitting `Param(enclosing)` | **CHOSEN** |
+| (b) compatibility payload | `SelfType { enclosing: Entity }`, readers use a `root_entity()` helper | rejected — see below |
+
+### Why (a)
+
+**Correctness.** `Self` has no entity — it is a *position*, resolved
+per-conformance; in a protocol extension it denotes the conformer, unknown
+where the clause is read. That is the whole reason D7 keeps it separate. `(b)`
+writes the rejected answer *into the type* and relies on discipline to stop
+anyone reading it. A field nobody may read is not modeling the domain; it is a
+known-false value stored where people look for the truth.
+
+**Honesty of the interim state.** Under (a) the resolver emits `Param(Foo)` —
+today's wrong behaviour, but the type is not yet claiming to model `Self`. It
+reads as *not done*. Under (b) the type claims `Self` **is** modeled and hands
+back the wrong entity. It reads as *done*. Wrong-and-unfinished beats
+wrong-and-finished; the recurring failure mode in this audit is not missing
+information but information that looks settled and is not.
+
+**The compiler does the counting.** When stage 3a switches the producer, every
+reader matching on `WhereSubject` without a `SelfType` arm **stops compiling** —
+the work list is generated, not remembered. The number of affected sites in
+this area has been wrong four times (seven → four → six → twenty-one); this is
+not a place to trust hand-enumeration. Under (b) a reader calling
+`root_entity()` keeps the wrong answer **silently and forever**: no compile
+error, no failing test, nothing that forces its removal.
+
+**(b) buys sequencing only** — incremental reader migration — at the price of a
+permanent defect in the type. Compatibility fields that outlive their reason
+are exactly how `param_tyvars`, the flat `ProjectionBound`, and the base-free
+`where_clause_assoc_subs` key all arrived. (a)'s atomic flip is ~8
+same-shaped comparison sites in one crate, smaller than the merge in commit 1.
+
+### Consequence, stated plainly
+
+`Self.Item: P` **keeps collapsing** until stage 3a. That is the status quo, not
+a regression — but do not let the commit message imply otherwise.
+
 ## Decided
 
 - **D7** — `WhereSubject` is recursive, arbitrary depth; `Bound` and
   `ProjectionBound` collapse into one variant. Maintainer, 2026-08-20.
+- **D8** — `SelfType` is payload-free and **not constructed** in the
+  representation commit; the resolver keeps emitting `Param(enclosing)` until
+  stage 3a flips producer and readers together, compiler-enforced. Maintainer,
+  2026-08-20.
 
 ## Refutations landed
 
