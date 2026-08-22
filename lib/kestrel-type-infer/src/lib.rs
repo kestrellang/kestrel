@@ -461,12 +461,14 @@ fn emit_method_projection_bound_constraint(
     // `SubjectRoot::Mint` reproduces the old `ctx.param(base)` exactly, and
     // recurses for depth > 1 subjects (which `WhereClausesOf` does not build
     // yet — see `where_clauses::resolve_projection_subject`).
-    let Some(proj_tv) = generate::lower_subject(ctx, subject, generate::SubjectRoot::Mint) else {
+    let Some((base_tv, proj_tv)) =
+        generate::lower_subject_with_base(ctx, subject, generate::SubjectRoot::Mint)
+    else {
         return;
     };
     ctx.conforms_typearg(proj_tv, protocol, span.clone());
     // The body's `T.Assoc` projections reuse this TyVar (preserving the base).
-    ctx.where_clause_assoc_subs.push((assoc, proj_tv));
+    ctx.push_assoc_sub(base_tv, assoc, proj_tv);
 
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
     let arg_tvs: Vec<ty::TyVar> = protocol_type_args
@@ -498,7 +500,7 @@ fn emit_method_type_equality_constraint(
     ctx.equal(assoc_result, rhs_tv, span.clone());
 
     if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, assoc_name) {
-        ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
+        ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
     }
 }
 
@@ -518,11 +520,13 @@ fn emit_method_direct_equality_constraint(
     // Redirect the param to the RHS type
     ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
     // For TypeAlias entities (associated types like Item), also register
-    // in where_clause_assoc_subs so lower_hir_ty_sub can find it
+    // in where_clause_assoc_subs so lower_hir_ty_sub can find it.
+    // Baseless by construction: `where Item = X` on a TypeAlias entity names
+    // no receiver — the one legitimate `None` base in the table (G17 P3).
     if query_ctx.get::<kestrel_ast_builder::NodeKind>(param)
         == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
     {
-        ctx.where_clause_assoc_subs.push((param, rhs_tv));
+        ctx.push_assoc_sub(None, param, rhs_tv);
     }
 }
 
@@ -800,7 +804,7 @@ fn emit_container_where_clauses(
                 // can substitute it in protocol member signatures (e.g., Output → Item).
                 // Search param's protocol bounds for a child TypeAlias named assoc_name.
                 if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
-                    ctx.where_clause_assoc_subs.push((assoc_entity, rhs_tv));
+                    ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
                 }
             },
             resolve::WhereClause::DirectEquality { param, rhs } => {
@@ -880,7 +884,7 @@ fn emit_protocol_assoc_type_where_clauses(
             assoc_type_tvs.entry(child).or_insert_with(|| {
                 let tv = ctx.fresh();
                 ctx.associated(subject_tv, &assoc_name, tv, span.clone());
-                ctx.where_clause_assoc_subs.push((child, tv));
+                ctx.push_assoc_sub(Some(subject_tv), child, tv);
                 tv
             });
         }
@@ -914,7 +918,7 @@ fn emit_protocol_assoc_type_where_clauses(
         let alias_tv = *assoc_type_tvs.entry(child).or_insert_with(|| {
             let tv = ctx.fresh();
             ctx.associated(subject_tv, &assoc_name, tv, span.clone());
-            ctx.where_clause_assoc_subs.push((child, tv));
+            ctx.push_assoc_sub(Some(subject_tv), child, tv);
             tv
         });
 
@@ -969,7 +973,9 @@ fn emit_protocol_assoc_type_where_clauses(
                     // Register so solve_associated can reuse
                     if let Some(inner_entity) = find_assoc_type_in_bounds(ctx, child, &inner_assoc)
                     {
-                        ctx.where_clause_assoc_subs.push((inner_entity, rhs_tv));
+                        // Base is the alias itself: this is `TargetIterator.Item`,
+                        // not `Self.Item` (G17 P7 — the Iterable/Iterator bridge).
+                        ctx.push_assoc_sub(Some(alias_tv), inner_entity, rhs_tv);
                     }
                 },
                 resolve::WhereClause::DirectEquality { .. } => {},

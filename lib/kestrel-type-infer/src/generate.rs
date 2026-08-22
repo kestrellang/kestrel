@@ -2092,16 +2092,32 @@ pub(crate) fn lower_subject(
     subject: &crate::resolve::WhereSubject,
     root: SubjectRoot<'_>,
 ) -> Option<TyVar> {
+    lower_subject_with_base(ctx, subject, root).map(|(_, tv)| tv)
+}
+
+/// As [`lower_subject`], but also hands back the **base** of the outermost
+/// projection — `Some(base_tv)` for `T.Assoc` / `T.Iter.Item`, `None` for a
+/// bare `T`. That base is what `where_clause_assoc_subs` has to be keyed on;
+/// re-walking the chain at the emitter to recover it would be a second answer
+/// to the same question (G17 stage 3a).
+pub(crate) fn lower_subject_with_base(
+    ctx: &mut InferCtx<'_>,
+    subject: &crate::resolve::WhereSubject,
+    root: SubjectRoot<'_>,
+) -> Option<(Option<TyVar>, TyVar)> {
     use crate::resolve::WhereSubject;
     match subject {
         WhereSubject::Param(e) => match root {
-            SubjectRoot::Subs(subs) => subs.iter().find(|(s, _)| s == e).map(|&(_, tv)| tv),
-            SubjectRoot::Mint => Some(ctx.param(*e)),
+            SubjectRoot::Subs(subs) => subs
+                .iter()
+                .find(|(s, _)| s == e)
+                .map(|&(_, tv)| (None, tv)),
+            SubjectRoot::Mint => Some((None, ctx.param(*e))),
         },
         WhereSubject::SelfType => None,
         WhereSubject::Projection { base, assoc } => {
             let base_tv = lower_subject(ctx, base, root)?;
-            Some(ctx.assoc_projection(base_tv, *assoc))
+            Some((Some(base_tv), ctx.assoc_projection(base_tv, *assoc)))
         },
     }
 }
@@ -2341,11 +2357,10 @@ pub(crate) fn lower_hir_ty_with_subs(
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
-                if let Some(&(_, tv)) = ctx
-                    .where_clause_assoc_subs
-                    .iter()
-                    .find(|(e, _)| e == entity)
-                {
+                // R1 — the one genuinely baseless read: a bare `Item` here has
+                // no receiver in scope. Strict lookup would apply the
+                // unambiguity rule; base-blind today.
+                if let Some(tv) = ctx.assoc_sub("generate:AliasUse", None, *entity) {
                     return tv;
                 }
                 if let Some(&tv) = ctx.param_tyvars.get(entity) {
@@ -2361,9 +2376,9 @@ pub(crate) fn lower_hir_ty_with_subs(
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
             // Short-circuit if this specific assoc is already bound via a
-            // where-clause equality (e.g. `Item = (A, B)`).
-            if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == assoc) {
-                let _ = base_tv;
+            // where-clause equality (e.g. `Item = (A, B)`). R2 — base-blind
+            // today; `base_tv` feeds the audit only (G17 C1).
+            if let Some(tv) = ctx.assoc_sub("generate:AssocProjection", Some(base_tv), *assoc) {
                 return tv;
             }
             ctx.project_associated(base_tv, *assoc, span.clone())

@@ -2819,10 +2819,10 @@ fn solve_associated(
                 &assoc.resolved
             {
                 if args.is_empty() {
-                    if let Some(&(_, tv)) = ctx
-                        .where_clause_assoc_subs
-                        .iter()
-                        .find(|(e, _)| e == entity)
+                    // R3/R4 — `container` is the receiver being projected off;
+                    // base-blind today, audited under `KESTREL_DEBUG=audit-subject`.
+                    if let Some(tv) =
+                        ctx.assoc_sub("solver:solve_associated", Some(container), *entity)
                     {
                         if ctx.resolve(tv) == resolved_result {
                             // Self-referential: the where_clause_assoc_subs TyVar is the same
@@ -2833,14 +2833,15 @@ fn solve_associated(
                         } else {
                             tv
                         }
-                    } else if let Some(&(_, tv)) =
-                        ctx.where_clause_assoc_subs.iter().find(|(e, _)| {
-                            // Name-based fallback: different protocols can define the same
-                            // associated type (e.g., Iterator.Item vs Iterable.Item)
-                            ctx.query_ctx.get::<kestrel_ast_builder::Name>(*e)
-                                == ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity)
-                        })
-                    {
+                    } else if let Some(tv) = ctx.assoc_sub_by_name(
+                        // Name-based fallback: different protocols can define the same
+                        // associated type (e.g., Iterator.Item vs Iterable.Item).
+                        // TODO(G17 C6): a name match on a *different* receiver is
+                        // `distinct_samename`'s miscompile; narrowing waits on C1's numbers.
+                        "solver:solve_associated:name-fallback",
+                        Some(container),
+                        *entity,
+                    ) {
                         if ctx.resolve(tv) == resolved_result {
                             ctx.assoc_projection(container, *entity)
                         } else {
@@ -3905,16 +3906,15 @@ fn solve_member(
     // type, substitute the bound TyVar before member dispatch. If the bound is
     // itself unresolved (e.g. it's another abstract TypeAlias for the same
     // thing), fall through so resolve_member can do a protocol-bound search.
+    // R5 — a projection receiver carries its base; a bare `TypeAlias` receiver
+    // has already lost one, so the query is baseless there (G17 C1).
     let bound_entity = match &recv_kind {
-        TyKind::AssocProjection { assoc, .. } => Some(*assoc),
-        TyKind::TypeAlias { entity, args } if args.is_empty() => Some(*entity),
+        TyKind::AssocProjection { base, assoc } => Some((Some(*base), *assoc)),
+        TyKind::TypeAlias { entity, args } if args.is_empty() => Some((None, *entity)),
         _ => None,
     };
-    if let Some(entity) = bound_entity
-        && let Some(&(_, bound_tv)) = ctx
-            .where_clause_assoc_subs
-            .iter()
-            .find(|(e, _)| *e == entity)
+    if let Some((base, entity)) = bound_entity
+        && let Some(bound_tv) = ctx.assoc_sub("solver:solve_member", base, entity)
     {
         let bound_resolved = ctx.resolve(bound_tv);
         // Only substitute if bound_tv resolves to something other than the
@@ -5993,11 +5993,17 @@ fn lower_hir_ty_sub(
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
-                if let Some(&(_, tv)) = ctx
-                    .where_clause_assoc_subs
-                    .iter()
-                    .find(|(e, _)| e == entity)
-                {
+                // R6 — reads as baseless, but a bare `Item` in a protocol
+                // member signature lowered for receiver `B` *means* `B.Item`,
+                // and `recv_tv` is right here. C1 measures both readings: the
+                // baseless one (what C3 alone would do) is the real lookup, and
+                // the `recv_tv` one is an audit-only probe sizing C2.
+                ctx.probe_assoc_sub(
+                    "solver:lower_hir_ty_sub:AliasUse(recv_tv-probe)",
+                    Some(recv_tv),
+                    *entity,
+                );
+                if let Some(tv) = ctx.assoc_sub("solver:lower_hir_ty_sub:AliasUse", None, *entity) {
                     return tv;
                 }
             }
@@ -6036,8 +6042,11 @@ fn lower_hir_ty_sub(
         },
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);
-            if let Some(&(_, tv)) = ctx.where_clause_assoc_subs.iter().find(|(e, _)| e == assoc) {
-                let _ = base_tv;
+            // R7 — the `leak5.ks` site. Base-blind today; `base_tv` feeds the
+            // audit only (G17 C1), and becomes the key in C3.
+            if let Some(tv) =
+                ctx.assoc_sub("solver:lower_hir_ty_sub:AssocProjection", Some(base_tv), *assoc)
+            {
                 return tv;
             }
             ctx.project_associated(base_tv, *assoc, span.clone())

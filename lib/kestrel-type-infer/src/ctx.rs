@@ -27,6 +27,57 @@ pub(crate) struct PendingPeel {
     pub target_tv: TyVar,
 }
 
+/// Which *projection* a cached `where_clause_assoc_subs` TyVar stands for.
+///
+/// The base is a `TyVar`, not a `WhereSubject`: this table is a memo over the
+/// *inference* world, six of its seven readers hold a TyVar and no subject, and
+/// `lower_subject` is not invertible — by the time a reader asks, the base may
+/// have unified with a concrete type no `WhereSubject` names.
+///
+/// The base is stored **raw** — never `resolve()`d at push. `DirectEquality`
+/// writes `TySlot::Redirect` straight into a param slot and ordinary
+/// unification redirects constantly, so a canonical snapshot taken at push goes
+/// stale and yields a false *miss* (the over-rejection failure mode). Both
+/// sides are resolved at lookup instead; union-find is monotone, so
+/// resolve-at-lookup only ever becomes *more* permissive as inference proceeds.
+/// Same convention as `witness_protocol_args`.
+#[derive(Clone, Copy, Debug)]
+struct AssocSubKey {
+    /// `None` only for a genuinely baseless binding — `DirectEquality` on a
+    /// TypeAlias entity (`where Item = Int64`), which names no receiver.
+    base: Option<TyVar>,
+    assoc: Entity,
+}
+
+/// What a *strict* `(resolved base, assoc)` key would have answered at a read
+/// site, relative to the base-blind answer the compiler actually uses today.
+/// Detection only — see [`InferCtx::assoc_sub`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SubVerdict {
+    /// The memo has no entry for this assoc at all; strict and blind agree.
+    None_,
+    /// Strict and blind pick the same TyVar.
+    Match,
+    /// Strict picks a *different* TyVar than blind — a live receiver confusion.
+    Mismatch,
+    /// Blind found an entry; strict finds none (no entry shares the base).
+    Miss,
+    /// Baseless query with >1 candidate: strict would bail to the general path.
+    Ambiguous,
+}
+
+impl SubVerdict {
+    fn tag(self) -> &'static str {
+        match self {
+            SubVerdict::None_ => "NONE",
+            SubVerdict::Match => "MATCH",
+            SubVerdict::Mismatch => "MISMATCH",
+            SubVerdict::Miss => "MISS",
+            SubVerdict::Ambiguous => "AMBIGUOUS",
+        }
+    }
+}
+
 /// Mutable state for type inference of a single function/init/getter body.
 pub struct InferCtx<'a> {
     /// Type resolver for querying the world (members, conformances, builtins).
@@ -176,14 +227,16 @@ pub struct InferCtx<'a> {
     /// from `Item.Output = Item`). Used by lower_hir_ty_sub to substitute
     /// associated type entities found in protocol member signatures.
     ///
-    /// TODO(G17 stage 3a): keyed on the **assoc entity alone**, so two subjects
-    /// that share an assoc (`A.Item` and `B.Item`) collide on `find()`-returns-
-    /// first no matter how the subject is represented. `WhereSubject` builds
-    /// the right TyVar and this lookup then throws the distinction away — G17
-    /// (`leak5.ks`) is NOT closed by the D7 representation change. Re-keying
-    /// this by `WhereSubject` is stage 3a's job; see D7's *Scope limit* in
-    /// `docs/fragility/G14-G17/decisions.md`.
-    pub(crate) where_clause_assoc_subs: Vec<(Entity, TyVar)>,
+    /// **Private to this module on purpose** (G17 stage 3a, C1). Every reader
+    /// goes through [`InferCtx::assoc_sub`] / [`InferCtx::assoc_sub_by_name`],
+    /// which are still keyed on the **assoc entity alone** — today's exact
+    /// `find()`-returns-first behaviour — so no reader can accidentally start
+    /// consulting [`AssocSubKey::base`] before the re-key commit (C3) lands.
+    ///
+    /// TODO(G17 stage 3a): two subjects that share an assoc (`A.Item` and
+    /// `B.Item`) still collide, so G17 (`leak5.ks`) is NOT closed. See D7's
+    /// *Scope limit* in `docs/fragility/G14-G17/decisions.md`.
+    where_clause_assoc_subs: Vec<(AssocSubKey, TyVar)>,
 
     /// Maps type parameter entities to their canonical TyVars.
     /// Ensures all references to the same type param share one TyVar,
@@ -551,6 +604,152 @@ impl<'a> InferCtx<'a> {
         self.types
             .push(TySlot::Resolved(TyKind::AssocProjection { base, assoc }));
         TyVar(idx)
+    }
+
+    // === where-clause associated-type memo (G17 stage 3a) ===
+
+    /// Record `base.assoc → tv`. The base is stored **raw**; see [`AssocSubKey`].
+    pub(crate) fn push_assoc_sub(&mut self, base: Option<TyVar>, assoc: Entity, tv: TyVar) {
+        self.where_clause_assoc_subs
+            .push((AssocSubKey { base, assoc }, tv));
+    }
+
+    /// Base-blind memo lookup — **today's exact semantics**: the first entry
+    /// whose assoc entity matches wins, whatever receiver it was filed under.
+    ///
+    /// `base` is the receiver the caller is actually projecting off. C1 does
+    /// **not** consult it for the answer: it is passed so the env-gated audit
+    /// can report what a strict `(resolved base, assoc)` key *would* have
+    /// answered. Enable with `KESTREL_DEBUG=audit-subject`; inert otherwise.
+    pub(crate) fn assoc_sub(
+        &self,
+        site: &'static str,
+        base: Option<TyVar>,
+        assoc: Entity,
+    ) -> Option<TyVar> {
+        self.lookup_assoc_sub(site, base, assoc, &|e| e == assoc)
+    }
+
+    /// As [`Self::assoc_sub`], but matching the assoc by **`Name` across
+    /// protocols** (`Iterator.Item` vs `Iterable.Item`) — `solve_associated`'s
+    /// fallback. Same base-blind semantics, same audit.
+    pub(crate) fn assoc_sub_by_name(
+        &self,
+        site: &'static str,
+        base: Option<TyVar>,
+        assoc: Entity,
+    ) -> Option<TyVar> {
+        let want = self.query_ctx.get::<kestrel_ast_builder::Name>(assoc);
+        self.lookup_assoc_sub(site, base, assoc, &|e| {
+            self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want
+        })
+    }
+
+    /// Audit-only probe: report the strict verdict a read site *would* get for
+    /// a hypothetical base, without performing a lookup. Used at R6, whose base
+    /// (`recv_tv`) is identified rather than passed through, so the C2 and C3
+    /// deltas can be sized separately. Inert unless the audit category is on.
+    pub(crate) fn probe_assoc_sub(&self, site: &'static str, base: Option<TyVar>, assoc: Entity) {
+        if !kestrel_debug::is_enabled("audit-subject") {
+            return;
+        }
+        let matches = |e: Entity| e == assoc;
+        let blind = self
+            .where_clause_assoc_subs
+            .iter()
+            .find(|(k, _)| matches(k.assoc))
+            .map(|&(_, tv)| tv);
+        self.audit_assoc_sub(site, base, assoc, blind, &matches);
+    }
+
+    /// The one place the memo is scanned. `matches` selects candidate entries
+    /// by assoc entity; the answer is the first hit, exactly as before.
+    fn lookup_assoc_sub(
+        &self,
+        site: &'static str,
+        base: Option<TyVar>,
+        assoc: Entity,
+        matches: &dyn Fn(Entity) -> bool,
+    ) -> Option<TyVar> {
+        let blind = self
+            .where_clause_assoc_subs
+            .iter()
+            .find(|(k, _)| matches(k.assoc))
+            .map(|&(_, tv)| tv);
+        if kestrel_debug::is_enabled("audit-subject") {
+            self.audit_assoc_sub(site, base, assoc, blind, matches);
+        }
+        blind
+    }
+
+    /// Log how a strict `(resolved base, assoc)` key would differ from the
+    /// base-blind answer. Detection only: never influences `blind`.
+    fn audit_assoc_sub(
+        &self,
+        site: &'static str,
+        base: Option<TyVar>,
+        assoc: Entity,
+        blind: Option<TyVar>,
+        matches: &dyn Fn(Entity) -> bool,
+    ) {
+        let cands: Vec<(AssocSubKey, TyVar)> = self
+            .where_clause_assoc_subs
+            .iter()
+            .filter(|(k, _)| matches(k.assoc))
+            .copied()
+            .collect();
+        let strict = match base {
+            // Baseless query: resolve by unambiguity — one candidate is the
+            // answer, two or more bail to the general path.
+            None if cands.len() > 1 => None,
+            None => cands.first().map(|&(_, tv)| tv),
+            // Resolve BOTH sides here; raw indices differ after any redirect.
+            // A baseless *entry* matches only a baseless query.
+            Some(q) => cands
+                .iter()
+                .find(|(k, _)| k.base.is_some_and(|s| self.resolve(s) == self.resolve(q)))
+                .map(|&(_, tv)| tv),
+        };
+        // Two distinct indices that already resolve to the same canonical are
+        // behaviourally the same answer, so compare resolved, not raw.
+        let verdict = match (blind, strict) {
+            (None, _) => SubVerdict::None_,
+            (Some(b), Some(s)) if self.resolve(b) == self.resolve(s) => SubVerdict::Match,
+            (Some(_), Some(_)) => SubVerdict::Mismatch,
+            (Some(_), None) if base.is_none() => SubVerdict::Ambiguous,
+            (Some(_), None) => SubVerdict::Miss,
+        };
+        let tv = |t: Option<TyVar>| t.map_or(-1i64, |t| i64::from(self.resolve(t).0));
+        // `cands[0]` *is* the entry the base-blind read picked, so reporting its
+        // own assoc + base says exactly which receiver the answer leaked from.
+        let via = cands.first().map_or_else(
+            || "-".to_string(),
+            |(k, _)| format!("{}@{}", self.assoc_path(k.assoc), tv(k.base)),
+        );
+        kestrel_debug::ktrace!(
+            "audit-subject",
+            "{} site={site} assoc={} base={} blind={} strict={} cands={} via={via}",
+            verdict.tag(),
+            self.assoc_path(assoc),
+            tv(base),
+            tv(blind),
+            tv(strict),
+            cands.len(),
+        );
+    }
+
+    /// `Owner.Name` for an associated-type entity — audit output only.
+    fn assoc_path(&self, assoc: Entity) -> String {
+        let name = |e: Entity| {
+            self.query_ctx
+                .get::<kestrel_ast_builder::Name>(e)
+                .map(|n| n.0.clone())
+                .unwrap_or_else(|| "?".to_string())
+        };
+        match self.query_ctx.parent_of(assoc) {
+            Some(p) => format!("{}.{}", name(p), name(assoc)),
+            None => name(assoc),
+        }
     }
 
     /// Allocate a TyVar bound to a Tuple type.
