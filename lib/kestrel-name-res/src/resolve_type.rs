@@ -63,55 +63,122 @@ impl QueryFn for ResolveTypePath {
     }
 
     fn execute(&self, ctx: &QueryContext<'_>) -> TypeResolution {
-        if self.segments.is_empty() {
-            return TypeResolution::NotFound("<empty>".into());
-        }
+        resolve_type_path_chain(ctx, &self.segments, self.context, self.root).resolution
+    }
+}
 
-        // Handle "Self" keyword
-        if self.segments[0] == "Self" {
-            // Multi-segment Self.Item — try resolving through synthetic type param
-            if self.segments.len() > 1 {
-                if let Some(result) =
-                    try_resolve_self_as_type_param(ctx, &self.segments, self.context, self.root)
-                {
-                    return result;
-                }
-                // Fallback: resolve Self.Item through the enclosing extension target.
-                // For `extend Iterator: Iterable { type Iterable.Item = Self.Item }`,
-                // Self resolves to Iterator, then .Item walks Iterator's children.
-                if let Some(result) = try_resolve_self_via_extension_target(
-                    ctx,
-                    &self.segments,
-                    self.context,
-                    self.root,
-                ) {
-                    return result;
-                }
+// ===== TypePathChain =====
+
+/// A resolved dotted type path, with the entity for *every* segment.
+///
+/// `ResolveTypePath` only ever needs the last entity, but a where-clause
+/// projection subject (`C.Iter.Item: P`) needs the whole chain so it can keep
+/// its receiver at each depth. Both come from the same walk — the segment
+/// ordering in `resolve_segment` is load-bearing and must have exactly one
+/// implementation.
+#[derive(Clone, Debug)]
+pub struct TypePathChain {
+    /// Exactly what `ResolveTypePath` returns for the same inputs.
+    pub resolution: TypeResolution,
+    /// One entity per segment, in source order (`steps[i]` is `segments[i]`).
+    /// Empty unless `resolution` is `Found`.
+    pub steps: Vec<Entity>,
+    /// The path began at the `Self` keyword, so `steps[0]` is whatever `Self`
+    /// resolved *through* (a synthetic `Self` type param, or the enclosing
+    /// extension's target) rather than a user-written name.
+    pub self_rooted: bool,
+}
+
+/// Resolve a dotted type path, recording the entity behind each segment.
+///
+/// Free function, not a second query: a memoized twin on the same key would
+/// double the cache for every type path in the program to serve one caller
+/// (`WhereClausesOf`, itself memoized). Same house pattern as
+/// `kestrel_type_infer::where_clauses::resolve_where_clauses`.
+pub fn resolve_type_path_chain(
+    ctx: &QueryContext<'_>,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+) -> TypePathChain {
+    let self_rooted = segments.first().is_some_and(|s| s == "Self");
+    let mut steps = Vec::with_capacity(segments.len());
+    let resolution = resolve_path_steps(ctx, segments, context, root, &mut steps);
+    // Only a fully resolved path has a meaningful chain; a partial walk that
+    // hit NotFound/NotAType must not leak half a chain to callers.
+    if !matches!(resolution, TypeResolution::Found(_)) {
+        steps.clear();
+    }
+    TypePathChain {
+        resolution,
+        steps,
+        self_rooted,
+    }
+}
+
+/// The one implementation of the type-path walk. `steps` accumulates the
+/// per-segment entities; it is only trustworthy when the return is `Found`.
+fn resolve_path_steps(
+    ctx: &QueryContext<'_>,
+    segments: &[String],
+    context: Entity,
+    root: Entity,
+    steps: &mut Vec<Entity>,
+) -> TypeResolution {
+    if segments.is_empty() {
+        return TypeResolution::NotFound("<empty>".into());
+    }
+
+    // Handle "Self" keyword
+    if segments[0] == "Self" {
+        // Multi-segment Self.Item — try resolving through synthetic type param
+        if segments.len() > 1 {
+            if let Some(result) =
+                try_resolve_self_as_type_param(ctx, segments, context, root, steps)
+            {
+                return result;
             }
-            // Bare "Self" — return SelfType for contextual resolution by caller
-            if self.segments.len() == 1 {
-                return TypeResolution::SelfType;
+            // Fallback: resolve Self.Item through the enclosing extension target.
+            // For `extend Iterator: Iterable { type Iterable.Item = Self.Item }`,
+            // Self resolves to Iterator, then .Item walks Iterator's children.
+            if let Some(result) =
+                try_resolve_self_via_extension_target(ctx, segments, context, root, steps)
+            {
+                return result;
             }
         }
+        // Bare "Self" — return SelfType for contextual resolution by caller
+        if segments.len() == 1 {
+            return TypeResolution::SelfType;
+        }
+    }
 
-        // Resolve first segment via name resolution; single-segment paths
-        // and lookup failures resolve fully here.
-        let mut current = match resolve_first_segment(ctx, &self.segments, self.context, self.root)
-        {
-            Ok(entity) => entity,
+    // Resolve first segment via name resolution; single-segment paths
+    // and lookup failures resolve fully here.
+    steps.clear();
+    let mut current = match resolve_first_segment(ctx, segments, context, root) {
+        Ok(entity) => entity,
+        // Single-segment paths resolve fully here — record the one step so a
+        // `Found` chain always has one entity per segment.
+        Err(resolution) => {
+            if let TypeResolution::Found(e) = &resolution {
+                steps.push(*e);
+            }
+            return resolution;
+        },
+    };
+    steps.push(current);
+
+    // Multi-segment: walk remaining segments
+    for segment in &segments[1..] {
+        current = match resolve_segment(ctx, current, segment, context, root) {
+            Ok(next) => next,
             Err(resolution) => return resolution,
         };
-
-        // Multi-segment: walk remaining segments
-        for segment in &self.segments[1..] {
-            current = match resolve_segment(ctx, current, segment, self.context, self.root) {
-                Ok(next) => next,
-                Err(resolution) => return resolution,
-            };
-        }
-
-        TypeResolution::Found(current)
+        steps.push(current);
     }
+
+    TypeResolution::Found(current)
 }
 
 /// Resolve the first path segment via name resolution.
@@ -226,6 +293,7 @@ fn try_resolve_self_as_type_param(
     segments: &[String],
     context: Entity,
     root: Entity,
+    steps: &mut Vec<Entity>,
 ) -> Option<TypeResolution> {
     // Try to resolve "Self" via name resolution
     let result = ctx.query(ResolveName {
@@ -245,6 +313,8 @@ fn try_resolve_self_as_type_param(
     }
 
     // Walk remaining segments through type param bounds
+    steps.clear();
+    steps.push(self_entity);
     let mut current = self_entity;
     for segment in &segments[1..] {
         if let Some(assoc) = resolve_type_param_assoc(ctx, current, segment, context, root) {
@@ -255,6 +325,7 @@ fn try_resolve_self_as_type_param(
         } else {
             return Some(TypeResolution::NotFound(segment.clone()));
         }
+        steps.push(current);
     }
 
     Some(TypeResolution::Found(current))
@@ -270,6 +341,7 @@ fn try_resolve_self_via_extension_target(
     segments: &[String],
     context: Entity,
     root: Entity,
+    steps: &mut Vec<Entity>,
 ) -> Option<TypeResolution> {
     // Walk up from context to find an enclosing Extension
     let mut current = Some(context);
@@ -289,6 +361,8 @@ fn try_resolve_self_via_extension_target(
     // Walk remaining segments (after "Self") through the target's children
     // and associated types. For protocols, this finds associated types;
     // for structs, this finds nested types.
+    steps.clear();
+    steps.push(target);
     let mut resolved = target;
     for segment in &segments[1..] {
         // Check if resolved is a protocol — look for associated types
@@ -296,6 +370,7 @@ fn try_resolve_self_via_extension_target(
             && let Some(assoc) = find_assoc_type(ctx, resolved, segment)
         {
             resolved = assoc;
+            steps.push(resolved);
             continue;
         }
 
@@ -310,6 +385,7 @@ fn try_resolve_self_via_extension_target(
         } else {
             return Some(TypeResolution::NotFound(segment.clone()));
         }
+        steps.push(resolved);
     }
 
     Some(TypeResolution::Found(resolved))

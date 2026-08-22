@@ -14,7 +14,7 @@ use kestrel_ast_builder::{
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::Builtin;
 use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_name_res::{ResolveBuiltin, ResolveTypePath, TypeResolution, resolve_type_path_chain};
 use kestrel_semantics::{
     CopyRequirement, CopySemantics, NominalCopySemantics, StaticRequirement,
     TypeParamCopyRequirement, TypeParamStaticRequirement,
@@ -270,11 +270,8 @@ fn resolve_bound_subject(
     entity: Entity,
     root: Entity,
 ) -> Option<WhereSubject> {
-    if let Some((base, assoc)) = resolve_projection_subject(ctx, ast_ty, entity, root) {
-        return Some(WhereSubject::Projection {
-            base: Box::new(WhereSubject::Param(base)),
-            assoc,
-        });
+    if let Some(projection) = resolve_projection_subject(ctx, ast_ty, entity, root) {
+        return Some(projection);
     }
     // TODO(G17 stage 3a): a bare `Self` subject resolves through
     // `resolve_type_entity` to the *enclosing* entity and is stored as
@@ -286,49 +283,48 @@ fn resolve_bound_subject(
     resolve_type_entity(ctx, ast_ty, entity, root).map(WhereSubject::Param)
 }
 
-/// If `ast_ty` is a `Base.Assoc` projection whose `Base` resolves to a type
-/// parameter and `Assoc` to an associated type reachable from it, return
-/// `(base_param_entity, assoc_entity)`. Returns `None` for a plain type/param
-/// subject (handled by `resolve_type_entity`) or any deeper/unsupported shape.
+/// If `ast_ty` is a dotted path rooted at a type parameter (`T.Assoc`,
+/// `C.Iter.Item`, …), return it as a nested `WhereSubject::Projection` that
+/// keeps every receiver. Returns `None` for a plain type/param subject
+/// (handled by `resolve_type_entity`) or any shape whose root is not a type
+/// parameter — those still take the collapsing path.
 fn resolve_projection_subject(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     entity: Entity,
     root: Entity,
-) -> Option<(Entity, Entity)> {
+) -> Option<WhereSubject> {
     let AstType::Named { segments, .. } = ast_ty else {
         return None;
     };
-    // Only the depth-1 `T.Assoc` shape for now (covers the assoc-bound cases);
-    // deeper chains fall through to the collapsing path. `WhereSubject` can
-    // express any depth — lifting this bail is the next commit, kept out of
-    // the representation change so its suite delta is attributable.
-    if segments.len() != 2 {
+    if segments.len() < 2 {
         return None;
     }
-    let base = match ctx.query(ResolveTypePath {
-        segments: vec![segments[0].name.clone()],
-        context: entity,
-        root,
-    }) {
-        TypeResolution::Found(e) => e,
-        _ => return None,
-    };
-    if ctx.get::<kestrel_ast_builder::NodeKind>(base)
-        != Some(&kestrel_ast_builder::NodeKind::TypeParameter)
-    {
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    let chain = resolve_type_path_chain(ctx, &seg_names, entity, root);
+    // D8: a `Self`-rooted chain has nothing to name as its root yet — the
+    // producer keeps collapsing it to the enclosing entity until stage 3a
+    // introduces `WhereSubject::SelfType`. See `resolve_bound_subject` and
+    // `docs/fragility/G14-G17/decisions.md`.
+    if chain.self_rooted {
         return None;
     }
-    // Resolve the whole `T.Assoc` to the associated-type entity.
-    let assoc = match ctx.query(ResolveTypePath {
-        segments: segments.iter().map(|s| s.name.clone()).collect(),
-        context: entity,
-        root,
-    }) {
-        TypeResolution::Found(e) => e,
-        _ => return None,
-    };
-    Some((base, assoc))
+    if !matches!(chain.resolution, TypeResolution::Found(_)) {
+        return None;
+    }
+    let mut steps = chain.steps.into_iter();
+    let base = steps.next()?;
+    // Only type-parameter roots project; a path rooted at a concrete type or a
+    // module (`std.collections.Array`) is a plain type, not a projection.
+    if ctx.get::<NodeKind>(base) != Some(&NodeKind::TypeParameter) {
+        return None;
+    }
+    Some(steps.fold(WhereSubject::Param(base), |base, assoc| {
+        WhereSubject::Projection {
+            base: Box::new(base),
+            assoc,
+        }
+    }))
 }
 
 fn resolve_type_entity(

@@ -36,7 +36,7 @@ pub use protocol_members::{
 pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};
-pub use resolve_type::{ResolveTypePath, TypeResolution};
+pub use resolve_type::{ResolveTypePath, TypePathChain, TypeResolution, resolve_type_path_chain};
 pub use resolve_value::{ResolveValuePath, ValueResolution};
 pub use scope::{Scope, ScopeFor};
 pub use traversal::MemberMap;
