@@ -276,6 +276,24 @@ storms. That is the signal the audit in commit 1 must be built to detect.
 
 ---
 
+> ## ⚠ §3 IS REFUTED BY MEASUREMENT — read this before acting on it
+>
+> [measured @ `a8fa672c`, C1 audit sweep over all 3655 testdata files]
+>
+> §3 assumes the legitimate `Iterable`/`Iterator` bridge is a **same-receiver**
+> cross-protocol name match, and concludes that requiring equal bases "leaves
+> the bridge's same-receiver hits alone". **There are no same-receiver hits.**
+>
+> The 27×/compilation figure is confirmed exactly. But every one of the 27 is
+> `assoc=Iterator.Item` answered from an entry filed under **`Iterable.Item`,
+> across five distinct receivers — zero same-receiver.** So **C6 as specified
+> is not a narrowing of the fallback, it is a deletion of all 27 uses.**
+>
+> The bridge is justified by the `where TargetIterator.Item = Item` **equality
+> clause**, not by base identity. C6 therefore depends on the equality path
+> working first — the very fallback §3 flags as unimplemented. Re-plan C6
+> against the equality clause before touching `solver.rs:2836`.
+
 ## 3. The `solver.rs:2836` name fallback
 
 ### What it is serving
@@ -632,3 +650,67 @@ until it is attempted.
   constraints, not from the miss.
 - **The commit that makes `leak5.ks` reject: C4.** The commit that stops it
   emitting wrong code is **C3**, and C4 does nothing without it.
+
+---
+
+# C1 measurement — the numbers that replace every estimate above
+
+[measured @ `a8fa672c`, `KESTREL_DEBUG=audit-subject`, all 3655 testdata files.
+`kestrel dump diagnostics` verified equivalent to a full build — 1456 reads
+either way — so the sweep used it.]
+
+**4,939,238 reads, ~1352 per compilation. 94.23% NONE · 2.07% MATCH · 3.70%
+MISS · zero MISMATCH · zero AMBIGUOUS.**
+
+| site | reads | MATCH | MISS | div% |
+|---|---|---|---|---|
+| `solver:lower_hir_ty_sub:AssocProjection` (R7) | 1733616 | 10984 | 14622 | 0.84% |
+| `solver:solve_associated` (R3) | 1173329 | 80431 | 10969 | 0.93% |
+| `solver:solve_associated:name-fallback` (R4) | 1081929 | 0 | 98689 | 9.12% |
+| `generate:AssocProjection` (R2) | 482511 | 7312 | 58485 | 12.12% |
+| `solver:lower_hir_ty_sub:AliasUse` (R6) | 380129 | 0 | 0 | 0% |
+| `solver:solve_member` (R5) | 87724 | 3656 | 0 | 0% |
+| `generate:AliasUse` (R1) | **0** | – | – | – |
+
+## Blast radius
+
+3655/3655 files diverge — but that number is useless on its own. **3650 of
+them diverge by exactly the same 50-MISS stdlib floor**, a byte-identical
+7-row signature present in every compilation. Only **five** files contribute
+anything of their own:
+
+```
+56  declarations/wacky_inference/transitive_equality_constraints_in_extension_method.ks
+54  declarations/extensions/init_in_generic_extension_no_double_type_args.ks
+53  declarations/associated_types/iterable_iter_bound_propagates.ks
+51  validation/type_checking/tuple_index_with_associated_type_equality.ks
+51  declarations/associated_types/where_clause_two_associated_types_equal.ks
+```
+
+The plan's static estimate (13 + 17 files) understated it; "the whole suite"
+overstates it. The truth is **the stdlib prelude, invariantly, plus five files.**
+
+## Consequences for the remaining commits
+
+- **Zero MISMATCH corpus-wide.** C3 can only ever *lose a shortcut*, never swap
+  one answer for another. The failure mode to watch is an unsolved deferred
+  `Associated` constraint — "could not infer type" — **never an E100 storm.**
+  Predicted in the *`None` rules*; now measured.
+- **C2 is a no-op on this corpus.** R6 never diverges across 380129 reads, R1
+  never executes at all, and R5 has zero divergence. Re-scope or drop it.
+- **C6 is blocked** — see the §3 refutation above.
+- Both isolations confirmed at exactly one read each:
+  `leak5 \ control2` → R7, `assoc=Producer.Item via=Producer.Item@1`, base `A`
+  vs query base `B`. `distinct_samename \ distinct` → R4,
+  `assoc=ProducerB.Item via=ProducerA.Item@1`.
+
+## What C1 actually shipped
+
+`where_clause_assoc_subs` is `Vec<(AssocSubKey, TyVar)>` carrying the base,
+**stored raw and resolved only at lookup**. The field is now **private to
+`ctx.rs`** — stronger than planned: no reader can reach the table at all, only
+`push_assoc_sub` / `assoc_sub` / `assoc_sub_by_name`, every one of them
+byte-for-byte base-blind today. Verified: all references outside `ctx.rs` are
+comments.
+
+Suite `3815 passed, 0 failed`, run twice. Both miscompiles unchanged.
