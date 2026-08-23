@@ -68,7 +68,7 @@ projection skip and a `TODO(G17 stage 3a)`:
 
 | site | today | classification |
 | --- | --- | --- |
-| `solver.rs:3565` | `=> {}` | **live bug** — call-site obligation for a direct `Def` call |
+| `solver.rs:3565` | `=> {}` | **live bug** — call-site obligation for an **overloaded** direct `Def` call (`emit_resolved_call`'s only callers are in `solve_overloaded_call`). *Corrected during C7: this row originally read "a direct `Def` call", which made the plan point `callsite.ks` here. It does not go here — an unambiguous call is typed by `lower_entity_ref` and takes the `generate.rs:1972` row instead.* |
 | `solver.rs:4485` | `=> {}` | **live bug** — same, member/method path |
 | `lib.rs:812` | `=> {}` | **live bug** — the only emitter for container-level clauses |
 | `generate.rs:1972` | `=> {}` | **live bug** — call-site / type-formation path |

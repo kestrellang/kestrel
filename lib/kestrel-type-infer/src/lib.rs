@@ -461,9 +461,15 @@ fn emit_method_projection_bound_constraint(
     // `SubjectRoot::Mint` reproduces the old `ctx.param(base)` exactly, and
     // recurses for depth > 1 subjects (which `WhereClausesOf` does not build
     // yet — see `where_clauses::resolve_projection_subject`).
-    let Some((base_tv, proj_tv)) =
-        generate::lower_subject_with_base(ctx, subject, generate::SubjectRoot::Mint)
-    else {
+    // `Opaque`: this is declaration scope. The base is a type parameter of the
+    // method being set up, so the projection must survive as `T.Assoc` for the
+    // body's own uses to reuse it via `push_assoc_sub` below.
+    let Some((base_tv, proj_tv)) = generate::lower_subject_with_base(
+        ctx,
+        subject,
+        generate::SubjectRoot::Mint,
+        generate::ProjectionPolicy::Opaque,
+    ) else {
         return;
     };
     ctx.conforms_typearg(proj_tv, protocol, span.clone());

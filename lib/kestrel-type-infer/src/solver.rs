@@ -3597,13 +3597,21 @@ fn emit_resolved_call(
                 // `T.Assoc: P` projection bounds are handled at body setup.
                 // TODO(G17 stage 3a): this skip is a live bug — the call-site
                 // obligation for a direct `Def` call is never emitted for a
-                // projection subject. Deleting the guard is that stage's job.
+                // projection subject. C7 fixed the sibling site
+                // (`generate::emit_where_clause_constraints_with_subs`), which
+                // is the one `assoc_projection_bound_call_site.ks` exercises;
+                // this arm never saw a projection subject on that corpus, so it
+                // is still untested surface and keeps its guard. When it goes,
+                // it wants `ProjectionPolicy::Reduce(&span)` for the same reason.
                 if !matches!(subject, crate::resolve::WhereSubject::Param(_)) {
                     continue;
                 }
-                if let Some(tv) =
-                    crate::generate::lower_subject(ctx, &subject, SubjectRoot::Subs(&subs))
-                {
+                if let Some(tv) = crate::generate::lower_subject(
+                    ctx,
+                    &subject,
+                    SubjectRoot::Subs(&subs),
+                    crate::generate::ProjectionPolicy::Opaque,
+                ) {
                     ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
                     // an extension's free TypeParams when projecting through

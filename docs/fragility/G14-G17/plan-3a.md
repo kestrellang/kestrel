@@ -703,20 +703,100 @@ the `Iterable`/`Iterator` bridge is shown to survive on the deferred-`Associated
 path. If it does not, the fallback stays and the equality bridge gets fixed first,
 in its own commit.
 
-### C7 — the three call-site skip sites
+### C7 — the call-site skip sites
 
-**Changes** `generate.rs:1941`, `solver.rs:3534`, `solver.rs:4435`, plus the
-`Opaque`/`Reduce` projection policy on `lower_subject`. One commit each; the
-policy lands with the first.
-**Test** `assoc_projection_bound_call_site.ks` (already green from C4 — these
-commits make it reject at the *call site* with a user-code span rather than
-wherever C4 catches it, which is the better diagnostic; add a span assertion).
-**Expected delta** new rejections wherever a generic call has an unsatisfied
-projection bound. The three stdlib projection bounds (`adapters.ks:397`, `:666`,
-`:866`) are all `Copyable` / `not Copyable`, answered structurally before the arm,
-so the stdlib should be unaffected — **verify, do not assume.**
-**Risk** medium-high, and it is the one that most plausibly produces false
-rejects.
+**LANDED (first of the three).** [verified @ this commit, built + full suite]
+
+> **⚠ THE SITE ATTRIBUTION WAS WRONG.** [measured @ `b096cdf9` + the C7 spike]
+>
+> The plan, and the Sequencing table in `decisions.md`, assign
+> `assoc_projection_bound_call_site.ks` to **`solver.rs:3534`** (`:3565`
+> pre-commit-1, `:3598` today) — "the call-site obligation for a direct `Def`
+> call". **That site is never reached by this test, and deleting its guard is a
+> measured no-op.**
+>
+> `emit_resolved_call` has exactly two callers, `solver.rs:3409` and `:3439`,
+> both inside `solve_overloaded_call`. It is the **overload-resolution** path.
+> `good(StrSrc(…))` is an unambiguous call, so it never goes there: the callee
+> is typed by `lower_entity_ref` (`generate.rs:1810`), whose where-clause
+> emitter is **`emit_where_clause_constraints_with_subs` — the
+> `generate.rs:1941` site**, filed in the Sequencing table as the "call-site /
+> type-formation path".
+>
+> Instrumented at `emit_resolved_call`, `solve_member`, and
+> `emit_where_clause_constraints_with_subs` on `callsite.ks`: 20 / 11876 / many
+> hits respectively, **one** of which carried a `Projection` subject, and it
+> was the `generate.rs` one. Deleting the `solver.rs` guard alone changed
+> nothing on any of the eight repros.
+
+**Changes** the guard at `generate.rs:1941` goes, plus the `Opaque`/`Reduce`
+projection policy on `lower_subject` / `lower_subject_with_base`. Both remaining
+call-site sites keep their guards and get `Opaque` (a no-op for the `Param`-only
+subjects that reach them), so this commit is exactly one behavioural site.
+
+**The `Reduce` policy is load-bearing, and the plan is right about why.**
+Deleting the guard with `Opaque` still accepts `callsite.ks`: the subject lowers
+to `assoc_projection(StrSrc_tv, Producer.Item)`, which never reduces, and C4's
+base check on an `AssocProjection` with a *concrete* base has no spine to compare
+(`None` = cannot compare = permit). `ProjectionPolicy::Reduce` calls
+`project_associated`, which emits the `Associated` constraint, the projection
+resolves to `String`, and `String: Show` fails for real. Measured: guard-deletion
+alone = no change on all eight repros; guard-deletion + `Reduce` = frontend
+`E100`.
+
+**Measured** suite **3820 passed / 3 failed → 3821 passed / 2 failed.** One
+flipped, zero collateral:
+
+| test | before | after |
+| --- | --- | --- |
+| `assoc_projection_bound_call_site` | fail | **pass** — frontend `E100 … String !: Show` at `callsite.ks:51:21`, under the `good` callee token |
+| `assoc_projection_bound_same_name_distinct_protocols` | fail | fail — C6's, still blocked |
+| `assoc_projection_bound_self_subject` | fail | fail — C9's |
+
+`leak5`, `control2`, `distinct`, `distinct_samename`, `structcase`,
+`structcase_nobound`, `selfproj` are byte-identical to their C4 behaviour.
+
+**Blast radius, bounded by measurement.** 19 files in `testdata/` carry a
+where-clause projection bound, plus `lang/std/iter/adapters.ks` (`:397`, `:666`,
+`:866`). Those three stdlib bounds are **container-level clauses on structs**,
+and `WhereClausesOf` only reads an entity's own `AstWhereClause` — it does not
+walk up to a parent — so an `Iterator`-adapter construction never sees them
+here. That is C5's territory, still guarded. Confirmed by the green suite and by
+`peekable()` running correctly.
+
+**The two remaining call-site sites see no projection subject anywhere in the
+corpus.** [measured, spike reverted, `solver.rs` byte-identical —
+`shasum 830b97a3b83f24f0d827d638767b644484d6dfed` before and after] Instrumented
+both skip arms and swept all 19 projection-bound files plus 12
+`stdlib/iterator/` files: **zero hits at each.** So:
+
+- **`solver.rs:3598` (`emit_resolved_call`, overloaded direct-`Def` call)** — the
+  *same shape* as the site fixed here, and the same edit applies verbatim: drop
+  the `matches!(subject, Param(_))` guard, pass
+  `ProjectionPolicy::Reduce(&span)`. **No corpus test would flip.** It needs a
+  new test first: a generic function with a projection bound that is
+  *overloaded*, so `solve_overloaded_call` is the path taken.
+- **`solver.rs:4498` (`solve_member`, member/method call)** — **not** the same
+  shape. It uses `subject.as_param()` and a two-stage lookup
+  (`resolution.type_params` → `fresh_params[idx]`, else `subs`) that `SubjectRoot`
+  does not model, exactly as its in-source comment says. The clean adoption is to
+  build one merged `Vec<(Entity, TyVar)>` = `zip(type_params, fresh_params)`
+  followed by `subs` — `find` gives first-wins, which *is* the two-stage
+  semantics — and then use `SubjectRoot::Subs(&merged)`. Note this path is hot
+  (11876 hits compiling a 50-line program), so the merge wants to be conditional
+  on a projection subject actually being present. **No corpus test would flip**,
+  and more than that: `resolution.where_clauses` never contains a projection
+  subject on the whole projection-bound corpus, including
+  `assoc_projection_bound_extension.ks`, whose
+  `extend Box[T]: Show where T.Item: Show` is served by the body-setup emitter
+  (`lib.rs`'s `emit_method_projection_bound_constraint`) rather than by the
+  `Box(…).show()` call site. A test for this site has to be written from
+  scratch — the natural one is `Box(inner: StrSrc(s: "z")).show()`, the negative
+  twin of the existing positive.
+
+**Risk taken** the over-rejection direction, as flagged. Contained: an
+unmappable subject root still yields `None` from `lower_subject` and is skipped,
+which is the same conservative permit as before.
 
 ### C8 — the two inert skip sites, `Static` wf, `find_protocol_type_args`, entailment
 

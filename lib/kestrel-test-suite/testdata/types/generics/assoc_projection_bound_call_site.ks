@@ -5,16 +5,18 @@
 // bound `A.Item: Show` it does declare. The bug is at the CALL SITE: passing
 // `StrSrc` means `A.Item = String`, which has no `Show` witness, so the
 // obligation `A.Item: Show` must be discharged (and must fail) at `good(…)`.
-// Today no call-site obligation is emitted for a projection subject at all, so
-// the call is accepted and only fails after monomorphization.
+// Before G17 C7 no call-site obligation was emitted for a projection subject at
+// all, so the call was accepted and only failed after monomorphization.
 //
 // This is the isolated call-site half of G17: no leaking clause is involved,
 // which is why it needs no A/B control — the callee is unimpeachable.
 //
-// EXPECTED TO FAIL: a diagnostics test never monomorphizes, so the current
-// post-mono error is invisible to it. Flips green when the direct-`Def`
-// call-site obligation stops skipping projection subjects (plan-3a:
-// solver.rs:3534, with the `Reduce` projection policy).
+// FIXED by C7: `generate::emit_where_clause_constraints_with_subs` no longer
+// skips a projection subject, and lowers it with `ProjectionPolicy::Reduce` so
+// `A.Item` reduces to `String` instead of being judged as an opaque projection
+// (which permits). NB the plan filed this against `solver.rs`'s
+// `emit_resolved_call`; that is the *overloaded*-call path and this
+// unambiguous call never reaches it.
 
 module Test
 

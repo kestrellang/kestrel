@@ -1935,15 +1935,20 @@ fn emit_where_clause_constraints_with_subs(
                 protocol,
                 protocol_type_args,
             } => {
-                // Projection bounds (`T.Assoc: P`) are body-inference facts
-                // emitted at body setup; nothing to do at this call-site path
-                // (the assoc entity isn't a call type-arg here).
-                // TODO(G17 stage 3a): this skip is a live bug — deleting the
-                // guard is that stage's job, with its own test.
-                if !matches!(subject, crate::resolve::WhereSubject::Param(_)) {
-                    continue;
-                }
-                if let Some(tv) = lower_subject(ctx, &subject, SubjectRoot::Subs(subs)) {
+                // G17 C7: a projection subject (`A.Item: P`) gets its call-site
+                // obligation here, same as a bare `A: P`. `Reduce`, not
+                // `Opaque`: the base is a call type-arg, so at `good(StrSrc(…))`
+                // the obligation is really about `String`, and an unreduced
+                // `StrSrc.Item` would be judged as an opaque projection — which
+                // permits. `lower_subject` returns `None` when the subject's
+                // root is not one of `subs`, and that skip is the deliberate
+                // conservative permit for an abstract position.
+                if let Some(tv) = lower_subject(
+                    ctx,
+                    &subject,
+                    SubjectRoot::Subs(subs),
+                    ProjectionPolicy::Reduce(site_span),
+                ) {
                     // Call-site where-clause obligation: a TYPE-ARGUMENT
                     // bound (success instantiates witnesses at tv).
                     ctx.conforms_typearg(tv, protocol, site_span.clone());
@@ -2078,21 +2083,42 @@ pub(crate) enum SubjectRoot<'a> {
     Mint,
 }
 
+/// How a `WhereSubject`'s `Projection` step becomes a TyVar (G17 stage 3a).
+///
+/// The two callers of `lower_subject` want opposite things from `T.Assoc`, and
+/// getting it wrong is silent in both directions — hence a named policy rather
+/// than a second copy of the walk.
+#[derive(Clone, Copy)]
+pub(crate) enum ProjectionPolicy<'a> {
+    /// `ctx.assoc_projection` — the projection survives as an opaque
+    /// `TyKind::AssocProjection`. Correct in *declaration* scope, where the base
+    /// is a type parameter that will never reduce and the bound must stay
+    /// nameable as `T.Assoc`.
+    Opaque,
+    /// `ctx.project_associated` — allocate a fresh TyVar *and* emit the
+    /// `Associated` constraint that reduces it. Required at a **call site**: at
+    /// `good(StrSrc(…))` the subject's base is concrete, and an opaque
+    /// `StrSrc.Item` is judged by `solve_conforms` as an unreduced projection
+    /// (which permits) instead of the `String` it denotes.
+    Reduce(&'a Span),
+}
+
 /// Lower a where-clause subject to the TyVar the constraints should talk
 /// about, preserving the receiver at every depth.
 ///
 /// `Param`      → per `root`
 /// `SelfType`   → `None` (TODO(G17 stage 3a): needs the clause's owning entity)
-/// `Projection` → `ctx.assoc_projection(lower_subject(base)?, assoc)`
+/// `Projection` → per `proj`, over `lower_subject(base)?`
 ///
-/// `assoc_projection` allocates a fresh TyVar per call and is deliberately not
-/// memoized here: caching would merge projection TyVars that are distinct today.
+/// Neither projection policy memoizes: caching would merge projection TyVars
+/// that are distinct today.
 pub(crate) fn lower_subject(
     ctx: &mut InferCtx<'_>,
     subject: &crate::resolve::WhereSubject,
     root: SubjectRoot<'_>,
+    proj: ProjectionPolicy<'_>,
 ) -> Option<TyVar> {
-    lower_subject_with_base(ctx, subject, root).map(|(_, tv)| tv)
+    lower_subject_with_base(ctx, subject, root, proj).map(|(_, tv)| tv)
 }
 
 /// As [`lower_subject`], but also hands back the **base** of the outermost
@@ -2104,6 +2130,7 @@ pub(crate) fn lower_subject_with_base(
     ctx: &mut InferCtx<'_>,
     subject: &crate::resolve::WhereSubject,
     root: SubjectRoot<'_>,
+    proj: ProjectionPolicy<'_>,
 ) -> Option<(Option<TyVar>, TyVar)> {
     use crate::resolve::WhereSubject;
     match subject {
@@ -2116,8 +2143,14 @@ pub(crate) fn lower_subject_with_base(
         },
         WhereSubject::SelfType => None,
         WhereSubject::Projection { base, assoc } => {
-            let base_tv = lower_subject(ctx, base, root)?;
-            Some((Some(base_tv), ctx.assoc_projection(base_tv, *assoc)))
+            let base_tv = lower_subject(ctx, base, root, proj)?;
+            let tv = match proj {
+                ProjectionPolicy::Opaque => ctx.assoc_projection(base_tv, *assoc),
+                ProjectionPolicy::Reduce(span) => {
+                    ctx.project_associated(base_tv, *assoc, span.clone())
+                },
+            };
+            Some((Some(base_tv), tv))
         },
     }
 }
