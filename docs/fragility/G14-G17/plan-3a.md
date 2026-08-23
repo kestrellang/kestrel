@@ -590,11 +590,26 @@ least 1 fire/compilation at `6039` on `Iterator.Item` changes answer.
 > invariant rather than changing it, and the bridge (`Iterator.Item` answered
 > from `Iterable.Item` — **different** entities) is untouched.
 >
-> Verified as a revertible spike @ C3: `leak5` → post-mono error;
+> **Landed as C3b** (`76ddd5f7`), maintainer-approved after independent review.
+> [verified @ `76ddd5f7`, built and run] `leak5` → post-mono error;
 > `distinct_samename` still builds and prints `result=i` (C6's, correctly
 > unaffected); `control2`, `distinct`, `structcase{,_nobound}`, `callsite`,
-> `selfproj` all byte-identical to baseline. **Not landed** — C3's brief
-> forbade touching the fallback. It wants its own commit (C3b).
+> `selfproj` all byte-identical to baseline. Suite `3818 passed, 5 failed`,
+> unchanged.
+
+### C3b — the name fallback skips same-entity candidates
+
+**Changes** one predicate in `assoc_sub_by_name` (`ctx.rs`): `e != assoc &&`.
+**Test** none new; `assoc_projection_bound_cross_receiver.ks` stays failing —
+`leak5` stops *miscompiling* but the frontend still accepts, which is C4's job.
+**Expected delta** 0, and it is a *provable* 0: R4's single caller is the
+`else if` after R3, and pre-C3 R3 was base-blind, so reaching R4 already meant
+no same-entity entry existed. C3b restores that invariant rather than changing
+it.
+**Risk** low. Explicitly **not** C6: C6 makes the fallback base-*aware* and
+deletes the cross-receiver `Iterable`/`Iterator` bridge; C3b filters on the
+*entity*, and the bridge is cross-entity, so the two do not overlap.
+**This is the commit that stops `leak5` emitting wrong code.**
 
 ### C4 — move the `AssocProjection` conformance arm into `solve_conforms`
 
@@ -699,7 +714,11 @@ until it is attempted.
   shortcut. Over-rejection, if it comes, comes from unsolved deferred
   constraints, not from the miss.
 - **The commit that makes `leak5.ks` reject: C4.** The commit that stops it
-  emitting wrong code is **C3**, and C4 does nothing without it.
+  emitting wrong code is ~~**C3**~~ **C3 + C3b** — C3 alone leaves the leak
+  live via the R3→R4 fallthrough (see the ⚠ banner on C3). C4 does nothing
+  without both, and per the ordering table it now needs **C3b** specifically:
+  until `b.produce()` types as `B.Item`, C4's base check finds a genuine match
+  against the `A.Item` clause and permits.
 
 ---
 

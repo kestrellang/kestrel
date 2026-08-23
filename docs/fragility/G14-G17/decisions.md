@@ -467,7 +467,9 @@ a regression — but do not let the commit message imply otherwise.
   fixing R3 just routes the query into the still-base-blind R4, which re-admits
   the same entry by name. Fix is a same-entity exclusion on R4 (not C6's
   base-awareness, and provably a no-op pre-C3); spike-verified, not landed.
-  Source: `plan-3a.md` C3 ⚠ banner.
+  Source: `plan-3a.md` C3 ⚠ banner. **Fix landed as C3b (`76ddd5f7`)**;
+  `leak5` is now a post-mono error, and C4 becomes the commit that makes it
+  reject in the frontend.
 - **2026-08-20** — "only one projection bound ships in the stdlib" is wrong;
   there are three (`adapters.ks:397`, `:666`, `:866`). Conclusion unaffected —
   `Copyable` is answered structurally before the arm — but the count is not.
