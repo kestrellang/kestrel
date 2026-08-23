@@ -2107,7 +2107,10 @@ pub(crate) enum ProjectionPolicy<'a> {
 /// about, preserving the receiver at every depth.
 ///
 /// `Param`      → per `root`
-/// `SelfType`   → `None` (TODO(G17 stage 3a): needs the clause's owning entity)
+/// `SelfType`   → `None`. Both callers are *call-site* / type-formation
+///                emitters keyed on a substitution of declared type params;
+///                neither has the receiver `Self` denotes, and the enclosing
+///                entity is the wrong answer (D8). `None` = permit.
 /// `Projection` → per `proj`, over `lower_subject(base)?`
 ///
 /// Neither projection policy memoizes: caching would merge projection TyVars

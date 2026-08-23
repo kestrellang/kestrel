@@ -807,18 +807,126 @@ re-key.
 
 ### C9 — the D8 `SelfType` flip
 
-**Changes** `where_clauses.rs:309` stops returning `None` for `Self`-rooted
-chains; `resolve_bound_subject` emits `WhereSubject::SelfType`;
-`lower_subject`'s `SelfType => None` becomes `=> Some(self_tv)`. Per D8 the
-compiler generates the reader work list — every non-exhaustive match stops
-compiling.
-**Test** `assoc_projection_bound_self_subject.ks` flips to passing.
-`h_selfq_neg.ks`'s shipped negative and the five latent `where Self: Q` files
-listed in `problem.md` must stay green.
-**Expected delta** +1 pass, and the ~8 `Some(*param) == target_entity`
-comparison sites flip together.
-**Risk** medium. Last, because it is the only commit whose work list is not known
-until it is attempted.
+**LANDED.** [verified @ this commit, built + full suite + 12 repros]
+
+> **⚠ "THE COMPILER GENERATES THE READER WORK LIST" IS REFUTED.**
+> [measured @ `4cccba32` + the C9 flip]
+>
+> D8's central argument for the payload-free variant was that flipping the
+> producer would make "every reader matching on `WhereSubject` without a
+> `SelfType` arm stop compiling — the work list is generated, not remembered."
+>
+> **The flip built clean on the first try.** Zero errors, zero warnings. D7's
+> representation commit had already given every exhaustive `match` a `SelfType`
+> arm, and every *other* reader goes through `as_param()` / `spine()`, which
+> return `Option` and cannot be non-exhaustive. So the flip is **silent**: every
+> reader kept compiling and quietly changed answer from "compare an entity" to
+> "no answer".
+>
+> That silence cost the one branch D8 named: `conformance.rs`'s
+> `Some(*param) == target_entity` went from matching to
+> `as_param() → None → continue`, i.e. from *gating* `where Self: Q` to
+> *permitting* it. `h_selfq_neg.ks` stopped rejecting, with no compile error at
+> all — measured on the repro corpus before any suite run.
+>
+> The **suite** would have caught it. `h_selfq_neg.ks` is shipped, byte-identical
+> and under a different name, as
+> `declarations/extensions/unconstrained_protocol_extension_not_met.ks`
+> (full name: `..._unconstrained_protocol_extension_not_found_when_constraint_not_met.ks`).
+> Worth recording, because `problem.md` and `decisions.md` both cite the
+> `temp/g14/` path and neither mentions the shipped twin — a reader would
+> reasonably conclude the coverage was scratch-only. It is not.
+>
+> Cause of the bad claim: D8 reasoned about `match` exhaustiveness in a codebase
+> whose readers had been deliberately funnelled through two `Option`-returning
+> accessors one commit earlier — the funnelling that `as_param()`'s own doc
+> comment advertises ("one grep rather than twenty match arms"). The two design
+> choices are individually good and jointly cancel: an accessor that turns
+> "shape I don't handle" into `None` is exactly a compatibility shim, and D8
+> rejected `root_entity()` for being one.
+>
+> **(a) was still the right option** — the *type* stayed honest, and the readers
+> that now permit are permitting for a stated reason rather than comparing
+> against a known-false entity. But the work list had to be swept by hand after
+> all, and the count was **19 subject readers, not ~8**. `decisions.md`'s own
+> "21 decision points" figure (D7, §2.2) was much closer than D8's.
+
+**Changes**
+- **Producer.** `resolve_bound_subject` returns `SelfType` for a bare `Self`;
+  `resolve_projection_subject` drops the `chain.self_rooted` bail and roots a
+  `Self`-rooted chain at `SelfType`, discarding `steps[0]` (whatever `Self`
+  resolved *through*).
+- **`conformance::extension_bounds_hold_impl`.** The `as_param()` bail becomes
+  `subject_type()`, the reference answer for "what type does this subject
+  denote *for this receiver*": `SelfType → recv`, `Param → subst`-or-target,
+  `Projection → assoc_binding(base_ty)`. `assoc_binding` looks up a `type X = …`
+  witness on the nominal and its extensions and **permits on 0 or >1 matches**
+  (the lookup is by name; two protocols may declare the same one).
+- **`resolve::collect_extension_where_clause_protocols`.** Matches `SelfType` as
+  well as `Param(target)`, restoring body-side member lookup through
+  `where Self: Q`.
+- **`lib.rs::emit_container_where_clauses`.** Recognises
+  `Projection { base: SelfType, assoc }` and maps it to the alias entity, which
+  `get_or_create_subject_tv` turns into `associated(self_tv, "Assoc")`. Pre-C9
+  the subject arrived pre-collapsed to `Param(Assoc)` and took this path by
+  accident; naming it keeps body inference byte-identical. A bare `Self: P` is
+  now skipped here instead of minting a fresh TyVar and emitting an
+  unsatisfiable `Conforms(fresh, P)` — which was leaking a **spanless `E100`**
+  into every `where Self: Q` compilation.
+- The remaining 15 readers were verified correct-as-is: each is keyed on a
+  declared type param or has no receiver, so `None` = permit is the right
+  answer. `lower_subject`'s `SelfType => None` **stays** — contrary to this
+  section's original prose, neither of its callers has a `self_tv` to hand
+  (`generate.rs:1290` is a struct init, `:1810` is `lower_entity_ref`; both are
+  keyed on a substitution of declared type params).
+
+**Measured** suite **3821 passed / 2 failed → 3821 passed / 2 failed.** Zero
+collateral; `declarations/extensions/*` all 126 green, including the five latent
+`where Self: Q` files and both `Self.Item` files.
+
+| repro | before | after |
+| --- | --- | --- |
+| `selfproj` | post-mono `String !: Show`, no binary | **frontend `E100`: no member 'render' on type 'StrSrc'** |
+| `h_selfq_neg` | rejects + spurious spanless `E100` | rejects; **spurious `E100` gone** |
+| `e_self_q` | `E454` + spurious spanless `E100` | `E454`; **spurious `E100` gone** (the `E454` is the pre-existing latent twin, unchanged) |
+| `leak5`, `control2`, `distinct`, `distinct_samename`, `structcase`, `structcase_nobound`, `callsite` | — | byte-identical |
+
+**Also closed, unplanned:** `Box(inner: StrSrc(s:"z")).show()` against
+`extend Box[T]: Show where T: Producer, T.Item: Show` now rejects in the
+frontend. C7 named this hole and said "a test for this site has to be written
+from scratch"; the same `subject_type` walk covers it, because a `T`-rooted
+projection whose `T` maps to a concrete arg is now judged too.
+
+> **⚠ `assoc_projection_bound_self_subject.ks` DID NOT FLIP.** Its frontend
+> `E100` lands on the right line (`:49`, the `.render()` call) but reads
+> **`no member 'render' on type 'StrSrc'`**, not `!: Show`. The test is
+> unchanged; it still fails, now for a materially different reason.
+>
+> **The annotation, not the behaviour, is what is stale.** §6's table applied
+> `// ERROR: !: Show` uniformly to all eight promoted repros. For the six that
+> are *obligation* shapes (a generic callee's bound checked at a call site) that
+> is right. `self_subject` is an **applicability** shape: `where Self.Item: Show`
+> decides whether a constrained protocol extension *has* the member at all,
+> exactly like `where Self: Q`, whose own shipped repro `h_selfq_neg.ks`
+> annotates `// ERROR: member`. Two mechanisms, two correct messages; the
+> template picked the other one. This is the third §6/expected-delta claim
+> extended by analogy and refuted by measurement (see the C4 and C7 banners).
+>
+> The `!: Show` message is not reachable without making the check *weaker*: the
+> applicability gate fires during member resolution, so there is no resolved
+> `render` left to attach a call-site obligation to. `// ERROR: member` is the
+> annotation this file should carry. **Not changed here** — changing a test to
+> make it pass is out of bounds without an explicit instruction.
+>
+> (For completeness: `diagnostic_matcher.rs:62-71` matches the main message plus
+> the **primary label**, so a label carrying the unmet constraint would also
+> match. Threading "why did extension selection fail" out of a `bool`-returning
+> gate and into the member-not-found diagnostic is a real improvement and a real
+> change; it is not C9.)
+
+**Risk taken** over-rejection, as flagged. Bounded by three positive repros —
+`c9_pos` (conforming `Item`), `c9_selfq_pos` (`where Self: Q` satisfied), and
+`c9_abstract` (generic receiver, must permit) — all of which build and run.
 
 ## Risks, ranked
 

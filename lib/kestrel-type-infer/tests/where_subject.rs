@@ -1,10 +1,12 @@
 //! `WhereSubject` shape tests — what `WhereClausesOf` records as the *subject*
 //! of a bound, at each spelling and each depth.
 //!
-//! These assert on representation, not on inference: a projection subject is
-//! still skipped by every consumer (see `docs/fragility/G14-G17/decisions.md`),
-//! so the only way to see whether the receiver survived resolution is to read
-//! the clause back. Same lex → parse → `build_declarations` harness as
+//! These assert on representation, not on inference — the point is whether the
+//! receiver survived resolution, which is only visible by reading the clause
+//! back. Which consumers then *act* on a given subject shape is a separate
+//! question, covered by the `.ks` corpus (see
+//! `docs/fragility/G14-G17/decisions.md`).
+//! Same lex → parse → `build_declarations` harness as
 //! `assoc_where_repro.rs`; a hand-built `World` cannot resolve `C.Iter.Item`.
 
 use kestrel_ast_builder::{Name, NodeKind, build_declarations, seed_lang_module};
@@ -154,11 +156,17 @@ fn nested_projection_nests_to_depth_three() {
     );
 }
 
-/// D8: `Self` subjects keep collapsing to the enclosing entity until stage 3a.
-/// `WhereSubject::SelfType` exists but is never constructed — when someone
-/// flips the producer, this test is what tells them what they changed.
+/// G17 stage 3a (C9) flipped the D8 producer: `Self` subjects are now
+/// `WhereSubject::SelfType`, and a `Self`-rooted projection keeps that root
+/// instead of collapsing to the bare alias.
+///
+/// This test was written under D8 as `self_subject_still_collapses`, a
+/// deliberate tripwire: its whole purpose was to fail loudly at the moment the
+/// producer flipped, and say what changed. It has now fired, so it is rewritten
+/// to assert the new shape. Renamed rather than deleted — the pair of
+/// assertions below is exactly the before/after record.
 #[test]
-fn self_subject_still_collapses() {
+fn self_subject_is_self_type() {
     let source = r#"
 module TestMod
 protocol Comparable {
@@ -184,16 +192,22 @@ extend Iterator where Self: Comparable, Self.Item: Equatable {
     let item = child(&ctx, iterator, NodeKind::TypeAlias, "Item");
     let extension = sole_extension(&ctx, module);
 
-    // `Self: Comparable` → the extension target, NOT `WhereSubject::SelfType`.
+    // `Self: Comparable` → the position, not the enclosing `Iterator` entity.
+    // Readers resolve it against the receiver they are judging.
     assert_eq!(
         subjects_for_protocol(&ctx, extension, root, comparable),
-        vec![WhereSubject::Param(iterator)]
+        vec![WhereSubject::SelfType]
     );
-    // `Self.Item: Equatable` → collapsed to the assoc entity alone, receiver
-    // dropped. A `Self`-rooted chain does not gain depth in this commit.
+    // `Self.Item: Equatable` → a depth-1 projection whose root is `Self`.
+    // Pre-C9 this was `Param(item)`: the receiver was dropped entirely, which
+    // is what made `extend Producer where Self.Item: Show` apply to every
+    // conformer regardless of what its `Item` was.
     assert_eq!(
         subjects_for_protocol(&ctx, extension, root, equatable),
-        vec![WhereSubject::Param(item)]
+        vec![WhereSubject::Projection {
+            base: Box::new(WhereSubject::SelfType),
+            assoc: item,
+        }]
     );
 }
 

@@ -273,14 +273,23 @@ fn resolve_bound_subject(
     if let Some(projection) = resolve_projection_subject(ctx, ast_ty, entity, root) {
         return Some(projection);
     }
-    // TODO(G17 stage 3a): a bare `Self` subject resolves through
-    // `resolve_type_entity` to the *enclosing* entity and is stored as
-    // `Param(enclosing)`, never as `WhereSubject::SelfType`. That is today's
-    // behaviour, deliberately preserved (D8 in
-    // `docs/fragility/G14-G17/decisions.md`) — flipping the producer means
-    // flipping ~8 readers that compare against the enclosing entity, and it is
-    // compiler-enforced once this line changes.
+    // A bare `Self` subject is the *conformer*, resolved per-conformance — not
+    // the enclosing entity. Collapsing it to `Param(<enclosing>)` is receiver
+    // loss one level up, so it gets its own payload-free variant (D8 /
+    // G17 stage 3a, `docs/fragility/G14-G17/decisions.md`). Readers that need a
+    // concrete type for it have one — the receiver they are judging.
+    if is_bare_self(ast_ty) {
+        return Some(WhereSubject::SelfType);
+    }
     resolve_type_entity(ctx, ast_ty, entity, root).map(WhereSubject::Param)
+}
+
+/// The subject is the single segment `Self`. Spelled against the AST rather
+/// than against a `TypeResolution::SelfType` return so the answer is the same
+/// whether or not `Self` happens to resolve in this scope.
+fn is_bare_self(ast_ty: &AstType) -> bool {
+    matches!(ast_ty, AstType::Named { segments, .. }
+        if segments.len() == 1 && segments[0].name == "Self")
 }
 
 /// If `ast_ty` is a dotted path rooted at a type parameter (`T.Assoc`,
@@ -302,28 +311,30 @@ fn resolve_projection_subject(
     }
     let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
     let chain = resolve_type_path_chain(ctx, &seg_names, entity, root);
-    // D8: a `Self`-rooted chain has nothing to name as its root yet — the
-    // producer keeps collapsing it to the enclosing entity until stage 3a
-    // introduces `WhereSubject::SelfType`. See `resolve_bound_subject` and
-    // `docs/fragility/G14-G17/decisions.md`.
-    if chain.self_rooted {
-        return None;
-    }
     if !matches!(chain.resolution, TypeResolution::Found(_)) {
         return None;
     }
     let mut steps = chain.steps.into_iter();
-    let base = steps.next()?;
-    // Only type-parameter roots project; a path rooted at a concrete type or a
-    // module (`std.collections.Array`) is a plain type, not a projection.
-    if ctx.get::<NodeKind>(base) != Some(&NodeKind::TypeParameter) {
-        return None;
-    }
-    Some(steps.fold(WhereSubject::Param(base), |base, assoc| {
-        WhereSubject::Projection {
-            base: Box::new(base),
-            assoc,
+    let root_subject = if chain.self_rooted {
+        // `Self.Item` — `steps[0]` is whatever `Self` resolved *through* (a
+        // synthetic `Self` param, or the enclosing extension's target). That
+        // entity is not what the clause is about: `Self` is the conformer, so
+        // the root is the position, not the thing it resolved through.
+        steps.next()?;
+        WhereSubject::SelfType
+    } else {
+        let base = steps.next()?;
+        // Only type-parameter roots project; a path rooted at a concrete type
+        // or a module (`std.collections.Array`) is a plain type, not a
+        // projection.
+        if ctx.get::<NodeKind>(base) != Some(&NodeKind::TypeParameter) {
+            return None;
         }
+        WhereSubject::Param(base)
+    };
+    Some(steps.fold(root_subject, |base, assoc| WhereSubject::Projection {
+        base: Box::new(base),
+        assoc,
     }))
 }
 

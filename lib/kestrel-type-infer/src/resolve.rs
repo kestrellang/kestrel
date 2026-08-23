@@ -132,14 +132,14 @@ pub enum WhereSubject {
     /// protocol extension `Self` is the *conformer*, resolved per-conformance,
     /// so pinning it to the protocol entity is receiver loss one level up.
     ///
-    /// TODO(G17 stage 3a): **not constructed yet** — the resolver still emits
-    /// `Param(<enclosing entity>)` for a bare `Self` (see
-    /// `where_clauses::resolve_bound_subject`). Producing `SelfType` requires
-    /// every reader to know the clause's owning entity, which most do not
-    /// have (`entailment::constraint_entailed_by` gets no owner at all); that
-    /// threading is stage 3a's job. Decided as D8 in
-    /// `docs/fragility/G14-G17/decisions.md`: define it inert rather than give
-    /// it a compatibility payload, so the flip is compiler-enforced.
+    /// Payload-free on purpose (D8, `docs/fragility/G14-G17/decisions.md`):
+    /// there is no entity that is correct here, and a "compatibility" field
+    /// holding the enclosing one would be a known-false value stored where
+    /// people look for the truth. A reader that wants a type for `Self` gets it
+    /// from the **receiver it is judging** — see `conformance::subject_type`,
+    /// the reference implementation. A reader with no receiver in hand (the
+    /// entailment checker, the call-site emitters) cannot answer, and must
+    /// **permit**: that is the conservative contract for abstract positions.
     SelfType,
     /// `<base>.<assoc>`, to any depth.
     Projection { base: Box<WhereSubject>, assoc: Entity },
@@ -151,8 +151,8 @@ impl WhereSubject {
     ///
     /// Every site that used to destructure `param` goes through this, so
     /// "projections are skipped here" is one grep rather than twenty match
-    /// arms. A `None` return is always a projection (or, once stage 3a lands,
-    /// `Self`).
+    /// arms. A `None` return is a projection or a `Self`-rooted subject; both
+    /// mean "this site cannot name the subject", which must **permit**.
     pub fn as_param(&self) -> Option<Entity> {
         match self {
             WhereSubject::Param(e) => Some(*e),
@@ -164,9 +164,9 @@ impl WhereSubject {
     /// receiver spine. `T` is `[T]`, `T.Item` is `[T, Item]`, `T.Iter.Item` is
     /// `[T, Iter, Item]`.
     ///
-    /// `None` for anything with no nameable root — today only a `Self`-rooted
-    /// chain (D8). Callers must read `None` as "cannot compare", never as
-    /// "different".
+    /// `None` for anything with no nameable root — a `Self`-rooted chain, whose
+    /// root is a position rather than an entity. Callers must read `None` as
+    /// "cannot compare", never as "different".
     ///
     /// The same flattening applied to a `TyKind::AssocProjection` chain yields
     /// a directly comparable spine; that is the one bridge between the
@@ -2312,13 +2312,14 @@ impl WorldResolver<'_> {
                             subject, protocol, ..
                         } = clause
                         {
-                            // `Self: Protocol` — the subject is `Param(<target
-                            // protocol entity>)` because the resolver still
-                            // collapses `Self` to the enclosing entity (D8).
-                            // TODO(G17 stage 3a): once `WhereSubject::SelfType`
-                            // is constructed, this must match it instead; and
-                            // `as_param()` keeps projections skipped as before.
-                            if subject.as_param() == Some(target_protocol) {
+                            // `Self: Protocol`. `SelfType` is the spelling the
+                            // resolver produces (G17 stage 3a); `Param(target)`
+                            // still covers the same clause written with the
+                            // protocol's own name. Projections stay skipped —
+                            // `Self.Item: P` bounds the *alias*, not `Self`.
+                            if matches!(subject, WhereSubject::SelfType)
+                                || subject.as_param() == Some(target_protocol)
+                            {
                                 protocols.push(protocol);
                             }
                         }

@@ -338,7 +338,8 @@ fn extension_bounds_hold_impl(
         })
         .collect();
 
-    // `where Self: Q` — the clause subject is the extension's target entity.
+    // A subject spelled with the *protocol's own name* rather than `Self`
+    // (`extend Producer where Producer: Q`) still arrives as `Param(target)`.
     let target_entity = ctx.query(ExtensionTargetEntity { extension, root });
 
     for clause in &clauses {
@@ -350,12 +351,6 @@ fn extension_bounds_hold_impl(
         else {
             continue; // TypeEquality / DirectEquality — out of scope, treat satisfied.
         };
-        // TODO(G17 stage 3a): projection subjects (`T.Assoc: P`) are permitted
-        // unconditionally here, exactly as when they were a separate clause
-        // variant this `let … else` never saw.
-        let Some(param) = subject.as_param() else {
-            continue;
-        };
         // NOTE: there is deliberately NO Copyable/Cloneable skip here. There
         // used to be one ("copyability is enforced by the move checker / mono"),
         // which meant a `where T: Copyable` clause did not gate member
@@ -364,18 +359,101 @@ fn extension_bounds_hold_impl(
         // (SIGILL). `type_satisfies` now answers both builtins directly via
         // the copy-semantics classifier, so the clause is evaluated like any
         // other. Never re-add a blanket skip here.
-        let sub_ty = if let Some((_, c)) = subst.iter().find(|(e, _)| *e == param) {
-            (*c).clone()
-        } else if Some(param) == target_entity {
-            recv.clone()
-        } else {
-            continue; // Unknown param — permit (conservative).
+        let Some(sub_ty) = subject_type(ctx, subject, &subst, target_entity, recv, root) else {
+            continue; // Nothing nameable to judge — permit (conservative).
         };
         if !type_satisfies_at_depth(ctx, &sub_ty, *pb, root, depth + 1) {
             return false;
         }
     }
     true
+}
+
+/// The concrete type a where-clause subject denotes *for this receiver*, or
+/// `None` when this vantage cannot name one (which always permits).
+///
+/// This is where `Self` gets its meaning: an extension's `Self` **is** the
+/// receiver being judged, which is exactly why `WhereSubject::SelfType` carries
+/// no entity (D8). Every other site that wants "the type `Self` denotes" has to
+/// answer the same way — from the receiver it is judging, never from the
+/// enclosing declaration.
+fn subject_type(
+    ctx: &QueryContext<'_>,
+    subject: &crate::resolve::WhereSubject,
+    subst: &[(Entity, &HirTy)],
+    target_entity: Option<Entity>,
+    recv: &HirTy,
+    root: Entity,
+) -> Option<HirTy> {
+    use crate::resolve::WhereSubject;
+    match subject {
+        WhereSubject::SelfType => Some(recv.clone()),
+        WhereSubject::Param(param) => {
+            if let Some((_, c)) = subst.iter().find(|(e, _)| e == param) {
+                return Some((*c).clone());
+            }
+            (Some(*param) == target_entity).then(|| recv.clone())
+        },
+        // `Self.Item: P` / `T.Item: P` — project the alias off the base's
+        // *binding*. An unbound (abstract) alias yields `None` and permits.
+        WhereSubject::Projection { base, assoc } => {
+            let base_ty = subject_type(ctx, base, subst, target_entity, recv, root)?;
+            assoc_binding(ctx, &base_ty, *assoc, root)
+        },
+    }
+}
+
+/// The type `base_ty` binds the associated type `assoc` to, if it binds one
+/// concretely and *unambiguously*. Searches the nominal's own children then its
+/// extensions — the two places a `type Item = …` witness can live.
+///
+/// Deliberately narrow, because this is the over-rejection direction: only a
+/// concrete nominal receiver can disprove a projection bound, and only a
+/// binding with an actual annotation is a proof. Two protocols can declare an
+/// associated type of the same name, and this lookup is by name, so **more
+/// than one candidate means "cannot tell" and permits** rather than guessing a
+/// witness. Everything else is an abstract position and returns `None`.
+fn assoc_binding(
+    ctx: &QueryContext<'_>,
+    base_ty: &HirTy,
+    assoc: Entity,
+    root: Entity,
+) -> Option<HirTy> {
+    let (HirTy::Struct { entity, .. } | HirTy::Enum { entity, .. }) = base_ty else {
+        return None;
+    };
+    let name = &ctx.get::<kestrel_ast_builder::Name>(assoc)?.0;
+    let extensions = ctx.query(kestrel_name_res::ExtensionsFor {
+        target: *entity,
+        root,
+    });
+    let mut found: Vec<HirTy> = std::iter::once(*entity)
+        .chain(extensions.iter().copied())
+        .filter_map(|owner| assoc_binding_in(ctx, owner, name, root))
+        .collect();
+    (found.len() == 1).then(|| found.remove(0))
+}
+
+/// A `type <name> = …` child of `owner` with a lowerable annotation.
+fn assoc_binding_in(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    name: &str,
+    root: Entity,
+) -> Option<HirTy> {
+    ctx.children_of(owner).iter().copied().find_map(|child| {
+        (ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+            && ctx
+                .get::<kestrel_ast_builder::Name>(child)
+                .is_some_and(|n| n.0 == name))
+        .then(|| {
+            ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+                entity: child,
+                root,
+            })
+        })
+        .flatten()
+    })
 }
 
 /// Every concrete (non-`Param`) position of `target_args` structurally matches

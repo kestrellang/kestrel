@@ -229,7 +229,7 @@ root crate.
 | `c_assoc_witness.ks` | cross-protocol witness, satisfiable | **E454 on a legal program** |
 | `d_solver_permit.ks` | same extension, unsatisfiable, direct call | clean, exit 0 — wrong accept |
 | `e_self_q.ks` | `where Self: Q`, member witnesses `Equatable` | **E454** — twin is live in the witness shape |
-| `h_selfq_neg.ks` | shipped negative | correctly rejects |
+| `h_selfq_neg.ks` | shipped negative — byte-identical to `testdata/declarations/extensions/unconstrained_protocol_extension_not_found_when_constraint_not_met.ks`, so the suite covers it [added 2026-08-23, C9] | correctly rejects |
 | `g2.ks` | **`TypeParameter`** subject, unsatisfiable, body *uses* the bound | wrong accept → post-mono failure |
 | `g_param_subject_control.ks` | same, body does **not** use the bound | **clean build, exit 0 — no diagnostic at any stage** |
 | `f_stdlib_iter.ks` | shipped `extend Iterator where Item: Equatable` | wrong accept → post-mono, span in stdlib |

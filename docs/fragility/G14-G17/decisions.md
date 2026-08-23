@@ -414,13 +414,16 @@ back the wrong entity. It reads as *done*. Wrong-and-unfinished beats
 wrong-and-finished; the recurring failure mode in this audit is not missing
 information but information that looks settled and is not.
 
-**The compiler does the counting.** When stage 3a switches the producer, every
+**The compiler does the counting.** ~~When stage 3a switches the producer, every
 reader matching on `WhereSubject` without a `SelfType` arm **stops compiling** —
-the work list is generated, not remembered. The number of affected sites in
+the work list is generated, not remembered.~~ **REFUTED 2026-08-23 by C9** — the
+flip built clean; see *Refutations landed*. The number of affected sites in
 this area has been wrong four times (seven → four → six → twenty-one); this is
-not a place to trust hand-enumeration. Under (b) a reader calling
-`root_entity()` keeps the wrong answer **silently and forever**: no compile
-error, no failing test, nothing that forces its removal.
+not a place to trust hand-enumeration — and it turned out hand-enumeration was
+the only tool available. Under (b) a reader calling `root_entity()` keeps the
+wrong answer **silently and forever**: no compile error, no failing test,
+nothing that forces its removal. That half stands, and is why (a) was still the
+right call.
 
 **(b) buys sequencing only** — incremental reader migration — at the price of a
 permanent defect in the type. Compatibility fields that outlive their reason
@@ -439,11 +442,39 @@ a regression — but do not let the commit message imply otherwise.
   `ProjectionBound` collapse into one variant. Maintainer, 2026-08-20.
 - **D8** — `SelfType` is payload-free and **not constructed** in the
   representation commit; the resolver keeps emitting `Param(enclosing)` until
-  stage 3a flips producer and readers together, compiler-enforced. Maintainer,
-  2026-08-20.
+  stage 3a flips producer and readers together, ~~compiler-enforced~~.
+  Maintainer, 2026-08-20. **Flipped by C9, 2026-08-23.** The verdict held; the
+  *enforcement mechanism* did not — the flip compiled clean and the readers had
+  to be swept by hand. See the first entry under *Refutations landed*.
 
 ## Refutations landed
 
+- **2026-08-23** — **D8's "the compiler does the counting" argument.** The
+  producer flip (C9) **built clean on the first attempt** — zero errors. D7 had
+  already given every exhaustive `match` a `SelfType` arm, and every other
+  reader goes through `as_param()` / `spine()`, which return `Option` and cannot
+  be non-exhaustive. So the flip was *silent*, and it silently un-gated
+  `where Self: Q` at the one branch D8 named by name
+  (`conformance.rs`'s `Some(*param) == target_entity`) with no compile error.
+  The suite would have caught it — `h_selfq_neg.ks` is shipped byte-identical as
+  `declarations/extensions/unconstrained_protocol_extension_not_found_when_constraint_not_met.ks`,
+  which neither this file nor `problem.md` mentions. Cause of the bad claim: D8 reasoned about `match`
+  exhaustiveness in a codebase whose readers had been funnelled through two
+  `Option`-returning accessors one commit earlier — and an accessor that turns
+  "shape I don't handle" into `None` *is* a compatibility shim, which is the
+  thing D8 rejected `root_entity()` for being. **Option (a) was still correct**
+  (the type stayed honest), but the work list was swept by hand: **19 subject
+  readers, not ~8**; D7 §2.2's "21 decision points" was the better estimate.
+  Source: `plan-3a.md` C9 ⚠ banner. **Landed as C9.**
+- **2026-08-23** — **`assoc_projection_bound_self_subject.ks`'s `!: Show`
+  annotation.** §6 of `plan-3a.md` applied one annotation template to all eight
+  promoted repros. Six are *obligation* shapes; `self_subject` is an
+  *applicability* shape — a constrained protocol extension either has the member
+  or does not — so its correct diagnostic is `no member 'render'`, matching its
+  `where Self: Q` twin `h_selfq_neg.ks` (`// ERROR: member`). Third instance of
+  the same failure mode as the C4 and C7 expected-delta refutations: a claim
+  extended by analogy across cases that share a symptom and not a mechanism.
+  Test left unchanged. Source: `plan-3a.md` C9 ⚠ banner.
 - **2026-08-20** — §A13's scenario does not reproduce; a third evaluator masks
   it. Source: diagnosis agent, repro `temp/g14/a_assoc_subject.ks`.
 - **2026-08-20** — G14 is not bare-assoc-specific; a plain `TypeParameter`

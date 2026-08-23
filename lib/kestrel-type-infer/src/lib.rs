@@ -360,8 +360,13 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
                         &span,
                     )
                 },
-                // TODO(G17 stage 3a): never constructed today — the resolver
-                // collapses a bare `Self` to `Param(<enclosing entity>)` (D8).
+                // `where Self: P` on a *method's own* clause list. `Self` in a
+                // method being set up for body inference is the abstract
+                // conformer; there is no TyVar here that denotes it (the
+                // receiver's `self_tv` belongs to the container path, below in
+                // `emit_container_where_clauses`). Nothing to emit — permit.
+                // Body-side member lookup through such a clause is served by
+                // `resolve::collect_extension_where_clause_protocols`, not here.
                 resolve::WhereSubject::SelfType => {},
             },
             resolve::WhereClause::TypeEquality {
@@ -710,11 +715,38 @@ fn emit_container_where_clauses(
                 protocol,
                 protocol_type_args,
             } => {
-                // `T.Assoc: P` on an extension — handled at body setup via the
-                // member path; no extra emission needed here yet (#185
-                // follow-up). TODO(G17 stage 3a): this skip is a live bug —
-                // this is the only emitter for container-level clauses.
-                let Some(param) = subject.as_param() else {
+                // Which entity this container clause is *about*, from the
+                // body's vantage — where `self_tv` is the receiver.
+                //
+                // * `T: P` — the container's own type param.
+                // * `Self.Assoc: P` — `get_or_create_subject_tv` turns an
+                //   alias entity into `associated(self_tv, "Assoc")`, which is
+                //   precisely `Self.Assoc`. Pre-C9 the subject arrived already
+                //   collapsed to `Param(Assoc)` and took this path by accident;
+                //   naming the shape keeps body inference identical now that
+                //   the root survives.
+                // * `T.Assoc: P` — skipped. Handled at body setup via the
+                //   member path; no extra emission here yet (#185 follow-up).
+                //   TODO(G17 C5): this skip is a live bug — this is the only
+                //   emitter for container-level clauses.
+                // * `Self: P` — skipped. `self_tv` is the abstract conformer
+                //   inside a protocol extension, and conforming it would reject
+                //   bodies that are correct for every real conformer. Pre-C9
+                //   this arrived as `Param(<protocol entity>)`, which
+                //   `get_or_create_subject_tv` could not map either: it minted
+                //   a *fresh* TyVar and emitted an unsatisfiable
+                //   `Conforms(fresh, P)` that surfaced as a spanless `E100`.
+                //   Skipping is both correct and strictly quieter.
+                let subject_entity = match &subject {
+                    resolve::WhereSubject::Param(p) => Some(*p),
+                    resolve::WhereSubject::Projection { base, assoc }
+                        if matches!(**base, resolve::WhereSubject::SelfType) =>
+                    {
+                        Some(*assoc)
+                    },
+                    _ => None,
+                };
+                let Some(param) = subject_entity else {
                     continue;
                 };
                 // Skip the implicit `T: Copyable` / `Cloneable` bound that

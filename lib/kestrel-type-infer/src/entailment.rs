@@ -35,8 +35,11 @@ pub fn constraint_entailed_by(
     context: &[WhereClause],
 ) -> bool {
     match constraint {
-        // A projection subject has no `as_param()`, so it falls to `false`
-        // exactly as the old `ProjectionBound` variant did.
+        // A projection or `Self`-rooted subject has no `as_param()`, so it
+        // falls to `false` exactly as the old `ProjectionBound` variant did.
+        // This is the one reader with *no* owner and *no* receiver — there is
+        // nothing here that could name what `Self` denotes (D8 called this out
+        // by name), so it cannot be entailed and the caller falls back.
         // TODO(G17 stage 3a): entailment for projection subjects.
         WhereClause::Bound {
             subject, protocol, ..
