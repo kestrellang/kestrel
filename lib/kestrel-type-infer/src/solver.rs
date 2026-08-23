@@ -2111,11 +2111,16 @@ fn solve_conforms(
                 // clean `DoesNotConform` rather than a mono `report()` witness ICE.
                 // Conservative: `type_satisfies` permits abstract/generic
                 // positions, so this never rejects a body whose bound holds
-                // abstractly — only concrete violations.
-                ctx.resolver.conforms_to(&kind, protocol) && {
-                    let hir = reify_tv(ctx, resolved);
-                    crate::conformance::type_satisfies(ctx.query_ctx, &hir, protocol, ctx.root)
-                }
+                // abstractly — only concrete violations. That same permissiveness
+                // is why `projection_base_admits` has to sit here: for an
+                // associated-type projection `conforms_to` is the SOLE decider,
+                // and it answers declares-only (G17 C4).
+                ctx.resolver.conforms_to(&kind, protocol)
+                    && projection_base_admits(ctx, &kind, protocol)
+                    && {
+                        let hir = reify_tv(ctx, resolved);
+                        crate::conformance::type_satisfies(ctx.query_ctx, &hir, protocol, ctx.root)
+                    }
             };
             if conforms {
                 // Parameterized bounds: `where R: P[Int16]` must also pin the
@@ -2143,6 +2148,53 @@ fn solve_conforms(
             }
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
+    }
+}
+
+/// G17 C4 — the base-aware half of a projection's conformance answer.
+///
+/// `WorldResolver::conforms_to`'s `TyKind::AssocProjection` arm answers
+/// *declares-only*: it collects the bounds filed against the alias **entity**
+/// and discards `base`, because a `WorldResolver` holds no `InferCtx` and so
+/// cannot resolve a `TyVar`. Here it can, so this is where the two halves meet.
+///
+/// Non-projections answer `true` unchanged — a `Param`, `SelfType`, or nominal
+/// subject is not what this narrows.
+fn projection_base_admits(ctx: &InferCtx<'_>, kind: &TyKind, protocol: Entity) -> bool {
+    let TyKind::AssocProjection { base, assoc } = kind else {
+        return true;
+    };
+    // No comparable receiver (a concrete base, an unresolved one, `Self`) —
+    // permit, matching this module's contract for abstract positions. An
+    // unknown must never manufacture a rejection.
+    let Some(spine) = base_spine(ctx, *base, 0) else {
+        return true;
+    };
+    ctx.resolver
+        .assoc_projection_base_admits(*assoc, protocol, &spine)
+}
+
+/// Flatten a projection base to the receiver spine
+/// `WhereSubject::spine` produces, so the two are directly comparable:
+/// `B` is `[B]`, `T.Iter` is `[T, Iter]`.
+///
+/// `None` for any base that is not a chain of projections over a type
+/// parameter — the caller reads that as "cannot compare".
+fn base_spine(ctx: &InferCtx<'_>, base: TyVar, depth: u32) -> Option<Vec<Entity>> {
+    // Projection chains are shallow by construction; the cap is only so a
+    // cyclic slot graph cannot spin here.
+    if depth > 16 {
+        return None;
+    }
+    match ctx.slot(ctx.resolve(base)) {
+        TySlot::Resolved(TyKind::Param { entity }) => Some(vec![*entity]),
+        TySlot::Resolved(TyKind::AssocProjection { base, assoc }) => {
+            let (base, assoc) = (*base, *assoc);
+            let mut spine = base_spine(ctx, base, depth + 1)?;
+            spine.push(assoc);
+            Some(spine)
+        },
+        _ => None,
     }
 }
 

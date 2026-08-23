@@ -470,6 +470,15 @@ a regression — but do not let the commit message imply otherwise.
   Source: `plan-3a.md` C3 ⚠ banner. **Fix landed as C3b (`76ddd5f7`)**;
   `leak5` is now a post-mono error, and C4 becomes the commit that makes it
   reject in the frontend.
+- **2026-08-23** — **C4's expected delta.** "`assoc_projection_bound_call_site.ks`
+  flips too — its accept comes from the same mechanism" is refuted: C4 landed and
+  `call_site` still fails. Its callee is *correct* (the body projects off `A`, the
+  clause is about `A`), so C4's base check finds a genuine match and permits, as
+  it must; what is missing is the call-site obligation, which is C7. The file's
+  own header comment already said this — the plan's C4 section contradicted it.
+  Cause of the bad claim: C4's expected-delta list was extended from `leak5` to
+  the other two post-mono-failing repros by analogy, and the analogy holds for
+  `on_container` only. Real delta −2, not −3. Source: `plan-3a.md` C4 ⚠ banner.
 - **2026-08-20** — "only one projection bound ships in the stdlib" is wrong;
   there are three (`adapters.ks:397`, `:666`, `:866`). Conclusion unaffected —
   `Copyable` is answered structurally before the arm — but the count is not.

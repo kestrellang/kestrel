@@ -611,20 +611,76 @@ deletes the cross-receiver `Iterable`/`Iterator` bridge; C3b filters on the
 *entity*, and the bridge is cross-entity, so the two do not overlap.
 **This is the commit that stops `leak5` emitting wrong code.**
 
-### C4 — move the `AssocProjection` conformance arm into `solve_conforms`
+### C4 — the conformance answer for a projection respects its base
 
-**Changes** `resolve.rs:627` keeps the declares-only answer; `solver.rs:2115`
-intersects it with a resolved-base check against the clause's `WhereSubject`.
-Requires reaching the owning clause from the solver — via `WhereClausesOf` on the
-body owner, the same walk `collect_assoc_type_direct_bounds_inner` already does at
-`resolve.rs:2072-2083`.
-**Test** `assoc_projection_bound_cross_receiver.ks` **flips to passing**. So do
-`assoc_projection_bound_on_container.ks` and `assoc_projection_bound_call_site.ks`
-(their accept comes from the same mechanism).
-**Expected delta** −3 failures. Any *new* failure is a program that was relying on
-a bound leaking across receivers.
-**Risk** medium. Contained: 6 `conforms_to` callers, all in one crate.
-**This is the commit that makes `leak5.ks` reject.**
+**LANDED.** [verified @ this commit, built + full suite]
+
+**Changes** `conforms_to`'s `TyKind::AssocProjection` arm keeps the declares-only
+answer, exactly as §4 recommends. Alongside it, a new `TypeResolver` method
+`assoc_projection_base_admits(assoc, protocol, base_spine)` — **default-permit**,
+so the solver's test stubs answer as before — and `solve_conforms` intersects the
+two. `WorldResolver`'s impl asks three questions in order, any one of which
+permits:
+
+1. Is the grant *receiver-free*? `collect_assoc_type_direct_bounds_inner` split
+   into `collect_assoc_type_receiver_free_bounds_inner` (the alias's own
+   `Conformances`, plus the owning protocol's where clause — both statements
+   about the alias itself) and the owner-hierarchy walk. Only the second can
+   name a receiver, so only the second is base-sensitive.
+2. Otherwise: which owner-hierarchy clauses could have produced the grant? Read
+   through **`WhereClausesOf`**, not `gather_bounds_from_where_clause` — the
+   structured subject keeps the receiver that the latter's last-segment
+   `resolve_type_entity` collapse throws away. A bare-`Item` subject names no
+   receiver and permits.
+3. Does any of them name *this* receiver?
+
+Only "at least one clause could have granted it, all of them name a receiver,
+and none of those receivers is ours" rejects.
+
+**Comparison is by entity spine, not by TyVar.** `WhereSubject::spine()` flattens
+a subject to `(root type parameter, then each projected alias)` — `[A]`, `[T,
+Iter]`; `base_spine` in `solver.rs` flattens a `TyKind::AssocProjection` chain the
+same way. That is the one bridge between the declaration world and the inference
+world here, and it exists because `WorldResolver` still cannot lower a subject to
+a TyVar. `None` on either side ("no nameable root": a `Self`-rooted chain, a
+concrete base, an unresolved base) means *cannot compare*, which permits.
+
+**Measured** suite **3818 passed / 5 failed → 3820 passed / 3 failed.** Two
+flipped, zero collateral:
+
+| test | before | after |
+| --- | --- | --- |
+| `assoc_projection_bound_cross_receiver` | fail | **pass** — frontend `E100 … B.Item !: Show` at the `needsShow(b.produce())` line |
+| `assoc_projection_bound_on_container` | fail | **pass** — same diagnostic at `go()`'s body |
+| `assoc_projection_bound_call_site` | fail | fail — **the plan was wrong here, see below** |
+| `assoc_projection_bound_same_name_distinct_protocols` | fail | fail — C6's, still blocked |
+| `assoc_projection_bound_self_subject` | fail | fail — C9's, D8 keeps `Self` collapsing |
+
+> **⚠ "So does `assoc_projection_bound_call_site.ks` (their accept comes from the
+> same mechanism)" is REFUTED.** [measured @ this commit]
+>
+> `call_site`'s accept does **not** come from this mechanism, and the file's own
+> header already said so. Its callee `good[A] where A: Producer, A.Item: Show` is
+> correct: the body projects off `A`, and the clause is about `A`, so C4's base
+> check finds a genuine **match** and permits — as it must. The missing check is
+> the *call-site obligation* `A.Item: Show` at `good(StrSrc(…))`, which is never
+> emitted at all. That is C7 (`solver.rs:3534` + the `Reduce` projection policy),
+> unchanged.
+>
+> Cause of the bad claim: C4's section was written from the §4 ordering table,
+> which only ever modelled `leak5`. `on_container` and `call_site` were added to
+> the expected-delta list by analogy, and the analogy holds for exactly one of
+> them. Expected delta was −3; the true delta is **−2**.
+
+**Risk taken** the one the brief flagged — this is the direction that produces
+false rejections. Contained by construction: the check narrows *only*
+`TyKind::AssocProjection`, and every unknown permits. Zero new `E100`s across the
+suite bears that out.
+
+**This is the commit that makes `leak5.ks` reject.** Post-C3b it produced a
+post-mono error and no binary; it now produces a frontend `E100` and no binary.
+`control2`, `distinct`, `structcase_nobound`, `distinct_samename`, `callsite`,
+`selfproj` are all byte-identical to their C3b behaviour.
 
 ### C5 — `lib.rs:705`: emit container-level projection clauses
 
@@ -713,7 +769,8 @@ until it is attempted.
   obligation, and every site's fallback is strictly more informative than the
   shortcut. Over-rejection, if it comes, comes from unsolved deferred
   constraints, not from the miss.
-- **The commit that makes `leak5.ks` reject: C4.** The commit that stops it
+- **The commit that makes `leak5.ks` reject: C4** — landed; frontend `E100 …
+  B.Item !: Show`. The commit that stops it
   emitting wrong code is ~~**C3**~~ **C3 + C3b** — C3 alone leaves the leak
   live via the R3→R4 fallthrough (see the ⚠ banner on C3). C4 does nothing
   without both, and per the ordering table it now needs **C3b** specifically:
