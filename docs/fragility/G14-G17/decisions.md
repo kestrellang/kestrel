@@ -459,6 +459,15 @@ a regression — but do not let the commit message imply otherwise.
   either evaluator is touched. It is the smallest change, the only one that
   stops emitting bad code, and independent of the whole G14 evaluator question.
   Source: `problem.md` second pass.
+- **2026-08-23** — **C3's headline claim.** "The commit that stops `leak5`
+  emitting wrong code is C3" is refuted: C3 landed as specified and `leak5`
+  still miscompiles. Cause of the bad claim — the C1 measurement isolated each
+  miscompile to "exactly one read", which read as *independent* sites; R3 and
+  R4 are actually the two arms of one `else if` at `solver.rs:2818-2850`, so
+  fixing R3 just routes the query into the still-base-blind R4, which re-admits
+  the same entry by name. Fix is a same-entity exclusion on R4 (not C6's
+  base-awareness, and provably a no-op pre-C3); spike-verified, not landed.
+  Source: `plan-3a.md` C3 ⚠ banner.
 - **2026-08-20** — "only one projection bound ships in the stdlib" is wrong;
   there are three (`adapters.ks:397`, `:666`, `:866`). Conclusion unaffected —
   `Copyable` is answered structurally before the arm — but the count is not.

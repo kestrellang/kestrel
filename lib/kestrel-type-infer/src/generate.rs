@@ -2358,8 +2358,8 @@ pub(crate) fn lower_hir_ty_with_subs(
                     return tv;
                 }
                 // R1 — the one genuinely baseless read: a bare `Item` here has
-                // no receiver in scope. Strict lookup would apply the
-                // unambiguity rule; base-blind today.
+                // no receiver in scope, so C3's unambiguity rule applies —
+                // a lone candidate answers, two or more fall through below.
                 if let Some(tv) = ctx.assoc_sub("generate:AliasUse", None, *entity) {
                     return tv;
                 }
@@ -2376,8 +2376,8 @@ pub(crate) fn lower_hir_ty_with_subs(
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_with_subs(ctx, base, subs);
             // Short-circuit if this specific assoc is already bound via a
-            // where-clause equality (e.g. `Item = (A, B)`). R2 — base-blind
-            // today; `base_tv` feeds the audit only (G17 C1).
+            // where-clause equality (e.g. `Item = (A, B)`). R2 — since C3 the
+            // equality has to be about *this* base to answer here.
             if let Some(tv) = ctx.assoc_sub("generate:AssocProjection", Some(base_tv), *assoc) {
                 return tv;
             }

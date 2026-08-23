@@ -544,7 +544,57 @@ least 1 fire/compilation at `6039` on `Iterator.Item` changes answer.
 **Risk** **HIGH** — this is the commit that can produce deferred, never-solved
 `Associated` constraints. Failure signature is *"could not infer type"*, not
 `E100`.
-**This is the commit that stops `leak5` emitting wrong code.**
+~~**This is the commit that stops `leak5` emitting wrong code.**~~
+
+> ### ⚠ C3'S HEADLINE CLAIM IS REFUTED — R3 falls through to R4
+>
+> [measured @ `6fb52dcb` + C3, built and run]
+>
+> C3 landed exactly as specified above and **`leak5` still miscompiles** —
+> clean build, `result=int:4315148960`. The re-key is not sufficient, because
+> the two "isolations confirmed at exactly one read each" finding
+> (`leak5` → R7, `distinct_samename` → R4) treats the read sites as
+> independent. **R3 and R4 are not independent: they are the two arms of one
+> `else if` chain at `solver.rs:2818-2850`.**
+>
+> The audit at C3 shows the cascade precisely — `leak5 \ control2` is now:
+>
+> ```
+> MISS site=solver:lower_hir_ty_sub:AssocProjection assoc=Producer.Item base=2 blind=3 strict=-1  ← R7 fixed
+> MISS site=solver:solve_associated                 assoc=Producer.Item base=2 blind=3 strict=-1  ← R3 fixed
+> MISS site=solver:solve_associated:name-fallback   assoc=Producer.Item base=2 blind=3 strict=-1  ← R4 STILL ANSWERS 3
+> ```
+>
+> R7 and R3 both correctly refuse the entry filed under base `A` (`@1`) for a
+> query on base `B` (`@2`). R3's refusal then **enters the `else if`**, and R4 —
+> deliberately left base-blind, per the §3 refutation — matches the *same
+> entity* `Producer.Item` by name and hands back the very TyVar R3 just
+> rejected. Net answer unchanged; the miscompile survives.
+>
+> **This is not C6.** The fix is not to make R4 base-aware (which would delete
+> the `Iterable`/`Iterator` bridge — §3 stands). It is that R4 should never
+> consider a candidate whose assoc entity **equals** the query's:
+>
+> ```rust
+> &|e| e != assoc && self.query_ctx.get::<Name>(e) == want,
+> ```
+>
+> That is R4's own documented contract — *"**different protocols** can define
+> the same associated type (e.g. `Iterator.Item` vs `Iterable.Item`)"*. Same
+> entity is by definition not a different protocol, and it is R3's job.
+>
+> **It is a provable no-op at pre-C3 semantics.** R4 has exactly one caller,
+> the `else if` after R3. Pre-C3 R3 was base-blind, so it returned `None` only
+> when *no* entry had `assoc == entity` — meaning R4's candidate set never
+> contained a same-entity entry in the first place. The exclusion restores that
+> invariant rather than changing it, and the bridge (`Iterator.Item` answered
+> from `Iterable.Item` — **different** entities) is untouched.
+>
+> Verified as a revertible spike @ C3: `leak5` → post-mono error;
+> `distinct_samename` still builds and prints `result=i` (C6's, correctly
+> unaffected); `control2`, `distinct`, `structcase{,_nobound}`, `callsite`,
+> `selfproj` all byte-identical to baseline. **Not landed** — C3's brief
+> forbade touching the fallback. It wants its own commit (C3b).
 
 ### C4 — move the `AssocProjection` conformance arm into `solve_conforms`
 

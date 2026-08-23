@@ -2819,8 +2819,8 @@ fn solve_associated(
                 &assoc.resolved
             {
                 if args.is_empty() {
-                    // R3/R4 — `container` is the receiver being projected off;
-                    // base-blind today, audited under `KESTREL_DEBUG=audit-subject`.
+                    // R3 — `container` is the receiver being projected off, and
+                    // since C3 the memo only answers for that same receiver.
                     if let Some(tv) =
                         ctx.assoc_sub("solver:solve_associated", Some(container), *entity)
                     {
@@ -2834,10 +2834,13 @@ fn solve_associated(
                             tv
                         }
                     } else if let Some(tv) = ctx.assoc_sub_by_name(
-                        // Name-based fallback: different protocols can define the same
-                        // associated type (e.g., Iterator.Item vs Iterable.Item).
-                        // TODO(G17 C6): a name match on a *different* receiver is
-                        // `distinct_samename`'s miscompile; narrowing waits on C1's numbers.
+                        // R4 — name-based fallback: different protocols can define
+                        // the same associated type (e.g., Iterator.Item vs
+                        // Iterable.Item). Deliberately left base-blind by C3; a
+                        // name match on a *different* receiver is
+                        // `distinct_samename`'s miscompile, but so is every one of
+                        // the stdlib bridge's 27 hits, so narrowing here deletes
+                        // the bridge. See `Keying::BaseBlind` — TODO(G17 C6).
                         "solver:solve_associated:name-fallback",
                         Some(container),
                         *entity,
@@ -5993,11 +5996,12 @@ fn lower_hir_ty_sub(
                 if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
                     return tv;
                 }
-                // R6 — reads as baseless, but a bare `Item` in a protocol
-                // member signature lowered for receiver `B` *means* `B.Item`,
-                // and `recv_tv` is right here. C1 measures both readings: the
-                // baseless one (what C3 alone would do) is the real lookup, and
-                // the `recv_tv` one is an audit-only probe sizing C2.
+                // R6 — reads as baseless, so C3's unambiguity rule applies: one
+                // candidate answers, two or more bail to the paths below. A
+                // bare `Item` in a protocol member signature lowered for
+                // receiver `B` arguably *means* `B.Item`, and `recv_tv` is
+                // right here — but that reading (C2) never diverges from the
+                // baseless one across the corpus, so it stays an audit probe.
                 ctx.probe_assoc_sub(
                     "solver:lower_hir_ty_sub:AliasUse(recv_tv-probe)",
                     Some(recv_tv),
@@ -6042,8 +6046,8 @@ fn lower_hir_ty_sub(
         },
         HirTy::AssocProjection { base, assoc, span } => {
             let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);
-            // R7 — the `leak5.ks` site. Base-blind today; `base_tv` feeds the
-            // audit only (G17 C1), and becomes the key in C3.
+            // R7 — the `leak5.ks` site. Since C3 `base_tv` is the key, so a
+            // clause about `A.Item` no longer answers a projection off `B`.
             if let Some(tv) =
                 ctx.assoc_sub("solver:lower_hir_ty_sub:AssocProjection", Some(base_tv), *assoc)
             {

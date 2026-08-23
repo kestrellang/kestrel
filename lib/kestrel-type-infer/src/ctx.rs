@@ -49,9 +49,28 @@ struct AssocSubKey {
     assoc: Entity,
 }
 
-/// What a *strict* `(resolved base, assoc)` key would have answered at a read
-/// site, relative to the base-blind answer the compiler actually uses today.
-/// Detection only — see [`InferCtx::assoc_sub`].
+/// How a read site keys the `where_clause_assoc_subs` memo.
+#[derive(Clone, Copy)]
+enum Keying {
+    /// `(resolved base, assoc)` — G17 C3. Two subjects that share an assoc
+    /// entity (`A.Item` and `B.Item`) no longer collide.
+    BaseAware,
+    /// Assoc entity only, first hit wins — the pre-C3 behaviour, retained for
+    /// **one** reader: `solve_associated`'s cross-protocol `Name` fallback.
+    ///
+    /// Not an oversight. That fallback fires 27× per compilation on the stdlib
+    /// `Iterable`/`Iterator` bridge, and a sweep over all 3655 testdata files
+    /// found **zero** of those hits are same-receiver — every one answers
+    /// `Iterator.Item` from an entry filed under `Iterable.Item`. Requiring
+    /// equal bases would therefore *delete* the bridge, not narrow it. The
+    /// bridge is justified by `where TargetIterator.Item = Item`, so C6 has to
+    /// make that equality path carry it before this can flip.
+    BaseBlind,
+}
+
+/// What a *strict* `(resolved base, assoc)` key answers at a read site,
+/// relative to the base-blind answer. Detection only — see
+/// [`InferCtx::audit_assoc_sub`].
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SubVerdict {
     /// The memo has no entry for this assoc at all; strict and blind agree.
@@ -227,15 +246,13 @@ pub struct InferCtx<'a> {
     /// from `Item.Output = Item`). Used by lower_hir_ty_sub to substitute
     /// associated type entities found in protocol member signatures.
     ///
-    /// **Private to this module on purpose** (G17 stage 3a, C1). Every reader
-    /// goes through [`InferCtx::assoc_sub`] / [`InferCtx::assoc_sub_by_name`],
-    /// which are still keyed on the **assoc entity alone** — today's exact
-    /// `find()`-returns-first behaviour — so no reader can accidentally start
-    /// consulting [`AssocSubKey::base`] before the re-key commit (C3) lands.
+    /// **Private to this module on purpose** (G17 stage 3a). Every reader goes
+    /// through [`InferCtx::assoc_sub`] / [`InferCtx::assoc_sub_by_name`], so
+    /// the `(base, assoc)` comparison rule lives in exactly one place —
+    /// [`InferCtx::lookup_assoc_sub`] — and no reader can re-derive its own.
     ///
-    /// TODO(G17 stage 3a): two subjects that share an assoc (`A.Item` and
-    /// `B.Item`) still collide, so G17 (`leak5.ks`) is NOT closed. See D7's
-    /// *Scope limit* in `docs/fragility/G14-G17/decisions.md`.
+    /// C3 made [`InferCtx::assoc_sub`] base-aware. [`InferCtx::assoc_sub_by_name`]
+    /// is deliberately still base-blind; see [`Keying::BaseBlind`].
     where_clause_assoc_subs: Vec<(AssocSubKey, TyVar)>,
 
     /// Maps type parameter entities to their canonical TyVars.
@@ -614,25 +631,27 @@ impl<'a> InferCtx<'a> {
             .push((AssocSubKey { base, assoc }, tv));
     }
 
-    /// Base-blind memo lookup — **today's exact semantics**: the first entry
-    /// whose assoc entity matches wins, whatever receiver it was filed under.
+    /// Base-aware memo lookup (G17 C3): an entry answers only if its recorded
+    /// base and the query's base resolve to the same TyVar.
     ///
-    /// `base` is the receiver the caller is actually projecting off. C1 does
-    /// **not** consult it for the answer: it is passed so the env-gated audit
-    /// can report what a strict `(resolved base, assoc)` key *would* have
-    /// answered. Enable with `KESTREL_DEBUG=audit-subject`; inert otherwise.
+    /// `base` is the receiver the caller is projecting off — `None` only where
+    /// the read site genuinely has no receiver in scope, which then resolves by
+    /// unambiguity. A miss is never an error: the memo is a shortcut, so every
+    /// caller falls through to its general path (`project_associated`, an
+    /// `Associated` constraint, a protocol-bound search) exactly as it does for
+    /// a `None` answer today.
     pub(crate) fn assoc_sub(
         &self,
         site: &'static str,
         base: Option<TyVar>,
         assoc: Entity,
     ) -> Option<TyVar> {
-        self.lookup_assoc_sub(site, base, assoc, &|e| e == assoc)
+        self.lookup_assoc_sub(site, base, assoc, &|e| e == assoc, Keying::BaseAware)
     }
 
     /// As [`Self::assoc_sub`], but matching the assoc by **`Name` across
     /// protocols** (`Iterator.Item` vs `Iterable.Item`) — `solve_associated`'s
-    /// fallback. Same base-blind semantics, same audit.
+    /// fallback, and **still base-blind**; see [`Keying::BaseBlind`].
     pub(crate) fn assoc_sub_by_name(
         &self,
         site: &'static str,
@@ -640,9 +659,13 @@ impl<'a> InferCtx<'a> {
         assoc: Entity,
     ) -> Option<TyVar> {
         let want = self.query_ctx.get::<kestrel_ast_builder::Name>(assoc);
-        self.lookup_assoc_sub(site, base, assoc, &|e| {
-            self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want
-        })
+        self.lookup_assoc_sub(
+            site,
+            base,
+            assoc,
+            &|e| self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want,
+            Keying::BaseBlind,
+        )
     }
 
     /// Audit-only probe: report the strict verdict a read site *would* get for
@@ -653,63 +676,80 @@ impl<'a> InferCtx<'a> {
         if !kestrel_debug::is_enabled("audit-subject") {
             return;
         }
-        let matches = |e: Entity| e == assoc;
-        let blind = self
-            .where_clause_assoc_subs
-            .iter()
-            .find(|(k, _)| matches(k.assoc))
-            .map(|&(_, tv)| tv);
-        self.audit_assoc_sub(site, base, assoc, blind, &matches);
+        self.audit_assoc_sub(site, base, assoc, &|e: Entity| e == assoc);
     }
 
     /// The one place the memo is scanned. `matches` selects candidate entries
-    /// by assoc entity; the answer is the first hit, exactly as before.
+    /// by assoc entity; `keying` decides whether the receiver then filters them.
     fn lookup_assoc_sub(
         &self,
         site: &'static str,
         base: Option<TyVar>,
         assoc: Entity,
         matches: &dyn Fn(Entity) -> bool,
+        keying: Keying,
     ) -> Option<TyVar> {
-        let blind = self
-            .where_clause_assoc_subs
-            .iter()
-            .find(|(k, _)| matches(k.assoc))
-            .map(|&(_, tv)| tv);
         if kestrel_debug::is_enabled("audit-subject") {
-            self.audit_assoc_sub(site, base, assoc, blind, matches);
+            self.audit_assoc_sub(site, base, assoc, matches);
         }
-        blind
+        match keying {
+            Keying::BaseAware => self.strict_assoc_sub(base, matches),
+            Keying::BaseBlind => self.blind_assoc_sub(matches),
+        }
     }
 
-    /// Log how a strict `(resolved base, assoc)` key would differ from the
-    /// base-blind answer. Detection only: never influences `blind`.
+    /// Candidate entries in push order — the scan every lookup shares.
+    fn assoc_sub_candidates<'m>(
+        &'m self,
+        matches: &'m dyn Fn(Entity) -> bool,
+    ) -> impl Iterator<Item = &'m (AssocSubKey, TyVar)> {
+        self.where_clause_assoc_subs
+            .iter()
+            .filter(move |(k, _)| matches(k.assoc))
+    }
+
+    /// The pre-C3 answer: first candidate wins, whatever receiver it was filed
+    /// under. Still live at exactly one reader — see [`Keying::BaseBlind`].
+    fn blind_assoc_sub(&self, matches: &dyn Fn(Entity) -> bool) -> Option<TyVar> {
+        self.assoc_sub_candidates(matches).next().map(|&(_, tv)| tv)
+    }
+
+    /// The `(resolved base, assoc)` answer. Both sides are resolved **here**,
+    /// never at push: raw indices differ after any redirect, and union-find is
+    /// monotone so resolving at lookup only ever becomes more permissive.
+    fn strict_assoc_sub(
+        &self,
+        base: Option<TyVar>,
+        matches: &dyn Fn(Entity) -> bool,
+    ) -> Option<TyVar> {
+        let mut cands = self.assoc_sub_candidates(matches);
+        let Some(q) = base else {
+            // Baseless query: resolve by unambiguity — a lone candidate is the
+            // answer, two or more bail to the general path rather than picking
+            // arbitrarily (the `witness_protocol_args` rule).
+            let first = cands.next()?;
+            return cands.next().is_none().then_some(first.1);
+        };
+        // A baseless *entry* matches only a baseless query; widening it to
+        // "matches anything" would reintroduce the receiver confusion.
+        cands
+            .find(|(k, _)| k.base.is_some_and(|s| self.resolve(s) == self.resolve(q)))
+            .map(|&(_, tv)| tv)
+    }
+
+    /// Log how the base-aware key differs from the base-blind one at a read
+    /// site. Detection only: never influences either answer.
     fn audit_assoc_sub(
         &self,
         site: &'static str,
         base: Option<TyVar>,
         assoc: Entity,
-        blind: Option<TyVar>,
         matches: &dyn Fn(Entity) -> bool,
     ) {
-        let cands: Vec<(AssocSubKey, TyVar)> = self
-            .where_clause_assoc_subs
-            .iter()
-            .filter(|(k, _)| matches(k.assoc))
-            .copied()
-            .collect();
-        let strict = match base {
-            // Baseless query: resolve by unambiguity — one candidate is the
-            // answer, two or more bail to the general path.
-            None if cands.len() > 1 => None,
-            None => cands.first().map(|&(_, tv)| tv),
-            // Resolve BOTH sides here; raw indices differ after any redirect.
-            // A baseless *entry* matches only a baseless query.
-            Some(q) => cands
-                .iter()
-                .find(|(k, _)| k.base.is_some_and(|s| self.resolve(s) == self.resolve(q)))
-                .map(|&(_, tv)| tv),
-        };
+        let cands: Vec<(AssocSubKey, TyVar)> =
+            self.assoc_sub_candidates(matches).copied().collect();
+        let blind = cands.first().map(|&(_, tv)| tv);
+        let strict = self.strict_assoc_sub(base, matches);
         // Two distinct indices that already resolve to the same canonical are
         // behaviourally the same answer, so compare resolved, not raw.
         let verdict = match (blind, strict) {
