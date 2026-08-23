@@ -652,6 +652,19 @@ impl<'a> InferCtx<'a> {
     /// As [`Self::assoc_sub`], but matching the assoc by **`Name` across
     /// protocols** (`Iterator.Item` vs `Iterable.Item`) — `solve_associated`'s
     /// fallback, and **still base-blind**; see [`Keying::BaseBlind`].
+    ///
+    /// `e != assoc` keeps this to its documented contract: a *different*
+    /// protocol's same-named assoc. The same entity is [`Self::assoc_sub`]'s
+    /// job, and re-offering a candidate that reader just refused on its base
+    /// is how `leak5.ks` survived C3 (G17 C3b). **This is not C6** — C6 makes
+    /// the fallback base-*aware*, which would delete the `Iterable`/`Iterator`
+    /// bridge outright; the bridge is cross-entity, so this filter never sees
+    /// it.
+    ///
+    /// It restores an invariant rather than changing behaviour: before C3 the
+    /// only caller reached this fallback solely when the base-blind
+    /// [`Self::assoc_sub`] found *no* entry with `assoc == entity`, so a
+    /// same-entity candidate was already unreachable here.
     pub(crate) fn assoc_sub_by_name(
         &self,
         site: &'static str,
@@ -663,7 +676,7 @@ impl<'a> InferCtx<'a> {
             site,
             base,
             assoc,
-            &|e| self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want,
+            &|e| e != assoc && self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want,
             Keying::BaseBlind,
         )
     }
