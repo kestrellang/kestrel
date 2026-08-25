@@ -3594,23 +3594,23 @@ fn emit_resolved_call(
                 protocol,
                 protocol_type_args,
             } => {
-                // `T.Assoc: P` projection bounds are handled at body setup.
-                // TODO(G17 stage 3a): this skip is a live bug — the call-site
-                // obligation for a direct `Def` call is never emitted for a
-                // projection subject. C7 fixed the sibling site
-                // (`generate::emit_where_clause_constraints_with_subs`), which
-                // is the one `assoc_projection_bound_call_site.ks` exercises;
-                // this arm never saw a projection subject on that corpus, so it
-                // is still untested surface and keeps its guard. When it goes,
-                // it wants `ProjectionPolicy::Reduce(&span)` for the same reason.
-                if !matches!(subject, crate::resolve::WhereSubject::Param(_)) {
-                    continue;
-                }
+                // G17 C10: a projection subject (`A.Item: P`) gets its call-site
+                // obligation here too, same as a bare `A: P`. This is the
+                // *overload-resolution* twin of the site C7 fixed in
+                // `generate::emit_where_clause_constraints_with_subs`;
+                // `emit_resolved_call`'s only callers are inside
+                // `solve_overloaded_call`, so an unambiguous call never reaches
+                // it. `Reduce`, not `Opaque`: the base is a call type-arg, so at
+                // `good(src: StrSrc(…))` the obligation is really about `String`,
+                // and an unreduced `StrSrc.Item` would be judged as an opaque
+                // projection — which permits. `lower_subject` returns `None`
+                // when the subject's root is not one of `subs`, and that skip is
+                // the deliberate conservative permit for an abstract position.
                 if let Some(tv) = crate::generate::lower_subject(
                     ctx,
                     &subject,
                     SubjectRoot::Subs(&subs),
-                    crate::generate::ProjectionPolicy::Opaque,
+                    crate::generate::ProjectionPolicy::Reduce(&span),
                 ) {
                     ctx.conforms_typearg(tv, protocol, span.clone());
                     // Cache the protocol args so solve_associated can substitute
