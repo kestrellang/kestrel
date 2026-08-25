@@ -4501,27 +4501,49 @@ fn solve_member(
                 protocol,
                 protocol_type_args,
             } => {
-                // `T.Assoc: P` projection bounds are body-inference facts; the
-                // member-resolution path doesn't re-emit them.
-                // TODO(G17 stage 3a): this skip is a live bug. It stays here
-                // rather than adopting `lower_subject` because this site does a
-                // two-stage lookup (`resolution.type_params`, then `subs`) that
-                // `SubjectRoot` does not model; unifying them is a fix, not a
-                // refactor.
-                let Some(param) = subject.as_param() else {
-                    continue;
+                let bound_tv = match subject.as_param() {
+                    // Bare `T: P`. This loop runs on every member resolution
+                    // (~12k times compiling a 50-line program), so the common
+                    // shape keeps its allocation-free two-stage lookup: the
+                    // method's own type params first, then the receiver's.
+                    Some(param) => resolution
+                        .type_params
+                        .iter()
+                        .position(|&p| p == param)
+                        .map(|idx| fresh_params[idx])
+                        .or_else(|| subs.iter().find(|(e, _)| *e == param).map(|&(_, tv)| tv)),
+                    // G17 C11: `T.Assoc: P` — the member/method call-site
+                    // obligation, previously skipped outright. `SubjectRoot`
+                    // models one substitution, not two, so flatten them: `find`
+                    // is first-wins, which *is* the two-stage semantics above.
+                    // Built only for a projection (or `Self`) subject, so the
+                    // hot path above never allocates.
+                    //
+                    // `Reduce`, not `Opaque`: the base is a concrete call
+                    // type-arg here, so at `h.render(StrSrc(…))` the obligation
+                    // is really about `String`. An unreduced `StrSrc.Item` would
+                    // be judged by `solve_conforms` as an opaque projection,
+                    // which permits. `lower_subject` still returns `None` when
+                    // the root maps to nothing — the conservative permit for an
+                    // abstract position.
+                    None => {
+                        let merged: Vec<(Entity, TyVar)> = resolution
+                            .type_params
+                            .iter()
+                            .copied()
+                            .zip(fresh_params.iter().copied())
+                            .chain(subs.iter().copied())
+                            .collect();
+                        crate::generate::lower_subject(
+                            ctx,
+                            subject,
+                            SubjectRoot::Subs(&merged),
+                            crate::generate::ProjectionPolicy::Reduce(&span),
+                        )
+                    },
                 };
-                let bound_tv =
-                    if let Some(idx) = resolution.type_params.iter().position(|&p| p == param) {
-                        ctx.conforms_typearg(fresh_params[idx], *protocol, span.clone());
-                        Some(fresh_params[idx])
-                    } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
-                        ctx.conforms_typearg(tv, *protocol, span.clone());
-                        Some(tv)
-                    } else {
-                        None
-                    };
                 if let Some(tv) = bound_tv {
+                    ctx.conforms_typearg(tv, *protocol, span.clone());
                     let arg_tvs: Vec<TyVar> = protocol_type_args
                         .iter()
                         .map(|hir_ty| lower_hir_ty_sub(ctx, hir_ty, self_entity, receiver, &subs))
