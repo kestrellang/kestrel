@@ -4,17 +4,23 @@
 // G17: the projection subject is rooted at `Self` rather than a named type
 // parameter — `extend Producer where Self.Item: Show`. `StrSrc.Item = String`,
 // which has no `Show` witness, so `StrSrc(…).render()` must not resolve to that
-// extension. Today `Self`-rooted projection subjects are dropped outright
-// (`resolve_projection_subject` returns `None` for them), so the constrained
-// extension applies unconditionally and the error only surfaces after
-// monomorphization.
+// extension.
+//
+// This is an *applicability* shape, not an obligation shape: the clause decides
+// whether the constrained protocol extension provides `render` at all. When the
+// constraint is unmet there is no resolved member to hang a conformance
+// obligation on, so `no member 'render' on type 'StrSrc'` is the correct
+// diagnostic — the same message the shipped `where Self: Q` twin
+// `declarations/extensions/unconstrained_protocol_extension_not_found_when_constraint_not_met.ks`
+// annotates. (This file previously expected `!: Show`, from a template that
+// applied the obligation-shape annotation to all eight promoted G17 repros.)
 //
 // No A/B control: the whole clause is the subject under test, and deleting it
 // would change which extension exists rather than which receiver it constrains.
 //
-// EXPECTED TO FAIL: a diagnostics test never monomorphizes, so the current
-// post-mono error is invisible to it. This is the test for the D8 `SelfType`
-// flip (plan-3a).
+// Fixed by the D8 `SelfType` flip (plan-3a, C9): `Self`-rooted projection
+// subjects used to be dropped outright, so the extension applied
+// unconditionally and the error only surfaced after monomorphization.
 
 module Test
 
@@ -46,6 +52,6 @@ extend Producer where Self.Item: Show {
 @main
 func main() -> lang.i32 {
     // StrSrc.Item = String, which does NOT conform to Show.
-    print("result=\(StrSrc(s: "z").render())"); // ERROR: !: Show
+    print("result=\(StrSrc(s: "z").render())"); // ERROR: member
     0
 }
