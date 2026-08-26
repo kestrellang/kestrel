@@ -566,3 +566,113 @@ Under `temp/g17scope/` (gitignored). Promote the pairs named in §6 into
 | `shadow_control.ks` | same, inner param renamed `U` | correctly rejects |
 | `xrecv_member.ks` | `A.Item: Show` + `self.b.produce().show()` | **residual live** — frontend accepts, post-mono error |
 | `xrecv_member_control.ks` | clause deleted | correct `E100` |
+
+---
+
+## S1 measurement — LANDED. Every estimate above is now replaced by a number.
+
+**Base.** `pwd` `/Users/dino/Documents/Projects/kestrel`, branch `arch/fixes`,
+no worktree. `git rev-parse HEAD` `1635e2d130f87cc6f5128ed13744a30f5819a443`
+(`1635e2d1 docs(fragility): F12's wrong-accept is refuted…`) plus this commit's
+probe. Tree clean apart from a pre-existing `rust-toolchain.toml` edit.
+`cargo build --release --bin kestrel` clean.
+
+**Method.** `KESTREL_DEBUG=audit-scope ./target/release/kestrel dump diagnostics
+<file>`, one process per file, 8-way. **`dump diagnostics` equivalence to
+`build` was verified before relying on it**, not assumed: on
+`types/generics/same_param_multiple_separate_constraints.ks` the two paths
+produce byte-identical probe output (3265 lines each), and on
+`temp/g17scope/assoc_shadow_control.ks` both produce 3268.
+
+### What was measured
+
+The probe compares, for each `Bound` constraint the raw walker reads, the bound
+set contributed to the queried entity under the **current** `body_owner`-scoped
+resolution against a **per-holder** (`holder`-scoped) one. Both sides call the
+*same* resolver — `where_clauses::resolve_type_entity` is
+`WorldResolver::resolve_type_entity` with `context` as a parameter instead of
+`self.body_owner` — so the only variable is the scope. Projections collapse on
+both sides on purpose: this measures the **scope** half, not the key half.
+
+**The brief's deviation from §6 is deliberate:** no `DeclaredWhereClausesOf`
+split and no `clauses_in_force` extraction landed here. S1 compares *name
+resolution*, not clause sets, so the Q1 implicit-injection problem does not
+arise and the query does not need splitting yet. That stays S2's problem, and
+S1's diff is a probe plus one `pub(crate)`.
+
+### Corpus: `lib/kestrel-test-suite/testdata`, 3667 `.ks`
+
+| | |
+| --- | --- |
+| total subject resolutions | **11,973,637** |
+| `SAME` | 11,973,635 |
+| `ADD` | **2** |
+| `DROP` | **0** |
+| `SWAP` | **0** |
+| distinct files with ≥1 non-`SAME` | **2** |
+
+### Floor vs contribution — the split that matters
+
+The invariant floor is **3265 subject resolutions per file**, contributed by the
+stdlib prelude, and **3422 of 3667 files sit exactly at it**. Unlike C1's
+`audit-subject` floor, this one is a *volume* floor only:
+
+> **The prelude's divergence floor is ZERO.** All 3265 baseline reads classify
+> `SAME`. Every non-`SAME` in the corpus is per-file contribution.
+
+So the raw "2 files diverge" is also the true per-file figure — 2 files out of
+3667 contribute, and the 99.97% of reads that are prelude background contribute
+nothing. Confirmed independently on an empty `module T` program: 3265 reads, 0
+non-`SAME`.
+
+### `lang/` — all 17 packages, 0 non-`SAME`
+
+`clutch crypto datetime flock html-builder http jessup perch plume quill
+quill-json quill-toml sdl std swoop talon-sqlite uuid`, each compiled as a unit.
+`std` reads 6357 (3265 prelude + 3092 from compiling its own sources);
+every other package sits between 3265 and 3387. **Zero divergences anywhere.**
+
+### The `DROP shadowed=false` column
+
+> ### **`DROP shadowed=false` = 0. `DROP` of any kind = 0.**
+>
+> Across 11,973,637 corpus resolutions plus all of `lang/`, the raw walk never
+> finds a bound that per-holder resolution loses. §6's gate on S2 — "S2 does not
+> land until that column is zero or every entry has an explanation" — **is met
+> unconditionally**, with no entries to explain.
+
+This inverts §6's risk ranking. S2 was ranked highest-risk on the grounds that
+its reject-direction delta was "unbounded until S1 reports". It is now bounded,
+and it is bounded at zero: there is no corpus program whose accepted bound the
+scope fix removes. The two `ADD`s are permit-direction.
+
+### The two corpus divergences — both are the F12 tests themselves
+
+```
+ADD kind=param subject=T asked=Holder.T holder=Test.Holder owner=Holder.f
+    oldsubj=f.T newsubj=Holder.T old=[] new=[Test.Mapper] shadowed=true
+ADD kind=param subject=T asked=Box.T   holder=Test.?(ext) owner=?.doMap
+    oldsubj=doMap.T newsubj=Box.T old=[] new=[Test.Mapper] shadowed=true
+```
+
+- `types/generics/shadowed_type_param_does_not_borrow_assoc_type.ks`
+- `types/generics/shadowed_type_param_in_extension_does_not_borrow_assoc_type.ks`
+
+Both are `shadowed=true`, and both are the *outer* parameter silently **losing**
+its `Mapper` bound while a method's own `[T]` is in scope — the wrong-**reject**
+direction the ⚠ banner predicted, now measured. Neither file's `// ERROR`
+annotations sit on the outer `T`, so S2 should leave both green; that is S2's
+check, not a prediction made here.
+
+### The A/B pair (§1, `temp/g17scope/`, outside the corpus)
+
+| file | probe verdict |
+| --- | --- |
+| `assoc_shadow.ks` | **one `ADD` and one `DROP`, both `shadowed=true`** — `Producer.Item` gains `Show` back (`ADD`), the method's own `Item` gives it up (`DROP`) |
+| `assoc_shadow_control.ks` | **all 3268 `SAME`**, zero divergence |
+
+The pair behaves exactly as §1 describes: a *single* clause leaks in *both*
+directions in the same file, and renaming the method parameter removes both
+halves. Note this is the corpus's only `DROP` of any kind anywhere in this
+measurement — and it is `shadowed=true`, i.e. a genuine F12 aliasing win, not a
+name that fails to resolve in the holder's scope.

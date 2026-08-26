@@ -142,7 +142,10 @@ pub enum WhereSubject {
     /// **permit**: that is the conservative contract for abstract positions.
     SelfType,
     /// `<base>.<assoc>`, to any depth.
-    Projection { base: Box<WhereSubject>, assoc: Entity },
+    Projection {
+        base: Box<WhereSubject>,
+        assoc: Entity,
+    },
 }
 
 impl WhereSubject {
@@ -2475,12 +2478,20 @@ impl WorldResolver<'_> {
             return;
         };
         for constraint in &wc.0 {
-            if let WhereConstraint::Bound {
+            let WhereConstraint::Bound {
                 subject,
                 protocols: proto_types,
                 ..
             } = constraint
-                && let Some(resolved_subj) = self.resolve_type_entity(subject)
+            else {
+                continue;
+            };
+            // G17 S1: detection only. Inert — and not even computed — unless
+            // `KESTREL_DEBUG=audit-scope` is set.
+            if kestrel_debug::is_enabled("audit-scope") {
+                self.audit_scope(param_entity, entity, subject, proto_types);
+            }
+            if let Some(resolved_subj) = self.resolve_type_entity(subject)
                 && resolved_subj == param_entity
             {
                 for proto_ty in proto_types {
@@ -2492,6 +2503,116 @@ impl WorldResolver<'_> {
                 }
             }
         }
+    }
+
+    /// G17 S1 probe: for one `Bound` constraint on `holder`, report the bound
+    /// set the **current** `body_owner`-scoped resolution contributes to
+    /// `param_entity` against the set a **per-holder** (`holder`-scoped)
+    /// resolution would contribute.
+    ///
+    /// Both sides call the *same* resolver — `where_clauses::resolve_type_entity`
+    /// is `Self::resolve_type_entity` with `context` as a parameter instead of
+    /// `self.body_owner` — so the only variable is the scope. That is
+    /// deliberate: this measures the **scope** half of G17, not the key half
+    /// (which C1–C11 already fixed), so the per-holder side is allowed to
+    /// collapse projections exactly as the current side does.
+    ///
+    /// Detection only: returns `()`, touches nothing the caller reads.
+    fn audit_scope(
+        &self,
+        param_entity: Entity,
+        holder: Entity,
+        subject: &AstType,
+        proto_types: &[AstType],
+    ) {
+        let per_holder = |ty: &AstType| {
+            crate::where_clauses::resolve_type_entity(self.ctx, ty, holder, self.root)
+        };
+        let old_subj = self.resolve_type_entity(subject);
+        let new_subj = per_holder(subject);
+
+        // The clause contributes bounds only when its subject *is* the entity
+        // being asked about, so an unbound side contributes the empty set.
+        let bounds = |binds: bool, r: &dyn Fn(&AstType) -> Option<Entity>| -> Vec<Entity> {
+            if !binds {
+                return Vec::new();
+            }
+            proto_types.iter().filter_map(r).collect()
+        };
+        let old = bounds(old_subj == Some(param_entity), &|t| {
+            self.resolve_type_entity(t)
+        });
+        let new = bounds(new_subj == Some(param_entity), &per_holder);
+
+        let subset = |a: &[Entity], b: &[Entity]| a.iter().all(|e| b.contains(e));
+        let verdict = match (subset(&old, &new), subset(&new, &old)) {
+            (true, true) => "SAME",
+            (true, false) => "ADD", // per-holder finds a bound the current miss
+            (false, true) => "DROP", // current finds one per-holder does not
+            (false, false) => "SWAP",
+        };
+        // `shadowed` separates "the name means something else over there" from
+        // "the name does not resolve there at all" — the two have different
+        // fixes, and only the former is a genuine F12 aliasing win.
+        let shadowed = matches!((old_subj, new_subj), (Some(a), Some(b)) if a != b);
+        let kind = match new_subj
+            .or(old_subj)
+            .and_then(|e| self.ctx.get::<NodeKind>(e))
+        {
+            Some(NodeKind::TypeParameter) => "param",
+            Some(NodeKind::TypeAlias) => "alias",
+            Some(_) => "other",
+            None => "unresolved",
+        };
+        let list = |es: &[Entity]| {
+            es.iter()
+                .map(|&e| self.audit_path(e))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        kestrel_debug::ktrace!(
+            "audit-scope",
+            "{verdict} kind={kind} subject={} asked={} holder={} owner={} \
+             oldsubj={} newsubj={} old=[{}] new=[{}] shadowed={shadowed}",
+            Self::ast_type_text(subject),
+            self.audit_path(param_entity),
+            self.audit_path(holder),
+            self.audit_path(self.body_owner),
+            old_subj.map_or_else(|| "-".to_string(), |e| self.audit_path(e)),
+            new_subj.map_or_else(|| "-".to_string(), |e| self.audit_path(e)),
+            list(&old),
+            list(&new),
+        );
+    }
+
+    /// The dotted source spelling of a where-clause subject, for audit output only.
+    ///
+    /// Placed as an associated fn purely so it sits beside its only caller.
+    fn ast_type_text(ast_ty: &AstType) -> String {
+        match ast_ty {
+            AstType::Named { segments, .. } => segments
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+            _ => "<non-named>".to_string(),
+        }
+    }
+
+    /// `Parent.Name#index` for audit output. The index disambiguates two
+    /// same-named entities under the same parent, which is the whole point of
+    /// a shadowing audit.
+    fn audit_path(&self, entity: Entity) -> String {
+        let name = |e: Entity| {
+            self.ctx
+                .get::<Name>(e)
+                .map_or_else(|| "?".to_string(), |n| n.0.clone())
+        };
+        let parent = self
+            .ctx
+            .parent_of(entity)
+            .map_or_else(|| "?".to_string(), name);
+        format!("{parent}.{}#{}", name(entity), entity.index())
     }
 
     /// Rank ambiguous candidates by extension specificity.

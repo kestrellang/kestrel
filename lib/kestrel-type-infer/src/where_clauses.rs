@@ -332,13 +332,19 @@ fn resolve_projection_subject(
         }
         WhereSubject::Param(base)
     };
-    Some(steps.fold(root_subject, |base, assoc| WhereSubject::Projection {
-        base: Box::new(base),
-        assoc,
-    }))
+    Some(
+        steps.fold(root_subject, |base, assoc| WhereSubject::Projection {
+            base: Box::new(base),
+            assoc,
+        }),
+    )
 }
 
-fn resolve_type_entity(
+/// Resolve a where-clause name in **`entity`'s own scope**. `pub(crate)` so the
+/// G17 S1 `audit-scope` probe can ask "what would per-holder resolution have
+/// said?" using the very function the query uses, rather than a second copy
+/// that could drift from it.
+pub(crate) fn resolve_type_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     entity: Entity,
