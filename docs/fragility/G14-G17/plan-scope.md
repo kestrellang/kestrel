@@ -9,11 +9,52 @@
 > which is what happens when IDs are allocated per-document instead of
 > per-audit.
 
+> ## ⚠ Q5's F12 finding is REFUTED — measured on a clean tree
+>
+> [verified @ `b3f79f4f`, clean tree, current binary, built and run]
+>
+> Q5 reports the shadowing repro as **ACCEPTED** — a wrong-accept where an
+> unbounded method type parameter named `Item` gains `Show`. **It is rejected.**
+> The original measurement was taken with another agent's uncommitted
+> `solver.rs` in the binary and was disclosed as such; on a clean tree it does
+> not hold.
+>
+> What *is* live is the same leak in the opposite direction — a **wrong-reject
+> with a degraded diagnostic**:
+>
+> | repro | result |
+> | --- | --- |
+> | `extend Producer where Item: Show { func leak[Item](x: Item) … }` | `E100: does not conform to protocol; does not satisfy constraint` — **spanless**, "(no source location available — diagnostic attached to a synthesized node)" |
+> | same, parameter renamed `U` | `E100: no member 'show' on type 'U'` at `:13:43`, expression underlined |
+>
+> **Renaming a method's type parameter turns a precise located error into a
+> spanless vague one.** The subject still resolves to the wrong `Item` — the
+> scope leak is real — but it over-rejects rather than under-rejects.
+>
+> Two consequences for this plan:
+>
+> 1. **S2's risk profile improves.** S2 is reject-direction, and this case
+>    already over-rejects, so the scope fix should *repair* it rather than
+>    endanger it. Add this A/B pair to S2's test set; the control must stay
+>    green and the shadow case should gain a real span.
+> 2. **The `E439` hole in Q5 stands** — it compares only against ancestors'
+>    `TypeParams` and extension LHS params, so a `TypeAlias` is invisible to it.
+>    That is a source-read, unaffected by the binary, and it is why the repro
+>    had to be assoc-shaped at all.
+>
+> This is the fifth prediction in this work refuted by running rather than
+> reading. See `plan-3a.md`'s banners for the other four.
+
 > **Scope.** G17 as filed has two halves. Every commit so far (C1, C3, C3b, C4,
 > C7, C9, C10, C11) fixed the **key**: `T.Assoc: P` collapsing onto the bare
 > associated type. Nobody has touched the **scope**: `TypeResolver` resolves
 > where-clause subject *names* in the ambient `body_owner` scope rather than in
 > the scope of the entity the clause is written on. This is that design.
+>
+> **S4 re-verified live @ `b3f79f4f`** — `struct Pair[A,B] where …, A.Item: Show`
+> with a *direct* `self.b.produce().show()` still accepts at the frontend and
+> dies post-mono. The committed C11 (`solve_member`, `58e2c550`) did **not**
+> close it; the two are distinct arms.
 >
 > **Status:** designed, not implemented. No production code was written for this
 > document. No spike was run; no file outside this one was touched.
