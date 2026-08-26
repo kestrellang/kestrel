@@ -2467,6 +2467,19 @@ impl WorldResolver<'_> {
     }
 
     /// Extract protocol bounds for `param_entity` from a single entity's WhereClause.
+    ///
+    /// **G17 S2 — scope.** The clause is *written on* `entity`, so its names
+    /// mean whatever they mean in `entity`'s own scope, not in the body that
+    /// happens to be under inference. Resolving them against `self.body_owner`
+    /// (what this did before) let a method-local type parameter named `Item`
+    /// capture a clause written about the protocol's `Item`, in both
+    /// directions: the local param wrongly *gained* the bound and the real
+    /// subject wrongly *lost* it. Per-holder resolution *is* the scope check —
+    /// a name that does not resolve in `entity`'s scope cannot bind
+    /// `param_entity` — so this also subsumes the "ancestor chain" leak for
+    /// `TypeParameter` subjects; the walk itself (`body_owner` + ancestors)
+    /// stays as it was, because that walk answers the different question of
+    /// *which clauses are in force here*.
     fn gather_bounds_from_where_clause(
         &self,
         param_entity: Entity,
@@ -2491,11 +2504,15 @@ impl WorldResolver<'_> {
             if kestrel_debug::is_enabled("audit-scope") {
                 self.audit_scope(param_entity, entity, subject, proto_types);
             }
-            if let Some(resolved_subj) = self.resolve_type_entity(subject)
+            // Resolve subject *and* protocols in the clause-holder's scope.
+            let in_holder_scope = |ty: &kestrel_ast_builder::AstType| {
+                crate::where_clauses::resolve_type_entity(self.ctx, ty, entity, self.root)
+            };
+            if let Some(resolved_subj) = in_holder_scope(subject)
                 && resolved_subj == param_entity
             {
                 for proto_ty in proto_types {
-                    if let Some(proto) = self.resolve_type_entity(proto_ty)
+                    if let Some(proto) = in_holder_scope(proto_ty)
                         && visited.insert(proto)
                     {
                         protocols.push(proto);
@@ -2506,9 +2523,16 @@ impl WorldResolver<'_> {
     }
 
     /// G17 S1 probe: for one `Bound` constraint on `holder`, report the bound
-    /// set the **current** `body_owner`-scoped resolution contributes to
-    /// `param_entity` against the set a **per-holder** (`holder`-scoped)
-    /// resolution would contribute.
+    /// set a `body_owner`-scoped resolution contributes to `param_entity`
+    /// against the set a **per-holder** (`holder`-scoped) resolution
+    /// contributes.
+    ///
+    /// **Post-S2 reading.** `gather_bounds_from_where_clause` now *is* the
+    /// per-holder side, so this is no longer "current vs. proposed" — it is a
+    /// census of where the two scopes disagree, i.e. `old` is the pre-S2
+    /// answer and `new` is what the compiler actually does. The probe
+    /// therefore does **not** fall silent after S2; a non-`SAME` line marks a
+    /// site the scope fix changed, not a site still to fix.
     ///
     /// Both sides call the *same* resolver — `where_clauses::resolve_type_entity`
     /// is `Self::resolve_type_entity` with `context` as a parameter instead of

@@ -676,3 +676,127 @@ directions in the same file, and renaming the method parameter removes both
 halves. Note this is the corpus's only `DROP` of any kind anywhere in this
 measurement — and it is `shadowed=true`, i.e. a genuine F12 aliasing win, not a
 name that fails to resolve in the holder's scope.
+
+---
+
+## 8. S2 — LANDED. What it actually took, and what the plan got wrong
+
+[measured @ `091563ee` + this commit, `pwd` `/Users/dino/Documents/Projects/kestrel`,
+branch `arch/fixes`, parent checkout — no worktree. `cargo build --release --bin kestrel`
+rebuilt clean before every figure below.]
+
+### The approach: the minimal fix, not the query rebuild
+
+§6 specified deleting `gather_bounds_from_where_clause` and rebuilding the three
+collectors on `clauses_in_force` + `DeclaredWhereClausesOf`. **None of that was
+done, and none of it was needed.** S1 landed the probe only — neither
+`clauses_in_force` nor `DeclaredWhereClausesOf` nor the `declared_where_clauses`
+split exists in the tree — so the rebuild would have had to start by building
+the query split, whose sole purpose is to dodge the implicit-bound injection
+that §2 identifies as the blocker.
+
+What S2 changed instead is **three lines**: `gather_bounds_from_where_clause`
+resolves its subject and its protocol names with
+`where_clauses::resolve_type_entity(ctx, ty, entity, root)` — the clause
+holder's scope — instead of `self.resolve_type_entity`, which is
+`ResolveTypePath { context: self.body_owner }`.
+
+This is *exactly* the `new` column S1 measured. The probe's per-holder arm calls
+the same function with the same arguments, so the fix's corpus behaviour is not
+an estimate: it is the 11,973,637-resolution sweep, already run. The query
+rebuild would have delivered the same answer plus the injection risk, which S1
+never measured.
+
+**Why the other rewrites were dropped too.** §3 lists five sites re-deriving the
+walk. Re-read at HEAD, three of them — `assoc_projection_base_admits`,
+`collect_extension_where_clause_protocols`, and the `WhereClausesOf` half of
+`find_protocol_type_args_from_bounds` — **already** go through
+`WhereClausesOf`, which is holder-scoped by construction. After this commit
+`gather_bounds_from_where_clause` was the last `body_owner`-scoped where-clause
+subject resolver in the crate. Extracting `clauses_in_force` is still worth
+doing as dedup, but it is no longer load-bearing for the scope defect and does
+not belong in a reject-direction commit.
+
+### The probe does **not** go quiet — the brief's success criterion is unsatisfiable as stated
+
+`audit_scope` compares `body_owner`-scope against `holder`-scope. Both arms
+compute their own resolution; **neither reads the production path.** Changing
+which one production uses therefore cannot change the probe's verdicts.
+Measured, pre-binary vs post-binary, same files:
+
+| file | pre-S2 | post-S2 |
+| --- | --- | --- |
+| `shadowed_type_param_does_not_borrow_assoc_type.ks` | 1 `ADD`, 3265 `SAME` | 1 `ADD`, 3265 `SAME` |
+| `shadowed_type_param_in_extension_…ks` | 1 `ADD`, 3265 `SAME` | 1 `ADD`, 3265 `SAME` |
+| `f12/shadow.ks` | 1 `ADD`, 1 `DROP`, 3265 `SAME` | 1 `ADD`, **2** `DROP`, 3265 `SAME` |
+| `f12/control.ks` | all `SAME` | all `SAME` |
+
+(`shadow.ks` gains a second `DROP` line only because the repaired production
+path attempts one extra member resolution; it is the same clause reported
+twice, `shadowed=true` both times.)
+
+The correct statement of what S2 achieved is not "the probe fell silent" but
+**"production now equals the probe's `new` column at every one of the
+11,973,637 sites"** — which follows by construction, since production now calls
+the very function the `new` arm calls. The probe's remaining value is as a
+census of *where the two scopes disagree*; its doc comment now says so.
+
+### The A/B pair — the wrong-reject is repaired, with a span
+
+```
+shadow.ks   pre:  E100 type mismatch: does not conform to protocol; does not
+                  satisfy constraint
+                  = (no source location available — diagnostic attached to a
+                    synthesized node)
+shadow.ks   post: E100 no member 'show' on type 'Item'
+                  ┌─ shadow.ks:13:49
+                  13 │ public func leak[Item](x: Item) -> String { x.show() }
+                     │                                             ^^^^^^^^
+control.ks  pre:  E100 no member 'show' on type 'U'   @ :13:43   (unchanged)
+control.ks  post: E100 no member 'show' on type 'U'   @ :13:43   (unchanged)
+```
+
+The shadow case now produces the *same shape* as the control, differing only in
+the parameter's name and column. The ⚠ banner's prediction — "the scope fix
+should repair it rather than endanger it" — is the first prediction in this
+work stream to survive contact with measurement.
+
+Promoted to testdata as
+`types/generics/where_subject_resolves_in_clause_holder_scope{,_control}.ks`.
+
+### `lang/` — 191 files, zero diagnostic divergence
+
+Every `.ks` under `lang/` compiled with the pre-S2 and post-S2 binaries, output
+compared as a normalized sorted diagnostic set. **0 of 191 divergent.**
+
+A raw line-by-line diff shows 127 "divergent" files and is **void**: the same
+binary run twice on the same file produces those diffs too. Diagnostic emission
+order for out-of-package files is nondeterministic, so any A/B over this corpus
+must compare sorted sets. Recording it here because the naive diff looks
+alarming and is not.
+
+### Suite
+
+| run | counts |
+| --- | --- |
+| pre-S2 baseline (`091563ee`, build `0829e581`) | **3826 passed, 1 failed** |
+| post-S2, incl. the 2 promoted files (build `02bdd323`) | **3828 passed, 1 failed** |
+
+The lone failure is `types.generics.assoc_projection_bound_same_name_distinct_protocols`
+in both runs — filed as **G25**, out of S2's scope. **Zero collateral: no test
+changed verdict.** Both promoted files pass. `cargo clippy --release
+--all-targets` adds no warning to `kestrel-type-infer`; the pre-existing ones in
+`kestrel-analyze` / `kestrel-name-res` / `kestrel-syntax-tree` /
+`kestrel-codegen-llvm` / `kestrel-mir` are unchanged.
+
+### Residual found while verifying — **conformance lists** are still body-scoped
+
+Out of scope for S2, recorded so it is not re-discovered. Three sites resolve a
+`Conformances` entry that belongs to *another* entity using the ambient body
+scope: `find_inherited_protocol_type_args` (`resolve.rs:1951`),
+`extension_directly_conforms_to` (`resolve.rs:1791`), and the `Conformances`
+loop in `collect_assoc_type_receiver_free_bounds_inner` (`resolve.rs:2242`).
+The clause-holder argument applies verbatim — `extend X: P[Foo]` means whatever
+`Foo` means where the extension is written — but this is the conformance list,
+not the where clause, so it is a distinct finding and needs its own measurement
+before anyone touches it.
