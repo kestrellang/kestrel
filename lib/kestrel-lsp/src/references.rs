@@ -10,7 +10,8 @@
 //!
 //! Coverage today:
 //! - Direct entity references in expressions: `HirExpr::Def(target, ...)`,
-//!   `OverloadSet` containing `target`, `ProtocolCall { protocol: target }`.
+//!   `OverloadSet` containing `target`, `ProtocolCall { protocol: target }`,
+//!   and every segment of a `HirExpr::TypeRef` that names `target`.
 //! - Pattern-position references: `HirPat::Variant`, `HirPat::Struct`.
 //! - Inference-resolved member accesses: anything in `TypedBody::resolutions`
 //!   that maps to `target` (covers `Field`, `MethodCall`, `Call`,
@@ -93,6 +94,19 @@ pub fn references_to(world: &World, root: Entity, target: Entity) -> Vec<Referen
                         kind: RefKind::Direct,
                     })
                 },
+                // A type in expression position (`B.Item`): each segment that
+                // names `target`. A projection's span covers its base, so the
+                // site is clipped to the trailing identifier like a member.
+                HirExpr::TypeRef { ty, .. } => sites.extend(
+                    crate::semantic::hir_ty_named_entities(ty)
+                        .into_iter()
+                        .filter(|(e, _)| *e == target)
+                        .map(|(_, span)| ReferenceSite {
+                            file,
+                            span,
+                            kind: RefKind::MemberAccess,
+                        }),
+                ),
                 _ => {},
             }
         }

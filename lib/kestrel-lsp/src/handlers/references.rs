@@ -100,7 +100,7 @@ fn target_at(
             entity: body_entity,
             root,
         }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
+            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, offset, &ctx, root)
         {
             return Some(t);
         }
@@ -121,11 +121,16 @@ fn resolve_expr(
     hir: &HirBody,
     body: Entity,
     expr_id: HirExprId,
+    offset: usize,
     ctx: &kestrel_hecs::QueryContext<'_>,
     root: Entity,
 ) -> Option<Target> {
     match &hir.exprs[expr_id] {
         HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
+        // A type in expression position: the segment under the cursor.
+        HirExpr::TypeRef { ty, .. } => {
+            semantic::hir_ty_entity_at(ty, offset).map(|(e, _)| Target::Entity(e))
+        },
         HirExpr::Local(local_id, _) => Some(Target::Local {
             body,
             id: *local_id,
@@ -356,5 +361,37 @@ mod tests {
         let start_offset = li.position_to_offset(loc.1.start);
         let end_offset = li.position_to_offset(loc.1.end);
         let _ = (start_offset, end_offset, loc); // smoke-only
+    }
+
+    /// G26: references from the cursor on `Item` in `B.Item.zero()` target
+    /// the associated type, and the expression-position use is itself a site.
+    #[test]
+    fn references_from_projection_receiver() {
+        let mut c = Compiler::new();
+        let src = "module T\n\
+                   protocol Zero { static func zero() -> Self }\n\
+                   protocol Producer { type Item; func produce() -> Item }\n\
+                   func make[B](b: B) -> B.Item where B: Producer, B.Item: Zero { B.Item.zero() }\n";
+        let f = c.set_source("/tmp/refs_typeref.ks", src.into());
+        c.build(f);
+        let item_at = src.find("B.Item.zero").unwrap() + "B.".len();
+        let target = target_at(c.world(), f, item_at, c.root(), &c).expect("target");
+        let Target::Entity(e) = target else {
+            panic!("expected an entity target");
+        };
+        use kestrel_ast_builder::Name;
+        assert_eq!(
+            c.world().get::<Name>(e).map(|n| n.0.clone()),
+            Some("Item".into())
+        );
+        let sites = crate::references::references_to(c.world(), c.root(), e);
+        let hit = sites.iter().any(|s| {
+            let clipped = clip_to_identifier(src, &s.span, s.kind);
+            clipped.start == item_at && &src[clipped.start..clipped.end] == "Item"
+        });
+        assert!(
+            hit,
+            "expected the `B.Item.zero()` receiver as a site: {sites:?}"
+        );
     }
 }

@@ -6,6 +6,7 @@
 use kestrel_ast_builder::{Body, DeclSpan, FileId, FilePath, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat, HirPatId};
+use kestrel_hir::ty::HirTy;
 use kestrel_span::Span;
 use kestrel_syntax_tree::SyntaxNode;
 use rowan::TextSize;
@@ -82,6 +83,57 @@ pub fn hir_expr_span(expr: &HirExpr) -> Span {
         HirExpr::Error { span } => span.clone(),
         HirExpr::Sugar { span, .. } => span.clone(),
     }
+}
+
+/// Every entity a `HirTy` names, each paired with the span of the type node
+/// that names it. `B.Item` gives `(B, "B")` and `(Producer.Item, "B.Item")`:
+/// a projection's own span covers its base, so callers that want only the
+/// trailing name clip with `references::clip_to_identifier`.
+///
+/// The one walk for a type written in expression position
+/// (`HirExpr::TypeRef`, G26): hover, go-to-definition and references all
+/// read it from here.
+pub fn hir_ty_named_entities(ty: &HirTy) -> Vec<(Entity, Span)> {
+    let mut out = Vec::new();
+    collect_hir_ty_entities(ty, &mut out);
+    out
+}
+
+fn collect_hir_ty_entities(ty: &HirTy, out: &mut Vec<(Entity, Span)>) {
+    match ty {
+        HirTy::Struct { entity, args, span }
+        | HirTy::Enum { entity, args, span }
+        | HirTy::Protocol { entity, args, span }
+        | HirTy::AliasUse { entity, args, span } => {
+            out.push((*entity, span.clone()));
+            args.iter().for_each(|a| collect_hir_ty_entities(a, out));
+        },
+        HirTy::Param(entity, span) | HirTy::SelfType(entity, span) => {
+            out.push((*entity, span.clone()));
+        },
+        HirTy::AssocProjection { base, assoc, span } => {
+            collect_hir_ty_entities(base, out);
+            out.push((*assoc, span.clone()));
+        },
+        HirTy::Tuple(elems, _) => elems.iter().for_each(|e| collect_hir_ty_entities(e, out)),
+        HirTy::Function { params, ret, .. } => {
+            params.iter().for_each(|p| collect_hir_ty_entities(p, out));
+            collect_hir_ty_entities(ret, out);
+        },
+        HirTy::Opaque { bounds, .. } => bounds.iter().for_each(|b| collect_hir_ty_entities(b, out)),
+        HirTy::Ref { inner, .. } => collect_hir_ty_entities(inner, out),
+        HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) => {},
+    }
+}
+
+/// The entity named at `offset` inside a type: the smallest named node whose
+/// span contains it, so the cursor on `B` in `B.Item` is `B` and the cursor
+/// on `Item` is the associated type.
+pub fn hir_ty_entity_at(ty: &HirTy, offset: usize) -> Option<(Entity, Span)> {
+    hir_ty_named_entities(ty)
+        .into_iter()
+        .filter(|(_, s)| s.start <= offset && offset <= s.end)
+        .min_by_key(|(_, s)| s.end - s.start)
 }
 
 /// Find the smallest HIR expression whose span contains `offset`. Returns
@@ -221,5 +273,52 @@ mod tests {
         let id = hir_expr_at(&hir, body_offset).expect("expr");
         let span = hir_expr_span(&hir.exprs[id]);
         assert_eq!(&src[span.start..span.end], "42");
+    }
+
+    /// G26: `B.Item.zero()` lowers its receiver to `HirExpr::TypeRef`; the
+    /// walker must name `B` under the cursor on `B` and the associated type
+    /// `Item` under the cursor on `Item` — not the whole path as one entity.
+    #[test]
+    fn hir_ty_entity_at_splits_projection_segments() {
+        use kestrel_ast_builder::Name;
+        let mut c = Compiler::new();
+        let src = "module T\n\
+                   protocol Zero { static func zero() -> Self }\n\
+                   protocol Producer { type Item; func produce() -> Item }\n\
+                   func make[B](b: B) -> B.Item where B: Producer, B.Item: Zero { B.Item.zero() }\n";
+        let f = c.set_source("/tmp/typeref.ks", src.into());
+        c.build(f);
+        let at = src.find("B.Item.zero").unwrap();
+        let body = body_entity_at(c.world(), f, at).expect("body");
+        let world = c.world();
+        let ctx = world.query_context();
+        let hir = ctx
+            .query(kestrel_hir_lower::LowerBody {
+                entity: body,
+                root: c.root(),
+            })
+            .expect("hir");
+        let ty = hir
+            .exprs
+            .iter()
+            .find_map(|(_, e)| match e {
+                HirExpr::TypeRef { ty, .. } => Some(ty.clone()),
+                _ => None,
+            })
+            .expect("receiver `B.Item` lowers to a TypeRef");
+        let name_at = |offset: usize| {
+            let (e, span) = hir_ty_entity_at(&ty, offset).expect("entity at offset");
+            (
+                world.get::<Name>(e).map(|n| n.0.clone()),
+                &src[span.start..span.end],
+            )
+        };
+        assert_eq!(name_at(at), (Some("B".into()), "B"));
+        let (item, text) = name_at(at + "B.".len());
+        assert_eq!(item, Some("Item".into()));
+        assert!(
+            text.ends_with("Item"),
+            "span should end at `Item`: {text:?}"
+        );
     }
 }

@@ -306,7 +306,13 @@ fn entity_hover_range(
             root,
         }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
         {
-            let span = semantic::hir_expr_span(&hir.exprs[expr_id]);
+            let span = match &hir.exprs[expr_id] {
+                HirExpr::TypeRef { ty, .. } => {
+                    semantic::hir_ty_entity_at(ty, offset).map(|(_, s)| s)
+                },
+                _ => None,
+            }
+            .unwrap_or_else(|| semantic::hir_expr_span(&hir.exprs[expr_id]));
             return line_index.range_for(span.start, span.end);
         }
     }
@@ -351,7 +357,7 @@ fn entity_at_cursor(
             root,
         }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
         {
-            return entity_from_expr(&hir, body_entity, expr_id, &ctx, root);
+            return entity_from_expr(&hir, body_entity, expr_id, offset, &ctx, root);
         }
         // Inside a body but no expression at cursor — let the caller
         // fall through to local_at_binding / inferred-type paths.
@@ -365,11 +371,15 @@ fn entity_from_expr(
     hir: &HirBody,
     body: Entity,
     expr_id: HirExprId,
+    offset: usize,
     ctx: &kestrel_hecs::QueryContext<'_>,
     root: Entity,
 ) -> Option<Entity> {
     match &hir.exprs[expr_id] {
         HirExpr::Def(entity, _, _) => Some(*entity),
+        // A type in expression position (`B.Item` in `B.Item.zero()`): the
+        // segment under the cursor, `B` or the associated type `Item`.
+        HirExpr::TypeRef { ty, .. } => semantic::hir_ty_entity_at(ty, offset).map(|(e, _)| e),
         HirExpr::OverloadSet { candidates, .. } => candidates.first().copied(),
         HirExpr::MethodCall { .. }
         | HirExpr::Field { .. }
@@ -844,5 +854,18 @@ mod tests {
         let md = entity_hover_for(src, "greet").expect("hover");
         assert!(md.contains("public func greet()"), "{md}");
         assert!(md.contains("Public-facing message."), "{md}");
+    }
+
+    /// G26: the receiver of `B.Item.zero()` is a `TypeRef`, not a `Def`.
+    /// Hovering `Item` there must render the associated type declaration.
+    #[test]
+    fn entity_hover_on_projection_receiver_names_assoc_type() {
+        let src = "module T\n\
+                   protocol Zero { static func zero() -> Self }\n\
+                   protocol Producer { type Item; func produce() -> Item }\n\
+                   func make[B](b: B) -> B.Item where B: Producer, B.Item: Zero { B.Item.zero() }\n";
+        let needle = src.find("B.Item.zero").unwrap() + "B.".len();
+        let md = entity_hover_for(src, &src[needle..]).expect("hover on `Item`");
+        assert!(md.contains("type Item"), "{md}");
     }
 }

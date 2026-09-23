@@ -391,10 +391,31 @@ fn build_assoc_projection_base(
     span: &Span,
 ) -> HirTy {
     if segments.len() >= 2 {
-        // Lower segments[..last] as a standalone path.
+        // Lower segments[..last] as a standalone path, spanning only those
+        // segments (`B` in `B.Item`), so each node's span says which segment
+        // names which entity — LSP hover/definition on a `TypeRef` read it
+        // (G26). A synthesized path whose segment spans fall outside `span`
+        // keeps the whole span.
+        let prefix_segments = &segments[..segments.len() - 1];
+        let (first, last) = (
+            &prefix_segments[0],
+            &prefix_segments[prefix_segments.len() - 1],
+        );
+        let prefix_span = if span.start <= first.span.start
+            && first.span.start <= last.span.end
+            && last.span.end <= span.end
+        {
+            Span {
+                file_id: span.file_id,
+                start: first.span.start,
+                end: last.span.end,
+            }
+        } else {
+            span.clone()
+        };
         let prefix = AstType::Named {
-            segments: segments[..segments.len() - 1].to_vec(),
-            span: span.clone(),
+            segments: prefix_segments.to_vec(),
+            span: prefix_span,
         };
         lower_ast_type(ctx, owner, root, &prefix)
     } else {

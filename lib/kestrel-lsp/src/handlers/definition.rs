@@ -79,7 +79,7 @@ pub async fn handle(
                 })?;
 
                 let expr_id = semantic::hir_expr_at(&hir, offset)?;
-                let target = resolve_target(&hir, &typed, expr_id)?;
+                let target = resolve_target(&hir, &typed, expr_id, offset)?;
 
                 target_to_location(world, &sources, target)
             },
@@ -104,9 +104,14 @@ fn resolve_target(
     hir: &HirBody,
     typed: &kestrel_type_infer::result::TypedBody,
     expr_id: HirExprId,
+    offset: usize,
 ) -> Option<Target> {
     match &hir.exprs[expr_id] {
         HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
+        // A type in expression position: the segment under the cursor.
+        HirExpr::TypeRef { ty, .. } => {
+            semantic::hir_ty_entity_at(ty, offset).map(|(e, _)| Target::Entity(e))
+        },
         HirExpr::Local(local_id, _) => {
             let local: &Local = &hir.locals[*local_id];
             Some(Target::Local {
@@ -150,5 +155,51 @@ fn target_to_location(
             }
             None
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kestrel_ast_builder::Name;
+    use kestrel_compiler::Compiler;
+
+    /// G26: go-to-definition on `Item` in `B.Item.zero()` lands on the
+    /// associated type, and on `B` lands on the type parameter — the
+    /// receiver is a `TypeRef`, which carries both.
+    #[test]
+    fn definition_on_projection_receiver_segments() {
+        let mut c = Compiler::new();
+        let src = "module T\n\
+                   protocol Zero { static func zero() -> Self }\n\
+                   protocol Producer { type Item; func produce() -> Item }\n\
+                   func make[B](b: B) -> B.Item where B: Producer, B.Item: Zero { B.Item.zero() }\n";
+        let f = c.set_source("/tmp/def_typeref.ks", src.into());
+        c.build(f);
+        let at = src.find("B.Item.zero").unwrap();
+        let world = c.world();
+        let body = semantic::body_entity_at(world, f, at).expect("body");
+        let ctx = world.query_context();
+        let hir = ctx
+            .query(LowerBody {
+                entity: body,
+                root: c.root(),
+            })
+            .expect("hir");
+        let typed = ctx
+            .query(InferBody {
+                entity: body,
+                root: c.root(),
+            })
+            .expect("typed");
+        let target_name = |offset: usize| {
+            let expr = semantic::hir_expr_at(&hir, offset).expect("expr");
+            match resolve_target(&hir, &typed, expr, offset) {
+                Some(Target::Entity(e)) => world.get::<Name>(e).map(|n| n.0.clone()),
+                _ => None,
+            }
+        };
+        assert_eq!(target_name(at + "B.".len()), Some("Item".into()));
+        assert_eq!(target_name(at), Some("B".into()));
     }
 }
