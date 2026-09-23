@@ -13,6 +13,7 @@ use crate::constraint::{CallArg, ConformsOrigin, Constraint, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::generate::SubjectRoot;
+use crate::resolve::EqualityLhs;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
 use crate::unify::{self, UnifyError};
 use kestrel_ast_builder::arg_binding::{BindError, BindParam, Binding, bind_arguments};
@@ -3639,22 +3640,24 @@ fn emit_resolved_call(
                     }
                 }
             },
-            crate::resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
-                    let assoc_result = ctx.fresh();
-                    ctx.associated(tv, &assoc_name, assoc_result, span.clone());
-                    let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
-                    ctx.equal(assoc_result, rhs_tv, span.clone());
-                }
-            },
-            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
-                    let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
-                    ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+            crate::resolve::WhereClause::Equality { subject, rhs } => {
+                match subject.equality_lhs() {
+                    Some(EqualityLhs::Assoc { root: param, assoc }) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                            let assoc_result = ctx.fresh();
+                            let name = crate::resolve::assoc_name(qctx, assoc);
+                            ctx.associated(tv, &name, assoc_result, span.clone());
+                            let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
+                            ctx.equal(assoc_result, rhs_tv, span.clone());
+                        }
+                    },
+                    Some(EqualityLhs::Direct(param)) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
+                            let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
+                            ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+                        }
+                    },
+                    None => {},
                 }
             },
         }
@@ -4572,42 +4575,51 @@ fn solve_member(
                     }
                 }
             },
-            crate::resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                let param_tv =
-                    if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
-                        Some(fresh_params[idx])
-                    } else {
-                        subs.iter().find(|(e, _)| e == param).map(|&(_, tv)| tv)
-                    };
-                if let Some(tv) = param_tv {
-                    let assoc_result = ctx.fresh();
-                    ctx.associated(tv, assoc_name, assoc_result, span.clone());
-                    let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
-                    ctx.equal(assoc_result, rhs_tv, span.clone());
-                }
-            },
-            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
-                if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param) {
-                    // Method's own type param — redirect directly
-                    ctx.types[fresh_params[idx].0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
-                } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
-                    // Struct/extension type param — equate with RHS
-                    ctx.equal(tv, rhs_tv, span.clone());
-                } else if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*param)
-                    == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
-                {
-                    // Associated type (e.g. `Item` in `where Item = (A, B)`) —
-                    // resolve on receiver and equate with RHS
-                    if let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*param) {
-                        let assoc_tv = ctx.fresh();
-                        ctx.associated(receiver, &name.0, assoc_tv, span.clone());
-                        ctx.equal(assoc_tv, rhs_tv, span.clone());
-                    }
+            crate::resolve::WhereClause::Equality { subject, rhs } => {
+                match subject.equality_lhs() {
+                    Some(EqualityLhs::Assoc { root, assoc }) => {
+                        let param = &root;
+                        let assoc_name = &crate::resolve::assoc_name(ctx.query_ctx, assoc);
+                        let param_tv = if let Some(idx) =
+                            resolution.type_params.iter().position(|&p| p == *param)
+                        {
+                            Some(fresh_params[idx])
+                        } else {
+                            subs.iter().find(|(e, _)| e == param).map(|&(_, tv)| tv)
+                        };
+                        if let Some(tv) = param_tv {
+                            let assoc_result = ctx.fresh();
+                            ctx.associated(tv, assoc_name, assoc_result, span.clone());
+                            let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
+                            ctx.equal(assoc_result, rhs_tv, span.clone());
+                        }
+                    },
+                    Some(EqualityLhs::Direct(param)) => {
+                        let param = &param;
+                        let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
+                        if let Some(idx) = resolution.type_params.iter().position(|&p| p == *param)
+                        {
+                            // Method's own type param — redirect directly
+                            ctx.types[fresh_params[idx].0 as usize] =
+                                crate::ty::TySlot::Redirect(rhs_tv);
+                        } else if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == param) {
+                            // Struct/extension type param — equate with RHS
+                            ctx.equal(tv, rhs_tv, span.clone());
+                        } else if ctx.query_ctx.get::<kestrel_ast_builder::NodeKind>(*param)
+                            == Some(&kestrel_ast_builder::NodeKind::TypeAlias)
+                        {
+                            // Associated type (e.g. `Item` in `where Item = (A, B)`) —
+                            // resolve on receiver and equate with RHS
+                            if let Some(name) =
+                                ctx.query_ctx.get::<kestrel_ast_builder::Name>(*param)
+                            {
+                                let assoc_tv = ctx.fresh();
+                                ctx.associated(receiver, &name.0, assoc_tv, span.clone());
+                                ctx.equal(assoc_tv, rhs_tv, span.clone());
+                            }
+                        }
+                    },
+                    None => {},
                 }
             },
         }
@@ -5913,9 +5925,12 @@ fn emit_type_alias_where_clauses(
                     ctx.record_witness_args(alias_tv, protocol, arg_tvs);
                 }
             },
-            crate::resolve::WhereClause::TypeEquality {
-                assoc_name, rhs, ..
-            } => {
+            // About this alias (`Iter.Item = Item`); the root is not re-read.
+            crate::resolve::WhereClause::Equality { subject, rhs } => {
+                let Some(EqualityLhs::Assoc { assoc, .. }) = subject.equality_lhs() else {
+                    continue;
+                };
+                let assoc_name = crate::resolve::assoc_name(ctx.query_ctx, assoc);
                 // Emit associated type equality: e.g., `Iter.Item = Item`
                 // → Associated(alias_tv, "Item", fresh) + Equal(fresh, rhs_tv)
                 let fresh = ctx.fresh();
@@ -5938,9 +5953,6 @@ fn emit_type_alias_where_clauses(
                 {
                     ctx.push_assoc_sub(Some(alias_tv), inner, rhs_tv);
                 }
-            },
-            crate::resolve::WhereClause::DirectEquality { .. } => {
-                // Direct equality on TypeAlias — rare, skip for now
             },
         }
     }

@@ -149,6 +149,24 @@ pub enum WhereSubject {
 }
 
 impl WhereSubject {
+    /// Read an equality clause's subject as one of the two shapes
+    /// `WhereClausesOf` produces. `None` for any other shape (a `Self` root, a
+    /// deeper chain) — no producer emits one today, and a reader that meets it
+    /// must skip, i.e. permit.
+    pub(crate) fn equality_lhs(&self) -> Option<EqualityLhs> {
+        match self {
+            WhereSubject::Param(e) => Some(EqualityLhs::Direct(*e)),
+            WhereSubject::Projection { base, assoc } => match **base {
+                WhereSubject::Param(root) => Some(EqualityLhs::Assoc {
+                    root,
+                    assoc: *assoc,
+                }),
+                _ => None,
+            },
+            WhereSubject::SelfType => None,
+        }
+    }
+
     /// The subject entity iff this is a bare `Param` — the exact set of
     /// subjects the pre-D7 `WhereClause::Bound { param }` could hold.
     ///
@@ -229,14 +247,30 @@ pub enum WhereClause {
         /// Empty for non-generic protocols.
         protocol_type_args: Vec<HirTy>,
     },
-    /// `T.Item = SomeType` (associated type equality)
-    TypeEquality {
-        param: Entity,
-        assoc_name: String,
-        rhs: HirTy,
-    },
-    /// `V = Array[E]` (direct type parameter equality)
-    DirectEquality { param: Entity, rhs: HirTy },
+    /// `T.Item = SomeType` or `V = Array[E]`. The subject is the same
+    /// `WhereSubject` a bound carries, so the assoc is an **entity**, never a
+    /// name string (D7's deferred fold, G25 step 3). `WhereClausesOf` produces
+    /// exactly two shapes, read through [`WhereSubject::equality_lhs`].
+    Equality { subject: WhereSubject, rhs: HirTy },
+}
+
+/// The source name of an associated-type entity. The `Associated` constraint
+/// is name-keyed, so an equality clause's assoc entity is spelled back out
+/// here, at the one place a consumer needs the string.
+pub(crate) fn assoc_name(qctx: &kestrel_hecs::QueryContext<'_>, assoc: Entity) -> String {
+    qctx.get::<kestrel_ast_builder::Name>(assoc)
+        .map(|n| n.0.clone())
+        .unwrap_or_default()
+}
+
+/// The two left-hand shapes an [`WhereClause::Equality`] is produced in.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum EqualityLhs {
+    /// `root.assoc = X` — the former `TypeEquality`. `root` is a type
+    /// parameter or an associated-type alias (`TargetIterator.Item`).
+    Assoc { root: Entity, assoc: Entity },
+    /// `V = X` — the former `DirectEquality`.
+    Direct(Entity),
 }
 
 /// Slim trait abstracting world queries for testability.

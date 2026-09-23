@@ -17,7 +17,7 @@
 //!   returns the bounds written on the param's enclosing decl. Mirrors
 //!   `collect_param_protocol_bounds` in `resolve.rs`.
 //!
-//! Conservative on `TypeEquality` / `DirectEquality`: structural match
+//! Conservative on `Equality`: structural match
 //! against context. Generalize when a real test demands.
 
 use kestrel_hecs::{Entity, QueryContext};
@@ -47,11 +47,11 @@ pub fn constraint_entailed_by(
             Some(param) => bound_entailed(qctx, root, param, *protocol, context),
             None => false,
         },
-        // TypeEquality / DirectEquality carry HirTy on the RHS, which has
-        // no structural equality. Reject conservatively until a real
-        // caller demands proper handling — matches prior behavior in
+        // An equality carries HirTy on the RHS, which has no structural
+        // equality. Reject conservatively until a real caller demands proper
+        // handling — matches prior behavior in
         // `conformance_completeness::extension_where_clauses_satisfied`.
-        WhereClause::TypeEquality { .. } | WhereClause::DirectEquality { .. } => false,
+        WhereClause::Equality { .. } => false,
     }
 }
 

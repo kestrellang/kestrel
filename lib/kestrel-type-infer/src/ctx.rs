@@ -34,7 +34,7 @@ pub(crate) struct PendingPeel {
 /// `lower_subject` is not invertible — by the time a reader asks, the base may
 /// have unified with a concrete type no `WhereSubject` names.
 ///
-/// The base is stored **raw** — never `resolve()`d at push. `DirectEquality`
+/// The base is stored **raw** — never `resolve()`d at push. A direct equality (`V = X`)
 /// writes `TySlot::Redirect` straight into a param slot and ordinary
 /// unification redirects constantly, so a canonical snapshot taken at push goes
 /// stale and yields a false *miss* (the over-rejection failure mode). Both
@@ -43,7 +43,7 @@ pub(crate) struct PendingPeel {
 /// Same convention as `witness_protocol_args`.
 #[derive(Clone, Copy, Debug)]
 struct AssocSubKey {
-    /// `None` only for a genuinely baseless binding — `DirectEquality` on a
+    /// `None` only for a genuinely baseless binding — a direct equality on a
     /// TypeAlias entity (`where Item = Int64`), which names no receiver.
     base: Option<TyVar>,
     assoc: Entity,
@@ -236,7 +236,7 @@ pub struct InferCtx<'a> {
 
     /// Maps type parameter entities to their canonical TyVars.
     /// Ensures all references to the same type param share one TyVar,
-    /// even after the TyVar is redirected by DirectEquality.
+    /// even after the TyVar is redirected by a direct equality (`V = X`).
     pub(crate) param_tyvars: HashMap<Entity, TyVar>,
 
     /// Tracks Def(TypeParameter) expressions that haven't been consumed

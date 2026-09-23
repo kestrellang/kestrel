@@ -349,7 +349,7 @@ fn extension_bounds_hold_impl(
             ..
         } = clause
         else {
-            continue; // TypeEquality / DirectEquality — out of scope, treat satisfied.
+            continue; // Equality — out of scope, treat satisfied.
         };
         // NOTE: there is deliberately NO Copyable/Cloneable skip here. There
         // used to be one ("copyability is enforced by the move checker / mono"),

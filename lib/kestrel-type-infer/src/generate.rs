@@ -1979,22 +1979,24 @@ fn emit_where_clause_constraints_with_subs(
                     }
                 }
             },
-            crate::resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
-                    let assoc_result = ctx.fresh();
-                    ctx.associated(tv, &assoc_name, assoc_result, site_span.clone());
-                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
-                    ctx.equal(assoc_result, rhs_tv, site_span.clone());
-                }
-            },
-            crate::resolve::WhereClause::DirectEquality { param, rhs } => {
-                if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
-                    let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
-                    ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+            crate::resolve::WhereClause::Equality { subject, rhs } => {
+                match subject.equality_lhs() {
+                    Some(crate::resolve::EqualityLhs::Assoc { root, assoc }) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == root) {
+                            let assoc_result = ctx.fresh();
+                            let name = crate::resolve::assoc_name(ctx.query_ctx, assoc);
+                            ctx.associated(tv, &name, assoc_result, site_span.clone());
+                            let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
+                            ctx.equal(assoc_result, rhs_tv, site_span.clone());
+                        }
+                    },
+                    Some(crate::resolve::EqualityLhs::Direct(param)) => {
+                        if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == param) {
+                            let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
+                            ctx.types[tv.0 as usize] = crate::ty::TySlot::Redirect(rhs_tv);
+                        }
+                    },
+                    None => {},
                 }
             },
         }

@@ -75,25 +75,30 @@ pub fn resolve_where_clauses(
 ) -> Vec<WhereClause> {
     let mut result = Vec::new();
     if let Some(ast_wc) = ctx.get::<AstWhereClause>(entity) {
-        for constraint in &ast_wc.0 {
-            match constraint {
+        // Pass 1: every `Bound` in this holder. An equality's assoc may be
+        // reachable only through one of them (`where Item: Addable,
+        // Item.Output = Item` — `Output` is `Addable`'s, and name-res follows
+        // only `Item`'s *declared* bounds), so pass 2 needs them all first.
+        let bounds: Vec<Option<ResolvedBound>> = ast_wc
+            .0
+            .iter()
+            .map(|c| match c {
                 WhereConstraint::Bound {
                     subject, protocols, ..
-                } => {
-                    let Some(subject) = resolve_bound_subject(ctx, subject, entity, root) else {
-                        continue;
-                    };
-                    for protocol_ty in protocols {
-                        let Some(protocol) = resolve_type_entity(ctx, protocol_ty, entity, root)
-                        else {
-                            continue;
-                        };
-                        let protocol_type_args =
-                            extract_protocol_type_args(ctx, entity, root, protocol_ty);
+                } => resolve_bound(ctx, subject, protocols, entity, root),
+                _ => None,
+            })
+            .collect();
+        // Pass 2: emit in source order — body emitters are order-sensitive.
+        for (constraint, bound) in ast_wc.0.iter().zip(&bounds) {
+            match constraint {
+                WhereConstraint::Bound { .. } => {
+                    let Some(bound) = bound else { continue };
+                    for (protocol, protocol_type_args) in &bound.protocols {
                         result.push(WhereClause::Bound {
-                            subject: subject.clone(),
-                            protocol,
-                            protocol_type_args,
+                            subject: bound.subject.clone(),
+                            protocol: *protocol,
+                            protocol_type_args: protocol_type_args.clone(),
                         });
                     }
                 },
@@ -107,21 +112,14 @@ pub fn resolve_where_clauses(
                         ctx,
                         kestrel_hir_lower::lower_ast_type(ctx, entity, root, rhs),
                     );
-                    if let Some((param, assoc_name)) =
-                        extract_associated_type_path(ctx, lhs, entity, root)
-                    {
-                        result.push(WhereClause::TypeEquality {
-                            param,
-                            assoc_name,
-                            rhs: rhs_hir,
-                        });
-                    } else if let Some(param) = resolve_type_param_or_assoc(ctx, lhs, entity, root)
-                    {
-                        result.push(WhereClause::DirectEquality {
-                            param,
-                            rhs: rhs_hir,
-                        });
-                    }
+                    let Some(subject) = resolve_equality_subject(ctx, lhs, &bounds, entity, root)
+                    else {
+                        continue;
+                    };
+                    result.push(WhereClause::Equality {
+                        subject,
+                        rhs: rhs_hir,
+                    });
                 },
                 WhereConstraint::NegativeBound { .. } => {
                     // Negative bounds are not modeled in inference where clauses.
@@ -455,6 +453,130 @@ fn extract_associated_type_path(
     }) {
         TypeResolution::Found(e) => Some((e, assoc_name.clone())),
         _ => None,
+    }
+}
+
+/// One resolved `Bound` constraint: its subject and each protocol it names.
+struct ResolvedBound {
+    subject: WhereSubject,
+    protocols: Vec<(Entity, Vec<HirTy>)>,
+}
+
+fn resolve_bound(
+    ctx: &QueryContext<'_>,
+    subject: &AstType,
+    protocols: &[AstType],
+    entity: Entity,
+    root: Entity,
+) -> Option<ResolvedBound> {
+    let subject = resolve_bound_subject(ctx, subject, entity, root)?;
+    let protocols = protocols
+        .iter()
+        .filter_map(|protocol_ty| {
+            let protocol = resolve_type_entity(ctx, protocol_ty, entity, root)?;
+            Some((
+                protocol,
+                extract_protocol_type_args(ctx, entity, root, protocol_ty),
+            ))
+        })
+        .collect();
+    Some(ResolvedBound { subject, protocols })
+}
+
+/// An equality's left side as a subject. `T.Item = X` is
+/// `Projection { Param(T), Item }` with `Item` resolved to its **entity**;
+/// `V = X` is `Param(V)`. `None` drops the clause, as an unresolvable clause
+/// always has been.
+fn resolve_equality_subject(
+    ctx: &QueryContext<'_>,
+    lhs: &AstType,
+    bounds: &[Option<ResolvedBound>],
+    entity: Entity,
+    root: Entity,
+) -> Option<WhereSubject> {
+    let Some((param, assoc_name)) = extract_associated_type_path(ctx, lhs, entity, root) else {
+        return resolve_type_param_or_assoc(ctx, lhs, entity, root).map(WhereSubject::Param);
+    };
+    let assoc = resolve_assoc_by_path(ctx, lhs, param, entity, root)
+        .or_else(|| resolve_assoc_via_holder_bounds(ctx, param, &assoc_name, bounds, root))?;
+    Some(WhereSubject::Projection {
+        base: Box::new(WhereSubject::Param(param)),
+        assoc,
+    })
+}
+
+/// The assoc entity by the same segment walk the bound-subject path uses
+/// (`resolve_type_path_chain`), in `entity`'s scope. The root may be a type
+/// parameter or an associated-type alias (`TargetIterator.Item`), which
+/// `Param` already denotes for bare-assoc subjects.
+fn resolve_assoc_by_path(
+    ctx: &QueryContext<'_>,
+    ast_ty: &AstType,
+    param: Entity,
+    entity: Entity,
+    root: Entity,
+) -> Option<Entity> {
+    let AstType::Named { segments, .. } = ast_ty else {
+        return None;
+    };
+    let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+    let chain = resolve_type_path_chain(ctx, &seg_names, entity, root);
+    match chain.steps.as_slice() {
+        [base, assoc] if *base == param => Some(*assoc),
+        _ => None,
+    }
+}
+
+/// Pass-2 fallback: `assoc_name` among the associated types of the protocols
+/// **this holder's** own bounds place on `param` (refinement parents included,
+/// via `ProtocolAssociatedTypes`). Scoped to the holder, like S2: another
+/// holder's bounds never widen what a name means here.
+///
+/// Only the declaring protocol's requirement counts (parent is a `Protocol`),
+/// so an extension default of the same name is not a second candidate. Two or
+/// more distinct requirements is a genuine ambiguity: the clause is dropped,
+/// and the `where-eq` trace records it.
+fn resolve_assoc_via_holder_bounds(
+    ctx: &QueryContext<'_>,
+    param: Entity,
+    assoc_name: &str,
+    bounds: &[Option<ResolvedBound>],
+    root: Entity,
+) -> Option<Entity> {
+    let subject = WhereSubject::Param(param);
+    let mut found: Vec<Entity> = Vec::new();
+    for bound in bounds.iter().flatten().filter(|b| b.subject == subject) {
+        for &(protocol, _) in &bound.protocols {
+            let members = ctx.query(kestrel_name_res::ProtocolAssociatedTypes { protocol, root });
+            for m in members {
+                let named = ctx
+                    .get::<kestrel_ast_builder::Name>(m.entity)
+                    .is_some_and(|n| n.0 == assoc_name);
+                let is_requirement = ctx
+                    .parent_of(m.entity)
+                    .is_some_and(|p| ctx.get::<NodeKind>(p) == Some(&NodeKind::Protocol));
+                if named && is_requirement && !found.contains(&m.entity) {
+                    found.push(m.entity);
+                }
+            }
+        }
+    }
+    match found.as_slice() {
+        [one] => Some(*one),
+        [] => {
+            kestrel_debug::ktrace!(
+                "where-eq",
+                "UNRESOLVED param={param:?} assoc={assoc_name}: no bound in this holder declares it"
+            );
+            None
+        },
+        many => {
+            kestrel_debug::ktrace!(
+                "where-eq",
+                "AMBIGUOUS param={param:?} assoc={assoc_name} candidates={many:?}: clause dropped"
+            );
+            None
+        },
     }
 }
 

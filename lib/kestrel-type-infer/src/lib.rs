@@ -369,28 +369,29 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
                 // `resolve::collect_extension_where_clause_protocols`, not here.
                 resolve::WhereSubject::SelfType => {},
             },
-            resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => emit_method_type_equality_constraint(
-                ctx,
-                param,
-                &assoc_name,
-                &rhs,
-                &type_params,
-                &parent_type_params,
-                &span,
-            ),
-            resolve::WhereClause::DirectEquality { param, rhs } => {
-                emit_method_direct_equality_constraint(
-                    ctx,
-                    query_ctx,
-                    param,
-                    &rhs,
-                    &type_params,
-                    &parent_type_params,
-                );
+            resolve::WhereClause::Equality { subject, rhs } => match subject.equality_lhs() {
+                Some(resolve::EqualityLhs::Assoc { root, assoc }) => {
+                    emit_method_type_equality_constraint(
+                        ctx,
+                        root,
+                        &resolve::assoc_name(query_ctx, assoc),
+                        &rhs,
+                        &type_params,
+                        &parent_type_params,
+                        &span,
+                    )
+                },
+                Some(resolve::EqualityLhs::Direct(param)) => {
+                    emit_method_direct_equality_constraint(
+                        ctx,
+                        query_ctx,
+                        param,
+                        &rhs,
+                        &type_params,
+                        &parent_type_params,
+                    );
+                },
+                None => {},
             },
         }
     }
@@ -807,50 +808,24 @@ fn emit_container_where_clauses(
                     &span,
                 );
             },
-            resolve::WhereClause::TypeEquality {
-                param,
-                assoc_name,
-                rhs,
-            } => {
-                let span = Span::synthetic(0);
-                let subject_tv = get_or_create_subject_tv(
-                    ctx,
-                    &target_type_params,
-                    fresh_args,
-                    &mut assoc_type_tvs,
-                    param,
-                    self_tv,
-                    query_ctx,
-                );
-                let assoc_result = ctx.fresh();
-                ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
+            resolve::WhereClause::Equality { subject, rhs } => match subject.equality_lhs() {
+                Some(resolve::EqualityLhs::Assoc { root: param, assoc }) => {
+                    let assoc_name = resolve::assoc_name(query_ctx, assoc);
+                    let span = Span::synthetic(0);
+                    let subject_tv = get_or_create_subject_tv(
+                        ctx,
+                        &target_type_params,
+                        fresh_args,
+                        &mut assoc_type_tvs,
+                        param,
+                        self_tv,
+                        query_ctx,
+                    );
+                    let assoc_result = ctx.fresh();
+                    ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
 
-                // Build subs so RHS references to type params and associated types
-                // resolve to the same TyVars used in constraints (not raw Named entities)
-                let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
-                    .iter()
-                    .zip(fresh_args.iter())
-                    .map(|(&e, &tv)| (e, tv))
-                    .collect();
-                for (&e, &tv) in &assoc_type_tvs {
-                    rhs_subs.push((e, tv));
-                }
-                let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
-                ctx.equal(assoc_result, rhs_tv, span);
-
-                // Register the associated type entity → rhs_tv mapping so the solver
-                // can substitute it in protocol member signatures (e.g., Output → Item).
-                // Search param's protocol bounds for a child TypeAlias named assoc_name.
-                if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
-                    ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
-                }
-            },
-            resolve::WhereClause::DirectEquality { param, rhs } => {
-                // Direct type param equality: V = Array[E]
-                // Overwrite the param's TyVar slot with the concrete RHS type.
-                if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
-                    let param_tv = fresh_args[idx];
-                    // Build subs so RHS type param references resolve correctly
+                    // Build subs so RHS references to type params and associated types
+                    // resolve to the same TyVars used in constraints (not raw Named entities)
                     let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
                         .iter()
                         .zip(fresh_args.iter())
@@ -860,9 +835,35 @@ fn emit_container_where_clauses(
                         rhs_subs.push((e, tv));
                     }
                     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
-                    // Overwrite the Param slot → the param IS the RHS type in this scope
-                    ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
-                }
+                    ctx.equal(assoc_result, rhs_tv, span);
+
+                    // Register the associated type entity → rhs_tv mapping so the solver
+                    // can substitute it in protocol member signatures (e.g., Output → Item).
+                    // Search param's protocol bounds for a child TypeAlias named assoc_name.
+                    if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
+                        ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
+                    }
+                },
+                Some(resolve::EqualityLhs::Direct(param)) => {
+                    // Direct type param equality: V = Array[E]
+                    // Overwrite the param's TyVar slot with the concrete RHS type.
+                    if let Some(idx) = target_type_params.iter().position(|&p| p == param) {
+                        let param_tv = fresh_args[idx];
+                        // Build subs so RHS type param references resolve correctly
+                        let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
+                            .iter()
+                            .zip(fresh_args.iter())
+                            .map(|(&e, &tv)| (e, tv))
+                            .collect();
+                        for (&e, &tv) in &assoc_type_tvs {
+                            rhs_subs.push((e, tv));
+                        }
+                        let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
+                        // Overwrite the Param slot → the param IS the RHS type in this scope
+                        ctx.types[param_tv.0 as usize] = ty::TySlot::Redirect(rhs_tv);
+                    }
+                },
+                None => {},
             },
         }
     }
@@ -988,11 +989,14 @@ fn emit_protocol_assoc_type_where_clauses(
                         ctx.record_witness_args(alias_tv, bound_proto, arg_tvs);
                     }
                 },
-                resolve::WhereClause::TypeEquality {
-                    assoc_name: inner_assoc,
-                    rhs,
-                    ..
-                } => {
+                // The clause is about this alias (`TargetIterator.Item = …`); the
+                // root is not re-read, as before the fold.
+                resolve::WhereClause::Equality { subject, rhs } => {
+                    let Some(resolve::EqualityLhs::Assoc { assoc, .. }) = subject.equality_lhs()
+                    else {
+                        continue;
+                    };
+                    let inner_assoc = resolve::assoc_name(query_ctx, assoc);
                     let fresh = ctx.fresh();
                     ctx.associated(alias_tv, &inner_assoc, fresh, span.clone());
 
@@ -1021,7 +1025,6 @@ fn emit_protocol_assoc_type_where_clauses(
                         ctx.push_assoc_sub(Some(alias_tv), inner_entity, rhs_tv);
                     }
                 },
-                resolve::WhereClause::DirectEquality { .. } => {},
             }
         }
     }

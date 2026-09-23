@@ -87,6 +87,41 @@
 > extras were 19 KEEP + 3 DIRECT. Resolving that assoc needs where-clause-aware
 > path resolution (the D7 "path resolution needs an order" concern, for
 > clause-granted bounds), so it is a design question, not a focused fold.
+>
+> **Step 3 landed (2026-09-23), with two-pass resolution.** `WhereClause` now
+> has `Bound` and `Equality { subject: WhereSubject, rhs }`. `T.Item = X` is
+> `Projection { Param(T), Item-entity }` and `V = X` is `Param(V)`; an alias
+> root reuses `Param(alias)`, so no new variant was needed.
+> `resolve_where_clauses` resolves every `Bound` of the holder first (pass 1).
+> It then resolves equalities in source order (pass 2): by the name-res
+> segment walk, and if that fails, by `assoc_name` among the associated types
+> of the protocols this holder's own bounds place on the same subject
+> (`ProtocolAssociatedTypes`, which includes refinement parents; only the
+> requirement declared on a protocol counts). **Ambiguity (2+ requirements)
+> keeps the clause out and traces `KESTREL_DEBUG=where-eq` AMBIGUOUS**, pinned
+> by `types/generics/assoc_equality_ambiguous_across_holder_bounds.ks`: the
+> body is rejected, not at an ideal location. Zero matches traces UNRESOLVED.
+>
+> **Clause census** (3681 testdata files + 17 `lang/` packages):
+>
+> | | prototype | two-pass |
+> |---|---|---|
+> | kept via path walk | 62,596 | 62,596 |
+> | kept via holder bounds | — | 7,362 |
+> | kept direct (`V = X`) | 18,408 | 18,408 |
+> | **dropped** | **7,362** | **0** |
+> | AMBIGUOUS / UNRESOLVED | — | 0 / 0 |
+>
+> Per compilation: 17 + 2 + 5 = 24 clauses, 0 dropped. Suite 3838 passed / 4
+> failed (the +1 is the new ambiguity test); no existing verdict changed.
+> `sum()`/`product()` are covered by `stdlib/iterator/min_max_sorted.ks`
+> (execution), which passes.
+>
+> **Caveat: the string key is gone from the clause layer only.**
+> `Constraint::Associated { container, name: String, result, span }` is still
+> keyed by name one layer down: consumers spell the entity back out with
+> `resolve::assoc_name`. Getting to "no name matching" means making that
+> constraint entity-keyed too. That is a separate change, noted and not done.
 > Found while trying to close G17's C6. Every claim below carries a provenance
 > stamp per [`../../contributing/verifying-claims.md`](../../contributing/verifying-claims.md).
 
