@@ -6138,9 +6138,11 @@ fn lower_hir_ty_sub(
             let base_tv = lower_hir_ty_sub(ctx, base, self_entity, recv_tv, subs);
             // R7 — the `leak5.ks` site. Since C3 `base_tv` is the key, so a
             // clause about `A.Item` no longer answers a projection off `B`.
-            if let Some(tv) =
-                ctx.assoc_sub("solver:lower_hir_ty_sub:AssocProjection", Some(base_tv), *assoc)
-            {
+            if let Some(tv) = ctx.assoc_sub(
+                "solver:lower_hir_ty_sub:AssocProjection",
+                Some(base_tv),
+                *assoc,
+            ) {
                 return tv;
             }
             ctx.project_associated(base_tv, *assoc, span.clone())

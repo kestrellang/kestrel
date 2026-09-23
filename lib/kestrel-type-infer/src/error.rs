@@ -267,7 +267,10 @@ fn vis_label(v: &Vis) -> &'static str {
 /// The "why" note for E624 — names the property of the source kind that the
 /// expected slot needs and the source cannot supply. Mirrors the rejected
 /// cells of the passing table in docs/design/closures.md.
-fn kind_mismatch_note(expected: kestrel_ast::FnTypeKind, actual: kestrel_ast::FnTypeKind) -> String {
+fn kind_mismatch_note(
+    expected: kestrel_ast::FnTypeKind,
+    actual: kestrel_ast::FnTypeKind,
+) -> String {
     use kestrel_ast::FnTypeKind::*;
     match (actual, expected) {
         // Frame views are not owned environments and cannot leave the frame.

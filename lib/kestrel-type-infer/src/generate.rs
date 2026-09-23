@@ -2138,10 +2138,7 @@ pub(crate) fn lower_subject_with_base(
     use crate::resolve::WhereSubject;
     match subject {
         WhereSubject::Param(e) => match root {
-            SubjectRoot::Subs(subs) => subs
-                .iter()
-                .find(|(s, _)| s == e)
-                .map(|&(_, tv)| (None, tv)),
+            SubjectRoot::Subs(subs) => subs.iter().find(|(s, _)| s == e).map(|&(_, tv)| (None, tv)),
             SubjectRoot::Mint => Some((None, ctx.param(*e))),
         },
         WhereSubject::SelfType => None,
