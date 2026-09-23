@@ -1984,8 +1984,7 @@ fn emit_where_clause_constraints_with_subs(
                     Some(crate::resolve::EqualityLhs::Assoc { root, assoc }) => {
                         if let Some(&(_, tv)) = subs.iter().find(|(entity, _)| *entity == root) {
                             let assoc_result = ctx.fresh();
-                            let name = crate::resolve::assoc_name(ctx.query_ctx, assoc);
-                            ctx.associated(tv, &name, assoc_result, site_span.clone());
+                            ctx.associated_entity(tv, assoc, assoc_result, site_span.clone());
                             let rhs_tv = lower_hir_ty_with_subs(ctx, &rhs, subs);
                             ctx.equal(assoc_result, rhs_tv, site_span.clone());
                         }

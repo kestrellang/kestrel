@@ -355,6 +355,23 @@ pub trait TypeResolver {
         name: &str,
     ) -> Option<AssociatedTypeResolution>;
 
+    /// [`Self::resolve_associated_type`] for a caller that holds the
+    /// associated type's **entity** (G29 — `AssocKey::Entity`). On an abstract
+    /// container the answer is that requirement, never a same-named one
+    /// reached first through another bound. `name` is the entity's spelling,
+    /// which is how a *concrete* conformer's binding witnesses a requirement.
+    ///
+    /// The default answers by name, for resolvers that model no protocols.
+    fn resolve_associated_type_by_entity(
+        &self,
+        container: &TyKind,
+        assoc: Entity,
+        name: &str,
+    ) -> Option<AssociatedTypeResolution> {
+        let _ = assoc;
+        self.resolve_associated_type(container, name)
+    }
+
     /// Look up a builtin entity by language feature.
     fn builtin(&self, feature: Builtin) -> Option<Entity>;
 
@@ -932,26 +949,35 @@ impl TypeResolver for WorldResolver<'_> {
                     kestrel_name_res::extensions::resolve_lang_child(self.ctx, self.root, "!")?;
                 self.find_associated_type_in_entity_and_extensions(entity, name)
             },
-            TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => {
-                self.find_associated_type_in_protocol(*entity, name)
-            },
-            TyKind::TypeAlias { entity, .. } => {
-                // Protocol associated type (e.g. Iter: Iterator) —
-                // search the bound protocols for the name.
-                let bound_protocols = self.collect_assoc_type_protocol_bounds(*entity);
-                self.find_associated_type_in_protocols(&bound_protocols, name)
-            },
-            TyKind::Param { entity } => {
-                let bound_protocols = self.collect_param_protocol_bounds(*entity);
-                self.find_associated_type_in_protocols(&bound_protocols, name)
-            },
-            TyKind::AssocProjection { assoc, .. } => {
-                // Nested: T.Iter.Item — search Iter's bound protocols for Item.
-                let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
+            TyKind::Protocol { .. }
+            | TyKind::SelfType { .. }
+            | TyKind::TypeAlias { .. }
+            | TyKind::Param { .. }
+            | TyKind::AssocProjection { .. } => {
+                let bound_protocols = self.abstract_container_bounds(container)?;
                 self.find_associated_type_in_protocols(&bound_protocols, name)
             },
             _ => None,
         }
+    }
+
+    fn resolve_associated_type_by_entity(
+        &self,
+        container: &TyKind,
+        assoc: Entity,
+        name: &str,
+    ) -> Option<AssociatedTypeResolution> {
+        let by_name = self.resolve_associated_type(container, name);
+        // A concrete conformer's `type Out = …` witnesses every requirement
+        // spelled `Out`, so there the name *is* the match rule.
+        let Some(protocols) = self.abstract_container_bounds(container) else {
+            return by_name;
+        };
+        let by_entity = self.find_associated_type_in_protocols_where(&protocols, |e| e == assoc);
+        if kestrel_debug::is_enabled("g29-assoc") {
+            self.audit_assoc_key(container, assoc, by_name.as_ref(), by_entity.as_ref());
+        }
+        by_name
     }
 
     fn builtin(&self, feature: Builtin) -> Option<Entity> {
@@ -1382,18 +1408,24 @@ impl WorldResolver<'_> {
         None
     }
 
-    /// Search a protocol for an associated type, including inherited protocols
-    /// and protocol extensions.
-    ///
-    /// TODO: Move this into a shared name-resolution query that returns a
-    /// single associated-type member by name, so type inference does not need
-    /// to know how protocol associated-type traversal is assembled.
-    fn find_associated_type_in_protocol(
-        &self,
-        protocol: Entity,
-        name: &str,
-    ) -> Option<AssociatedTypeResolution> {
-        self.find_associated_type_in_protocols(&[protocol], name)
+    /// The protocols an **abstract** container's associated types come from,
+    /// in lookup order; `None` for a concrete container, whose own bindings
+    /// answer instead. The one list both the name and the entity lookup
+    /// search (G29).
+    fn abstract_container_bounds(&self, container: &TyKind) -> Option<Vec<Entity>> {
+        match container {
+            TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(vec![*entity]),
+            // Protocol associated type (`Iter: Iterator`) — its bound protocols.
+            TyKind::TypeAlias { entity, .. } => {
+                Some(self.collect_assoc_type_protocol_bounds(*entity))
+            },
+            TyKind::Param { entity } => Some(self.collect_param_protocol_bounds(*entity)),
+            // Nested `T.Iter.Item` — `Iter`'s bound protocols.
+            TyKind::AssocProjection { assoc, .. } => {
+                Some(self.collect_assoc_type_protocol_bounds(*assoc))
+            },
+            _ => None,
+        }
     }
 
     /// Search protocol bounds for an associated type with the given name.
@@ -1407,13 +1439,25 @@ impl WorldResolver<'_> {
         protocols: &[Entity],
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
+        self.find_associated_type_in_protocols_where(protocols, |e| {
+            self.ctx.get::<Name>(e).is_some_and(|n| n.0 == name)
+        })
+    }
+
+    /// The first associated type of `protocols` (same traversal and order as
+    /// [`Self::find_associated_type_in_protocols`]) whose entity `matches`.
+    fn find_associated_type_in_protocols_where(
+        &self,
+        protocols: &[Entity],
+        matches: impl Fn(Entity) -> bool,
+    ) -> Option<AssociatedTypeResolution> {
         for &proto in protocols {
             let members = self.ctx.query(kestrel_name_res::ProtocolAssociatedTypes {
                 protocol: proto,
                 root: self.root,
             });
             for m in members {
-                if self.ctx.get::<Name>(m.entity).is_none_or(|n| n.0 != name) {
+                if !matches(m.entity) {
                     continue;
                 }
                 // Concrete (has TypeAnnotation) → lower and return.
@@ -2723,6 +2767,53 @@ impl WorldResolver<'_> {
     /// `Parent.Name#index` for audit output. The index disambiguates two
     /// same-named entities under the same parent, which is the whole point of
     /// a shadowing audit.
+    /// G29 probe (temporary): would solving an entity-keyed `Associated`
+    /// reach a different associated type than solving it by name does?
+    fn audit_assoc_key(
+        &self,
+        container: &TyKind,
+        assoc: Entity,
+        by_name: Option<&AssociatedTypeResolution>,
+        by_entity: Option<&AssociatedTypeResolution>,
+    ) {
+        let reached = |r: Option<&AssociatedTypeResolution>| match r.map(|r| &r.resolved) {
+            Some(kestrel_hir::ty::HirTy::AliasUse { entity, .. }) => Some(*entity),
+            _ => None,
+        };
+        let (n, e) = (reached(by_name), reached(by_entity));
+        let verdict = match (by_name.is_some(), by_entity.is_some()) {
+            (false, false) => "NONE",
+            (true, false) => "UNREACH",
+            (false, true) => "NAMEMISS",
+            (true, true)
+                if by_name
+                    .zip(by_entity)
+                    .is_some_and(|(a, b)| a.resolved.same_type(&b.resolved)) =>
+            {
+                "SAME"
+            },
+            (true, true) => "DIFF",
+        };
+        let show = |x: Option<Entity>| x.map_or_else(|| "-".to_string(), |e| self.audit_path(e));
+        kestrel_debug::ktrace!(
+            "g29-assoc",
+            "{verdict} container={} assoc={} byname={} byentity={} owner={}",
+            match container {
+                TyKind::Param { entity } => format!("param:{}", self.audit_path(*entity)),
+                TyKind::TypeAlias { entity, .. } => format!("alias:{}", self.audit_path(*entity)),
+                TyKind::AssocProjection { assoc, .. } =>
+                    format!("proj:{}", self.audit_path(*assoc)),
+                TyKind::Protocol { entity, .. } => format!("proto:{}", self.audit_path(*entity)),
+                TyKind::SelfType { entity } => format!("self:{}", self.audit_path(*entity)),
+                _ => "other".to_string(),
+            },
+            self.audit_path(assoc),
+            show(n),
+            show(e),
+            self.audit_path(self.body_owner),
+        );
+    }
+
     fn audit_path(&self, entity: Entity) -> String {
         let name = |e: Entity| {
             self.ctx

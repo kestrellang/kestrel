@@ -374,7 +374,7 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
                     emit_method_type_equality_constraint(
                         ctx,
                         root,
-                        &resolve::assoc_name(query_ctx, assoc),
+                        assoc,
                         &rhs,
                         &type_params,
                         &parent_type_params,
@@ -497,7 +497,7 @@ fn emit_method_projection_bound_constraint(
 fn emit_method_type_equality_constraint(
     ctx: &mut InferCtx<'_>,
     param: Entity,
-    assoc_name: &str,
+    assoc: Entity,
     rhs: &kestrel_hir::ty::HirTy,
     type_params: &[Entity],
     parent_type_params: &[Entity],
@@ -505,13 +505,15 @@ fn emit_method_type_equality_constraint(
 ) {
     let subject_tv = ctx.param(param);
     let assoc_result = ctx.fresh();
-    ctx.associated(subject_tv, assoc_name, assoc_result, span.clone());
+    ctx.associated_entity(subject_tv, assoc, assoc_result, span.clone());
 
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
     ctx.equal(assoc_result, rhs_tv, span.clone());
 
-    if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, assoc_name) {
+    let assoc_name = resolve::assoc_name(ctx.query_ctx, assoc);
+    let looked_up = find_assoc_type_in_bounds(ctx, param, &assoc_name);
+    if let Some(assoc_entity) = g29_memo_probe(ctx, "lib:method_eq", looked_up, assoc) {
         ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
     }
 }
@@ -822,7 +824,7 @@ fn emit_container_where_clauses(
                         query_ctx,
                     );
                     let assoc_result = ctx.fresh();
-                    ctx.associated(subject_tv, &assoc_name, assoc_result, span.clone());
+                    ctx.associated_entity(subject_tv, assoc, assoc_result, span.clone());
 
                     // Build subs so RHS references to type params and associated types
                     // resolve to the same TyVars used in constraints (not raw Named entities)
@@ -840,7 +842,10 @@ fn emit_container_where_clauses(
                     // Register the associated type entity → rhs_tv mapping so the solver
                     // can substitute it in protocol member signatures (e.g., Output → Item).
                     // Search param's protocol bounds for a child TypeAlias named assoc_name.
-                    if let Some(assoc_entity) = find_assoc_type_in_bounds(ctx, param, &assoc_name) {
+                    let looked_up = find_assoc_type_in_bounds(ctx, param, &assoc_name);
+                    if let Some(assoc_entity) =
+                        g29_memo_probe(ctx, "lib:container_eq", looked_up, assoc)
+                    {
                         ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
                     }
                 },
@@ -916,13 +921,9 @@ fn emit_protocol_assoc_type_where_clauses(
             {
                 continue;
             }
-            let assoc_name = query_ctx
-                .get::<kestrel_ast_builder::Name>(child)
-                .map(|n| n.0.clone())
-                .unwrap_or_default();
             assoc_type_tvs.entry(child).or_insert_with(|| {
                 let tv = ctx.fresh();
-                ctx.associated(subject_tv, &assoc_name, tv, span.clone());
+                ctx.associated_entity(subject_tv, child, tv, span.clone());
                 ctx.push_assoc_sub(Some(subject_tv), child, tv);
                 tv
             });
@@ -950,13 +951,9 @@ fn emit_protocol_assoc_type_where_clauses(
         }
 
         // Get the TyVar for this associated type (e.g., T.Iter)
-        let assoc_name = query_ctx
-            .get::<kestrel_ast_builder::Name>(child)
-            .map(|n| n.0.clone())
-            .unwrap_or_default();
         let alias_tv = *assoc_type_tvs.entry(child).or_insert_with(|| {
             let tv = ctx.fresh();
-            ctx.associated(subject_tv, &assoc_name, tv, span.clone());
+            ctx.associated_entity(subject_tv, child, tv, span.clone());
             ctx.push_assoc_sub(Some(subject_tv), child, tv);
             tv
         });
@@ -998,7 +995,7 @@ fn emit_protocol_assoc_type_where_clauses(
                     };
                     let inner_assoc = resolve::assoc_name(query_ctx, assoc);
                     let fresh = ctx.fresh();
-                    ctx.associated(alias_tv, &inner_assoc, fresh, span.clone());
+                    ctx.associated_entity(alias_tv, assoc, fresh, span.clone());
 
                     // Build subs so RHS references resolve correctly
                     let mut rhs_subs: Vec<(Entity, ty::TyVar)> = target_type_params
@@ -1021,7 +1018,10 @@ fn emit_protocol_assoc_type_where_clauses(
                     // Register so solve_associated can reuse. Base is the alias
                     // itself: this is `TargetIterator.Item`, not `Self.Item`
                     // (G17 P7 — the Iterable/Iterator bridge).
-                    if let Some(inner_entity) = alias_bound_assoc_entity(ctx, child, &inner_assoc) {
+                    let looked_up = alias_bound_assoc_entity(ctx, child, &inner_assoc);
+                    if let Some(inner_entity) =
+                        g29_memo_probe(ctx, "lib:protocol_assoc_eq", looked_up, assoc)
+                    {
                         ctx.push_assoc_sub(Some(alias_tv), inner_entity, rhs_tv);
                     }
                 },
@@ -1056,13 +1056,10 @@ fn get_or_create_subject_tv(
         if let Some(&cached) = assoc_type_tvs.get(&param) {
             return cached;
         }
-        // Get the name of the associated type
-        if let Some(name) = query_ctx.get::<kestrel_ast_builder::Name>(param) {
-            let result_tv = ctx.fresh();
-            ctx.associated(self_tv, &name.0, result_tv, Span::synthetic(0));
-            assoc_type_tvs.insert(param, result_tv);
-            return result_tv;
-        }
+        let result_tv = ctx.fresh();
+        ctx.associated_entity(self_tv, param, result_tv, Span::synthetic(0));
+        assoc_type_tvs.insert(param, result_tv);
+        return result_tv;
     }
 
     // Fallback: create a fresh TyVar
@@ -1158,6 +1155,33 @@ fn is_ptr_ref_intrinsic_call(
         ctx.get::<Name>(e).map(|n| n.0.as_str()),
         Some("ptr_ref" | "ptr_mut_ref")
     )
+}
+
+/// G29 probe (temporary): an equality clause's memo registration re-finds its
+/// associated type by name; report whether that reaches the clause's own
+/// entity. Returns the by-name answer unchanged.
+pub(crate) fn g29_memo_probe(
+    ctx: &InferCtx<'_>,
+    site: &'static str,
+    looked_up: Option<Entity>,
+    clause: Entity,
+) -> Option<Entity> {
+    if kestrel_debug::is_enabled("g29-assoc") {
+        let verdict = match looked_up {
+            Some(e) if e == clause => "SAME",
+            Some(_) => "DIFF",
+            None => "UNREACH",
+        };
+        let name = |e: Entity| resolve::assoc_name(ctx.query_ctx, e);
+        kestrel_debug::ktrace!(
+            "g29-assoc",
+            "MEMO-{verdict} site={site} clause={}#{:?} byname={}",
+            name(clause),
+            clause,
+            looked_up.map_or_else(|| "-".to_string(), |e| format!("{}#{e:?}", name(e))),
+        );
+    }
+    looked_up
 }
 
 /// Find an associated type entity by searching protocol bounds of a TypeAlias.

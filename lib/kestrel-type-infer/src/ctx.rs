@@ -581,13 +581,8 @@ impl<'a> InferCtx<'a> {
     /// misuse: callers who forgot the constraint caused abstract `Item`
     /// names to leak into diagnostics. Do not add a raw variant back.
     pub fn project_associated(&mut self, base: TyVar, assoc: Entity, span: Span) -> TyVar {
-        let name = self
-            .query_ctx
-            .get::<kestrel_ast_builder::Name>(assoc)
-            .map(|n| n.0.clone())
-            .unwrap_or_default();
         let result = self.fresh();
-        self.associated(base, &name, result, span);
+        self.associated_entity(base, assoc, result, span);
         result
     }
 
@@ -991,10 +986,41 @@ impl<'a> InferCtx<'a> {
         });
     }
 
+    /// `container.<name>` for a producer that has only a spelling — see
+    /// [`AssocKey::Name`](crate::constraint::AssocKey). Anything holding the
+    /// associated type's entity uses [`Self::associated_entity`].
     pub fn associated(&mut self, container: TyVar, name: &str, result: TyVar, span: Span) {
         self.constraints.push(Constraint::Associated {
             container,
-            name: name.to_string(),
+            key: crate::constraint::AssocKey::Name(name.to_string()),
+            result,
+            span,
+        });
+    }
+
+    /// The source spelling of an [`AssocKey`](crate::constraint::AssocKey) —
+    /// for diagnostics, and for a concrete conformer's by-name binding.
+    pub(crate) fn assoc_key_name(&self, key: &crate::constraint::AssocKey) -> String {
+        match key {
+            crate::constraint::AssocKey::Entity(e) => {
+                crate::resolve::assoc_name(self.query_ctx, *e)
+            },
+            crate::constraint::AssocKey::Name(n) => n.clone(),
+        }
+    }
+
+    /// `container.<assoc>` keyed by the associated type's entity (G29): the
+    /// solver resolves that requirement, not the first one spelled alike.
+    pub fn associated_entity(
+        &mut self,
+        container: TyVar,
+        assoc: Entity,
+        result: TyVar,
+        span: Span,
+    ) {
+        self.constraints.push(Constraint::Associated {
+            container,
+            key: crate::constraint::AssocKey::Entity(assoc),
             result,
             span,
         });

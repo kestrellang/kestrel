@@ -27,6 +27,20 @@ pub enum ConformsOrigin {
     TypeArg,
 }
 
+/// Which associated type an `Associated` constraint projects (G29).
+///
+/// `Entity` is the associated-type declaration the producer already holds (a
+/// where-clause subject, an `AssocProjection`, a protocol's own child); the
+/// solver looks up **that** requirement, so two protocols that both declare
+/// `Out` cannot be confused. `Name` is only for producers that genuinely start
+/// from a spelling with no declaration in hand (array/dictionary literals,
+/// `Indirection.Target`, `ArrayMatchable.Element`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssocKey {
+    Entity(Entity),
+    Name(String),
+}
+
 /// A type constraint emitted during constraint generation.
 #[derive(Clone, Debug)]
 pub enum Constraint {
@@ -113,7 +127,7 @@ pub enum Constraint {
     /// Deferred until container is concrete.
     Associated {
         container: TyVar,
-        name: String,
+        key: AssocKey,
         result: TyVar,
         span: Span,
     },

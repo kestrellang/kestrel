@@ -676,10 +676,11 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             },
             Constraint::Associated {
                 container,
-                name,
+                key,
                 result,
                 span,
             } => {
+                let name = ctx.assoc_key_name(&key);
                 let resolved = ctx.resolve(container);
                 if ctx.is_error(resolved) {
                     ctx.poison(result);
@@ -894,10 +895,10 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
         } => solve_conforms(ctx, ty, protocol, span, poison_ty_on_failure, origin),
         Constraint::Associated {
             container,
-            name,
+            key,
             result,
             span,
-        } => solve_associated(ctx, container, &name, result, span),
+        } => solve_associated(ctx, container, key, result, span),
         Constraint::Call {
             callee,
             args,
@@ -1046,7 +1047,13 @@ fn solve_interpolation_link(
     }
 
     // Delegate: resolve ResultType.Interpolation → accumulator type.
-    solve_associated(ctx, result_tv, "Interpolation", acc_tv, span)
+    solve_associated(
+        ctx,
+        result_tv,
+        crate::constraint::AssocKey::Name("Interpolation".to_string()),
+        acc_tv,
+        span,
+    )
 }
 
 /// Resolve a tuple index access (`t.N`). Defers until `tuple` is concrete,
@@ -2741,7 +2748,7 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
 fn solve_associated(
     ctx: &mut InferCtx<'_>,
     container: TyVar,
-    name: &str,
+    key: crate::constraint::AssocKey,
     result: TyVar,
     span: Span,
 ) -> SolveResult {
@@ -2749,11 +2756,12 @@ fn solve_associated(
     if !ctx.is_concrete(resolved) {
         return SolveResult::Deferred(Constraint::Associated {
             container,
-            name: name.to_string(),
+            key,
             result,
             span,
         });
     }
+    let name = &ctx.assoc_key_name(&key);
 
     if ctx.is_error(resolved) {
         ctx.poison(result);
@@ -2766,7 +2774,13 @@ fn solve_associated(
         _ => unreachable!(),
     };
 
-    match ctx.resolver.resolve_associated_type(&kind, name) {
+    let found = match key {
+        crate::constraint::AssocKey::Entity(assoc) => ctx
+            .resolver
+            .resolve_associated_type_by_entity(&kind, assoc, name),
+        crate::constraint::AssocKey::Name(_) => ctx.resolver.resolve_associated_type(&kind, name),
+    };
+    match found {
         Some(assoc) => {
             // Build substitution map from the container's type parameters → its
             // concrete type args, so e.g. `Array[i32].Element = T` resolves to
@@ -3645,8 +3659,7 @@ fn emit_resolved_call(
                     Some(EqualityLhs::Assoc { root: param, assoc }) => {
                         if let Some(&(_, tv)) = subs.iter().find(|(e, _)| *e == param) {
                             let assoc_result = ctx.fresh();
-                            let name = crate::resolve::assoc_name(qctx, assoc);
-                            ctx.associated(tv, &name, assoc_result, span.clone());
+                            ctx.associated_entity(tv, assoc, assoc_result, span.clone());
                             let rhs_tv = lower_hir_ty_sub(ctx, &rhs, None, TyVar(0), &subs);
                             ctx.equal(assoc_result, rhs_tv, span.clone());
                         }
@@ -4579,7 +4592,6 @@ fn solve_member(
                 match subject.equality_lhs() {
                     Some(EqualityLhs::Assoc { root, assoc }) => {
                         let param = &root;
-                        let assoc_name = &crate::resolve::assoc_name(ctx.query_ctx, assoc);
                         let param_tv = if let Some(idx) =
                             resolution.type_params.iter().position(|&p| p == *param)
                         {
@@ -4589,7 +4601,7 @@ fn solve_member(
                         };
                         if let Some(tv) = param_tv {
                             let assoc_result = ctx.fresh();
-                            ctx.associated(tv, assoc_name, assoc_result, span.clone());
+                            ctx.associated_entity(tv, assoc, assoc_result, span.clone());
                             let rhs_tv = lower_hir_ty_sub(ctx, rhs, self_entity, receiver, &subs);
                             ctx.equal(assoc_result, rhs_tv, span.clone());
                         }
@@ -4610,13 +4622,9 @@ fn solve_member(
                         {
                             // Associated type (e.g. `Item` in `where Item = (A, B)`) —
                             // resolve on receiver and equate with RHS
-                            if let Some(name) =
-                                ctx.query_ctx.get::<kestrel_ast_builder::Name>(*param)
-                            {
-                                let assoc_tv = ctx.fresh();
-                                ctx.associated(receiver, &name.0, assoc_tv, span.clone());
-                                ctx.equal(assoc_tv, rhs_tv, span.clone());
-                            }
+                            let assoc_tv = ctx.fresh();
+                            ctx.associated_entity(receiver, *param, assoc_tv, span.clone());
+                            ctx.equal(assoc_tv, rhs_tv, span.clone());
                         }
                     },
                     None => {},
@@ -5930,11 +5938,10 @@ fn emit_type_alias_where_clauses(
                 let Some(EqualityLhs::Assoc { assoc, .. }) = subject.equality_lhs() else {
                     continue;
                 };
-                let assoc_name = crate::resolve::assoc_name(ctx.query_ctx, assoc);
                 // Emit associated type equality: e.g., `Iter.Item = Item`
-                // → Associated(alias_tv, "Item", fresh) + Equal(fresh, rhs_tv)
+                // → Associated(alias_tv, Iterator.Item, fresh) + Equal(fresh, rhs_tv)
                 let fresh = ctx.fresh();
-                ctx.associated(alias_tv, &assoc_name, fresh, span.clone());
+                ctx.associated_entity(alias_tv, assoc, fresh, span.clone());
                 // Lower rhs using where_clause_assoc_subs so that `Item` resolves
                 // to the existing TyVar for T.Item. The RHS's bare `Item` is
                 // `Self.Item` of the alias's protocol, and that `Self` is the
@@ -5949,7 +5956,10 @@ fn emit_type_alias_where_clauses(
                 ctx.equal(fresh, rhs_tv, span.clone());
                 // Register `alias.assoc → rhs` in the memo, same shape as the
                 // protocol-side emitter: base = the alias's own TyVar, stored raw.
-                if let Some(inner) = crate::alias_bound_assoc_entity(ctx, alias_entity, &assoc_name)
+                let assoc_name = crate::resolve::assoc_name(ctx.query_ctx, assoc);
+                let looked_up = crate::alias_bound_assoc_entity(ctx, alias_entity, &assoc_name);
+                if let Some(inner) =
+                    crate::g29_memo_probe(ctx, "solver:type_alias_eq", looked_up, assoc)
                 {
                     ctx.push_assoc_sub(Some(alias_tv), inner, rhs_tv);
                 }
@@ -6165,11 +6175,14 @@ fn lower_hir_ty_sub(
                     },
                     _ => false,
                 };
-                if is_concrete_non_self
-                    && let Some(name) = ctx.query_ctx.get::<kestrel_ast_builder::Name>(*entity)
-                {
+                if is_concrete_non_self {
                     let result = ctx.fresh();
-                    ctx.associated(recv_tv, &name.0, result, kestrel_span::Span::synthetic(0));
+                    ctx.associated_entity(
+                        recv_tv,
+                        *entity,
+                        result,
+                        kestrel_span::Span::synthetic(0),
+                    );
                     return result;
                 }
             }
