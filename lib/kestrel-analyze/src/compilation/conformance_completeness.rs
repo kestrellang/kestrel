@@ -1639,9 +1639,10 @@ fn extension_clauses_entailed(
         // provides `isEqual` to `BoxC: Container[Int64]` exactly when Int64
         // genuinely satisfies Equatable. This is the constrained-protocol-
         // extension witness the stdlib's own Array/Slice idiom relies on (#213).
-        // TODO(G17 stage 3a): `as_param()` keeps projection subjects out of the
-        // concrete-binding check, as when they were a separate clause variant;
-        // they still fall through to `substitute_clause` below.
+        // `as_param()` keeps projection subjects out of this concrete-binding
+        // check: `substitute_clause` renames their root, and a concrete root
+        // makes it `None` (not entailed), since `Int64.Item: P` needs a real
+        // conformance check this path does not do.
         if let ResolvedWhereClause::Bound {
             subject, protocol, ..
         } = c
@@ -1661,8 +1662,10 @@ fn extension_clauses_entailed(
 }
 
 /// Apply `proto_subs` (protocol-param → conforming-type binding) to a where
-/// clause. Returns None if a referenced param maps to a non-`Param` binding
-/// (concrete type), since the entailment check only handles param-to-param.
+/// clause: its subject (root param, through any projection) and, for an
+/// equality, every `Param` inside the RHS. Returns `None` if any referenced
+/// param maps to a non-`Param` binding (concrete type), since the entailment
+/// check only handles param-to-param.
 fn substitute_clause(
     clause: &ResolvedWhereClause,
     proto_subs: &HashMap<Entity, ResolvedTy>,
@@ -1672,28 +1675,43 @@ fn substitute_clause(
             subject,
             protocol,
             protocol_type_args,
-        } => {
-            // TODO(G17 stage 3a): only a bare-param subject is substituted. A
-            // projection reproduces the old catch-all below — cloned through
-            // untouched, never rewritten at its base.
-            let Some(param) = subject.as_param() else {
-                return Some(clause.clone());
-            };
-            let new_param = match proto_subs.get(&param) {
-                Some(ResolvedTy::Param { entity }) => *entity,
-                Some(_) => return None,
-                None => param,
-            };
-            Some(ResolvedWhereClause::Bound {
-                subject: WhereSubject::Param(new_param),
-                protocol: *protocol,
-                protocol_type_args: protocol_type_args.clone(),
-            })
+        } => Some(ResolvedWhereClause::Bound {
+            subject: substitute_subject(subject, proto_subs)?,
+            protocol: *protocol,
+            protocol_type_args: protocol_type_args.clone(),
+        }),
+        ResolvedWhereClause::Equality { subject, rhs } => Some(ResolvedWhereClause::Equality {
+            subject: substitute_subject(subject, proto_subs)?,
+            rhs: rhs.try_rename_params(&mut |p| rename_param(p, proto_subs))?,
+        }),
+    }
+}
+
+/// Rename a where-clause subject's root param through `proto_subs`, keeping
+/// every projection above it (`T.Item` → `U.Item`). `Self` has no param to
+/// rename and is kept as written.
+fn substitute_subject(
+    subject: &WhereSubject,
+    proto_subs: &HashMap<Entity, ResolvedTy>,
+) -> Option<WhereSubject> {
+    Some(match subject {
+        WhereSubject::Param(p) => WhereSubject::Param(rename_param(*p, proto_subs)?),
+        WhereSubject::SelfType => WhereSubject::SelfType,
+        WhereSubject::Projection { base, assoc } => WhereSubject::Projection {
+            base: Box::new(substitute_subject(base, proto_subs)?),
+            assoc: *assoc,
         },
-        // Equality clauses pass through unchanged. Entailment accepts one only
-        // when the context states the same equality (G25 step 4), so an
-        // unsubstituted subject can only make it more conservative.
-        other => Some(other.clone()),
+    })
+}
+
+/// One param through `proto_subs`: unmapped stays itself, a param binding
+/// renames, a concrete binding is `None` (param-to-param entailment cannot
+/// judge it).
+fn rename_param(param: Entity, proto_subs: &HashMap<Entity, ResolvedTy>) -> Option<Entity> {
+    match proto_subs.get(&param) {
+        Some(ResolvedTy::Param { entity }) => Some(*entity),
+        Some(_) => None,
+        None => Some(param),
     }
 }
 

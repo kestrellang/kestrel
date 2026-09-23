@@ -226,4 +226,160 @@ impl HirTy {
             _ => false,
         }
     }
+
+    /// Rebuild this type with every `Param(e)` renamed to `rename(e)`, at any
+    /// depth. `rename` returning `None` aborts the whole rewrite with `None`.
+    ///
+    /// Renaming only: a parameter can become another parameter, never a
+    /// concrete type. That keeps the result exact — no lossy bridge from an
+    /// inference-side type is involved — which is what entailment's
+    /// `same_type` comparison needs (G29, `substitute_clause`). Spans, and
+    /// every non-`Param` leaf (`SelfType` included), are kept as written.
+    pub fn try_rename_params(
+        &self,
+        rename: &mut impl FnMut(Entity) -> Option<Entity>,
+    ) -> Option<HirTy> {
+        fn list(
+            tys: &[HirTy],
+            rename: &mut impl FnMut(Entity) -> Option<Entity>,
+        ) -> Option<Vec<HirTy>> {
+            tys.iter().map(|t| t.try_rename_params(rename)).collect()
+        }
+        Some(match self {
+            HirTy::Param(e, span) => HirTy::Param(rename(*e)?, span.clone()),
+            HirTy::Struct { entity, args, span } => HirTy::Struct {
+                entity: *entity,
+                args: list(args, rename)?,
+                span: span.clone(),
+            },
+            HirTy::Enum { entity, args, span } => HirTy::Enum {
+                entity: *entity,
+                args: list(args, rename)?,
+                span: span.clone(),
+            },
+            HirTy::Protocol { entity, args, span } => HirTy::Protocol {
+                entity: *entity,
+                args: list(args, rename)?,
+                span: span.clone(),
+            },
+            HirTy::AliasUse { entity, args, span } => HirTy::AliasUse {
+                entity: *entity,
+                args: list(args, rename)?,
+                span: span.clone(),
+            },
+            HirTy::Tuple(elems, span) => HirTy::Tuple(list(elems, rename)?, span.clone()),
+            HirTy::Function {
+                kind,
+                params,
+                param_conventions,
+                ret,
+                span,
+            } => HirTy::Function {
+                kind: *kind,
+                params: list(params, rename)?,
+                param_conventions: param_conventions.clone(),
+                ret: Box::new(ret.try_rename_params(rename)?),
+                span: span.clone(),
+            },
+            HirTy::AssocProjection { base, assoc, span } => HirTy::AssocProjection {
+                base: Box::new(base.try_rename_params(rename)?),
+                assoc: *assoc,
+                span: span.clone(),
+            },
+            HirTy::Opaque {
+                bounds,
+                not_copyable,
+                span,
+            } => HirTy::Opaque {
+                bounds: list(bounds, rename)?,
+                not_copyable: *not_copyable,
+                span: span.clone(),
+            },
+            HirTy::Ref {
+                inner,
+                mutating,
+                span,
+            } => HirTy::Ref {
+                inner: Box::new(inner.try_rename_params(rename)?),
+                mutating: *mutating,
+                span: span.clone(),
+            },
+            leaf @ (HirTy::SelfType(..) | HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_)) => {
+                leaf.clone()
+            },
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn e(n: u32) -> Entity {
+        Entity::from_raw(n)
+    }
+
+    fn sp() -> Span {
+        Span::synthetic(0)
+    }
+
+    /// `Array[(A, B.Item)]` with A→X, B→Y renames at every depth and keeps
+    /// the non-param entities as written.
+    #[test]
+    fn try_rename_params_renames_nested_params() {
+        let (a, b, x, y, array, item) = (e(1), e(2), e(3), e(4), e(10), e(11));
+        let ty = HirTy::Struct {
+            entity: array,
+            args: vec![HirTy::Tuple(
+                vec![
+                    HirTy::Param(a, sp()),
+                    HirTy::AssocProjection {
+                        base: Box::new(HirTy::Param(b, sp())),
+                        assoc: item,
+                        span: sp(),
+                    },
+                ],
+                sp(),
+            )],
+            span: sp(),
+        };
+        let renamed = ty
+            .try_rename_params(&mut |p| {
+                Some(if p == a {
+                    x
+                } else if p == b {
+                    y
+                } else {
+                    p
+                })
+            })
+            .expect("every param renames");
+        let expected = HirTy::Struct {
+            entity: array,
+            args: vec![HirTy::Tuple(
+                vec![
+                    HirTy::Param(x, sp()),
+                    HirTy::AssocProjection {
+                        base: Box::new(HirTy::Param(y, sp())),
+                        assoc: item,
+                        span: sp(),
+                    },
+                ],
+                sp(),
+            )],
+            span: sp(),
+        };
+        assert!(renamed.same_type(&expected));
+    }
+
+    /// One param that cannot be renamed aborts the whole rewrite.
+    #[test]
+    fn try_rename_params_aborts_on_none() {
+        let (a, b) = (e(1), e(2));
+        let ty = HirTy::Tuple(vec![HirTy::Param(a, sp()), HirTy::Param(b, sp())], sp());
+        assert!(
+            ty.try_rename_params(&mut |p| (p == a).then_some(p))
+                .is_none()
+        );
+    }
 }
