@@ -110,7 +110,7 @@ who has no way to tell whether it still applies.
 ### Delegating a measurement
 
 When you hand this to a subagent, the preflight goes in the prompt, not in your
-hopes. Two failure modes to close explicitly:
+hopes. Failure modes to close explicitly:
 
 - **Worktree isolation.** `isolation: "worktree"` bases the worktree on `main`.
   For anything measuring current behaviour, do not use it — say "work only in
