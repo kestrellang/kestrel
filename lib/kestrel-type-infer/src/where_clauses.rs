@@ -46,7 +46,8 @@ impl QueryFn for WhereClausesOf {
 }
 
 /// Query: the clauses **written** on `entity` (no implicit `Copyable` /
-/// `Static` bounds), plus every equality clause that could not be resolved.
+/// `Static` bounds), plus every clause dropped because an associated-type
+/// path in it names no single associated type.
 ///
 /// `WhereClausesOf` is this query's `clauses` plus the implicit bounds. The
 /// `dropped` half exists so a clause that resolution throws away is reported
@@ -63,23 +64,25 @@ pub struct ExplicitWhereClauses {
 #[derive(Clone, Debug, Default, Hash)]
 pub struct ExplicitWhereResolution {
     pub clauses: Vec<WhereClause>,
-    pub dropped: Vec<DroppedEquality>,
+    pub dropped: Vec<DroppedAssocPath>,
 }
 
-/// An equality clause `param.segment = RHS` whose `segment` names no single
-/// associated type. Recorded, not reported: `GenericsAnalyzer` turns it into
-/// E479 (ambiguous) or E440 (not found).
+/// A clause whose path `param.segment` names no single associated type: an
+/// equality's left side (`Item.Out = X`) or a bound's subject
+/// (`Item.Out: P`). Recorded, not reported: `GenericsAnalyzer` turns it into
+/// E479 (ambiguous) or E440 (not found; equality only — a bound subject that
+/// names nothing is E440'd by the analyzer's own subject check).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DroppedEquality {
-    /// The clause's left side, `Item.Out`.
-    pub lhs_span: Span,
+pub struct DroppedAssocPath {
+    /// The path, `Item.Out`.
+    pub path_span: Span,
     /// The clause's root, `Item`.
     pub param: Entity,
     /// The segment that did not resolve, `Out`.
     pub segment: String,
-    /// The associated-type requirements `segment` could name among the
-    /// protocols this holder bounds `param` with. Two or more: ambiguous.
-    /// None: no bound declares it.
+    /// The associated-type requirements `segment` could name at the nearest
+    /// protocol level that declares any (see `single_assoc`). Two or more:
+    /// ambiguous. None: nothing declares it.
     pub candidates: Vec<Entity>,
 }
 
@@ -156,7 +159,7 @@ fn resolve_explicit_where_clauses(
         // reachable only through one of them (`where Item: Addable,
         // Item.Output = Item` — `Output` is `Addable`'s, and name-res follows
         // only `Item`'s *declared* bounds), so pass 2 needs them all first.
-        let bounds: Vec<Option<ResolvedBound>> = ast_wc
+        let mut bounds: Vec<Option<ResolvedBound>> = ast_wc
             .0
             .iter()
             .map(|c| match c {
@@ -166,6 +169,44 @@ fn resolve_explicit_where_clauses(
                 _ => None,
             })
             .collect();
+        // Pass 1b: a projection subject (`Item.Out: P`) was resolved by name
+        // in pass 1, which picks one `Out` silently. Re-decide it by the
+        // same nearest-level rule an equality's left side uses (G29): the
+        // subject is re-pointed at that answer, or dropped and reported when
+        // it is ambiguous.
+        let rechecked: Vec<(usize, Result<Entity, DroppedAssocPath>)> = ast_wc
+            .0
+            .iter()
+            .zip(&bounds)
+            .enumerate()
+            .filter_map(|(i, (c, bound))| {
+                let WhereConstraint::Bound { subject, .. } = c else {
+                    return None;
+                };
+                Some((
+                    i,
+                    recheck_bound_subject(ctx, subject, bound.as_ref()?, &bounds, root)?,
+                ))
+            })
+            .collect();
+        for (i, verdict) in rechecked {
+            match verdict {
+                Ok(assoc) => {
+                    if let Some(ResolvedBound {
+                        subject: WhereSubject::Projection { assoc: a, .. },
+                        ..
+                    }) = &mut bounds[i]
+                    {
+                        *a = assoc;
+                    }
+                },
+                Err(dropped) => {
+                    bounds[i] = None;
+                    out.dropped.push(dropped);
+                },
+            }
+        }
+        let bounds = bounds;
         // Pass 2: emit in source order — body emitters are order-sensitive.
         for (constraint, bound) in ast_wc.0.iter().zip(&bounds) {
             match constraint {
@@ -567,32 +608,65 @@ fn resolve_equality_subject(
     bounds: &[Option<ResolvedBound>],
     entity: Entity,
     root: Entity,
-) -> Result<WhereSubject, Option<DroppedEquality>> {
+) -> Result<WhereSubject, Option<DroppedAssocPath>> {
     let Some((param, assoc_name)) = extract_associated_type_path(ctx, lhs, entity, root) else {
         return resolve_type_param_or_assoc(ctx, lhs, entity, root)
             .map(WhereSubject::Param)
             .ok_or(None);
     };
-    let assoc = match resolve_assoc_by_path(ctx, lhs, param, entity, root) {
-        Some(assoc) => assoc,
-        None => resolve_assoc_via_holder_bounds(ctx, param, &assoc_name, bounds, root).map_err(
-            |candidates| {
-                let AstType::Named { span, .. } = lhs else {
-                    return None;
-                };
-                Some(DroppedEquality {
-                    lhs_span: span.clone(),
-                    param,
-                    segment: assoc_name.clone(),
-                    candidates,
-                })
-            },
-        )?,
-    };
+    let path_pick = resolve_assoc_by_path(ctx, lhs, param, entity, root);
+    let assoc =
+        single_assoc(ctx, param, &assoc_name, path_pick, bounds, root).map_err(|candidates| {
+            let AstType::Named { span, .. } = lhs else {
+                return None;
+            };
+            Some(DroppedAssocPath {
+                path_span: span.clone(),
+                param,
+                segment: assoc_name.clone(),
+                candidates,
+            })
+        })?;
     Ok(WhereSubject::Projection {
         base: Box::new(WhereSubject::Param(param)),
         assoc,
     })
+}
+
+/// Re-decide a resolved bound's `param.Seg` subject (exactly two segments,
+/// rooted at a type parameter) by [`single_assoc`]: `Ok` is the associated
+/// type it names, `Err` an ambiguity to drop and report. `None` for any other
+/// shape — deeper chains and `Self`-rooted subjects keep name resolution's
+/// answer.
+fn recheck_bound_subject(
+    ctx: &QueryContext<'_>,
+    ast_subject: &AstType,
+    bound: &ResolvedBound,
+    bounds: &[Option<ResolvedBound>],
+    root: Entity,
+) -> Option<Result<Entity, DroppedAssocPath>> {
+    let WhereSubject::Projection { base, assoc } = &bound.subject else {
+        return None;
+    };
+    let WhereSubject::Param(param) = **base else {
+        return None;
+    };
+    let AstType::Named { segments, span } = ast_subject else {
+        return None;
+    };
+    let [_, segment] = segments.as_slice() else {
+        return None;
+    };
+    Some(
+        single_assoc(ctx, param, &segment.name, Some(*assoc), bounds, root).map_err(|candidates| {
+            DroppedAssocPath {
+                path_span: span.clone(),
+                param,
+                segment: segment.name.clone(),
+                candidates,
+            }
+        }),
+    )
 }
 
 /// The assoc entity by the same segment walk the bound-subject path uses
@@ -617,58 +691,106 @@ fn resolve_assoc_by_path(
     }
 }
 
-/// Pass-2 fallback: `assoc_name` among the associated types of the protocols
-/// **this holder's** own bounds place on `param` (refinement parents included,
-/// via `ProtocolAssociatedTypes`). Scoped to the holder, like S2: another
-/// holder's bounds never widen what a name means here.
+/// The one associated type `param.assoc_name` names in this holder, or
+/// `Err(candidates)` when it names none or several. The single
+/// candidate-gathering rule for every where-clause path `param.Seg` — the
+/// equality fallback and name resolution's pick both go through it (G29).
 ///
-/// Only the declaring protocol's requirement counts (parent is a `Protocol`),
-/// so an extension default of the same name is not a second candidate. Two or
-/// more distinct requirements is a genuine ambiguity. `Err` carries the
-/// candidates (empty when none declares it); the clause is dropped and
-/// reported at the clause by `GenericsAnalyzer`.
-fn resolve_assoc_via_holder_bounds(
+/// **Nearest level first.** Level 0 is the protocols this holder's own bounds
+/// place directly on `param`; each later level is the previous level's
+/// parents, by refinement and by `extend P: Q` (`protocol_parents`). The
+/// candidates at a level are the requirements named `assoc_name` that those
+/// protocols **declare themselves** (`ProtocolAssociatedTypes` members whose
+/// `declaring_protocol` is the protocol and that no extension supplies). The
+/// first level with a candidate decides: one is the answer, two or more is
+/// ambiguous (E479). A nearer declaration hides an inherited one — `T:
+/// Hashable, T: Addable` names `Addable.Output`, not the `Equal.Output` that
+/// `Hashable` only inherits; `I: Iterator` names `Iterator.Item`, not the
+/// `Iterable.Item` that `extend Iterator: Iterable` adds a level out.
+///
+/// `path_pick` is what name resolution's segment walk chose. It sees bounds
+/// this holder does not (a param's declared bounds, outer holders' clauses),
+/// so when this holder's bounds yield no candidate at any level the pick
+/// stands as it always did. When they do yield one, the level rule wins; a
+/// disagreement is traced as `DIVERGE`.
+fn single_assoc(
     ctx: &QueryContext<'_>,
     param: Entity,
     assoc_name: &str,
+    path_pick: Option<Entity>,
     bounds: &[Option<ResolvedBound>],
     root: Entity,
 ) -> Result<Entity, Vec<Entity>> {
     let subject = WhereSubject::Param(param);
-    let mut found: Vec<Entity> = Vec::new();
-    for bound in bounds.iter().flatten().filter(|b| b.subject == subject) {
-        for &(protocol, _) in &bound.protocols {
-            let members = ctx.query(kestrel_name_res::ProtocolAssociatedTypes { protocol, root });
-            for m in members {
-                let named = ctx
-                    .get::<kestrel_ast_builder::Name>(m.entity)
-                    .is_some_and(|n| n.0 == assoc_name);
-                let is_requirement = ctx
-                    .parent_of(m.entity)
-                    .is_some_and(|p| ctx.get::<NodeKind>(p) == Some(&NodeKind::Protocol));
-                if named && is_requirement && !found.contains(&m.entity) {
-                    found.push(m.entity);
-                }
+    let level_zero: Vec<Entity> = bounds
+        .iter()
+        .flatten()
+        .filter(|b| b.subject == subject)
+        .flat_map(|b| b.protocols.iter().map(|&(protocol, _)| protocol))
+        .collect();
+    let found = nearest_level_assoc(ctx, level_zero, assoc_name, root);
+    match (found.as_slice(), path_pick) {
+        ([one], pick) => {
+            if pick.is_some_and(|p| p != *one) {
+                kestrel_debug::ktrace!(
+                    "where-eq",
+                    "DIVERGE param={param:?} assoc={assoc_name} path_pick={pick:?} nearest={one:?}"
+                );
             }
-        }
-    }
-    match found.as_slice() {
-        [one] => Ok(*one),
-        [] => {
+            Ok(*one)
+        },
+        ([], Some(pick)) => Ok(pick),
+        ([], None) => {
             kestrel_debug::ktrace!(
                 "where-eq",
                 "UNRESOLVED param={param:?} assoc={assoc_name}: no bound in this holder declares it"
             );
             Err(found)
         },
-        many => {
+        (many, _) => {
             kestrel_debug::ktrace!(
                 "where-eq",
-                "AMBIGUOUS param={param:?} assoc={assoc_name} candidates={many:?}: clause dropped"
+                "AMBIGUOUS param={param:?} assoc={assoc_name} path_pick={path_pick:?} candidates={many:?}: clause dropped"
             );
             Err(found)
         },
     }
+}
+
+/// Breadth-first over the protocol graph from `level`: the requirements named
+/// `assoc_name` declared at the first level that has any. Each protocol is
+/// visited once, at its nearest level. Empty when no level declares it.
+fn nearest_level_assoc(
+    ctx: &QueryContext<'_>,
+    mut level: Vec<Entity>,
+    assoc_name: &str,
+    root: Entity,
+) -> Vec<Entity> {
+    let mut visited: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    level.retain(|&p| visited.insert(p));
+    while !level.is_empty() {
+        let mut found: Vec<Entity> = Vec::new();
+        for &protocol in &level {
+            for m in ctx.query(kestrel_name_res::ProtocolAssociatedTypes { protocol, root }) {
+                let declared_here = m.declaring_protocol == protocol && m.extension.is_none();
+                let named = ctx
+                    .get::<kestrel_ast_builder::Name>(m.entity)
+                    .is_some_and(|n| n.0 == assoc_name);
+                if declared_here && named && !found.contains(&m.entity) {
+                    found.push(m.entity);
+                }
+            }
+        }
+        if !found.is_empty() {
+            return found;
+        }
+        level = level
+            .iter()
+            .flat_map(|&p| kestrel_name_res::protocol_parents(ctx, p, root))
+            .filter(|&p| visited.insert(p))
+            .collect();
+    }
+    Vec::new()
 }
 
 fn extract_protocol_type_args(

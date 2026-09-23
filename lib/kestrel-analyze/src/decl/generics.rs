@@ -75,7 +75,7 @@
 //! **Labels:**
 //! - Primary: the subject / equality left side
 //!   - Span source: the `AstType::Named` span of the subject (bound) or of
-//!     `DroppedEquality::lhs_span` (equality)
+//!     `DroppedAssocPath::path_span` (equality)
 //!   - Message: "associated type not found"
 //!
 //! **Notes:**
@@ -87,15 +87,18 @@
 //! **Message:** "associated type '{name}' in where clause is ambiguous: '{type}'
 //! is bound by {protocol list}, which each declare '{name}'"
 //!
-//! An equality clause `T.Name = X` whose `Name` is declared by two or more
-//! protocols this holder bounds `T` with. The fact is computed once, by
+//! A where-clause path `T.Name` — an equality's left side (`T.Name = X`) or a
+//! bound's subject (`T.Name: P`) — whose `Name` is declared by two or more
+//! protocols at the nearest level of this holder's bounds on `T` (the bound
+//! protocols themselves, then their parents, and so on; a nearer declaration
+//! hides an inherited one). The fact is computed once, by
 //! `ExplicitWhereClauses` (the same resolution `WhereClausesOf` uses), and the
 //! clause is dropped there; this analyzer only reports it (G29).
 //!
 //! **Labels:**
-//! - Primary: the equality's left side
-//!   - Span source: `DroppedEquality::lhs_span` (the `AstType::Named` span of
-//!     the clause's left side)
+//! - Primary: the path
+//!   - Span source: `DroppedAssocPath::path_span` (the `AstType::Named` span of
+//!     the equality's left side or the bound's subject)
 //!   - Message: "ambiguous associated type"
 //! - Secondary: each candidate requirement
 //!   - Span source: `util::entity_span` on the candidate associated-type entity
@@ -104,6 +107,8 @@
 //! **Notes:**
 //! - "a where-clause path has no protocol-qualified form, so it cannot say
 //!   which protocol's '{name}' it means; the clause is ignored"
+//! - "a protocol that declares '{name}' itself hides one it only inherits, but
+//!   these declarations are equally near to '{type}'"
 
 use std::collections::HashMap;
 
@@ -218,7 +223,7 @@ impl DeclCheck for GenericsAnalyzer {
 
         // Any holder may write an equality clause — `extend Iterator where
         // Item: Addable, Item.Output = Item` has no type params at all.
-        check_dropped_equalities(cx, &mut diags);
+        check_dropped_assoc_paths(cx, &mut diags);
 
         let Some(type_params) = cx.query.get::<TypeParams>(cx.entity) else {
             return diags;
@@ -706,11 +711,12 @@ fn check_where_clause_bounds(
     }
 }
 
-/// Report each equality clause `ExplicitWhereClauses` dropped because its
-/// segment names no single associated type (G29): E479 when two or more bound
-/// protocols declare it, E440 when none does. The resolution is not redone
+/// Report each clause `ExplicitWhereClauses` dropped because a `T.Seg` path in
+/// it (an equality's left side or a bound's subject) names no single
+/// associated type (G29): E479 when two or more equally near protocols declare
+/// it, E440 when none does. The resolution is not redone
 /// here — the query that dropped the clause is the one source of the fact.
-fn check_dropped_equalities(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnostic>) {
+fn check_dropped_assoc_paths(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnostic>) {
     let resolution = cx.query.query(ExplicitWhereClauses {
         entity: cx.entity,
         root: cx.root,
@@ -725,7 +731,7 @@ fn check_dropped_equalities(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnos
                 severity: d.default_severity,
                 message: format!("no associated type '{segment}' on '{param}'"),
                 labels: vec![DiagLabel {
-                    span: dropped.lhs_span.clone(),
+                    span: dropped.path_span.clone(),
                     message: "associated type not found".into(),
                     is_primary: true,
                 }],
@@ -749,7 +755,7 @@ fn check_dropped_equalities(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnos
             })
             .collect();
         let mut labels = vec![DiagLabel {
-            span: dropped.lhs_span.clone(),
+            span: dropped.path_span.clone(),
             message: "ambiguous associated type".into(),
             is_primary: true,
         }];
@@ -774,10 +780,16 @@ fn check_dropped_equalities(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnos
                 owners.join(" and ")
             ),
             labels,
-            notes: vec![format!(
-                "a where-clause path has no protocol-qualified form, so it cannot say which \
-                 protocol's '{segment}' it means; the clause is ignored"
-            )],
+            notes: vec![
+                format!(
+                    "a where-clause path has no protocol-qualified form, so it cannot say which \
+                     protocol's '{segment}' it means; the clause is ignored"
+                ),
+                format!(
+                    "a protocol that declares '{segment}' itself hides one it only inherits, but \
+                     these declarations are equally near to '{param}'"
+                ),
+            ],
         });
     }
 }

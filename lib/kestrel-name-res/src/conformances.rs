@@ -288,23 +288,7 @@ fn gather_protocol_conformances(
     protocols: &mut Vec<Entity>,
     visited: &mut HashSet<Entity>,
 ) {
-    let Some(conformances) = ctx.get::<Conformances>(entity) else {
-        return;
-    };
-
-    for item in &conformances.0 {
-        let ConformanceItem::Positive(ast_ty, _) = item else {
-            continue;
-        };
-        let Some(resolved) = resolve_conformance_entity(ctx, ast_ty, entity, root) else {
-            continue;
-        };
-
-        // Only collect protocol entities
-        if ctx.get::<NodeKind>(resolved) != Some(&NodeKind::Protocol) {
-            continue;
-        }
-
+    for resolved in declared_conformance_protocols(ctx, entity, root) {
         if !visited.insert(resolved) {
             continue;
         }
@@ -314,6 +298,47 @@ fn gather_protocol_conformances(
         // Walk inherited protocols transitively
         gather_protocol_conformances(ctx, resolved, root, protocols, visited);
     }
+}
+
+/// The protocols named by `entity`'s own `Conformances` component, in
+/// declaration order, not expanded. The single edge every protocol-graph walk
+/// in this file is built from.
+fn declared_conformance_protocols(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+) -> Vec<Entity> {
+    let Some(conformances) = ctx.get::<Conformances>(entity) else {
+        return Vec::new();
+    };
+    conformances
+        .0
+        .iter()
+        .filter_map(|item| {
+            let ConformanceItem::Positive(ast_ty, _) = item else {
+                return None;
+            };
+            resolve_conformance_entity(ctx, ast_ty, entity, root)
+        })
+        // Only collect protocol entities
+        .filter(|&resolved| ctx.get::<NodeKind>(resolved) == Some(&NodeKind::Protocol))
+        .collect()
+}
+
+/// One level out from `protocol`: the protocols it refines (its own
+/// `Conformances`) and those added by `extend protocol: Q`, in the same order
+/// `expand_protocol_closure_in_place` visits them. Not transitive — a caller
+/// that needs distance from a seed (nearest declaration wins) steps with this;
+/// one that needs the whole closure uses `expand_protocol_closure`.
+pub fn protocol_parents(ctx: &QueryContext<'_>, protocol: Entity, root: Entity) -> Vec<Entity> {
+    let mut parents = declared_conformance_protocols(ctx, protocol, root);
+    for ext in &ctx.query(ExtensionsFor {
+        target: protocol,
+        root,
+    }) {
+        parents.extend(declared_conformance_protocols(ctx, *ext, root));
+    }
+    parents
 }
 
 /// Find the init on `target` that witnesses `protocol`, restricted to those
