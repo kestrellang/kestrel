@@ -134,7 +134,12 @@
 > calls per compilation, but no conformance check in the corpus reaches an
 > extension equality clause. This is a correctness fix with no visible effect
 > today; two unit tests pin it, span-insensitive entailment and its
-> different-RHS/subject control. Suite 3838 passed / 4 failed, no verdict
+> different-RHS/subject control. **Correction 2026-09-23:** as committed in
+> `cfe147ad` those tests did not compile. The helper passed a `u32` to
+> `Span::synthetic(usize)`, which never changed, so the step-4 report of them
+> passing cannot be true. Fixed at `entailment.rs`; they pass now, along with
+> all 21 of the crate's lib tests. `triage` does not run crate unit tests, so
+> verifying a change also means running `cargo test -p <crate>`. Suite 3838 passed / 4 failed, no verdict
 > changes. Remaining gap: `conformance_completeness::substitute_clause`
 > passes equalities through unsubstituted, so a protocol-param subject can
 > only match a context clause on the very same entity. That is conservative,

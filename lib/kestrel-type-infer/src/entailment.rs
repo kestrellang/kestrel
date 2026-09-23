@@ -336,7 +336,7 @@ mod tests {
     }
 
     /// `T = Int64`-style clause: same subject, same RHS type, different spans.
-    fn equality(t: Entity, rhs_entity: Entity, at: u32) -> WhereClause {
+    fn equality(t: Entity, rhs_entity: Entity, at: usize) -> WhereClause {
         WhereClause::Equality {
             subject: WhereSubject::Param(t),
             rhs: kestrel_hir::ty::HirTy::Struct {
