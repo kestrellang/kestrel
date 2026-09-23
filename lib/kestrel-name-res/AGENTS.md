@@ -124,3 +124,18 @@ Note the shape of that failure: two representations of the same fact, read by
 different code, kept in sync by nobody. `witness_lower.rs` documents a place
 where the analogous `Callable`-vs-`Computed` split *did* drift. Prefer one
 accessor over "check the marker" plus "check the NodeKind".
+
+## A dotted path has exactly one walker
+
+`resolve_type_path_chain` (`resolve_type.rs`) is the only implementation of
+"resolve `A.B.C` segment by segment". It encodes the segment-ordering rules:
+type-parameter associated types are tried before nested alias bounds, and a
+bare `Self` short-circuits. `ResolveTypePath::execute` is a one-line delegate
+that returns only `.resolution`.
+
+If you need more than the final entity (every step, or whether the path was
+`Self`-rooted), use the `TypePathChain` it returns. Do **not** add a second
+query for it (that doubles the cache for one caller), and do not copy the
+walk into a caller (that creates a second copy of the ordering rules to drift).
+D7 commit 2 (`30b8f61c`) introduced the chain-returning function for exactly
+this reason: `where C.Iter.Item: P` needed every step of the chain.

@@ -148,3 +148,23 @@ deleted; `to_diagnostic` is a thin wrapper (F15).
 of their own. A variant that deserves its own code (E624 / E491 / E492) names it
 in its `render` arm — and that code must also be in `docs/error-codes.md`, which
 is *not* covered by the analyzer-registry doc test (it only walks descriptors).
+
+## A type in expression position must be consumed, or it is an error
+
+MIR lowers a type used as an expression to **unit**. That covers `Def(entity)`
+where the entity is a `TypeParameter`, and `HirExpr::TypeRef` (G17 S5, for
+example `B.Item` in `B.Item.zero()`). So such an expression is only valid as
+the **receiver** of a `MethodCall`, the **callee** of a `Call`, or the **base**
+of a field access. Anywhere else it compiles to a unit value and fails much
+later, in MIR, as a crash or a type confusion.
+
+`gen_expr` inserts every such expression into `ctx.type_param_defs`. Each
+consuming site removes its child (`generate.rs`: callee, receiver, field base).
+Anything left at the end of `generate_body` is reported as
+`InferError::TypeParamAsValue`.
+
+When you add a new expression form that names a type, **register it in
+`type_param_defs`**, and make every legitimate parent remove it. Skip a type
+that already failed to resolve (`HirTy::Error`); it has its own diagnostic.
+G26 found `let x = Item.Sub;` crashing the compiler in post-mono verify because
+`TypeRef` was not yet registered.
