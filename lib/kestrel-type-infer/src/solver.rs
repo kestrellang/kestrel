@@ -2976,7 +2976,7 @@ fn solve_associated(
             // E.g., `type Iter: Iterator where Iter.Item = Item` — when we resolve
             // `T.Iter`, emit constraints equating `T.Iter.Item` with `T.Item`.
             if let kestrel_hir::ty::HirTy::AliasUse { entity, .. } = &assoc.resolved {
-                emit_type_alias_where_clauses(ctx, *entity, assoc_tv, &span);
+                emit_type_alias_where_clauses(ctx, *entity, assoc_tv, container, &span);
             }
 
             solve_equal(ctx, assoc_tv, result, span)
@@ -5903,6 +5903,7 @@ fn emit_type_alias_where_clauses(
     ctx: &mut InferCtx<'_>,
     alias_entity: kestrel_hecs::Entity,
     alias_tv: TyVar,
+    container: TyVar,
     span: &Span,
 ) {
     // Resolve where clause names in the alias's own scope. Scope walking
@@ -5945,9 +5946,23 @@ fn emit_type_alias_where_clauses(
                 let fresh = ctx.fresh();
                 ctx.associated(alias_tv, &assoc_name, fresh, span.clone());
                 // Lower rhs using where_clause_assoc_subs so that `Item` resolves
-                // to the existing TyVar for T.Item
-                let rhs_tv = crate::generate::lower_hir_ty(ctx, &rhs);
+                // to the existing TyVar for T.Item. The RHS's bare `Item` is
+                // `Self.Item` of the alias's protocol, and that `Self` is the
+                // `container` the alias was projected off (G25 step 1).
+                let self_sub: Vec<(kestrel_hecs::Entity, TyVar)> = ctx
+                    .query_ctx
+                    .parent_of(alias_entity)
+                    .map(|protocol| (protocol, container))
+                    .into_iter()
+                    .collect();
+                let rhs_tv = crate::generate::lower_hir_ty_with_subs(ctx, &rhs, &self_sub);
                 ctx.equal(fresh, rhs_tv, span.clone());
+                // Register `alias.assoc → rhs` in the memo, same shape as the
+                // protocol-side emitter: base = the alias's own TyVar, stored raw.
+                if let Some(inner) = crate::alias_bound_assoc_entity(ctx, alias_entity, &assoc_name)
+                {
+                    ctx.push_assoc_sub(Some(alias_tv), inner, rhs_tv);
+                }
             },
             crate::resolve::WhereClause::DirectEquality { .. } => {
                 // Direct equality on TypeAlias — rare, skip for now

@@ -2463,7 +2463,13 @@ pub(crate) fn lower_hir_ty_with_subs(
             ctx.param(*entity)
         },
         HirTy::SelfType(entity, _) => {
-            // Preserve the "this is Self" identity through inference output so
+            // A subs entry keyed on the owning protocol binds that protocol's
+            // `Self` to a known conformer — e.g. the `T` of `T: Iterable` when
+            // lowering an associated type's where-clause RHS (G25 step 1).
+            if let Some(&(_, tv)) = subs.iter().find(|(e, _)| e == entity) {
+                return tv;
+            }
+            // Otherwise preserve the "this is Self" identity through inference output so
             // MIR receives `MirTy::SelfType` and monomorphization substitutes
             // it with the caller's concrete self type. `TyKind::SelfType(P)`
             // behaves like `Protocol(P)` for associated-type / conformance

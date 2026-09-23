@@ -46,6 +46,22 @@
 > is to make the existing `TypeEquality` registration resolve its lhs (and to
 > register in `emit_type_alias_where_clauses`, which does not push at all), then
 > measure whether R4 still fires. Not predicted — measure it.
+>
+> **Step 1 landed (2026-09-23).** Both emitters now resolve the clause's lhs
+> through `alias_bound_assoc_entity` (asks off `TyKind::TypeAlias`) and register
+> `(base = alias_tv raw, assoc) → rhs_tv`. **Fixing only the registration broke
+> the stdlib** (`expected T got Self.Item` in `Array.append`, `flatten`, `Set`,
+> `Deque`, `Dictionary`, …): the RHS `Item` arrives as
+> `AssocProjection { SelfType(Iterable), Item }`, and both emitters lowered that
+> `Self` to the literal protocol `Self`, not the conformer. So the equation was
+> always about the wrong receiver; R4 masked this because it answered from the
+> correctly-based `Iterable.Item` entry. The fix binds the protocol's `Self` to
+> the conformer (`subject_tv` in `lib.rs`, `container` in `solver.rs`) through a
+> `(protocol → tv)` subs entry that `lower_hir_ty_with_subs`'s `SelfType` arm
+> now honours. **Measured @ step 1:** R4 hits over 3681 testdata files: **1**
+> (the witness, `UNJUSTIFIED`); floor **0**; all 17 `lang/` packages **0**.
+> Suite 3836/5 unchanged, per-file `dump diagnostics` exit codes identical, the
+> witness still prints `result=i`. R4 is now reached only by the miscompile.
 > Found while trying to close G17's C6. Every claim below carries a provenance
 > stamp per [`../../contributing/verifying-claims.md`](../../contributing/verifying-claims.md).
 

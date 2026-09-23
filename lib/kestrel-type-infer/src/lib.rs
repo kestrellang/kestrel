@@ -1006,14 +1006,19 @@ fn emit_protocol_assoc_type_where_clauses(
                     for (&e, &tv) in assoc_type_tvs.iter() {
                         rhs_subs.push((e, tv));
                     }
+                    // The RHS is written inside the protocol, so a bare `Item`
+                    // arrives as `Self.Item` (`AssocProjection { SelfType(P) }`).
+                    // Here `Self` is the conformer `subject_tv`; without this it
+                    // lowers to the literal protocol `Self` and the equality is
+                    // about the wrong receiver (G25 step 1).
+                    rhs_subs.push((protocol, subject_tv));
                     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
                     ctx.equal(fresh, rhs_tv, span.clone());
 
-                    // Register so solve_associated can reuse
-                    if let Some(inner_entity) = find_assoc_type_in_bounds(ctx, child, &inner_assoc)
-                    {
-                        // Base is the alias itself: this is `TargetIterator.Item`,
-                        // not `Self.Item` (G17 P7 — the Iterable/Iterator bridge).
+                    // Register so solve_associated can reuse. Base is the alias
+                    // itself: this is `TargetIterator.Item`, not `Self.Item`
+                    // (G17 P7 — the Iterable/Iterator bridge).
+                    if let Some(inner_entity) = alias_bound_assoc_entity(ctx, child, &inner_assoc) {
                         ctx.push_assoc_sub(Some(alias_tv), inner_entity, rhs_tv);
                     }
                 },
@@ -1164,6 +1169,24 @@ pub(crate) fn find_assoc_type_in_bounds(
     // Resolve the associated type through the resolver's associated type mechanism.
     // Build a TyKind::Param for the param entity to query the resolver.
     assoc_entity_on(ctx, &ty::TyKind::Param { entity: param }, assoc_name)
+}
+
+/// The entity `<alias>.<assoc_name>` names, resolved through the associated
+/// type alias's own declared bounds (`type TargetIterator: Iterator` →
+/// `Iterator.Item`). Asking off `TyKind::Param { alias }` instead — what
+/// [`find_assoc_type_in_bounds`] does — cannot see those bounds and returns
+/// `None`, which left the equality-clause memo registration dead and the
+/// solver's name fallback carrying the bridge (G25 step 1).
+pub(crate) fn alias_bound_assoc_entity(
+    ctx: &InferCtx<'_>,
+    alias: Entity,
+    assoc_name: &str,
+) -> Option<Entity> {
+    let receiver = ty::TyKind::TypeAlias {
+        entity: alias,
+        args: Vec::new(),
+    };
+    assoc_entity_on(ctx, &receiver, assoc_name)
 }
 
 /// The entity `receiver.<assoc_name>` resolves to through the resolver's

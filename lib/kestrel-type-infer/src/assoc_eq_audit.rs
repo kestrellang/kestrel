@@ -18,8 +18,11 @@
 //! A clause's left side `X.Item` is resolved the way production resolves it
 //! (`find_assoc_type_in_bounds`, which asks off `Param(X)`) and, failing that,
 //! off `TypeAlias(X)` — the receiver kind an associated-type `X` actually has.
-//! Each clause logs `!prod` when only the second succeeded: production's own
-//! memo registration for that clause is then dead.
+//! Each clause logs `!prod` when only the second succeeded. Before G25 step 1
+//! that meant production's memo registration for the clause was dead; both
+//! associated-type emitters now resolve through `alias_bound_assoc_entity`
+//! instead, so `!prod` only marks where the `Param`-receiver lookup (still used
+//! by the body-level emitters) would have missed.
 //!
 //! Inert unless `KESTREL_DEBUG=audit-assoc-eq`: the caller gates the call, and
 //! nothing here writes to the context. Delete with the fallback (G25 commit 4).
