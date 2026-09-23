@@ -470,11 +470,10 @@ fn resolve_projection_subject(
     )
 }
 
-/// Resolve a where-clause name in **`entity`'s own scope**. `pub(crate)` so the
-/// G17 S1 `audit-scope` probe can ask "what would per-holder resolution have
-/// said?" using the very function the query uses, rather than a second copy
-/// that could drift from it.
-pub(crate) fn resolve_type_entity(
+/// Resolve a where-clause name in **`entity`'s own scope**. Private to this
+/// module: every other reader takes the resolved clauses (G29 removed the last
+/// raw-AST re-resolution, `resolve.rs::gather_bounds_from_where_clause`).
+fn resolve_type_entity(
     ctx: &QueryContext<'_>,
     ast_ty: &AstType,
     entity: Entity,

@@ -7,7 +7,7 @@
 use kestrel_ast_builder::arg_binding::{BindParam, binds};
 use kestrel_ast_builder::{
     AstType, Callable, ConformanceItem, Conformances, Gettable, Name, NodeKind, Settable, Static,
-    TypeParams, Vis, WhereClause as AstWhereClause, WhereConstraint,
+    TypeParams, Vis,
 };
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::Builtin;
@@ -178,6 +178,16 @@ impl WhereSubject {
         match self {
             WhereSubject::Param(e) => Some(*e),
             _ => None,
+        }
+    }
+
+    /// The entity this subject is finally *about*: the param itself, or a
+    /// projection's last associated type (`T.Iter.Item` → `Item`). `None` for
+    /// `Self`, which names a position, not an entity.
+    pub fn tail(&self) -> Option<Entity> {
+        match self {
+            WhereSubject::Param(e) | WhereSubject::Projection { assoc: e, .. } => Some(*e),
+            WhereSubject::SelfType => None,
         }
     }
 
@@ -2616,6 +2626,12 @@ impl WorldResolver<'_> {
     /// `TypeParameter` subjects; the walk itself (`body_owner` + ancestors)
     /// stays as it was, because that walk answers the different question of
     /// *which clauses are in force here*.
+    ///
+    /// **G29 — structure.** The clause is read through
+    /// [`Self::where_clause_bounds_on`], not re-derived from the raw AST: a
+    /// by-name re-resolution of `T.Out` picked the first `Out` in source order
+    /// (`R.Out` through `Q` when the clause means `P.Out`) and re-granted
+    /// bounds the structured layer had dropped as ambiguous (E479).
     fn gather_bounds_from_where_clause(
         &self,
         param_entity: Entity,
@@ -2623,156 +2639,35 @@ impl WorldResolver<'_> {
         protocols: &mut Vec<Entity>,
         visited: &mut std::collections::HashSet<Entity>,
     ) {
-        let Some(wc) = self.ctx.get::<AstWhereClause>(entity) else {
-            return;
-        };
-        for constraint in &wc.0 {
-            let WhereConstraint::Bound {
-                subject,
-                protocols: proto_types,
-                ..
-            } = constraint
-            else {
-                continue;
-            };
-            // G17 S1: detection only. Inert — and not even computed — unless
-            // `KESTREL_DEBUG=audit-scope` is set.
-            if kestrel_debug::is_enabled("audit-scope") {
-                self.audit_scope(param_entity, entity, subject, proto_types);
-            }
-            // Resolve subject *and* protocols in the clause-holder's scope.
-            let in_holder_scope = |ty: &kestrel_ast_builder::AstType| {
-                crate::where_clauses::resolve_type_entity(self.ctx, ty, entity, self.root)
-            };
-            if let Some(resolved_subj) = in_holder_scope(subject)
-                && resolved_subj == param_entity
-            {
-                for proto_ty in proto_types {
-                    if let Some(proto) = in_holder_scope(proto_ty)
-                        && visited.insert(proto)
-                    {
-                        protocols.push(proto);
-                    }
-                }
+        for proto in self.where_clause_bounds_on(param_entity, entity) {
+            if visited.insert(proto) {
+                protocols.push(proto);
             }
         }
     }
 
-    /// G17 S1 probe: for one `Bound` constraint on `holder`, report the bound
-    /// set a `body_owner`-scoped resolution contributes to `param_entity`
-    /// against the set a **per-holder** (`holder`-scoped) resolution
-    /// contributes.
-    ///
-    /// **Post-S2 reading.** `gather_bounds_from_where_clause` now *is* the
-    /// per-holder side, so this is no longer "current vs. proposed" — it is a
-    /// census of where the two scopes disagree, i.e. `old` is the pre-S2
-    /// answer and `new` is what the compiler actually does. The probe
-    /// therefore does **not** fall silent after S2; a non-`SAME` line marks a
-    /// site the scope fix changed, not a site still to fix.
-    ///
-    /// Both sides call the *same* resolver — `where_clauses::resolve_type_entity`
-    /// is `Self::resolve_type_entity` with `context` as a parameter instead of
-    /// `self.body_owner` — so the only variable is the scope. That is
-    /// deliberate: this measures the **scope** half of G17, not the key half
-    /// (which C1–C11 already fixed), so the per-holder side is allowed to
-    /// collapse projections exactly as the current side does.
-    ///
-    /// Detection only: returns `()`, touches nothing the caller reads.
-    fn audit_scope(
-        &self,
-        param_entity: Entity,
-        holder: Entity,
-        subject: &AstType,
-        proto_types: &[AstType],
-    ) {
-        let per_holder = |ty: &AstType| {
-            crate::where_clauses::resolve_type_entity(self.ctx, ty, holder, self.root)
-        };
-        let old_subj = self.resolve_type_entity(subject);
-        let new_subj = per_holder(subject);
-
-        // The clause contributes bounds only when its subject *is* the entity
-        // being asked about, so an unbound side contributes the empty set.
-        let bounds = |binds: bool, r: &dyn Fn(&AstType) -> Option<Entity>| -> Vec<Entity> {
-            if !binds {
-                return Vec::new();
-            }
-            proto_types.iter().filter_map(r).collect()
-        };
-        let old = bounds(old_subj == Some(param_entity), &|t| {
-            self.resolve_type_entity(t)
+    /// The protocols the clauses **written** on `entity` bound `param_entity`
+    /// by, read off the structured `ExplicitWhereClauses` (G29 / G17's raw-AST
+    /// half). A subject matches on its entity — the param itself, or a
+    /// projection's tail associated type — so a clause resolution dropped
+    /// (E479/E440) grants nothing here. `ExplicitWhereClauses`, not
+    /// `WhereClausesOf`: the implicit `Copyable`/`Static` bounds are not
+    /// written clauses (G17 `plan-scope.md` Q1).
+    fn where_clause_bounds_on(&self, param_entity: Entity, entity: Entity) -> Vec<Entity> {
+        let resolution = self.ctx.query(crate::where_clauses::ExplicitWhereClauses {
+            entity,
+            root: self.root,
         });
-        let new = bounds(new_subj == Some(param_entity), &per_holder);
-
-        let subset = |a: &[Entity], b: &[Entity]| a.iter().all(|e| b.contains(e));
-        let verdict = match (subset(&old, &new), subset(&new, &old)) {
-            (true, true) => "SAME",
-            (true, false) => "ADD", // per-holder finds a bound the current miss
-            (false, true) => "DROP", // current finds one per-holder does not
-            (false, false) => "SWAP",
-        };
-        // `shadowed` separates "the name means something else over there" from
-        // "the name does not resolve there at all" — the two have different
-        // fixes, and only the former is a genuine F12 aliasing win.
-        let shadowed = matches!((old_subj, new_subj), (Some(a), Some(b)) if a != b);
-        let kind = match new_subj
-            .or(old_subj)
-            .and_then(|e| self.ctx.get::<NodeKind>(e))
-        {
-            Some(NodeKind::TypeParameter) => "param",
-            Some(NodeKind::TypeAlias) => "alias",
-            Some(_) => "other",
-            None => "unresolved",
-        };
-        let list = |es: &[Entity]| {
-            es.iter()
-                .map(|&e| self.audit_path(e))
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-        kestrel_debug::ktrace!(
-            "audit-scope",
-            "{verdict} kind={kind} subject={} asked={} holder={} owner={} \
-             oldsubj={} newsubj={} old=[{}] new=[{}] shadowed={shadowed}",
-            Self::ast_type_text(subject),
-            self.audit_path(param_entity),
-            self.audit_path(holder),
-            self.audit_path(self.body_owner),
-            old_subj.map_or_else(|| "-".to_string(), |e| self.audit_path(e)),
-            new_subj.map_or_else(|| "-".to_string(), |e| self.audit_path(e)),
-            list(&old),
-            list(&new),
-        );
-    }
-
-    /// The dotted source spelling of a where-clause subject, for audit output only.
-    ///
-    /// Placed as an associated fn purely so it sits beside its only caller.
-    fn ast_type_text(ast_ty: &AstType) -> String {
-        match ast_ty {
-            AstType::Named { segments, .. } => segments
-                .iter()
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-            _ => "<non-named>".to_string(),
-        }
-    }
-
-    /// `Parent.Name#index` for audit output. The index disambiguates two
-    /// same-named entities under the same parent, which is the whole point of
-    /// a shadowing audit.
-    fn audit_path(&self, entity: Entity) -> String {
-        let name = |e: Entity| {
-            self.ctx
-                .get::<Name>(e)
-                .map_or_else(|| "?".to_string(), |n| n.0.clone())
-        };
-        let parent = self
-            .ctx
-            .parent_of(entity)
-            .map_or_else(|| "?".to_string(), name);
-        format!("{parent}.{}#{}", name(entity), entity.index())
+        resolution
+            .clauses
+            .iter()
+            .filter_map(|clause| match clause {
+                WhereClause::Bound {
+                    subject, protocol, ..
+                } if subject.tail() == Some(param_entity) => Some(*protocol),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Rank ambiguous candidates by extension specificity.
