@@ -672,13 +672,18 @@ impl<'a> InferCtx<'a> {
         assoc: Entity,
     ) -> Option<TyVar> {
         let want = self.query_ctx.get::<kestrel_ast_builder::Name>(assoc);
-        self.lookup_assoc_sub(
-            site,
-            base,
-            assoc,
-            &|e| e != assoc && self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want,
-            Keying::BaseBlind,
-        )
+        let matches =
+            |e: Entity| e != assoc && self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want;
+        let answer = self.lookup_assoc_sub(site, base, assoc, &matches, Keying::BaseBlind);
+        // G25 commit 1: detection only. Not even computed unless
+        // `KESTREL_DEBUG=audit-assoc-eq` is set, and never feeds the answer.
+        if answer.is_some() && kestrel_debug::is_enabled("audit-assoc-eq") {
+            // The entry `blind_assoc_sub` just picked: the first candidate.
+            if let Some(&(entry, _)) = self.assoc_sub_candidates(&matches).next() {
+                crate::assoc_eq_audit::report(self, base, assoc, entry.base, entry.assoc);
+            }
+        }
+        answer
     }
 
     /// Audit-only probe: report the strict verdict a read site *would* get for

@@ -1,6 +1,51 @@
 # G25 — associated-type equality clauses are declared but never evaluated
 
 > **Status:** filed 2026-08-25, designed, not implemented.
+
+> ⚠ **Re-verified @ `60d3406a`, 2026-09-22 (step 0 + commit 1). Three of this
+> plan's claims are refuted; §"What already exists" and Design §1/§2 rest on
+> them. Read this before the rest.**
+>
+> 1. **"The two emitters skip equality clauses" — REFUTED.** Both
+>    `emit_protocol_assoc_type_where_clauses` (`lib.rs`) and
+>    `emit_type_alias_where_clauses` (`solver.rs`) have a live `TypeEquality`
+>    arm that emits `Associated(alias_tv, "Item", fresh)` + `Equal(fresh, rhs)`.
+>    What they skip is `DirectEquality` and projection-subject `Bound`s — those
+>    are D7's "inert features". Only `entailment.rs` returns `false` for
+>    equality. So Design §2 ("emit the unification") already exists for this
+>    clause; it is not the missing piece.
+> 2. **"A bare `TargetIterator` is `Projection { Projection { SelfType,
+>    TargetIterator }, Item }`" — REFUTED.** An equality clause carries no
+>    `WhereSubject` at all. `WhereClausesOf` on the alias produces
+>    `TypeEquality { param: Iterable.TargetIterator (the TypeAlias entity),
+>    assoc_name: "Item", rhs: Iterable.Item }` (measured by the commit-1 probe).
+>    Even on the `Bound` path a bare `TargetIterator.Item` would not root at
+>    `SelfType`: `resolve_type_path_chain` sets `self_rooted` only for a literal
+>    `Self` segment, and `resolve_projection_subject` returns `None` for a
+>    non-`TypeParameter` root. The "blocker dissolved" claim is false; building
+>    that representation is still work.
+> 3. **What R4 actually stands in for (new, measured).** The `TypeEquality` arm
+>    in `emit_protocol_assoc_type_where_clauses` registers the answer in the
+>    memo via `push_assoc_sub(Some(alias_tv), find_assoc_type_in_bounds(child,
+>    "Item"), rhs_tv)`. For the bridge clause that lookup returns **`None`**:
+>    `find_assoc_type_in_bounds` asks off `TyKind::Param { alias }`, which does
+>    not see an alias's declared `: Iterator` bound. Asked off
+>    `TyKind::TypeAlias { alias }` it returns `Iterator.Item`. So the clause is
+>    evaluated but its memo registration is dead, and R4 fills that hole by
+>    name. Every one of the 99,391 R4 hits in the corpus relies on a clause
+>    whose production registration is dead this way (`!prod` in the probe).
+> 4. **The 27/compilation count — CONFIRMED** at `60d3406a` (after C3b and
+>    G26), and **every hit outside the witness is `JUSTIFIED`** with
+>    `base_rel=proj-of-entry` (asked off `S.TargetIterator`, answered from an
+>    entry filed off `S`, exactly the clause's shape). The witness's one hit is
+>    `UNJUSTIFIED` and involves no equality clause at all: it is a `Bound`
+>    (`A.Item: Show`) entry for `ProducerA.Item` handed to `ProducerB.Item`.
+>    Numbers: `docs/fragility-audit.md` G25 entry.
+>
+> Consequence for the sequence: before folding variants, the cheaper candidate
+> is to make the existing `TypeEquality` registration resolve its lhs (and to
+> register in `emit_type_alias_where_clauses`, which does not push at all), then
+> measure whether R4 still fires. Not predicted — measure it.
 > Found while trying to close G17's C6. Every claim below carries a provenance
 > stamp per [`../../contributing/verifying-claims.md`](../../contributing/verifying-claims.md).
 
