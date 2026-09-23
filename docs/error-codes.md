@@ -17,7 +17,7 @@ comes from the type checker.
 - [E100–E121 — Type checking, parameters & literals](#e100e121--type-checking-parameters--literals)
 - [E200–E211 — Mutability, access modes & assignment](#e200e211--mutability-access-modes--assignment)
 - [E300–E316 — Patterns & exhaustiveness](#e300e316--patterns--exhaustiveness)
-- [E411–E478 — Declarations, generics & protocol conformance](#e411e478--declarations-generics--protocol-conformance)
+- [E411–E479 — Declarations, generics & protocol conformance](#e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
@@ -118,7 +118,7 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E411–E478 — Declarations, generics & protocol conformance
+## E411–E479 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -150,7 +150,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E437 | undeclared type parameter '{name}' in where clause | The `where` clause constrains a name that isn't a type parameter in scope. |
 | E438 | too few/too many type arguments for '{name}': expected {n}, got {m} | Wrong number of generic arguments (also: the type doesn't accept arguments at all). |
 | E439 | type parameter '{name}' shadows outer type parameter | A nested declaration reuses an enclosing generic parameter's name. |
-| E440 | no associated type '{name}' on '{type}' | A `where` clause projects an associated type the bound protocol doesn't declare. |
+| E440 | no associated type '{name}' on '{type}' | A `where` clause projects an associated type the bound protocol doesn't declare — as a bound subject (`T.X: P`) or as an equality's left side (`T.X = Y`), where no declared bound of `T` and no bound in the same clause declares `X`. |
 | E441 | type alias '{name}' cannot have bounds outside a protocol | Bounded `type` aliases (associated types) belong in protocol bodies only. |
 | E442 | type alias '{name}' requires a type definition | Outside a protocol, `type X` needs `= SomeType`. |
 | E443 | '{type_name}' does not conform to '{protocol_name}' | A qualified associated-type binding (`T.[P].X`) names a protocol `T` doesn't conform to. |
@@ -184,6 +184,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. |
 | E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) doesn't match the requirement. |
 | E478 | 'static' is redundant here | Global (module-level) properties are already static. |
+| E479 | associated type '{name}' in where clause is ambiguous: '{type}' is bound by {protocols}, which each declare '{name}' | An equality clause `T.X = Y` where two or more protocols bound on `T` in the same clause each declare `X`. A where-clause path has no protocol-qualified form, so the clause is ignored. |
 
 ### Example — E412 (duplicate extension method)
 

@@ -435,8 +435,17 @@ fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
     if names.is_empty() {
         return None;
     }
+    // Start at the first identifier, not the node: in a where clause the
+    // separator before the path (`, ` / `: `) is an `Error` token inside its
+    // first `PathElement`, so the node range would label the separator — and,
+    // for a clause on its own line, the line before it.
     let range = path_node.text_range();
-    let span = Span::new(file_id, (range.start().into())..(range.end().into()));
+    let start = path_node
+        .descendants_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+        .map_or(range.start(), |t| t.text_range().start());
+    let span = Span::new(file_id, (start.into())..(range.end().into()));
 
     // Extract type arguments (e.g., Factory[lang.i64] → [lang.i64])
     // Type args appear as a TypeArgumentList child of the path node

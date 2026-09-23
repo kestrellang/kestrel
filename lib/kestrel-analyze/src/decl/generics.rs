@@ -63,6 +63,47 @@
 //!
 //! **Notes:**
 //! - "available type parameters: {list}"
+//!
+//! ### E440 -- `where_clause_associated_type_not_found` (Error, Correctness)
+//!
+//! **Message:** "no associated type '{name}' on '{type}'"
+//!
+//! Reported for a bound subject (`T.Missing: P`) and, since G29, for an
+//! equality left side (`T.Missing = X`) that `ExplicitWhereClauses` dropped
+//! with no candidate.
+//!
+//! **Labels:**
+//! - Primary: the subject / equality left side
+//!   - Span source: the `AstType::Named` span of the subject (bound) or of
+//!     `DroppedEquality::lhs_span` (equality)
+//!   - Message: "associated type not found"
+//!
+//! **Notes:**
+//! - equality only: "neither the declared bounds of '{type}' nor the bounds in
+//!   this where clause declare '{name}'"
+//!
+//! ### E479 -- `ambiguous_where_clause_associated_type` (Error, Correctness)
+//!
+//! **Message:** "associated type '{name}' in where clause is ambiguous: '{type}'
+//! is bound by {protocol list}, which each declare '{name}'"
+//!
+//! An equality clause `T.Name = X` whose `Name` is declared by two or more
+//! protocols this holder bounds `T` with. The fact is computed once, by
+//! `ExplicitWhereClauses` (the same resolution `WhereClausesOf` uses), and the
+//! clause is dropped there; this analyzer only reports it (G29).
+//!
+//! **Labels:**
+//! - Primary: the equality's left side
+//!   - Span source: `DroppedEquality::lhs_span` (the `AstType::Named` span of
+//!     the clause's left side)
+//!   - Message: "ambiguous associated type"
+//! - Secondary: each candidate requirement
+//!   - Span source: `util::entity_span` on the candidate associated-type entity
+//!   - Message: "'{name}' declared in '{protocol}'"
+//!
+//! **Notes:**
+//! - "a where-clause path has no protocol-qualified form, so it cannot say
+//!   which protocol's '{name}' it means; the clause is ignored"
 
 use std::collections::HashMap;
 
@@ -76,6 +117,7 @@ use kestrel_ast_builder::{
 };
 use kestrel_name_res::{ExtensionLhsParams, ResolveTypePath, TypeResolution};
 use kestrel_span::Span;
+use kestrel_type_infer::where_clauses::ExplicitWhereClauses;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     DiagnosticDescriptor {
@@ -120,7 +162,21 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
+    DiagnosticDescriptor {
+        id: "E479",
+        name: "ambiguous_where_clause_associated_type",
+        default_severity: Severity::Error,
+        category: Category::Correctness,
+    },
 ];
+
+/// Look a descriptor up by its E-code — see the note in `body/access_mode.rs`.
+fn descriptor(id: &str) -> &'static DiagnosticDescriptor {
+    DESCRIPTORS
+        .iter()
+        .find(|d| d.id == id)
+        .expect("descriptor id not declared by GenericsAnalyzer")
+}
 
 static BORROWED: &[&DiagnosticDescriptor] =
     &[&crate::compilation::type_annotation_resolution::DESCRIPTORS[0]];
@@ -143,6 +199,8 @@ impl Describe for GenericsAnalyzer {
 
 impl DeclCheck for GenericsAnalyzer {
     fn target_kinds(&self) -> &'static [NodeKind] {
+        // Extension and Subscript carry where clauses but no `TypeParams`
+        // of their own; they are here for the dropped-equality check only.
         &[
             NodeKind::Function,
             NodeKind::Struct,
@@ -150,18 +208,24 @@ impl DeclCheck for GenericsAnalyzer {
             NodeKind::Protocol,
             NodeKind::TypeAlias,
             NodeKind::Initializer,
+            NodeKind::Extension,
+            NodeKind::Subscript,
         ]
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
+        let mut diags = Vec::new();
+
+        // Any holder may write an equality clause — `extend Iterator where
+        // Item: Addable, Item.Output = Item` has no type params at all.
+        check_dropped_equalities(cx, &mut diags);
+
         let Some(type_params) = cx.query.get::<TypeParams>(cx.entity) else {
-            return vec![];
+            return diags;
         };
         if type_params.0.is_empty() {
-            return vec![];
+            return diags;
         }
-
-        let mut diags = Vec::new();
 
         check_duplicate_type_params(cx, &type_params.0, &mut diags);
         check_default_ordering(cx, &type_params.0, &mut diags);
@@ -639,5 +703,81 @@ fn check_where_clause_bounds(
                 _ => {},
             }
         }
+    }
+}
+
+/// Report each equality clause `ExplicitWhereClauses` dropped because its
+/// segment names no single associated type (G29): E479 when two or more bound
+/// protocols declare it, E440 when none does. The resolution is not redone
+/// here — the query that dropped the clause is the one source of the fact.
+fn check_dropped_equalities(cx: &DeclContext<'_>, diags: &mut Vec<AnalyzeDiagnostic>) {
+    let resolution = cx.query.query(ExplicitWhereClauses {
+        entity: cx.entity,
+        root: cx.root,
+    });
+    for dropped in &resolution.dropped {
+        let param = util::entity_name(cx.query, dropped.param);
+        let segment = &dropped.segment;
+        if dropped.candidates.is_empty() {
+            let d = descriptor("E440");
+            diags.push(AnalyzeDiagnostic {
+                descriptor_id: d.id,
+                severity: d.default_severity,
+                message: format!("no associated type '{segment}' on '{param}'"),
+                labels: vec![DiagLabel {
+                    span: dropped.lhs_span.clone(),
+                    message: "associated type not found".into(),
+                    is_primary: true,
+                }],
+                notes: vec![format!(
+                    "neither the declared bounds of '{param}' nor the bounds in this where clause \
+                     declare '{segment}'"
+                )],
+            });
+            continue;
+        }
+        // Each candidate is a protocol requirement, so its parent names the
+        // protocol it comes from.
+        let owners: Vec<String> = dropped
+            .candidates
+            .iter()
+            .map(|&c| {
+                cx.query
+                    .parent_of(c)
+                    .map(|p| util::entity_name(cx.query, p))
+                    .unwrap_or_else(|| "<unknown>".into())
+            })
+            .collect();
+        let mut labels = vec![DiagLabel {
+            span: dropped.lhs_span.clone(),
+            message: "ambiguous associated type".into(),
+            is_primary: true,
+        }];
+        labels.extend(
+            dropped
+                .candidates
+                .iter()
+                .zip(&owners)
+                .map(|(&c, owner)| DiagLabel {
+                    span: util::entity_span(cx.query, c),
+                    message: format!("'{segment}' declared in '{owner}'"),
+                    is_primary: false,
+                }),
+        );
+        let d = descriptor("E479");
+        diags.push(AnalyzeDiagnostic {
+            descriptor_id: d.id,
+            severity: d.default_severity,
+            message: format!(
+                "associated type '{segment}' in where clause is ambiguous: '{param}' is bound by \
+                 {}, which each declare '{segment}'",
+                owners.join(" and ")
+            ),
+            labels,
+            notes: vec![format!(
+                "a where-clause path has no protocol-qualified form, so it cannot say which \
+                 protocol's '{segment}' it means; the clause is ignored"
+            )],
+        });
     }
 }

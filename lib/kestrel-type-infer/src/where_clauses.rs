@@ -19,6 +19,7 @@ use kestrel_semantics::{
     CopyRequirement, CopySemantics, NominalCopySemantics, StaticRequirement,
     TypeParamCopyRequirement, TypeParamStaticRequirement,
 };
+use kestrel_span::Span;
 
 use crate::resolve::{WhereClause, WhereSubject};
 
@@ -41,6 +42,56 @@ impl QueryFn for WhereClausesOf {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Vec<WhereClause> {
         resolve_where_clauses(ctx, self.entity, self.root)
+    }
+}
+
+/// Query: the clauses **written** on `entity` (no implicit `Copyable` /
+/// `Static` bounds), plus every equality clause that could not be resolved.
+///
+/// `WhereClausesOf` is this query's `clauses` plus the implicit bounds. The
+/// `dropped` half exists so a clause that resolution throws away is reported
+/// at the clause (G29) by an analyzer — the one place a declaration-level
+/// diagnostic is emitted exactly once — and never inside this memoized,
+/// many-caller query.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ExplicitWhereClauses {
+    pub entity: Entity,
+    pub root: Entity,
+}
+
+/// Output of [`ExplicitWhereClauses`].
+#[derive(Clone, Debug, Default, Hash)]
+pub struct ExplicitWhereResolution {
+    pub clauses: Vec<WhereClause>,
+    pub dropped: Vec<DroppedEquality>,
+}
+
+/// An equality clause `param.segment = RHS` whose `segment` names no single
+/// associated type. Recorded, not reported: `GenericsAnalyzer` turns it into
+/// E479 (ambiguous) or E440 (not found).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DroppedEquality {
+    /// The clause's left side, `Item.Out`.
+    pub lhs_span: Span,
+    /// The clause's root, `Item`.
+    pub param: Entity,
+    /// The segment that did not resolve, `Out`.
+    pub segment: String,
+    /// The associated-type requirements `segment` could name among the
+    /// protocols this holder bounds `param` with. Two or more: ambiguous.
+    /// None: no bound declares it.
+    pub candidates: Vec<Entity>,
+}
+
+impl QueryFn for ExplicitWhereClauses {
+    type Output = ExplicitWhereResolution;
+
+    fn describe(&self) -> String {
+        format!("ExplicitWhereClauses({:?})", self.entity)
+    }
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> ExplicitWhereResolution {
+        resolve_explicit_where_clauses(ctx, self.entity, self.root)
     }
 }
 
@@ -73,7 +124,33 @@ pub fn resolve_where_clauses(
     entity: Entity,
     root: Entity,
 ) -> Vec<WhereClause> {
-    let mut result = Vec::new();
+    let mut result = ctx.query(ExplicitWhereClauses { entity, root }).clauses;
+
+    // Inject the implicit `T: Copyable` / `Cloneable` bound for every generic
+    // param that is not declared `: not Copyable`. Emitting it as a Bound lets
+    // the standard conformance machinery reject `not Copyable` arguments at the
+    // call site. Runs even when the entity has no explicit where clause
+    // (unconstrained params still get the implicit bound).
+    inject_implicit_copyable_bounds(ctx, entity, root, &mut result);
+
+    // Likewise the implicit `T: Static` containment bound (references 2a):
+    // generic code may store/return/capture its params, so a param accepts
+    // reference-bearing arguments only when relaxed with `where T: not
+    // Static` (or when its owner is itself `not Static`).
+    inject_implicit_static_bounds(ctx, entity, root, &mut result);
+
+    result
+}
+
+/// The clauses written on `entity`, in source order, and the equalities that
+/// did not resolve. See [`ExplicitWhereClauses`].
+fn resolve_explicit_where_clauses(
+    ctx: &QueryContext<'_>,
+    entity: Entity,
+    root: Entity,
+) -> ExplicitWhereResolution {
+    let mut out = ExplicitWhereResolution::default();
+    let result = &mut out.clauses;
     if let Some(ast_wc) = ctx.get::<AstWhereClause>(entity) {
         // Pass 1: every `Bound` in this holder. An equality's assoc may be
         // reachable only through one of them (`where Item: Addable,
@@ -112,14 +189,22 @@ pub fn resolve_where_clauses(
                         ctx,
                         kestrel_hir_lower::lower_ast_type(ctx, entity, root, rhs),
                     );
-                    let Some(subject) = resolve_equality_subject(ctx, lhs, &bounds, entity, root)
-                    else {
-                        continue;
-                    };
-                    result.push(WhereClause::Equality {
-                        subject,
-                        rhs: rhs_hir,
-                    });
+                    match resolve_equality_subject(ctx, lhs, &bounds, entity, root) {
+                        Ok(subject) => result.push(WhereClause::Equality {
+                            subject,
+                            rhs: rhs_hir,
+                        }),
+                        // Reported at the clause by `GenericsAnalyzer`. No
+                        // recovery clause: the body emitters re-key an
+                        // equality by name (`find_assoc_type_in_bounds`), so
+                        // pinning each candidate to the error type cannot
+                        // reach the body's use; the follow-on E100 stays
+                        // until those consumers key on the entity (G29).
+                        Err(Some(dropped)) => out.dropped.push(dropped),
+                        // A shape this resolver does not model — dropped
+                        // unrecorded, as it always has been.
+                        Err(None) => {},
+                    }
                 },
                 WhereConstraint::NegativeBound { .. } => {
                     // Negative bounds are not modeled in inference where clauses.
@@ -127,21 +212,7 @@ pub fn resolve_where_clauses(
             }
         }
     }
-
-    // Inject the implicit `T: Copyable` / `Cloneable` bound for every generic
-    // param that is not declared `: not Copyable`. Emitting it as a Bound lets
-    // the standard conformance machinery reject `not Copyable` arguments at the
-    // call site. Runs even when the entity has no explicit where clause
-    // (unconstrained params still get the implicit bound).
-    inject_implicit_copyable_bounds(ctx, entity, root, &mut result);
-
-    // Likewise the implicit `T: Static` containment bound (references 2a):
-    // generic code may store/return/capture its params, so a param accepts
-    // reference-bearing arguments only when relaxed with `where T: not
-    // Static` (or when its owner is itself `not Static`).
-    inject_implicit_static_bounds(ctx, entity, root, &mut result);
-
-    result
+    out
 }
 
 /// Push an implicit `T: Copyable` (or `Cloneable`) `WhereClause::Bound` for each
@@ -485,21 +556,40 @@ fn resolve_bound(
 
 /// An equality's left side as a subject. `T.Item = X` is
 /// `Projection { Param(T), Item }` with `Item` resolved to its **entity**;
-/// `V = X` is `Param(V)`. `None` drops the clause, as an unresolvable clause
-/// always has been.
+/// `V = X` is `Param(V)`.
+///
+/// `Err` drops the clause. `Err(Some(_))` is a `T.Seg` whose `Seg` names no
+/// single associated type — recorded so it is reported at the clause (G29).
+/// `Err(None)` is any other unresolvable shape, dropped unrecorded.
 fn resolve_equality_subject(
     ctx: &QueryContext<'_>,
     lhs: &AstType,
     bounds: &[Option<ResolvedBound>],
     entity: Entity,
     root: Entity,
-) -> Option<WhereSubject> {
+) -> Result<WhereSubject, Option<DroppedEquality>> {
     let Some((param, assoc_name)) = extract_associated_type_path(ctx, lhs, entity, root) else {
-        return resolve_type_param_or_assoc(ctx, lhs, entity, root).map(WhereSubject::Param);
+        return resolve_type_param_or_assoc(ctx, lhs, entity, root)
+            .map(WhereSubject::Param)
+            .ok_or(None);
     };
-    let assoc = resolve_assoc_by_path(ctx, lhs, param, entity, root)
-        .or_else(|| resolve_assoc_via_holder_bounds(ctx, param, &assoc_name, bounds, root))?;
-    Some(WhereSubject::Projection {
+    let assoc = match resolve_assoc_by_path(ctx, lhs, param, entity, root) {
+        Some(assoc) => assoc,
+        None => resolve_assoc_via_holder_bounds(ctx, param, &assoc_name, bounds, root).map_err(
+            |candidates| {
+                let AstType::Named { span, .. } = lhs else {
+                    return None;
+                };
+                Some(DroppedEquality {
+                    lhs_span: span.clone(),
+                    param,
+                    segment: assoc_name.clone(),
+                    candidates,
+                })
+            },
+        )?,
+    };
+    Ok(WhereSubject::Projection {
         base: Box::new(WhereSubject::Param(param)),
         assoc,
     })
@@ -534,15 +624,16 @@ fn resolve_assoc_by_path(
 ///
 /// Only the declaring protocol's requirement counts (parent is a `Protocol`),
 /// so an extension default of the same name is not a second candidate. Two or
-/// more distinct requirements is a genuine ambiguity: the clause is dropped,
-/// and the `where-eq` trace records it.
+/// more distinct requirements is a genuine ambiguity. `Err` carries the
+/// candidates (empty when none declares it); the clause is dropped and
+/// reported at the clause by `GenericsAnalyzer`.
 fn resolve_assoc_via_holder_bounds(
     ctx: &QueryContext<'_>,
     param: Entity,
     assoc_name: &str,
     bounds: &[Option<ResolvedBound>],
     root: Entity,
-) -> Option<Entity> {
+) -> Result<Entity, Vec<Entity>> {
     let subject = WhereSubject::Param(param);
     let mut found: Vec<Entity> = Vec::new();
     for bound in bounds.iter().flatten().filter(|b| b.subject == subject) {
@@ -562,20 +653,20 @@ fn resolve_assoc_via_holder_bounds(
         }
     }
     match found.as_slice() {
-        [one] => Some(*one),
+        [one] => Ok(*one),
         [] => {
             kestrel_debug::ktrace!(
                 "where-eq",
                 "UNRESOLVED param={param:?} assoc={assoc_name}: no bound in this holder declares it"
             );
-            None
+            Err(found)
         },
         many => {
             kestrel_debug::ktrace!(
                 "where-eq",
                 "AMBIGUOUS param={param:?} assoc={assoc_name} candidates={many:?}: clause dropped"
             );
-            None
+            Err(found)
         },
     }
 }
