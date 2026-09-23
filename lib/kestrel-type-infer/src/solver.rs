@@ -5956,13 +5956,7 @@ fn emit_type_alias_where_clauses(
                 ctx.equal(fresh, rhs_tv, span.clone());
                 // Register `alias.assoc → rhs` in the memo, same shape as the
                 // protocol-side emitter: base = the alias's own TyVar, stored raw.
-                let assoc_name = crate::resolve::assoc_name(ctx.query_ctx, assoc);
-                let looked_up = crate::alias_bound_assoc_entity(ctx, alias_entity, &assoc_name);
-                if let Some(inner) =
-                    crate::g29_memo_probe(ctx, "solver:type_alias_eq", looked_up, assoc)
-                {
-                    ctx.push_assoc_sub(Some(alias_tv), inner, rhs_tv);
-                }
+                ctx.push_assoc_sub(Some(alias_tv), assoc, rhs_tv);
             },
         }
     }

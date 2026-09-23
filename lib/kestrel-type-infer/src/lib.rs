@@ -511,11 +511,8 @@ fn emit_method_type_equality_constraint(
     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
     ctx.equal(assoc_result, rhs_tv, span.clone());
 
-    let assoc_name = resolve::assoc_name(ctx.query_ctx, assoc);
-    let looked_up = find_assoc_type_in_bounds(ctx, param, &assoc_name);
-    if let Some(assoc_entity) = g29_memo_probe(ctx, "lib:method_eq", looked_up, assoc) {
-        ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
-    }
+    // Memo key = the clause's own entity (G29), never a by-name re-lookup.
+    ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
 }
 
 /// Emit a `param = RHS` clause: redirect the param's TyVar slot straight to
@@ -812,7 +809,6 @@ fn emit_container_where_clauses(
             },
             resolve::WhereClause::Equality { subject, rhs } => match subject.equality_lhs() {
                 Some(resolve::EqualityLhs::Assoc { root: param, assoc }) => {
-                    let assoc_name = resolve::assoc_name(query_ctx, assoc);
                     let span = Span::synthetic(0);
                     let subject_tv = get_or_create_subject_tv(
                         ctx,
@@ -839,15 +835,12 @@ fn emit_container_where_clauses(
                     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, &rhs, &rhs_subs);
                     ctx.equal(assoc_result, rhs_tv, span);
 
-                    // Register the associated type entity → rhs_tv mapping so the solver
-                    // can substitute it in protocol member signatures (e.g., Output → Item).
-                    // Search param's protocol bounds for a child TypeAlias named assoc_name.
-                    let looked_up = find_assoc_type_in_bounds(ctx, param, &assoc_name);
-                    if let Some(assoc_entity) =
-                        g29_memo_probe(ctx, "lib:container_eq", looked_up, assoc)
-                    {
-                        ctx.push_assoc_sub(Some(subject_tv), assoc_entity, rhs_tv);
-                    }
+                    // Register the clause's own associated type → rhs_tv so the
+                    // solver substitutes it in protocol member signatures
+                    // (e.g., Output → Item). Keyed by entity (G29): a by-name
+                    // re-lookup reached `Equal.Output` for `Set.sum`'s
+                    // `T.Output = T`, which means `Addable.Output`.
+                    ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
                 },
                 Some(resolve::EqualityLhs::Direct(param)) => {
                     // Direct type param equality: V = Array[E]
@@ -993,7 +986,6 @@ fn emit_protocol_assoc_type_where_clauses(
                     else {
                         continue;
                     };
-                    let inner_assoc = resolve::assoc_name(query_ctx, assoc);
                     let fresh = ctx.fresh();
                     ctx.associated_entity(alias_tv, assoc, fresh, span.clone());
 
@@ -1018,12 +1010,7 @@ fn emit_protocol_assoc_type_where_clauses(
                     // Register so solve_associated can reuse. Base is the alias
                     // itself: this is `TargetIterator.Item`, not `Self.Item`
                     // (G17 P7 — the Iterable/Iterator bridge).
-                    let looked_up = alias_bound_assoc_entity(ctx, child, &inner_assoc);
-                    if let Some(inner_entity) =
-                        g29_memo_probe(ctx, "lib:protocol_assoc_eq", looked_up, assoc)
-                    {
-                        ctx.push_assoc_sub(Some(alias_tv), inner_entity, rhs_tv);
-                    }
+                    ctx.push_assoc_sub(Some(alias_tv), assoc, rhs_tv);
                 },
             }
         }
@@ -1155,77 +1142,4 @@ fn is_ptr_ref_intrinsic_call(
         ctx.get::<Name>(e).map(|n| n.0.as_str()),
         Some("ptr_ref" | "ptr_mut_ref")
     )
-}
-
-/// G29 probe (temporary): an equality clause's memo registration re-finds its
-/// associated type by name; report whether that reaches the clause's own
-/// entity. Returns the by-name answer unchanged.
-pub(crate) fn g29_memo_probe(
-    ctx: &InferCtx<'_>,
-    site: &'static str,
-    looked_up: Option<Entity>,
-    clause: Entity,
-) -> Option<Entity> {
-    if kestrel_debug::is_enabled("g29-assoc") {
-        let verdict = match looked_up {
-            Some(e) if e == clause => "SAME",
-            Some(_) => "DIFF",
-            None => "UNREACH",
-        };
-        let name = |e: Entity| resolve::assoc_name(ctx.query_ctx, e);
-        kestrel_debug::ktrace!(
-            "g29-assoc",
-            "MEMO-{verdict} site={site} clause={}#{:?} byname={}",
-            name(clause),
-            clause,
-            looked_up.map_or_else(|| "-".to_string(), |e| format!("{}#{e:?}", name(e))),
-        );
-    }
-    looked_up
-}
-
-/// Find an associated type entity by searching protocol bounds of a TypeAlias.
-/// E.g., for param=Item (which conforms to Addable), find Addable's "Output" child.
-/// Uses the resolver to find protocol bounds, then searches their children.
-fn find_assoc_type_in_bounds(
-    ctx: &InferCtx<'_>,
-    param: Entity,
-    assoc_name: &str,
-) -> Option<Entity> {
-    // Resolve the associated type through the resolver's associated type mechanism.
-    // Build a TyKind::Param for the param entity to query the resolver.
-    assoc_entity_on(ctx, &ty::TyKind::Param { entity: param }, assoc_name)
-}
-
-/// The entity `<alias>.<assoc_name>` names, resolved through the associated
-/// type alias's own declared bounds (`type TargetIterator: Iterator` →
-/// `Iterator.Item`). Asking off `TyKind::Param { alias }` instead — what
-/// [`find_assoc_type_in_bounds`] does — cannot see those bounds and returns
-/// `None`, which left the equality-clause memo registration dead and the
-/// solver's name fallback carrying the bridge (G25 step 1).
-pub(crate) fn alias_bound_assoc_entity(
-    ctx: &InferCtx<'_>,
-    alias: Entity,
-    assoc_name: &str,
-) -> Option<Entity> {
-    let receiver = ty::TyKind::TypeAlias {
-        entity: alias,
-        args: Vec::new(),
-    };
-    assoc_entity_on(ctx, &receiver, assoc_name)
-}
-
-/// The entity `receiver.<assoc_name>` resolves to through the resolver's
-/// associated-type lookup, whichever variant it comes back as.
-fn assoc_entity_on(ctx: &InferCtx<'_>, receiver: &ty::TyKind, assoc_name: &str) -> Option<Entity> {
-    let resolved = ctx.resolver.resolve_associated_type(receiver, assoc_name)?;
-    // Extract the entity from whichever variant the resolver returned.
-    match &resolved.resolved {
-        kestrel_hir::ty::HirTy::Struct { entity, .. }
-        | kestrel_hir::ty::HirTy::Enum { entity, .. }
-        | kestrel_hir::ty::HirTy::Protocol { entity, .. }
-        | kestrel_hir::ty::HirTy::AliasUse { entity, .. } => Some(*entity),
-        kestrel_hir::ty::HirTy::AssocProjection { assoc, .. } => Some(*assoc),
-        _ => None,
-    }
 }

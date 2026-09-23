@@ -967,17 +967,12 @@ impl TypeResolver for WorldResolver<'_> {
         assoc: Entity,
         name: &str,
     ) -> Option<AssociatedTypeResolution> {
-        let by_name = self.resolve_associated_type(container, name);
         // A concrete conformer's `type Out = …` witnesses every requirement
         // spelled `Out`, so there the name *is* the match rule.
         let Some(protocols) = self.abstract_container_bounds(container) else {
-            return by_name;
+            return self.resolve_associated_type(container, name);
         };
-        let by_entity = self.find_associated_type_in_protocols_where(&protocols, |e| e == assoc);
-        if kestrel_debug::is_enabled("g29-assoc") {
-            self.audit_assoc_key(container, assoc, by_name.as_ref(), by_entity.as_ref());
-        }
-        by_name
+        self.find_associated_type_in_protocols_where(&protocols, |e| e == assoc)
     }
 
     fn builtin(&self, feature: Builtin) -> Option<Entity> {
@@ -2767,53 +2762,6 @@ impl WorldResolver<'_> {
     /// `Parent.Name#index` for audit output. The index disambiguates two
     /// same-named entities under the same parent, which is the whole point of
     /// a shadowing audit.
-    /// G29 probe (temporary): would solving an entity-keyed `Associated`
-    /// reach a different associated type than solving it by name does?
-    fn audit_assoc_key(
-        &self,
-        container: &TyKind,
-        assoc: Entity,
-        by_name: Option<&AssociatedTypeResolution>,
-        by_entity: Option<&AssociatedTypeResolution>,
-    ) {
-        let reached = |r: Option<&AssociatedTypeResolution>| match r.map(|r| &r.resolved) {
-            Some(kestrel_hir::ty::HirTy::AliasUse { entity, .. }) => Some(*entity),
-            _ => None,
-        };
-        let (n, e) = (reached(by_name), reached(by_entity));
-        let verdict = match (by_name.is_some(), by_entity.is_some()) {
-            (false, false) => "NONE",
-            (true, false) => "UNREACH",
-            (false, true) => "NAMEMISS",
-            (true, true)
-                if by_name
-                    .zip(by_entity)
-                    .is_some_and(|(a, b)| a.resolved.same_type(&b.resolved)) =>
-            {
-                "SAME"
-            },
-            (true, true) => "DIFF",
-        };
-        let show = |x: Option<Entity>| x.map_or_else(|| "-".to_string(), |e| self.audit_path(e));
-        kestrel_debug::ktrace!(
-            "g29-assoc",
-            "{verdict} container={} assoc={} byname={} byentity={} owner={}",
-            match container {
-                TyKind::Param { entity } => format!("param:{}", self.audit_path(*entity)),
-                TyKind::TypeAlias { entity, .. } => format!("alias:{}", self.audit_path(*entity)),
-                TyKind::AssocProjection { assoc, .. } =>
-                    format!("proj:{}", self.audit_path(*assoc)),
-                TyKind::Protocol { entity, .. } => format!("proto:{}", self.audit_path(*entity)),
-                TyKind::SelfType { entity } => format!("self:{}", self.audit_path(*entity)),
-                _ => "other".to_string(),
-            },
-            self.audit_path(assoc),
-            show(n),
-            show(e),
-            self.audit_path(self.body_owner),
-        );
-    }
-
     fn audit_path(&self, entity: Entity) -> String {
         let name = |e: Entity| {
             self.ctx
