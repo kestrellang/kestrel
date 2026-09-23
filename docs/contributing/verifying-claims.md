@@ -118,6 +118,13 @@ hopes. Two failure modes to close explicitly:
 - **Unreproduced relay.** If you pass an agent's measurement upward without
   re-running it, you own it. Either reproduce the load-bearing ones yourself or
   mark them as the agent's, unverified.
+- **`triage` is not the whole test suite.** It runs the `.ks` corpus only.
+  Rust unit and integration tests inside a crate run only through
+  `cargo test -p <crate>`. A claim like "the unit tests pass" needs that
+  command, run on the current tree. G25 step 4 reported its entailment tests
+  passing when the test target did not even compile (a `u32` passed where
+  `usize` was expected). Nothing caught it for three commits, because every
+  check in between was a `triage` run.
 
 ## When a claim is refuted
 
