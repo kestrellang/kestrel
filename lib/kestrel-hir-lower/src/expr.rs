@@ -458,14 +458,14 @@ impl LowerCtx<'_> {
                 entity,
                 container: None,
             } => self.alloc_expr(HirExpr::Def(entity, vec![], span.clone())),
-            ValueResolution::AssociatedTypeStaticMember {
-                entity: _,
-                assoc_type,
-            } => {
-                // Emit Field { base: Def(assoc_type), name: member } so the solver
-                // can do Self-substitution (e.g., Item.zero → Member(Item, "zero"))
+            ValueResolution::AssociatedTypeStaticMember { .. } => {
+                // `Item.zero` / `Item.Sub.zero`: a static member off an
+                // associated type. The prefix is lowered as the *type* (a
+                // `TypeRef` projection, base = the implicit Self or the named
+                // base) rather than a `Def` of the alias entity, so a
+                // two-level prefix keeps its middle segment (G26).
                 let member_name = segments.last().map(|s| s.name.clone()).unwrap_or_default();
-                let base = self.alloc_expr(HirExpr::Def(assoc_type, vec![], span.clone()));
+                let base = self.lower_type_receiver_path(&segments[..segments.len() - 1]);
                 self.alloc_expr(HirExpr::Field {
                     base,
                     name: name_from_ast(member_name),
@@ -745,57 +745,63 @@ impl LowerCtx<'_> {
                     }
                 }
 
-                // Type parameter static call: T.method(args) or T.Item.method(args)
-                // → MethodCall. The solver resolves the method via protocol bounds.
-                // The receiver is segments[..last], which may walk through
-                // associated types on a type parameter (e.g. T.Item where T: Container).
-                {
+                // Type-level static call → MethodCall: `T.method(args)`,
+                // `T.Item.method(args)`, or — with no type parameter in the
+                // path — an associated type named from inside its protocol's
+                // extension (`Item.seed()`, `Item.Sub.seed()`, whose base is
+                // the implicit Self). The solver resolves the method via
+                // protocol bounds on the receiver.
+                'type_level: {
+                    if segments.len() < 2 {
+                        break 'type_level;
+                    }
                     let first_result = self.ctx.query(ResolveValuePath {
                         segments: vec![segments[0].name.clone()],
                         context: self.owner,
                         root: self.root,
                     });
-                    if matches!(first_result, ValueResolution::TypeParameter(_)) {
-                        let prefix_segments: Vec<String> = segments[..segments.len() - 1]
-                            .iter()
-                            .map(|s| s.name.clone())
-                            .collect();
-                        let prefix_result = self.ctx.query(ResolveValuePath {
-                            segments: prefix_segments,
-                            context: self.owner,
-                            root: self.root,
-                        });
-                        // Build receiver from the prefix resolution. An
-                        // associated-type prefix (`B.Item`) is a projection:
-                        // lowering it as a `Def` of the alias entity would keep
-                        // `Item` and drop `B`, so a bound on `A.Item` would be
-                        // handed to `B.Item` (G17 S5).
-                        let prefix = &segments[..segments.len() - 1];
-                        let receiver = match prefix_result {
-                            ValueResolution::TypeParameter(entity)
-                            | ValueResolution::Def(entity) => {
-                                Some(self.lower_type_receiver_def(entity, &segments[0]))
-                            },
-                            ValueResolution::AssociatedType { .. } => {
-                                Some(self.lower_type_receiver_path(prefix))
-                            },
-                            _ => None,
-                        };
-                        if let Some(receiver) = receiver {
-                            let last = &segments[segments.len() - 1];
-                            let lowered_type_args = last
-                                .type_args
-                                .as_ref()
-                                .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
-                            return self.alloc_expr(HirExpr::MethodCall {
-                                receiver,
-                                method: name_from_ast(last.name.clone()),
-                                type_args: lowered_type_args,
-                                args: lowered_args,
-                                span: span.clone(),
-                            });
-                        }
-                    }
+                    let first_is_param = matches!(first_result, ValueResolution::TypeParameter(_));
+                    let prefix_segments: Vec<String> = segments[..segments.len() - 1]
+                        .iter()
+                        .map(|s| s.name.clone())
+                        .collect();
+                    let prefix_result = self.ctx.query(ResolveValuePath {
+                        segments: prefix_segments,
+                        context: self.owner,
+                        root: self.root,
+                    });
+                    // Build receiver from the prefix resolution. An
+                    // associated-type prefix (`B.Item`, `Item.Sub`) is a
+                    // projection: lowering it as a `Def` of the alias entity
+                    // would keep `Item` and drop `B`, so a bound on `A.Item`
+                    // would be handed to `B.Item` (G17 S5, G26).
+                    let prefix = &segments[..segments.len() - 1];
+                    let receiver = match prefix_result {
+                        ValueResolution::TypeParameter(entity) | ValueResolution::Def(entity)
+                            if first_is_param =>
+                        {
+                            Some(self.lower_type_receiver_def(entity, &segments[0]))
+                        },
+                        ValueResolution::AssociatedType { .. } => {
+                            Some(self.lower_type_receiver_path(prefix))
+                        },
+                        _ => None,
+                    };
+                    let Some(receiver) = receiver else {
+                        break 'type_level;
+                    };
+                    let last = &segments[segments.len() - 1];
+                    let lowered_type_args = last
+                        .type_args
+                        .as_ref()
+                        .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                    return self.alloc_expr(HirExpr::MethodCall {
+                        receiver,
+                        method: name_from_ast(last.name.clone()),
+                        type_args: lowered_type_args,
+                        args: lowered_args,
+                        span: span.clone(),
+                    });
                 }
 
                 // Value-prefix method call: `Type.staticProp.instanceMethod(args)`.
