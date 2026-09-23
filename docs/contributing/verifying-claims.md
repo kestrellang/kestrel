@@ -118,6 +118,13 @@ hopes. Two failure modes to close explicitly:
 - **Unreproduced relay.** If you pass an agent's measurement upward without
   re-running it, you own it. Either reproduce the load-bearing ones yourself or
   mark them as the agent's, unverified.
+- **Comparing against an older compiler.** Don't use a worktree for this;
+  worktrees start from `main` (see above). Export the commit you want into the
+  scratchpad instead, and build it there:
+  `git archive <sha> | tar -x -C <scratchpad>/base && (cd <scratchpad>/base && cargo build --release --bin kestrel)`.
+  The first build takes about 4 minutes and about 750 MB of disk. Run the
+  same input through both binaries. This is how G29 confirmed that a
+  behaviour change was new rather than inherited from an earlier commit.
 - **`triage` is not the whole test suite.** It runs the `.ks` corpus only.
   Rust unit and integration tests inside a crate run only through
   `cargo test -p <crate>`. A claim like "the unit tests pass" needs that

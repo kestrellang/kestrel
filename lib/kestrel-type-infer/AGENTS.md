@@ -168,3 +168,26 @@ When you add a new expression form that names a type, **register it in
 that already failed to resolve (`HirTy::Error`); it has its own diagnostic.
 G26 found `let x = Item.Sub;` crashing the compiler in post-mono verify because
 `TypeRef` was not yet registered.
+
+## Same-name associated-type checks must go level by level
+
+`ProtocolAssociatedTypes` (`kestrel-name-res`) returns **every** associated type
+a protocol can reach, as one flat list. That includes types inherited through
+refinement **and** through conformances added in extensions (`extend P: Q`).
+Each entry's `declaring_protocol` says where the type came from. The list is
+not grouped by distance.
+
+Any check of the form "does this name refer to exactly one associated type?"
+must look at the nearest level first. That level is the associated types
+declared by the protocols the subject is **directly** bound by, which are the
+entries whose `declaring_protocol` is that protocol and whose `extension` is
+`None`. Go out one level (`kestrel_name_res::protocol_parents`) only when
+nothing at the current level matches. A match wins at the first level that has
+one, and only two matches **at the same level** are ambiguous.
+
+A flat check over the whole list wrongly reports six stdlib clauses as
+ambiguous. `Iterator` reaches `Iterable.Item` through `extend Iterator:
+Iterable`, and `Hashable` reaches `Equal.Output` and `NotEqual.Output` through
+`Equatable`. G29 (`a87b1f9f`) found this and fixed it in one place:
+`where_clauses.rs::single_assoc` decides every `T.Seg` path in a where clause.
+Reuse it; don't write a second candidate gatherer.
