@@ -231,7 +231,18 @@ Current allocations:
   E-codes (each pair's registered/externally-referenced owner kept the
   old code; the other side moved here). Uniqueness is now enforced by
   `registry.rs::descriptor_ids_are_unique_across_all_analyzers`.
-  **Next free E4xx is E479.**
+  **E4xx is allocated up to E479.** E480 and above are already emitted
+  elsewhere (`kestrel-hir-lower/src/ty.rs`, `kestrel-semantics/src/staticness.rs`,
+  `body/access_mode.rs`). The only free E4xx codes are the gaps
+  **E400–E410 and E414**. As of 2026-09-23 they are not emitted, documented or
+  reserved anywhere. Take a new E4xx from those gaps.
+  - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
+    `6ef0782c`. It is reported at the clause when the associated type in a
+    where-clause equality (`Item.Out = X`) is declared by two or more of the
+    protocols bound on `Item`. Its sibling, where no bound protocol declares
+    the segment, reuses **E440**. E479 had been informally earmarked for F29
+    (`@builtin` argument validation, never built), so F29 needs a code from
+    the gaps above.
   - E473: `duplicate_deinit` (decl/duplicate_deinit.rs) — was E423
   - E474: `duplicate_symbol_same_kind` (decl/duplicate_symbol.rs) — was E424
   - E475: `duplicate_symbol_different_kind` (decl/duplicate_symbol.rs) — was E425
