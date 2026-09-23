@@ -426,6 +426,7 @@ fn analyze_expr(
         // Leaf expressions: no sub-expressions to check
         HirExpr::Literal { .. }
         | HirExpr::Def(..)
+        | HirExpr::TypeRef { .. }
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {},
 

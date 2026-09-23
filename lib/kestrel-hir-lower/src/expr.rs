@@ -755,25 +755,23 @@ impl LowerCtx<'_> {
                             context: self.owner,
                             root: self.root,
                         });
-                        // Build receiver from the prefix resolution.
-                        let receiver_entity = match prefix_result {
+                        // Build receiver from the prefix resolution. An
+                        // associated-type prefix (`B.Item`) is a projection:
+                        // lowering it as a `Def` of the alias entity would keep
+                        // `Item` and drop `B`, so a bound on `A.Item` would be
+                        // handed to `B.Item` (G17 S5).
+                        let prefix = &segments[..segments.len() - 1];
+                        let receiver = match prefix_result {
                             ValueResolution::TypeParameter(entity)
-                            | ValueResolution::Def(entity) => Some(entity),
-                            ValueResolution::AssociatedType { entity, .. } => Some(entity),
+                            | ValueResolution::Def(entity) => {
+                                Some(self.lower_type_receiver_def(entity, &segments[0]))
+                            },
+                            ValueResolution::AssociatedType { .. } => {
+                                Some(self.lower_type_receiver_path(prefix))
+                            },
                             _ => None,
                         };
-                        if let Some(entity) = receiver_entity {
-                            let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
-                                .type_args
-                                .iter()
-                                .flatten()
-                                .map(|t| self.lower_type(t))
-                                .collect();
-                            let receiver = self.alloc_expr(HirExpr::Def(
-                                entity,
-                                first_type_args,
-                                segments[0].span.clone(),
-                            ));
+                        if let Some(receiver) = receiver {
                             let last = &segments[segments.len() - 1];
                             let lowered_type_args = last
                                 .type_args
@@ -1164,6 +1162,49 @@ impl LowerCtx<'_> {
             .map(|t| self.lower_type(t))
             .collect();
         Some((matches, type_args))
+    }
+
+    /// Receiver of a type-level static call whose prefix names a single
+    /// entity (`T.zero()`): a `Def`, carrying the first segment's type args.
+    fn lower_type_receiver_def(
+        &mut self,
+        entity: kestrel_hecs::Entity,
+        first: &ExprPathSegment,
+    ) -> HirExprId {
+        let type_args: Vec<kestrel_hir::ty::HirTy> = first
+            .type_args
+            .iter()
+            .flatten()
+            .map(|t| self.lower_type(t))
+            .collect();
+        self.alloc_expr(HirExpr::Def(entity, type_args, first.span.clone()))
+    }
+
+    /// Receiver of a type-level static call whose prefix is an
+    /// associated-type projection (`B.Item.zero()`): the prefix lowered as
+    /// the *type* `B.Item`, through the same path as a type annotation, so it
+    /// arrives as `HirTy::AssocProjection { base: Param(B), .. }` and keeps
+    /// its base (G17 S5).
+    fn lower_type_receiver_path(&mut self, prefix: &[ExprPathSegment]) -> HirExprId {
+        let (first, last) = (&prefix[0], &prefix[prefix.len() - 1]);
+        let span = Span {
+            file_id: first.span.file_id,
+            start: first.span.start,
+            end: last.span.end,
+        };
+        let segments = prefix
+            .iter()
+            .map(|s| kestrel_ast::PathSegment {
+                name: s.name.clone(),
+                type_args: s.type_args.clone().unwrap_or_default(),
+                span: s.span.clone(),
+            })
+            .collect();
+        let ty = self.lower_type(&kestrel_ast::AstType::Named {
+            segments,
+            span: span.clone(),
+        });
+        self.alloc_expr(HirExpr::TypeRef { ty, span })
     }
 
     /// Lower Path segments except the last one as receiver.

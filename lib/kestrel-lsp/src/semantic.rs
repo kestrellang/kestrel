@@ -62,6 +62,7 @@ pub fn hir_expr_span(expr: &HirExpr) -> Span {
         HirExpr::Closure { span, .. } => span.clone(),
         HirExpr::Local(_, span) => span.clone(),
         HirExpr::Def(_, _, span) => span.clone(),
+        HirExpr::TypeRef { span, .. } => span.clone(),
         HirExpr::OverloadSet { span, .. } => span.clone(),
         HirExpr::Borrow { span, .. } => span.clone(),
         HirExpr::Field { span, .. } => span.clone(),

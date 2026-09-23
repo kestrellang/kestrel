@@ -221,6 +221,16 @@ pub enum HirExpr {
     /// Function, enum case, type, etc. — resolved by name resolution.
     /// Optional type args for explicit generic instantiation (e.g., `Pointer[UInt8]`).
     Def(Entity, Vec<crate::ty::HirTy>, Span),
+    /// A type written in expression position whose meaning needs more than
+    /// one entity — today the receiver of a static call on an associated-type
+    /// projection, `B.Item.zero()`. Carries the full `HirTy`
+    /// (`AssocProjection { base: Param(B), assoc: Item }`), so inference types
+    /// it exactly as the annotation `-> B.Item` and the projection keeps its
+    /// base (G17 S5). A `Def` of the alias entity would drop `B`.
+    TypeRef {
+        ty: crate::ty::HirTy,
+        span: Span,
+    },
     /// Multiple overloaded function entities sharing the same name.
     /// Resolved by type inference at the call site via OverloadedCall constraint.
     OverloadSet {

@@ -475,6 +475,11 @@ impl OssaBodyCtx<'_, '_> {
 
             HirExpr::Def(entity, _type_args, _) => self.lower_def(expr_id, *entity),
 
+            // A type in expression position only ever stands as a static
+            // call's receiver; like `Def` of a type parameter or alias it has
+            // no runtime value (G17 S5).
+            HirExpr::TypeRef { .. } => self.emit_literal(Immediate::unit()),
+
             HirExpr::OverloadSet { candidates, .. } => {
                 if let Some(&resolved) = self
                     .typed

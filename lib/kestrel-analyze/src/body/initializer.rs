@@ -735,6 +735,7 @@ fn analyze_expr(
         HirExpr::Local(..)
         | HirExpr::Literal { .. }
         | HirExpr::Def(..)
+        | HirExpr::TypeRef { .. }
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {},
 

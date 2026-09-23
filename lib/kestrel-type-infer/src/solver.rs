@@ -396,6 +396,7 @@ fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Closure { span, .. }
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
+        | HirExpr::TypeRef { span, .. }
         | HirExpr::OverloadSet { span, .. }
         | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }

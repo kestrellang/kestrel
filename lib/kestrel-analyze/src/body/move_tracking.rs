@@ -962,6 +962,7 @@ fn analyze_expr(
         // Leaves
         HirExpr::Literal { .. }
         | HirExpr::Def(..)
+        | HirExpr::TypeRef { .. }
         | HirExpr::OverloadSet { .. }
         | HirExpr::Error { .. } => {},
 
@@ -1313,6 +1314,7 @@ fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<Loc
         | HirExpr::Local(..)
         | HirExpr::Literal { .. }
         | HirExpr::Def(..)
+        | HirExpr::TypeRef { .. }
         | HirExpr::OverloadSet { .. }
         | HirExpr::Break { .. }
         | HirExpr::Continue { .. }

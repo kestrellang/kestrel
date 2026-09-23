@@ -133,6 +133,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             tv
         },
 
+        // A type in expression position (`B.Item` in `B.Item.zero()`), typed
+        // exactly as the annotation `-> B.Item` is, so a projection keeps its
+        // base and S4's base-aware member lookup can judge it (G17 S5). Only
+        // a static `MethodCall` receiver is built this way; MIR lowers it to
+        // unit, like a `Def` of a type.
+        HirExpr::TypeRef { ty, .. } => lower_hir_ty(ctx, ty),
+
         // Overloaded function reference — can only appear as callee of Call
         HirExpr::OverloadSet { span, .. } => {
             // A receiver-less overload reference used as a bare value.
@@ -272,17 +279,19 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // enum, protocol, type alias, type parameter) is a static call —
             // e.g. `Counter.getValue()`, `T.staticFn()`, `Pointer[UInt8].nullPointer()`.
             // solve_member uses this to reject instance methods called as static.
-            let is_static_ctx = matches!(
-                &hir.exprs[*receiver],
-                HirExpr::Def(entity, _, _) if matches!(
+            // A `TypeRef` (a projection like `B.Item`, G17 S5) is always one.
+            let is_static_ctx = match &hir.exprs[*receiver] {
+                HirExpr::TypeRef { .. } => true,
+                HirExpr::Def(entity, _, _) => matches!(
                     ctx.query_ctx.get::<NodeKind>(*entity),
                     Some(&NodeKind::Struct)
                         | Some(&NodeKind::Enum)
                         | Some(&NodeKind::Protocol)
                         | Some(&NodeKind::TypeAlias)
                         | Some(&NodeKind::TypeParameter)
-                )
-            );
+                ),
+                _ => false,
+            };
 
             let has_explicit = explicit_targs.as_ref().is_some_and(|a| !a.is_empty());
 
@@ -2598,6 +2607,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Closure { span, .. }
         | HirExpr::Local(_, span)
         | HirExpr::Def(_, _, span)
+        | HirExpr::TypeRef { span, .. }
         | HirExpr::OverloadSet { span, .. }
         | HirExpr::Borrow { span, .. }
         | HirExpr::Field { span, .. }

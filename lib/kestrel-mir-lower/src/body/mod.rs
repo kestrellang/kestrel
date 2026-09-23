@@ -4421,6 +4421,7 @@ pub(crate) fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | kestrel_hir::body::HirExpr::Field { span, .. }
         | kestrel_hir::body::HirExpr::TupleIndex { span, .. }
         | kestrel_hir::body::HirExpr::Def(_, _, span)
+        | kestrel_hir::body::HirExpr::TypeRef { span, .. }
         | kestrel_hir::body::HirExpr::OverloadSet { span, .. }
         | kestrel_hir::body::HirExpr::ImplicitMember { span, .. }
         | kestrel_hir::body::HirExpr::Call { span, .. }

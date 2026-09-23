@@ -911,3 +911,74 @@ lookup rejects with `E100 no member 'describe' on type 'T'`. The pre-S2 binary
 does the same, so it is not a G17-scope regression. It has not been checked
 whether that spelling is the supported one for a bound on a protocol's own type
 parameter.
+
+---
+
+## 11. S5 — LANDED. A type-level projection receiver keeps its base
+
+[measured @ `db2e2cd6` + this commit, parent checkout, branch `arch/fixes`,
+`cargo build --release --bin kestrel` rebuilt before every figure.]
+
+### Where the base was lost — confirmed by instrumentation
+
+`kestrel-hir-lower/src/expr.rs`, `lower_call`, the "type parameter static call"
+branch. `ResolveValuePath(["B", "Item"])` answers
+`AssociatedType { entity: Producer.Item, container: Some(B) }` — name
+resolution still had the base — and the branch built the receiver as
+`HirExpr::Def(Producer.Item, <B's type args>)`, keeping the alias and dropping
+`B`. A temporary `ktrace!` showed that HIR, and `solve_member` then saw
+`recv=TypeAlias { Producer.Item }` with `spine=None`, so S4's filter permitted.
+`HirExpr` had no shape that could hold a projection, so no fix in
+`kestrel-type-infer` alone could have recovered it.
+
+### It was a miscompile of LEGAL programs, not only a wrong-accept
+
+Pre-fix, with `Zero` bounded on **both** `A.Item` (`Int64`) and `B.Item`
+(`W`, a user struct), `B.Item.zero()` compiled with zero errors and exited
+**139**. The witness was `call @witness Zero.zero for Producer::Producer.Item`
+(no base); mono resolved it to `A`'s binding and ran `Int64.zero` for a `W`
+result. The illegal case (§9's last row) crashed the same way, running
+`Int64.zero` for a `String`. Rejecting the illegal case at the frontend alone
+would not have fixed the legal one.
+
+### The fix
+
+A new HIR variant, `HirExpr::TypeRef { ty: HirTy, span }` — a type in
+expression position. The branch lowers the prefix `B.Item` through the ordinary
+type-path lowering (`lower_type` on an `AstType::Named`), giving
+`HirTy::AssocProjection { base: Param(B), assoc: Item }`. `gen_expr` types it
+with `lower_hir_ty`, the same path as the annotation `-> B.Item`, so the
+receiver is `AssocProjection { base: B, .. }` and S4's
+`projection_base_spine` → `resolve_member_with_base` → `retain_base_admitted`
+→ `assoc_projection_base_admits` is the only verdict — no second check.
+`is_static_ctx` counts it as static; mir-lower lowers it to unit, like `Def` of
+a type. `Def` keeps a single meaning: nothing reads a base out of its type args
+or a side table. The other arms (analyze ×5, mir-lower span, lsp span) are
+leaves.
+
+### Measured, pre vs post
+
+| file | pre | post |
+| --- | --- | --- |
+| `assoc_projection_bound_static_member_other_receiver.ks` | 0 errors, exit 139 | `E100 no member 'zero' on type 'B.Item'` @ `:44:34` |
+| `..._other_receiver_control.ks` (both bounds, `B.Item = W`) | 0 errors, exit 139 | prints `n=42 m=43`; mono calls `W.zero` |
+| `..._same_receiver.ks` (`A.Item.zero()`, bound on `A.Item`) | prints `[0]` | same |
+
+### Suite
+
+**3834 passed, 1 failed** (triage build `aa727406`). That is S3's 3831/2 plus
+the two new files, both passing, plus `static_member_other_receiver` flipping
+to pass. The one failure is `assoc_projection_bound_same_name_distinct_protocols`
+(G25, unchanged). No other test changed verdict.
+
+### Residuals — NOT fixed here
+
+- **Value-position spelling.** `let f = A.Item.zero;` lowers to a
+  `Def(A)` + `Field("Item")` chain and is rejected with
+  `E100 no member 'Item' on type 'A'` even when the bound exists. The value
+  path's `AssociatedType` arm (`lower_path` fallback, `expr.rs`) still builds a
+  baseless `Def(alias)` too. Kept out of S5 by maintainer decision; `TypeRef` is
+  the natural carrier for both.
+- **LSP.** Hover / go-to-definition / references read `HirExpr::Def`; a
+  `TypeRef` receiver is now invisible to them. The old `Def(alias)` carried the
+  span of `B` alone, so it was already pointing the wrong way.
