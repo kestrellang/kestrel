@@ -17,8 +17,9 @@
 //!   returns the bounds written on the param's enclosing decl. Mirrors
 //!   `collect_param_protocol_bounds` in `resolve.rs`.
 //!
-//! Conservative on `Equality`: structural match
-//! against context. Generalize when a real test demands.
+//! - Equality — entailed only by the same equality in context: equal subject,
+//!   and an RHS that is `HirTy::same_type` (span-insensitive). No
+//!   substitution or transitivity.
 
 use kestrel_hecs::{Entity, QueryContext};
 use kestrel_name_res::expand_protocol_closure;
@@ -47,11 +48,14 @@ pub fn constraint_entailed_by(
             Some(param) => bound_entailed(qctx, root, param, *protocol, context),
             None => false,
         },
-        // An equality carries HirTy on the RHS, which has no structural
-        // equality. Reject conservatively until a real caller demands proper
-        // handling — matches prior behavior in
-        // `conformance_completeness::extension_where_clauses_satisfied`.
-        WhereClause::Equality { .. } => false,
+        // An equality is entailed when the context states the same one: the
+        // same subject, and an RHS that is the same type as written
+        // (`HirTy::same_type`, span-insensitive). No rewriting, no
+        // transitivity — deliberately the narrowest sound answer (G25 step 4).
+        WhereClause::Equality { subject, rhs } => context.iter().any(|c| {
+            matches!(c, WhereClause::Equality { subject: s, rhs: r }
+                if s == subject && r.same_type(rhs))
+        }),
     }
 }
 
@@ -329,6 +333,69 @@ mod tests {
         };
         let ctx = world.query_context();
         assert!(!constraint_entailed_by(&ctx, root, &constraint, &[]));
+    }
+
+    /// `T = Int64`-style clause: same subject, same RHS type, different spans.
+    fn equality(t: Entity, rhs_entity: Entity, at: u32) -> WhereClause {
+        WhereClause::Equality {
+            subject: WhereSubject::Param(t),
+            rhs: kestrel_hir::ty::HirTy::Struct {
+                entity: rhs_entity,
+                args: vec![],
+                span: Span::synthetic(at),
+            },
+        }
+    }
+
+    /// G25 step 4: the same equality in context entails it, even though the
+    /// two were written at different places (spans differ).
+    #[test]
+    fn equality_entailed_by_same_clause_ignoring_span() {
+        let mut world = World::new();
+        world.begin_revision();
+        let root = spawn_module(&mut world, None, Name::ROOT);
+        let owner = spawn_module(&mut world, Some(root), "Owner");
+        let t = spawn_type_param(&mut world, owner, "T");
+        let int = spawn_module(&mut world, Some(root), "Int64");
+        let ctx = world.query_context();
+        assert!(constraint_entailed_by(
+            &ctx,
+            root,
+            &equality(t, int, 1),
+            &[equality(t, int, 2)]
+        ));
+    }
+
+    /// Control: a different RHS, or a different subject, does not entail.
+    #[test]
+    fn equality_not_entailed_by_different_rhs_or_subject() {
+        let mut world = World::new();
+        world.begin_revision();
+        let root = spawn_module(&mut world, None, Name::ROOT);
+        let owner = spawn_module(&mut world, Some(root), "Owner");
+        let t = spawn_type_param(&mut world, owner, "T");
+        let u = spawn_type_param(&mut world, owner, "U");
+        let int = spawn_module(&mut world, Some(root), "Int64");
+        let string = spawn_module(&mut world, Some(root), "String");
+        let ctx = world.query_context();
+        assert!(!constraint_entailed_by(
+            &ctx,
+            root,
+            &equality(t, int, 1),
+            &[equality(t, string, 1)]
+        ));
+        assert!(!constraint_entailed_by(
+            &ctx,
+            root,
+            &equality(t, int, 1),
+            &[equality(u, int, 1)]
+        ));
+        assert!(!constraint_entailed_by(
+            &ctx,
+            root,
+            &equality(t, int, 1),
+            &[]
+        ));
     }
 
     #[test]

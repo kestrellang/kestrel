@@ -122,6 +122,23 @@
 > keyed by name one layer down: consumers spell the entity back out with
 > `resolve::assoc_name`. Getting to "no name matching" means making that
 > constraint entity-keyed too. That is a separate change, noted and not done.
+>
+> **Step 4 landed (2026-09-23).** `HirTy::same_type` (in `kestrel-hir`) is a
+> span-insensitive structural comparison, written by hand rather than derived.
+> `Infer` and `Error` are never equal to anything. `constraint_entailed_by`
+> now entails an `Equality` exactly when the context holds the same subject
+> with a `same_type` RHS, with no substitution or transitivity.
+> **Probe first** (temporary `g25-entail` ktrace, 3681 testdata files + 17
+> `lang/` packages): the `Equality` arm was **never evaluated**, so **0
+> answers flip** from false to true. Entailment itself is live, about 809
+> calls per compilation, but no conformance check in the corpus reaches an
+> extension equality clause. This is a correctness fix with no visible effect
+> today; two unit tests pin it, span-insensitive entailment and its
+> different-RHS/subject control. Suite 3838 passed / 4 failed, no verdict
+> changes. Remaining gap: `conformance_completeness::substitute_clause`
+> passes equalities through unsubstituted, so a protocol-param subject can
+> only match a context clause on the very same entity. That is conservative,
+> and noted, not done.
 > Found while trying to close G17's C6. Every claim below carries a provenance
 > stamp per [`../../contributing/verifying-claims.md`](../../contributing/verifying-claims.md).
 

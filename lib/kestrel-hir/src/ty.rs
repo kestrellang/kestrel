@@ -102,3 +102,128 @@ pub enum HirTy {
         span: Span,
     },
 }
+
+impl HirTy {
+    /// Span-insensitive structural equality: do `self` and `other` denote the
+    /// same type as written?
+    ///
+    /// Deliberately **not** a derived `PartialEq`: every variant carries a
+    /// `Span`, so a derive would call two identical clauses written on
+    /// different lines unequal. Every other field is compared exactly.
+    ///
+    /// `Infer` and `Error` never equal anything, themselves included: neither
+    /// names a type, so "the same" is unknowable, and answering `false` is the
+    /// conservative direction for every caller (G25 step 4 entailment).
+    pub fn same_type(&self, other: &HirTy) -> bool {
+        fn all(a: &[HirTy], b: &[HirTy]) -> bool {
+            a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.same_type(y))
+        }
+        match (self, other) {
+            (
+                HirTy::Struct {
+                    entity: e1,
+                    args: a1,
+                    ..
+                },
+                HirTy::Struct {
+                    entity: e2,
+                    args: a2,
+                    ..
+                },
+            )
+            | (
+                HirTy::Enum {
+                    entity: e1,
+                    args: a1,
+                    ..
+                },
+                HirTy::Enum {
+                    entity: e2,
+                    args: a2,
+                    ..
+                },
+            )
+            | (
+                HirTy::Protocol {
+                    entity: e1,
+                    args: a1,
+                    ..
+                },
+                HirTy::Protocol {
+                    entity: e2,
+                    args: a2,
+                    ..
+                },
+            )
+            | (
+                HirTy::AliasUse {
+                    entity: e1,
+                    args: a1,
+                    ..
+                },
+                HirTy::AliasUse {
+                    entity: e2,
+                    args: a2,
+                    ..
+                },
+            ) => e1 == e2 && all(a1, a2),
+            (HirTy::Tuple(a1, _), HirTy::Tuple(a2, _)) => all(a1, a2),
+            (
+                HirTy::Function {
+                    kind: k1,
+                    params: p1,
+                    param_conventions: c1,
+                    ret: r1,
+                    ..
+                },
+                HirTy::Function {
+                    kind: k2,
+                    params: p2,
+                    param_conventions: c2,
+                    ret: r2,
+                    ..
+                },
+            ) => k1 == k2 && c1 == c2 && all(p1, p2) && r1.same_type(r2),
+            (HirTy::Param(e1, _), HirTy::Param(e2, _))
+            | (HirTy::SelfType(e1, _), HirTy::SelfType(e2, _)) => e1 == e2,
+            (
+                HirTy::AssocProjection {
+                    base: b1,
+                    assoc: s1,
+                    ..
+                },
+                HirTy::AssocProjection {
+                    base: b2,
+                    assoc: s2,
+                    ..
+                },
+            ) => s1 == s2 && b1.same_type(b2),
+            (
+                HirTy::Opaque {
+                    bounds: b1,
+                    not_copyable: n1,
+                    ..
+                },
+                HirTy::Opaque {
+                    bounds: b2,
+                    not_copyable: n2,
+                    ..
+                },
+            ) => n1 == n2 && all(b1, b2),
+            (HirTy::Never(_), HirTy::Never(_)) => true,
+            (
+                HirTy::Ref {
+                    inner: i1,
+                    mutating: m1,
+                    ..
+                },
+                HirTy::Ref {
+                    inner: i2,
+                    mutating: m2,
+                    ..
+                },
+            ) => m1 == m2 && i1.same_type(i2),
+            _ => false,
+        }
+    }
+}

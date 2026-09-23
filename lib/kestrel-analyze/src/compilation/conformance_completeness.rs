@@ -1690,9 +1690,9 @@ fn substitute_clause(
                 protocol_type_args: protocol_type_args.clone(),
             })
         },
-        // Equality clauses passed through unchanged; entailment treats them
-        // conservatively (always rejects). Substitution would only matter
-        // once entailment is generalized.
+        // Equality clauses pass through unchanged. Entailment accepts one only
+        // when the context states the same equality (G25 step 4), so an
+        // unsubstituted subject can only make it more conservative.
         other => Some(other.clone()),
     }
 }
