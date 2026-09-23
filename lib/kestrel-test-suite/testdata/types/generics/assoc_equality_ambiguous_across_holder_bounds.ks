@@ -7,10 +7,11 @@
 // `ExplicitWhereClauses` drops it rather than picking one by name, and
 // `GenericsAnalyzer` reports E479 at the clause.
 //
-// The body's follow-on mismatch is still reported: with the clause gone,
-// `outA()` returns an unpinned `Item.Out`. It cannot be suppressed yet, because
-// the body emitters look an equality's associated type up again by name, so
-// no recovery clause can reach that use (the name-keyed half of G29).
+// E479 is the only error. The dropped clause is replaced by error-typed
+// stand-ins (`Item.<HasOutA.Out>` and `Item.<HasOutB.Out>` pinned to the error
+// type), so the body's `outA()` absorbs instead of reporting a follow-on
+// mismatch. That works because the body emitters key an equality by its
+// associated-type entity, not its name (G29).
 
 module Test
 
@@ -21,5 +22,5 @@ protocol HasOutB { type Out; func outB() -> Out }
 protocol Source { type Item; func fetch() -> Item }
 
 extend Source where Item: HasOutA, Item: HasOutB, Item.Out = Int64 { // ERROR: associated type 'Out' in where clause is ambiguous: 'Item' is bound by HasOutA and HasOutB, which each declare 'Out'
-    public func viaA() -> Int64 { self.fetch().outA() } // ERROR: expected Int64 got Item.Out
+    public func viaA() -> Int64 { self.fetch().outA() }
 }

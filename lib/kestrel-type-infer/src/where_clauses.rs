@@ -174,6 +174,9 @@ fn resolve_explicit_where_clauses(
         // same nearest-level rule an equality's left side uses (G29): the
         // subject is re-pointed at that answer, or dropped and reported when
         // it is ambiguous.
+        // Error-pinned stand-ins for bound subjects dropped as ambiguous,
+        // emitted at the dropped clause's position (see `recovery_clauses`).
+        let mut recovery: Vec<(usize, Vec<WhereClause>)> = Vec::new();
         let rechecked: Vec<(usize, Result<Entity, DroppedAssocPath>)> = ast_wc
             .0
             .iter()
@@ -202,15 +205,19 @@ fn resolve_explicit_where_clauses(
                 },
                 Err(dropped) => {
                     bounds[i] = None;
+                    recovery.push((i, recovery_clauses(&dropped)));
                     out.dropped.push(dropped);
                 },
             }
         }
         let bounds = bounds;
         // Pass 2: emit in source order — body emitters are order-sensitive.
-        for (constraint, bound) in ast_wc.0.iter().zip(&bounds) {
+        for (i, (constraint, bound)) in ast_wc.0.iter().zip(&bounds).enumerate() {
             match constraint {
                 WhereConstraint::Bound { .. } => {
+                    if let Some((_, stand_ins)) = recovery.iter().find(|(j, _)| *j == i) {
+                        result.extend(stand_ins.iter().cloned());
+                    }
                     let Some(bound) = bound else { continue };
                     for (protocol, protocol_type_args) in &bound.protocols {
                         result.push(WhereClause::Bound {
@@ -235,13 +242,12 @@ fn resolve_explicit_where_clauses(
                             subject,
                             rhs: rhs_hir,
                         }),
-                        // Reported at the clause by `GenericsAnalyzer`. No
-                        // recovery clause: the body emitters re-key an
-                        // equality by name (`find_assoc_type_in_bounds`), so
-                        // pinning each candidate to the error type cannot
-                        // reach the body's use; the follow-on E100 stays
-                        // until those consumers key on the entity (G29).
-                        Err(Some(dropped)) => out.dropped.push(dropped),
+                        // Reported at the clause by `GenericsAnalyzer`; the
+                        // stand-ins keep the body from cascading off it.
+                        Err(Some(dropped)) => {
+                            result.extend(recovery_clauses(&dropped));
+                            out.dropped.push(dropped);
+                        },
                         // A shape this resolver does not model — dropped
                         // unrecorded, as it always has been.
                         Err(None) => {},
@@ -254,6 +260,32 @@ fn resolve_explicit_where_clauses(
         }
     }
     out
+}
+
+/// Error recovery for a clause dropped as **ambiguous** (E479, 2+ candidates):
+/// pin `param.<candidate>` to the error type for every candidate, so each use
+/// of that associated type in the body absorbs through the existing
+/// `TyKind::Error` poisoning instead of reporting a follow-on error the
+/// clause's own E479 already explains. Nothing for a zero-candidate drop
+/// (E440): there is no associated type to pin. Equality clauses are entity-
+/// keyed end to end (G29), so the stand-in reaches exactly the uses of that
+/// candidate and nothing else; `HirTy::same_type` never equates `Error`, so a
+/// stand-in never entails anything.
+fn recovery_clauses(dropped: &DroppedAssocPath) -> Vec<WhereClause> {
+    if dropped.candidates.len() < 2 {
+        return Vec::new();
+    }
+    dropped
+        .candidates
+        .iter()
+        .map(|&assoc| WhereClause::Equality {
+            subject: WhereSubject::Projection {
+                base: Box::new(WhereSubject::Param(dropped.param)),
+                assoc,
+            },
+            rhs: HirTy::Error(dropped.path_span.clone()),
+        })
+        .collect()
 }
 
 /// Push an implicit `T: Copyable` (or `Cloneable`) `WhereClause::Bound` for each
