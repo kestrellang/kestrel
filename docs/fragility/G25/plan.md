@@ -69,6 +69,24 @@
 > binary produced) and passes unedited. Suite **3837 passed, 4 failed**; that
 > test is the only verdict change. G25 is closed in the audit. Steps 3 (fold
 > the variants) and 4 (entailment) continue below as cleanup.
+>
+> **Step 3 (fold) — STOPPED at its drop gate, not landed (2026-09-23, base
+> `165dd802`).** I prototyped `Equality { subject: WhereSubject, rhs }`. The
+> alias root is expressed with the existing `WhereSubject::Param(alias)` (the
+> same convention bare-assoc bounds already use), so no new variant was needed.
+> The drop census (a temporary `g25-fold` ktrace in `resolve_where_clauses`,
+> over 3681 testdata files plus 17 `lang/` packages) found **2 of 24
+> equality clauses per compilation dropped**. There is 1 distinct source,
+> **`Item.Output = Item`** on `extend Iterator where Item: Addable` /
+> `Multipliable` (`lang/std/iter/iterator.ks:1032`, `:1049`).
+> `resolve_type_path_chain(["Item","Output"])` returns `NotFound("Output")`:
+> name-res follows only an alias's *declared* bounds, not the `Item: Addable`
+> bound that sits in the same extension where clause. The string-keyed
+> `TypeEquality` never needed the entity. Dropping the clause breaks `sum()`
+> (`expected Item got Item.Output`). There are no other drops: per file, the
+> extras were 19 KEEP + 3 DIRECT. Resolving that assoc needs where-clause-aware
+> path resolution (the D7 "path resolution needs an order" concern, for
+> clause-granted bounds), so it is a design question, not a focused fold.
 > Found while trying to close G17's C6. Every claim below carries a provenance
 > stamp per [`../../contributing/verifying-claims.md`](../../contributing/verifying-claims.md).
 
