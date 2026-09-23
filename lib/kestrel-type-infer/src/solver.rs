@@ -2924,6 +2924,10 @@ fn solve_associated(
                     } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
                         tv
                     } else if matches!(kind, TyKind::Param { .. } | TyKind::AssocProjection { .. })
+                        || (is_self_rooted_assoc_alias(ctx, &kind)
+                            && ctx
+                                .assoc_sub("solver:solve_associated:self-rooted", None, *entity)
+                                .is_none())
                     {
                         // Abstract container — a type param (`T.Item`) or an
                         // already-projected base (`T.TargetIterator.Item`) — with
@@ -2937,11 +2941,20 @@ fn solve_associated(
                         // concrete substituted base (e.g. `T.TargetIterator` →
                         // `Array[Int64].TargetIterator` → `ArraySliceIterator`).
                         //
-                        // Intentionally excludes `SelfType` and bare `TypeAlias`
-                        // containers: projecting off `Self` yields a literal
-                        // `Self.Item` that won't unify with the based form, and a
-                        // bare `TypeAlias` base has already lost its own base.
-                        // Those fall through to the original collapse.
+                        // Intentionally excludes `SelfType` containers: projecting
+                        // off `Self` yields a literal `Self.Item` that won't unify
+                        // with the based form, so `Self.Item` collapses to the
+                        // bare alias `TypeAlias(Item)`, which MIR's
+                        // `lower_named_type` re-roots at its own protocol's
+                        // `Self`. That collapse is exactly one level deep, so a
+                        // projection OFF it (`Item.Sub` in `extend Outer`) must
+                        // keep it as base — collapsing again would re-root `Sub`
+                        // at `Inner`'s Self, which mono can't resolve (G26). Only
+                        // when the baseless where-clause memo has no answer: that
+                        // memo is the one thing the collapse below could still
+                        // resolve it to (`Item.Output = Item` in `sum()`); with no
+                        // answer the collapse ends in the bare alias, which is the
+                        // base loss. See `is_self_rooted_assoc_alias`.
                         ctx.assoc_projection(container, *entity)
                     } else {
                         lower_hir_ty_sub(
@@ -2974,6 +2987,21 @@ fn solve_associated(
             span,
         }),
     }
+}
+
+/// Is `kind` the bare alias a `Self.Item` projection collapses to — an
+/// argument-less `TypeAlias` whose parent is a protocol? It stands for the
+/// protocol's `Self.Item` (MIR's `lower_named_type` restores that base), so a
+/// projection off it is off an abstract base and must keep it (G26).
+fn is_self_rooted_assoc_alias(ctx: &InferCtx<'_>, kind: &TyKind) -> bool {
+    let TyKind::TypeAlias { entity, args } = kind else {
+        return false;
+    };
+    args.is_empty()
+        && ctx
+            .query_ctx
+            .parent_of(*entity)
+            .is_some_and(|p| ctx.query_ctx.get::<NodeKind>(p) == Some(&NodeKind::Protocol))
 }
 
 /// Whether a closure of kind `from` may be passed where kind `to` is expected —
