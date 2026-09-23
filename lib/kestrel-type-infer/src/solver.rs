@@ -2161,17 +2161,27 @@ fn solve_conforms(
 /// Non-projections answer `true` unchanged — a `Param`, `SelfType`, or nominal
 /// subject is not what this narrows.
 fn projection_base_admits(ctx: &InferCtx<'_>, kind: &TyKind, protocol: Entity) -> bool {
-    let TyKind::AssocProjection { base, assoc } = kind else {
+    let TyKind::AssocProjection { assoc, .. } = kind else {
         return true;
     };
     // No comparable receiver (a concrete base, an unresolved one, `Self`) —
     // permit, matching this module's contract for abstract positions. An
     // unknown must never manufacture a rejection.
-    let Some(spine) = base_spine(ctx, *base, 0) else {
+    let Some(spine) = projection_base_spine(ctx, kind) else {
         return true;
     };
     ctx.resolver
         .assoc_projection_base_admits(*assoc, protocol, &spine)
+}
+
+/// The base spine of a `TyKind::AssocProjection`, or `None` for any other
+/// kind or a base that cannot be compared. Shared by the conformance answer
+/// (C4) and member lookup (S4) so both judge the same receiver.
+fn projection_base_spine(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<Vec<Entity>> {
+    let TyKind::AssocProjection { base, .. } = kind else {
+        return None;
+    };
+    base_spine(ctx, *base, 0)
 }
 
 /// Flatten a projection base to the receiver spine
@@ -4065,11 +4075,16 @@ fn solve_member(
         return SolveResult::Solved;
     }
 
-    // (debug removed)
     // Resolve the member via the type resolver.
     // Try instance members first, fall back to static members for type-level calls
     // (e.g., Box.wrap() where wrap is a static method in an extension).
-    let resolution = match ctx.resolver.resolve_member(&recv_kind, name, &args) {
+    // A projection receiver carries its base spine so the bound search sees
+    // only bounds that name *this* receiver (G17 S4).
+    let spine = projection_base_spine(ctx, &recv_kind);
+    let lookup = ctx
+        .resolver
+        .resolve_member_with_base(&recv_kind, spine.as_deref(), name, &args);
+    let resolution = match lookup {
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {
             // Fall back to static member search

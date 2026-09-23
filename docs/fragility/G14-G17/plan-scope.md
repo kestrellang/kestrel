@@ -800,3 +800,62 @@ The clause-holder argument applies verbatim — `extend X: P[Foo]` means whateve
 `Foo` means where the extension is written — but this is the conformance list,
 not the where clause, so it is a distinct finding and needs its own measurement
 before anyone touches it.
+
+---
+
+## 9. S4 — LANDED. Member lookup on a projection receiver is base-aware
+
+[measured @ `6027d548` + this commit, parent checkout, branch `arch/fixes`,
+`cargo build --release --bin kestrel` rebuilt before every figure.]
+
+### The granting path, confirmed by instrumentation
+
+`solve_member` → `WorldResolver::resolve_member` → `TyKind::AssocProjection`
+arm → `resolve_assoc_type_member` → `collect_assoc_type_direct_bounds` — the
+**owner-hierarchy walk** (`gather_bounds_from_where_clause` over
+`body_owner`'s ancestors). A temporary `ktrace!` showed `direct = [Show]` with
+the receiver-free bounds empty: the grant came only from `A.Item: Show`,
+filed under the alias entity and handed to `B.Item`. §6's guess was right.
+
+### The fix
+
+§6's plumbing worry was real — `WorldResolver` cannot resolve the base `TyVar` —
+and was solved the way C4 solved it: the solver computes the spine.
+`TypeResolver::resolve_member_with_base` (default: ignore the spine) takes
+`base_spine: Option<&[Entity]>`; `solve_member` passes C4's `base_spine`
+through a shared `projection_base_spine` helper that `projection_base_admits`
+now also uses. `WorldResolver` filters both the direct and the expanded bound
+lists — instance and static — through `retain_base_admitted`, which is C4's
+`assoc_projection_base_admits` applied per bound. `None` filters nothing.
+
+Filtering the **bound list**, not the chosen member, matters: see `two.ks` below.
+
+### Measured, pre (HEAD build) vs post
+
+| file | pre | post |
+| --- | --- | --- |
+| `xrecv_member.ks` | accepts; post-mono `String does not implement 'show'` | `E100 no member 'show' on type 'B.Item'` @ `:20:34` |
+| `xrecv_member_control.ks` | `E100 no member 'show' on type 'B.Item'` @ `:20:34` | same |
+| `self.a.produce().show()` | runs, `r=int:7` | same |
+| `A.Item: Show`, `B.Item: Show2`, both with `show()` | **`E100 ambiguous member 'show'`** (wrong-reject) | runs, `s1:7 s2` |
+| `extend Producer where Item: Show` (bare `Item`) | runs | same |
+| `B.Item.zero()`, `Zero` bound on `A.Item` only | **SIGSEGV at run time** | **SIGSEGV at run time** |
+
+The fourth row is a reject→accept flip — the unfiltered search saw both
+protocols on both receivers. It is the correct answer, and it is recorded as a
+test (`assoc_projection_bound_member_same_receiver.ks`).
+
+### Residual — the type-level spelling is still base-blind
+
+`B.Item.zero()` reaches `solve_member` as a bare `TypeAlias { Producer.Item }`:
+the base is gone before the solver sees it (spine `None`), so S4 cannot filter
+it. The program compiles and crashes. It was live before S4, and S4 does not
+change it. Recorded as the failing test
+`assoc_projection_bound_static_member_other_receiver.ks`. The fix belongs where
+the type expression `B.Item` is lowered, not in member lookup.
+
+### Suite
+
+**3831 passed, 2 failed** (build `30e543e4`). That is 3828 + the three new
+passing files. Failures: `assoc_projection_bound_same_name_distinct_protocols`
+(G25, unchanged) and the new residual above. No other test changed verdict.

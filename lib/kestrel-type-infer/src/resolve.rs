@@ -293,6 +293,27 @@ pub trait TypeResolver {
         true
     }
 
+    /// G17 S4 — [`Self::resolve_member`] for a caller that can also name the
+    /// receiver's base. The member-lookup twin of
+    /// [`Self::assoc_projection_base_admits`]: a `TyKind::AssocProjection`
+    /// receiver's bound search otherwise collects every bound filed against
+    /// the alias **entity**, so `where A.Item: Show` hands `show()` to
+    /// `B.Item`. `base_spine` is the same flattened base that method takes;
+    /// `None` means "cannot compare" and permits.
+    ///
+    /// The default ignores the spine, so a resolver that models no where
+    /// clauses answers exactly as `resolve_member` does.
+    fn resolve_member_with_base(
+        &self,
+        receiver_ty: &TyKind,
+        base_spine: Option<&[Entity]>,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let _ = base_spine;
+        self.resolve_member(receiver_ty, name, args)
+    }
+
     /// Resolve an associated type on a container (e.g., Array[Int].Element → Int).
     fn resolve_associated_type(
         &self,
@@ -352,28 +373,19 @@ impl TypeResolver for WorldResolver<'_> {
         }
 
         // Abstract associated-type projection: member-lookup through the
-        // assoc entity's bounds (same machinery as TypeAlias below).
+        // assoc entity's bounds (same machinery as TypeAlias below). No base
+        // spine reaches this entry point, so nothing is filtered — callers
+        // that can name the base use `resolve_member_with_base` (G17 S4).
         if let TyKind::AssocProjection { assoc, .. } = receiver_ty {
-            match self.resolve_assoc_type_member(*assoc, name, _args) {
-                Ok(res) => return Ok(res),
-                Err(MemberError::NotFound) => {
-                    return self.resolve_assoc_type_static_member_resolve(*assoc, name, _args);
-                },
-                Err(e) => return Err(e),
-            }
+            return self.resolve_projection_member(*assoc, None, name, _args);
         }
 
         // TypeAlias receiver: abstract associated types consult protocol bounds;
         // concrete aliases should have been reduced by the solver's Reduce rule
         // before reaching here (but handle defensively in case they show up).
+        // A bare alias has already lost its base, so it cannot be filtered.
         if let TyKind::TypeAlias { entity, .. } = receiver_ty {
-            match self.resolve_assoc_type_member(*entity, name, _args) {
-                Ok(res) => return Ok(res),
-                Err(MemberError::NotFound) => {
-                    return self.resolve_assoc_type_static_member_resolve(*entity, name, _args);
-                },
-                Err(e) => return Err(e),
-            }
+            return self.resolve_projection_member(*entity, None, name, _args);
         }
 
         // Opaque types: delegate member resolution to the protocol bounds.
@@ -845,6 +857,19 @@ impl TypeResolver for WorldResolver<'_> {
         }
 
         !saw_other_receiver
+    }
+
+    fn resolve_member_with_base(
+        &self,
+        receiver_ty: &TyKind,
+        base_spine: Option<&[Entity]>,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        let TyKind::AssocProjection { assoc, .. } = receiver_ty else {
+            return self.resolve_member(receiver_ty, name, args);
+        };
+        self.resolve_projection_member(*assoc, base_spine, name, args)
     }
 
     fn resolve_associated_type(
@@ -2092,6 +2117,41 @@ impl WorldResolver<'_> {
         Ok((instance_candidates, member))
     }
 
+    /// Member lookup on an abstract associated type: instance members first,
+    /// then static ones. `base_spine` narrows the bound search to the bounds
+    /// this receiver's base admits (G17 S4); `None` narrows nothing.
+    fn resolve_projection_member(
+        &self,
+        alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
+        name: &str,
+        args: &[crate::constraint::CallArg],
+    ) -> Result<MemberResolution, MemberError> {
+        match self.resolve_assoc_type_member(alias_entity, base_spine, name, args) {
+            Err(MemberError::NotFound) => {
+                self.resolve_assoc_type_static_member_resolve(alias_entity, base_spine, name, args)
+            },
+            other => other,
+        }
+    }
+
+    /// G17 S4 — drop every bound `protocols` holds that the projection's base
+    /// does not admit. The per-bound verdict is C4's
+    /// [`TypeResolver::assoc_projection_base_admits`], so member lookup and the
+    /// conformance answer cannot disagree about which receiver a clause names.
+    /// `None` (no comparable base) keeps everything — the module's permit.
+    fn retain_base_admitted(
+        &self,
+        alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
+        protocols: &mut Vec<Entity>,
+    ) {
+        let Some(spine) = base_spine else {
+            return;
+        };
+        protocols.retain(|&p| self.assoc_projection_base_admits(alias_entity, p, spine));
+    }
+
     /// Resolve a member on an associated type (TypeAlias entity, e.g., `Iter`, `Item`).
     ///
     /// Associated types in protocols have bounds (e.g., `type Iter: Iterator`).
@@ -2103,17 +2163,20 @@ impl WorldResolver<'_> {
     fn resolve_assoc_type_member(
         &self,
         alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
         // Prefer direct bounds over expanded bounds (same reason as
         // resolve_param_member — see the comment there).
         let arg_labels: Vec<Option<&str>> = args.iter().map(|a| a.label.as_deref()).collect();
-        let direct = self.collect_assoc_type_direct_bounds(alias_entity);
+        let mut direct = self.collect_assoc_type_direct_bounds(alias_entity);
+        self.retain_base_admitted(alias_entity, base_spine, &mut direct);
         if let Some(m) = self.select_bound_candidate(&direct, name, &arg_labels)? {
             return self.build_member_resolution(m);
         }
-        let expanded = self.collect_assoc_type_protocol_bounds(alias_entity);
+        let mut expanded = self.collect_assoc_type_protocol_bounds(alias_entity);
+        self.retain_base_admitted(alias_entity, base_spine, &mut expanded);
         if expanded.is_empty() {
             return Err(MemberError::NotFound);
         }
@@ -2127,10 +2190,12 @@ impl WorldResolver<'_> {
     fn resolve_assoc_type_static_member_resolve(
         &self,
         alias_entity: Entity,
+        base_spine: Option<&[Entity]>,
         name: &str,
         args: &[crate::constraint::CallArg],
     ) -> Result<MemberResolution, MemberError> {
-        let bound_protocols = self.collect_assoc_type_protocol_bounds(alias_entity);
+        let mut bound_protocols = self.collect_assoc_type_protocol_bounds(alias_entity);
+        self.retain_base_admitted(alias_entity, base_spine, &mut bound_protocols);
         if bound_protocols.is_empty() {
             return Err(MemberError::NotFound);
         }
