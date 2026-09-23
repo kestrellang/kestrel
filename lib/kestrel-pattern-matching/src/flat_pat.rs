@@ -122,13 +122,14 @@ impl FlatPat {
     }
 }
 
-/// Handle array decomposition where source and target shapes may differ.
+/// Lay a row's array pattern over the target constructor's element slots.
 ///
-/// Four cases based on whether source/target have rest patterns:
-/// 1. Both have rest → map prefix, rest, suffix
-/// 2. Source has rest, target doesn't → expand rest to wildcards
-/// 3. Source doesn't, target has rest → compress to target arity
-/// 4. Neither has rest → direct mapping
+/// The target is a piece from `split`: an exact length, or an open
+/// `[prefix, .., suffix]` at least as wide as the row on both sides. Each target
+/// slot takes the row's sub-pattern at the same position counted from the
+/// matching end, or a wildcard where the row's rest covers it. Counting the
+/// suffix from the END is what keeps `[x, .., 3]` testing the last element of
+/// every length.
 fn decompose_array(
     children: &[FlatPat],
     src_prefix: usize,
@@ -138,61 +139,37 @@ fn decompose_array(
     tgt_suffix: usize,
     tgt_rest: bool,
 ) -> Vec<FlatPat> {
-    let tgt_arity = tgt_prefix + tgt_suffix + if tgt_rest { 1 } else { 0 };
-    let mut result = Vec::with_capacity(tgt_arity);
+    // The row's element at `i` from the front, and at `k` from the back
+    // (`k == 1` is the last). A rest row knows only its prefix and suffix; its
+    // children are `prefix, rest slot, suffix`.
+    let from_front = |i: usize| -> FlatPat {
+        let known = if src_rest { i < src_prefix } else { i < children.len() };
+        if known { children[i].clone() } else { FlatPat::Wildcard }
+    };
+    let from_back = |k: usize| -> FlatPat {
+        let known = if src_rest { k <= src_suffix } else { k <= children.len() };
+        if known { children[children.len() - k].clone() } else { FlatPat::Wildcard }
+    };
 
-    match (src_rest, tgt_rest) {
-        // Case 1: both have rest — map prefix, rest wildcard, suffix
-        (true, true) => {
-            for i in 0..tgt_prefix {
-                result.push(children.get(i).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-            result.push(FlatPat::Wildcard); // rest slot
-            // Source suffix children are at the END of the source array.
-            let total_src = src_prefix + 1 + src_suffix;
-            for i in 0..tgt_suffix {
-                let src_idx = total_src.saturating_sub(tgt_suffix) + i;
-                result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-        },
-
-        // Case 2: source has rest, target doesn't — expand rest to wildcards
-        (true, false) => {
-            for i in 0..tgt_prefix {
-                result.push(children.get(i).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-            // Source suffix children are after prefix + rest slot.
-            // Total source children: src_prefix + 1 (rest) + src_suffix.
-            let total_src = src_prefix + 1 + src_suffix;
-            for i in 0..tgt_suffix {
-                let src_idx = total_src.saturating_sub(tgt_suffix) + i;
-                result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-        },
-
-        // Case 3: source doesn't have rest, target does — compress
-        (false, true) => {
-            for i in 0..tgt_prefix {
-                result.push(children.get(i).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-            result.push(FlatPat::Wildcard); // rest slot
-            // Suffix children are at the END of the source children array.
-            // Source has src_prefix + src_suffix children total (no rest slot).
-            let total_src = src_prefix + src_suffix;
-            for i in 0..tgt_suffix {
-                let src_idx = total_src.saturating_sub(tgt_suffix) + i;
-                result.push(children.get(src_idx).cloned().unwrap_or(FlatPat::Wildcard));
-            }
-        },
-
-        // Case 4: neither has rest — direct mapping
-        (false, false) => {
-            for child in children {
-                result.push(child.clone());
-            }
-        },
+    if !tgt_rest {
+        // Exact length: every slot has a front index and a back index. Prefer
+        // the front for the row's prefix, the back for its suffix.
+        let len = tgt_prefix + tgt_suffix;
+        return (0..len)
+            .map(|i| {
+                let back = len - i;
+                if src_rest && i >= src_prefix && back <= src_suffix {
+                    from_back(back)
+                } else {
+                    from_front(i)
+                }
+            })
+            .collect();
     }
 
+    let mut result: Vec<FlatPat> = (0..tgt_prefix).map(from_front).collect();
+    result.push(FlatPat::Wildcard); // rest slot
+    result.extend((1..=tgt_suffix).rev().map(from_back));
     result
 }
 

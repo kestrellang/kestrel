@@ -34,6 +34,7 @@ use kestrel_type_infer::result::ResolvedTy;
 use super::constructor::Constructor;
 use super::flat_pat::{self, FlatPat};
 use super::matrix::{PatternMatrix, PatternRow};
+use super::split;
 use super::witness::Witness;
 
 /// Result of exhaustiveness checking.
@@ -108,61 +109,31 @@ pub fn check_match(
     let mut redundant_arms = Vec::new();
     let mut overlapping_arms = Vec::new();
 
-    // Track prior range intervals for overlap / union-coverage detection.
-    // The usefulness algorithm's `specialize` treats any overlap between two
-    // ranges as full coverage, which misclassifies partial overlaps as
-    // redundant. We fix that here: a range arm is redundant iff its interval
-    // is fully covered by the union of prior intervals, and overlapping iff
-    // it shares some values with a prior interval but owns some new ones.
-    let mut prior_int_ranges: Vec<(usize, i64, i64)> = Vec::new();
-    let mut prior_char_ranges: Vec<(usize, u32, u32)> = Vec::new();
+    // Top-level literal/range arms seen so far, for the E307 overlap lint.
+    // Redundancy needs no help here: `is_useful` splits ranges, so a range
+    // covered only by the UNION of earlier ranges is already not useful.
+    let mut prior_ranges: Vec<Constructor> = Vec::new();
 
     for (i, (flat_pat, arm)) in flat_pats.iter().zip(arms.iter()).enumerate() {
         let has_guard = arm.guard.is_some();
+        let range = top_level_range(flat_pat);
 
-        // Check usefulness against prior patterns
+        // An empty range (`10..=0`) matches nothing; bounds validation reports
+        // it, so it is not also called unreachable.
+        let is_empty_range = range.as_ref().is_some_and(|r| split::split(&[r.clone()]).is_empty());
+
         let query_row = PatternRow::new(vec![flat_pat.clone()], i, has_guard);
-        let usefulness = is_useful(&matrix, &query_row, root, query);
-        let mut is_redundant = !usefulness.is_useful && !has_guard;
-
-        // Range arms: apply union-coverage check to correct the bug in
-        // `specialize` where overlapping ranges look fully covered.
-        // Empty ranges (start > end, e.g. `10..=0`) are left for a separate
-        // bounds-validation pass and skipped here.
-        if !has_guard {
-            if let Some((s, e)) = extract_int_range(flat_pat) {
-                if s <= e {
-                    let has_overlap = prior_int_ranges
-                        .iter()
-                        .any(|&(_, ps, pe)| s <= pe && ps <= e);
-                    let covered = range_covered_by_union_i64(s, e, &prior_int_ranges);
-                    if covered {
-                        is_redundant = true;
-                    } else if has_overlap {
-                        is_redundant = false;
-                        overlapping_arms.push(i);
-                    }
-                    prior_int_ranges.push((i, s, e));
-                }
-            } else if let Some((s, e)) = extract_char_range(flat_pat)
-                && s <= e
-            {
-                let has_overlap = prior_char_ranges
-                    .iter()
-                    .any(|&(_, ps, pe)| s <= pe && ps <= e);
-                let covered = range_covered_by_union_u32(s, e, &prior_char_ranges);
-                if covered {
-                    is_redundant = true;
-                } else if has_overlap {
-                    is_redundant = false;
-                    overlapping_arms.push(i);
-                }
-                prior_char_ranges.push((i, s, e));
-            }
-        }
+        let is_redundant =
+            !has_guard && !is_empty_range && !is_useful(&matrix, &query_row, root, query).is_useful;
 
         if is_redundant {
             redundant_arms.push(i);
+        } else if let Some(range) = range.filter(|_| !has_guard && !is_empty_range) {
+            // Reachable, but shares values with an earlier range: E307.
+            if prior_ranges.iter().any(|prior| ranges_overlap(prior, &range)) {
+                overlapping_arms.push(i);
+            }
+            prior_ranges.push(range);
         }
 
         // Add to matrix (guarded arms don't cover for exhaustiveness)
@@ -224,10 +195,17 @@ pub fn is_useful(
     let query_ctor = query.pats[col].head_constructor();
 
     if query_ctor.is_wildcard() {
-        is_wildcard_useful(matrix, query, col, col_type, root, ctx)
-    } else {
-        is_constructor_useful(matrix, query, col, &query_ctor, col_type, root, ctx)
+        return is_wildcard_useful(matrix, query, col, col_type, root, ctx);
     }
+    // A range (or array length) may be partly covered: cut it against the
+    // column and ask of each piece. It is useful iff some piece is.
+    for piece in matrix.split_head(col, &query_ctor) {
+        let result = is_constructor_useful(matrix, query, col, &piece, col_type, root, ctx);
+        if result.is_useful {
+            return result;
+        }
+    }
+    UsefulnessResult::not_useful()
 }
 
 /// Remove column `col` from a pattern vector.
@@ -265,7 +243,8 @@ fn is_wildcard_useful(
     }
 
     // Get covered constructors
-    let covered: HashSet<Constructor> = matrix.head_constructors(col).into_iter().collect();
+    let heads = matrix.head_constructors(col);
+    let covered: HashSet<Constructor> = heads.iter().cloned().collect();
 
     match Constructor::all_for_type(ctx, root, col_type) {
         Some(all_ctors) => {
@@ -286,19 +265,18 @@ fn is_wildcard_useful(
         },
 
         None => {
-            // Range patterns (`..<0 | 0..=59 | 60..`) produce constructors on
-            // Infinite types (Int64, Char). The main algorithm can't see that
-            // their union covers the full value space, so it would fall
-            // through to the default matrix and report a false non-exhaustive.
-            // Handle that here before asking `Constructor::missing`.
-            if let Some(ranges) = collect_int_ranges(&covered)
-                && range_covered_by_union_i64(i64::MIN, i64::MAX, &ranges)
-            {
-                return UsefulnessResult::not_useful();
-            }
-            if let Some(ranges) = collect_char_ranges(&covered)
-                && range_covered_by_union_u32(0, char::MAX as u32, &ranges)
-            {
+            // Range patterns (`..<0 | 0..=59 | 60..`) can cover all of an
+            // infinite type (Int64, Char). The default matrix can't see that and
+            // would report a false non-exhaustive, so treat the split pieces
+            // like a finite constructor set: the wildcard is useful iff it is
+            // useful under some piece — the OTHER columns may still be open.
+            if covers_whole_domain(&heads) {
+                for ctor in &heads {
+                    let result = is_constructor_useful(matrix, query, col, ctor, col_type, root, ctx);
+                    if result.is_useful {
+                        return result;
+                    }
+                }
                 return UsefulnessResult::not_useful();
             }
 
@@ -431,122 +409,52 @@ fn expand_or_pattern(pat: &FlatPat) -> Vec<FlatPat> {
     }
 }
 
-/// Extract integer range bounds from a FlatPat, if it is a bounded int range.
-/// `None` bounds are widened to `i64::MIN`/`MAX` so open ranges can participate
-/// in union-coverage checks.
-fn extract_int_range(pat: &FlatPat) -> Option<(i64, i64)> {
-    if let FlatPat::Ctor {
-        ctor: Constructor::IntRange { start, end },
-        ..
-    } = pat
-    {
-        Some((start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX)))
-    } else if let FlatPat::Ctor {
-        ctor: Constructor::IntLiteral(v),
-        ..
-    } = pat
-    {
-        Some((*v, *v))
-    } else {
-        None
-    }
+/// The literal or range at the top of an arm's pattern, if any.
+fn top_level_range(pat: &FlatPat) -> Option<Constructor> {
+    let FlatPat::Ctor { ctor, .. } = pat else {
+        return None;
+    };
+    matches!(
+        ctor,
+        Constructor::IntLiteral(_)
+            | Constructor::IntRange { .. }
+            | Constructor::CharLiteral(_)
+            | Constructor::CharRange { .. }
+    )
+    .then(|| ctor.clone())
 }
 
-/// Extract char range bounds (as u32 codepoints) for union-coverage checks.
-fn extract_char_range(pat: &FlatPat) -> Option<(u32, u32)> {
-    if let FlatPat::Ctor {
-        ctor: Constructor::CharRange { start, end },
-        ..
-    } = pat
-    {
-        Some((
-            start.map(|c| c as u32).unwrap_or(0),
-            end.map(|c| c as u32).unwrap_or(char::MAX as u32),
-        ))
-    } else if let FlatPat::Ctor {
-        ctor: Constructor::CharLiteral(c),
-        ..
-    } = pat
-    {
-        Some((*c as u32, *c as u32))
-    } else {
-        None
-    }
+/// Do two literal/range constructors share a value? True iff splitting them
+/// together yields a piece inside both.
+fn ranges_overlap(a: &Constructor, b: &Constructor) -> bool {
+    split::split(&[a.clone(), b.clone()])
+        .iter()
+        .any(|piece| a.matches(piece) && b.matches(piece))
 }
 
-/// True if `[qs, qe]` is fully covered by the union of `prior` intervals.
-/// Sorts `prior` by start and walks, returning true as soon as some interval
-/// reaches `qe`. Empty intervals (`s > e`) are skipped harmlessly.
-fn range_covered_by_union_i64(qs: i64, qe: i64, prior: &[(usize, i64, i64)]) -> bool {
-    let mut intervals: Vec<(i64, i64)> = prior.iter().map(|&(_, s, e)| (s, e)).collect();
-    intervals.sort_by_key(|&(s, _)| s);
-    let mut cursor = qs;
-    for (s, e) in intervals {
-        if s > cursor {
-            return false; // gap
+/// Do these split int (or char) pieces cover every value of their type?
+/// Pieces are sorted and disjoint, so they cover it iff they tile it.
+fn covers_whole_domain(pieces: &[Constructor]) -> bool {
+    let tiles = |mut intervals: Vec<(i128, i128)>, lo: i128, hi: i128| {
+        intervals.sort_unstable();
+        let mut next = lo;
+        for (s, e) in intervals {
+            if s > next {
+                return false;
+            }
+            next = next.max(e + 1);
         }
-        if e >= qe {
-            return true;
-        }
-        if e >= cursor {
-            cursor = e + 1; // safe: e < qe <= i64::MAX
-        }
+        next > hi
+    };
+    let ints: Option<Vec<_>> = pieces.iter().map(split::int_interval).collect();
+    if let Some(ints) = ints.filter(|v| !v.is_empty()) {
+        return tiles(ints, i64::MIN as i128, i64::MAX as i128);
     }
-    false
-}
-
-/// Same as `range_covered_by_union_i64` but for char codepoints (u32).
-fn range_covered_by_union_u32(qs: u32, qe: u32, prior: &[(usize, u32, u32)]) -> bool {
-    let mut intervals: Vec<(u32, u32)> = prior.iter().map(|&(_, s, e)| (s, e)).collect();
-    intervals.sort_by_key(|&(s, _)| s);
-    let mut cursor = qs;
-    for (s, e) in intervals {
-        if s > cursor {
-            return false;
-        }
-        if e >= qe {
-            return true;
-        }
-        if e >= cursor {
-            cursor = e + 1;
-        }
-    }
-    false
-}
-
-/// Collect `(idx, start, end)` tuples for each covered int-range-like
-/// constructor. Returns `None` if any covered constructor isn't an int
-/// range or literal — mixing other constructors means the union-coverage
-/// check doesn't apply.
-fn collect_int_ranges(covered: &HashSet<Constructor>) -> Option<Vec<(usize, i64, i64)>> {
-    let mut out = Vec::with_capacity(covered.len());
-    for (i, c) in covered.iter().enumerate() {
-        match c {
-            Constructor::IntRange { start, end } => {
-                out.push((i, start.unwrap_or(i64::MIN), end.unwrap_or(i64::MAX)));
-            },
-            Constructor::IntLiteral(v) => out.push((i, *v, *v)),
-            _ => return None,
-        }
-    }
-    (!out.is_empty()).then_some(out)
-}
-
-/// Same as `collect_int_ranges` but for char literals / char ranges.
-fn collect_char_ranges(covered: &HashSet<Constructor>) -> Option<Vec<(usize, u32, u32)>> {
-    let mut out = Vec::with_capacity(covered.len());
-    for (i, c) in covered.iter().enumerate() {
-        match c {
-            Constructor::CharRange { start, end } => {
-                out.push((
-                    i,
-                    start.map(|c| c as u32).unwrap_or(0),
-                    end.map(|c| c as u32).unwrap_or(char::MAX as u32),
-                ));
-            },
-            Constructor::CharLiteral(c) => out.push((i, *c as u32, *c as u32)),
-            _ => return None,
-        }
-    }
-    (!out.is_empty()).then_some(out)
+    let chars: Option<Vec<_>> = pieces.iter().map(split::char_interval).collect();
+    // The surrogate block holds no char, so a tiling may skip it.
+    let chars = chars.filter(|v| !v.is_empty()).map(|mut v| {
+        v.push((0xD800, 0xDFFF));
+        v
+    });
+    chars.is_some_and(|v| tiles(v, 0, char::MAX as i128))
 }
