@@ -135,10 +135,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // A type in expression position (`B.Item` in `B.Item.zero()`), typed
         // exactly as the annotation `-> B.Item` is, so a projection keeps its
-        // base and S4's base-aware member lookup can judge it (G17 S5). Only
-        // a static `MethodCall` receiver is built this way; MIR lowers it to
-        // unit, like a `Def` of a type.
-        HirExpr::TypeRef { ty, .. } => lower_hir_ty(ctx, ty),
+        // base and S4's base-aware member lookup can judge it (G17 S5). MIR
+        // lowers it to unit, so — like a `Def(TypeParameter)` — it is only
+        // valid when consumed as a receiver, callee or field base; tracked in
+        // the same set so a bare `let x = Item.Sub;` is reported (G26). A
+        // type that already failed to resolve carries its own diagnostic.
+        HirExpr::TypeRef { ty, span } => {
+            if !matches!(ty, HirTy::Error(_)) {
+                ctx.type_param_defs.insert(id, span.clone());
+            }
+            lower_hir_ty(ctx, ty)
+        },
 
         // Overloaded function reference — can only appear as callee of Call
         HirExpr::OverloadSet { span, .. } => {
@@ -403,15 +410,17 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let base_tv = gen_expr(ctx, hir, *base);
             let result_tv = ctx.fresh();
 
-            // Field access through a type-param ref (T.staticProp) is a static
-            // protocol-property access — analogous to T.method() in MethodCall.
-            // Consume the Def(TypeParameter) so it isn't flagged as a stray
-            // type-param-as-value at end of inference.
-            if matches!(
-                &hir.exprs[*base],
-                HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
-                    == Some(&NodeKind::TypeParameter)
-            ) {
+            // Field access through a type-param ref (T.staticProp) or a
+            // projection (`B.Item.staticProp`) is a static protocol-property
+            // access — analogous to T.method() in MethodCall. Consume the base
+            // so it isn't flagged as a stray type-as-value at end of inference.
+            if matches!(&hir.exprs[*base], HirExpr::TypeRef { .. })
+                || matches!(
+                    &hir.exprs[*base],
+                    HirExpr::Def(entity, _, _) if ctx.query_ctx.get::<NodeKind>(*entity)
+                        == Some(&NodeKind::TypeParameter)
+                )
+            {
                 ctx.type_param_defs.remove(base);
             }
 

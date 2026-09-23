@@ -445,9 +445,19 @@ impl LowerCtx<'_> {
                 let base = self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()));
                 self.lower_trailing_member_segments(base, &segments[resolved_index + 1..])
             },
-            ValueResolution::AssociatedType { entity, .. } => {
-                self.alloc_expr(HirExpr::Def(entity, vec![], span.clone()))
-            },
+            // A qualified path ending in an associated type (`U.Item`,
+            // `Item.Sub`) is a projection: lower it as the *type* so it keeps
+            // its base, exactly as the static-call receiver does (G26). A
+            // `Def` of the alias entity would keep `Sub` and drop `Item`.
+            ValueResolution::AssociatedType {
+                container: Some(_), ..
+            } => self.lower_type_receiver_path(segments),
+            // Bare `Item` inside its own protocol: the base is the implicit
+            // `Self`, so the alias entity alone is the whole answer.
+            ValueResolution::AssociatedType {
+                entity,
+                container: None,
+            } => self.alloc_expr(HirExpr::Def(entity, vec![], span.clone())),
             ValueResolution::AssociatedTypeStaticMember {
                 entity: _,
                 assoc_type,
@@ -1180,11 +1190,12 @@ impl LowerCtx<'_> {
         self.alloc_expr(HirExpr::Def(entity, type_args, first.span.clone()))
     }
 
-    /// Receiver of a type-level static call whose prefix is an
-    /// associated-type projection (`B.Item.zero()`): the prefix lowered as
-    /// the *type* `B.Item`, through the same path as a type annotation, so it
-    /// arrives as `HirTy::AssocProjection { base: Param(B), .. }` and keeps
-    /// its base (G17 S5).
+    /// An associated-type projection in expression position, lowered as the
+    /// *type* through the same path as a type annotation, so it arrives as
+    /// `HirTy::AssocProjection { base: Param(B), .. }` and keeps its base.
+    /// The one lowering for both callers: the receiver of a type-level static
+    /// call (`B.Item.zero()`, G17 S5) and a value path ending in an
+    /// associated type (`Item.Sub`, G26).
     fn lower_type_receiver_path(&mut self, prefix: &[ExprPathSegment]) -> HirExprId {
         let (first, last) = (&prefix[0], &prefix[prefix.len() - 1]);
         let span = Span {
