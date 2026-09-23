@@ -23,7 +23,7 @@ claim needs a reproduction and the commit it was measured at; anything else is a
 G22/G24 are what this costs when skipped — a `high` finding filed against a compiler
 173 commits stale.
 
-**Progress: 50 fixed · 4 partial · 4 blocked · 19 open · 1 withdrawn** — 73 top-level (F1–F43, G1–G30).
+**Progress: 51 fixed · 4 partial · 4 blocked · 18 open · 1 withdrawn** — 73 top-level (F1–F43, G1–G30).
 Partial: F2, F28, F29, F43. Blocked on a maintainer decision: F11, F29, F42, G16.
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
@@ -67,7 +67,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Silent miscompilation and wrong behavior
 
-- [ ] **F1** `high` `single-source-of-truth` — Range-overlap correction lives only in `check_match`; decision-tree codegen uses the raw overlap test and misroutes arms
 - [ ] **F2** `high` `fragility` — LSP local rename replaces the whole `let` statement (and inserts at file offset 0 for parameters) — **partial: it now fails closed**
   - Stage 1 landed. Rename writes to the user's real files, so the first job was to stop the corruption, not to make it work. Reproduced **three** defects, not the two filed: (1) renaming a `let` local replaces the whole statement; (2) renaming a parameter inserts at file offset 0 and never touches the declaration, leaving a file that starts `renamedmodule Test`; (3) **renaming *from* a declaration site silently renames the enclosing function workspace-wide** — `hir_expr_at` only sees `Local` *use* sites, so a binding's own identifier falls through to `enclosing_decl_at`. That is the most natural rename gesture. A fourth was found by running: clicking a type reference in a body does the same, because `rename`'s `target_at` is the only one of its three copies lacking a `type_at_cursor` pre-check
   - Guard A: the edit span must literally spell the symbol's name. Chosen over the proposed `is_synthetic() || starts_with('$')` heuristic, which misses closure-destructure synthetics (`_cparam_N` gets a non-synthetic span and an ordinary name — both heuristics pass, the text does not match). Guard B: `enclosing_decl_at` results are kept only when the offset lands on the decl's own name span, copied to the two hand-rolled twins in `references.rs` and `document_highlight.rs`
@@ -168,6 +167,12 @@ Completed findings, moved here from their original sections. Grouped by the sect
 
 ### Silent miscompilation and wrong behavior
 
+- [x] **F1** `high` `single-source-of-truth` — Range-overlap correction lives only in `check_match`; decision-tree codegen uses the raw overlap test and misroutes arms — **fixed** `9004ba05` `[verified @ 9004ba05, 2026-09-23]`
+  - Worse than filed. `match n { 0..=10 => 1, 5..=15 => 2, _ => 0 }` returned **1 for `12`**, a value outside arm 0's range, not just the wrong one of two matching arms. The same cause hit a literal inside a later range (`5 => 2, 0..=10 => 1` sent `3` to arm 0), open ranges, chars, and **array lengths**: `[x, y, ..]` was taken by a one-element array, and `[x]` by a two-element one
+  - Root cause: `Constructor::matches` meant *overlap*, and specialization kept a row for any case its constructor overlapped. That is only sound if the cases a column switches on are disjoint, which ranges and array lengths are not. `check_match` patched the redundancy result after the fact; the decision tree never saw the patch
+  - Fix: a new `split` module cuts int/char literals and ranges, and array lengths, into pieces no row constructor straddles. `PatternMatrix::head_constructors` returns split pieces, `is_useful` splits a range query against its column (`split_head`), and `matches` is now containment. The `check_match` correction and its interval helpers are deleted; redundancy comes straight from usefulness, and only the E307 overlap lint remains there
+  - Three more defects in the same path, found by the tests: `decompose_array` mapped elements from the wrong end whenever a case was wider than the row (`[x, .., 3]` on a two-element array never tested the `3`); `build_specialized_paths` gave suffix elements of an open array case a front index instead of `IndexFromEnd`; and the "ranges cover every Int64" exhaustiveness shortcut returned *exhaustive* without looking at the other columns, so `(..<0, true), (0.., true)` was accepted and trapped at run time on `(5, false)`
+  - Tests: `range_matchable/overlapping_{int,char}_ranges_dispatch`, `array_matchable/overlapping_lengths_dispatch` (all failed before, pass on both backends), `exhaustiveness/full_range_cover_other_column_missing`, `exhaustiveness/overlapping_ranges_later_arm_reachable`, plus 6 unit tests in `split.rs`. Suite 3853 passed / 4 failed (the known G27/G28 four)
 - [x] **F13** `medium` `single-source-of-truth` — A missing `;` after an expression statement in a function body is silently accepted — **fixed**
   - Two discard points: the parser collapsed a real and a synthesized `;` into one arm, and the emitter called plain `add_token` where the sibling *var-decl* path already called `add_token_or_missing`. The CST carried `Semicolon@69..69 ""` — a zero-width token with no `Missing` node and no error
   - **The audit's proposed fix — carry a synth flag on `StmtVariant::Expression` — was unnecessary.** `add_token_or_missing` keys off `span.start == span.end`; the working var-decl path carries no flag either
