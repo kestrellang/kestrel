@@ -62,6 +62,13 @@
 > (the witness, `UNJUSTIFIED`); floor **0**; all 17 `lang/` packages **0**.
 > Suite 3836/5 unchanged, per-file `dump diagnostics` exit codes identical, the
 > witness still prints `result=i`. R4 is now reached only by the miscompile.
+>
+> **Step 2 landed (2026-09-23): R4 is deleted.** `assoc_sub_by_name`, its arm in
+> `solve_associated`, `Keying::BaseBlind` and the `audit-assoc-eq` probe are
+> gone. The witness is rejected in the frontend (`E100 … B.Item !: Show`, no
+> binary produced) and passes unedited. Suite **3837 passed, 4 failed**; that
+> test is the only verdict change. G25 is closed in the audit. Steps 3 (fold
+> the variants) and 4 (entailment) continue below as cleanup.
 > Found while trying to close G17's C6. Every claim below carries a provenance
 > stamp per [`../../contributing/verifying-claims.md`](../../contributing/verifying-claims.md).
 

@@ -49,25 +49,6 @@ struct AssocSubKey {
     assoc: Entity,
 }
 
-/// How a read site keys the `where_clause_assoc_subs` memo.
-#[derive(Clone, Copy)]
-enum Keying {
-    /// `(resolved base, assoc)` — G17 C3. Two subjects that share an assoc
-    /// entity (`A.Item` and `B.Item`) no longer collide.
-    BaseAware,
-    /// Assoc entity only, first hit wins — the pre-C3 behaviour, retained for
-    /// **one** reader: `solve_associated`'s cross-protocol `Name` fallback.
-    ///
-    /// Not an oversight. That fallback fires 27× per compilation on the stdlib
-    /// `Iterable`/`Iterator` bridge, and a sweep over all 3655 testdata files
-    /// found **zero** of those hits are same-receiver — every one answers
-    /// `Iterator.Item` from an entry filed under `Iterable.Item`. Requiring
-    /// equal bases would therefore *delete* the bridge, not narrow it. The
-    /// bridge is justified by `where TargetIterator.Item = Item`, so C6 has to
-    /// make that equality path carry it before this can flip.
-    BaseBlind,
-}
-
 /// What a *strict* `(resolved base, assoc)` key answers at a read site,
 /// relative to the base-blind answer. Detection only — see
 /// [`InferCtx::audit_assoc_sub`].
@@ -247,12 +228,10 @@ pub struct InferCtx<'a> {
     /// associated type entities found in protocol member signatures.
     ///
     /// **Private to this module on purpose** (G17 stage 3a). Every reader goes
-    /// through [`InferCtx::assoc_sub`] / [`InferCtx::assoc_sub_by_name`], so
-    /// the `(base, assoc)` comparison rule lives in exactly one place —
-    /// [`InferCtx::lookup_assoc_sub`] — and no reader can re-derive its own.
-    ///
-    /// C3 made [`InferCtx::assoc_sub`] base-aware. [`InferCtx::assoc_sub_by_name`]
-    /// is deliberately still base-blind; see [`Keying::BaseBlind`].
+    /// through [`InferCtx::assoc_sub`], so the `(base, assoc)` comparison rule
+    /// lives in exactly one place — [`InferCtx::lookup_assoc_sub`] — and no
+    /// reader can re-derive its own. Every reader is base-aware (C3); the last
+    /// base-blind one, the cross-protocol `Name` fallback, was deleted by G25.
     where_clause_assoc_subs: Vec<(AssocSubKey, TyVar)>,
 
     /// Maps type parameter entities to their canonical TyVars.
@@ -646,44 +625,7 @@ impl<'a> InferCtx<'a> {
         base: Option<TyVar>,
         assoc: Entity,
     ) -> Option<TyVar> {
-        self.lookup_assoc_sub(site, base, assoc, &|e| e == assoc, Keying::BaseAware)
-    }
-
-    /// As [`Self::assoc_sub`], but matching the assoc by **`Name` across
-    /// protocols** (`Iterator.Item` vs `Iterable.Item`) — `solve_associated`'s
-    /// fallback, and **still base-blind**; see [`Keying::BaseBlind`].
-    ///
-    /// `e != assoc` keeps this to its documented contract: a *different*
-    /// protocol's same-named assoc. The same entity is [`Self::assoc_sub`]'s
-    /// job, and re-offering a candidate that reader just refused on its base
-    /// is how `leak5.ks` survived C3 (G17 C3b). **This is not C6** — C6 makes
-    /// the fallback base-*aware*, which would delete the `Iterable`/`Iterator`
-    /// bridge outright; the bridge is cross-entity, so this filter never sees
-    /// it.
-    ///
-    /// It restores an invariant rather than changing behaviour: before C3 the
-    /// only caller reached this fallback solely when the base-blind
-    /// [`Self::assoc_sub`] found *no* entry with `assoc == entity`, so a
-    /// same-entity candidate was already unreachable here.
-    pub(crate) fn assoc_sub_by_name(
-        &self,
-        site: &'static str,
-        base: Option<TyVar>,
-        assoc: Entity,
-    ) -> Option<TyVar> {
-        let want = self.query_ctx.get::<kestrel_ast_builder::Name>(assoc);
-        let matches =
-            |e: Entity| e != assoc && self.query_ctx.get::<kestrel_ast_builder::Name>(e) == want;
-        let answer = self.lookup_assoc_sub(site, base, assoc, &matches, Keying::BaseBlind);
-        // G25 commit 1: detection only. Not even computed unless
-        // `KESTREL_DEBUG=audit-assoc-eq` is set, and never feeds the answer.
-        if answer.is_some() && kestrel_debug::is_enabled("audit-assoc-eq") {
-            // The entry `blind_assoc_sub` just picked: the first candidate.
-            if let Some(&(entry, _)) = self.assoc_sub_candidates(&matches).next() {
-                crate::assoc_eq_audit::report(self, base, assoc, entry.base, entry.assoc);
-            }
-        }
-        answer
+        self.lookup_assoc_sub(site, base, assoc, &|e| e == assoc)
     }
 
     /// Audit-only probe: report the strict verdict a read site *would* get for
@@ -698,22 +640,19 @@ impl<'a> InferCtx<'a> {
     }
 
     /// The one place the memo is scanned. `matches` selects candidate entries
-    /// by assoc entity; `keying` decides whether the receiver then filters them.
+    /// by assoc entity; the receiver then filters them. There is no base-blind
+    /// reader: the cross-protocol `Name` fallback that was one is gone (G25).
     fn lookup_assoc_sub(
         &self,
         site: &'static str,
         base: Option<TyVar>,
         assoc: Entity,
         matches: &dyn Fn(Entity) -> bool,
-        keying: Keying,
     ) -> Option<TyVar> {
         if kestrel_debug::is_enabled("audit-subject") {
             self.audit_assoc_sub(site, base, assoc, matches);
         }
-        match keying {
-            Keying::BaseAware => self.strict_assoc_sub(base, matches),
-            Keying::BaseBlind => self.blind_assoc_sub(matches),
-        }
+        self.strict_assoc_sub(base, matches)
     }
 
     /// Candidate entries in push order — the scan every lookup shares.
@@ -724,12 +663,6 @@ impl<'a> InferCtx<'a> {
         self.where_clause_assoc_subs
             .iter()
             .filter(move |(k, _)| matches(k.assoc))
-    }
-
-    /// The pre-C3 answer: first candidate wins, whatever receiver it was filed
-    /// under. Still live at exactly one reader — see [`Keying::BaseBlind`].
-    fn blind_assoc_sub(&self, matches: &dyn Fn(Entity) -> bool) -> Option<TyVar> {
-        self.assoc_sub_candidates(matches).next().map(|&(_, tv)| tv)
     }
 
     /// The `(resolved base, assoc)` answer. Both sides are resolved **here**,

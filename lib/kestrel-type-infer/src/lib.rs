@@ -9,7 +9,6 @@
 //! HIR Lowering (HirBody) → Type Inference (this crate) → TypedBody
 //! ```
 
-mod assoc_eq_audit;
 pub mod captures;
 pub mod compare;
 pub mod conformance;
@@ -1161,7 +1160,7 @@ fn is_ptr_ref_intrinsic_call(
 /// Find an associated type entity by searching protocol bounds of a TypeAlias.
 /// E.g., for param=Item (which conforms to Addable), find Addable's "Output" child.
 /// Uses the resolver to find protocol bounds, then searches their children.
-pub(crate) fn find_assoc_type_in_bounds(
+fn find_assoc_type_in_bounds(
     ctx: &InferCtx<'_>,
     param: Entity,
     assoc_name: &str,
@@ -1191,11 +1190,7 @@ pub(crate) fn alias_bound_assoc_entity(
 
 /// The entity `receiver.<assoc_name>` resolves to through the resolver's
 /// associated-type lookup, whichever variant it comes back as.
-pub(crate) fn assoc_entity_on(
-    ctx: &InferCtx<'_>,
-    receiver: &ty::TyKind,
-    assoc_name: &str,
-) -> Option<Entity> {
+fn assoc_entity_on(ctx: &InferCtx<'_>, receiver: &ty::TyKind, assoc_name: &str) -> Option<Entity> {
     let resolved = ctx.resolver.resolve_associated_type(receiver, assoc_name)?;
     // Extract the entity from whichever variant the resolver returned.
     match &resolved.resolved {

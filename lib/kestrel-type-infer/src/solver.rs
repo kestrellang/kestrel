@@ -2896,31 +2896,6 @@ fn solve_associated(
                         } else {
                             tv
                         }
-                    } else if let Some(tv) = ctx.assoc_sub_by_name(
-                        // R4 — name-based fallback: different protocols can define
-                        // the same associated type (e.g., Iterator.Item vs
-                        // Iterable.Item). It only ever considers a *different*
-                        // entity: the same entity belongs to the R3 arm above,
-                        // and re-offering what R3 just refused on its base is
-                        // exactly how `leak5.ks` survived the C3 re-key (G17 C3b).
-                        // Pre-C3 that was already true — R3 was base-blind, so
-                        // reaching here meant no same-entity entry existed at all.
-                        //
-                        // Still deliberately base-BLIND. A name match on a
-                        // different receiver is `distinct_samename`'s miscompile,
-                        // but so is every one of the stdlib bridge's 27 hits, so
-                        // requiring equal bases here deletes the bridge rather
-                        // than narrowing it. See `Keying::BaseBlind` —
-                        // TODO(G17 C6).
-                        "solver:solve_associated:name-fallback",
-                        Some(container),
-                        *entity,
-                    ) {
-                        if ctx.resolve(tv) == resolved_result {
-                            ctx.assoc_projection(container, *entity)
-                        } else {
-                            tv
-                        }
                     } else if let Some(&tv) = ctx.param_tyvars.get(entity) {
                         tv
                     } else if matches!(kind, TyKind::Param { .. } | TyKind::AssocProjection { .. })
