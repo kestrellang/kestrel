@@ -44,6 +44,26 @@ impl QueryFn for WhereClausesOf {
     }
 }
 
+/// The where clauses written on the decl that **declares** `param`: its
+/// owning function, type, extension or protocol. A `TypeParameter` entity
+/// never carries a where clause or `TypeParams` of its own, so
+/// `WhereClausesOf { entity: param }` is always empty. This is the one place
+/// that makes the hop to the parent (G15 / A16).
+pub fn param_owner_where_clauses(
+    ctx: &QueryContext<'_>,
+    param: Entity,
+    root: Entity,
+) -> Vec<WhereClause> {
+    ctx.parent_of(param)
+        .map(|owner| {
+            ctx.query(WhereClausesOf {
+                entity: owner,
+                root,
+            })
+        })
+        .unwrap_or_default()
+}
+
 /// Free-function implementation. Takes `entity` (which is also the resolution
 /// context). Separated from the query impl so it can be called directly by
 /// other queries without going through the memoization layer when that

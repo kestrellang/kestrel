@@ -1919,12 +1919,10 @@ impl WorldResolver<'_> {
         param_entity: Entity,
         protocol_entity: Entity,
     ) -> Vec<HirTy> {
-        // Walk up from the param to find the owner (function/init that declares the where clause)
-        let owner = self.ctx.parent_of(param_entity).unwrap_or(self.body_owner);
-        let clauses = self.ctx.query(crate::where_clauses::WhereClausesOf {
-            entity: owner,
-            root: self.root,
-        });
+        // The clauses written on the param's owner (the function/init/type that
+        // declares it). Shared with the entailment tier so the hop lives once.
+        let clauses =
+            crate::where_clauses::param_owner_where_clauses(self.ctx, param_entity, self.root);
 
         // Direct match: where clause says T: Protocol[Args]
         // TODO(G17 stage 3a): `as_param()` skips projection subjects, matching

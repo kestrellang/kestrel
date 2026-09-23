@@ -859,3 +859,55 @@ the type expression `B.Item` is lowered, not in member lookup.
 **3831 passed, 2 failed** (build `30e543e4`). That is 3828 + the three new
 passing files. Failures: `assoc_projection_bound_same_name_distinct_protocols`
 (G25, unchanged) and the new residual above. No other test changed verdict.
+
+---
+
+## 10. S3 — LANDED. The param-declared entailment tier is live (G15 / A16)
+
+[measured @ `57b0a70c` + this commit, parent checkout, branch `arch/fixes`.]
+
+### Still dead at HEAD, measured two ways
+
+- **Source.** Every `set_where_clause` caller in `kestrel-ast-builder` targets a
+  decl: function, type, extension, protocol, alias or subscript. None targets a
+  `TypeParameter`, and no param carries `TypeParams`. So
+  `WhereClausesOf { entity: param }` has nothing to return.
+- **Corpus probe.** A temporary `audit-entail` `ktrace!` sat at the tier's
+  fall-through. It logged the dead tier's clause count next to what the owner
+  hop would answer. Swept with `kestrel dump diagnostics` over all 3,864 `.ks`
+  files (testdata + `lang/`): **3,042,683 tier-2 reaches, `dead_tier_len=0` in
+  every one, 0 `FLIP`.** The revived tier would change no answer in the corpus.
+  The probe was removed before this commit. Once the tier is live, it would
+  only compare the tier with itself.
+- **Unit test.** `bound_declared_on_param_owner_is_entailed` failed before the
+  fix and passes after it.
+
+Most reaches are stdlib: `Iterator.Item`, an associated type whose owner is the
+protocol, and `Array`/`ArraySlice.T`, whose owner clauses hold only the
+injected `Copyable`/`Static`. Neither entails the protocols asked about.
+
+### What the plan got wrong
+
+§4 and §6 say A16 closes "only if the extraction in §3 happens", via
+`clauses_in_force(ctx, root, parent_of(param))`. `clauses_in_force` was never
+built (§8), and it was not needed. The fix is the parent hop alone:
+`where_clauses::param_owner_where_clauses`. `find_protocol_type_args_from_bounds`
+in `resolve.rs` now uses the same helper instead of its own copy.
+
+That site used to fall back to `body_owner` for a parentless param. The helper
+returns no clauses instead. No builder creates a parentless param, and
+borrowing `body_owner`'s clauses was the ambient-scope leak G17 is about.
+
+### Suite
+
+**3831 passed, 2 failed** (build `f8ab1d39`), identical to S4. No test flipped
+from reject to accept.
+
+### Residual candidate, NOT characterised
+
+In `protocol Container[T] { func first() -> T … }` +
+`extend Container where T: Describe { … self.first().describe() }`, member
+lookup rejects with `E100 no member 'describe' on type 'T'`. The pre-S2 binary
+does the same, so it is not a G17-scope regression. It has not been checked
+whether that spelling is the supported one for a bound on a protocol's own type
+parameter.

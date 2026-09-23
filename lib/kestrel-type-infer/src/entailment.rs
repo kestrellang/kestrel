@@ -13,9 +13,9 @@
 //! - Refinement transitivity — `expand_protocol_closure([P_ctx])` contains
 //!   `constraint.protocol`. Picks up protocol inheritance and
 //!   extension-added conformances (e.g. `extend Equatable: Equal[Self]`).
-//! - Param-declared bounds — `WhereClausesOf(constraint.param)` returns
-//!   bounds attached to the param's enclosing decl. Mirrors
-//!   `collect_param_protocol_bounds` in `solver.rs`.
+//! - Param-declared bounds — `param_owner_where_clauses(constraint.param)`
+//!   returns the bounds written on the param's enclosing decl. Mirrors
+//!   `collect_param_protocol_bounds` in `resolve.rs`.
 //!
 //! Conservative on `TypeEquality` / `DirectEquality`: structural match
 //! against context. Generalize when a real test demands.
@@ -24,10 +24,10 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_name_res::expand_protocol_closure;
 
 use crate::resolve::WhereClause;
-use crate::where_clauses::WhereClausesOf;
+use crate::where_clauses::param_owner_where_clauses;
 
 /// True iff `constraint` is provable from `context` (plus any bounds
-/// attached to the constraint's subject param via `WhereClausesOf`).
+/// written on the constraint's subject param's owner decl).
 pub fn constraint_entailed_by(
     qctx: &QueryContext<'_>,
     root: Entity,
@@ -92,12 +92,11 @@ fn bound_entailed(
     }
 
     // 2. Bounds declared on the param's own enclosing decl (e.g. a struct
-    //    or extension that wrote `where T: P`). Mirrors the solver's
-    //    `collect_param_protocol_bounds`.
-    let param_bounds = qctx.query(WhereClausesOf {
-        entity: param,
-        root,
-    });
+    //    or extension that wrote `where T: P`). Mirrors the resolver's
+    //    `collect_param_protocol_bounds`. The clause lives on the param's
+    //    OWNER, not on the `TypeParameter` entity; querying the param itself
+    //    always came back empty and left this tier dead (G15 / A16).
+    let param_bounds = param_owner_where_clauses(qctx, param, root);
     let param_protocols: Vec<Entity> = param_bounds
         .iter()
         .filter_map(|c| match c {
@@ -263,6 +262,73 @@ mod tests {
         };
         let ctx = world.query_context();
         assert!(!constraint_entailed_by(&ctx, root, &constraint, &context));
+    }
+
+    /// Owner `Owner[T, U] where T: P` — the clause lives on the owner, the way
+    /// the AST builder files every where clause.
+    fn spawn_owner_with_clause(
+        world: &mut World,
+        root: Entity,
+        subject: &str,
+        protocol: &str,
+    ) -> (Entity, Entity) {
+        let owner = world.spawn();
+        world.set(owner, NodeKind::Struct);
+        world.set(owner, Name("Owner".into()));
+        world.set(owner, Vis::Public);
+        world.set_parent(owner, root);
+        let t = spawn_type_param(world, owner, "T");
+        let u = spawn_type_param(world, owner, "U");
+        world.set(owner, kestrel_ast_builder::TypeParams(vec![t, u]));
+        world.set(
+            owner,
+            kestrel_ast_builder::WhereClause(vec![kestrel_ast_builder::WhereConstraint::Bound {
+                subject: named(subject),
+                protocols: vec![named(protocol)],
+                node: fake_syntax(),
+            }]),
+        );
+        (t, u)
+    }
+
+    /// G15 / A16: the param-declared tier. A bound written on the param's
+    /// OWNER entails the constraint with an empty context. Before the fix the
+    /// tier queried `WhereClausesOf` on the `TypeParameter` itself, which is
+    /// always empty, so this could never hold.
+    #[test]
+    fn bound_declared_on_param_owner_is_entailed() {
+        let mut world = World::new();
+        world.begin_revision();
+        let root = spawn_module(&mut world, None, Name::ROOT);
+        let p = spawn_protocol(&mut world, root, "P");
+        let (t, _) = spawn_owner_with_clause(&mut world, root, "T", "P");
+
+        let constraint = WhereClause::Bound {
+            subject: WhereSubject::Param(t),
+            protocol: p,
+            protocol_type_args: vec![],
+        };
+        let ctx = world.query_context();
+        assert!(constraint_entailed_by(&ctx, root, &constraint, &[]));
+    }
+
+    /// Control for the above: the owner's `T: P` says nothing about its
+    /// sibling `U`, so the owner hop must not grant it.
+    #[test]
+    fn bound_on_sibling_param_is_not_entailed() {
+        let mut world = World::new();
+        world.begin_revision();
+        let root = spawn_module(&mut world, None, Name::ROOT);
+        let p = spawn_protocol(&mut world, root, "P");
+        let (_, u) = spawn_owner_with_clause(&mut world, root, "T", "P");
+
+        let constraint = WhereClause::Bound {
+            subject: WhereSubject::Param(u),
+            protocol: p,
+            protocol_type_args: vec![],
+        };
+        let ctx = world.query_context();
+        assert!(!constraint_entailed_by(&ctx, root, &constraint, &[]));
     }
 
     #[test]
