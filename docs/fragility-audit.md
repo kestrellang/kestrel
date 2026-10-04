@@ -23,8 +23,8 @@ claim needs a reproduction and the commit it was measured at; anything else is a
 G22/G24 are what this costs when skipped — a `high` finding filed against a compiler
 173 commits stale.
 
-**Progress: 51 fixed · 4 partial · 4 blocked · 18 open · 1 withdrawn** — 73 top-level (F1–F43, G1–G30).
-Partial: F2, F28, F29, F43. Blocked on a maintainer decision: F11, F29, F42, G16.
+**Progress: 52 fixed · 4 partial · 3 blocked · 18 open · 1 withdrawn** — 73 top-level (F1–F43, G1–G30).
+Partial: F2, F28, F29, F43. Blocked on a maintainer decision: F11, F29, G16.
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
 
@@ -34,14 +34,6 @@ Completed items live in [**Fixed**](#fixed) at the bottom of this file.
 
 These are not "unstarted" — they were investigated and the obvious fix is wrong.
 
-- **F42 — `unsafe impl Sync for StdlibCache`.** A `Mutex` does **not** fix it. `World::snapshot()`
-  clones query memos holding rowan CST nodes, whose refcounts are non-atomic and shared with the
-  cache; a snapshot outlives any lock, so one thread's drop races another's snapshot. Confirmed
-  structural: adding `Send + Sync` to `QueryFn` compiles workspace-wide, but adding it to
-  `QueryFn::Output` fails on `ParseResult` (`NonNull<rowan::cursor::NodeData>`). Live, not
-  theoretical — `libtest_mimic` runs trials as threads in one process and triage batches many tests
-  per process. Options: process-per-test, exclude CST-bearing memos from snapshots, single-thread
-  per process, or a thread-local cache. All have real costs.
 - **F29 — `@builtin` argument validation (was earmarked E479; E479 was taken by G29 `6ef0782c`, so F29 needs a new code).** Seven testdata files already exist for
   malformed/typo'd `@builtin` (`@builtin()`, `@builtin(42)`, `@builtin(.Copable)`, …), all
   `// test: diagnostics` with **zero `// ERROR:` annotations** — the diagnostic was designed and
@@ -97,8 +89,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 
 ## Editor and tooling
 
-- [ ] **F42** `medium` `global-state` — `unsafe impl Sync for StdlibCache` is unsound — **blocked**
-  - not fixable by a Mutex — rowan CST refcounts are shared across snapshots; needs a design decision
 - [ ] **F43** `low` `single-source-of-truth` — Smaller tooling defects
   - [ ] F43a — `Compiler::build` is call-once-per-entity but nothing enforces it
   - [x] F43b — `PARAM_COUNTER` is a process-global counter whose doc claims it is reset — **fixed**. Both sentences of its doc comment were false: the names are `_param_N`, not `_0/_1`, and nothing ever reset it — `grep` found only the declaration and the `fetch_add`. Now a local threaded through `extract_params` (3 call sites, one per declaration, never re-entrant — default-value bodies take a different path). It matters because `_param_N` reaches user-visible E611/E613 text: in the LSP's long-lived `Compiler` the same unedited source yielded `_param_0`, then `_param_7`, then `_param_23` across rebuilds. Rule added to `kestrel-ast-builder/AGENTS.md`
@@ -322,6 +312,11 @@ Completed findings, moved here from their original sections. Grouped by the sect
   - **Caveats, so this isn't read as more than it is.** The post-mono walk currently reports *nothing* — mono IR is well-formed OSSA and the instantiation-specific double-free class is semantic, not an ownership violation; it lands as infrastructure and should be deleted if it is still finding nothing in a few months. And the dominance check is likewise silent corpus-wide, proven non-inert only by unit tests. Suite: 3719 passed, 1 failed (`stdlib.os.os_fs_result`, failing identically in every historical run)
 
 ### Editor and tooling
+
+- [x] **F42** `medium` `global-state` — `unsafe impl Sync for StdlibCache` is unsound — **fixed** `e7179d31` (branch `frontend-rewrite`)
+  - Was blocked on "a Mutex does not fix it": snapshots share memo values, and `ParseResult` held a rowan `SyntaxNode` whose refcount is non-atomic, so a snapshot dropped after the lock raced the cache. Two changes remove both halves: `ParseResult` now holds the `GreenNode` (atomic refcounts; `tree()` builds a cursor on demand), and `kestrel-hecs` requires `Send + Sync` of every component, query key/output and accumulated value — the whole workspace compiled under that bound with `ParseResult` the only offender. `World: Send` is asserted at compile time.
+  - `StdlibCache` holds a `Mutex<Compiler>` and snapshots under the lock (the lock is still needed: `snapshot()` reads the query store through a `RefCell`, whose borrow flag is not atomic). Both `unsafe impl`s are deleted; the `static` now type-checks only because `Compiler: Send`.
+  - Verified: workspace `cargo check --all-targets` with the bounds; unit tests for hecs/parser/compiler/lsp; whole-corpus CLI differential 998/998 execution identical (`32f2b058`). Not run through triage (not installed in that container), so the `-j` default it constrained has not been re-measured.
 
 - [x] **F39** `medium` `single-source-of-truth` — Completion open-codes member lookup instead of `TypeMembers`, missing every protocol-extension member — **fixed**
   - The hand-rolled `children_of` + `ExtensionsFor` walk is replaced by a dispatch on `NodeKind`: `ProtocolMembers` for a protocol-typed receiver, `TypeMembers` for everything else. They stay **separate on purpose** — `collect_members_transitive` passes `include_parent_direct_children: false` for `TypeMembers`, so unifying would drop an inherited protocol's own direct requirements
