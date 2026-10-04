@@ -144,6 +144,7 @@ impl LowerCtx<'_> {
 
         self.ctx.accumulate(
             Diagnostic::error()
+                .with_code("E122")
                 .with_message(format!(
                     "unsupported unary operator '{}'",
                     unary_op_symbol(op)
@@ -182,6 +183,7 @@ impl LowerCtx<'_> {
 
         self.ctx.accumulate(
             Diagnostic::error()
+                .with_code("E124")
                 .with_message(format!(
                     "unsupported postfix operator '{}'",
                     postfix_op_symbol(op)
@@ -223,6 +225,7 @@ impl LowerCtx<'_> {
         if !ast_is_place_expr(body, lhs) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
+                    .with_code("E213")
                     .with_message("left-hand side of compound assignment is not assignable")
                     .with_labels(vec![Label::primary(span.file_id, span.range())]),
             );
@@ -261,6 +264,7 @@ impl LowerCtx<'_> {
 
         self.ctx.accumulate(
             Diagnostic::error()
+                .with_code("E126")
                 .with_message(format!(
                     "unsupported compound assignment operator '{}'",
                     compound_assign_op_symbol(op)
@@ -539,6 +543,7 @@ impl LowerCtx<'_> {
         let Some(iter_protocol) = self.resolve_builtin(Builtin::IterableProtocol) else {
             self.ctx.accumulate(
                 Diagnostic::error()
+                    .with_code("E127")
                     .with_message("`for` loop requires the `Iterable` protocol")
                     .with_labels(vec![Label::primary(span.file_id, span.range())])
                     .with_notes(vec!["is the standard library imported?".to_string()]),
@@ -716,6 +721,7 @@ impl LowerCtx<'_> {
         let Some(try_protocol) = self.resolve_builtin(Builtin::TryableProtocol) else {
             self.ctx.accumulate(
                 Diagnostic::error()
+                    .with_code("E128")
                     .with_message("`try` expression requires the `Tryable` protocol")
                     .with_labels(vec![Label::primary(span.file_id, span.range())])
                     .with_notes(vec!["is the standard library imported?".to_string()]),
@@ -889,6 +895,7 @@ impl LowerCtx<'_> {
         let Some(dsi_struct) = self.resolve_builtin(Builtin::DefaultStringInterpolation) else {
             self.ctx.accumulate(
                 Diagnostic::error()
+                    .with_code("E129")
                     .with_message("string interpolation requires the standard library")
                     .with_labels(vec![Label::primary(span.file_id, span.range())]),
             );
@@ -1048,6 +1055,7 @@ impl LowerCtx<'_> {
             Err(e) => {
                 self.ctx.accumulate(
                     Diagnostic::error()
+                        .with_code("E708")
                         .with_message(format!("invalid format specifier: {e}"))
                         .with_labels(vec![Label::primary(span.file_id, span.range())]),
                 );
@@ -1268,6 +1276,7 @@ impl LowerCtx<'_> {
     fn emit_missing_operator_diagnostic(&self, op: &BinaryOp, span: &Span) {
         self.ctx.accumulate(
             Diagnostic::error()
+                .with_code("E125")
                 .with_message(format!(
                     "unsupported binary operator '{}'",
                     binary_op_symbol(op)

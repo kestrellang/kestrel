@@ -198,6 +198,11 @@ Current allocations:
 - E313: `wrong_variant_arity` (match_pattern.rs)
 - E314: `wrong_tuple_arity_in_pattern` (match_pattern.rs)
 - E315: `or_pattern_inconsistent_bindings` (match_pattern.rs)
+- HIR-lowering codespan codes (kestrel-hir-lower, not analyzer descriptors;
+  allocated 2026-10 by the frontend rewrite so every lowering diagnostic has
+  one): E010–E011, E122, E124–E141, E213, E317–E321, E708–E710; it reuses
+  E438 (type argument count) and E476 (cannot find type). E123 is skipped (it
+  is the worked example in docs/contributing/workflows.md); E212 stays retired.
 - E400: `duplicate_builtin` (decl/duplicate_builtin.rs) — a second `@builtin(.X)`
   for the same lang item; `BuiltinIndex` keeps the first (2026-10, frontend rewrite).
 - E422: `disallowed_enum_conformance` (decl/conformance_rules.rs)

@@ -47,6 +47,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     } else {
                         ctx.accumulate(
                             Diagnostic::error()
+                                .with_code("E138")
                                 .with_message("'Self' is not valid in this scope")
                                 .with_labels(vec![Label::primary(span.file_id, span.range())]),
                         );
@@ -61,6 +62,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                         .join(".");
                     ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E476")
                             .with_message(format!("cannot find type '{type_name}' in this scope"))
                             .with_labels(vec![
                                 Label::primary(span.file_id, span.range())
@@ -90,6 +92,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     }
                     ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E139")
                             .with_message(format!("'{type_name}' is not a type"))
                             .with_labels(labels),
                     );
@@ -188,6 +191,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                         let neg_span = ast_type_span(neg);
                         ctx.accumulate(
                             Diagnostic::error()
+                                .with_code("E140")
                                 .with_message("negative bound on an opaque type must be 'Copyable'")
                                 .with_labels(vec![
                                     Label::primary(neg_span.file_id, neg_span.range())
@@ -760,6 +764,7 @@ fn validate_arity(
             .join(".");
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E438")
                 .with_message(format!("too few type arguments for '{type_name}'"))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -775,6 +780,7 @@ fn validate_arity(
             .join(".");
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E438")
                 .with_message(format!("too many type arguments for '{type_name}'"))
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -825,6 +831,7 @@ fn lower_sugar_type(
     } else {
         ctx.accumulate(
             Diagnostic::error()
+                .with_code("E141")
                 .with_message(format!("{name} is not defined"))
                 .with_labels(vec![Label::primary(span.file_id, span.range())])
                 .with_notes(vec!["is the standard library imported?".to_string()]),

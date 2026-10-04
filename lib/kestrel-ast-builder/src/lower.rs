@@ -2969,36 +2969,29 @@ mod tests {
     }
 }
 
-/// Check if a closure body (the CST node for ExprClosure) references `it` as
-/// an identifier in expression position. Does NOT descend into nested closures —
-/// an `it` inside `{ list.map { it } }` belongs to the inner closure only.
+/// Whether a closure body (the CST node for ExprClosure) refers to the NAME
+/// `it`: a value path whose first segment is `it` (`it`, `it.count`,
+/// `it.0`…). A member, argument label, or binding spelled `it` (`x.it`,
+/// `f(it: 1)`, `let it = …`) is not a reference (audit H8: this used to be a
+/// search for any `it` token). Does NOT descend into nested closures — an
+/// `it` inside `{ list.map { it } }` belongs to the inner closure only.
+/// Interpolation holes are ordinary CST nodes, so `"\(it)"` counts.
 fn closure_body_references_it(node: &SyntaxNode) -> bool {
+    use kestrel_syntax_tree::ast::{self, AstNode};
     fn walk(node: &SyntaxNode) -> bool {
-        for child in node.children_with_tokens() {
-            match &child {
-                rowan::NodeOrToken::Token(token) => {
-                    // Interpolation holes are ordinary CST nodes, so an `it`
-                    // inside `\(...)` is found by this same walk.
-                    if token.kind() == SyntaxKind::Identifier && token.text() == "it" {
-                        return true;
-                    }
-                },
-                rowan::NodeOrToken::Node(child_node) => {
-                    // Don't descend into nested closures — their `it` is their own
-                    if child_node.kind() == SyntaxKind::ExprClosure {
-                        continue;
-                    }
-                    // Skip ClosureParams (the explicit param list, not the body)
-                    if child_node.kind() == SyntaxKind::ClosureParams {
-                        continue;
-                    }
-                    if walk(child_node) {
-                        return true;
-                    }
-                },
+        node.children().any(|child| {
+            if matches!(
+                child.kind(),
+                SyntaxKind::ExprClosure | SyntaxKind::ClosureParams
+            ) {
+                return false;
             }
-        }
-        false
+            let names_it = ast::ExprPath::cast(child.clone()).is_some_and(|path| {
+                path.expression().is_none()
+                    && path.identifier_token().is_some_and(|t| t.text() == "it")
+            });
+            names_it || walk(&child)
+        })
     }
     walk(node)
 }

@@ -13,10 +13,10 @@ comes from the type checker.
 
 ## Contents
 
-- [E001–E009 — Control flow & definite initialization](#e001e009--control-flow--definite-initialization)
-- [E100–E121 — Type checking, parameters & literals](#e100e121--type-checking-parameters--literals)
-- [E200–E211 — Mutability, access modes & assignment](#e200e211--mutability-access-modes--assignment)
-- [E300–E316 — Patterns & exhaustiveness](#e300e316--patterns--exhaustiveness)
+- [E001–E011 — Control flow & definite initialization](#e001e011--control-flow--definite-initialization)
+- [E100–E141 — Type checking, names, parameters & literals](#e100e141--type-checking-names-parameters--literals)
+- [E200–E213 — Mutability, access modes & assignment](#e200e213--mutability-access-modes--assignment)
+- [E300–E321 — Patterns & exhaustiveness](#e300e321--patterns--exhaustiveness)
 - [E400, E411–E479 — Declarations, generics & protocol conformance](#e400-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
@@ -24,12 +24,12 @@ comes from the type checker.
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E625 — Closure kinds](#e624e625--closure-kinds)
-- [E700–E707 — String literals & escapes](#e700e707--string-literals--escapes)
+- [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E809 — Syntax](#e800e809--syntax)
 
 ---
 
-## E001–E009 — Control flow & definite initialization
+## E001–E011 — Control flow & definite initialization
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -42,8 +42,10 @@ comes from the type checker.
 | E007 | cannot read field '{name}' before it is initialized | An `init` body reads a field that has not been assigned yet. |
 | E008 | cannot use 'self' before all fields are initialized | Whole-`self` uses (method calls, passing `self`) require every field to be set first. |
 | E009 | cannot return before all fields are initialized | An `init` has an early `return` while some fields are still unassigned. |
+| E010 | '{keyword}' outside of loop | `break`/`continue` used where no loop encloses it. |
+| E011 | undeclared label '{label}' | `break`/`continue` names a loop label that no enclosing loop declares. |
 
-## E100–E121 — Type checking, parameters & literals
+## E100–E141 — Type checking, names, parameters & literals
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -53,6 +55,25 @@ comes from the type checker.
 | E111 | tuple pattern has {n} elements but type has {m} | A tuple-destructuring parameter doesn't match the tuple type's arity. |
 | E112 | tuple pattern used with non-tuple type | A parameter uses tuple destructuring but its type is not a tuple. |
 | E121 | integer literal out of range for \`{type}\` | The literal cannot be represented by the resolved integer type; it would silently wrap. |
+| E122 | unsupported unary operator '{op}' | The operator's protocol lang item (`@builtin(.…OperatorProtocol)`) is missing — usually the standard library is not imported. |
+| E124 | unsupported postfix operator '{op}' | Same, for a postfix operator. |
+| E125 | unsupported binary operator '{op}' | Same, for a binary operator. |
+| E126 | unsupported compound assignment operator '{op}' | Same, for a compound assignment (`op=`). |
+| E127 | \`for\` loop requires the \`Iterable\` protocol | `for` desugars through the `@builtin(.IterableProtocol)` lang item, which is missing (no standard library). |
+| E128 | \`try\` expression requires the \`Tryable\` protocol | `try` desugars through the `@builtin(.TryableProtocol)` lang item, which is missing. |
+| E129 | string interpolation requires the standard library | Interpolation builds a `DefaultStringInterpolation`, a standard-library lang item. |
+| E130 | variable '{name}' does not accept type arguments | `x[T]` where `x` names a local or parameter. |
+| E131 | empty type argument list | `f[]` — a type argument list needs at least one type. |
+| E132 | undefined name '{path}' | A value path does not resolve in scope. |
+| E133 | ambiguous name '{path}' | A value path resolves to several unrelated declarations; qualify it. |
+| E134 | 'Self' is only valid inside a type, extension, or protocol body | `Self` in an expression outside any type scope. |
+| E135 | cannot use 'self' in static method / free function | `self` outside an instance method. |
+| E136 | cannot call 'init' outside of an initializer | `self.init(…)` delegation is only valid inside another initializer. |
+| E137 | undeclared variable '{name}' | An assignment target names no binding in scope. |
+| E138 | 'Self' is not valid in this scope | `Self` in a type position outside any type scope. |
+| E139 | '{name}' is not a type | A type annotation names a value or module. |
+| E140 | negative bound on an opaque type must be 'Copyable' | `some P and not Q` only supports `not Copyable`. |
+| E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) is missing; is the standard library imported? |
 
 ### Example — E100 (type mismatch)
 
@@ -69,7 +90,7 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
                       // Int8 holds -128...127
 ```
 
-## E200–E211 — Mutability, access modes & assignment
+## E200–E213 — Mutability, access modes & assignment
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -85,9 +106,10 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E209 | a ref binding must be a simple \`let\` | A borrow initializer (`let r = &x`) can't be combined with `var` or a destructuring pattern. |
 | E210 | cannot take a \`&mutating\` borrow of immutable variable '{name}' | Mutable borrows need a mutable place (`var`, mutable field, or `Pointer.mutatingValue`). |
 | E211 | \`&\` pattern bindings are not supported in this position | `&` patterns are only allowed in match-arm patterns, not in `let`/`for`/conditions/params. |
+| E213 | left-hand side of compound assignment is not assignable | `a op= b` needs a place (variable, field, subscript) on the left. |
 | E212 | *(retired)* | Was "closure cannot capture non-Static binding '{name}'". Retired with closure kinds (docs/design/closures.md): a view-kind closure's environment is frame-bound, so it may capture ref bindings and non-`Static` values freely. The owning tier keeps the rejection under E624. |
 
-## E300–E316 — Patterns & exhaustiveness
+## E300–E321 — Patterns & exhaustiveness
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -108,6 +130,11 @@ let tiny: Int8 = 200  // error[E121]: integer literal out of range for `Int8`
 | E314 | tuple pattern has {pat} elements but type has {ty} | Tuple pattern arity doesn't match the matched tuple type. |
 | E315 | inconsistent bindings across or-pattern alternatives | Every `|` alternative must bind the same names with the same types. |
 | E316 *(warning)* | match on \`String\` with {n} literal arms does byte-equality per arm | Large string matches are O(arms × len); consider a different dispatch strategy. |
+| E317 | only one rest pattern (\`..\`) is allowed per tuple pattern | A tuple pattern can elide one run of elements, not two. |
+| E318 | invalid range bounds: start must be less than or equal to end | A range pattern whose bounds are reversed matches nothing. |
+| E319 | nested @ patterns are not allowed | `a @ (b @ p)` — bind one name per pattern. |
+| E320 | struct \`{type}\` has no field \`{field}\` | A struct pattern names a field the struct does not declare. |
+| E321 | pattern does not cover field(s) {fields} | A struct pattern without `..` must mention every field. |
 
 ### Example — E305 (non-exhaustive match)
 
@@ -183,7 +210,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | E473 | struct \`{name}\` already has a deinit | A type may declare at most one `deinit`. |
 | E474 | duplicate definition of {kind} '{name}' | Two declarations of the same kind share a name in the same scope. |
 | E475 | '{name}' is already defined as a {original_kind} | A name is reused by a declaration of a different kind (e.g. struct vs func). |
-| E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. |
+| E476 | cannot find type '{name}' in this scope | A type annotation names a type that doesn't resolve. (Also emitted by HIR lowering for the same condition.) |
 | E477 | method '{name}' has wrong receiver kind for protocol '{proto}' | The witness's receiver (`mutating`/`consuming`/plain) doesn't match the requirement. |
 | E478 | 'static' is redundant here | Global (module-level) properties are already static. |
 | E479 | associated type '{name}' in where clause is ambiguous: '{type}' is bound by {protocols}, which each declare '{name}' | An equality clause `T.X = Y` where two or more protocols bound on `T` in the same clause each declare `X`. A where-clause path has no protocol-qualified form, so the clause is ignored. |
@@ -474,7 +501,7 @@ func each(action: mutating (Int64) -> ()) { }
 func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 ```
 
-## E700–E707 — String literals & escapes
+## E700–E710 — String & character literals, escapes, format specs
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -486,6 +513,9 @@ func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 | E705 | multi-line string opener \`"""\` must be followed by a newline | Content starts on the line after the opening `"""`. |
 | E706 | multi-line string closer \`"""\` must be on its own line | Content ends on the line before the closing `"""`. |
 | E707 | unterminated string | The string literal is never closed. |
+| E708 | invalid format specifier: {detail} | The `:spec` of an interpolation hole does not parse. |
+| E709 | empty character literal | `''` — a character literal needs one codepoint. |
+| E710 | character literal may only contain one codepoint | `'ab'` — use a string for more than one codepoint. |
 
 ## E800–E809 — Syntax
 

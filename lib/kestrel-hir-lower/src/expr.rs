@@ -220,13 +220,10 @@ impl LowerCtx<'_> {
                 }
             },
             AstLiteral::Char(s) => {
-                {
-                    let (value, escape_errors) =
-                        crate::pat::parse_char_validated(s, span, self.ctx);
-                    HirLiteral::Char {
-                        value,
-                        escape_errors,
-                    }
+                let (value, escape_errors) = crate::pat::parse_char_validated(s, span, self.ctx);
+                HirLiteral::Char {
+                    value,
+                    escape_errors,
                 }
             },
             AstLiteral::Bool(b) => HirLiteral::Bool(*b),
@@ -308,6 +305,7 @@ impl LowerCtx<'_> {
             // Local variable with type args (e.g., `x[Int]`) — variables don't accept type args
             self.ctx.accumulate(
                 kestrel_reporting::Diagnostic::error()
+                    .with_code("E130")
                     .with_message(format!(
                         "variable '{}' does not accept type arguments",
                         first.name
@@ -388,6 +386,7 @@ impl LowerCtx<'_> {
             {
                 self.ctx.accumulate(
                     kestrel_reporting::Diagnostic::error()
+                        .with_code("E131")
                         .with_message("empty type argument list")
                         .with_labels(vec![
                             kestrel_reporting::Label::primary(seg.span.file_id, seg.span.range())
@@ -500,6 +499,7 @@ impl LowerCtx<'_> {
                     }
                 }
                 let diag = Diagnostic::error()
+                    .with_code("E133")
                     .with_message(format!("ambiguous name '{path_name}'"))
                     .with_labels(labels)
                     .with_notes(vec![
@@ -511,6 +511,7 @@ impl LowerCtx<'_> {
             ValueResolution::SelfNotInScope => {
                 self.ctx.accumulate(
                     Diagnostic::error()
+                        .with_code("E134")
                         .with_message(
                             "'Self' is only valid inside a type, extension, or protocol body",
                         )
@@ -529,6 +530,7 @@ impl LowerCtx<'_> {
                     .join(".");
                 self.ctx.accumulate(
                     Diagnostic::error()
+                        .with_code("E132")
                         .with_message(format!("undefined name '{path_name}'"))
                         .with_labels(vec![
                             Label::primary(span.file_id, span.range())
@@ -562,6 +564,7 @@ impl LowerCtx<'_> {
     fn emit_init_outside_initializer(&mut self, span: &Span) -> HirExprId {
         self.ctx.accumulate(
             Diagnostic::error()
+                .with_code("E136")
                 .with_message("cannot call 'init' outside of an initializer".to_string())
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range())
@@ -588,6 +591,7 @@ impl LowerCtx<'_> {
         };
         self.ctx.accumulate(
             Diagnostic::error()
+                .with_code("E135")
                 .with_message(message.to_string())
                 .with_labels(vec![
                     Label::primary(self_span.file_id, self_span.range())
@@ -1800,6 +1804,7 @@ impl LowerCtx<'_> {
         if !self.in_loop() {
             self.ctx.accumulate(
                 kestrel_reporting::Diagnostic::error()
+                    .with_code("E010")
                     .with_message(format!("'{}' outside of loop", keyword))
                     .with_labels(vec![
                         kestrel_reporting::Label::primary(span.file_id, span.range())
@@ -1813,6 +1818,7 @@ impl LowerCtx<'_> {
         {
             self.ctx.accumulate(
                 kestrel_reporting::Diagnostic::error()
+                    .with_code("E011")
                     .with_message(format!("undeclared label '{}'", lbl))
                     .with_labels(vec![
                         kestrel_reporting::Label::primary(span.file_id, span.range())

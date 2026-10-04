@@ -80,6 +80,7 @@ impl LowerCtx<'_> {
                 if *multiple_rests {
                     self.ctx.accumulate(
                         kestrel_reporting::Diagnostic::error()
+                            .with_code("E317")
                             .with_message(
                                 "only one rest pattern (`..`) is allowed per tuple pattern",
                             )
@@ -144,6 +145,7 @@ impl LowerCtx<'_> {
                     if invalid {
                         self.ctx.accumulate(
                             kestrel_reporting::Diagnostic::error()
+                                .with_code("E318")
                                 .with_message(
                                     "invalid range bounds: start must be less than or equal to end",
                                 )
@@ -217,6 +219,7 @@ impl LowerCtx<'_> {
                 if matches!(&body.pats[*subpattern], AstPat::At { .. }) {
                     self.ctx.accumulate(
                         kestrel_reporting::Diagnostic::error()
+                            .with_code("E319")
                             .with_message("nested @ patterns are not allowed")
                             .with_labels(vec![
                                 kestrel_reporting::Label::primary(span.file_id, span.range())
@@ -412,6 +415,7 @@ impl LowerCtx<'_> {
                         has_unknown = true;
                         self.ctx.accumulate(
                             kestrel_reporting::Diagnostic::error()
+                                .with_code("E320")
                                 .with_message(format!(
                                     "struct `{}` has no field `{}`",
                                     name, field_name
@@ -438,6 +442,7 @@ impl LowerCtx<'_> {
                     if !missing.is_empty() {
                         self.ctx.accumulate(
                             kestrel_reporting::Diagnostic::error()
+                                .with_code("E321")
                                 .with_message(format!(
                                     "pattern does not cover field{} `{}`",
                                     if missing.len() > 1 { "s" } else { "" },
@@ -623,6 +628,7 @@ pub(crate) fn parse_char_validated(
     if inner.is_empty() {
         ctx.accumulate(
             kestrel_reporting::Diagnostic::error()
+                .with_code("E709")
                 .with_message("empty character literal")
                 .with_labels(vec![
                     kestrel_reporting::Label::primary(span.file_id, span.range())
@@ -637,6 +643,7 @@ pub(crate) fn parse_char_validated(
     if codepoints.len() > 1 {
         ctx.accumulate(
             kestrel_reporting::Diagnostic::error()
+                .with_code("E710")
                 .with_message("character literal may only contain one codepoint")
                 .with_labels(vec![
                     kestrel_reporting::Label::primary(span.file_id, span.range())

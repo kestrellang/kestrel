@@ -42,6 +42,7 @@ impl LowerCtx<'_> {
                 if local.is_none() {
                     self.ctx.accumulate(
                         Diagnostic::error()
+                            .with_code("E137")
                             .with_message(format!("undeclared variable '{name}'"))
                             .with_labels(vec![
                                 Label::primary(span.file_id, span.range())
