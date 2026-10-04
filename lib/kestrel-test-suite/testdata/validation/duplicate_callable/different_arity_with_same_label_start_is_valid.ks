@@ -5,6 +5,6 @@ module Test
 struct Widget {
     let x: ()
 
-    init(value: ()) { x = value }
-    init(value: (), extra: ()) { x = value }
+    init(value: ()) { self.x = value }
+    init(value: (), extra: ()) { self.x = value }
 }

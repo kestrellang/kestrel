@@ -5,6 +5,6 @@ module Test
 struct Container {
     let items: ()
 
-    subscript(index index: ()) -> () { items }
-    subscript(at at: ()) -> () { items }
+    subscript(index index: ()) -> () { self.items }
+    subscript(at at: ()) -> () { self.items }
 }

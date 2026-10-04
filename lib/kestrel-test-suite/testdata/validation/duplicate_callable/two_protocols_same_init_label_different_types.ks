@@ -13,6 +13,6 @@ protocol Beta {
 struct Widget: Alpha, Beta {
     let x: ()
 
-    init(value: ()) { x = value }
-    init(value: ((), ())) { x = () }
+    init(value: ()) { self.x = value }
+    init(value: ((), ())) { self.x = () }
 }

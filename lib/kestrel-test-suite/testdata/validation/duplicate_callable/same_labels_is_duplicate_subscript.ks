@@ -5,6 +5,6 @@ module Test
 struct Container {
     let items: ()
 
-    subscript(index: ()) -> () { items }
-    subscript(index: ()) -> () { items } // ERROR: duplicate subscript signature
+    subscript(index: ()) -> () { self.items }
+    subscript(index: ()) -> () { self.items } // ERROR: duplicate subscript signature
 }
