@@ -79,6 +79,53 @@ through its view; shared helpers take the `Has*` traits. Types lower with
 lowered to `AstBody` by `lower.rs` (still an untyped CST walk) and from there
 to HIR by `kestrel-hir-lower`, which lowers operators as written.
 
+**No syntax in components.** A declaration keeps `CstNode(SyntaxNodePtr)`,
+its body `Valued(SyntaxNodePtr)`; conformance and where-clause entries keep
+pointers too. The file entity owns the tree as `FileSyntax(GreenNode)` (the
+immutable, `Send` green tree). `kestrel_ast_builder::syntax::{cst_node,
+valued_node}` resolve a pointer through the `World` or a `QueryContext`.
+
+**Implicit `it`.** A closure without a parameter header gets an `it`
+parameter when its body (not counting nested closures) refers to the *name*
+`it` — a value path starting with `it` — not when the token merely appears
+(`{ p.it }` has no parameter).
+
+## Name resolution (`kestrel-name-res`)
+
+- **Lang items** resolve through the `@builtin(.X)` index only; a declaration
+  that merely shares a builtin's name is never taken for it. A second
+  annotation of the same builtin is E400.
+- **Type scopes** are member scopes: in a struct/enum/protocol body or any of
+  its extensions, the lexical names are the type's non-instance members from
+  every part (nested types, aliases, enum cases, statics) plus that part's
+  own type parameters. Instance members are reached only through `self.`.
+- **Selective imports** bind only declarations visible from the importing
+  file, like wildcard imports.
+
+## Diagnostics
+
+Every front-end diagnostic has a code: E800–E809 from the parser, the HIR
+lowering codes (E010–E011, E122–E141, E213, E317–E321, E708–E710, plus E438 /
+E476 shared with the analyzers), and the analyzers' own. See
+`docs/error-codes.md`.
+
+## Not yet built
+
+The target design's remaining pieces, in the order they would land:
+
+- **Item tree + ID map.** Entities are still created straight from the CST by
+  the builders, and components still carry spans (`DeclSpan`, spans inside
+  `AstType`). The target is a position-independent item tree per file with
+  IDs from (container, kind, name, disambiguator) and an ID map
+  (item → `AstPtr`) as the only place spans live.
+- **Direct CST → HIR body lowering** from the typed views with scopes built
+  during the walk (path vs. member decided by scope, `it` decided by
+  scope), a HIR ↔ `AstPtr` source map, `Name::Missing` instead of `""`, and
+  deleting `AstBody` / `kestrel-ast`. Until then `lower.rs` is the one
+  untyped CST reader left in the ast-builder.
+- The query cache still holds `ParseResult { tree: SyntaxNode }`, so the
+  World is not yet `Send` even though components are syntax-free.
+
 ## Verification
 
 `scripts/frontend-oracle.py` is the differential oracle used for every step
