@@ -10,7 +10,7 @@
 //!
 //! ### E400 -- `duplicate_builtin` (Error, Correctness)
 //!
-//! **Message:** "duplicate @builtin(.{feature}): already declared by '{name}'"
+//! **Message:** "duplicate @builtin(.{feature}): already declared by '{name}'" ({feature} as written)
 //!
 //! **Labels:**
 //! - Primary: the later declaration
@@ -72,8 +72,8 @@ impl DeclCheck for DuplicateBuiltinAnalyzer {
             descriptor_id: DESCRIPTORS[0].id,
             severity: DESCRIPTORS[0].default_severity,
             message: format!(
-                "duplicate @builtin(.{}): already declared by '{}'",
-                builtin.name(),
+                "duplicate @builtin({}): already declared by '{}'",
+                written_feature(cx).unwrap_or_else(|| format!(".{}", builtin.name())),
                 util::entity_name(cx.query, first)
             ),
             labels: vec![
@@ -91,4 +91,12 @@ impl DeclCheck for DuplicateBuiltinAnalyzer {
             notes: vec![],
         }]
     }
+}
+
+/// The feature as written in the annotation (`.AddOperatorProtocol`), which
+/// is not always `Builtin::name()` (`Addable`).
+fn written_feature(cx: &DeclContext<'_>) -> Option<String> {
+    let attrs = cx.query.get::<kestrel_ast_builder::Attributes>(cx.entity)?;
+    let builtin = attrs.0.iter().find(|a| a.name == "builtin")?;
+    Some(builtin.args.first()?.value.clone())
 }
