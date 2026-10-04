@@ -330,13 +330,14 @@ impl LowerCtx<'_> {
         (lhs, rhs)
     }
 
-    /// `HirExpr::Local` for a path segment naming a local, recorded in the
-    /// source map as a use of it.
-    fn alloc_local_ref(&mut self, local: kestrel_hir::res::LocalId, seg: &PathSeg) -> HirExprId {
-        let id = self.alloc_expr(HirExpr::Local(local, seg.span.clone()));
+    /// Allocate an expression that one path segment names (a `Local`, a
+    /// type parameter's `Def`, a member `Field`), recording the segment's
+    /// identifier in the source map.
+    fn alloc_seg(&mut self, expr: HirExpr, seg: &PathSeg) -> HirExprId {
+        let id = self.alloc_expr(expr);
         let range =
             rowan::TextRange::new((seg.span.start as u32).into(), (seg.span.end as u32).into());
-        self.source_map.record_local_ref(range, id);
+        self.source_map.record_name_ref(range, id);
         id
     }
 
@@ -354,6 +355,9 @@ impl LowerCtx<'_> {
                 name: hir_name(member.name.clone()),
                 span: span.clone(),
             });
+            if let Some(range) = member.name_range {
+                self.source_map.record_name_ref(range, current);
+            }
         }
         current
     }
@@ -368,11 +372,12 @@ impl LowerCtx<'_> {
     fn lower_trailing_member_segments(&mut self, base: HirExprId, rest: &[PathSeg]) -> HirExprId {
         let mut current = base;
         for seg in rest {
-            current = self.alloc_expr(HirExpr::Field {
+            let field = HirExpr::Field {
                 base: current,
                 name: HirName::Name(seg.name.clone()),
                 span: seg.span.clone(),
-            });
+            };
+            current = self.alloc_seg(field, seg);
         }
         current
     }
@@ -393,15 +398,8 @@ impl LowerCtx<'_> {
         // Remaining segments become field accesses — type inference resolves them later.
         if first.type_args.is_none() {
             if let Some(local_id) = self.lookup_local(&first.name) {
-                let mut current = self.alloc_local_ref(local_id, first);
-                for seg in &segments[1..] {
-                    current = self.alloc_expr(HirExpr::Field {
-                        base: current,
-                        name: HirName::Name(seg.name.clone()),
-                        span: seg.span.clone(),
-                    });
-                }
-                return current;
+                let local = self.alloc_seg(HirExpr::Local(local_id, first.span.clone()), first);
+                return self.lower_trailing_member_segments(local, &segments[1..]);
             }
 
             // Specific diagnostic for `self` used where no receiver is in scope.
@@ -442,19 +440,9 @@ impl LowerCtx<'_> {
                     .flatten()
                     .map(|t| self.lower_type(t))
                     .collect();
-                let mut current = self.alloc_expr(HirExpr::Def(
-                    entity,
-                    first_type_args,
-                    segments[0].span.clone(),
-                ));
-                for seg in &segments[1..] {
-                    current = self.alloc_expr(HirExpr::Field {
-                        base: current,
-                        name: HirName::Name(seg.name.clone()),
-                        span: seg.span.clone(),
-                    });
-                }
-                return current;
+                let def = HirExpr::Def(entity, first_type_args, segments[0].span.clone());
+                let def = self.alloc_seg(def, &segments[0]);
+                return self.lower_trailing_member_segments(def, &segments[1..]);
             }
         }
 
@@ -1317,7 +1305,7 @@ impl LowerCtx<'_> {
             .flatten()
             .map(|t| self.lower_type(t))
             .collect();
-        self.alloc_expr(HirExpr::Def(entity, type_args, first.span.clone()))
+        self.alloc_seg(HirExpr::Def(entity, type_args, first.span.clone()), first)
     }
 
     /// An associated-type projection in expression position, lowered as the
@@ -1354,17 +1342,11 @@ impl LowerCtx<'_> {
     fn lower_path_prefix(&mut self, segments: &[PathSeg]) -> HirExprId {
         let first = &segments[0];
         let local_id = self.lookup_local(&first.name).unwrap();
-        let mut current = self.alloc_local_ref(local_id, first);
+        let local = self.alloc_seg(HirExpr::Local(local_id, first.span.clone()), first);
         // Build Field chain for all segments except first and last
-        for seg in &segments[1..segments.len() - 1] {
-            current = self.alloc_expr(HirExpr::Field {
-                base: current,
-                name: HirName::Name(seg.name.clone()),
-                span: seg.span.clone(),
-            });
-        }
-        current
+        self.lower_trailing_member_segments(local, &segments[1..segments.len() - 1])
     }
+
     /// Lower call arguments.
     fn lower_call_args(&mut self, args: &[ArgSyntax]) -> Vec<HirCallArg> {
         args.iter()
@@ -1543,10 +1525,17 @@ impl LowerCtx<'_> {
                 "outer 'it' declared here",
             ),
         };
+        // Point at the outer `it` itself: an enclosing closure's first `it`,
+        // else the outer binding's name (its `Local::span` covers the whole
+        // declaration — a `let` statement, or nothing for a parameter).
         let outer_span = self
             .implicit_it_locals
             .get(&outer)
             .cloned()
+            .or_else(|| {
+                let name = self.source_map.local_source(outer)?.name;
+                Some(Span::new(self.file_id, name.into()))
+            })
             .unwrap_or_else(|| self.locals[outer].span.clone());
         self.ctx.accumulate(
             kestrel_reporting::Diagnostic::warning()

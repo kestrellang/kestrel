@@ -27,7 +27,8 @@ use kestrel_ast_builder::{Callable, DefaultReferencesParam, FileId, Valued};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::body::{HirBody, HirExpr, HirMatchArm, HirStmt, MatchSource};
 use kestrel_span::Span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::ast::{self, AstNode};
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub use source_map::{BodySourceMap, LocalSource};
 pub use ty::{
@@ -196,9 +197,19 @@ impl LowerCtx<'_> {
             self.params.push(self_local);
         }
 
+        let mut named = self.signature_param_names();
         for param in &callable.params {
             let local = self.define_local(&param.name, param.is_mut, Span::synthetic(0));
             self.params.push(local);
+            // Record where a plainly-named parameter is spelled.
+            if param.pattern.is_none()
+                && let Some(slot) = named
+                    .iter_mut()
+                    .find(|n| n.as_ref().is_some_and(|(_, t)| t.text() == param.name))
+                && let Some((binding, name)) = slot.take()
+            {
+                self.source_map.record_local(local, &binding, &name);
+            }
 
             // Desugar destructured params: match _param_0 { (a, b) => () }
             if let Some(ref pattern) = param.pattern {
@@ -227,6 +238,36 @@ impl LowerCtx<'_> {
             }
         }
         param_desugar_stmts
+    }
+
+    /// The binding pattern and identifier of each plainly-named parameter in
+    /// the owner's own signature, in order.
+    ///
+    /// Only a function or initializer binds its parameters in exactly one
+    /// body. A subscript's index parameters are bound again by its setter and
+    /// place accessors, and a rename through one body would miss the others,
+    /// so those stay unrecorded (tools then refuse to rename them).
+    fn signature_param_names(&self) -> Vec<Option<(SyntaxNode, SyntaxToken)>> {
+        use kestrel_ast_builder::NodeKind;
+        if !matches!(
+            self.ctx.get::<NodeKind>(self.owner),
+            Some(NodeKind::Function | NodeKind::Initializer)
+        ) {
+            return Vec::new();
+        }
+        let Some(list) = kestrel_ast_builder::syntax::cst_node(self.ctx, self.owner)
+            .and_then(|decl| decl.children().find_map(ast::ParameterList::cast))
+        else {
+            return Vec::new();
+        };
+        list.parameters()
+            .filter_map(|param| match param.pattern()?.pat()? {
+                ast::Pat::BindingPattern(b) => {
+                    Some(Some((b.syntax().clone(), b.identifier_token()?)))
+                },
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -342,5 +383,135 @@ mod tests {
         let (world, root, func) = setup("protocol P { func noBody() }", "noBody");
         let ctx = world.query_context();
         assert!(ctx.query(LowerBody { entity: func, root }).is_none());
+    }
+
+    /// A statement-like expression ending a block without `;` is the block's
+    /// value, not a statement.
+    #[test]
+    fn trailing_if_is_the_block_value() {
+        let hir = lower(
+            "func f() -> Int { let a = 1; if true { a } else { 2 } }",
+            "f",
+        );
+        assert_eq!(hir.statements.len(), 1);
+        assert!(matches!(
+            hir.exprs[hir.tail_expr.unwrap()],
+            HirExpr::If { .. }
+        ));
+    }
+
+    /// In a closure, a statement-like expression stands without a
+    /// `Statement` wrapper; one that is not last is a statement, kept in
+    /// source order with the statements around it.
+    #[test]
+    fn closure_items_keep_source_order() {
+        let hir = lower(
+            "func g(c: () -> Int) -> Int { c() }
+             func f() -> Int { g({ while false {}; let x = 1; x }) }",
+            "f",
+        );
+        let closure = hir
+            .exprs
+            .iter()
+            .find_map(|(_, e)| match e {
+                HirExpr::Closure { body, .. } => Some(body.clone()),
+                _ => None,
+            })
+            .expect("closure");
+        assert_eq!(closure.stmts.len(), 2);
+        let first = &hir.stmts[closure.stmts[0]];
+        let HirStmt::Expr { expr, .. } = first else {
+            panic!("the loop comes first: {first:?}");
+        };
+        assert!(matches!(hir.exprs[*expr], HirExpr::Loop { .. }));
+        assert!(matches!(hir.stmts[closure.stmts[1]], HirStmt::Let { .. }));
+        assert!(matches!(
+            hir.exprs[closure.tail_expr.unwrap()],
+            HirExpr::Local(..)
+        ));
+    }
+
+    /// `it` is a parameter only when a header-less closure refers to the
+    /// *name* `it`; a member spelled `it` is not a reference.
+    #[test]
+    fn implicit_it_is_a_name_reference() {
+        let param_names = |src: &'static str| {
+            let hir = lower(src, "f");
+            hir.exprs
+                .iter()
+                .filter_map(|(_, e)| match e {
+                    HirExpr::Closure { params, .. } => Some(
+                        params
+                            .iter()
+                            .map(|p| hir.locals[p.local].name.clone())
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            param_names("func f() { let c = { it }; }"),
+            vec![vec!["it"]]
+        );
+        assert_eq!(
+            param_names("func f(p: Int) { let c = { p.it }; }"),
+            vec![Vec::<String>::new()]
+        );
+        // An explicit header is transparent: the inner `it` is the outer
+        // closure's.
+        assert_eq!(
+            param_names("func f() { let c = { { (y) in y + it } }; }"),
+            vec![vec!["y".to_string()], vec!["it".to_string()]]
+        );
+    }
+
+    /// A field initializer is a one-expression body.
+    #[test]
+    fn field_initializer_lowers_as_a_value() {
+        let (world, root, _) = setup(
+            "struct S { var x: Int = 42 }
+func f() {}",
+            "f",
+        );
+        let field = world
+            .iter_component::<Name>()
+            .find(|(_, n)| n.0 == "x")
+            .map(|(e, _)| e)
+            .unwrap();
+        let ctx = world.query_context();
+        let hir = ctx
+            .query(LowerBody {
+                entity: field,
+                root,
+            })
+            .unwrap();
+        assert!(hir.statements.is_empty());
+        assert!(matches!(
+            hir.exprs[hir.tail_expr.unwrap()],
+            HirExpr::Literal {
+                value: HirLiteral::Integer(42),
+                ..
+            }
+        ));
+    }
+
+    /// Every body of a real stdlib file lowers.
+    #[test]
+    fn ordering_ks_bodies_lower() {
+        let (world, root, _) = setup(
+            include_str!("../../../lang/std/core/ordering.ks"),
+            "reverse",
+        );
+        let ctx = world.query_context();
+        let bodies: Vec<_> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
+        assert!(
+            bodies.len() >= 6,
+            "ordering.ks has 6 methods, got {}",
+            bodies.len()
+        );
+        for body in bodies {
+            assert!(ctx.query(LowerBody { entity: body, root }).is_some());
+        }
     }
 }

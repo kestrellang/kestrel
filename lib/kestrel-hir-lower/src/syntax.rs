@@ -438,6 +438,8 @@ pub(crate) struct PathSeg {
 #[derive(Clone)]
 pub(crate) struct MemberSeg {
     pub name: Option<String>,
+    /// The name's identifier token range.
+    pub name_range: Option<rowan::TextRange>,
     pub type_args: Option<Vec<AstType>>,
 }
 
@@ -509,6 +511,7 @@ fn pure_path(elements: &[SyntaxElement], file_id: usize) -> PathSyntax {
     let members = if trailing_dot && !segments.is_empty() {
         vec![MemberSeg {
             name: None,
+            name_range: None,
             type_args: None,
         }]
     } else {
@@ -532,11 +535,12 @@ fn member_chain(elements: &[SyntaxElement], file_id: usize) -> Vec<MemberSeg> {
         if !is_dot {
             continue;
         }
-        let name = elements
+        let name_token = elements
             .get(i)
             .and_then(SyntaxElement::as_token)
-            .filter(|t| t.kind() == SyntaxKind::Identifier)
-            .map(|t| t.text().to_string());
+            .filter(|t| t.kind() == SyntaxKind::Identifier);
+        let name = name_token.map(|t| t.text().to_string());
+        let name_range = name_token.map(|t| t.text_range());
         let type_args = if name.is_some() {
             i += 1;
             let args = type_args_at(elements, i, file_id);
@@ -547,7 +551,11 @@ fn member_chain(elements: &[SyntaxElement], file_id: usize) -> Vec<MemberSeg> {
         } else {
             None
         };
-        members.push(MemberSeg { name, type_args });
+        members.push(MemberSeg {
+            name,
+            name_range,
+            type_args,
+        });
     }
     members
 }

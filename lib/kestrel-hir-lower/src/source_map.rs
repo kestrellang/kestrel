@@ -13,7 +13,7 @@
 //! | `SyntaxNodePtr` | id | the id the node lowered *to* (a desugaring's outermost node) |
 //! | `LocalId` | [`LocalSource`] | the binding and its identifier token |
 //! | identifier position | `LocalId` | a declaration site |
-//! | identifier position | `HirExprId` | a use site (`HirExpr::Local`) |
+//! | identifier position | `HirExprId` | the expression one path segment names |
 //!
 //! Synthesized ids (desugaring temporaries, `self`, an implicit `it`) have no
 //! entry. Ranges are positions in the body's file.
@@ -44,7 +44,7 @@ pub struct BodySourceMap {
     node_pats: Vec<(SyntaxNodePtr, HirPatId)>,
     node_stmts: Vec<(SyntaxNodePtr, HirStmtId)>,
     local_names: Vec<(TextRange, LocalId)>,
-    local_refs: Vec<(TextRange, HirExprId)>,
+    name_refs: Vec<(TextRange, HirExprId)>,
 }
 
 /// `vec[idx] = value`, growing the vector as needed.
@@ -113,22 +113,35 @@ impl BodySourceMap {
         find_range(&self.local_names, offset)
     }
 
-    /// The `HirExpr::Local` whose identifier contains `offset` (a use of a
-    /// local, by name).
-    pub fn local_ref_at(&self, offset: TextSize) -> Option<HirExprId> {
-        find_range(&self.local_refs, offset)
+    /// The expression the path segment at `offset` names: a local's
+    /// `HirExpr::Local`, a type parameter's `Def`, or a member `Field` of a
+    /// path whose prefix is a value. A path segment is a token, not a node,
+    /// so these are keyed by the identifier's range.
+    pub fn name_ref_at(&self, offset: TextSize) -> Option<HirExprId> {
+        find_range(&self.name_refs, offset)
     }
 
-    /// Every use of a local, by name: `(identifier range, HirExpr::Local id)`.
-    pub fn local_refs(&self) -> impl Iterator<Item = (TextRange, HirExprId)> + '_ {
-        self.local_refs.iter().copied()
+    /// Every path segment that names an expression of its own:
+    /// `(identifier range, id)`.
+    pub fn name_refs(&self) -> impl Iterator<Item = (TextRange, HirExprId)> + '_ {
+        self.name_refs.iter().copied()
     }
 
-    /// The smallest lowered expression node containing `offset`, walking out
-    /// from the token there. `root` is the body's file tree.
+    /// The expression at `offset`: the path segment there, else the innermost
+    /// lowered node around the token there. `root` is the body's file tree.
     pub fn expr_at(&self, root: &SyntaxNode, offset: TextSize) -> Option<HirExprId> {
+        if let Some(expr) = self.name_ref_at(offset) {
+            return Some(expr);
+        }
         let token = token_at(root, offset)?;
         token.parent_ancestors().find_map(|n| self.node_expr(&n))
+    }
+
+    /// The pattern at `offset`: the innermost lowered pattern node around the
+    /// token there.
+    pub fn pat_at(&self, root: &SyntaxNode, offset: TextSize) -> Option<HirPatId> {
+        let token = token_at(root, offset)?;
+        token.parent_ancestors().find_map(|n| self.node_pat(&n))
     }
 
     // ===== Recording (lowering only) =====
@@ -171,8 +184,8 @@ impl BodySourceMap {
         set_at(&mut self.local_sources, local.raw() as usize, source);
     }
 
-    pub(crate) fn record_local_ref(&mut self, name: TextRange, expr: HirExprId) {
-        self.local_refs.push((name, expr));
+    pub(crate) fn record_name_ref(&mut self, name: TextRange, expr: HirExprId) {
+        self.name_refs.push((name, expr));
     }
 }
 
