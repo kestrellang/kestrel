@@ -351,6 +351,14 @@ pub struct InferCtx<'a> {
     /// wins. Keyed structurally, not by TyVar, because the duplicate sites
     /// form independent TyVar trees for the same concrete type.
     pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
+
+    /// BIDI PROTOTYPE (local, uncommitted): nesting depth of closure bodies
+    /// during generation. Statement-boundary literal defaulting only fires at
+    /// depth 0 — a closure body's statements are checked once its expected
+    /// type is known, which here is the end of the enclosing statement.
+    pub(crate) probe_closure_depth: u32,
+    /// BIDI PROTOTYPE: the body has a tail value and no declared return type.
+    pub(crate) probe_omitted_return: bool,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -435,6 +443,8 @@ impl<'a> InferCtx<'a> {
             opaque_return: None,
             type_param_defaults: Vec::new(),
             reported_typearg_conformance: HashSet::new(),
+            probe_closure_depth: 0,
+            probe_omitted_return: false,
         }
     }
 

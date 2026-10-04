@@ -60,6 +60,13 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
             relax_level = 0;
             continue;
         }
+        // BIDI PROTOTYPE: symmetric operator literal rule (N3).
+        if kestrel_debug::is_enabled("bidi-op") && crate::bidi_probe::op_literal_adopts_operand(ctx)
+        {
+            fixpoint(ctx);
+            relax_level = 0;
+            continue;
+        }
         let progress = apply_literal_defaults(ctx, relax_level);
         if progress {
             fixpoint(ctx);
@@ -133,6 +140,10 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // use of a ret_borrow function (E491 — the convention is not
     // expressible in function types).
     validate_ref_placement(ctx, hir);
+
+    // BIDI PROTOTYPE measurement (inert unless KESTREL_DEBUG=bidi-n4).
+    crate::bidi_probe::report_literal_lets(ctx, hir);
+    crate::bidi_probe::report_omitted_return(ctx);
 
     // Phase 4.5: report any expression or local whose TyVar stayed unresolved.
     // These slots would otherwise surface as `MirTy::Error` downstream and
@@ -510,7 +521,7 @@ fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     }
 }
 
-fn fixpoint(ctx: &mut InferCtx<'_>) {
+pub(crate) fn fixpoint(ctx: &mut InferCtx<'_>) {
     const MAX_ROUNDS: usize = 256;
     for _ in 0..MAX_ROUNDS {
         let progress = solve_round(ctx);
@@ -3457,6 +3468,15 @@ fn solve_overloaded_call(
                 .copied()
                 .filter(|&c| types_compatible(ctx, c, &args))
                 .collect();
+            // BIDI PROTOTYPE measurement: a free-function call whose candidates
+            // survive label filtering, so argument TYPES pick the overload.
+            kestrel_debug::ktrace!(
+                "bidi-ovl",
+                "type-overload name={overload_name} label_matches={} type_matches={} owner={}",
+                matched.len(),
+                compatible.len(),
+                crate::bidi_probe::owner_name(ctx)
+            );
 
             match compatible.len() {
                 0 => SolveResult::Error(InferError::NoMember {
@@ -5158,7 +5178,7 @@ fn extension_where_clauses_satisfied(
 /// still pin blocked literals before force-defaulting. The deferral itself
 /// lives in `solve_coerce` arm 2: an annotation pinning the target to the
 /// ref TYPE (`let o: Optional[&Int64] = .Some(r)`) must win the race.
-fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
+pub(crate) fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
     for c in &ctx.constraints {
         let (from, to) = match c {
@@ -5216,7 +5236,7 @@ fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
 /// under a different head constructor); `Output = Self` operators
 /// (`negate`, `add`, …) already flow through literal-marker unification
 /// and the context-driven pass in `apply_literal_defaults`.
-fn apply_operator_shape_projections(ctx: &mut InferCtx<'_>) -> bool {
+pub(crate) fn apply_operator_shape_projections(ctx: &mut InferCtx<'_>) -> bool {
     // Collect candidates immutably first; project after.
     let mut candidates: Vec<(TyVar, TyVar, String, Vec<crate::constraint::CallArg>)> = Vec::new();
     for c in &ctx.constraints {
@@ -5416,6 +5436,14 @@ fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
 ///
 /// Returns `true` when this call made any change.
 fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
+    let mut progress = apply_context_literals(ctx);
+    progress |= apply_literal_defaults_rest(ctx, relax_level);
+    progress
+}
+
+/// BIDI PROTOTYPE split: the context-driven first pass of
+/// `apply_literal_defaults`, callable on its own at statement boundaries.
+pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
 
     // First pass: collect context-driven types for literals that have deferred
@@ -5460,6 +5488,16 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
             progress = true;
         }
     }
+    progress
+}
+
+pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
+    apply_literal_defaults_from(ctx, relax_level, 0)
+}
+
+/// BIDI PROTOTYPE: defaulting restricted to TyVars allocated at or after `start`.
+pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u8, start: usize) -> bool {
+    let mut progress = false;
 
     // Compute the set of literal TyVars that are "blocked" at this relax
     // level. Level 2 removes all blocking; levels 0–1 block arg-position
@@ -5521,10 +5559,10 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
     };
 
     // Second pass: apply defaults for remaining unconstrained literals
-    for idx in 0..ctx.types.len() {
+    for idx in start..ctx.types.len() {
         let tv = TyVar(idx as u32);
         let resolved = ctx.resolve(tv);
-        if resolved != tv {
+        if resolved != tv && (start == 0 || resolved.0 as usize >= start) {
             continue;
         }
         if blocked.contains(&resolved) {

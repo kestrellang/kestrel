@@ -31,6 +31,9 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
 
     // Set return type
     ctx.return_ty = return_ty;
+    // BIDI PROTOTYPE measurement: an omitted return type is a fresh var here.
+    ctx.probe_omitted_return = hir.tail_expr.is_some()
+        && matches!(ctx.slot(ctx.resolve(return_ty)), TySlot::Unresolved { literal: None });
 
     // Walk statements
     for &stmt_id in &hir.statements {
@@ -279,6 +282,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             span,
         } => {
             let recv_tv = gen_expr(ctx, hir, *receiver);
+            crate::bidi_probe::receiver(ctx, hir, *receiver, recv_tv, "method", span);
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
@@ -365,6 +369,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ..
         } => {
             let recv_tv = gen_expr(ctx, hir, *receiver);
+            let probe_kind = if *from_operator { "operator" } else { "protocol-sugar" };
+            crate::bidi_probe::receiver(ctx, hir, *receiver, recv_tv, probe_kind, span);
             let arg_tvs = gen_call_args(ctx, hir, args);
             let result_tv = ctx.fresh();
 
@@ -408,6 +414,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             base, name, span, ..
         } => {
             let base_tv = gen_expr(ctx, hir, *base);
+            crate::bidi_probe::receiver(ctx, hir, *base, base_tv, "field", span);
             let result_tv = ctx.fresh();
 
             // Field access through a type-param ref (T.staticProp) or a
@@ -820,7 +827,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         // Type-of(Sugar) == type-of(inner) (structurally transparent).
         HirExpr::Sugar { kind, inner, span } => {
             mark_sugar_primary(ctx, hir, *kind, *inner);
+            // BIDI PROTOTYPE: an interpolation's desugared statements are part
+            // of the literal, not inference regions of their own.
+            let interp = matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation);
+            ctx.probe_closure_depth += interp as u32;
             let result_tv = gen_expr(ctx, hir, *inner);
+            ctx.probe_closure_depth -= interp as u32;
 
             // Link the interpolation's result type to its accumulator so that
             // an expected type (from a let annotation or function parameter)
@@ -924,7 +936,19 @@ fn mark_sugar_primary(
 
 // ===== Statement generation =====
 
+/// BIDI PROTOTYPE wrapper: with `KESTREL_DEBUG=bidi-stmt`, every statement
+/// outside a closure body is an inference region — solved and its literals
+/// defaulted when it ends, so literal types never flow across statements.
 fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
+    let start = ctx.types.len();
+    gen_stmt_inner(ctx, hir, id);
+    if ctx.probe_closure_depth == 0 && kestrel_debug::is_enabled("bidi-stmt") {
+        crate::bidi_probe::statement_boundary(ctx, start);
+        crate::bidi_probe::report_open_let(ctx, hir, id);
+    }
+}
+
+fn gen_stmt_inner(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
     match &hir.stmts[id] {
         HirStmt::Let {
             local,
@@ -1580,7 +1604,9 @@ fn gen_closure(
     ctx.return_ty = closure_ret_tv;
 
     // Infer body
+    ctx.probe_closure_depth += 1;
     let body_tv = gen_block(ctx, hir, body);
+    ctx.probe_closure_depth -= 1;
 
     // Reconcile the body's fall-through value with the closure's return type,
     // mirroring `generate()` for a function body. `return` statements already
