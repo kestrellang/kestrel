@@ -1,8 +1,10 @@
 # kestrel-ast
 
-The AST arena, type syntax, pretty-printing — and anything that must be shared
-by crates on both sides of the AST-builder / HIR split, because this is the
-deepest crate `kestrel-ast-builder` and `kestrel-hir` can both reach.
+Type syntax (and its arena), operator enums, escape decoding, type
+pretty-printing — and anything that must be shared by crates on both sides of
+the AST-builder / HIR split, because this is the deepest crate
+`kestrel-ast-builder` and `kestrel-hir` can both reach. Function bodies have no
+AST: `kestrel-hir-lower` lowers them from the CST.
 
 ## `escape.rs` is THE escape table
 
@@ -17,7 +19,7 @@ It had three implementations, and they disagreed in ways that miscompiled (F26):
 - the char decoder (`kestrel-hir-lower::pat`) — read `\u{…}` hex with an
   unbounded loop, no close-brace requirement and no digit limit, so
   `'\u{00000041}'` compiled to `'A'` while `"\u{00000041}"` was rejected;
-- `unescape_char_simple` (`kestrel-ast-builder::lower`), used for the literal
+- `unescape_char_simple` (in the since-deleted `kestrel-ast-builder::lower`), used for the literal
   segments of any string containing `\(` — **no `\x` arm, no `\u` arm, no error
   path**, so `"\u{41} \(x)"` silently produced the text `u{41} `.
 

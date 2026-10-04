@@ -75,9 +75,14 @@ hold a `SyntaxNode` (`!Send`, pins the tree — audit F42).
 **Answers**: "Can this be written to?"
 
 ### `Valued`
-**Data**: `SyntaxNodePtr` to the body subtree (resolve with `syntax::valued_node`)
-**On**: Function (body), Initializer (body), Deinit (body), Field (default value or getter body)
-**Answers**: "Does this have executable code?"
+**Data**: `SyntaxNodePtr` to the body subtree (resolve with `syntax::valued_node`): a
+`CodeBlock`, a function's `= expr` (`FunctionBody`), a parameter default's `= expr`
+(`DefaultValue`), or a field initializer `Expression`
+**On**: Function (body), Initializer (body), Deinit (body), Field (default value or getter
+body), Setter / RefAccessor (body), Subscript (getter body), ParamDefault (default value)
+**Answers**: "Does this have executable code?" — the one "has a body" marker; every body
+`LowerBody` can lower carries it and nothing else does. Bodies are lowered on demand
+from this pointer (`kestrel-hir-lower`); there is no stored body AST.
 
 ### `Static`
 **Marker** (no data)

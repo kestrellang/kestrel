@@ -302,7 +302,7 @@ fn lower_return_statement() {
 // Note: match/if/loop with nested braces require multi-line source
 // which the parser doesn't support in single-line format.
 // These control flow structures are tested in the unit tests
-// (lib.rs) using manually constructed AstBody instances.
+// (lib.rs), which lower real source.
 
 // ===== Tests: Assignment =====
 
@@ -452,7 +452,7 @@ fn lower_multiple_statements() {
 // Loop/break lowering is tested in unit tests.
 
 // Scoped locals test: requires nested braces (if { let x... }),
-// tested in unit tests with manually constructed AstBody.
+// tested in the unit tests (lib.rs).
 
 // ===== Tests: condition-chain fail continuation (fragility audit F31) =====
 

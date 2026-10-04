@@ -120,11 +120,12 @@ unspellable (`<` and `>` are not identifier characters) so it cannot collide.
 
 `BinaryOp::symbol()`, `UnaryOp::symbol()`, and friends (in `kestrel-ast`) are the
 only place an operator's source text is written. `operator_spellings_round_trip_through_the_lexer`
-re-lexes each spelling and requires it to produce exactly the token the parser
+(in `kestrel-hir-lower/src/syntax.rs`, next to the token → operator mapping) re-lexes each spelling and requires it to produce exactly the token the parser
 maps back to that operator — so a spelling that is not real Kestrel syntax fails
 the build. A second table in `kestrel-hir-lower` had written `&&`, `||` and `...`
 for `and`, `or` and `..=`.
 
-Relatedly: `token_to_binary_op` and friends return `Option`, and lowering now
-treats `None` as `AstExpr::Error`. Do not reintroduce an `unwrap_or(BinaryOp::Add)`
+Relatedly: the token → operator mappings (`binary_op`, `unary_op`, … in
+`kestrel-hir-lower/src/syntax.rs`) return `Option`, and body lowering treats
+`None` as `HirExpr::Error`. Do not reintroduce an `unwrap_or(BinaryOp::Add)`
 — a fallback there compiles a different program than the one written.

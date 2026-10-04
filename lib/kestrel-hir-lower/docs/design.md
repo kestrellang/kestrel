@@ -3,20 +3,22 @@
 ## Pipeline Position
 
 ```
-CST → AST Builder (mutation) → ECS World
-                                   ↓
-                             Name Resolution (queries)
-                                   ↓
-                             HIR Lowering (this crate) ← LowerBody query
-                                   ↓
-                             Type Inference (InferBody query)
+CST ──→ Declaration builder (mutation) → ECS World
+ │                                          ↓
+ │                                    Name Resolution (queries)
+ │                                          ↓
+ └── body syntax (`Valued` ptr) ──→ HIR Lowering (this crate) ← LowerBody query
+                                            ↓
+                                    Type Inference (InferBody query)
 ```
 
-HIR lowering converts `AstBody` (arena-based, unresolved AST) into `HirBody`
-(partially-resolved HIR). It sits between name resolution and type inference,
-consuming both:
+HIR lowering converts a body's **syntax** — read through the typed views, with
+no intermediate AST — into `HirBody` (partially-resolved HIR), plus a
+`BodySourceMap`. It sits between name resolution and type inference, consuming
+both:
 
-- **From AST builder**: `Body(AstBody)` and `Callable` components on entities
+- **From the declaration builder**: `Valued` (a pointer to the body syntax,
+  resolved against the file's `FileSyntax`) and `Callable` components on entities
 - **From name resolution**: `ResolveValuePath`, `ResolveTypePath`, `ResolveBuiltin` queries (called lazily during lowering)
 - **Produces**: `HirBody` consumed by `kestrel-type-infer`'s `InferBody` query
 
@@ -32,17 +34,19 @@ Three kinds of work in a single pass:
    ever sees it:
    - Binary/unary/compound-assign operators → `ProtocolCall` on protocol entities
    - `for x in collection { ... }` → `loop` + `iter()` + `next()` + `match`
-   - `while cond { ... }` / `while let` → `loop` + `if !cond { break }`
-   - `try expr` → `match` on `Ok`/`Err`
+   - `while cond { ... }` → `loop` + `if cond {} else { break }`; `while let` →
+     `loop { match v { p => body, _ => break } }`
+   - `try expr` → `match expr.tryExtract() { .Continue(v) => v, .Break(e) => return .fromResidual(e) }`
    - `throw value` → `return .Err(value)`
-   - `value!` (unwrap) → `match` on `Some`/`None`
-   - `"hello \(name)"` → `"hello " + name.description() + ""`
-   - `guard let` → `if cond { } else { diverge }`
-   - `if let pattern = expr` → `match expr { pattern => true, _ => false }`
+   - `value!` (unwrap) → `ForceUnwrap.forceUnwrap()` protocol call
+   - `"hello \(name)"` → a `DefaultStringInterpolation` builder (`appendLiteral` /
+     `appendInterpolation` / `build`)
+   - `guard let` → CPS: the rest of the block is the match's success arm
+   - `if let pattern = expr` → nested `match`es threading bindings into the then-block
 
 3. **Local variable allocation** — params, `let`/`var` bindings, pattern
    bindings, and compiler-generated temporaries (`$iter`, `$let_tmp`,
-   `$try_ok`, etc.) all get slots in the `HirBody.locals` arena.
+   `$try_value`, etc.) all get slots in the `HirBody.locals` arena.
 
 ## What This Crate Does NOT Do
 
@@ -51,20 +55,21 @@ Three kinds of work in a single pass:
 - **Field resolution**: `x.bar` becomes `HirExpr::Field { base, name: "bar" }`.
   Same — the field entity is resolved later.
 - **Overload resolution**: when `ResolveValuePath` returns multiple candidates,
-  this crate picks the first and relies on type inference. There is no
-  overload-set representation in HIR.
+  this crate emits `HirExpr::OverloadSet` and type inference picks.
 - **Type checking**: types are lowered (`AstType → HirTy`) but never checked
   against each other.
 
 ## Architecture
 
 ```
-lib.rs          — LowerBody query entry point
+lib.rs          — LowerBody / LowerBodyWithSourceMap, body-node dispatch, parameters
+syntax.rs       — reading the CST (blocks, conditions, paths, operators, implicit `it`)
+source_map.rs   — BodySourceMap
 ctx.rs          — LowerCtx: arenas, scope stack, local allocation
 expr.rs         — Expression lowering, path resolution, call shape detection
-stmt.rs         — Statement lowering (let, expr, guard-let, deinit)
+stmt.rs         — Statement lowering (let, expr, guard, deinit)
 pat.rs          — Pattern lowering, literal parsing utilities
-desugar.rs      — Operator/loop/try/throw/unwrap/interpolation desugaring
+desugar.rs      — Operator/loop/try/throw/interpolation desugaring
 ty.rs           — AstType → HirTy, LowerTypeAnnotation/LowerCallableTypes queries
 ```
 
@@ -72,7 +77,8 @@ ty.rs           — AstType → HirTy, LowerTypeAnnotation/LowerCallableTypes qu
 
 | Query | Input | Output | Used by |
 |---|---|---|---|
-| `LowerBody` | `entity, root` | `Option<HirBody>` | `InferBody` (type inference) |
+| `LowerBodyWithSourceMap` | `entity, root` | `Option<Arc<LoweredBody>>` | `LowerBody`; the LSP (cursor ↔ HIR) |
+| `LowerBody` | `entity, root` | `Option<Arc<HirBody>>` | `InferBody` (type inference), analyzers, MIR |
 | `LowerTypeAnnotation` | `entity, root` | `Option<HirTy>` | `InferBody` (return type) |
 | `LowerCallableTypes` | `entity, root` | `Option<Vec<Option<HirTy>>>` | `InferBody` (param types) |
 
@@ -86,7 +92,8 @@ All mutable state for one body lives in `LowerCtx`:
 - **Arenas**: `Arena<HirExpr>`, `Arena<HirPat>`, `Arena<HirStmt>`, `Arena<Local>`
 - **Scope stack**: `Vec<HashMap<String, LocalId>>` — lexical scoping via push/pop
 - **Params**: `Vec<LocalId>` — parameter locals in declaration order
-- **References**: `&QueryContext`, `root`, `owner` entity
+- **References**: `&QueryContext`, `root`, `owner` entity, `file_id`
+- **Source map**: the `BodySourceMap` being recorded
 
 ## Design Decisions
 
@@ -94,21 +101,25 @@ All mutable state for one body lives in `LowerCtx`:
 
 The parser applies precedence and associativity (`kestrel-parser`
 `grammar/exprs.rs::binary_binding_power` is the operator table), so the CST,
-the AST and the spans already have the final shape. `lower_binary` lowers each
-`AstExpr::Binary` as written and desugars it to a `ProtocolCall` via
+and the spans already have the final shape. Lowering takes each `ExprBinary` as
+written and desugars it to a `ProtocolCall` via
 `desugar_binary_hir`, with the node's own span. (It used to flatten a
 left-folded chain and re-associate it here, which gave mixed-precedence
 operators the wrong spans — audit H6.)
 
 ### Call shape detection: method calls vs direct calls
 
-The parser can produce `local.method(args)` as either:
-- `MemberAccess { base, member } + Call` — when the base is a complex expression
-- `Path { segments: [local, method] } + Call` — when the base is a simple name
+The parser produces `local.method(args)` as an `ExprCall` whose callee is an
+`ExprPath`, either:
+- a member access on a computed base (`f().method(args)`), when the base is an
+  expression — `lower_member_call`;
+- a pure path (`local.method`), when every segment is an identifier —
+  `lower_path_call`.
 
-`lower_call` in `expr.rs` detects the second case by checking whether the
-first path segment is a known local variable. If so, it rewrites to
-`HirExpr::MethodCall`. Otherwise it falls through to a direct `HirExpr::Call`.
+For the second, `lower_path_call` checks whether the first path segment is a
+known local variable. If so, it rewrites to `HirExpr::MethodCall`. Otherwise
+it tries a static method on a type, a type-level call, a value prefix, and
+falls through to a direct `HirExpr::Call`.
 
 This heuristic is correct because:
 - Locals shadow globals in Kestrel
@@ -144,36 +155,57 @@ in type inference.
 Abstract associated types (no `TypeAnnotation`) are left as
 `HirTy::Named { entity: type_alias_entity }` for type inference to handle.
 
+### Lowering reads the CST directly
+
+There is no body AST. `LowerBodyWithSourceMap` resolves the entity's `Valued`
+pointer and walks the typed views; the decisions that take more than one
+accessor live in `syntax.rs` so the lowering code reads as "what does this mean":
+
+- **Blocks**: a `Statement` child is a statement; a trailing bare `Expression`,
+  or a final statement-like `ExpressionStatement` without `;`, is the value
+  (`block_syntax`). A closure's items sit directly in `ExprClosure`, where a
+  statement-like expression stands *without* a `Statement` wrapper; one that is
+  not last is demoted to a statement in source order (`closure_body_syntax`).
+- **Paths**: an `ExprPath` is either identifier segments (`PathBase::Segments`)
+  or a computed base plus member accesses (`PathBase::Expr`). Whether a segment
+  is a value or a member is decided by *scope* in `lower_path`, never by syntax.
+- **Implicit `it`**: a closure without a parameter header gets an `it` parameter
+  when its body refers to the **name** `it` (a value path whose first segment is
+  `it`), looking through nested closures that declare parameters and stopping
+  at nested header-less ones (`implicit_it_reference`). The implicit parameter
+  always wins over an outer `it`; E142 (an enclosing closure's `it`) / E143
+  (another outer binding) warn at the first reference.
+- **Missing syntax** lowers to explicit error/missing forms, never an empty
+  name: `ExprSrc::Error(span)` / `PatSrc::Error(span)` → `HirExpr::Error` /
+  `HirPat::Error`; an absent member or case name → `HirName::Missing`; a binder
+  without a name → `HirPat::Error`; a nameless `deinit` reports nothing more.
+- **Allocation order** of HIR ids follows source order exactly as before the
+  port (callers rely on it: diagnostics, `while_conditions`, analyzers).
+
+### The source map
+
+`BodySourceMap` is recorded by the same walk, so ids and syntax can never
+disagree:
+
+- every node lowered through `lower_expr` / `lower_pat` / `lower_stmt` ↔ its id
+  (a desugaring's node maps to its outermost id; a grouping `(e)` maps to `e`'s);
+- every local the source spells → its binding node + identifier
+  (`LocalSource`), and an identifier position → that local. Function and
+  initializer parameters are matched to their signature's `BindingPattern`s.
+  Not recorded: `self`, an implicit `it`, desugaring temporaries, destructured
+  parameters' synthetic `_param_N`, struct-pattern shorthand `{ x }` (the token
+  is also the field name) and subscript index parameters (bound again by every
+  accessor body) — tools must fail closed on those;
+- every path segment / member name that lowers to an expression of its own
+  (`Local`, a type parameter's `Def`, a `Field`, a callee prefix's receiver or
+  static method) → that expression (`name_refs`), since segments are tokens,
+  not nodes.
+
+`Local::span` keeps its meaning (the whole declaration — type inference anchors
+"could not infer type" there, see `docs/fragility/F2/decisions.md`); the name
+lives in the source map.
+
 ## Known Limitations
-
-### Complex `let` destructuring is incomplete
-
-For `let (a, b) = expr`, `stmt.rs` allocates a temp `$let_tmp`, lowers the
-pattern (which defines `a` and `b` in scope via `define_local`), and creates a
-match expression for destructuring — but the match statement is allocated and
-then discarded (`let _match_stmt = ...`). Only the `let` binding for
-`$let_tmp` is returned. The bindings exist in scope but are never assigned
-from the temp.
-
-### `@` binding patterns drop the outer binding
-
-`pat.rs` handles `name @ subpattern` by calling `define_local` for `name`
-(making it available in scope) but then returns only the lowered subpattern.
-No HIR node captures the `name` binding, so it's defined but never written to.
-
-### For-loop iterator is inside the loop body
-
-`desugar.rs` places `let $iter = iterable.iter()` **inside** the `Loop` node
-(as the first statement of the loop body). The comment says "so we return a
-single expression." This means `$iter` is re-created on every iteration. The
-correct desugaring would wrap the loop in a block: `{ let $iter = ...; loop { ... } }`.
-
-### String interpolation uses `MethodCall`, not `ProtocolCall`
-
-`desugar_interpolated_string` calls `.description()` via a plain
-`HirExpr::MethodCall`, not a `ProtocolCall` through a `Describable`/`Formattable`
-protocol. This means no conformance constraint is generated — the method is
-resolved by type inference via ordinary member resolution.
 
 ### Overloaded functions are deferred to type inference
 

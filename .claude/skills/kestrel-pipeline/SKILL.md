@@ -1,29 +1,30 @@
 ---
 name: kestrel-pipeline
-description: Pipeline-routing reference for the lib Kestrel compiler. Use when someone asks "where is X handled?", "where does <AstExpr/HirExpr/HirStmt/HirPat variant> get built?", "how does Type.method() lower?", "what constraint does try emit?", "trace this through the compiler", "what's the MIR shape of X?", or any question that would otherwise require opening 4-5 files across kestrel-ast-builder / kestrel-hir-lower / kestrel-type-infer / kestrel-mir-lower to answer.
+description: Pipeline-routing reference for the lib Kestrel compiler. Use when someone asks "where is X handled?", "where does <HirExpr/HirStmt/HirPat variant> get built?", "how does <syntax node> lower?", "how does Type.method() lower?", "what constraint does try emit?", "trace this through the compiler", "what's the MIR shape of X?", or any question that would otherwise require opening 4-5 files across kestrel-hir-lower / kestrel-type-infer / kestrel-mir-lower to answer.
 ---
 
 # kestrel-pipeline
 
 One-lookup map from a source construct to its file:line in every pipeline stage:
-CST → AST → HIR → type-infer constraints → solver → MIR. Entries are **enum-complete**
-across `AstExpr` / `AstStmt` / `AstPat` and `HirExpr` / `HirStmt` / `HirPat`.
+CST → HIR → type-infer constraints → solver → MIR. Bodies have no AST: HIR lowering
+reads the CST's typed views directly. Entries are **enum-complete** across the CST's
+`Expr` / `StatementKind` / `Pat` kinds and `HirExpr` / `HirStmt` / `HirPat`.
 
 ## Which file to open
 
-- `expressions.md` — every `AstExpr` (30) and `HirExpr` (23) variant. Binary ops,
+- `expressions.md` — every `Expr` syntax kind and `HirExpr` (23) variant. Binary ops,
   calls, member access, control flow, literals.
-- `statements.md` — every `AstStmt` (4) and `HirStmt` (3) variant. Let bindings,
+- `statements.md` — every `StatementKind` (4) and `HirStmt` (3) variant. Let bindings,
   expression statements, guard-let, deinit.
-- `patterns.md` — every `AstPat` (12) and `HirPat` (12) variant. Plus the
+- `patterns.md` — every `Pat` syntax kind and `HirPat` (12) variant. Plus the
   `HirLiteral` sub-reference used by pattern literals.
 - `desugarings.md` — HIR-only constructs (`ProtocolCall`, `OverloadSet`, each
   non-`UserMatch` `MatchSource`, synthetic `If` / `Block` / `Tuple` / `Local` / etc.).
   Open this when the question is "how did we get HIR-expr X?" and the construct has
-  no direct AST counterpart.
+  no direct syntax counterpart.
 
 If you're unsure which file covers a construct, start with its enum name:
-`AstExpr::*` / `HirExpr::*` → `expressions.md`, `*::Stmt` → `statements.md`,
+`Expr*` / `HirExpr::*` → `expressions.md`, statements → `statements.md`,
 `*::Pat` → `patterns.md`, or `MatchSource::*` / `ProtocolCall` / `OverloadSet` →
 `desugarings.md`.
 
@@ -32,7 +33,8 @@ If you're unsure which file covers a construct, start with its enum name:
 **Pipeline maps go stale.** Before telling the user to edit at a cited `file:line`,
 open the file and confirm the claim — function renames, match-arm reorders, and
 inlined helpers move line numbers frequently. The enum variants themselves are
-stable (checked via `ast_body.rs:42` / `body.rs:96`), but dispatch sites drift.
+stable (`kestrel.ungram` in `kestrel-syntax-tree` / `kestrel-hir/src/body.rs`), but
+dispatch sites drift.
 
 If a cited line no longer matches: grep for the variant name (e.g.,
 `HirExpr::Match`) or the function name (e.g., `lower_match`, `desugar_try`) to
@@ -42,9 +44,10 @@ locate the current site, then update the skill file.
 
 If a variant entry is missing or a new variant is added:
 
-1. Read the enum definition (`ast_body.rs:42` / `body.rs:96`) to confirm the scope.
-2. Trace the variant through AST-builder (`lower.rs`), HIR-lower
-   (`expr.rs` / `stmt.rs` / `pat.rs` / `desugar.rs`), inference
+1. Read the grammar rule (`lib/kestrel-syntax-tree/kestrel.ungram`) / the HIR enum
+   (`lib/kestrel-hir/src/body.rs`) to confirm the scope.
+2. Trace the variant through HIR-lower (`syntax.rs` for multi-child syntax decisions,
+   `expr.rs` / `stmt.rs` / `pat.rs` / `desugar.rs`), inference
    (`generate.rs` / `solver.rs`), and MIR-lower (`body_lower.rs`).
 3. Add the entry with the same shape as existing ones — cite `file:line`, include a
    match-arm excerpt for branching variants, note gotchas. TODO markers are allowed
@@ -73,12 +76,13 @@ Plus many more codegen / runtime memory files relevant to the MIR side — see
 Top of each pipeline stage — useful when you need the full match statement, not a
 single variant:
 
-- AST-builder expr dispatch: `lib/kestrel-ast-builder/src/lower.rs:307`
-- AST-builder stmt dispatch: `lib/kestrel-ast-builder/src/lower.rs:160`
-- AST-builder pat dispatch: `lib/kestrel-ast-builder/src/lower.rs:1321`
-- HIR lowering expr dispatch: `lib/kestrel-hir-lower/src/expr.rs:19`
-- HIR lowering stmt dispatch: `lib/kestrel-hir-lower/src/stmt.rs:15`
-- HIR lowering pat dispatch: `lib/kestrel-hir-lower/src/pat.rs:34`
+- Body entry (body syntax → `BlockSyntax`, params): `lib/kestrel-hir-lower/src/lib.rs`
+  (`LowerBodyWithSourceMap`, `body_syntax`, `define_params`)
+- Syntax helpers (blocks, conditions, paths, operators, implicit `it`):
+  `lib/kestrel-hir-lower/src/syntax.rs`
+- HIR lowering expr dispatch: `lib/kestrel-hir-lower/src/expr.rs` (`lower_expr_node`)
+- HIR lowering stmt dispatch: `lib/kestrel-hir-lower/src/stmt.rs` (`lower_stmt_node`)
+- HIR lowering pat dispatch: `lib/kestrel-hir-lower/src/pat.rs` (`lower_pat_node`)
 - Inference gen_expr: `lib/kestrel-type-infer/src/generate.rs:60`
 - Inference gen_stmt: `lib/kestrel-type-infer/src/generate.rs:551`
 - Inference gen_pat: `lib/kestrel-type-infer/src/generate.rs:607`

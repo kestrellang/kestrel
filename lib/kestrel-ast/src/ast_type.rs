@@ -1,7 +1,8 @@
 //! AST-level type representation.
 //!
 //! Pure data types extracted from the CST during build. Stored in
-//! `TypeAnnotation` components and embedded in `AstBody` nodes.
+//! `TypeAnnotation` components; `kestrel-hir-lower` also builds them from
+//! type syntax inside bodies before resolving them to `HirTy`.
 //! All types carry a `Span` for error reporting.
 
 use kestrel_span::Span;

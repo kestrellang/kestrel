@@ -7,7 +7,7 @@ Source Text → Tokens → CST (rowan) → AST Builder → ECS World → Queries
               ↑lex      ↑parse       ↑build_declarations    ↑name resolution, type checking
 ```
 
-The AST builder sits between parsing and semantic analysis. It walks the rowan CST and creates **declaration entities** with **components** in the ECS world. Expressions are not processed — they remain as CST subtrees stored in `Valued` components for later phases.
+The AST builder sits between parsing and semantic analysis. It walks the rowan CST and creates **declaration entities** with **components** in the ECS world. Bodies are not processed: a body-carrying declaration keeps a `Valued` pointer to its body's syntax, and `kestrel-hir-lower`'s `LowerBody` lowers it straight from the CST on demand.
 
 ## Mutation Phase
 
@@ -34,8 +34,9 @@ Declarations are read through the typed views generated from
 builder takes its declaration's view (`ast::FunctionDeclaration`, …) and the
 shared helpers take the `Has*` traits (`HasVisibility`, `HasAttributes`,
 `HasGenerics`, `HasConformances`), so no builder matches child kinds by hand.
-Types lower through `ast_type::lower_type(&ast::Ty)`. Expression bodies
-(`lower.rs`) still walk the untyped CST.
+Types lower through `ast_type::lower_type(&ast::Ty)`. Function bodies are
+not read here at all (beyond `DefaultReferencesParam`'s check that a parameter
+default is exactly a sibling parameter's name).
 
 ## Module Hierarchy
 
@@ -59,7 +60,7 @@ Components describe **capabilities** — what an entity CAN DO. They are orthogo
 - `Typed` — this entity IS a type (can appear in type positions)
 - `Callable` — has a parameter list, can be invoked
 - `Gettable` / `Settable` — can be read/written as a value
-- `Valued` — has a body or initializer expression
+- `Valued` — has a body or initializer expression to lower (the one "has a body" marker; a pointer to its syntax)
 - `Static` — accessed through a type, not an instance
 
 This is intentionally flat rather than hierarchical. A subscript is `Callable + Gettable + Settable + Subscript`, not a special "subscript type". Downstream queries can pattern-match on capability combinations.

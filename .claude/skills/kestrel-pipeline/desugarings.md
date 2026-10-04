@@ -1,6 +1,6 @@
 # Desugarings — HIR-only constructs
 
-HIR variants and shapes that don't have a 1:1 AST counterpart: constructs synthesized
+HIR variants and shapes that don't have a 1:1 syntax counterpart: constructs synthesized
 during HIR lowering to reduce the surface language to a smaller core. "How did we get
 this `HirExpr::X`?" is usually answered here.
 
@@ -10,7 +10,7 @@ All citations refer to `lib/kestrel-hir-lower/src/` unless otherwise noted.
 
 ## HirExpr::ProtocolCall
 
-ProtocolCall is **desugar-only** — there is no `AstExpr::ProtocolCall`. Every
+ProtocolCall is **desugar-only** — no syntax spells it directly. Every
 ProtocolCall in the HIR was synthesized from one of the sites below.
 
 Signature (`body.rs:172-179`):
@@ -35,7 +35,7 @@ Emits witness-based method dispatch.
 
 ### Source: binary operators
 
-- Trigger: `AstExpr::Binary` (precedence already applied by the parser).
+- Trigger: `ExprBinary` (precedence already applied by the parser).
 - Site: `desugar.rs` (`desugar_binary_hir`) — invoked by `lower_binary` in
   `expr.rs` for each binary node.
 - Shape:
@@ -48,12 +48,12 @@ Emits witness-based method dispatch.
   }
   ```
 - Protocol + method table: see `kestrel-hir::body::lookup_binary_op` and
-  `desugar_binary_hir` at `desugar.rs:57-70`.
+  `desugar_binary_hir` at `desugar.rs`.
 
 ### Source: short-circuit operators (`&&`, `||`, `??`)
 
-- Trigger: `AstExpr::Binary` with a short-circuit op.
-- Site: `desugar.rs:29-54` (inside `desugar_binary_hir`). RHS is wrapped in a
+- Trigger: `ExprBinary` with a short-circuit op.
+- Site: `desugar.rs` (inside `desugar_binary_hir`). RHS is wrapped in a
   parameterless `HirExpr::Closure` so the RHS protocol method can lazy-evaluate:
   ```
   ProtocolCall {
@@ -64,20 +64,20 @@ Emits witness-based method dispatch.
   }
   ```
 - Gotcha: the captures list on the synthesized closure is empty at HIR time;
-  `collect_captures` is only called for user-written closures (`expr.rs:1213`). MIR
+  `collect_captures` is only called for user-written closures (`expr.rs`). MIR
   closure lowering walks the body for effective captures.
 
 ### Source: `desugar_logical_and` (multi-condition if/while/guard)
 
 - Trigger: `if a, b, c { ... }` (comma-separated conditions combining into `a && b && c`).
-- Site: `expr.rs:1130-1135` calls `desugar_logical_and` (`desugar.rs:78`) pair-wise
+- Site: `expr.rs` calls `desugar_logical_and` (`desugar.rs`) pair-wise
   over the condition list.
 - Shape: same as short-circuit `&&` above.
 
 ### Source: unary operators
 
-- Trigger: `AstExpr::Unary` (except `UnaryOp::Pos` which is identity).
-- Site: `desugar.rs:116` (`desugar_unary_op`). Emits at `desugar.rs:133-140`:
+- Trigger: `ExprUnary` (except `UnaryOp::Pos` which is identity).
+- Site: `desugar.rs` (`desugar_unary_op`). Emits at `desugar.rs`:
   ```
   ProtocolCall {
       receiver: operand,
@@ -89,9 +89,9 @@ Emits witness-based method dispatch.
 
 ### Source: compound assignment
 
-- Trigger: `AstExpr::CompoundAssignment`.
+- Trigger: `ExprCompoundAssignment`.
 - Site: `desugar.rs` (`desugar_compound_assign`). Wraps the resulting
-  `ProtocolCall` (or `HirExpr::Error` if the AST place check rejected the LHS)
+  `ProtocolCall` (or `HirExpr::Error` if the syntactic place check rejected the LHS)
   in `HirExpr::Sugar { kind: CompoundAssign, inner, span }`:
   ```
   Sugar {
@@ -104,7 +104,7 @@ Emits witness-based method dispatch.
       },
   }
   ```
-- AST place check: `ast_is_place_expr(body, lhs)` runs before lowering and
+- Syntactic place check: `is_place_syntax(lhs)` runs before lowering and
   rejects literals/calls/blocks/etc. with "left-hand side of compound
   assignment is not assignable", returning `Sugar { CompoundAssign, inner: Error }`.
 - Gotcha: this is **not** `HirExpr::Assign(lhs, ProtocolCall(lhs, add, rhs))`. The
@@ -114,9 +114,9 @@ Emits witness-based method dispatch.
 
 ### Source: while-let negation
 
-- Trigger: `AstExpr::WhileLet` (the condition is negated to compute the break
+- Trigger: `ExprWhile (let)` (the condition is negated to compute the break
   condition).
-- Site: `desugar.rs:280-288`:
+- Site: `desugar.rs`:
   ```
   ProtocolCall {
       receiver: cond,
@@ -128,7 +128,7 @@ Emits witness-based method dispatch.
 
 ### Source: for-loop `iter()` / `next()`
 
-- Trigger: `AstExpr::For`.
+- Trigger: `ExprFor`.
 - Sites:
   - `desugar.rs` (`desugar_for_loop`) — `iterable.iter()` via `IterableProtocol`.
   - Same function — `$iter.next()` via `IteratorProtocol`.
@@ -142,7 +142,7 @@ Emits witness-based method dispatch.
 
 ### Source: try-expr `tryExtract()`
 
-- Trigger: `AstExpr::Try`.
+- Trigger: `ExprTry`.
 - Site: `desugar.rs` (`desugar_try`) — `operand.tryExtract()` via `TryableProtocol`.
   The whole desugaring (the `Match { source: TryOp, ... }`) is wrapped in
   `HirExpr::Sugar { kind: Try, inner: Match, span }`.
@@ -153,8 +153,8 @@ Emits witness-based method dispatch.
 
 ### Source: interpolated-string concatenation
 
-- Trigger: `AstExpr::InterpolatedString`.
-- Site: `desugar.rs:766-777`:
+- Trigger: `ExprInterpolatedString`.
+- Site: `desugar.rs`:
   ```
   ProtocolCall {
       receiver: result_so_far,
@@ -164,13 +164,13 @@ Emits witness-based method dispatch.
   }
   ```
 - Each `StringPart::Interpolation` becomes a `HirExpr::MethodCall { method: "description" }`
-  on the expression (`desugar.rs:740-746`), then the parts are chained with `add`.
+  on the expression (`desugar.rs`), then the parts are chained with `add`.
 
 ---
 
 ## HirExpr::OverloadSet
 
-HIR-only (no `AstExpr::OverloadSet`).
+HIR-only (no syntax of its own).
 
 Signature (`body.rs:129-133`):
 
@@ -184,10 +184,10 @@ OverloadSet {
 
 Sources:
 
-- `AstExpr::Path` resolving to `ValueResolution::Overloaded` — `expr.rs:344-350`.
+- `ExprPath` resolving to `ValueResolution::Overloaded` — `expr.rs`.
 - Multi-candidate static-method resolution in `lower_call`:
-  - base `MemberAccess` path — `expr.rs:508-513`.
-  - multi-segment `Path` — `expr.rs:578-584`.
+  - base `MemberAccess` path — `expr.rs`.
+  - multi-segment `Path` — `expr.rs`.
 
 Type-infer: `generate.rs:108-115` errors if standalone (AmbiguousMember). In a
 `HirExpr::Call` callee position, `generate.rs:120-132` dispatches via
@@ -217,22 +217,21 @@ pub enum MatchSource {
     LetDestructure,   // let <complex_pattern> = value;
     ParamDestructure, // fn f((a, b): (I, I)) { ... } or { ((a, b)) in ... }
     TryOp,            // try expr
-    UnwrapOp,         // expr!
 }
 ```
 
 ### MatchSource::UserMatch
 
-- Trigger: `AstExpr::Match`.
-- Site: `expr.rs:1226` (`lower_match`) → allocated at `expr.rs:1252`.
+- Trigger: `ExprMatch`.
+- Site: `expr.rs` (`lower_match`) → allocated at `expr.rs`.
 - Shape: direct 1:1 mapping of the source match.
 - Analyzers: full exhaustiveness + redundancy checks apply.
 
 ### MatchSource::IfLet
 
-- Trigger: `AstExpr::If` with `IfCondition::Let` — or any `if let pattern = value { ... }`.
-- Site: `expr.rs:1093-1125` (inside `lower_if_conditions`, called from `lower_if` at
-  `expr.rs:1048`).
+- Trigger: `ExprIf` with `IfCondition::Let` — or any `if let pattern = value { ... }`.
+- Site: `expr.rs` (inside `lower_if_conditions`, called from `lower_if` at
+  `expr.rs`).
 - Shape:
   ```
   Match {
@@ -250,27 +249,27 @@ pub enum MatchSource {
 
 ### MatchSource::WhileLet
 
-- Trigger: `AstExpr::WhileLet`.
-- Site: `expr.rs:1093-1125` with `source: WhileLet` (from
-  `desugar_while_let` at `desugar.rs:271`). The bool match produced here feeds
-  into the negation + break check in `desugar_while_let` (`desugar.rs:279-301`).
+- Trigger: `ExprWhile (let)`.
+- Site: `expr.rs` with `source: WhileLet` (from
+  `desugar_while_let` at `desugar.rs`). The bool match produced here feeds
+  into the negation + break check in `desugar_while_let` (`desugar.rs`).
 - Full shape: `loop { if !<match_bool> { break } <body stmts> }`. See
-  `desugar.rs:259` for the full flow.
+  `desugar.rs` for the full flow.
 - Diagnostics: E308.
 
 ### MatchSource::GuardLet
 
-- Trigger: `AstStmt::GuardLet`.
-- Site: `stmt.rs:155` calls `lower_if_conditions(..., MatchSource::GuardLet, ...)`.
+- Trigger: `GuardStatement`.
+- Site: `stmt.rs` calls `lower_if_conditions(..., MatchSource::GuardLet, ...)`.
 - Full shape: `if <cond> { } else { <else_body> }` wrapped in `HirStmt::Expr`.
-- Pushed into `ctx.guard_let_stmts` (`stmt.rs:180`) so the
+- Pushed into `ctx.guard_let_stmts` (`stmt.rs`) so the
   `guard_let_divergence` analyzer can verify the else block diverges.
 - Diagnostics: E309.
 
 ### MatchSource::ForLoop
 
-- Trigger: `AstExpr::For`.
-- Site: `desugar.rs:434-450` (inside `desugar_for_loop`).
+- Trigger: `ExprFor`.
+- Site: `desugar.rs` (inside `desugar_for_loop`).
 - Shape:
   ```
   Match {
@@ -283,13 +282,13 @@ pub enum MatchSource {
   }
   ```
 - Gotcha: `$iter` is a temp local defined by `desugar_for_loop` at
-  `desugar.rs:369-374` — the surrounding Block wraps the `let $iter = ...` stmt and
+  `desugar.rs` — the surrounding Block wraps the `let $iter = ...` stmt and
   the enclosing `HirExpr::Loop`.
 
 ### MatchSource::LetDestructure
 
-- Trigger: `AstStmt::Let` with any pattern other than `AstPat::Binding`.
-- Site: `stmt.rs:110-119` (inside `lower_let_stmt` at `stmt.rs:87-138`).
+- Trigger: `VariableDeclaration` with any pattern other than `BindingPattern`.
+- Site: `stmt.rs` (inside `lower_let_stmt` at `stmt.rs`).
 - Full shape:
   ```
   Block {
@@ -300,28 +299,28 @@ pub enum MatchSource {
       tail_expr: None,
   }
   ```
-  The wrapping `HirStmt::Expr` at `stmt.rs:133-136` returns one statement to the caller.
+  The wrapping `HirStmt::Expr` at `stmt.rs` returns one statement to the caller.
 - Gotcha: `var (a, b) = ...` propagates mutability into the sub-bindings via
-  `lower_pat_forcing_mut` at `stmt.rs:101`.
+  `lower_pat_forcing_mut` at `stmt.rs`.
 
 ### MatchSource::ParamDestructure
 
 - Trigger: a fn, method, or closure parameter whose pattern isn't
-  `AstPat::Binding` or `AstPat::Wildcard`.
+  `BindingPattern` or `WildcardPattern`.
 - Sites:
-  - Closures: `expr.rs:1179-1188` (inside `lower_closure`). The synthetic param
+  - Closures: `expr.rs` (inside `lower_closure`). The synthetic param
     name is `_cparam_N`; the match is prepended to the closure body as a `HirStmt::Expr`.
   - For function/method params: see `lib/kestrel-hir-lower/src/lib.rs` (not included
     here, but the pattern is the same — lowered via `lower_param_pattern` at
-    `pat.rs:410`). Also see `param_pattern` analyzer (E111) which emits a tuple-arity
+    `pat.rs`). Also see `param_pattern` analyzer (E111) which emits a tuple-arity
     error and is specifically gated to skip `ParamDestructure`.
 - Gotcha: `generate.rs:605-612` explicitly skips the scrutinee/pattern equate for
   `ParamDestructure` to avoid cascading the generic type-mismatch on top of E111.
 
 ### MatchSource::TryOp
 
-- Trigger: `AstExpr::Try`.
-- Site: `desugar.rs:590-606` (inside `desugar_try`).
+- Trigger: `ExprTry`.
+- Site: `desugar.rs` (inside `desugar_try`).
 - Shape:
   ```
   Match {
@@ -333,51 +332,39 @@ pub enum MatchSource {
       source: TryOp,
   }
   ```
-  Fallback (no Tryable protocol): arms are `.Ok($v) => $v` and `.Err($e) => return .Err($e)`.
+  Without the Tryable protocol: E128 and `Sugar { kind: Try, inner: Error }`.
 
-### MatchSource::UnwrapOp
+### `x!` (force unwrap) — not a match
 
-- Trigger: `AstExpr::Postfix(Unwrap)` (the `x!` syntax).
-- Site: `desugar.rs:672-688` (inside `desugar_unwrap`).
-- Shape:
-  ```
-  Match {
-      scrutinee: operand,
-      arms: [
-          { pattern: .Some($unwrap), body: $unwrap },
-          { pattern: .None, body: Error { span } },   // trap placeholder
-      ],
-      source: UnwrapOp,
-  }
-  ```
-- Gotcha: the `.None` body is `HirExpr::Error` as a trap placeholder; MIR currently
-  emits `Immediate::error()`. A proper panic intrinsic isn't wired yet. See MEMORY
-  `funcref_to_functhick_coercion.md` for related test-process fallout.
+`x!` is not desugared to a `Match` (there is no `MatchSource::UnwrapOp`): it lowers
+to `ForceUnwrap.forceUnwrap()` as a `ProtocolCall` through `POSTFIX_OP_PROTOCOLS`
+(`desugar_postfix_op`); the `.None` trap is the stdlib's `fatalError`. See
+`expressions.md` → `ExprPostfix` and `lib/kestrel-hir-lower/AGENTS.md`.
 
 ---
 
 ## HirExpr::If (synthetic)
 
-User-written `AstExpr::If` produces `HirExpr::If` directly, but there are three
+User-written `ExprIf` produces `HirExpr::If` directly, but there are three
 synthesis sites worth knowing about.
 
 ### Synthetic for `desugar_while`
 
-- Site: `desugar.rs:221-232`.
+- Site: `desugar.rs`.
 - Shape: `if <cond> { } else { break }`. The condition is the unmodified
   `lower_expr(condition)`; the break exits the enclosing loop.
-- Rationale comment at `desugar.rs:199-203`: avoids requiring the condition type to
+- Rationale comment at `desugar.rs`: avoids requiring the condition type to
   conform to `Not`.
 
 ### Synthetic for `desugar_while_let`
 
-- Site: `desugar.rs:293-301`.
+- Site: `desugar.rs`.
 - Shape: `if <!cond> { break } else { }` — uses an explicit `ProtocolCall` on
   `LogicalNotOperatorProtocol` for the negation.
 
 ### Synthetic for `lower_guard_let`
 
-- Site: `stmt.rs:164-172`.
+- Site: `stmt.rs`.
 - Shape: `if <cond> { } else { <else_body> }`. The condition is a match-bool produced
   by `lower_if_conditions(..., GuardLet, ...)`. The else body is the user-written
   `else` block.
@@ -388,15 +375,15 @@ synthesis sites worth knowing about.
 
 ## HirExpr::Block (synthetic)
 
-User-written `AstExpr::Block` maps 1:1. Synthesis sites:
+User-written `match-arm block` maps 1:1. Synthesis sites:
 
-- Complex let-destructure wrapper: `stmt.rs:126-131`. Wraps
+- Complex let-destructure wrapper: `stmt.rs`. Wraps
   `HirStmt::Let($let_tmp) + HirStmt::Expr(Match)` into a single `HirExpr::Block` so
   the caller receives one statement expression.
-- `desugar_for_loop` body wrapper: `desugar.rs:417-420`. Wraps `lower_for_body` in a
+- `desugar_for_loop` body wrapper: `desugar.rs`. Wraps `lower_for_body` in a
   `HirExpr::Block` so all statements are reachable (match arms are exprs, and the body
   of `.Some(pat) => { body }` needs to be an expr).
-- `desugar_for_loop` outer wrapper: `desugar.rs:468-474`. Wraps `let $iter = ...` +
+- `desugar_for_loop` outer wrapper: `desugar.rs`. Wraps `let $iter = ...` +
   the enclosing `HirExpr::Loop` into one block expression.
 
 ---
@@ -405,11 +392,11 @@ User-written `AstExpr::Block` maps 1:1. Synthesis sites:
 
 Synthesized for:
 
-- `AstLiteral::Unit` — `expr.rs:209-214` returns `HirExpr::Tuple { elements: vec![] }`
+- `ExprUnit` — `expr.rs` returns `HirExpr::Tuple { elements: vec![] }`
   directly from `lower_literal`. This is why unit values are tuples, not literals, in
   HIR.
-- Match-arm unit body for let-destructure and param-destructure — `stmt.rs:106-109`
-  and `expr.rs:1175-1178`.
+- Match-arm unit body for let-destructure and param-destructure — `stmt.rs`
+  and `expr.rs`.
 
 ---
 
@@ -419,12 +406,12 @@ Temp locals are $-prefixed so they can't collide with user identifiers. Full lis
 
 | Local name    | Where                                                              |
 | ------------- | ------------------------------------------------------------------ |
-| `$let_tmp`    | complex let destructure (`stmt.rs:90`)                             |
-| `$iter`       | for-loop iterator (`desugar.rs:369`)                               |
-| `$try_value`  | try-expr `.Continue` payload (`desugar.rs:531`)                    |
-| `$try_early`  | try-expr `.Break` payload (`desugar.rs:548`)                       |
-| `$unwrap`     | unwrap `.Some` payload (`desugar.rs:649`)                          |
-| `_cparam_N`   | complex closure param destructure (`expr.rs:1163`)                 |
+| `$let_tmp`    | complex let destructure (`stmt.rs`)                             |
+| `$iter`       | for-loop iterator (`desugar.rs`)                               |
+| `$try_value`  | try-expr `.Continue` payload (`desugar.rs`)                    |
+| `$try_early`  | try-expr `.Break` payload (`desugar.rs`)                       |
+| `$unwrap`     | unwrap `.Some` payload (`desugar.rs`)                          |
+| `_cparam_N`   | complex closure param destructure (`expr.rs`)                 |
 
 All of these are allocated via `define_local(name, is_mut, span)` which assigns a
 fresh `LocalId` and records the local in `HirBody::locals`.
@@ -433,13 +420,13 @@ fresh `LocalId` and records the local in `HirBody::locals`.
 
 ## HirExpr::ImplicitMember (synthetic) — `.Err` / `.fromResidual`
 
-User-written `.Case` / `.Case(args)` maps 1:1 from `AstExpr::ImplicitMember`. Synthesis
+User-written `.Case` / `.Case(args)` maps 1:1 from `ExprImplicitMemberAccess`. Synthesis
 sites:
 
-- `desugar_throw`: `.Err(value)` at `desugar.rs:618-625`. The outer
+- `desugar_throw`: `.Err(value)` at `desugar.rs`. The outer
   `HirExpr::Return` wraps it.
-- `desugar_try`: `.fromResidual(residual: $try_early)` at `desugar.rs:566-573` when
-  Tryable is available; `.Err($try_early)` fallback at `desugar.rs:576-583`.
+- `desugar_try`: `.fromResidual(residual: $try_early)` at `desugar.rs` when
+  Tryable is available; `.Err($try_early)` fallback at `desugar.rs`.
 
 These are resolved by `solve_implicit` against the function's return type.
 
@@ -448,34 +435,34 @@ These are resolved by `solve_implicit` against the function's return type.
 ## HirPat::ImplicitVariant (synthetic)
 
 User-written `.Case` / `.Case(binding)` in pattern position maps from
-`AstPat::Enum` that did NOT resolve to a concrete EnumCase (`pat.rs:279-293`).
+`EnumPattern` that did NOT resolve to a concrete EnumCase (`pat.rs`).
 Synthesized:
 
-- for-loop match: `.Some(pattern)` (`desugar.rs:401-408`), `.None` (`desugar.rs:423-427`).
-- try-expr match: `.Continue($v)` (`desugar.rs:536-542`), `.Break($e)`
-  (`desugar.rs:553-559`). Fallback: `.Ok($v)` / `.Err($e)`.
-- unwrap match: `.Some($v)` (`desugar.rs:654-660`), `.None` (`desugar.rs:665-668`).
+- for-loop match: `.Some(pattern)` (`desugar.rs`), `.None` (`desugar.rs`).
+- try-expr match: `.Continue($v)` (`desugar.rs`), `.Break($e)`
+  (`desugar.rs`). Fallback: `.Ok($v)` / `.Err($e)`.
+- unwrap match: `.Some($v)` (`desugar.rs`), `.None` (`desugar.rs`).
 
 ---
 
 ## HirPat::Binding (synthetic shorthand expansion)
 
-`AstPat::Struct { fields: [{ field_name: "x", pattern: None }], ... }` (shorthand
+`StructPattern { fields: [{ field_name: "x", pattern: None }], ... }` (shorthand
 `{ x }`) expands to `HirStructPatField { field_name: "x", pattern: Some(HirPat::Binding(x_local)) }`
-at `pat.rs:313-321`. The `HirPat::Binding` here was never written by the user.
+at `pat.rs`. The `HirPat::Binding` here was never written by the user.
 
 ---
 
 ## Paren unwrapping
 
-`AstExpr::Paren { inner, .. }` does not become a `HirExpr::Paren` — `expr.rs:185`
+`ExprGrouping { inner, .. }` does not become a `HirExpr::Paren` — `expr.rs`
 unwraps it:
 
 ```rust
-AstExpr::Paren { inner, .. } => self.lower_expr(body, inner),
+ExprGrouping { inner, .. } => self.lower_expr(body, inner),
 ```
 
-AstExpr::Paren records user-written grouping; precedence is already in the
+ExprGrouping records user-written grouping; precedence is already in the
 tree (the parser applies it), so HIR just unwraps it.
 
 ---
@@ -484,21 +471,20 @@ tree (the parser applies it), so HIR just unwraps it.
 
 | Source user writes              | MatchSource       | HIR-lowering function      |
 | ------------------------------- | ----------------- | -------------------------- |
-| `match x { ... }`               | `UserMatch`       | `lower_match` (expr.rs:1226) |
-| `if let p = v { ... }`          | `IfLet`           | `lower_if_conditions` (expr.rs:1076) |
-| `while let p = v { ... }`       | `WhileLet`        | `desugar_while_let` (desugar.rs:259) |
-| `guard let p = v else { ... }`  | `GuardLet`        | `lower_guard_let` (stmt.rs:143) + `lower_if_conditions` |
-| `for p in iter { ... }`         | `ForLoop`         | `desugar_for_loop` (desugar.rs:338) |
-| `let (a,b) = pair;` (complex)   | `LetDestructure`  | `lower_let_stmt` (stmt.rs:64) |
-| `fn f((a,b): (I,I)) { ... }` / `{ ((a,b)) in ... }` | `ParamDestructure` | `lower_closure` (expr.rs:1139) or `lower_param_pattern` + lib.rs |
-| `try expr`                      | `TryOp`           | `desugar_try` (desugar.rs:499) |
-| `expr!`                         | `UnwrapOp`        | `desugar_unwrap` (desugar.rs:640) |
+| `match x { ... }`               | `UserMatch`       | `lower_match`  |
+| `if let p = v { ... }`          | `IfLet`           | `lower_if_conditions`  |
+| `while let p = v { ... }`       | `WhileLet`        | `desugar_while_let`  |
+| `guard let p = v else { ... }`  | `GuardLet`        | `lower_guard_let`  + `lower_if_conditions` |
+| `for p in iter { ... }`         | `ForLoop`         | `desugar_for_loop`  |
+| `let (a,b) = pair;` (complex)   | `LetDestructure`  | `lower_let_stmt`  |
+| `fn f((a,b): (I,I)) { ... }` / `{ ((a,b)) in ... }` | `ParamDestructure` | `lower_closure`  or `lower_param_pattern` + lib.rs |
+| `try expr`                      | `TryOp`           | `desugar_try`  |
 
 ---
 
 ## Cross-references
 
-- For each surface construct, see `expressions.md` / `statements.md` for the AST side.
+- For each surface construct, see `expressions.md` / `statements.md` for the syntax side.
 - Pattern desugarings that produce `HirPat::*` variants (shorthand, `@`) — see
   `patterns.md`.
 - Historical cascading-error fixes from pattern desugaring —

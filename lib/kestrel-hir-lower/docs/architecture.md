@@ -1,72 +1,93 @@
 # kestrel-hir-lower Architecture
 
-HIR lowering for the Kestrel compiler. Transforms AST entities + name resolution results into `HirBody` — a desugared, partially-resolved IR that type inference can process.
+HIR lowering for the Kestrel compiler. Lowers a declaration's body **straight
+from its CST** (the typed views of `kestrel-syntax-tree`) plus name-resolution
+results into `HirBody` — a desugared, partially-resolved IR that type inference
+can process — and records a `BodySourceMap` linking HIR ids back to syntax.
+There is no intermediate body AST.
 
 ## Pipeline Position
 
 ```
-Source Text → Tokens → CST → AST Build → Name Res → HIR Lowering → Type Infer → Codegen
-                                                        ^^^
-                                                     this crate
+Source Text → Tokens → CST ─┬─ Decl Build (ECS) → Name Res ─┐
+                            │                                ▼
+                            └──── body syntax (Valued ptr) → HIR Lowering → Type Infer → …
+                                                             ^^^
+                                                          this crate
 ```
+
+A body entity carries `Valued(SyntaxNodePtr)`; `LowerBodyWithSourceMap`
+resolves it against the file's `FileSyntax` green tree **on demand**, inside the
+query, so a body is lowered the first time something asks for it.
 
 ## Three Kinds of Work
 
-1. **Path resolution** — calls name resolution queries to resolve names to `Entity` or `LocalId`
-2. **Desugaring** — rewrites operators to `ProtocolCall`, for/while to `Loop`, sugar types to `Named`
-3. **Local variable allocation** — assigns `LocalId` slots for parameters, let bindings, pattern bindings
+1. **Path resolution** — locals by scope (`lookup_local`), everything else through
+   name resolution queries, to `LocalId` or `Entity`. Whether `a.b` is a value
+   path or a member access is decided here, by scope.
+2. **Desugaring** — operators to `ProtocolCall`, `for`/`while`/`if let`/`guard
+   let`/`try`/`throw`/string interpolation to core HIR, sugar types to `Named`.
+3. **Local variable allocation** — `LocalId` slots for parameters, let bindings,
+   pattern bindings and desugaring temporaries.
 
-What this crate does **not** do: method/field resolution, overload resolution, type checking. Those are deferred to type inference.
+What this crate does **not** do: method/field resolution, overload resolution,
+type checking. Those are deferred to type inference.
 
 ## Core Types
 
 | Type | Description |
 |------|-------------|
-| `LowerCtx` | Lowering context: arenas, scope stack, current entity, references |
-| `LowerBody` | Query: entity → `Arc<HirBody>` (main entry point) |
-| `LowerTypeAnnotation` | Query: entity → `HirTy` (type annotation lowering) |
-| `LowerCallableTypes` | Query: entity → per-param annotation types |
-| `LowerCallableReturnType` | Query: callable entity → declared return type |
-| `LowerExtensionTargetTypeArgs` | Query: extension entity → target type args |
+| `LowerCtx` | Lowering context: arenas, scope stack, owner entity, file id, source map being built |
+| `BodySourceMap` | HIR expr/pat/stmt ids ↔ `SyntaxNodePtr`, `LocalId` → declaring identifier (`LocalSource`), identifier position → local / path-segment expression |
+| `LoweredBody` | `{ body: Arc<HirBody>, source_map: Arc<BodySourceMap> }` (both `Send + Sync`) |
+| `syntax::BlockSyntax` / `Cond` / `PathSyntax` / `ExprSrc` / `PatSrc` | The few multi-child syntax shapes lowering consumes (blocks, condition lists, paths vs member chains, "a node or the span of a missing one") |
 
 ## Queries
 
 | Query | Input | Output |
 |-------|-------|--------|
-| `LowerBody` | Entity with `Valued` component | `Option<Arc<HirBody>>` (expressions, statements, patterns, locals; Arc-wrapped so memo cache hits share one allocation) |
-| `LowerTypeAnnotation` | Entity with `TypeAnnotation` component | `HirTy` |
-| `LowerCallableTypes` | Entity with `Callable` component | Parameter types, `None` per unannotated param |
-| `LowerCallableReturnType` | Callable entity | `HirTy` — explicit `-> T` if annotated, else unit `()` (the single fallback rule; initializers count as unit) |
-| `LowerExtensionTargetTypeArgs` | Entity with `ExtensionTarget` component | Target type args as `HirTy` (`Some(vec![])` when none; excess args beyond target arity become `HirTy::Error`, left to E453) |
+| `LowerBodyWithSourceMap` | Entity with `Valued` | `Option<Arc<LoweredBody>>`; files the body's diagnostics |
+| `LowerBody` | Entity with `Valued` | `Option<Arc<HirBody>>` — projects the above (type inference, analyzers, MIR) |
+| `LowerTypeAnnotation` | Entity with `TypeAnnotation` | `HirTy` |
+| `LowerCallableTypes` | Entity with `Callable` | Parameter types, `None` per unannotated param |
+| `LowerCallableReturnType` | Callable entity | `HirTy` — explicit `-> T` if annotated, else unit `()` |
+| `LowerExtensionTargetTypeArgs` | Entity with `ExtensionTarget` | Target type args as `HirTy` |
 
 ## Module Map
 
 | File | Responsibility |
 |------|---------------|
-| `lib.rs` | Query definitions, `LowerCtx`, public API |
-| `expr.rs` | Expression lowering (19+ AST variants → HIR) |
-| `stmt.rs` | Statement lowering (let, expr, guard-let) |
-| `pat.rs` | Pattern lowering (11 variants) |
+| `lib.rs` | Queries, body-node dispatch (`CodeBlock` / `FunctionBody` / `DefaultValue` / initializer `Expression`), parameters |
+| `syntax.rs` | Reading the CST: block items, closure items, conditions, paths, arguments, closure params, tuple patterns, operator tokens, implicit `it` |
+| `source_map.rs` | `BodySourceMap`, `LocalSource`, `token_at` |
+| `ctx.rs` | `LowerCtx`: arenas, scopes, local allocation, init-effect wrapping |
+| `expr.rs` | Expression lowering, path resolution, call shape detection, blocks, closures, condition chains |
+| `stmt.rs` | Statement lowering (let, expr, guard, deinit) |
+| `pat.rs` | Pattern lowering, literal parsing utilities |
+| `desugar.rs` | Operator/loop/try/throw/interpolation desugaring |
+| `literal.rs`, `string_token.rs` | String literal classification, indentation stripping, escape decoding |
+| `format_spec.rs` | Interpolation format specifiers |
 | `ty.rs` | Type lowering (sugar resolution, path types) |
-| `desugar.rs` | Operator → protocol call mapping, loop desugaring |
 
 ## Design Decisions
 
 See [design.md](design.md) for detailed rationale on:
 
-- Call shape detection: method vs direct (heuristic on first path segment)
+- Lowering from the CST, and what missing syntax lowers to
+- The source map and what it does (not) record
+- Call shape detection: method vs direct (scope of the first path segment)
 - Self type resolution walking the owner hierarchy
 - Type alias transparency for simple aliases
-- Known limitations (incomplete destructuring, string interpolation, overloads)
 
 ## Dependencies
 
 | Crate | Usage |
 |-------|-------|
 | `kestrel-hecs` | ECS world and query context |
+| `kestrel-syntax-tree`, `rowan` | Typed CST views, `SyntaxNodePtr`, text ranges |
 | `kestrel-hir` | `HirBody`, `HirExpr`, `HirStmt`, `HirPat`, `HirTy` |
-| `kestrel-ast` | `AstBody`, `AstExpr`, `AstType`, operator enums |
-| `kestrel-ast-builder` | Components (`Valued`, `Callable`, `TypeAnnotation`, etc.) |
-| `kestrel-name-res` | Resolution queries (`ResolveName`, `ResolveTypePath`, etc.) |
+| `kestrel-ast` | `AstType` (type syntax), operator enums, escape table, `Arena` |
+| `kestrel-ast-builder` | Components (`Valued`, `Callable`, `TypeAnnotation`, `FileSyntax`, …), `ast_type_from_cst` |
+| `kestrel-name-res` | Resolution queries (`ResolveValuePath`, `ResolveTypePath`, `ResolveBuiltin`, …) |
 | `kestrel-span` | `Span` for source locations |
 | `kestrel-debug` | `ktrace!` for debug tracing |

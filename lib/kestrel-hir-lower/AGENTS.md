@@ -1,6 +1,6 @@
 # kestrel-hir-lower — Agent Guide
 
-Patterns and invariants for lowering AST → HIR (the desugaring layer).
+Patterns and invariants for lowering CST → HIR (the desugaring layer).
 Read this before adding or changing a desugaring in `desugar.rs` / `expr.rs`.
 
 ## Operators desugar to a `ProtocolCall` — never hand-roll a match
@@ -20,7 +20,7 @@ stdlib with `@builtin(.XOperatorProtocol)` / `@builtin(.XOperatorMethod)`
 (model on `lang/std/core/coalesce.ks`), register the two `Builtin` variants in
 `kestrel-hir/src/builtin.rs` (enum + `name()` + `from_str` + `kind()`), add a
 row to the relevant lookup table in `kestrel-hir/src/body.rs`, and route the
-AST variant through the matching `desugar_*` helper. The conformance carries
+syntax kind through the matching `desugar_*` helper. The conformance carries
 the behavior; the lowerer only emits the call.
 
 **Why this is a hard rule:** a hand-rolled match has to invent the type of every

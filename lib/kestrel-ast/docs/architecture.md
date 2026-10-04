@@ -1,68 +1,50 @@
 # kestrel-ast Architecture
 
-AST data types for the Kestrel compiler. Defines the typed representations of expressions, statements, patterns, and types that are extracted from the CST during AST building and consumed by HIR lowering.
+Syntax-level data shared across the front end: type syntax (`AstType`), the
+operator enums, the escape table, and the arena HIR stores its nodes in.
+
+Function bodies have **no AST**: `kestrel-hir-lower` lowers them straight from the
+CST (`docs/design/frontend.md`). What remains here is what declarations, HIR and
+lowering share and what the deepest common crate must own.
 
 ## Pipeline Position
 
 ```
-Source Text → Tokens → CST (rowan) → AST Build → Name Res → HIR Lower → Type Infer
-                                      ^^^
-                              this crate's types are produced here
+Source Text → Tokens → CST (rowan) → Decl Build → Name Res → HIR Lower → Type Infer
+                                      ^^^^^^^^^^              ^^^^^^^^^
+                   `AstType` for signatures / annotations;   operators, escapes,
+                                                             `Arena` for HIR nodes
 ```
-
-The AST builder creates entities with components, and expressions/statements/patterns are stored as `AstBody` values inside `Valued` components. HIR lowering reads these types and produces desugared HIR.
 
 ## Core Types
 
 | Type | Module | Description |
 |------|--------|-------------|
-| `AstExpr` | `expr.rs` | 19+ expression variants (literals, calls, operators, control flow, closures) |
-| `AstStmt` | `stmt.rs` | 4 statement variants (let, expr, guard-let, deinit) |
-| `AstPat` | `pat.rs` | 11 pattern variants (wildcard, binding, tuple, enum, struct, ...) |
-| `AstType` | `ty.rs` | 10 type variants (named, tuple, function, optional, result, ...) |
-| `AstBody` | `body.rs` | Container: arena-stored exprs/stmts/pats with top-level statements + tail expr |
-| `Arena<T>` | `arena.rs` | Flat storage indexed by `Idx<T>` — no heap-allocated trees |
-| `PathSegment` | `ty.rs` | Segment in a qualified type path: name + optional type args |
-
-## Arena-Based Storage
-
-All AST nodes are stored in flat arenas and addressed by typed indices:
-
-```
-AstBody {
-    exprs: Arena<AstExpr>,     // indexed by Idx<AstExpr>
-    stmts: Arena<AstStmt>,     // indexed by Idx<AstStmt>
-    pats:  Arena<AstPat>,      // indexed by Idx<AstPat>
-    statements: Vec<AstStmtId>,
-    tail_expr: Option<AstExprId>,
-}
-```
-
-Nodes reference each other by index, not pointers. This is cache-friendly and makes the body trivially cloneable.
-
-## Detailed Type Documentation
-
-| Document | Contents |
-|----------|----------|
-| [ast-types.md](ast-types.md) | `AstType` — 10 type variants with syntax examples |
-| [ast-expressions.md](ast-expressions.md) | `AstExpr` — 19+ expression variants, operator enums |
-| [ast-statements.md](ast-statements.md) | `AstStmt` — 4 statement types, tail expressions |
-| [ast-patterns.md](ast-patterns.md) | `AstPat` — 11 pattern types, destructuring syntax |
+| `AstType` | `ast_type.rs` | Type syntax (named, tuple, function, optional, result, `some`, refs, …) — stored in `TypeAnnotation`/`Callable` components, lowered to `HirTy` |
+| `PathSegment` | `ast_type.rs` | Segment of a qualified type path: name + type args |
+| `BinaryOp` / `UnaryOp` / `PostfixOp` / `CompoundAssignOp` | `ops.rs` | Operators; `symbol()` is the one place a spelling is written. Keys of HIR's operator→protocol tables |
+| `decode_escape`, `EscapeErrorKind` | `escape.rs` | **The** backslash-escape table (strings, chars, interpolation segments) |
+| `Arena<T>` / `Idx<T>` | `arena.rs` | Flat storage indexed by typed `u32` ids — `HirBody`'s exprs/pats/stmts/locals |
 
 ## Module Map
 
 | File | Responsibility |
 |------|---------------|
 | `lib.rs` | Crate root, re-exports |
-| `expr.rs` | `AstExpr` (19+ variants), `BinaryOp`, `UnaryOp`, `CompoundAssignOp`, `CallArg` |
-| `stmt.rs` | `AstStmt` (4 variants) |
-| `pat.rs` | `AstPat` (11 variants), `LitPatKind`, `EnumPatArg`, `StructPatField` |
-| `ty.rs` | `AstType` (10 variants), `PathSegment` |
-| `body.rs` | `AstBody` container with arenas |
-| `arena.rs` | `Arena<T>`, `Idx<T>` — typed arena storage |
+| `ast_type.rs` | `AstType`, `FnTypeKind`, `ParamConvention`, `PathSegment` |
+| `ops.rs` | Operator enums and their spellings |
+| `escape.rs` | Escape decoding, error kinds |
+| `pretty.rs` | `format_type` — renders an `AstType` back to source (doc generator, diagnostics) |
+| `arena.rs` | `Arena<T>`, `Idx<T>` |
+
+## Detailed Type Documentation
+
+| Document | Contents |
+|----------|----------|
+| [ast-types.md](ast-types.md) | `AstType` — type variants with syntax examples |
 
 ## Dependencies
 
 | Crate | Usage |
 |-------|-------|
-| `kestrel-span` | `Span` on all AST nodes |
+| `kestrel-span` | `Span` on type syntax |

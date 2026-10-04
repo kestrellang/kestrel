@@ -104,9 +104,9 @@ identifier inside its body.
 ## What's NOT yet covered
 
 - **Type-position hover** — `Foo` in `func bar(x: Foo)` or `let y: Foo`.
-  These are stored as `HirTy` on the binding, not as a `HirExpr`, so
-  there's no expression for `hir_expr_at` to find. Will need a separate
-  CST-driven lookup.
+  These are stored as `HirTy` on the binding, not as a `HirExpr`, so the
+  body's source map has no expression there; `types::type_at_cursor` is the
+  CST-driven lookup for them.
 - **Overload-set disambiguation** — when the cursor lands on an
   `OverloadSet` (multiple functions sharing a name), we render only the
   first candidate. A real impl would either show all of them or use the

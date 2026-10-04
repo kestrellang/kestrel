@@ -23,11 +23,12 @@ Source text
     │
     ▼
 ┌──────────────────────────────────────────────────────┐
-│  AST BUILD      kestrel-ast-builder                  │
+│  DECL BUILD     kestrel-ast-builder                  │
 │  CST → entities + components in the hECS World       │
 │  One entity per declaration; components describe     │
-│  its syntax (Name, Callable, TypeAnnotation, Body,   │
-│  Vis, WhereClause, TypeParams, …).                   │
+│  its syntax (Name, Callable, TypeAnnotation, Vis,    │
+│  WhereClause, TypeParams, …). A body is not read:    │
+│  `Valued` points at its syntax.                      │
 └──────────────────────────────────────────────────────┘
     │
     ▼
@@ -40,9 +41,11 @@ Source text
     ▼
 ┌──────────────────────────────────────────────────────┐
 │  HIR LOWER       kestrel-hir-lower → kestrel-hir     │
-│  Per-body: AstBody → HirBody. Names resolvable       │
-│  purely from scope are resolved; method/field names  │
-│  stay as strings until type inference.               │
+│  Per-body, on demand: body CST → HirBody (+ a        │
+│  BodySourceMap: HIR ids ↔ syntax). No body AST.      │
+│  Names resolvable purely from scope are resolved;    │
+│  method/field names stay as strings until type       │
+│  inference.                                          │
 └──────────────────────────────────────────────────────┘
     │
     ▼
@@ -88,7 +91,7 @@ Everything after parsing lives in a `World` (`kestrel-hecs`). The contributor-le
 | Concept | What it is |
 |---------|------------|
 | `Entity` | A 32-bit handle. Every declaration gets one. |
-| **Component** | Any `Clone + Send + Sync + 'static` struct stored against an entity (thread-safe so a `World` can be snapshotted across threads). Components are small and orthogonal — a function entity has `Name`, `Callable`, `Body`, optionally `WhereClause`, etc. |
+| **Component** | Any `Clone + Send + Sync + 'static` struct stored against an entity (thread-safe so a `World` can be snapshotted across threads). Components are small and orthogonal — a function entity has `Name`, `Callable`, `Valued` (its body's syntax), optionally `WhereClause`, etc. |
 | `NodeKind` | The discriminant component on every declaration entity (`Module`, `Struct`, `Enum`, `Protocol`, `Function`, `Field`, `TypeAlias`, …). |
 | **Query** | A `QueryFn` impl. Inputs: entity + root. Outputs: some derived fact (HIR body, inferred type, diagnostics, MIR). The framework caches results keyed on `(query, revision)` and re-runs them when inputs fingerprint-differ. |
 | **Revision** | A counter on the `World`. Bumped when the source changes. Feeds incremental invalidation. |
@@ -99,7 +102,7 @@ Because components are orthogonal, capability checks are "does this entity have 
 
 | Kind | Likely components (beyond `NodeKind`, `Name`, `DeclSpan`, `CstNode`, `Vis`) |
 |------|-----------------------------------------------------------------------------|
-| Function / Initializer / Deinit | `Callable`, `Valued` (pre-lower) or `Body` (post-lower), optional `WhereClause`, `TypeParams` |
+| Function / Initializer / Deinit | `Callable`, `Valued` (a pointer to the body syntax; `LowerBody` lowers it on demand), optional `WhereClause`, `TypeParams` |
 | Field | `TypeAnnotation`, `FieldMutability`, optionally `Computed`, `Static`, `Gettable`/`Settable`, `Valued` (default) |
 | Struct / Enum / Protocol / TypeAlias | `Typed` marker, optional `TypeParams`, `WhereClause` |
 | Subscript | `Callable`, `Subscript` marker, `Gettable`/`Settable` |
@@ -115,12 +118,12 @@ The authoritative catalogue is `lib/kestrel-ast-builder/src/components.rs`.
 | `kestrel-lexer` | Tokenization with logos. |
 | `kestrel-parser` | Event-driven parser; emits events consumed by `kestrel-syntax-tree`. |
 | `kestrel-syntax-tree` | Lossless CST (rowan). |
-| `kestrel-ast` | Arena-allocated AST types (`AstType`, `AstBody`, `AstExpr`, `AstStmt`, `AstPat`). |
+| `kestrel-ast` | Type syntax (`AstType`), operator enums, the escape table, `Arena`/`Idx`. Bodies have no AST. |
 | `kestrel-ast-builder` | Lowers CST → hECS entities + components. Defines `NodeKind` and the component catalogue. |
 | `kestrel-hecs` | The ECS itself: `Entity`, `World`, `QueryFn`, `QueryContext`, `Fingerprint`, `Revision`, snapshots. |
 | `kestrel-name-res` | Scope and name resolution queries (`ResolveName`, `ResolveTypePath`, `ResolveValuePath`). |
 | `kestrel-hir` | Body HIR (`HirExpr`, `HirPat`, `HirStmt`, `HirBody`). |
-| `kestrel-hir-lower` | `LowerBody`, `LowerCallableTypes` queries — AST bodies → HIR bodies. |
+| `kestrel-hir-lower` | `LowerBody` / `LowerBodyWithSourceMap`, `LowerCallableTypes` queries — body CST → HIR bodies + `BodySourceMap`. |
 | `kestrel-type-infer` | Constraint-based inference; `InferBody` query, `Constraint` / `InferError` enums, `TypeResolver`. |
 | `kestrel-semantics` | Higher-level semantic queries: conformance resolution and polarity, protocol refinement, builtin-protocol identification, copy semantics. Used by infer/analyze. (Witness resolution lives in `kestrel-mir-lower`/codegen.) |
 | `kestrel-copy-fold` | Single source of truth for the Copyable / Cloneable / NotCopyable decision tree (`fold_members` + `instance_semantics`). Five layer adapters (semantics over `HirTy`, the solver over `TyKind`, analyze move tracking over `ResolvedTy`, MIR `ty_query` and `mono` over `TyId`) all route through it — never re-implement the fold. |

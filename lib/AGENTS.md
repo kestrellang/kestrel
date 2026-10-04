@@ -79,7 +79,7 @@ Additional docs cover specific subsystems in depth. Each crate chooses topics ba
 | `kestrel-lexer` | architecture |
 | `kestrel-syntax-tree` | architecture |
 | `kestrel-parser` | architecture |
-| `kestrel-ast` | architecture, ast-types, ast-expressions, ast-statements, ast-patterns |
+| `kestrel-ast` | architecture, ast-types |
 | `kestrel-hecs` | architecture, snapshots |
 | `kestrel-ast-builder` | architecture, components, entity-mapping |
 | `kestrel-name-res` | architecture, scope, visibility, resolution, extensions |

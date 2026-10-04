@@ -1,5 +1,41 @@
 # F2 — decisions
 
+## Status: stages 2-4 landed through the body source map
+
+The staged plan below (a `name_span` on `Local` and on AST params) was
+overtaken by the front-end rewrite: bodies now lower straight from the CST,
+and `kestrel-hir-lower` records a `BodySourceMap` alongside each `HirBody`
+(`docs/design/frontend.md`). The map gives every user-spelled local its
+binding node and identifier range, and every path segment that names a local
+its use site, so no HIR or AST type gained a field:
+
+- **Stage 2/3** — `BodySourceMap::local_source(id).name` is the identifier
+  token's range for `let`/`var` bindings, `@` bindings, array rest bindings,
+  enum-pattern bindings, closure parameters and function/initializer
+  parameters (the parameter's *name*, never its label).
+- **Stage 4** — `semantic::local_declared_at` maps an offset on a declaring
+  identifier to `(body, LocalId)`; `semantic::target_at` returns
+  `Target::Local` for it, and uses come from `BodySourceMap::name_refs`.
+- **`Local::span` was not repurposed** (see below): it is still the whole
+  declaring statement.
+- **`target_at` is consolidated** into `semantic::target_at`, shared by
+  rename, find-references and document-highlight; rename gained the
+  type-position branch. All three already treated `OverloadSet` as no target,
+  so consolidating changed nothing there.
+- **The `let` → `var` quick fix's backward text search is deleted**; it reads
+  the `let` token off the declaring `VariableDeclaration`.
+- **The four handler bugs listed below are fixed**: go-to-definition lands on
+  the name, highlight/references paint the name, not the statement.
+
+Still refused, by design (no single declaring identifier): `self`, an
+implicit `it`, desugaring temporaries (`$let_tmp`, `_cparam_N`), struct
+pattern shorthand bindings (`P { x }` — the token is also the field's name),
+and subscript index parameters (bound separately by the getter and each
+accessor). `span_spells_name` stays as the last-line guard on every edit.
+
+The rest of this file is the original analysis, kept for the reasoning; its
+file/line references predate the rewrite.
+
 ## Why text equality, not a synthetic/`$`-prefix heuristic
 
 The obvious guard is "refuse if `span.is_synthetic()` or

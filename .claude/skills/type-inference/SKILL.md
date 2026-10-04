@@ -125,4 +125,4 @@ the index):
   `extend Iterator` leaks as `Named(Protocol)` without substitution.
 
 Pipeline-routing memory lives in the `kestrel-pipeline` skill — use that for
-"where does `AstExpr::Foo` turn into a constraint?"
+"where does `ExprFoo` syntax turn into a constraint?"

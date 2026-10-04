@@ -145,7 +145,7 @@ pub enum NodeKind {
 | `Typed` (marker) | Can appear in type position. |
 | `TypeAnnotation(AstType)` | Has a declared type (fields, params, alias targets). |
 | `Callable` | Parameter list + receiver convention. |
-| `Valued(SyntaxNodePtr)` / `Body(AstBody)` | Has a body/initializer (pre- / post-lower). |
+| `Valued(SyntaxNodePtr)` | Has a body/initializer — a pointer to its syntax, lowered on demand by `LowerBody`. |
 | `Gettable` / `Settable` (markers) | Read / write capability. |
 | `Static` (marker) | Accessed via type, not instance. |
 | `Subscript` (marker) | Call-syntax accessor. |

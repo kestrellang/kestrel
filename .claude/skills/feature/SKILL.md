@@ -12,13 +12,14 @@ Do not skip them.
 ## lib pipeline (where your code will go)
 
 ```
-Source → Tokens → CST → AST (ECS) → Name Res → HIR → Type Infer → MIR → Codegen
-         lexer    parser  ast-     name-res    hir-  type-       mir-  codegen-
-                          builder              lower infer       lower cranelift
+Source → Tokens → CST → Decls (ECS) → Name Res → HIR → Type Infer → MIR → Codegen
+         lexer    parser  ast-builder    name-res    hir-  type-       mir-  codegen-
+                          (decls only)               lower infer       lower cranelift
+                  bodies: CST ───────────────────────▶ HIR (hir-lower reads the CST)
 ```
 
 Orthogonal phases:
-- **Analyzers** (`kestrel-analyze`) run BodyCheck/DeclCheck passes over AST+HIR
+- **Analyzers** (`kestrel-analyze`) run BodyCheck/DeclCheck passes over components + HIR
   and emit diagnostics. Validation lives here, not in a distinct "validate" crate.
 - **Pattern matching** (`kestrel-pattern-matching`) is called from HIR lowering
   and MIR lowering for `match`-family constructs.
@@ -75,7 +76,7 @@ One paragraph: what it does, why it's needed.
 |-------|--------|
 | Lexer | New tokens? |
 | Parser / CST | New SyntaxKind? |
-| AST (ECS) | New components / AstExpr variant / AstStmt variant? |
+| Decls (ECS) | New components? (Body syntax has no AST — see HIR.) |
 | Name Res | Any new scope or visibility rules? |
 | HIR | New HirExpr / HirStmt / HirPat variant? Desugaring target? |
 | Type Infer | New constraint kind? Oracle changes? |
@@ -149,14 +150,15 @@ Files: `lib/kestrel-parser/src/...`
       `expr_parser` will eat the `{` as a trailing-closure argument. See
       `for_expr` in `kestrel-parser/src/expr/mod.rs`.
 
-### Phase 4 — AST (ECS) builder
+### Phase 4 — Declaration (ECS) builder
 Files: `lib/kestrel-ast-builder/src/builders/<feature>.rs` (+ `mod.rs`,
-`components.rs`, `lower.rs`)
-- [ ] AST component(s) if the feature carries new data on an entity.
-- [ ] `AstExpr` / `AstStmt` / `AstPat` variant if it's a body-level construct.
-- [ ] Builder function; register it in the dispatcher in `lower.rs` /
-      `build.rs` / `builders/mod.rs` so the new CST node reaches it.
+`components.rs`, `build.rs`)
+- [ ] Component(s) if the feature carries new data on a declaration entity.
+- [ ] Builder function; register it in `build.rs` / `builders/mod.rs` so the new
+      CST node reaches it.
 - [ ] Decls: modules own the entity; files attach as a `FileId` component.
+- [ ] A body-level construct needs nothing here: bodies are lowered from the CST
+      by `kestrel-hir-lower` (Phase 6).
 
 ### Phase 5 — Name resolution
 Files: `lib/kestrel-name-res/src/...`
@@ -165,11 +167,13 @@ Files: `lib/kestrel-name-res/src/...`
 - [ ] Update auto-import / std-import rules only if explicitly part of the design.
 
 ### Phase 6 — HIR lowering
-Files: `lib/kestrel-hir-lower/src/{expr,stmt,pat,ty,desugar}.rs`
+Files: `lib/kestrel-hir-lower/src/{syntax,expr,stmt,pat,ty,desugar}.rs`
 - [ ] `HirExpr` / `HirStmt` / `HirPat` variant — or desugar to existing ones
       (prefer desugar when the semantics overlap with an existing construct).
-- [ ] Lowering function; wire into the `lower_ast_*` dispatcher.
-- [ ] Body-only: HIR has no decl nodes — decls stay as ECS + AST components.
+- [ ] Lowering from the CST: an arm in `lower_expr_node` / `lower_stmt_node` /
+      `lower_pat_node` reading the typed view (multi-child syntax decisions go in
+      `syntax.rs`); record new nodes/bindings in the `BodySourceMap`.
+- [ ] Body-only: HIR has no decl nodes — decls stay as ECS components.
       See `feedback_no_hir_decls` memory.
 
 ### Phase 7 — Type inference
