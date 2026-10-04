@@ -88,7 +88,7 @@ Everything after parsing lives in a `World` (`kestrel-hecs`). The contributor-le
 | Concept | What it is |
 |---------|------------|
 | `Entity` | A 32-bit handle. Every declaration gets one. |
-| **Component** | Any `Clone + 'static` struct stored against an entity. Components are small and orthogonal — a function entity has `Name`, `Callable`, `Body`, optionally `WhereClause`, etc. |
+| **Component** | Any `Clone + Send + Sync + 'static` struct stored against an entity (thread-safe so a `World` can be snapshotted across threads). Components are small and orthogonal — a function entity has `Name`, `Callable`, `Body`, optionally `WhereClause`, etc. |
 | `NodeKind` | The discriminant component on every declaration entity (`Module`, `Struct`, `Enum`, `Protocol`, `Function`, `Field`, `TypeAlias`, …). |
 | **Query** | A `QueryFn` impl. Inputs: entity + root. Outputs: some derived fact (HIR body, inferred type, diagnostics, MIR). The framework caches results keyed on `(query, revision)` and re-runs them when inputs fingerprint-differ. |
 | **Revision** | A counter on the `World`. Bumped when the source changes. Feeds incremental invalidation. |

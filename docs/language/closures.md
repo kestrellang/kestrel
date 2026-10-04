@@ -71,7 +71,8 @@ let result = apply({ it * 2 }, 21);  // Returns 42
 - `it` is only available when the expected function type has exactly 1 parameter
 - Using `it` when arity is 0 or 2+ is an error (reported by the solver under **E100**)
 - Explicit parameters shadow `it` — you cannot use both
-- `it` in nested closures refers to the innermost closure's parameter
+- `it` belongs to the innermost enclosing closure **written without a parameter list**. A nested closure that declares its parameters (`{ (y) in … }`) is transparent: an `it` inside it is the enclosing closure's.
+- When a closure's `it` hides another `it` in scope, it still refers to the closure's own parameter, and the compiler warns: **E142** if the hidden `it` belongs to an enclosing closure, **E143** if it is any other binding (a `let it`, a parameter named `it`). A closure never captures an outer binding named `it` through the implicit parameter.
 
 ```kestrel
 // ERROR[E100]: it used but arity is 0
@@ -83,7 +84,10 @@ let g: (Int64, Int64) -> Int64 = { it };
 // ERROR: it not available with explicit params
 let h: (Int64) -> Int64 = { (x) in it };
 
-// OK: nested it shadows outer
+// `it` reaches through a closure that declares its parameters
+let counts = xs.map { ys.filter(where: { (y) in y == it }).count };  // `it` is the map element
+
+// WARNING[E142]: nested it shadows the outer closure's it
 func apply(f: (Int64) -> Int64) -> Int64 {
     f(10)
 }
@@ -92,6 +96,10 @@ let f: (Int64) -> Int64 = {
     let outer = it;
     apply({ it + outer })  // inner `it` is a different parameter
 };
+
+// WARNING[E143]: the closure's it shadows the outer `let it`
+let it = 100;
+let r = xs.map { it + 1 };  // `it` is the element, not 100
 ```
 
 ## Trailing Closure Syntax
@@ -865,16 +873,18 @@ func makeAccumulator(start: Int64) -> escaping (Int64) -> Int64 {
 
 ### Nested `it` Shadowing
 
-Each closure level has its own `it`:
+Each closure written without a parameter list has its own `it`; the innermost one wins, and hiding an outer `it` is warned about (E142):
 
 ```kestrel
 func apply(f: (Int64) -> Int64) -> Int64 { f(5) }
 
 let f: (Int64) -> Int64 = {
     let outer = it;           // outer closure's it
-    apply({ it + outer })     // inner closure's it is different
+    apply({ it + outer })     // WARNING[E142]: inner closure's it is different
 };
 ```
+
+Name the parameter to make the intent explicit and silence the warning: `apply({ (x) in x + outer })`.
 
 ## Immediate Invocation
 

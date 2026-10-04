@@ -80,6 +80,10 @@ pub(crate) struct LowerCtx<'a> {
     /// name to whichever alternative won scope insertion) would read a local
     /// that other alternatives' leaves never populated (#187).
     or_reuse: Option<HashMap<String, LocalId>>,
+    /// Implicit `it` closure parameters → the span of the closure's first
+    /// `it` reference. Lets a nested closure's implicit `it` tell an
+    /// enclosing closure's `it` (E142) from any other outer `it` (E143).
+    pub implicit_it_locals: HashMap<LocalId, Span>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -101,6 +105,7 @@ impl<'a> LowerCtx<'a> {
             ref_patterns_allowed: false,
             in_callee_position: false,
             or_reuse: None,
+            implicit_it_locals: HashMap::new(),
         }
     }
 

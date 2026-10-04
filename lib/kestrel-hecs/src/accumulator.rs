@@ -4,25 +4,25 @@ use std::collections::HashMap;
 use crate::query::QueryKey;
 
 /// Type-erased trait for accumulator storage.
-trait AnyAccumulator: Any {
+trait AnyAccumulator: Any + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     /// Remove this query's values and hand them back as an erased `Vec<T>`.
     /// `None` when nothing was filed — the common case on a hot path, and
     /// worth not boxing an empty vector for.
-    fn take_for_query(&mut self, query: &QueryKey) -> Option<Box<dyn Any>>;
+    fn take_for_query(&mut self, query: &QueryKey) -> Option<Box<dyn Any + Send + Sync>>;
     /// Put an erased `Vec<T>` produced by `take_for_query` back, replacing
     /// whatever is currently filed under `query`.
-    fn restore_for_query(&mut self, query: &QueryKey, values: Box<dyn Any>);
+    fn restore_for_query(&mut self, query: &QueryKey, values: Box<dyn Any + Send + Sync>);
 }
 
 /// Everything filed under one `QueryKey`, across every accumulator type.
 ///
 /// Produced by `AccumulatorStore::take_for_query` before a query executes and
 /// handed back by `restore_for_query` if that execution unwinds. Opaque on
-/// purpose: the per-type payloads are `Vec<T>` erased to `Box<dyn Any>`.
+/// purpose: the per-type payloads are `Vec<T>` erased to `Box<dyn Any + Send + Sync>`.
 pub struct AccumulatorSnapshot {
-    per_type: HashMap<TypeId, Box<dyn Any>>,
+    per_type: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
 }
 
 /// Typed accumulator for side-effect values of type T.
@@ -36,7 +36,7 @@ struct TypedAccumulator<T> {
     by_query: HashMap<QueryKey, Vec<T>>,
 }
 
-impl<T: Clone + 'static> TypedAccumulator<T> {
+impl<T: Clone + Send + Sync + 'static> TypedAccumulator<T> {
     fn new() -> Self {
         Self {
             by_query: HashMap::new(),
@@ -60,18 +60,18 @@ impl<T: Clone + 'static> TypedAccumulator<T> {
     }
 }
 
-impl<T: Clone + 'static> AnyAccumulator for TypedAccumulator<T> {
+impl<T: Clone + Send + Sync + 'static> AnyAccumulator for TypedAccumulator<T> {
     fn as_any(&self) -> &dyn Any {
         self
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-    fn take_for_query(&mut self, query: &QueryKey) -> Option<Box<dyn Any>> {
+    fn take_for_query(&mut self, query: &QueryKey) -> Option<Box<dyn Any + Send + Sync>> {
         self.take_for_query(query)
-            .map(|values| Box::new(values) as Box<dyn Any>)
+            .map(|values| Box::new(values) as Box<dyn Any + Send + Sync>)
     }
-    fn restore_for_query(&mut self, query: &QueryKey, values: Box<dyn Any>) {
+    fn restore_for_query(&mut self, query: &QueryKey, values: Box<dyn Any + Send + Sync>) {
         let values = *values
             .downcast::<Vec<T>>()
             .expect("type mismatch restoring an accumulator snapshot");
@@ -95,7 +95,7 @@ impl AccumulatorStore {
     }
 
     /// Push a value into the accumulator for type T, associated with a query.
-    pub fn push<T: Clone + 'static>(&mut self, query: QueryKey, value: T) {
+    pub fn push<T: Clone + Send + Sync + 'static>(&mut self, query: QueryKey, value: T) {
         self.store_mut::<T>().push(query, value);
     }
 
@@ -141,17 +141,17 @@ impl AccumulatorStore {
     }
 
     /// Iterate over all accumulated values of type T.
-    pub fn all<T: Clone + 'static>(&self) -> impl Iterator<Item = &T> {
+    pub fn all<T: Clone + Send + Sync + 'static>(&self) -> impl Iterator<Item = &T> {
         self.store::<T>().into_iter().flat_map(|s| s.all())
     }
 
-    fn store<T: Clone + 'static>(&self) -> Option<&TypedAccumulator<T>> {
+    fn store<T: Clone + Send + Sync + 'static>(&self) -> Option<&TypedAccumulator<T>> {
         self.stores
             .get(&TypeId::of::<T>())
             .and_then(|s| s.as_any().downcast_ref::<TypedAccumulator<T>>())
     }
 
-    fn store_mut<T: Clone + 'static>(&mut self) -> &mut TypedAccumulator<T> {
+    fn store_mut<T: Clone + Send + Sync + 'static>(&mut self) -> &mut TypedAccumulator<T> {
         self.stores
             .entry(TypeId::of::<T>())
             .or_insert_with(|| Box::new(TypedAccumulator::<T>::new()))

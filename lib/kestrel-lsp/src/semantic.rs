@@ -188,7 +188,7 @@ pub fn hir_pat_at(body: &HirBody, offset: usize) -> Option<HirPatId> {
 /// Pull the CST root for a file entity from the compiler. We re-parse rather
 /// than chasing `Valued` because not every node carries a CstNode pointer.
 pub fn file_cst(compiler: &kestrel_compiler::Compiler, file_entity: Entity) -> SyntaxNode {
-    compiler.parse(file_entity).tree
+    compiler.parse(file_entity).tree()
 }
 
 /// Smallest entity in `file_entity` whose `DeclSpan` covers `offset`. Falls

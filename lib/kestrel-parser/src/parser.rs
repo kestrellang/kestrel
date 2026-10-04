@@ -22,7 +22,7 @@
 
 use kestrel_lexer::Token;
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::{GreenNode, SyntaxNode};
 use std::fmt;
 
 use crate::event::{Event, EventSink, TreeBuilder};
@@ -88,18 +88,37 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-/// The result of parsing, containing both the syntax tree and any errors
+/// The result of parsing, containing both the syntax tree and any errors.
+///
+/// Holds the immutable green tree, not a `SyntaxNode`: green nodes are
+/// atomically reference-counted (`Send + Sync`), while a `SyntaxNode` cursor
+/// uses non-atomic refcounts. Parse results live in query memos, which
+/// `World::snapshot` shares across threads (audit F42), so the cached value
+/// must be thread-safe. [`ParseResult::tree`] builds a fresh cursor on demand.
 #[derive(Debug, Clone)]
 pub struct ParseResult {
-    /// The parsed syntax tree
-    pub tree: SyntaxNode,
+    /// The parsed syntax tree (green form)
+    pub green: GreenNode,
     /// Any parse errors encountered, sorted by position
     pub errors: Vec<ParseError>,
 }
 
+impl ParseResult {
+    /// The root `SyntaxNode` (a fresh cursor over the shared green tree).
+    pub fn tree(&self) -> SyntaxNode {
+        SyntaxNode::new_root(self.green.clone())
+    }
+}
+
+// Parse results are query memos shared across threads by `World::snapshot`.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<ParseResult>();
+};
+
 impl std::hash::Hash for ParseResult {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.tree.text().to_string().hash(state);
+        self.tree().text().to_string().hash(state);
         self.errors.hash(state);
     }
 }
@@ -157,7 +176,10 @@ impl Parser {
             );
         }
 
-        ParseResult { tree, errors }
+        ParseResult {
+            green: tree.green().into_owned(),
+            errors,
+        }
     }
 }
 
@@ -209,7 +231,7 @@ mod tests {
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -218,9 +240,9 @@ mod tests {
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             2,
             "Should have 2 declaration children"
         );
@@ -241,7 +263,7 @@ public struct B {}
         let result = parse_source(valid_source, 0);
         assert_eq!(result.errors.len(), 0, "Valid code should have no errors");
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             3,
             "Should parse all declarations"
         );
@@ -250,11 +272,11 @@ public struct B {}
         let source_with_errors = r#"module"#; // Incomplete module
         let result = parse_source(source_with_errors, 0);
         // Parser creates a SourceFile node even when parsing fails
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
 
         println!(
             "Error recovery test: {} declarations, {} errors",
-            result.tree.children().count(),
+            result.tree().children().count(),
             result.errors.len()
         );
     }
@@ -278,7 +300,7 @@ public struct B {}
         }
 
         // This test primarily documents that span tracking infrastructure is in place
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -288,7 +310,7 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             2,
             "Should have 2 children (module + struct)"
         );
@@ -301,7 +323,7 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.children().count(),
+            result.tree().children().count(),
             2,
             "Should have 2 children (module + struct)"
         );
@@ -336,19 +358,19 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
 
-        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        let line_comments = token_texts(&result.tree(), &[SyntaxKind::LineComment]);
         assert_eq!(line_comments, vec!["// keep this comment"]);
 
-        let newlines = token_texts(&result.tree, &[SyntaxKind::Newline]);
+        let newlines = token_texts(&result.tree(), &[SyntaxKind::Newline]);
         assert_eq!(
             newlines.len(),
             2,
             "two \\n separators between the three tokens"
         );
 
-        let whitespace = token_texts(&result.tree, &[SyntaxKind::Whitespace]);
+        let whitespace = token_texts(&result.tree(), &[SyntaxKind::Whitespace]);
         assert!(
             whitespace
                 .iter()
@@ -364,15 +386,15 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "tree text must round-trip the source verbatim"
         );
 
-        let block_comments = token_texts(&result.tree, &[SyntaxKind::BlockComment]);
+        let block_comments = token_texts(&result.tree(), &[SyntaxKind::BlockComment]);
         assert_eq!(block_comments, vec!["/* block */"]);
 
-        let line_comments = token_texts(&result.tree, &[SyntaxKind::LineComment]);
+        let line_comments = token_texts(&result.tree(), &[SyntaxKind::LineComment]);
         assert_eq!(line_comments, vec!["// trailing"]);
     }
 
@@ -383,7 +405,7 @@ public struct B {}
 
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "trailing trivia after the last syntax token must appear in the tree"
         );
@@ -395,10 +417,13 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert!(result.errors.is_empty(), "Should have no errors");
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::StructDeclaration), 2);
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::EnumDeclaration), 1);
         assert_eq!(
-            count_nodes(&result.tree, SyntaxKind::EnumCaseDeclaration),
+            count_nodes(&result.tree(), SyntaxKind::StructDeclaration),
+            2
+        );
+        assert_eq!(count_nodes(&result.tree(), SyntaxKind::EnumDeclaration), 1);
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::EnumCaseDeclaration),
             1
         );
     }
@@ -411,18 +436,24 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "tree must still round-trip even when recovering"
         );
         assert!(!result.errors.is_empty(), "recovery should report an error");
 
         // Both the module and import declarations should be in the tree.
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::ModuleDeclaration), 1);
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::ImportDeclaration), 1);
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::ModuleDeclaration),
+            1
+        );
+        assert_eq!(
+            count_nodes(&result.tree(), SyntaxKind::ImportDeclaration),
+            1
+        );
         // The recovered garbage is wrapped in an Error node.
         assert!(
-            count_nodes(&result.tree, SyntaxKind::Error) >= 1,
+            count_nodes(&result.tree(), SyntaxKind::Error) >= 1,
             "recovered region should become an Error node"
         );
     }
@@ -455,7 +486,7 @@ public struct B {}
             "trailing trivia should not trigger recovery, got {:?}",
             result.errors
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -466,7 +497,7 @@ public struct B {}
         assert!(result.errors.is_empty(), "Should have no errors");
         assert_eq!(
             token_texts(
-                &result.tree,
+                &result.tree(),
                 &[
                     SyntaxKind::Plus,
                     SyntaxKind::Star,
@@ -485,7 +516,7 @@ public struct B {}
         let source = "func f() { foo. }";
         let result = parse_source(source, 0);
 
-        let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
+        let missing_count = count_nodes(&result.tree(), SyntaxKind::Missing);
         assert_eq!(
             missing_count, 0,
             "missing tokens are absent, not synthesized"
@@ -505,7 +536,7 @@ public struct B {}
 
         // The synthesized identifier inside Missing should have empty text,
         // so the source round-trips without garbage.
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -516,7 +547,7 @@ public struct B {}
         let source = "func f() { foo.bar }";
         let result = parse_source(source, 0);
 
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 0);
+        assert_eq!(count_nodes(&result.tree(), SyntaxKind::Missing), 0);
         let recovery_errors: Vec<_> = result
             .errors
             .iter()
@@ -535,21 +566,21 @@ public struct B {}
 
         // The body should contain at least one Error wrapper from recovery
         // plus two Let statements (one before, one after the garbage).
-        let error_nodes = count_nodes(&result.tree, SyntaxKind::Error);
+        let error_nodes = count_nodes(&result.tree(), SyntaxKind::Error);
         assert!(
             error_nodes >= 1,
             "expected at least one recovered Error node, tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
-        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        let lets = count_nodes(&result.tree(), SyntaxKind::VariableDeclaration);
         assert_eq!(
             lets, 2,
             "both `let` statements must still parse around the garbage; tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
 
         // Source text must round-trip.
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -567,13 +598,13 @@ public struct B {}
         let source = "func f() { let x = 1; ?? let y = 7; }";
         let result = parse_source(source, 0);
 
-        let lets = count_nodes(&result.tree, SyntaxKind::VariableDeclaration);
+        let lets = count_nodes(&result.tree(), SyntaxKind::VariableDeclaration);
         assert_eq!(
             lets, 2,
             "both `let` statements must survive the stray `??`; tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -586,10 +617,10 @@ public struct B {}
         let result = parse_source(source, 0);
 
         assert_eq!(
-            count_nodes(&result.tree, SyntaxKind::ExprCall),
+            count_nodes(&result.tree(), SyntaxKind::ExprCall),
             1,
             "the call survives without its `)`, tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
         let recovery_errors: Vec<_> = result
             .errors
@@ -601,7 +632,7 @@ public struct B {}
             "expected an `expected \\`)\\`` diagnostic, got {:?}",
             result.errors
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -611,14 +642,14 @@ public struct B {}
         let source = "func f() { foo.; }";
         let result = parse_source(source, 0);
 
-        assert_eq!(count_nodes(&result.tree, SyntaxKind::Missing), 0);
+        assert_eq!(count_nodes(&result.tree(), SyntaxKind::Missing), 0);
         let recovery_errors: Vec<_> = result
             .errors
             .iter()
             .filter(|e| e.message.contains("expected identifier after `.`"))
             .collect();
         assert_eq!(recovery_errors.len(), 1);
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     /// Count the `expected `;`` diagnostics in a parse result.
@@ -646,12 +677,12 @@ public struct B {}
             result.errors
         );
         assert_eq!(
-            count_nodes(&result.tree, SyntaxKind::ExpressionStatement),
+            count_nodes(&result.tree(), SyntaxKind::ExpressionStatement),
             2,
             "both calls are statements; the absent `;` is not synthesized, tree:\n{:#?}",
-            result.tree
+            result.tree()
         );
-        assert_eq!(result.tree.text().to_string(), source);
+        assert_eq!(result.tree().text().to_string(), source);
     }
 
     #[test]
@@ -678,12 +709,12 @@ public struct B {}
                 result.errors
             );
             assert_eq!(
-                count_nodes(&result.tree, SyntaxKind::Missing),
+                count_nodes(&result.tree(), SyntaxKind::Missing),
                 0,
                 "no Missing node expected for `{body}`, tree:\n{:#?}",
-                result.tree
+                result.tree()
             );
-            assert_eq!(result.tree.text().to_string(), source);
+            assert_eq!(result.tree().text().to_string(), source);
         }
     }
 }

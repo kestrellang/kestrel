@@ -341,10 +341,19 @@ impl World {
     // -- Accumulators --
 
     /// Collect all accumulated values of type T into a Vec.
-    pub fn accumulated<T: Clone + 'static>(&self) -> Vec<T> {
+    pub fn accumulated<T: Clone + Send + Sync + 'static>(&self) -> Vec<T> {
         self.accumulators.borrow().all::<T>().cloned().collect()
     }
 }
+
+// `World` must stay `Send`: the test harness shares one cached stdlib
+// compiler across threads behind a `Mutex` and snapshots it per test (audit
+// F42). This holds because every component, query output and accumulated
+// value is `Send + Sync` (see `Component`, `QueryFn`, `QueryContext::accumulate`).
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<World>();
+};
 
 impl Default for World {
     fn default() -> Self {

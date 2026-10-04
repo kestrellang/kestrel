@@ -26,7 +26,7 @@ fn build_from_source(source: &str) -> (World, Entity, Entity) {
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
 
-    build_declarations(&mut world, file_entity, &result.tree, root, None);
+    build_declarations(&mut world, file_entity, &result.tree(), root, None);
     (world, root, file_entity)
 }
 
@@ -46,7 +46,7 @@ fn build_two_files(source_a: &str, source_b: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source_a, token_iter);
-    build_declarations(&mut world, file_a, &result.tree, root, None);
+    build_declarations(&mut world, file_a, &result.tree(), root, None);
 
     // Build second file
     let file_b = world.spawn();
@@ -55,7 +55,7 @@ fn build_two_files(source_a: &str, source_b: &str) -> (World, Entity) {
         .collect();
     let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
     let result = kestrel_parser::parse_source_file_from_source(source_b, token_iter);
-    build_declarations(&mut world, file_b, &result.tree, root, None);
+    build_declarations(&mut world, file_b, &result.tree(), root, None);
 
     (world, root)
 }
@@ -774,7 +774,7 @@ fn auto_import_across_std_modules() {
         src1,
         tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
-    build_declarations(&mut world, f1, &result1.tree, root, None);
+    build_declarations(&mut world, f1, &result1.tree(), root, None);
 
     // std.text with String
     let f2 = world.spawn();
@@ -786,7 +786,7 @@ fn auto_import_across_std_modules() {
         src2,
         tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
-    build_declarations(&mut world, f2, &result2.tree, root, None);
+    build_declarations(&mut world, f2, &result2.tree(), root, None);
 
     // User module — no explicit imports
     let f3 = world.spawn();
@@ -798,7 +798,7 @@ fn auto_import_across_std_modules() {
         src3,
         tokens3.iter().map(|t| (t.value.clone(), t.span.clone())),
     );
-    build_declarations(&mut world, f3, &result3.tree, root, None);
+    build_declarations(&mut world, f3, &result3.tree(), root, None);
 
     let ctx = world.query_context();
     let myapp = find_child(&ctx, root, NodeKind::Module, "MyApp");

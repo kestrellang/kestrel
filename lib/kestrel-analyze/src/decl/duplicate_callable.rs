@@ -251,7 +251,7 @@ mod tests {
             .collect();
         let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
         let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
-        build_declarations(&mut world, file_entity, &result.tree, root, None);
+        build_declarations(&mut world, file_entity, &result.tree(), root, None);
 
         let targets: Vec<(Entity, NodeKind)> = world
             .iter_component::<NodeKind>()

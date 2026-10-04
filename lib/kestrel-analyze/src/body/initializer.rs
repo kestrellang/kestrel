@@ -191,6 +191,17 @@ impl BodyCheck for InitializerAnalyzer {
             return vec![];
         }
 
+        // An assignment whose target failed to lower (an undefined name, E132)
+        // may have been meant for any field, so any "not initialized" verdict
+        // would be a guess. The lowering error already covers this body.
+        let has_unresolved_target = cx.hir.exprs.iter().any(|(_, e)| {
+            matches!(e, HirExpr::Assign { target, .. }
+                if matches!(cx.hir.exprs[*target], HirExpr::Error { .. }))
+        });
+        if has_unresolved_target {
+            return vec![];
+        }
+
         let mut vctx = VerifyCtx {
             all_fields: all_fields.clone(),
             let_fields,
@@ -805,7 +816,7 @@ mod tests {
             .collect();
         let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
         let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
-        build_declarations(&mut world, file_entity, &result.tree, root, None);
+        build_declarations(&mut world, file_entity, &result.tree(), root, None);
 
         let inits: Vec<Entity> = world
             .iter_component::<NodeKind>()

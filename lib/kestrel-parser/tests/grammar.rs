@@ -62,7 +62,7 @@ fn trailing_closure_must_start_on_the_same_line() {
     let result = parse("func f() {\n    foo()\n    { 1 }\n}\n");
     assert_eq!(result.errors.len(), 1);
     assert_eq!(result.errors[0].code, Some("E801"));
-    let tree = result.tree;
+    let tree = result.tree();
     let call = first(&tree, SyntaxKind::ExprCall);
     assert_eq!(
         call.descendants()
@@ -191,7 +191,7 @@ fn every_error_has_a_code() {
                 "uncoded error {e:?} for {src}"
             );
         }
-        assert_eq!(result.tree.text().to_string(), src);
+        assert_eq!(result.tree().text().to_string(), src);
     }
 }
 
@@ -214,7 +214,7 @@ fn struct_body_recovers_per_member() {
     let result = parse("struct S {\n    var a: Int64;\n    ???\n    var b: Int64;\n}\n");
     assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
     let fields = result
-        .tree
+        .tree()
         .descendants()
         .filter(|n| n.kind() == SyntaxKind::FieldDeclaration)
         .count();
@@ -249,14 +249,14 @@ fn stdlib_parses_without_errors_or_error_nodes() {
             result.errors
         );
         assert_eq!(
-            result.tree.text().to_string(),
+            result.tree().text().to_string(),
             source,
             "{}",
             entry.display()
         );
         assert!(
             result
-                .tree
+                .tree()
                 .descendants_with_tokens()
                 .all(|e| e.kind() != SyntaxKind::Error),
             "{} has Error elements",

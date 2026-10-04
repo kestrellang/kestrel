@@ -127,7 +127,7 @@ fn broken_hole_is_an_error_node_with_an_interpolation_error() {
             "{e:?}"
         );
     }
-    let hole = first(&result.tree, SyntaxKind::StringInterpolation);
+    let hole = first(&result.tree(), SyntaxKind::StringInterpolation);
     assert!(hole.children().any(|n| n.kind() == SyntaxKind::Error));
 }
 
@@ -136,7 +136,7 @@ fn unterminated_string_does_not_swallow_the_file() {
     let result = parse("func f() { let s = \"abc\n}\nfunc g() {}\n");
     assert_eq!(
         result
-            .tree
+            .tree()
             .descendants()
             .filter(|n| n.kind() == SyntaxKind::FunctionDeclaration)
             .count(),

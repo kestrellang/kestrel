@@ -200,7 +200,7 @@ Current allocations:
 - E315: `or_pattern_inconsistent_bindings` (match_pattern.rs)
 - HIR-lowering codespan codes (kestrel-hir-lower, not analyzer descriptors;
   allocated 2026-10 by the frontend rewrite so every lowering diagnostic has
-  one): E010–E011, E122, E124–E141, E213, E317–E321, E708–E710; it reuses
+  one): E010–E011, E122, E124–E143, E213, E317–E321, E708–E710; it reuses
   E438 (type argument count) and E476 (cannot find type). E123 is skipped (it
   is the worked example in docs/contributing/workflows.md); E212 stays retired.
 - E400: `duplicate_builtin` (decl/duplicate_builtin.rs) — a second `@builtin(.X)`
@@ -244,7 +244,7 @@ Current allocations:
   **E4xx is allocated up to E479.** E480 and above are already emitted
   elsewhere (`kestrel-hir-lower/src/ty.rs`, `kestrel-semantics/src/staticness.rs`,
   `body/access_mode.rs`). The only free E4xx codes are the gaps
-  **E401–E410 and E414** (E400 taken 2026-10). As of 2026-09-23 they are not emitted, documented or
+  **E402–E410 and E414** (E400 and E401 taken 2026-10). As of 2026-09-23 they are not emitted, documented or
   reserved anywhere. Take a new E4xx from those gaps.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a

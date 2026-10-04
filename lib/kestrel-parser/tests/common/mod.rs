@@ -21,21 +21,21 @@ pub fn parse_ok(source: &str) -> SyntaxNode {
         result.errors
     );
     assert_eq!(
-        result.tree.text().to_string(),
+        result.tree().text().to_string(),
         source,
         "tree must round-trip"
     );
     let errors = result
-        .tree
+        .tree()
         .descendants_with_tokens()
         .filter(|e| e.kind() == SyntaxKind::Error)
         .count();
     assert_eq!(
         errors, 0,
         "valid source produced Error elements:\n{:#?}",
-        result.tree
+        result.tree()
     );
-    result.tree
+    result.tree()
 }
 
 /// Compact rendering of the non-trivia tree for shape assertions.

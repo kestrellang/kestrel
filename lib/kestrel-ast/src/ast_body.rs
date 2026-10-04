@@ -370,6 +370,10 @@ pub struct ClosureParam {
     /// inferred convention may also be `MutBorrow` from the expected type
     /// even when this is `false` (see type-infer closure conventions).
     pub is_mut: bool,
+    /// `Some(span of the first \`it\` reference)` when this is the implicit
+    /// `it` parameter of a closure written without a parameter header. HIR
+    /// lowering anchors the `it` shadowing warnings (E142/E143) there.
+    pub implicit_it: Option<Span>,
 }
 
 // ===== Operators =====

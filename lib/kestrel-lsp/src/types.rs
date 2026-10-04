@@ -162,7 +162,7 @@ pub fn type_references_workspace(
     // `FileId` pointing at the file entity instead.
     let file_entities: Vec<Entity> = world.iter_component::<FilePath>().map(|(e, _)| e).collect();
     for file_entity in file_entities {
-        let cst = compiler.parse(file_entity).tree;
+        let cst = compiler.parse(file_entity).tree();
         for span in type_references_in_file(world, root, &cst, file_entity, target) {
             out.push((file_entity, span));
         }
@@ -189,7 +189,7 @@ mod tests {
         let f = c.set_source("/tmp/tac.ks", src.into());
         c.build(f);
         let cursor = src.find("p: Point").unwrap() + "p: Po".len(); // inside `Point`
-        let cst = c.parse(f).tree;
+        let cst = c.parse(f).tree();
         let (entity, span) = type_at_cursor(c.world(), c.root(), &cst, f, cursor)
             .expect("type at cursor must resolve");
         assert_eq!(&src[span.start..span.end], "Point");
@@ -208,7 +208,7 @@ mod tests {
         let f = c.set_source("/tmp/tac_expr.ks", src.into());
         c.build(f);
         let cursor = src.find("Point(").unwrap() + 2;
-        let cst = c.parse(f).tree;
+        let cst = c.parse(f).tree();
         assert!(type_at_cursor(c.world(), c.root(), &cst, f, cursor).is_none());
     }
 
@@ -226,7 +226,7 @@ mod tests {
             .find(|(e, n)| n.0 == "Point" && c.world().get::<F>(*e).map(|f2| f2.0) == Some(f))
             .map(|(e, _)| e)
             .expect("Point");
-        let cst = c.parse(f).tree;
+        let cst = c.parse(f).tree();
         let refs = type_references_in_file(c.world(), c.root(), &cst, f, point);
         let texts: Vec<&str> = refs.iter().map(|s| &src[s.start..s.end]).collect();
         // Two type-position references: `p: Point` and `-> Point`.

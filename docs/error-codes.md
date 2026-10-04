@@ -74,6 +74,8 @@ comes from the type checker.
 | E139 | '{name}' is not a type | A type annotation names a value or module. |
 | E140 | negative bound on an opaque type must be 'Copyable' | `some P and not Q` only supports `not Copyable`. |
 | E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) is missing; is the standard library imported? |
+| E142 *(warning)* | implicit parameter 'it' shadows the 'it' of an enclosing closure | A closure written without a parameter list uses `it` inside another such closure; the inner `it` is the inner closure's own parameter. Name one of the parameters to make the intent explicit. |
+| E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |
 
 ### Example — E100 (type mismatch)
 
@@ -151,6 +153,7 @@ func unwrap(opt: Int64?) -> Int64 {
 | Code | Message | Explanation |
 |---|---|---|
 | E400 | duplicate @builtin(.{feature}): already declared by '{name}' | Two declarations carry the same `@builtin` annotation. A lang item is identified by its annotation alone, so only the first (in declaration order) is used. |
+| E401 | @builtin(.{feature}) is reserved for the standard library | With a stdlib loaded, only declarations in `std` may claim a lang item; the annotation is ignored. `--no-std` programs declare their own. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |

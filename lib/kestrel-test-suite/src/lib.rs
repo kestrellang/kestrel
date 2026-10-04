@@ -33,7 +33,7 @@ use kestrel_compiler_driver::CompilerDriver;
 
 /// Cached stdlib compiler state. Built once, cloned per test.
 struct StdlibCache {
-    compiler: Compiler,
+    compiler: std::sync::Mutex<Compiler>,
     /// Rendered stdlib-side errors ("path:line: message") found while building
     /// the cache. Diagnostics are emitted into the CACHE compiler's sink at
     /// first query execution; per-test compilers get memoized cache hits that
@@ -42,30 +42,21 @@ struct StdlibCache {
     errors: Vec<String>,
 }
 
-// UNSOUND — audit finding F42, kept deliberately because no fix is free.
+// Thread safety (audit F42, fixed). Tests run as parallel threads that all
+// snapshot this one compiler. Two things make that sound, and both are now
+// checked by the compiler rather than argued in a comment:
 //
-// The retired justification was: "initialized once via OnceLock, then only
-// accessed via world().snapshot(), which clones all data into a fresh,
-// independent World. No concurrent mutation occurs — the cached Compiler is
-// read-only after init." That reasoning misses where the mutation is.
-// `snapshot()` clones the query memos, one of which is `Parse`, whose
-// `ParseResult` holds a rowan CST behind a NON-ATOMIC refcount. Cloning it
-// mutates a counter shared with the cache, so two threads snapshotting (or one
-// snapshotting while another drops its snapshot) race on that counter. The
-// object graph is shared, not copied.
+// 1. `snapshot()` reads the query store through a `RefCell`, whose borrow
+//    flag is not atomic, so snapshots are taken under the `Mutex` below.
+// 2. A snapshot shares the cache's memo values, and it may be dropped on any
+//    thread after the lock is released. That is safe only if every shared
+//    value is atomically reference-counted. `kestrel-hecs` now requires
+//    `Send + Sync` of every component, query output and accumulated value,
+//    and `ParseResult` holds a rowan `GreenNode` (atomic) instead of a
+//    `SyntaxNode` cursor (non-atomic) — the value that made this unsound.
 //
-// A Mutex around `snapshot()` does NOT fix it: the returned snapshot outlives
-// the lock, and dropping it decrements the same shared counters. Locking
-// narrows the window; it never closes it. The clean fix — `Send + Sync` on
-// `QueryFn::Output` — was probed and fails on `ParseResult`, since rowan's
-// `SyntaxNode` is inherently `!Send`/`!Sync`.
-//
-// Live, not theoretical: libtest_mimic runs trials as parallel threads in one
-// process and triage batches many tests per subprocess. It is why the triage
-// default `-j` is conservative. Fixing it means choosing a cost — isolated
-// processes, re-parsing per test, single-threading, or a thread-local cache.
-unsafe impl Send for StdlibCache {}
-unsafe impl Sync for StdlibCache {}
+// With those bounds `Compiler: Send`, so `Mutex<Compiler>` is `Sync` and
+// no `unsafe impl` is needed.
 
 static STDLIB_CACHE: OnceLock<StdlibCache> = OnceLock::new();
 
@@ -83,7 +74,10 @@ fn stdlib_cache() -> &'static StdlibCache {
         // Queries whose deps point to unchanged stdlib entities will
         // be verified as cache hits instead of re-executing.
         compiler.begin_revision();
-        StdlibCache { compiler, errors }
+        StdlibCache {
+            compiler: std::sync::Mutex::new(compiler),
+            errors,
+        }
     })
 }
 
@@ -130,13 +124,14 @@ fn render_stdlib_errors(compiler: &Compiler) -> Vec<String> {
 /// Create a test compiler with or without stdlib pre-loaded.
 pub fn test_compiler(with_stdlib: bool) -> Compiler {
     if with_stdlib {
-        let cache = stdlib_cache();
-        let snapshot = cache.compiler.world().snapshot();
-        Compiler::from_snapshot(
-            snapshot,
-            cache.compiler.root(),
-            cache.compiler.files().clone(),
-        )
+        // A panicking test cannot leave the cache half-mutated (it is only
+        // read here), so a poisoned lock is still safe to use.
+        let cache = stdlib_cache()
+            .compiler
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = cache.world().snapshot();
+        Compiler::from_snapshot(snapshot, cache.root(), cache.files().clone())
     } else {
         Compiler::new()
     }

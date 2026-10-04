@@ -625,7 +625,7 @@ mod tests {
         let mut c = Compiler::new();
         let f = c.set_source("/tmp/repro.ks", src.into());
         c.build(f);
-        let cst = c.parse(f).tree;
+        let cst = c.parse(f).tree();
         let kinds: Vec<_> = cst.descendants().map(|n| n.kind()).collect();
         assert!(
             kinds.contains(&SyntaxKind::FunctionBody),

@@ -100,7 +100,7 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 // Type-position hover: cursor on `Foo` in `func bar(x: Foo)`. There
                 // is no expression at the cursor, so the body-based fallbacks below
                 // would miss it; resolve via the file CST instead.
-                let file_cst = compiler.parse(file_entity).tree;
+                let file_cst = compiler.parse(file_entity).tree();
                 if let Some((entity, span)) =
                     crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
                     && let Some(mut md) = render_entity(world, &sources, entity)

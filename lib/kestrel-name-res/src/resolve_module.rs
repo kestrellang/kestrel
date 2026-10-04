@@ -59,7 +59,11 @@ fn find_module_by_name(ctx: &QueryContext<'_>, root: Entity, name: &str) -> Opti
 }
 
 /// Find a direct child module with the given name.
-fn find_child_module(ctx: &QueryContext<'_>, parent: Entity, name: &str) -> Option<Entity> {
+pub(crate) fn find_child_module(
+    ctx: &QueryContext<'_>,
+    parent: Entity,
+    name: &str,
+) -> Option<Entity> {
     ctx.children_of(parent)
         .iter()
         .find(|&&child| {

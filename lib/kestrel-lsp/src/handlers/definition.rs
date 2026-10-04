@@ -59,7 +59,7 @@ pub async fn handle(
                 // Type-position cursor (`func bar(x: Foo)`): resolve via CST before
                 // falling into the body-based path. The body lookup wouldn't find
                 // anything for type positions because they don't appear in HIR exprs.
-                let file_cst = compiler.parse(file_entity).tree;
+                let file_cst = compiler.parse(file_entity).tree();
                 if let Some((entity, _span)) =
                     crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
                     && let Some(loc) = target_to_location(world, &sources, Target::Entity(entity))

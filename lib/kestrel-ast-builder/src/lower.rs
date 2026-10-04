@@ -1318,6 +1318,7 @@ impl LowerCtx {
                             pattern,
                             ty,
                             is_mut,
+                            implicit_it: None,
                         }
                     })
                     .collect()
@@ -1325,9 +1326,14 @@ impl LowerCtx {
             .unwrap_or_default();
 
         // Implicit `it` parameter: when a closure has no explicit params and its
-        // body references `it` (not inside a nested closure), inject `it` as a param.
-        // `{ it + 1 }` becomes `{ (it) in it + 1 }`.
-        if !has_explicit_params && params.is_empty() && closure_body_references_it(node) {
+        // body references `it`, inject `it` as a param — `{ it + 1 }` becomes
+        // `{ (it) in it + 1 }`. It belongs to the innermost headerless closure
+        // and always wins over an outer binding named `it` (both shadowings
+        // warn in HIR lowering: E142/E143).
+        if !has_explicit_params
+            && params.is_empty()
+            && let Some(first_ref) = closure_body_it_reference(node)
+        {
             let pat = self.alloc_pat(AstPat::Binding {
                 is_mut: false,
                 name: "it".to_string(),
@@ -1338,6 +1344,7 @@ impl LowerCtx {
                 pattern: pat,
                 ty: None,
                 is_mut: false,
+                implicit_it: Some(self.span(&first_ref)),
             });
         }
 
@@ -2350,7 +2357,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root, None);
+        build_declarations(&mut world, file, &result.tree(), root, None);
 
         // Find first entity with a Body component
         find_body(&world, root).expect("no Body found in declarations")
@@ -2835,7 +2842,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root, None);
+        build_declarations(&mut world, file, &result.tree(), root, None);
 
         let body = find_body(&world, root).expect("field should have Body");
         assert!(
@@ -2872,7 +2879,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root, None);
+        build_declarations(&mut world, file, &result.tree(), root, None);
 
         // Count entities with Body component
         let mut body_count = 0;
@@ -2935,7 +2942,7 @@ mod tests {
             source,
             tokens.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, file, &result.tree, root, None);
+        build_declarations(&mut world, file, &result.tree(), root, None);
 
         // Collect all (name, body) pairs
         let mut bodies = Vec::new();
@@ -2969,28 +2976,33 @@ mod tests {
     }
 }
 
-/// Whether a closure body (the CST node for ExprClosure) refers to the NAME
-/// `it`: a value path whose first segment is `it` (`it`, `it.count`,
-/// `it.0`…). A member, argument label, or binding spelled `it` (`x.it`,
-/// `f(it: 1)`, `let it = …`) is not a reference (audit H8: this used to be a
-/// search for any `it` token). Does NOT descend into nested closures — an
-/// `it` inside `{ list.map { it } }` belongs to the inner closure only.
-/// Interpolation holes are ordinary CST nodes, so `"\(it)"` counts.
-fn closure_body_references_it(node: &SyntaxNode) -> bool {
+/// The first reference to the NAME `it` that this closure (the CST node for
+/// ExprClosure) owns, in source order: a value path whose first segment is
+/// `it` (`it`, `it.count`, `it.0`…). A member, argument label, or binding
+/// spelled `it` (`x.it`, `f(it: 1)`, `let it = …`) is not a reference (audit
+/// H8: this used to be a search for any `it` token).
+///
+/// `it` belongs to the innermost enclosing closure WITHOUT a parameter
+/// header. So the walk stops at a nested headerless closure (`{ list.map {
+/// it } }` — that `it` is the inner closure's) but looks through a nested
+/// closure that declares its parameters (`{ ys.filter { (y) in y == it } }`
+/// — that `it` is the outer closure's). Interpolation holes are ordinary
+/// CST nodes, so `"\(it)"` counts.
+fn closure_body_it_reference(node: &SyntaxNode) -> Option<SyntaxNode> {
     use kestrel_syntax_tree::ast::{self, AstNode};
-    fn walk(node: &SyntaxNode) -> bool {
-        node.children().any(|child| {
-            if matches!(
-                child.kind(),
-                SyntaxKind::ExprClosure | SyntaxKind::ClosureParams
-            ) {
-                return false;
-            }
-            let names_it = ast::ExprPath::cast(child.clone()).is_some_and(|path| {
-                path.expression().is_none()
-                    && path.identifier_token().is_some_and(|t| t.text() == "it")
-            });
-            names_it || walk(&child)
+    fn walk(node: &SyntaxNode) -> Option<SyntaxNode> {
+        node.children().find_map(|child| match child.kind() {
+            SyntaxKind::ClosureParams => None,
+            SyntaxKind::ExprClosure if find_child(&child, SyntaxKind::ClosureParams).is_none() => {
+                None
+            },
+            _ => {
+                let names_it = ast::ExprPath::cast(child.clone()).is_some_and(|path| {
+                    path.expression().is_none()
+                        && path.identifier_token().is_some_and(|t| t.text() == "it")
+                });
+                if names_it { Some(child) } else { walk(&child) }
+            },
         })
     }
     walk(node)

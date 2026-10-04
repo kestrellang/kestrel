@@ -100,7 +100,7 @@ impl QueryFn for BuiltinIndex {
 
     fn execute(&self, ctx: &QueryContext<'_>) -> Arc<BuiltinMap> {
         let mut map = HashMap::new();
-        scan_builtins(ctx, self.root, &mut map);
+        scan_builtins(ctx, self.root, self.root, &mut map);
         Arc::new(BuiltinMap(map))
     }
 }
@@ -108,13 +108,45 @@ impl QueryFn for BuiltinIndex {
 /// Scan an entity and its children for @builtin attributes, depth-first in
 /// declaration order. The FIRST annotation of a builtin wins; any later one
 /// is a duplicate, reported as E400 by kestrel-analyze (`duplicate_builtin`).
-fn scan_builtins(ctx: &QueryContext<'_>, entity: Entity, map: &mut HashMap<Builtin, Entity>) {
-    if let Some(builtin) = ctx.query(EntityBuiltin { entity }) {
+/// Annotations [`builtin_annotation_allowed`] rejects never enter the index.
+fn scan_builtins(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    entity: Entity,
+    map: &mut HashMap<Builtin, Entity>,
+) {
+    if let Some(builtin) = ctx.query(EntityBuiltin { entity })
+        && builtin_annotation_allowed(ctx, root, entity)
+    {
         map.entry(builtin).or_insert(entity);
     }
     for &child in ctx.children_of(entity) {
-        scan_builtins(ctx, child, map);
+        scan_builtins(ctx, root, child, map);
     }
+}
+
+/// Whether `entity`'s `@builtin` annotation may define a lang item. With a
+/// stdlib loaded (a top-level `std` module exists) only declarations inside
+/// it may — user code cannot claim a lang item (E401, kestrel-analyze
+/// `duplicate_builtin`). Without a stdlib (`--no-std` programs, test
+/// preludes) the program supplies its own lang items, so any module may.
+///
+/// Single source of truth for both the index and the diagnostic. Stdlib
+/// membership is by module path, so a user file declaring `module std.x`
+/// still passes; telling stdlib files apart by origin needs a file-level
+/// marker the loader does not set today.
+pub fn builtin_annotation_allowed(ctx: &QueryContext<'_>, root: Entity, entity: Entity) -> bool {
+    let Some(std_module) = crate::resolve_module::find_child_module(ctx, root, "std") else {
+        return true;
+    };
+    let mut current = entity;
+    while let Some(parent) = ctx.parent_of(current) {
+        if current == std_module {
+            return true;
+        }
+        current = parent;
+    }
+    false
 }
 
 // ===== ResolveBuiltin: reverse lookup (Builtin → Entity) =====

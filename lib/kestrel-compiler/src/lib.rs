@@ -168,7 +168,7 @@ impl Compiler {
         kestrel_ast_builder::build_declarations(
             &mut self.world,
             file_entity,
-            &result.tree,
+            &result.tree(),
             self.root,
             Some(&self.target),
         );
@@ -736,7 +736,7 @@ mod tests {
         // Any parse through the query always yields a SourceFile root node
         let mut c = Compiler::new();
         let f = c.set_source("t.ks", "module Main".into());
-        assert_eq!(c.parse(f).tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(c.parse(f).tree().kind(), SyntaxKind::SourceFile);
     }
 
     #[test]
@@ -747,7 +747,7 @@ mod tests {
         let result = c.parse(f);
 
         assert!(result.errors.is_empty());
-        assert_eq!(result.tree.children().count(), 3);
+        assert_eq!(result.tree().children().count(), 3);
     }
 
     #[test]
@@ -758,7 +758,7 @@ mod tests {
         let result = c.parse(f);
         assert!(result.errors.is_empty());
 
-        let child_kinds: Vec<_> = result.tree.children().map(|n| n.kind()).collect();
+        let child_kinds: Vec<_> = result.tree().children().map(|n| n.kind()).collect();
         // SourceFile children are module declaration + struct declaration nodes
         assert!(
             child_kinds.contains(&SyntaxKind::ModuleDeclaration),
@@ -779,8 +779,8 @@ mod tests {
         let f = c.set_source("t.ks", "".into());
         let result = c.parse(f);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 0);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().children().count(), 0);
         assert!(result.errors.is_empty());
         assert!(c.diagnostics().is_empty());
     }
@@ -825,7 +825,7 @@ mod tests {
         let f = c.set_source("t.ks", "module".into());
         let result = c.parse(f);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
     }
 
     // ================================================================
@@ -840,7 +840,7 @@ mod tests {
 
         let r1 = c.parse(f);
         let r2 = c.parse(f);
-        assert_eq!(r1.tree.children().count(), r2.tree.children().count());
+        assert_eq!(r1.tree().children().count(), r2.tree().children().count());
         assert_eq!(r1.errors.len(), r2.errors.len());
     }
 
@@ -855,7 +855,7 @@ mod tests {
         c.set_source("t.ks", "module A\nstruct B {}\nstruct C {}".into());
         let r2 = c.parse(f);
 
-        assert!(r2.tree.children().count() > r1.tree.children().count());
+        assert!(r2.tree().children().count() > r1.tree().children().count());
     }
 
     #[test]
@@ -887,8 +887,8 @@ mod tests {
         let e = c.world.spawn();
         let result = c.parse(e);
 
-        assert_eq!(result.tree.kind(), SyntaxKind::SourceFile);
-        assert_eq!(result.tree.children().count(), 0);
+        assert_eq!(result.tree().kind(), SyntaxKind::SourceFile);
+        assert_eq!(result.tree().children().count(), 0);
         assert!(c.diagnostics().is_empty());
     }
 
@@ -1038,7 +1038,7 @@ mod tests {
         // Parse should reflect the new source.
         let r = c.parse(f2);
         assert!(
-            r.tree
+            r.tree()
                 .children()
                 .any(|n| n.kind() == kestrel_syntax_tree::SyntaxKind::StructDeclaration)
         );
@@ -1081,7 +1081,7 @@ mod tests {
         // Verify f2 actually got updated results
         let r2 = c.parse(f2);
         assert_eq!(
-            r2.tree.children().count(),
+            r2.tree().children().count(),
             2,
             "f2 should have module + struct"
         );

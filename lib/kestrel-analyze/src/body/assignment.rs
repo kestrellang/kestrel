@@ -464,6 +464,10 @@ fn check_target(
             }
         },
 
+        // A target that failed to lower (e.g. an undefined name, E132) was
+        // already reported; "not a valid assignment target" would be noise.
+        HirExpr::Error { .. } => {},
+
         // All other expressions are invalid assignment targets
         _ => {
             push_assign_to_expression(cx, target, &mut *diags);

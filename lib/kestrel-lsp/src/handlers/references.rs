@@ -86,7 +86,7 @@ fn target_at(
     compiler: &kestrel_compiler::Compiler,
 ) -> Option<Target> {
     // Type-position cursor (`func bar(x: Foo)`): resolve via the file CST.
-    let file_cst = compiler.parse(file_entity).tree;
+    let file_cst = compiler.parse(file_entity).tree();
     if let Some((entity, _)) =
         crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
     {

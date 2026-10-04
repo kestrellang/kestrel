@@ -498,7 +498,7 @@ fn dump_syntax(kind: DumpKind, files: &[String], verbose: bool) -> Result<(), Ex
             DumpKind::Cst => {
                 println!("; cst: {}", file);
                 // SyntaxNode's Debug format is the tree-view CST representation.
-                println!("{:#?}", compiler.parse(entity).tree);
+                println!("{:#?}", compiler.parse(entity).tree());
             },
             _ => unreachable!("dump_syntax called with non-syntax kind"),
         }

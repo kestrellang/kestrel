@@ -1411,6 +1411,49 @@ impl LowerCtx<'_> {
     }
 
     /// Lower a closure expression.
+    /// Warn when a closure's implicit `it` (first referenced at `first_ref`)
+    /// hides another `it` in scope. The implicit parameter always wins — it
+    /// belongs to the innermost headerless closure and never captures an
+    /// outer binding — so either way the user may have meant the other one.
+    /// Call before the implicit parameter is defined.
+    fn warn_implicit_it_shadowing(&self, first_ref: &Span) {
+        let Some(outer) = self.lookup_local("it") else {
+            return;
+        };
+        let (code, message, outer_label) = match self.implicit_it_locals.get(&outer) {
+            Some(_) => (
+                "E142",
+                "implicit parameter 'it' shadows the 'it' of an enclosing closure",
+                "the enclosing closure's 'it'",
+            ),
+            None => (
+                "E143",
+                "implicit parameter 'it' shadows the outer binding 'it'",
+                "outer 'it' declared here",
+            ),
+        };
+        let outer_span = self
+            .implicit_it_locals
+            .get(&outer)
+            .cloned()
+            .unwrap_or_else(|| self.locals[outer].span.clone());
+        self.ctx.accumulate(
+            kestrel_reporting::Diagnostic::warning()
+                .with_code(code)
+                .with_message(message)
+                .with_labels(vec![
+                    kestrel_reporting::Label::primary(first_ref.file_id, first_ref.range())
+                        .with_message("this is the innermost closure's own parameter"),
+                    kestrel_reporting::Label::secondary(outer_span.file_id, outer_span.range())
+                        .with_message(outer_label),
+                ])
+                .with_notes(vec![
+                    "name the closure's parameter to make it explicit, e.g. `{ (x) in ... }`"
+                        .to_string(),
+                ]),
+        );
+    }
+
     fn lower_closure(
         &mut self,
         body: &AstBody,
@@ -1443,7 +1486,13 @@ impl LowerCtx<'_> {
                 // mutable so `x`/`x.field` assignment is allowed (no E604/E201)
                 // and the body lowers the param as a by-reference place.
                 let param_is_mut = is_mut || p.is_mut;
+                if let Some(first_ref) = &p.implicit_it {
+                    self.warn_implicit_it_shadowing(first_ref);
+                }
                 let local = self.define_local(&name, param_is_mut, span.clone());
+                if let Some(first_ref) = &p.implicit_it {
+                    self.implicit_it_locals.insert(local, first_ref.clone());
+                }
                 let ty =
                     p.ty.as_ref()
                         .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));

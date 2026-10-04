@@ -185,7 +185,7 @@ fn resolve_type_at(
     compiler: &kestrel_compiler::Compiler,
 ) -> Option<Entity> {
     // Type-position cursor (e.g., `func bar(x: Foo)`).
-    let file_cst = compiler.parse(file_entity).tree;
+    let file_cst = compiler.parse(file_entity).tree();
     if let Some((entity, _)) =
         crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
         && is_type_entity(world, entity)

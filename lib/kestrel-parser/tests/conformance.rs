@@ -27,7 +27,7 @@ fn corpus_conforms_to_grammar() {
                 continue;
             }
             checked += 1;
-            for v in validate(&result.tree) {
+            for v in validate(&result.tree()) {
                 let at = usize::from(v.range.start());
                 let line = source[..at].matches('\n').count() + 1;
                 failures.push(format!("{}:{line}: {v}", path.display()));

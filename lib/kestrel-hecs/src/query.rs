@@ -51,8 +51,8 @@ pub enum Dependency {
 ///     }
 /// }
 /// ```
-pub trait QueryFn: Hash + Eq + Clone + 'static {
-    type Output: Clone + Hash + 'static;
+pub trait QueryFn: Hash + Eq + Clone + Send + Sync + 'static {
+    type Output: Clone + Hash + Send + Sync + 'static;
 
     /// Execute the query. All component reads and sub-query calls go
     /// through `ctx`, which records dependencies automatically.
@@ -87,17 +87,17 @@ struct MemoEntry<V> {
 ///
 /// Used by `deps_unchanged` to recursively verify sub-query dependencies
 /// without knowing the sub-query's concrete type.
-type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision>;
+type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision + Send + Sync>;
 
 /// Type-erased store that can be cloned. Pairs a `Box<dyn Any>` with a
 /// clone function so we can duplicate query caches across snapshots.
 struct ErasedStore {
-    data: Box<dyn Any>,
-    clone_fn: fn(&dyn Any) -> Box<dyn Any>,
+    data: Box<dyn Any + Send + Sync>,
+    clone_fn: fn(&(dyn Any + Send + Sync)) -> Box<dyn Any + Send + Sync>,
 }
 
 impl ErasedStore {
-    fn new<T: Clone + 'static>(value: T) -> Self {
+    fn new<T: Clone + Send + Sync + 'static>(value: T) -> Self {
         Self {
             data: Box::new(value),
             clone_fn: |any| {
@@ -289,7 +289,7 @@ impl<'a> QueryContext<'a> {
     /// in kestrel-compiler) for reporting diagnostics — it enforces that
     /// errors go through `ToDiagnostic` for consistent formatting.
     /// Use `accumulate` directly only for non-diagnostic side-effects.
-    pub fn accumulate<T: Clone + 'static>(&self, value: T) {
+    pub fn accumulate<T: Clone + Send + Sync + 'static>(&self, value: T) {
         // Associate with the current active query
         let active = self.active.borrow();
         let query_key = active.last().map(|a| a.key.clone()).unwrap_or(QueryKey {

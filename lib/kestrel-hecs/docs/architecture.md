@@ -8,7 +8,7 @@ Hierarchical Entity Component System with incremental queries, designed for use 
 |------|--------|-------------|
 | `World` | `world.rs` | Central database. Owns entities, components, hierarchy, queries, accumulators |
 | `Entity` | `entity.rs` | Compact runtime handle (u32 index). Cheap to copy and compare |
-| `Component` | `component.rs` | Trait alias for `Any + Clone + 'static`. Any cloneable type qualifies |
+| `Component` | `component.rs` | Trait alias for `Any + Clone + Send + Sync + 'static`. Any cloneable, thread-safe type qualifies (query outputs and accumulated values carry the same `Send + Sync` bound, so `World` is `Send`; audit F42) |
 | `ComponentStore` | `component.rs` | Type-erased column storage. Each component type gets its own dense column |
 | `QueryFn` | `query.rs` | Trait for memoized queries with automatic dependency tracking |
 | `QueryContext` | `query.rs` | Read-only view of the world during query phase. Records dependencies |

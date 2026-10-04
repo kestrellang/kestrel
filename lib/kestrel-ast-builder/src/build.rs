@@ -201,7 +201,7 @@ mod tests {
         let token_iter = tokens.iter().map(|t| (t.value.clone(), t.span.clone()));
         let result = kestrel_parser::parse_source_file_from_source(source, token_iter);
 
-        build_declarations(&mut world, file_entity, &result.tree, root, None);
+        build_declarations(&mut world, file_entity, &result.tree(), root, None);
         (world, root, file_entity)
     }
 
@@ -303,7 +303,7 @@ mod tests {
             src1,
             tokens1.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, f1, &result1.tree, root, None);
+        build_declarations(&mut world, f1, &result1.tree(), root, None);
 
         // File 2
         let f2 = world.spawn();
@@ -315,7 +315,7 @@ mod tests {
             src2,
             tokens2.iter().map(|t| (t.value.clone(), t.span.clone())),
         );
-        build_declarations(&mut world, f2, &result2.tree, root, None);
+        build_declarations(&mut world, f2, &result2.tree(), root, None);
 
         // Both files should share the same module entity
         let shared = find_child_by_name(&world, root, &NodeKind::Module, "Shared").unwrap();

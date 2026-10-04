@@ -12,7 +12,7 @@
 //! ```
 //! use kestrel_hecs::{World, QueryFn, QueryContext};
 //!
-//! // Define components (any Clone + 'static type)
+//! // Define components (any Clone + Send + Sync + 'static type)
 //! #[derive(Clone)]
 //! struct Name(String);
 //!

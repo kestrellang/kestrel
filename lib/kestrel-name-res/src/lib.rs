@@ -34,7 +34,9 @@ pub use protocol_members::{
     ProtocolAssociatedTypes, ProtocolMember, ProtocolMemberMap, ProtocolMembers,
     ProtocolMembersByName,
 };
-pub use resolve_builtin::{BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin};
+pub use resolve_builtin::{
+    BuiltinIndex, BuiltinMap, EntityBuiltin, ResolveBuiltin, builtin_annotation_allowed,
+};
 pub use resolve_module::{ResolveModulePath, StdModules};
 pub use resolve_name::{NameResolution, ResolveName};
 pub use resolve_type::{ResolveTypePath, TypePathChain, TypeResolution, resolve_type_path_chain};
