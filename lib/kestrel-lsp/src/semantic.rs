@@ -2,13 +2,26 @@
 //!
 //! Most of M2's "what's at the cursor?" logic funnels through these helpers
 //! so handlers stay narrow and the lookup rules stay in one place.
+//!
+//! Positions are never matched against spans here. A body's
+//! [`BodySourceMap`](kestrel_hir_lower::BodySourceMap) (from
+//! `LowerBodyWithSourceMap`) answers "which HIR id is at this offset" and
+//! "where is this local declared"; a declaration's `CstNode` pointer answers
+//! "which declaration is this node". Both are produced by the passes that
+//! built the ids, so the answers are exact.
 
-use kestrel_ast_builder::{DeclSpan, FileId, FilePath, NodeKind, Valued};
-use kestrel_hecs::{Entity, World};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use kestrel_ast_builder::{CstNode, FileId, FilePath, NodeKind, Valued};
+use kestrel_hecs::{Entity, QueryContext, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat, HirPatId};
+use kestrel_hir::res::LocalId;
 use kestrel_hir::ty::HirTy;
+use kestrel_hir_lower::{LowerBodyWithSourceMap, LoweredBody};
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::{SyntaxNode, SyntaxNodePtr};
+use kestrel_type_infer::InferBody;
 use rowan::TextSize;
 
 /// Look up the file entity for a compiler-key path.
@@ -133,21 +146,156 @@ pub fn hir_ty_entity_at(ty: &HirTy, offset: usize) -> Option<(Entity, Span)> {
         .min_by_key(|(_, s)| s.end - s.start)
 }
 
-/// Find the smallest HIR expression whose span contains `offset`. Returns
-/// `None` when no expression covers the offset (e.g. cursor in trivia
-/// between expressions, or in the function signature).
-pub fn hir_expr_at(body: &HirBody, offset: usize) -> Option<HirExprId> {
-    let mut best: Option<(HirExprId, usize)> = None;
-    for (id, expr) in body.exprs.iter() {
-        let span = hir_expr_span(expr);
-        if span.start <= offset && offset <= span.end {
-            let len = span.end - span.start;
-            if best.map(|(_, l)| len < l).unwrap_or(true) {
-                best = Some((id, len));
-            }
-        }
+/// `body`'s HIR with its source map.
+pub fn lowered_body(world: &World, root: Entity, body: Entity) -> Option<Arc<LoweredBody>> {
+    world
+        .query_context()
+        .query(LowerBodyWithSourceMap { entity: body, root })
+}
+
+/// The HIR expression at `offset` in `body` (whose lowering is `lowered`):
+/// the path segment there, else the innermost lowered node around it.
+pub fn expr_at(
+    world: &World,
+    body: Entity,
+    lowered: &LoweredBody,
+    offset: usize,
+) -> Option<HirExprId> {
+    let root = kestrel_ast_builder::syntax::file_root(world, body)?;
+    lowered
+        .source_map
+        .expr_at(&root, TextSize::from(offset as u32))
+}
+
+/// The HIR pattern at `offset` in `body`.
+pub fn pat_at(
+    world: &World,
+    body: Entity,
+    lowered: &LoweredBody,
+    offset: usize,
+) -> Option<HirPatId> {
+    let root = kestrel_ast_builder::syntax::file_root(world, body)?;
+    lowered
+        .source_map
+        .pat_at(&root, TextSize::from(offset as u32))
+}
+
+/// The local whose declaring identifier is at `offset` — a binding in a
+/// body, or a parameter in a signature — with the body that owns it.
+pub fn local_declared_at(
+    world: &World,
+    root: Entity,
+    file_entity: Entity,
+    offset: usize,
+) -> Option<(Entity, LocalId)> {
+    let pos = TextSize::from(offset as u32);
+    // A binding inside a body, else a parameter in the signature of the
+    // declaration around the cursor (its body's map records it).
+    let candidates = [
+        body_entity_at(world, file_entity, offset),
+        enclosing_decl_at(world, file_entity, offset).filter(|d| world.has::<Valued>(*d)),
+    ];
+    candidates.into_iter().flatten().find_map(|body| {
+        let local = lowered_body(world, root, body)?
+            .source_map
+            .local_declared_at(pos)?;
+        Some((body, local))
+    })
+}
+
+/// Where `local` (of `body`) is declared: its file and the span of its name.
+/// `None` for a local the source does not spell (`self`, an implicit `it`,
+/// a desugaring temporary).
+pub fn local_name_site(
+    world: &World,
+    root: Entity,
+    body: Entity,
+    local: LocalId,
+) -> Option<(Entity, Span)> {
+    let lowered = lowered_body(world, root, body)?;
+    let name = lowered.source_map.local_source(local)?.name;
+    let file = crate::references::entity_file(world, body)?;
+    Some((file, Span::new(file.index(), name.into())))
+}
+
+/// What the cursor names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// A declaration — references span the workspace.
+    Entity(Entity),
+    /// A local of `body` — references stay in that body.
+    Local { body: Entity, id: LocalId },
+}
+
+/// The symbol at `offset`: the one lookup behind rename, find-references and
+/// document-highlight. In order:
+///
+/// 1. a type written in a signature or annotation (`Foo` in `x: Foo`);
+/// 2. a local's declaring identifier (a binding, or a parameter name);
+/// 3. the expression at the cursor in a body — a use of a local, a
+///    definition, a member resolved by inference, a segment of a type in
+///    expression position;
+/// 4. a declaration's own name.
+///
+/// An overload set is ambiguous and resolves to nothing.
+pub fn target_at(
+    world: &World,
+    root: Entity,
+    file_entity: Entity,
+    offset: usize,
+) -> Option<Target> {
+    let file_cst = kestrel_ast_builder::syntax::file_root(world, file_entity)?;
+    if let Some((entity, _)) =
+        crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
+    {
+        return Some(Target::Entity(entity));
     }
-    best.map(|(id, _)| id)
+    if let Some((body, id)) = local_declared_at(world, root, file_entity, offset) {
+        return Some(Target::Local { body, id });
+    }
+    if let Some(body) = body_entity_at(world, file_entity, offset)
+        && let Some(lowered) = lowered_body(world, root, body)
+        && let Some(expr) = expr_at(world, body, &lowered, offset)
+        && let Some(target) = resolve_expr(
+            &world.query_context(),
+            root,
+            body,
+            &lowered.body,
+            expr,
+            offset,
+        )
+    {
+        return Some(target);
+    }
+    crate::references::decl_at_name_offset(world, file_entity, offset).map(Target::Entity)
+}
+
+/// What the expression `expr` of `body` names.
+pub fn resolve_expr(
+    ctx: &QueryContext<'_>,
+    root: Entity,
+    body: Entity,
+    hir: &HirBody,
+    expr: HirExprId,
+    offset: usize,
+) -> Option<Target> {
+    match &hir.exprs[expr] {
+        HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
+        HirExpr::Local(id, _) => Some(Target::Local { body, id: *id }),
+        // A type in expression position: the segment under the cursor.
+        HirExpr::TypeRef { ty, .. } => hir_ty_entity_at(ty, offset).map(|(e, _)| Target::Entity(e)),
+        // Ambiguous — which overload?
+        HirExpr::OverloadSet { .. } => None,
+        HirExpr::MethodCall { .. }
+        | HirExpr::Field { .. }
+        | HirExpr::Call { .. }
+        | HirExpr::ImplicitMember { .. }
+        | HirExpr::ProtocolCall { .. } => {
+            let typed = ctx.query(InferBody { entity: body, root })?;
+            typed.resolutions.get(&expr).copied().map(Target::Entity)
+        },
+        _ => None,
+    }
 }
 
 pub fn hir_pat_span(pat: &HirPat) -> Span {
@@ -167,49 +315,39 @@ pub fn hir_pat_span(pat: &HirPat) -> Span {
     }
 }
 
-/// Find the smallest HIR pattern whose span contains `offset`.
-pub fn hir_pat_at(body: &HirBody, offset: usize) -> Option<HirPatId> {
-    let mut best: Option<(HirPatId, usize)> = None;
-    for (id, pat) in body.pats.iter() {
-        let span = hir_pat_span(pat);
-        if span.start <= offset && offset <= span.end {
-            let len = span.end - span.start;
-            if best.map(|(_, l)| len < l).unwrap_or(true) {
-                best = Some((id, len));
-            }
-        }
-    }
-    best.map(|(id, _)| id)
-}
-
 /// Pull the CST root for a file entity from the compiler. We re-parse rather
 /// than chasing `Valued` because not every node carries a CstNode pointer.
 pub fn file_cst(compiler: &kestrel_compiler::Compiler, file_entity: Entity) -> SyntaxNode {
     compiler.parse(file_entity).tree()
 }
 
-/// Smallest entity in `file_entity` whose `DeclSpan` covers `offset`. Falls
-/// back to walking the module hierarchy when no `DeclSpan` matches (e.g.
-/// the cursor is at file scope between two top-level decls). Used by
-/// completion to find the lexical scope at the cursor.
+/// The innermost declaration around `offset` in `file_entity`: walk out from
+/// the token at the cursor to the first node a declaration's `CstNode`
+/// points at. Falls back to the module that owns the file (the cursor is at
+/// file scope, between declarations). Used for the lexical scope at the
+/// cursor (completion, type lookups, rename collision checks) and for "the
+/// cursor is on a declaration".
 pub fn enclosing_decl_at(world: &World, file_entity: Entity, offset: usize) -> Option<Entity> {
-    let mut best: Option<(Entity, usize)> = None;
-    for (entity, span) in world.iter_component::<DeclSpan>() {
-        let Some(fid) = world.get::<FileId>(entity) else {
-            continue;
-        };
-        if fid.0 != file_entity {
-            continue;
-        }
-        let s = &span.0;
-        if s.start <= offset && offset <= s.end {
-            let len = s.end - s.start;
-            if best.map(|(_, l)| len < l).unwrap_or(true) {
-                best = Some((entity, len));
-            }
-        }
-    }
-    best.map(|(e, _)| e).or_else(|| {
+    let decls: HashMap<SyntaxNodePtr, Entity> = world
+        .iter_component::<CstNode>()
+        .filter(|(e, _)| world.get::<FileId>(*e).is_some_and(|f| f.0 == file_entity))
+        .map(|(e, cst)| (cst.0, e))
+        .collect();
+    // A declaration's node also holds the trivia (and attributes) before it;
+    // the cursor is in the declaration from its `DeclSpan` on.
+    let starts_by = |decl: Entity| {
+        world
+            .get::<kestrel_ast_builder::DeclSpan>(decl)
+            .is_none_or(|s| s.0.start <= offset)
+    };
+    let innermost = kestrel_ast_builder::syntax::file_root(world, file_entity).and_then(|root| {
+        let token = kestrel_hir_lower::source_map::token_at(&root, TextSize::from(offset as u32))?;
+        token
+            .parent_ancestors()
+            .filter_map(|n| decls.get(&SyntaxNodePtr::new(&n)).copied())
+            .find(|&decl| starts_by(decl))
+    });
+    innermost.or_else(|| {
         // Fall back to the module entity that owns this file. We find it by
         // looking at any other declaration's parent; that's the file's
         // module container. If the file is empty, return None.
@@ -250,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn hir_expr_at_returns_inner_expr() {
+    fn expr_at_returns_inner_expr() {
         let mut c = Compiler::new();
         let src = "module Test\nfunc foo() -> lang.i64 { 42 }\n";
         let f = c.set_source("/tmp/x.ks", src.into());
@@ -259,17 +397,44 @@ mod tests {
         let body_offset = src.find("42").unwrap();
         let body_entity = body_entity_at(c.world(), f, body_offset).expect("body");
         let world = c.world();
-        let ctx = world.query_context();
-        let hir = ctx
-            .query(kestrel_hir_lower::LowerBody {
-                entity: body_entity,
-                root: c.root(),
-            })
-            .expect("hir");
+        let lowered = lowered_body(world, c.root(), body_entity).expect("hir");
 
-        let id = hir_expr_at(&hir, body_offset).expect("expr");
-        let span = hir_expr_span(&hir.exprs[id]);
+        let id = expr_at(world, body_entity, &lowered, body_offset).expect("expr");
+        let span = hir_expr_span(&lowered.body.exprs[id]);
         assert_eq!(&src[span.start..span.end], "42");
+    }
+
+    /// The declaration around a cursor comes from the `CstNode` pointers:
+    /// a method inside a struct, the struct between its members, the
+    /// module at file scope.
+    #[test]
+    fn enclosing_decl_at_walks_out_to_the_innermost_declaration() {
+        use kestrel_ast_builder::Name;
+        let mut c = Compiler::new();
+        let src =
+            "module Test\n\nstruct S {\n  var a: lang.i64\n\n  func m() -> lang.i64 { 1 }\n}\n";
+        let f = c.set_source("/tmp/decl_at.ks", src.into());
+        c.build(f);
+        let world = c.world();
+        let name_at = |offset: usize| {
+            let decl = enclosing_decl_at(world, f, offset).expect("decl");
+            (
+                world.get::<NodeKind>(decl).cloned(),
+                world.get::<Name>(decl).map(|n| n.0.clone()),
+            )
+        };
+        assert_eq!(
+            name_at(src.find("1 }").unwrap()),
+            (Some(NodeKind::Function), Some("m".into()))
+        );
+        assert_eq!(
+            name_at(src.find("\n\n  func").unwrap() + 1),
+            (Some(NodeKind::Struct), Some("S".into()))
+        );
+        assert_eq!(
+            name_at(src.find("\n\nstruct").unwrap() + 1).0,
+            Some(NodeKind::Module)
+        );
     }
 
     /// G26: `B.Item.zero()` lowers its receiver to `HirExpr::TypeRef`; the

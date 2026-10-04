@@ -11,15 +11,11 @@ use std::collections::HashMap;
 
 use kestrel_ast_builder::{DeclSpan, FilePath};
 use kestrel_hecs::{Entity, World};
-use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
-use kestrel_hir::res::LocalId;
-use kestrel_hir_lower::LowerBody;
-use kestrel_type_infer::InferBody;
 use tower_lsp::lsp_types::{Location, Range, ReferenceParams, Url};
 
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite, clip_to_identifier};
-use crate::semantic;
+use crate::semantic::{self, Target, target_at};
 use crate::server::{SharedState, path_to_url, url_to_path};
 
 pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<Location>> {
@@ -51,7 +47,7 @@ pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<L
                 let world = compiler.world();
                 let root = compiler.root();
 
-                let target = target_at(world, file_entity, offset, root, compiler)?;
+                let target = target_at(world, root, file_entity, offset)?;
                 let sites = collect_sites(world, root, &target, include_declaration, compiler);
 
                 let mut by_file: HashMap<Entity, LineIndex> = HashMap::new();
@@ -68,83 +64,6 @@ pub async fn handle(state: SharedState, params: ReferenceParams) -> Option<Vec<L
         )
         .await
         .flatten()
-}
-
-/// What the cursor resolves to.
-enum Target {
-    /// External entity — references span the workspace.
-    Entity(Entity),
-    /// Local within a body — references stay in that body.
-    Local { body: Entity, id: LocalId },
-}
-
-fn target_at(
-    world: &World,
-    file_entity: Entity,
-    offset: usize,
-    root: Entity,
-    compiler: &kestrel_compiler::Compiler,
-) -> Option<Target> {
-    // Type-position cursor (`func bar(x: Foo)`): resolve via the file CST.
-    let file_cst = compiler.parse(file_entity).tree();
-    if let Some((entity, _)) =
-        crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
-    {
-        return Some(Target::Entity(entity));
-    }
-
-    // First try: cursor is inside a function body. Resolve the HIR expression.
-    if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
-        let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, offset, &ctx, root)
-        {
-            return Some(t);
-        }
-    }
-
-    // Fallback: cursor is on a declaration's own identifier (function name,
-    // struct field decl, etc). `decl_at_name_offset`, not bare
-    // `enclosing_decl_at`: the latter maps every offset inside a decl to that
-    // decl, so a cursor on a `let` binding or a parameter name (neither is an
-    // `HirExpr`, so the branch above can't see them) would report the
-    // enclosing function's references instead. Same root cause as the rename
-    // corruption in F2; here it is merely wrong, not destructive.
-    let decl = crate::references::decl_at_name_offset(world, file_entity, offset)?;
-    Some(Target::Entity(decl))
-}
-
-fn resolve_expr(
-    hir: &HirBody,
-    body: Entity,
-    expr_id: HirExprId,
-    offset: usize,
-    ctx: &kestrel_hecs::QueryContext<'_>,
-    root: Entity,
-) -> Option<Target> {
-    match &hir.exprs[expr_id] {
-        HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
-        // A type in expression position: the segment under the cursor.
-        HirExpr::TypeRef { ty, .. } => {
-            semantic::hir_ty_entity_at(ty, offset).map(|(e, _)| Target::Entity(e))
-        },
-        HirExpr::Local(local_id, _) => Some(Target::Local {
-            body,
-            id: *local_id,
-        }),
-        HirExpr::MethodCall { .. }
-        | HirExpr::Field { .. }
-        | HirExpr::Call { .. }
-        | HirExpr::ImplicitMember { .. }
-        | HirExpr::ProtocolCall { .. } => {
-            let typed = ctx.query(InferBody { entity: body, root })?;
-            typed.resolutions.get(&expr_id).copied().map(Target::Entity)
-        },
-        _ => None,
-    }
 }
 
 fn collect_sites(
@@ -183,21 +102,15 @@ fn collect_sites(
                 kind: RefKind::Direct,
             });
         }
-        // For locals, the definition site is `hir.locals[id].span` — included
-        // here too.
-        if let Target::Local { body, id } = target {
-            let ctx = world.query_context();
-            if let Some(hir) = ctx.query(LowerBody {
-                entity: *body,
-                root,
-            }) && let Some(file) = crate::references::entity_file(world, *body)
-            {
-                sites.push(ReferenceSite {
-                    file,
-                    span: hir.locals[*id].span.clone(),
-                    kind: RefKind::Direct,
-                });
-            }
+        // A local's declaration site is its declaring identifier.
+        if let Target::Local { body, id } = target
+            && let Some((file, span)) = semantic::local_name_site(world, root, *body, *id)
+        {
+            sites.push(ReferenceSite {
+                file,
+                span,
+                kind: RefKind::Direct,
+            });
         }
     }
 
@@ -375,7 +288,7 @@ mod tests {
         let f = c.set_source("/tmp/refs_typeref.ks", src.into());
         c.build(f);
         let item_at = src.find("B.Item.zero").unwrap() + "B.".len();
-        let target = target_at(c.world(), f, item_at, c.root(), &c).expect("target");
+        let target = target_at(c.world(), c.root(), f, item_at).expect("target");
         let Target::Entity(e) = target else {
             panic!("expected an entity target");
         };
@@ -393,5 +306,39 @@ mod tests {
             hit,
             "expected the `B.Item.zero()` receiver as a site: {sites:?}"
         );
+    }
+
+    /// Find-references on a local, from a use and from its declaration:
+    /// the declaring identifier (with `include_declaration`) and every use —
+    /// each exactly the name, never the `let` statement.
+    #[test]
+    fn references_to_a_local_are_its_name_and_uses() {
+        let src = "module Test\n\
+                   func f(n: lang.i64) -> lang.i64 { let total = n; lang.i64_add(total, total) }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/refs_local.ks", src.into());
+        c.build(f);
+        let names: Vec<usize> = src.match_indices("total").map(|(i, _)| i).collect();
+        for at in [names[0], names[2]] {
+            let target = target_at(c.world(), c.root(), f, at + 1).expect("target");
+            assert!(matches!(target, Target::Local { .. }));
+            for include_declaration in [true, false] {
+                let mut got: Vec<(usize, &str)> =
+                    collect_sites(c.world(), c.root(), &target, include_declaration, &c)
+                        .iter()
+                        .map(|s| (s.span.start, &src[s.span.start..s.span.end]))
+                        .collect();
+                got.sort();
+                let expected: Vec<(usize, &str)> = names
+                    .iter()
+                    .skip(usize::from(!include_declaration))
+                    .map(|&i| (i, "total"))
+                    .collect();
+                assert_eq!(
+                    got, expected,
+                    "from {at}, declaration: {include_declaration}"
+                );
+            }
+        }
     }
 }

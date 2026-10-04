@@ -15,8 +15,11 @@
 
 use std::collections::HashMap;
 
+use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::HirExpr;
-use kestrel_hir_lower::LowerBody;
+use kestrel_hir::res::LocalId;
+use kestrel_hir_lower::LoweredBody;
+use kestrel_syntax_tree::ast::{self, AstNode};
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, CodeActionResponse,
     Diagnostic, NumberOrString, Position, Range, TextEdit, Url, WorkspaceEdit,
@@ -159,6 +162,31 @@ fn extend_through_newline(source: &str, pos: Position) -> Position {
 
 // ===== E200 — change `let` to `var` =====
 
+/// The `let` keyword of the statement that declares `local` — read off the
+/// CST, from the binding the body's source map names. `None` when the local
+/// is not declared by a `let` statement (a parameter, a pattern binding, an
+/// already-`var` binding, or a local the source does not spell).
+fn let_keyword_of(
+    world: &World,
+    body: Entity,
+    lowered: &LoweredBody,
+    local: LocalId,
+) -> Option<rowan::TextRange> {
+    let binding = lowered.source_map.local_source(local)?.binding;
+    let root = kestrel_ast_builder::syntax::file_root(world, body)?;
+    let decl = binding
+        .to_node(&root)
+        .ancestors()
+        .find_map(ast::VariableDeclaration::cast)?;
+    // The binding must be the declaration's own pattern, not one nested in
+    // its initializer (a closure parameter, a match arm).
+    let own_pattern = decl.pattern()?.syntax().text_range();
+    if !own_pattern.contains_range(binding.text_range()) {
+        return None;
+    }
+    Some(decl.let_token()?.text_range())
+}
+
 async fn handle_let_to_var(
     state: &SharedState,
     uri: &Url,
@@ -202,30 +230,23 @@ async fn handle_let_to_var(
                     else {
                         continue;
                     };
-                    let ctx = world.query_context();
-                    let Some(hir) = ctx.query(LowerBody {
-                        entity: body_entity,
-                        root,
-                    }) else {
+                    let Some(lowered) = semantic::lowered_body(world, root, body_entity) else {
                         continue;
                     };
-                    let Some(expr_id) = semantic::hir_expr_at(&hir, *offset) else {
+                    let Some(expr_id) = semantic::expr_at(world, body_entity, &lowered, *offset)
+                    else {
                         continue;
                     };
-                    let HirExpr::Local(local_id, _) = &hir.exprs[expr_id] else {
+                    let HirExpr::Local(local_id, _) = &lowered.body.exprs[expr_id] else {
                         continue;
                     };
-                    let local = &hir.locals[*local_id];
-                    let decl_start = local.span.start;
-
-                    // Search backward from the name for the `let` keyword.
-                    let search_start = decl_start.saturating_sub(20);
-                    let prefix = &source[search_start..decl_start];
-                    let Some(let_in_prefix) = prefix.rfind("let") else {
+                    let local = &lowered.body.locals[*local_id];
+                    let Some(let_range) = let_keyword_of(world, body_entity, &lowered, *local_id)
+                    else {
                         continue;
                     };
-                    let let_start = search_start + let_in_prefix;
-                    let let_end = let_start + 3;
+                    let let_start: usize = let_range.start().into();
+                    let let_end: usize = let_range.end().into();
 
                     let li = LineIndex::new(source.clone());
                     let edit_range = li.range_for(let_start, let_end);
@@ -344,16 +365,40 @@ mod tests {
     }
 
     #[test]
-    fn e200_finds_let_keyword() {
-        // Simulate finding `let` before a local name at byte offset 15.
-        let src = "module T\nfunc f() {\n    let x = 1;\n    x = 2;\n}\n";
-        let let_pos = src.find("let x").unwrap();
-        let x_pos = src.find("let x").unwrap() + "let ".len();
-        let search_start = x_pos.saturating_sub(20);
-        let prefix = &src[search_start..x_pos];
-        let found = prefix.rfind("let").unwrap();
-        let actual_let = search_start + found;
-        assert_eq!(actual_let, let_pos);
-        assert_eq!(&src[actual_let..actual_let + 3], "let");
+    fn e200_finds_the_declaring_let() {
+        use kestrel_compiler::Compiler;
+        // The `let` read off the declaration — not a text search backward
+        // from the local's span, which (that span being the whole statement)
+        // found nothing, or found an earlier `let` and rewrote that one.
+        let src = "module T\nfunc f() {\n    let y = 0; let x = 1;\n    x = 2;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/e200.ks", src.into());
+        c.build(f);
+        let world = c.world();
+        let offset = src.find("x = 2").unwrap();
+        let body = semantic::body_entity_at(world, f, offset).expect("body");
+        let lowered = semantic::lowered_body(world, c.root(), body).expect("hir");
+        let expr = semantic::expr_at(world, body, &lowered, offset).expect("use");
+        let HirExpr::Local(x, _) = lowered.body.exprs[expr] else {
+            panic!("not a local");
+        };
+        let range = let_keyword_of(world, body, &lowered, x).expect("let keyword");
+        let start: usize = range.start().into();
+        assert_eq!(start, src.find("let x").unwrap());
+
+        // A parameter has no `let` to change.
+        let src = "module T\nfunc g(p: lang.i64) {\n    p = 2;\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/e200p.ks", src.into());
+        c.build(f);
+        let world = c.world();
+        let offset = src.find("p = 2").unwrap();
+        let body = semantic::body_entity_at(world, f, offset).expect("body");
+        let lowered = semantic::lowered_body(world, c.root(), body).expect("hir");
+        let expr = semantic::expr_at(world, body, &lowered, offset).expect("use");
+        let HirExpr::Local(p, _) = lowered.body.exprs[expr] else {
+            panic!("not a local");
+        };
+        assert!(let_keyword_of(world, body, &lowered, p).is_none());
     }
 }

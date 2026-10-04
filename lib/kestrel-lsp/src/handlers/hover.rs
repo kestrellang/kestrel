@@ -11,11 +11,11 @@
 //! decl span (no body to trim). Doc comments are read from the
 //! `Documentation` component attached during AST building.
 
-use kestrel_ast_builder::{DeclSpan, Documentation, Name, NodeKind, Valued};
+use kestrel_ast_builder::{DeclSpan, Documentation, Name, NodeKind};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat};
 use kestrel_hir::res::LocalId;
-use kestrel_hir_lower::LowerBody;
+use kestrel_hir_lower::LoweredBody;
 use kestrel_syntax_tree::utils::get_name_span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 use kestrel_type_infer::InferBody;
@@ -81,10 +81,9 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                     if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset)
                     {
                         let ctx = world.query_context();
-                        if let Some(hir) = ctx.query(LowerBody {
-                            entity: body_entity,
-                            root,
-                        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+                        if let Some(lowered) = semantic::lowered_body(world, root, body_entity)
+                            && let Some(expr_id) =
+                                semantic::expr_at(world, body_entity, &lowered, offset)
                             && let Some(typed) = ctx.query(InferBody {
                                 entity: body_entity,
                                 root,
@@ -119,22 +118,18 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 // Fall back to "inferred type of the expression at the cursor".
                 let body_entity = semantic::body_entity_at(world, file_entity, offset)?;
                 let ctx = world.query_context();
-                let hir = ctx.query(LowerBody {
-                    entity: body_entity,
-                    root,
-                })?;
+                let lowered = semantic::lowered_body(world, root, body_entity)?;
+                let hir = &lowered.body;
                 let typed = ctx.query(InferBody {
                     entity: body_entity,
                     root,
                 })?;
 
-                // Pattern-position cursor (e.g. on `x` in `let x = 42`): no HIR
-                // expression covers the binding, so the smallest-expr lookup below
-                // would miss it and the whole hover would return None. Try the CST
-                // BindingPattern path first.
-                if let Some((local_id, ty, range)) =
-                    local_at_binding(world, body_entity, &hir, &typed, offset, &line_index)
-                {
+                // Binding-position cursor (e.g. on `x` in `let x = 42`): the
+                // binding is not an expression, so the expression lookup below
+                // would miss it. The source map knows every local's name.
+                if let Some((local_id, ty, range)) = local_at_binding(&lowered, &typed, offset) {
+                    let range = line_index.range_for(range.start().into(), range.end().into());
                     let local = &hir.locals[local_id];
                     let kw = if local.is_mut { "var" } else { "let" };
                     let rendered = format_ty(world, &ty);
@@ -144,14 +139,14 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                 }
 
                 // Pattern hover: cursor on a match pattern or destructuring.
-                if let Some(pat_id) = semantic::hir_pat_at(&hir, offset) {
+                if let Some(pat_id) = semantic::pat_at(world, body_entity, &lowered, offset) {
                     let pat = &hir.pats[pat_id];
                     let span = semantic::hir_pat_span(pat);
                     let range = line_index.range_for(span.start, span.end);
                     let md = match pat {
                         HirPat::Variant { entity, .. } => {
                             let mut md = render_entity(world, &sources, *entity)?;
-                            if let Some(ty) = scrutinee_resolved_ty(&hir, &typed, pat_id) {
+                            if let Some(ty) = scrutinee_resolved_ty(hir, &typed, pat_id) {
                                 let rendered = format_ty(world, &ty);
                                 md.push_str(&format!("\n\nType: `{}`", rendered));
                                 append_type_links(&mut md, world, &sources, &ty);
@@ -170,7 +165,7 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                             append_type_links(&mut md, world, &sources, ty);
                             md
                         }),
-                        _ => scrutinee_resolved_ty(&hir, &typed, pat_id).map(|ty| {
+                        _ => scrutinee_resolved_ty(hir, &typed, pat_id).map(|ty| {
                             let rendered = format_ty(world, &ty);
                             let mut md = format!("```kestrel\n{}\n```", rendered);
                             append_type_links(&mut md, world, &sources, &ty);
@@ -182,7 +177,7 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
                     }
                 }
 
-                let expr_id = semantic::hir_expr_at(&hir, offset)?;
+                let expr_id = semantic::expr_at(world, body_entity, &lowered, offset)?;
                 let ty = typed.expr_types.get(&expr_id)?;
                 let rendered = format_ty(world, ty);
                 let md = match &hir.exprs[expr_id] {
@@ -216,62 +211,21 @@ pub async fn handle(state: SharedState, params: HoverParams) -> Option<Hover> {
     })
 }
 
-/// Cursor on a `BindingPattern` in the body's CST → the local being bound.
-/// Returns the local id, its inferred type, and the LSP range of the
-/// binding's identifier so the editor highlights just the name. Pattern
-/// positions don't appear in `hir.exprs`, so the standard expr-type
-/// fallback misses them; this fills the gap.
+/// Cursor on a local's declaring identifier (a `let` binding, a pattern
+/// binding, a closure parameter) → the local, its inferred type, and the
+/// identifier's range so the editor highlights just the name. Bindings are
+/// not expressions, so the expression-type fallback misses them.
 fn local_at_binding(
-    world: &World,
-    body_entity: Entity,
-    hir: &HirBody,
+    lowered: &LoweredBody,
     typed: &TypedBody,
     offset: usize,
-    line_index: &crate::position::LineIndex,
-) -> Option<(LocalId, ResolvedTy, Range)> {
-    world.get::<Valued>(body_entity)?;
-    let cst = kestrel_ast_builder::syntax::valued_node(world, body_entity)?;
-    let pos = TextSize::from(offset as u32);
-
-    let mut best: Option<SyntaxNode> = None;
-    for n in cst.descendants() {
-        if n.kind() != SyntaxKind::BindingPattern {
-            continue;
-        }
-        let r = n.text_range();
-        if r.start() <= pos && pos <= r.end() {
-            let smaller = best
-                .as_ref()
-                .map(|b| n.text_range().len() < b.text_range().len())
-                .unwrap_or(true);
-            if smaller {
-                best = Some(n);
-            }
-        }
-    }
-    let bp = best?;
-    let ident = bp
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?;
-    let ident_range = ident.text_range();
-    let ident_start: usize = ident_range.start().into();
-    let ident_end: usize = ident_range.end().into();
-    if !(ident_start <= offset && offset <= ident_end) {
-        return None;
-    }
-    let name = ident.text();
-
-    // Locals carry the enclosing let/var stmt span. The right local is the
-    // one whose name matches and whose span contains the binding token.
-    for (id, local) in hir.locals.iter() {
-        if local.name == name && local.span.start <= ident_start && ident_end <= local.span.end {
-            let ty = typed.local_types.get(&id)?.clone();
-            let range = line_index.range_for(ident_start, ident_end);
-            return Some((id, ty, range));
-        }
-    }
-    None
+) -> Option<(LocalId, ResolvedTy, rowan::TextRange)> {
+    let local = lowered
+        .source_map
+        .local_declared_at(TextSize::from(offset as u32))?;
+    let name = lowered.source_map.local_source(local)?.name;
+    let ty = typed.local_types.get(&local)?.clone();
+    Some((local, ty, name))
 }
 
 /// Locate the entity at the cursor and render its signature + docs as
@@ -300,22 +254,17 @@ fn entity_hover_range(
     root: Entity,
     line_index: &crate::position::LineIndex,
 ) -> Range {
-    if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
-        let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-        {
-            let span = match &hir.exprs[expr_id] {
-                HirExpr::TypeRef { ty, .. } => {
-                    semantic::hir_ty_entity_at(ty, offset).map(|(_, s)| s)
-                },
-                _ => None,
-            }
-            .unwrap_or_else(|| semantic::hir_expr_span(&hir.exprs[expr_id]));
-            return line_index.range_for(span.start, span.end);
+    if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset)
+        && let Some(lowered) = semantic::lowered_body(world, root, body_entity)
+        && let Some(expr_id) = semantic::expr_at(world, body_entity, &lowered, offset)
+    {
+        let expr = &lowered.body.exprs[expr_id];
+        let span = match expr {
+            HirExpr::TypeRef { ty, .. } => semantic::hir_ty_entity_at(ty, offset).map(|(_, s)| s),
+            _ => None,
         }
+        .unwrap_or_else(|| semantic::hir_expr_span(expr));
+        return line_index.range_for(span.start, span.end);
     }
     if let Some(decl) = semantic::enclosing_decl_at(world, file_entity, offset)
         && let Some(cst) = kestrel_ast_builder::syntax::cst_node(world, decl)
@@ -353,12 +302,10 @@ fn entity_at_cursor(
 ) -> Option<Entity> {
     if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
         let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        if let Some(lowered) = semantic::lowered_body(world, root, body_entity)
+            && let Some(expr_id) = semantic::expr_at(world, body_entity, &lowered, offset)
         {
-            return entity_from_expr(&hir, body_entity, expr_id, offset, &ctx, root);
+            return entity_from_expr(&lowered.body, body_entity, expr_id, offset, &ctx, root);
         }
         // Inside a body but no expression at cursor — let the caller
         // fall through to local_at_binding / inferred-type paths.
@@ -790,22 +737,20 @@ mod tests {
             src.find("let z").unwrap() + "let z".len() - 1,
         )
         .expect("body");
-        let hir = ctx
-            .query(LowerBody {
-                entity: body_entity,
-                root,
-            })
-            .expect("hir");
+        let lowered = crate::semantic::lowered_body(world, root, body_entity).expect("hir");
         let typed = ctx
             .query(InferBody {
                 entity: body_entity,
                 root,
             })
             .expect("typed");
-        let li = crate::position::LineIndex::new(src.to_string());
         let cursor = src.find("let z").unwrap() + "let ".len(); // on `z`
-        let result = local_at_binding(world, body_entity, &hir, &typed, cursor, &li);
-        let (_id, ty, _range) = result.expect("pattern hover hit");
+        let result = local_at_binding(&lowered, &typed, cursor);
+        let (_id, ty, range) = result.expect("pattern hover hit");
+        assert_eq!(
+            &src[usize::from(range.start())..usize::from(range.end())],
+            "z"
+        );
         let rendered = format_ty(world, &ty);
         assert!(rendered.contains("P"), "rendered = {rendered:?}");
     }
@@ -826,23 +771,20 @@ mod tests {
             src.find("var z").unwrap() + "var z".len() - 1,
         )
         .expect("body");
-        let hir = ctx
-            .query(LowerBody {
-                entity: body_entity,
-                root,
-            })
-            .expect("hir");
+        let lowered = crate::semantic::lowered_body(world, root, body_entity).expect("hir");
         let typed = ctx
             .query(InferBody {
                 entity: body_entity,
                 root,
             })
             .expect("typed");
-        let li = crate::position::LineIndex::new(src.to_string());
         let cursor = src.find("var z").unwrap() + "var ".len();
-        let (id, _ty, _range) = local_at_binding(world, body_entity, &hir, &typed, cursor, &li)
-            .expect("pattern hover hit");
-        assert!(hir.locals[id].is_mut, "var binding must be mutable");
+        let (id, _ty, _range) =
+            local_at_binding(&lowered, &typed, cursor).expect("pattern hover hit");
+        assert!(
+            lowered.body.locals[id].is_mut,
+            "var binding must be mutable"
+        );
     }
 
     #[test]

@@ -241,12 +241,10 @@ fn resolve_callable_at(
 ) -> Option<Entity> {
     if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
         let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
+        if let Some(lowered) = semantic::lowered_body(world, root, body_entity)
+            && let Some(expr_id) = semantic::expr_at(world, body_entity, &lowered, offset)
         {
-            match &hir.exprs[expr_id] {
+            match &lowered.body.exprs[expr_id] {
                 HirExpr::Def(entity, _, _) => {
                     if is_callable(world, *entity) {
                         return Some(*entity);

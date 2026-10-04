@@ -6,15 +6,11 @@
 
 use kestrel_ast_builder::DeclSpan;
 use kestrel_hecs::{Entity, World};
-use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
-use kestrel_hir::res::LocalId;
-use kestrel_hir_lower::LowerBody;
-use kestrel_type_infer::InferBody;
 use tower_lsp::lsp_types::{DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams};
 
 use crate::position::LineIndex;
 use crate::references::{self, RefKind, ReferenceSite, clip_to_identifier};
-use crate::semantic;
+use crate::semantic::{self, Target, target_at};
 use crate::server::{SharedState, url_to_path};
 
 pub async fn handle(
@@ -48,7 +44,7 @@ pub async fn handle(
                 let world = compiler.world();
                 let root = compiler.root();
 
-                let target = target_at(world, file_entity, offset, root, compiler)?;
+                let target = target_at(world, root, file_entity, offset)?;
                 let sites = collect_sites(world, root, &target, file_entity, compiler);
 
                 let source = sources.get(&path)?;
@@ -72,74 +68,6 @@ pub async fn handle(
         )
         .await
         .flatten()
-}
-
-enum Target {
-    Entity(Entity),
-    Local { body: Entity, id: LocalId },
-}
-
-fn target_at(
-    world: &World,
-    file_entity: Entity,
-    offset: usize,
-    root: Entity,
-    compiler: &kestrel_compiler::Compiler,
-) -> Option<Target> {
-    // Type-position cursor.
-    let file_cst = compiler.parse(file_entity).tree();
-    if let Some((entity, _)) =
-        crate::types::type_at_cursor(world, root, &file_cst, file_entity, offset)
-    {
-        return Some(Target::Entity(entity));
-    }
-
-    if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
-        let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
-        {
-            return Some(t);
-        }
-    }
-
-    // Fallback: cursor is on a declaration's own identifier.
-    // `decl_at_name_offset`, not bare `enclosing_decl_at`: the latter maps
-    // every offset inside a decl to that decl, so a cursor on a `let` binding
-    // or a parameter name (neither is an `HirExpr`, so the branch above can't
-    // see them) would highlight the enclosing function instead. Same root
-    // cause as the rename corruption in F2; here it is merely wrong, not
-    // destructive.
-    let decl = crate::references::decl_at_name_offset(world, file_entity, offset)?;
-    Some(Target::Entity(decl))
-}
-
-fn resolve_expr(
-    hir: &HirBody,
-    body: Entity,
-    expr_id: HirExprId,
-    ctx: &kestrel_hecs::QueryContext<'_>,
-    root: Entity,
-) -> Option<Target> {
-    match &hir.exprs[expr_id] {
-        HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
-        HirExpr::Local(local_id, _) => Some(Target::Local {
-            body,
-            id: *local_id,
-        }),
-        HirExpr::MethodCall { .. }
-        | HirExpr::Field { .. }
-        | HirExpr::Call { .. }
-        | HirExpr::ImplicitMember { .. }
-        | HirExpr::ProtocolCall { .. } => {
-            let typed = ctx.query(InferBody { entity: body, root })?;
-            typed.resolutions.get(&expr_id).copied().map(Target::Entity)
-        },
-        _ => None,
-    }
 }
 
 /// Collect reference sites scoped to the current file.
@@ -182,20 +110,15 @@ fn collect_sites(
             kind: RefKind::Direct,
         });
     }
-    if let Target::Local { body, id } = target {
-        let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: *body,
-            root,
-        }) && let Some(file) = crate::references::entity_file(world, *body)
-            && file == file_entity
-        {
-            sites.push(ReferenceSite {
-                file,
-                span: hir.locals[*id].span.clone(),
-                kind: RefKind::Direct,
-            });
-        }
+    if let Target::Local { body, id } = target
+        && let Some((file, span)) = semantic::local_name_site(world, root, *body, *id)
+        && file == file_entity
+    {
+        sites.push(ReferenceSite {
+            file,
+            span,
+            kind: RefKind::Direct,
+        });
     }
 
     sites
@@ -213,7 +136,7 @@ mod tests {
         let offset = src.find(needle).expect("needle not found");
         let world = c.world();
         let root = c.root();
-        let target = target_at(world, f, offset, root, &c).expect("target");
+        let target = target_at(world, root, f, offset).expect("target");
         let sites = collect_sites(world, root, &target, f, &c);
         let li = LineIndex::new(src.to_string());
         sites
@@ -251,7 +174,7 @@ mod tests {
         let mut c = Compiler::new();
         let f = c.set_source("/tmp/hl_local.ks", src.into());
         c.build(f);
-        let target = target_at(c.world(), f, pos, c.root(), &c).expect("target");
+        let target = target_at(c.world(), c.root(), f, pos).expect("target");
         let sites = collect_sites(c.world(), c.root(), &target, f, &c);
         // Two uses of x plus the declaration.
         assert!(
@@ -269,8 +192,52 @@ mod tests {
         c.build(f);
         // Cursor on the blank line between module and func.
         let offset = src.find("\n\n").unwrap() + 1;
-        let result = target_at(c.world(), f, offset, c.root(), &c);
+        let result = target_at(c.world(), c.root(), f, offset);
         // May resolve to the module or None — either way, should not crash.
         let _ = result;
+    }
+
+    /// Highlighting a local paints its declaring identifier and its uses —
+    /// not the whole `let` statement, and (for a parameter) not a
+    /// zero-width range at the top of the file.
+    #[test]
+    fn highlights_local_name_and_uses_exactly() {
+        let src = "module Test\n\
+                   func f(n: lang.i64) -> lang.i64 { let x = n; lang.i64_add(x, n) }\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/hl_exact.ks", src.into());
+        c.build(f);
+        let li = LineIndex::new(src.to_string());
+        let ranges_at = |at: usize| {
+            let target = target_at(c.world(), c.root(), f, at).expect("target");
+            let mut got: Vec<(usize, usize)> = collect_sites(c.world(), c.root(), &target, f, &c)
+                .iter()
+                .map(|site| {
+                    let clipped = clip_to_identifier(src, &site.span, site.kind);
+                    let r = li.range_for(clipped.start, clipped.end);
+                    (li.position_to_offset(r.start), li.position_to_offset(r.end))
+                })
+                .collect();
+            got.sort();
+            got
+        };
+        let words = |name: &str| -> Vec<(usize, usize)> {
+            src.match_indices(name)
+                .filter(|(i, _)| {
+                    !src[..*i].ends_with(|c: char| c.is_alphanumeric() || c == '_')
+                        && !src[i + name.len()..]
+                            .starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                })
+                .map(|(i, _)| (i, i + name.len()))
+                .collect()
+        };
+        let xs = words("x");
+        assert_eq!(xs.len(), 2);
+        assert_eq!(ranges_at(xs[1].0), xs, "from the use");
+        assert_eq!(ranges_at(xs[0].0), xs, "from the declaration");
+        let ns = words("n");
+        assert_eq!(ns.len(), 3);
+        assert_eq!(ranges_at(ns[2].0), ns, "parameter, from a use");
+        assert_eq!(ranges_at(ns[0].0), ns, "parameter, from the signature");
     }
 }

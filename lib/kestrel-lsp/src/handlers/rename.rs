@@ -11,24 +11,19 @@ use std::collections::HashMap;
 
 use kestrel_ast_builder::{DeclSpan, FilePath, Name, NodeKind};
 use kestrel_hecs::{Entity, World};
-use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
-use kestrel_hir::res::LocalId;
 use kestrel_hir_lower::LowerBody;
 use kestrel_lexer::{Token, lex};
 use kestrel_name_res::{NameResolution, ResolveName};
 use kestrel_span::Span;
 use kestrel_syntax_tree::utils::get_name_span;
-use kestrel_type_infer::InferBody;
 use tower_lsp::jsonrpc::{Error as RpcError, ErrorCode};
 use tower_lsp::lsp_types::{
     PrepareRenameResponse, RenameParams, TextDocumentPositionParams, TextEdit, Url, WorkspaceEdit,
 };
 
 use crate::position::LineIndex;
-use crate::references::{
-    self, RefKind, ReferenceSite, clip_to_identifier, decl_at_name_offset, span_spells_name,
-};
-use crate::semantic;
+use crate::references::{self, RefKind, ReferenceSite, clip_to_identifier, span_spells_name};
+use crate::semantic::{self, Target, target_at};
 use crate::server::{SharedState, path_to_url, url_to_path};
 
 // ===== prepareRename =====
@@ -66,7 +61,7 @@ pub async fn prepare(
                 let world = compiler.world();
                 let root = compiler.root();
 
-                let target = target_at(world, file_entity, offset, root)?;
+                let target = target_at(world, root, file_entity, offset)?;
                 let (placeholder, span) = identifier_for_target(world, root, &target, &sources)?;
                 let li = LineIndex::new(sources.get(&path)?.clone());
                 let range = li.range_for(span.start, span.end);
@@ -127,7 +122,7 @@ pub async fn rename(
                 let world = compiler.world();
                 let root = compiler.root();
 
-                let target = match target_at(world, file_entity, offset, root) {
+                let target = match target_at(world, root, file_entity, offset) {
                     Some(t) => t,
                     None => return Ok(None),
                 };
@@ -161,62 +156,6 @@ pub async fn rename(
     outcome
 }
 
-// ===== Shared dispatch =====
-
-/// What the cursor resolves to (mirrors `references.rs::Target`).
-enum Target {
-    Entity(Entity),
-    Local { body: Entity, id: LocalId },
-}
-
-fn target_at(world: &World, file_entity: Entity, offset: usize, root: Entity) -> Option<Target> {
-    if let Some(body_entity) = semantic::body_entity_at(world, file_entity, offset) {
-        let ctx = world.query_context();
-        if let Some(hir) = ctx.query(LowerBody {
-            entity: body_entity,
-            root,
-        }) && let Some(expr_id) = semantic::hir_expr_at(&hir, offset)
-            && let Some(t) = resolve_expr(&hir, body_entity, expr_id, &ctx, root)
-        {
-            return Some(t);
-        }
-    }
-    // Fallback: the cursor is on a declaration's own identifier (function
-    // name, struct field, …). `decl_at_name_offset` — not bare
-    // `enclosing_decl_at` — because the latter maps *every* offset inside a
-    // decl to that decl, so a cursor on a `let` binding or a parameter name
-    // (neither is an `HirExpr`, so the branch above can't see them) would
-    // resolve to the enclosing function and rename it workspace-wide.
-    let decl = decl_at_name_offset(world, file_entity, offset)?;
-    Some(Target::Entity(decl))
-}
-
-fn resolve_expr(
-    hir: &HirBody,
-    body: Entity,
-    expr_id: HirExprId,
-    ctx: &kestrel_hecs::QueryContext<'_>,
-    root: Entity,
-) -> Option<Target> {
-    match &hir.exprs[expr_id] {
-        HirExpr::Def(entity, _, _) => Some(Target::Entity(*entity)),
-        HirExpr::Local(local_id, _) => Some(Target::Local {
-            body,
-            id: *local_id,
-        }),
-        HirExpr::OverloadSet { .. } => None, // ambiguous — disqualify
-        HirExpr::MethodCall { .. }
-        | HirExpr::Field { .. }
-        | HirExpr::Call { .. }
-        | HirExpr::ImplicitMember { .. }
-        | HirExpr::ProtocolCall { .. } => {
-            let typed = ctx.query(InferBody { entity: body, root })?;
-            typed.resolutions.get(&expr_id).copied().map(Target::Entity)
-        },
-        _ => None,
-    }
-}
-
 /// Source text of the file that owns `entity`, keyed the way the server keys
 /// `sources` (canonical `FilePath`). `None` for stdlib entities (no `FilePath`
 /// ancestor) and for files the server has no text for.
@@ -232,22 +171,17 @@ fn source_of<'a>(
 
 /// Get the identifier text + span we'd rename for a target. Returns `None`
 /// for targets we refuse to rename: stdlib entities (no source span we can
-/// edit), overload sets (would need to fix every overload), and — the guard
-/// that makes this fail *closed* — any target whose span does not literally
-/// spell its own name.
+/// edit), modules, locals the source does not spell (`self`, an implicit
+/// `it`, desugaring temporaries — the body's source map has no declaration
+/// for them), and — the guard that makes this fail *closed* — any target
+/// whose span does not literally spell its own name.
 ///
-/// That last check is what stops rename from corrupting source. A local's
-/// `Local::span` is not the binding's identifier: for `let count = …` it is
-/// the whole statement, for a parameter or `self` it is `Span::synthetic(0)`
-/// (`0..0`, i.e. the top of some *other* file), and for every desugaring temp
-/// it is the span of the construct that produced it. Editing any of those
-/// destroys the statement or splices text at offset 0. Until `Local` carries a
-/// real `name_span` (Stage 2/3 of F2) the honest answer for those targets is
-/// "this symbol cannot be renamed".
-///
-/// `Target::Entity` is checked too, as defence in depth: `get_name_span`
-/// should always yield the identifier there, and if it ever doesn't, that is a
-/// real bug and refusing to edit is the right response.
+/// A local's span is its declaring identifier, from the body's
+/// [`BodySourceMap`](kestrel_hir_lower::BodySourceMap) — never
+/// `Local::span`, which covers the whole declaration (a `let` statement) or
+/// nothing at all (`Span::synthetic(0)` for a parameter) and would corrupt
+/// the file if edited. The spelling check stays as defence in depth for both
+/// kinds of target.
 fn identifier_for_target(
     world: &World,
     root: Entity,
@@ -270,14 +204,16 @@ fn identifier_for_target(
             let span = get_name_span(&cst, decl_span.0.file_id)?;
             (*e, name, span)
         },
+        // The local's declaring identifier, from the body's source map;
+        // `None` for a local the source does not spell (`self`, an
+        // implicit `it`, desugaring temporaries).
         Target::Local { body, id } => {
-            let ctx = world.query_context();
-            let hir = ctx.query(LowerBody {
+            let (_, span) = semantic::local_name_site(world, root, *body, *id)?;
+            let hir = world.query_context().query(LowerBody {
                 entity: *body,
                 root,
             })?;
-            let local = &hir.locals[*id];
-            (*body, local.name.clone(), local.span.clone())
+            (*body, hir.locals[*id].name.clone(), span)
         },
     };
 
@@ -465,6 +401,7 @@ mod tests {
     use super::*;
     use kestrel_ast_builder::FileId;
     use kestrel_compiler::Compiler;
+    use kestrel_hir::res::LocalId;
 
     fn find_decl(world: &World, file: Entity, name: &str) -> Entity {
         for (e, n) in world.iter_component::<Name>() {
@@ -506,111 +443,152 @@ mod tests {
         m
     }
 
-    /// Fixture shared by the Stage-1 refusal tests. One function, one
-    /// parameter, one `let` local, two use sites of each.
+    /// One function, one parameter, one `let` local, uses of each.
     const LOCALS_SRC: &str = "module Test\n\
                               func foo(bar: lang.i64) -> lang.i64 { let count = bar; count + bar }\n";
 
-    // ===== F2 Stage 1: renames that would corrupt source must be refused =====
-    //
-    // Every test below asserts a *refusal*. That is the Stage-1 target, not
-    // the intended end state: `Local::span` is not the binding's identifier
-    // (it is the whole `let` statement, or `Span::synthetic(0)` for a
-    // parameter), so any edit derived from it damages the file. Refusing is
-    // strictly better than corrupting. Stage 2 (`Local::name_span`), Stage 3
-    // (`AstParam::name_span`) and Stage 4 (`semantic::local_decl_at`) will
-    // make these renames actually work — at which point these assertions
-    // should be *flipped* to assert the correct edits, not deleted.
-
-    #[test]
-    fn local_let_rename_is_refused() {
-        // Renaming a `let` local must be refused. `Local::span` for a simple
-        // binding is the whole statement (`hir-lower/src/stmt.rs:126`), so
-        // before the guard this produced a TextEdit replacing
-        // `let count = bar;` with `renamed`.
-        //
-        // Stage 2 will flip this to assert an edit covering just `count`.
+    /// The byte ranges `rename` would rewrite for the target at `offset`
+    /// (`prepareRename` must accept it), sorted.
+    fn rename_ranges(src: &str, path: &str, offset: usize) -> Vec<(usize, usize)> {
         let mut c = Compiler::new();
-        let path = "/tmp/rename_local_let.ks";
-        let f = c.set_source(path, LOCALS_SRC.into());
+        let f = c.set_source(path, src.into());
         c.build(f);
         let (world, root) = (c.world(), c.root());
-        let sources = sources_of(path, LOCALS_SRC);
-
-        let offset = LOCALS_SRC.rfind("count").expect("use site") + 1;
-        let target = target_at(world, f, offset, root).expect("cursor resolves to the local");
+        let sources = sources_of(path, src);
+        let target = target_at(world, root, f, offset).expect("cursor resolves");
         assert!(
-            matches!(target, Target::Local { .. }),
-            "cursor on a `count` use should resolve to a local"
+            identifier_for_target(world, root, &target, &sources).is_some(),
+            "prepareRename refuses the target at {offset}"
         );
-
-        // Root cause, pinned: the span we would have edited is the statement.
-        let foo = find_decl(world, f, "foo");
-        let id = find_local(world, foo, root, "count");
-        let ctx = world.query_context();
-        let hir = ctx.query(LowerBody { entity: foo, root }).expect("hir");
-        let span = &hir.locals[id].span;
-        assert_eq!(
-            &LOCALS_SRC[span.start..span.end],
-            "let count = bar;",
-            "Local::span is the statement, not the identifier"
-        );
-
-        // The harm, asserted first: no edit may rewrite the statement.
         let mut sites = collect_sites(world, root, &target);
         push_decl_site(world, root, &target, &sources, &mut sites);
         let edit = build_workspace_edit(world, &sources, &sites, "renamed");
-        let li = LineIndex::new(LOCALS_SRC.to_string());
-        let stmt = li.range_for(span.start, span.end);
-        for edits in edit.changes.iter().flat_map(|c| c.values()) {
-            assert!(
-                !edits.iter().any(|e| e.range == stmt),
-                "an edit replaces the whole `let count = bar;` statement: {edits:?}"
-            );
-        }
+        let li = LineIndex::new(src.to_string());
+        let mut ranges: Vec<(usize, usize)> = edit
+            .changes
+            .into_iter()
+            .flat_map(|c| c.into_values())
+            .flatten()
+            .map(|e| {
+                assert_eq!(e.new_text, "renamed");
+                (
+                    li.position_to_offset(e.range.start),
+                    li.position_to_offset(e.range.end),
+                )
+            })
+            .collect();
+        ranges.sort();
+        ranges
+    }
 
-        assert!(
-            identifier_for_target(world, root, &target, &sources).is_none(),
-            "renaming a `let` local must be refused while Local::span is the statement"
-        );
+    /// Every occurrence of the identifier `name` in `src` (a whole word).
+    fn occurrences(src: &str, name: &str) -> Vec<(usize, usize)> {
+        src.match_indices(name)
+            .filter(|(i, _)| {
+                let before = src[..*i].chars().next_back();
+                let after = src[i + name.len()..].chars().next();
+                !before.is_some_and(references::is_ident_char)
+                    && !after.is_some_and(references::is_ident_char)
+            })
+            .map(|(i, _)| (i, i + name.len()))
+            .collect()
+    }
+
+    // ===== F2: renaming a local or parameter =====
+    //
+    // Stage 1 refused these renames because `Local::span` is not the
+    // binding's identifier (it is the whole `let` statement, or
+    // `Span::synthetic(0)` for a parameter), so any edit derived from it
+    // damaged the file. The body's source map now names each local's
+    // declaring identifier and every use of it, so they rename exactly the
+    // binding and its uses — from either end.
+
+    #[test]
+    fn local_let_rename_from_use() {
+        let use_site = LOCALS_SRC.rfind("count").expect("use site") + 1;
+        let ranges = rename_ranges(LOCALS_SRC, "/tmp/rename_local_use.ks", use_site);
+        assert_eq!(ranges, occurrences(LOCALS_SRC, "count"));
     }
 
     #[test]
-    fn parameter_rename_is_refused() {
-        // Renaming a parameter must be refused. Parameter locals are created
-        // with `Span::synthetic(0)` (`hir-lower/src/lib.rs:79`), i.e.
-        // `{file_id: 0, start: 0, end: 0}` — before the guard this emitted an
-        // insertion at line 0, character 0 of whichever file has id 0,
-        // prepending `renamed` to the top of the file.
-        //
-        // Stage 3 (`AstParam::name_span`) will flip this to assert a real edit.
+    fn local_let_rename_from_declaration() {
+        // The most natural rename gesture: cursor on the binding in
+        // `let count = bar;` itself. It used to fall through to
+        // `enclosing_decl_at` and rename the *enclosing function*.
+        let decl = LOCALS_SRC.find("count").expect("binding site") + 1;
+        let ranges = rename_ranges(LOCALS_SRC, "/tmp/rename_local_decl.ks", decl);
+        assert_eq!(ranges, occurrences(LOCALS_SRC, "count"));
+
+        // `Local::span` keeps covering the statement (type inference anchors
+        // "could not infer type" there); rename no longer reads it.
         let mut c = Compiler::new();
-        let path = "/tmp/rename_param.ks";
-        let f = c.set_source(path, LOCALS_SRC.into());
+        let f = c.set_source("/tmp/rename_local_span.ks", LOCALS_SRC.into());
         c.build(f);
-        let (world, root) = (c.world(), c.root());
-        let sources = sources_of(path, LOCALS_SRC);
+        let foo = find_decl(c.world(), f, "foo");
+        let id = find_local(c.world(), foo, c.root(), "count");
+        let hir = c
+            .world()
+            .query_context()
+            .query(LowerBody {
+                entity: foo,
+                root: c.root(),
+            })
+            .expect("hir");
+        let span = &hir.locals[id].span;
+        assert_eq!(&LOCALS_SRC[span.start..span.end], "let count = bar;");
+    }
 
-        let offset = LOCALS_SRC.rfind("bar").expect("use site") + 1;
-        let target = target_at(world, f, offset, root).expect("cursor resolves to the param");
-        assert!(matches!(target, Target::Local { .. }));
+    #[test]
+    fn parameter_rename_from_use() {
+        let use_site = LOCALS_SRC.rfind("bar").expect("use site") + 1;
+        let ranges = rename_ranges(LOCALS_SRC, "/tmp/rename_param_use.ks", use_site);
+        // The signature's `bar` and both uses — and nothing at offset 0,
+        // where a parameter's synthetic `Local::span` points.
+        assert_eq!(ranges, occurrences(LOCALS_SRC, "bar"));
+    }
 
-        // The harm, asserted first: no edit at (0,0)-(0,0).
-        let mut sites = collect_sites(world, root, &target);
-        push_decl_site(world, root, &target, &sources, &mut sites);
-        let edit = build_workspace_edit(world, &sources, &sites, "renamed");
-        let origin = LineIndex::new(LOCALS_SRC.to_string()).range_for(0, 0);
-        for edits in edit.changes.iter().flat_map(|c| c.values()) {
-            assert!(
-                !edits.iter().any(|e| e.range == origin),
-                "an edit splices text at offset 0 of the file: {edits:?}"
-            );
-        }
+    #[test]
+    fn parameter_rename_from_declaration() {
+        // Cursor on `bar` in the signature: outside the body, so only the
+        // body's source map (which records parameter names) can see it.
+        let decl = LOCALS_SRC.find("bar").expect("param declaration") + 1;
+        let ranges = rename_ranges(LOCALS_SRC, "/tmp/rename_param_decl.ks", decl);
+        assert_eq!(ranges, occurrences(LOCALS_SRC, "bar"));
+    }
 
-        assert!(
-            identifier_for_target(world, root, &target, &sources).is_none(),
-            "renaming a parameter must be refused while its span is synthetic"
-        );
+    #[test]
+    fn parameter_label_is_not_renamed() {
+        // `of value`: the label is part of the signature, not the binding.
+        let src = "module Test\n\
+                   func id(of value: lang.i64) -> lang.i64 { value }\n";
+        let decl = src.find("value").unwrap() + 1;
+        let ranges = rename_ranges(src, "/tmp/rename_param_label.ks", decl);
+        assert_eq!(ranges, occurrences(src, "value"));
+    }
+
+    #[test]
+    fn closure_parameter_rename() {
+        let src = "module Test\n\
+                   func apply(f: (lang.i64) -> lang.i64) -> lang.i64 { f(1) }\n\
+                   func g() -> lang.i64 { apply({ (n) in lang.i64_add(n, n) }) }\n";
+        let expected = occurrences(src, "n");
+        assert_eq!(expected.len(), 3);
+        let from_decl = rename_ranges(src, "/tmp/rename_cparam.ks", expected[0].0);
+        assert_eq!(from_decl, expected);
+        let from_use = rename_ranges(src, "/tmp/rename_cparam2.ks", expected[2].0);
+        assert_eq!(from_use, expected);
+    }
+
+    #[test]
+    fn shadowing_locals_rename_independently() {
+        // Two bindings spelled `x`: renaming the inner one leaves the outer
+        // binding and its use alone.
+        let src = "module Test\n\
+                   func f() -> lang.i64 { let x = 1; let y = { let x = 2; x }; x }\n";
+        let all = occurrences(src, "x");
+        assert_eq!(all.len(), 4);
+        let inner = rename_ranges(src, "/tmp/rename_shadow.ks", all[2].0);
+        assert_eq!(inner, vec![all[1], all[2]]);
     }
 
     #[test]
@@ -631,7 +609,7 @@ mod tests {
         let sources = sources_of(path, src);
 
         let offset = src.find("self.field").expect("receiver use") + 1;
-        let target = target_at(world, f, offset, root).expect("cursor resolves");
+        let target = target_at(world, root, f, offset).expect("cursor resolves");
         assert!(
             matches!(target, Target::Local { .. }),
             "cursor on `self` should resolve to the `self` local"
@@ -682,73 +660,12 @@ mod tests {
     }
 
     #[test]
-    fn rename_from_let_pattern_declaration_is_refused() {
-        // The most natural rename gesture: cursor on the binding in
-        // `let count = bar;` itself. A binding's own identifier is not an
-        // `HirExpr`, so `hir_expr_at` misses it and `target_at` used to fall
-        // through to `enclosing_decl_at`, which resolves *any* offset inside
-        // `foo` to `foo` — renaming the enclosing function workspace-wide.
-        //
-        // Stage 4 (`semantic::local_decl_at`) will flip this to resolve to
-        // `Target::Local`.
-        let mut c = Compiler::new();
-        let path = "/tmp/rename_let_decl.ks";
-        let f = c.set_source(path, LOCALS_SRC.into());
-        c.build(f);
-        let (world, root) = (c.world(), c.root());
-
-        let offset = LOCALS_SRC.find("count").expect("binding site") + 1;
-        let target = target_at(world, f, offset, root);
-        let resolved = target.as_ref().map(|t| match t {
-            Target::Entity(e) => world
-                .get::<Name>(*e)
-                .map(|n| n.0.clone())
-                .unwrap_or_default(),
-            Target::Local { .. } => "<local>".to_string(),
-        });
-        assert!(
-            target.is_none(),
-            "cursor on the `count` binding must not resolve to anything renameable, got {resolved:?}"
-        );
-    }
-
-    #[test]
-    fn rename_from_parameter_declaration_is_refused() {
-        // Same defect at the parameter declaration: cursor on `bar` in the
-        // signature. The offset is outside the body, so `hir_expr_at` never
-        // runs and `enclosing_decl_at` returned `foo`.
-        let mut c = Compiler::new();
-        let path = "/tmp/rename_param_decl.ks";
-        let f = c.set_source(path, LOCALS_SRC.into());
-        c.build(f);
-        let (world, root) = (c.world(), c.root());
-
-        let offset = LOCALS_SRC.find("bar").expect("param declaration") + 1;
-        let target = target_at(world, f, offset, root);
-        let resolved = target.as_ref().map(|t| match t {
-            Target::Entity(e) => world
-                .get::<Name>(*e)
-                .map(|n| n.0.clone())
-                .unwrap_or_default(),
-            Target::Local { .. } => "<local>".to_string(),
-        });
-        assert!(
-            target.is_none(),
-            "cursor on the `bar` parameter must not resolve to the enclosing function, got {resolved:?}"
-        );
-    }
-
-    #[test]
-    fn rename_from_type_reference_in_body_is_refused() {
-        // Confirmed while implementing Stage 1: `rename::target_at` has no
-        // `type_at_cursor` pre-check (unlike find-references and
-        // document-highlight), so a cursor on `Foo` in `let x: Foo = …` hit
-        // the same `enclosing_decl_at` fallback and renamed the *enclosing
-        // function*. Guard B fixes it for free.
-        //
-        // Making this rename `Foo` is a separate follow-up: teach
-        // `rename::target_at` the `type_at_cursor` branch the other two
-        // handlers already have.
+    fn rename_from_type_reference_in_body_targets_the_type() {
+        // `rename` used to lack the `type_at_cursor` pre-check that
+        // find-references and document-highlight had, so a cursor on `Foo`
+        // in `let x: Foo = …` fell back to `enclosing_decl_at` and renamed
+        // the *enclosing function*. The three handlers now share one
+        // `semantic::target_at`, so it names the type.
         let src = "module Test\n\
                    struct Foo { var a: lang.i64; }\n\
                    func use_it() -> lang.i64 { let x: Foo = Foo(a: 1); x.a }\n";
@@ -759,7 +676,7 @@ mod tests {
         let (world, root) = (c.world(), c.root());
 
         let offset = src.find(": Foo").expect("type annotation") + 2;
-        let target = target_at(world, f, offset, root);
+        let target = target_at(world, root, f, offset);
         let resolved = target.as_ref().map(|t| match t {
             Target::Entity(e) => world
                 .get::<Name>(*e)
@@ -767,11 +684,7 @@ mod tests {
                 .unwrap_or_default(),
             Target::Local { .. } => "<local>".to_string(),
         });
-        assert_ne!(
-            resolved.as_deref(),
-            Some("use_it"),
-            "cursor on a type annotation must not resolve to the enclosing function"
-        );
+        assert_eq!(resolved.as_deref(), Some("Foo"));
     }
 
     #[test]

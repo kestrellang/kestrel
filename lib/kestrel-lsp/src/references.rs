@@ -164,37 +164,34 @@ fn sort_key(s: &ReferenceSite) -> (usize, usize, usize, u8) {
     (s.file.index(), s.span.start, s.span.end, kind)
 }
 
-/// Find references to a local within its owning body. Locals don't escape, so
-/// this never crosses body boundaries.
+/// Find references to a local within its owning body: every identifier the
+/// body's source map records as naming it. Locals don't escape, so this
+/// never crosses body boundaries. The declaration is not a reference (see
+/// `semantic::local_name_site`).
 pub fn local_references(
     world: &World,
     body_entity: Entity,
     root: Entity,
     local: LocalId,
 ) -> Vec<ReferenceSite> {
-    let ctx = world.query_context();
     let Some(file) = entity_file(world, body_entity) else {
         return Vec::new();
     };
-    let Some(hir) = ctx.query(LowerBody {
-        entity: body_entity,
-        root,
-    }) else {
+    let Some(lowered) = crate::semantic::lowered_body(world, root, body_entity) else {
         return Vec::new();
     };
-
-    let mut sites: Vec<ReferenceSite> = Vec::new();
-    for (_, expr) in hir.exprs.iter() {
-        if let HirExpr::Local(id, span) = expr
-            && *id == local
-        {
-            sites.push(ReferenceSite {
-                file,
-                span: span.clone(),
-                kind: RefKind::Direct,
-            });
-        }
-    }
+    let mut sites: Vec<ReferenceSite> = lowered
+        .source_map
+        .name_refs()
+        .filter(
+            |(_, expr)| matches!(lowered.body.exprs[*expr], HirExpr::Local(id, _) if id == local),
+        )
+        .map(|(range, _)| ReferenceSite {
+            file,
+            span: Span::new(file.index(), range.into()),
+            kind: RefKind::Direct,
+        })
+        .collect();
     sites.sort_by_key(sort_key);
     sites.dedup();
     sites
@@ -231,21 +228,17 @@ pub fn is_ident_char(c: char) -> bool {
 ///
 /// The single fail-closed predicate for "is this span actually the identifier
 /// it claims to name?". Renaming rewrites the bytes under a span, so any span
-/// that does not spell its own name will corrupt source when edited. Today the
-/// offenders are all `HirBody::locals`:
-/// - a `let`/`var` binding's `Local::span` is the whole *statement*
-///   (`kestrel-hir-lower/src/stmt.rs:126`),
-/// - a parameter's and `self`'s is `Span::synthetic(0)` = `0..0`
-///   (`kestrel-hir-lower/src/lib.rs:71,79`),
-/// - every desugaring temp (`$iter`, `$try_value`, `$dsi`, `$opts`,
-///   `$let_tmp`, `_cparam_N`) borrows the span of the construct it came from.
+/// that does not spell its own name will corrupt source when edited. Rename
+/// takes a local's span from its body's source map (the declaring
+/// identifier), never from `Local::span` — which covers a whole `let`
+/// statement, is `Span::synthetic(0)` for a parameter, and borrows the
+/// construct's span for a desugaring temporary — so this is defence in depth.
 ///
 /// Deliberately *not* a `is_synthetic() || name.starts_with('$')` heuristic:
-/// closure-destructure params (`_cparam_N`,
-/// `kestrel-hir-lower/src/expr.rs:1445`) get a real, non-synthetic span (the
-/// closure's) and a name with no `$`, so both heuristics wave them through.
-/// Text equality is the property we actually need, and it stays correct for
-/// spans and synthetic names that don't exist yet.
+/// closure-destructure params (`_cparam_N`) get a real, non-synthetic span
+/// (the closure's) and a name with no `$`, so both heuristics wave them
+/// through. Text equality is the property we actually need, and it stays
+/// correct for spans and synthetic names that don't exist yet.
 pub fn span_spells_name(source: &str, span: &Span, name: &str) -> bool {
     source.get(span.start..span.end) == Some(name)
 }
@@ -255,10 +248,9 @@ pub fn span_spells_name(source: &str, span: &Span, name: &str) -> bool {
 /// `semantic::enclosing_decl_at` resolves any offset inside a declaration's
 /// extent to that declaration — including every offset in its body. Handlers
 /// that use it as the "cursor is on a declaration's identifier" fallback must
-/// therefore re-check that the cursor really is on the identifier: otherwise a
-/// cursor on a `let` binding or a parameter name (neither of which is an
-/// `HirExpr`, so `hir_expr_at` can't see them) silently resolves to the
-/// enclosing function — and rename then renames *that* workspace-wide.
+/// therefore re-check that the cursor really is on the identifier: otherwise
+/// a cursor anywhere in a body silently resolves to the enclosing function —
+/// and rename then renames *that* workspace-wide.
 ///
 /// `get_name_span` is the same function `rename::identifier_for_target` uses
 /// to find the text it would edit, so the two agree by construction.

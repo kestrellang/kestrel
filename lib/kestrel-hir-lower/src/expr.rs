@@ -335,10 +335,21 @@ impl LowerCtx<'_> {
     /// identifier in the source map.
     fn alloc_seg(&mut self, expr: HirExpr, seg: &PathSeg) -> HirExprId {
         let id = self.alloc_expr(expr);
-        let range =
-            rowan::TextRange::new((seg.span.start as u32).into(), (seg.span.end as u32).into());
-        self.source_map.record_name_ref(range, id);
+        self.record_segments(std::slice::from_ref(seg), id);
         id
+    }
+
+    /// Record `segs` as naming `id` in the source map. For the pieces of a
+    /// call's callee path that lower to an expression of their own (a
+    /// receiver, the resolved method) — the callee path itself is never
+    /// lowered as a node. A segment recorded earlier, more specifically,
+    /// keeps its entry.
+    fn record_segments(&mut self, segs: &[PathSeg], id: HirExprId) {
+        for seg in segs {
+            let range =
+                rowan::TextRange::new((seg.span.start as u32).into(), (seg.span.end as u32).into());
+            self.source_map.record_name_ref(range, id);
+        }
     }
 
     /// An `ExprPath` up to (not including) member `upto`: its base — a path
@@ -777,6 +788,9 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             };
+            if let Some(range) = member.name_range {
+                self.source_map.record_name_ref(range, callee);
+            }
             return self.alloc_expr(HirExpr::Call {
                 callee,
                 args: lowered_args,
@@ -860,6 +874,7 @@ impl LowerCtx<'_> {
                         span: span.clone(),
                     })
                 };
+                self.record_segments(std::slice::from_ref(last), callee);
                 return self.alloc_expr(HirExpr::Call {
                     callee,
                     args: lowered_args,
@@ -970,6 +985,7 @@ impl LowerCtx<'_> {
                     segments[0].span.start..prefix_slice.last().unwrap().span.end,
                 );
                 let receiver = self.lower_path(prefix_slice, &prefix_span);
+                self.record_segments(prefix_slice, receiver);
                 let last = &segments[segments.len() - 1];
                 let lowered_type_args = last
                     .type_args
@@ -1037,6 +1053,7 @@ impl LowerCtx<'_> {
                         segments[0].span.start..prefix_slice.last().unwrap().span.end,
                     );
                     let receiver = self.lower_path(prefix_slice, &prefix_span);
+                    self.record_segments(prefix_slice, receiver);
                     let last = &segments[segments.len() - 1];
                     let lowered_type_args = last
                         .type_args
@@ -1333,7 +1350,9 @@ impl LowerCtx<'_> {
             segments,
             span: span.clone(),
         });
-        self.alloc_expr(HirExpr::TypeRef { ty, span })
+        let id = self.alloc_expr(HirExpr::TypeRef { ty, span });
+        self.record_segments(prefix, id);
+        id
     }
 
     /// Lower Path segments except the last one as receiver.
