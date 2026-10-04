@@ -157,7 +157,11 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     ctx.module.add_function(def);
 
     // Lower function body if present
-    if ctx.world.get::<kestrel_ast_builder::Body>(entity).is_some() {
+    if ctx
+        .world
+        .get::<kestrel_ast_builder::Valued>(entity)
+        .is_some()
+    {
         crate::body::lower_function_body(ctx, entity, entity);
     }
 }

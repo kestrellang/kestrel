@@ -19,7 +19,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Body, Callable, Intrinsic, NodeKind, TypeParams};
+use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, TypeParams, Valued};
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerCallableTypes;
@@ -123,7 +123,7 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
 
         // Extern functions cannot have a body — skip FFISafe checks if so,
         // since the function is already structurally invalid
-        if cx.query.get::<Body>(cx.entity).is_some() {
+        if cx.query.get::<Valued>(cx.entity).is_some() {
             diags.push(AnalyzeDiagnostic {
                 descriptor_id: "E610",
                 severity: Severity::Error,

@@ -15,8 +15,9 @@ kestrel-name-res = { path = "../kestrel-name-res" }
 kestrel-span = { path = "../kestrel-span" }
 kestrel-debug = { path = "../kestrel-debug" }
 kestrel-reporting = { path = "../kestrel-reporting" }
+kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }
+rowan = { workspace = true }
 
 [dev-dependencies]
 kestrel-lexer = { path = "../kestrel-lexer" }
 kestrel-parser = { path = "../kestrel-parser" }
-kestrel-syntax-tree = { path = "../kestrel-syntax-tree" }

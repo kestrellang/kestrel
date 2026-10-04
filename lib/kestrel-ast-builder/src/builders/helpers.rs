@@ -15,7 +15,6 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::ast_type::{AstType, PathSegment, lower_opt_type, lower_types};
 use crate::components::*;
-use crate::lower;
 
 /// Set the `Vis` component from the declaration's visibility keyword.
 pub fn set_visibility(world: &mut World, entity: Entity, node: &impl HasVisibility) {
@@ -392,8 +391,7 @@ pub fn spawn_setter(
         world.set(setter, EnclosingContainer(container));
     }
     world.set(setter, Callable { params, receiver });
-    world.set(setter, Body(lower::lower_body(setter_body, file_id)));
-    world.set(setter, Valued(SyntaxNodePtr::new(&setter_body)));
+    world.set(setter, Valued(SyntaxNodePtr::new(setter_body)));
     if is_static {
         world.set(setter, Static);
     }
@@ -432,8 +430,7 @@ pub fn spawn_ref_accessor(
         world.set(acc, EnclosingContainer(container));
     }
     world.set(acc, Callable { params, receiver });
-    world.set(acc, Body(lower::lower_body(clause_body, file_id)));
-    world.set(acc, Valued(SyntaxNodePtr::new(&clause_body)));
+    world.set(acc, Valued(SyntaxNodePtr::new(clause_body)));
     if mutating {
         world.set(acc, MutatingAccessor);
     }

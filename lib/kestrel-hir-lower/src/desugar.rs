@@ -4,14 +4,16 @@
 //! Each desugaring function takes AST-level inputs and produces HIR nodes.
 //! Protocol entities are resolved via ResolveBuiltin (entity IDs, not strings).
 
-use kestrel_ast::ast_body::*;
+use kestrel_ast::{BinaryOp, CompoundAssignOp, PostfixOp, UnaryOp};
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 use crate::ctx::LowerCtx;
+use crate::syntax::{BlockSyntax, Cond, ExprSrc, PatSrc, expr_children, first_expr, token};
 
 /// True if `expr` is syntactically shaped like a place expression (an
 /// expression that could appear on the LHS of `=`/`+=`). Conservative —
@@ -21,12 +23,25 @@ use crate::ctx::LowerCtx;
 ///
 /// This is a syntactic check used by `desugar_compound_assign`. Mutability
 /// of the resolved binding is enforced later by the assignment analyzer.
-fn ast_is_place_expr(body: &AstBody, expr: ExprId) -> bool {
-    match &body.exprs[expr] {
-        AstExpr::Path { .. } | AstExpr::MemberAccess { .. } | AstExpr::TupleIndex { .. } => true,
-        AstExpr::Paren { inner, .. } => ast_is_place_expr(body, *inner),
+fn is_place_syntax(expr: &SyntaxNode) -> bool {
+    match expr.kind() {
+        SyntaxKind::ExprPath | SyntaxKind::ExprTupleIndex => true,
+        SyntaxKind::ExprGrouping => first_expr(expr)
+            .map(|inner| crate::syntax::unwrap_expr(&inner))
+            .is_some_and(|inner| is_place_syntax(&inner)),
         _ => false,
     }
+}
+
+/// One piece of an interpolated string.
+enum StringPart {
+    /// Decoded literal text.
+    Literal(String),
+    /// `\(expr)` or `\(expr:spec)`.
+    Hole {
+        expr: ExprSrc,
+        format: Option<String>,
+    },
 }
 
 impl LowerCtx<'_> {
@@ -96,21 +111,20 @@ impl LowerCtx<'_> {
     /// Desugar a unary operator to a ProtocolCall.
     pub(crate) fn desugar_unary_op(
         &mut self,
-        body: &AstBody,
         op: &UnaryOp,
-        operand: ExprId,
+        operand: &ExprSrc,
         span: &Span,
     ) -> HirExprId {
         // +x is identity
         if *op == UnaryOp::Pos {
-            return self.lower_expr(body, operand);
+            return self.lower_expr_src(operand);
         }
 
         // Prefix `&`/`&mutating` parse but are not free-standing expressions:
         // a borrow expression is legal only as a `let` initializer (named ref
         // binding — that path intercepts before this desugar).
         if matches!(op, UnaryOp::Borrow | UnaryOp::BorrowMutating) {
-            self.lower_expr(body, operand); // still lower for downstream diags
+            self.lower_expr_src(operand); // still lower for downstream diags
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E488")
@@ -126,7 +140,7 @@ impl LowerCtx<'_> {
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
         }
 
-        let lowered_operand = self.lower_expr(body, operand);
+        let lowered_operand = self.lower_expr_src(operand);
 
         if let Some((proto, method)) = lookup_unary_op(op)
             && let Some(protocol) = self.resolve_builtin(proto)
@@ -160,12 +174,11 @@ impl LowerCtx<'_> {
     /// Desugar a postfix operator to a ProtocolCall (e.g. `x..` → `x.rangeFrom()`).
     pub(crate) fn desugar_postfix_op(
         &mut self,
-        body: &AstBody,
         op: &PostfixOp,
-        operand: ExprId,
+        operand: &ExprSrc,
         span: &Span,
     ) -> HirExprId {
-        let lowered_operand = self.lower_expr(body, operand);
+        let lowered_operand = self.lower_expr_src(operand);
 
         if let Some((proto, method)) = lookup_postfix_op(op)
             && let Some(protocol) = self.resolve_builtin(proto)
@@ -207,10 +220,9 @@ impl LowerCtx<'_> {
     /// shape.
     pub(crate) fn desugar_compound_assign(
         &mut self,
-        body: &AstBody,
-        lhs: ExprId,
+        lhs: &ExprSrc,
         op: &CompoundAssignOp,
-        rhs: ExprId,
+        rhs: &ExprSrc,
         span: &Span,
     ) -> HirExprId {
         // AST-level place check: compound-assign requires a settable LHS.
@@ -221,8 +233,11 @@ impl LowerCtx<'_> {
         // `&mutating T` (`arr.mutableAt(index: i) += v`) is a writable place,
         // but only the typed layer can tell it apart from a temporary — the
         // assignment analyzer rejects the non-ref ones.
-        let call_shaped = matches!(&body.exprs[lhs], AstExpr::Call { .. });
-        if !ast_is_place_expr(body, lhs) && !call_shaped {
+        let lhs_node = lhs.inner();
+        let call_shaped = lhs_node
+            .as_ref()
+            .is_some_and(|n| n.kind() == SyntaxKind::ExprCall);
+        if !lhs_node.as_ref().is_some_and(is_place_syntax) && !call_shaped {
             self.ctx.accumulate(
                 Diagnostic::error()
                     .with_code("E213")
@@ -237,8 +252,8 @@ impl LowerCtx<'_> {
             });
         }
 
-        let lowered_lhs = self.lower_expr(body, lhs);
-        let lowered_rhs = self.lower_expr(body, rhs);
+        let lowered_lhs = self.lower_expr_src(lhs);
+        let lowered_rhs = self.lower_expr_src(rhs);
 
         if let Some((proto, method, label)) = lookup_compound_assign_op(op)
             && let Some(protocol) = self.resolve_builtin(proto)
@@ -289,13 +304,12 @@ impl LowerCtx<'_> {
     /// where while conditions only need Bool or BooleanConditional, not Not.
     pub(crate) fn desugar_while(
         &mut self,
-        body: &AstBody,
         label: Option<&str>,
-        condition: ExprId,
-        while_body: &AstBlock,
+        condition: &ExprSrc,
+        while_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_cond = self.lower_expr(body, condition);
+        let lowered_cond = self.lower_expr_src(condition);
         self.while_conditions.push(lowered_cond);
 
         let break_expr = self.alloc_expr(HirExpr::Break {
@@ -324,7 +338,7 @@ impl LowerCtx<'_> {
 
         // Lower while body (push loop label so break/continue can validate)
         self.push_loop(label);
-        let lowered_body = self.lower_block(body, while_body);
+        let lowered_body = self.lower_block(while_body);
         self.pop_loop();
 
         // Build loop body: if_break + body statements
@@ -366,22 +380,21 @@ impl LowerCtx<'_> {
     /// to the if-break-merge desugaring for those.
     pub(crate) fn desugar_while_let(
         &mut self,
-        body: &AstBody,
         label: Option<&str>,
-        conditions: &[IfCondition],
-        while_body: &AstBlock,
+        conditions: &[Cond],
+        while_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
         // Single-`let` shape: lower to `loop { match v { pat => body, _ => break } }`
         // — same structure as `desugar_for_loop`. No CFG merge before the body,
         // so the move-check dataflow keeps the binding-then-use correlation.
         if conditions.len() == 1
-            && let IfCondition::Let { pattern, value } = &conditions[0]
+            && let Cond::Let { pat, value } = &conditions[0]
         {
-            return self.desugar_while_let_single(body, label, *pattern, *value, while_body, span);
+            return self.desugar_while_let_single(label, pat, value, while_body, span);
         }
 
-        self.desugar_while_let_chain(body, label, conditions, while_body, span)
+        self.desugar_while_let_chain(label, conditions, while_body, span)
     }
 
     /// Single-let shape: `while let pat = value { body }` →
@@ -390,23 +403,22 @@ impl LowerCtx<'_> {
     /// bindings as `DefinitelyInit` at the body without a merge.
     fn desugar_while_let_single(
         &mut self,
-        body: &AstBody,
         label: Option<&str>,
-        pattern: PatId,
-        value: ExprId,
-        while_body: &AstBlock,
+        pattern: &PatSrc,
+        value: &ExprSrc,
+        while_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_value = self.lower_expr(body, value);
+        let lowered_value = self.lower_expr_src(value);
 
         // Pattern bindings are visible inside the loop body but not after.
         self.push_scope();
-        let lowered_pat = self.lower_pat(body, pattern);
+        let lowered_pat = self.lower_pat(pattern);
 
         // Lower body inside the same scope as the pattern bindings, with
         // the loop label in scope so `break` / `continue` can validate.
         self.push_loop(label);
-        let lowered_body = self.lower_block(body, while_body);
+        let lowered_body = self.lower_block(while_body);
         self.pop_loop();
         self.pop_scope();
 
@@ -464,10 +476,9 @@ impl LowerCtx<'_> {
     /// bindings and tripped OSSA verification (issue #126's while-let twin).
     fn desugar_while_let_chain(
         &mut self,
-        body: &AstBody,
         label: Option<&str>,
-        conditions: &[IfCondition],
-        while_body: &AstBlock,
+        conditions: &[Cond],
+        while_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
         // Success: run the body for one iteration (inside the pattern scopes so
@@ -475,7 +486,7 @@ impl LowerCtx<'_> {
         // break/continue). Fail: break out of the loop.
         let mut on_success = |this: &mut Self| {
             this.push_loop(label);
-            let lowered_body = this.lower_block(body, while_body);
+            let lowered_body = this.lower_block(while_body);
             this.pop_loop();
             this.alloc_expr(HirExpr::Block {
                 body: lowered_body,
@@ -489,7 +500,6 @@ impl LowerCtx<'_> {
             })
         };
         let match_expr = self.lower_condition_chain(
-            body,
             conditions,
             MatchSource::WhileLet,
             span,
@@ -526,14 +536,13 @@ impl LowerCtx<'_> {
     /// ```
     pub(crate) fn desugar_for_loop(
         &mut self,
-        body: &AstBody,
         label: Option<&str>,
-        pattern: PatId,
-        iterable: ExprId,
-        for_body: &AstBlock,
+        pattern: &PatSrc,
+        iterable: &ExprSrc,
+        for_body: &BlockSyntax,
         span: &Span,
     ) -> HirExprId {
-        let lowered_iterable = self.lower_expr(body, iterable);
+        let lowered_iterable = self.lower_expr_src(iterable);
 
         // $iter = iterable.iter() via Iterable protocol.
         // If the IterableProtocol builtin isn't available (e.g. tests with
@@ -597,7 +606,7 @@ impl LowerCtx<'_> {
 
         // Pattern for .Some(pattern)
         self.push_scope();
-        let lowered_pat = self.lower_pat(body, pattern);
+        let lowered_pat = self.lower_pat(pattern);
         let some_pat = self.alloc_pat(HirPat::ImplicitVariant {
             name: HirName::name("Some"),
             args: vec![HirPatArg {
@@ -609,7 +618,7 @@ impl LowerCtx<'_> {
 
         // Lower for body (push loop label so break/continue can validate)
         self.push_loop(label);
-        let lowered_for_body = self.lower_block(body, for_body);
+        let lowered_for_body = self.lower_block(for_body);
         self.pop_loop();
         self.pop_scope();
 
@@ -705,13 +714,8 @@ impl LowerCtx<'_> {
     /// `.fromResidual($early)` is an ImplicitMember resolved against the function's
     /// return type (which must conform to FromResidual[Early]).
     /// Falls back to hardcoded .Ok/.Err if Tryable protocol is not available.
-    pub(crate) fn desugar_try(
-        &mut self,
-        body: &AstBody,
-        operand: ExprId,
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_operand = self.lower_expr(body, operand);
+    pub(crate) fn desugar_try(&mut self, operand: &ExprSrc, span: &Span) -> HirExprId {
+        let lowered_operand = self.lower_expr_src(operand);
 
         // Try requires the Tryable protocol. Without it (e.g. tests with
         // `stdlib: false`) the desugaring would produce a malformed match
@@ -831,13 +835,8 @@ impl LowerCtx<'_> {
     /// doesn't cascade — without this the `.Err` member resolution fires
     /// and reports a confusing follow-up like "implicit member '.Err' not
     /// found on Error".
-    pub(crate) fn desugar_throw(
-        &mut self,
-        body: &AstBody,
-        value: ExprId,
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_value = self.lower_expr(body, value);
+    pub(crate) fn desugar_throw(&mut self, value: &ExprSrc, span: &Span) -> HirExprId {
+        let lowered_value = self.lower_expr_src(value);
 
         if matches!(&self.exprs[lowered_value], HirExpr::Error { .. }) {
             return self.alloc_expr(HirExpr::Error { span: span.clone() });
@@ -876,10 +875,11 @@ impl LowerCtx<'_> {
     /// ```
     pub(crate) fn desugar_interpolated_string(
         &mut self,
-        body: &AstBody,
-        parts: &[StringPart],
+        node: &SyntaxNode,
         span: &Span,
     ) -> HirExprId {
+        let parts = interpolated_string_parts(node, span, self.file_id);
+        let parts = parts.as_slice();
         // Empty interpolated string → plain empty string literal
         if parts.is_empty() {
             return self.alloc_expr(HirExpr::Literal {
@@ -913,7 +913,7 @@ impl LowerCtx<'_> {
         for part in parts {
             match part {
                 StringPart::Literal(text) => literal_capacity += text.len() as i64,
-                StringPart::Interpolation { .. } => interpolation_count += 1,
+                StringPart::Hole { .. } => interpolation_count += 1,
             }
         }
 
@@ -981,12 +981,12 @@ impl LowerCtx<'_> {
                         span: span.clone(),
                     }));
                 },
-                StringPart::Interpolation { expr, format } => {
-                    // A hole that failed to parse is an `AstExpr::Error`; the
-                    // parser already reported it ("invalid expression in
+                StringPart::Hole { expr, format } => {
+                    // A hole that failed to parse lowers to `HirExpr::Error`;
+                    // the parser already reported it ("invalid expression in
                     // string interpolation: …", #200), so the build stops
                     // before the `Error` type could reach monomorphization.
-                    let lowered = self.lower_expr(body, *expr);
+                    let lowered = self.lower_expr_src(expr);
 
                     let mut args = vec![HirCallArg {
                         label: None,
@@ -1339,4 +1339,113 @@ fn compound_assign_op_symbol(op: &CompoundAssignOp) -> &'static str {
         CompoundAssignOp::ShlAssign => "<<=",
         CompoundAssignOp::ShrAssign => ">>=",
     }
+}
+
+/// The pieces of an `ExprInterpolatedString`. The lexer split the literal
+/// into `StringFragment` tokens and `StringInterpolation` nodes, and the
+/// parser parsed every hole in place, so nothing is re-lexed here: fragments
+/// are decoded with the shared escape table and each hole is a node of its
+/// own, with real file spans (#166 by construction).
+///
+/// Multi-line literals need indentation stripped across lines that may
+/// contain holes, so the body is assembled with one placeholder character per
+/// hole, processed as text, and split back at the placeholders.
+fn interpolated_string_parts(node: &SyntaxNode, span: &Span, file_id: usize) -> Vec<StringPart> {
+    use kestrel_ast::escape::{Escaped, decode_escape};
+
+    let multiline = token(node, SyntaxKind::StringStart).is_some_and(|t| t.text() == "\"\"\"");
+    let holes: Vec<SyntaxNode> = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::StringInterpolation)
+        .collect();
+
+    // The body with each hole replaced by a placeholder no fragment uses.
+    let fragments: String = node
+        .children_with_tokens()
+        .filter_map(SyntaxElement::into_token)
+        .filter(|t| t.kind() == SyntaxKind::StringFragment)
+        .map(|t| t.text().to_string())
+        .collect();
+    let placeholder = (0xE000u32..)
+        .filter_map(char::from_u32)
+        .find(|c| !fragments.contains(*c))
+        .expect("a free private-use character");
+    let mut body = String::new();
+    for element in node.children_with_tokens() {
+        match element {
+            SyntaxElement::Token(t) if t.kind() == SyntaxKind::StringFragment => {
+                body.push_str(t.text())
+            },
+            SyntaxElement::Node(n) if n.kind() == SyntaxKind::StringInterpolation => {
+                body.push(placeholder)
+            },
+            _ => {},
+        }
+    }
+    // Indent errors are reported for plain multi-line literals (see
+    // `literal::decode_string_literal_token`); an interpolated one strips
+    // best-effort.
+    if multiline {
+        body = kestrel_ast_builder::string_token::process_multiline_body(&body, 0, 0).value;
+    }
+
+    let mut parts = Vec::new();
+    let mut holes = holes.into_iter();
+    let mut literal = String::new();
+    let mut chars = body.char_indices().peekable();
+    while let Some((_, c)) = chars.next() {
+        if c == placeholder {
+            if !literal.is_empty() {
+                parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+            }
+            if let Some(hole) = holes.next() {
+                parts.push(interpolation_hole(&hole, span, file_id));
+            }
+            continue;
+        }
+        if c != '\\' {
+            literal.push(c);
+            continue;
+        }
+        // The literal segments go through the SAME escape table as a plain
+        // string (`kestrel_ast::escape`, F26).
+        let decoded = decode_escape(&mut chars);
+        match decoded.result {
+            Ok(Escaped::Scalar(cp)) => match char::from_u32(cp) {
+                Some(ch) => literal.push(ch),
+                None => literal.push_str(&decoded.raw),
+            },
+            Ok(Escaped::LineContinuation) => {},
+            // `\(` never reaches here — the lexer turned every hole into a
+            // node. Malformed escapes keep their source text; reporting them
+            // is the plain-literal path's job.
+            Ok(Escaped::Interpolation) | Err(_) => literal.push_str(&decoded.raw),
+        }
+    }
+    if !literal.is_empty() {
+        parts.push(StringPart::Literal(literal));
+    }
+    parts
+}
+
+/// One `\( expr (: spec)? )` hole. A hole the parser could not parse holds
+/// an `Error` node (its error is already reported) and lowers to an error
+/// expression spanning the hole.
+fn interpolation_hole(hole: &SyntaxNode, string_span: &Span, file_id: usize) -> StringPart {
+    let expr = match expr_children(hole).next() {
+        Some(e) => ExprSrc::Node(e),
+        None if hole.text_range().is_empty() => ExprSrc::Error(string_span.clone()),
+        None => ExprSrc::Error(kestrel_syntax_tree::utils::get_node_span(hole, file_id)),
+    };
+    let format = hole
+        .children()
+        .find(|c| c.kind() == SyntaxKind::FormatSpecifier)
+        .map(|f| {
+            f.children_with_tokens()
+                .filter_map(SyntaxElement::into_token)
+                .filter(|t| t.kind() == SyntaxKind::FormatSpec)
+                .map(|t| t.text().to_string())
+                .collect::<String>()
+        });
+    StringPart::Hole { expr, format }
 }

@@ -21,7 +21,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Body, Intrinsic, NodeKind, Valued};
+use kestrel_ast_builder::{Attributes, Intrinsic, NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E623",
@@ -70,8 +70,7 @@ impl DeclCheck for FunctionBodyAnalyzer {
         }
 
         // Function has a body or computed value -- no error
-        if cx.query.get::<Body>(cx.entity).is_some() || cx.query.get::<Valued>(cx.entity).is_some()
-        {
+        if cx.query.get::<Valued>(cx.entity).is_some() {
             return vec![];
         }
 

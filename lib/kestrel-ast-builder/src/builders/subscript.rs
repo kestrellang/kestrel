@@ -10,7 +10,6 @@ use super::params::extract_params;
 use super::type_param::build_type_parameters;
 use crate::ast_type::lower_opt_type;
 use crate::components::*;
-use crate::lower;
 
 /// Build a subscript declaration entity from CST.
 ///
@@ -70,8 +69,7 @@ pub fn build_subscript(
             );
         } else if let Some(block) = body.code_block() {
             // Shorthand getter-only form: subscript(...) -> T { expr }
-            world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
-            world.set(entity, Valued(SyntaxNodePtr::new(&block.syntax())));
+            world.set(entity, Valued(SyntaxNodePtr::new(block.syntax())));
         }
     }
 
@@ -102,8 +100,7 @@ fn build_accessors(
         world.set(entity, Settable);
     }
     if let Some(block) = acc.getter().and_then(|g| g.code_block()) {
-        world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
-        world.set(entity, Valued(SyntaxNodePtr::new(&block.syntax())));
+        world.set(entity, Valued(SyntaxNodePtr::new(block.syntax())));
     }
     let index_params = |world: &World| {
         world

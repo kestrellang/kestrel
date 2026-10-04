@@ -24,7 +24,7 @@
 //!   entity isn't kept on the AST node. Add a `ResolveTypeRefs { file }`
 //!   query in `kestrel-name-res` when needed.
 
-use kestrel_ast_builder::{Body, DeclSpan, FileId};
+use kestrel_ast_builder::{DeclSpan, FileId, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirExpr, HirPat};
 use kestrel_hir::res::LocalId;
@@ -58,7 +58,7 @@ pub struct ReferenceSite {
 /// Find every reference to `target` in the workspace.
 pub fn references_to(world: &World, root: Entity, target: Entity) -> Vec<ReferenceSite> {
     let ctx = world.query_context();
-    let body_entities: Vec<Entity> = world.iter_component::<Body>().map(|(e, _)| e).collect();
+    let body_entities: Vec<Entity> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
 
     let mut sites: Vec<ReferenceSite> = Vec::new();
 

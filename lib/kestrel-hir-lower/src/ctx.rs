@@ -11,18 +11,18 @@ use kestrel_hecs::{Entity, QueryContext};
 use kestrel_hir::body::*;
 use kestrel_hir::res::{Local, LocalId};
 use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxNode, SyntaxToken};
 
-/// Bridge from the AST's string-typed name field to `HirName`. The AST
-/// builder stores `""` for member identifiers that the parser recovered
-/// as missing (the `Missing[Identifier ""]` wrapper from the parser's
-/// recovery primitive). Translating that to `HirName::Missing` here
-/// gives inference a single, explicit signal to short-circuit instead
-/// of cascading "name not found" diagnostics.
-pub(crate) fn name_from_ast(name: String) -> HirName {
-    if name.is_empty() {
-        HirName::Missing
-    } else {
-        HirName::Name(name)
+use crate::source_map::BodySourceMap;
+
+/// A member or case name as written: `None` when the parser recovered from
+/// an absent name, which lowers to `HirName::Missing` — one explicit signal
+/// for inference to short-circuit on instead of cascading "name not found"
+/// diagnostics.
+pub(crate) fn hir_name(name: Option<String>) -> HirName {
+    match name {
+        Some(name) => HirName::Name(name),
+        None => HirName::Missing,
     }
 }
 
@@ -32,6 +32,10 @@ pub(crate) struct LowerCtx<'a> {
     pub root: Entity,
     /// The function/init/getter entity whose body we're lowering
     pub owner: Entity,
+    /// `Span::file_id` of the body's file (its file entity's index).
+    pub file_id: usize,
+    /// HIR ids ↔ syntax, filled as nodes are lowered.
+    pub source_map: BodySourceMap,
 
     // HIR arenas being built
     pub exprs: Arena<HirExpr>,
@@ -87,11 +91,13 @@ pub(crate) struct LowerCtx<'a> {
 }
 
 impl<'a> LowerCtx<'a> {
-    pub fn new(ctx: &'a QueryContext<'a>, root: Entity, owner: Entity) -> Self {
+    pub fn new(ctx: &'a QueryContext<'a>, root: Entity, owner: Entity, file_id: usize) -> Self {
         Self {
             ctx,
             root,
             owner,
+            file_id,
+            source_map: BodySourceMap::default(),
             exprs: Arena::new(),
             pats: Arena::new(),
             stmts: Arena::new(),
@@ -155,6 +161,34 @@ impl<'a> LowerCtx<'a> {
             scope.insert(name.to_string(), id);
         }
         id
+    }
+
+    /// `define_local` for a binding the source spells: `name` is its
+    /// identifier token, `binding` the node that binds it. Records the
+    /// declaration in the source map.
+    pub fn define_named_local(
+        &mut self,
+        binding: &SyntaxNode,
+        name: &SyntaxToken,
+        is_mut: bool,
+        span: Span,
+    ) -> LocalId {
+        let reused = self
+            .or_reuse
+            .as_ref()
+            .is_some_and(|m| m.contains_key(name.text()));
+        let id = self.define_local(name.text(), is_mut, span);
+        // An or-pattern alternative re-binds the first alternative's local;
+        // the declaration is the first alternative's.
+        if !reused {
+            self.source_map.record_local(id, binding, name);
+        }
+        id
+    }
+
+    /// The span of `node`, from its first non-trivia token.
+    pub fn span(&self, node: &SyntaxNode) -> Span {
+        kestrel_syntax_tree::utils::get_node_span(node, self.file_id)
     }
 
     /// Current scope depth (for closure capture detection).

@@ -11,7 +11,6 @@ pub mod build;
 pub mod builders;
 pub mod components;
 pub mod lang_module;
-pub mod lower;
 pub mod string_token;
 pub mod syntax;
 

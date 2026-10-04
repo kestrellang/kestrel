@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::panic::AssertUnwindSafe;
 
-use kestrel_ast_builder::{Body, Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind, Valued};
 use kestrel_compiler::{Compiler, InferWithDiagnostics, diagnostic::WorldFiles};
 use kestrel_hecs::Entity;
 use kestrel_type_infer::error::InferError;
@@ -52,11 +52,11 @@ impl<'a> CompilerDriver<'a> {
         }
     }
 
-    /// Run type inference on every entity with a `Body` component.
+    /// Run type inference on every entity with a body (a `Valued` component).
     ///
     /// Each body is queried through `InferWithDiagnostics`, so per-body
     /// results are memoized by the query cache. The outer scan is not
-    /// incremental — it visits every `Body` entity every call.
+    /// incremental — it visits every body entity every call.
     ///
     /// Panics in the solver are caught per-body and recorded in the
     /// summary so one bad body doesn't abort the whole run.
@@ -64,7 +64,7 @@ impl<'a> CompilerDriver<'a> {
         let world = self.compiler.world();
         let root = self.compiler.root();
 
-        let entities: Vec<Entity> = world.iter_component::<Body>().map(|(e, _)| e).collect();
+        let entities: Vec<Entity> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
 
         let ctx = world.query_context();
         let mut summary = InferSummary::default();
@@ -166,7 +166,7 @@ impl<'a> CompilerDriver<'a> {
         let world = self.compiler.world();
         let root = self.compiler.root();
 
-        let body_entities: Vec<Entity> = world.iter_component::<Body>().map(|(e, _)| e).collect();
+        let body_entities: Vec<Entity> = world.iter_component::<Valued>().map(|(e, _)| e).collect();
         let decl_entities: Vec<Entity> =
             world.iter_component::<NodeKind>().map(|(e, _)| e).collect();
 

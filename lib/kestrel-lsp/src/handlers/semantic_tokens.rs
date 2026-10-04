@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{Body, DeclSpan, FileId, NodeKind};
+use kestrel_ast_builder::{DeclSpan, FileId, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::HirExpr;
 use kestrel_hir_lower::LowerBody;
@@ -144,7 +144,7 @@ fn build_entity_overrides(
     }
 
     // Phase 2: body expressions — classify each identifier reference.
-    for (body_entity, _) in world.iter_component::<Body>() {
+    for (body_entity, _) in world.iter_component::<Valued>() {
         let Some(fid) = world.get::<FileId>(body_entity) else {
             continue;
         };

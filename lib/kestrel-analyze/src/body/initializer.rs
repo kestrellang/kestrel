@@ -177,7 +177,7 @@ impl BodyCheck for InitializerAnalyzer {
                 continue;
             }
             // Skip fields with default values — they don't need explicit init
-            if cx.query.get::<kestrel_ast_builder::Body>(child).is_some() {
+            if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
                 continue;
             }
             all_fields.insert(name.clone());

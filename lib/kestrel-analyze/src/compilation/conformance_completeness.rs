@@ -280,9 +280,7 @@ fn check_protocol_requirements(
         // method that's already (illegally) implemented. Skip — the body is
         // visible to readers as a (would-be) default, so the conformance is
         // not missing in the sense E454 is meant to flag.
-        if cx.query.get::<kestrel_ast_builder::Body>(child).is_some()
-            || cx.query.get::<kestrel_ast_builder::Valued>(child).is_some()
-        {
+        if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
             continue;
         }
         let child_kind = cx.query.get::<NodeKind>(child);

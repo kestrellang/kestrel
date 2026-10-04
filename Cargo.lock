@@ -951,6 +951,7 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-span",
  "kestrel-syntax-tree",
+ "rowan",
 ]
 
 [[package]]
@@ -1024,6 +1025,7 @@ dependencies = [
  "kestrel-reporting",
  "kestrel-semantics",
  "kestrel-span",
+ "kestrel-syntax-tree",
  "kestrel-type-infer",
  "smallvec",
 ]

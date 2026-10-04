@@ -1,16 +1,22 @@
-//! Expression lowering: AstExpr → HirExpr.
+//! Expression lowering: CST expressions → HirExpr.
 //!
 //! The core of HIR lowering. Resolves paths to entities/locals,
 //! dispatches operator desugaring, and handles control flow.
 
-use kestrel_ast::ast_body::*;
 use kestrel_ast_builder::{DeclSpan, Name};
 use kestrel_hir::body::*;
 use kestrel_name_res::{ResolveValuePath, ValueResolution};
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
+use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::ctx::{LowerCtx, name_from_ast};
+use crate::ctx::{LowerCtx, hir_name};
+use crate::syntax::{
+    ArgSyntax, BlockSyntax, Cond, ExprSrc, PatSrc, PathBase, PathSeg, PathSyntax, StmtSyntax,
+    arguments, binary_op, closure_body_syntax, closure_params, code_block, compound_assign_op,
+    expr_children, first_expr, first_pat, first_token, if_conditions, implicit_it_reference,
+    jump_label, let_conditions, loop_label, postfix_op, token, unary_op, unwrap_expr,
+};
 
 /// How a `Type.instanceMethod` path was written. Both forms are the same
 /// mistake — an instance method has no receiver when named through its type —
@@ -23,130 +29,233 @@ enum MethodOnTypeUse {
     Value,
 }
 
+/// The `else` of an `if`.
+enum ElseSyntax {
+    Block(BlockSyntax),
+    /// `else if …` (or any expression after `else`).
+    ElseIf(SyntaxNode),
+}
+
+/// A match arm's body.
+enum ArmBody {
+    Expr(ExprSrc),
+    /// `pat => { stmts; value }` — a header-less closure in arm position is a
+    /// block, not a closure (no implicit `it`).
+    Block(SyntaxNode),
+}
+
+/// The type path a member call's base names, when the base is a plain
+/// path: `Type[Args]` in `Type[Args].staticMethod()`.
+fn static_call_base(path: &PathSyntax, file_id: usize) -> Option<Vec<PathSeg>> {
+    if path.members.len() != 1 {
+        return None;
+    }
+    match &path.base {
+        PathBase::Segments(segs) => Some(segs.clone()),
+        PathBase::Expr(base) => {
+            let inner = unwrap_expr(base);
+            (inner.kind() == SyntaxKind::ExprPath)
+                .then(|| PathSyntax::of(&inner, file_id))
+                .and_then(|p| p.as_segments().map(<[PathSeg]>::to_vec))
+        },
+    }
+}
+
 impl LowerCtx<'_> {
-    /// Lower an AST expression to an HIR expression.
-    pub fn lower_expr(&mut self, body: &AstBody, id: ExprId) -> HirExprId {
-        let expr = body.exprs[id].clone();
-        match expr {
-            AstExpr::Literal { kind, span } => self.lower_literal(&kind, &span),
-            AstExpr::InterpolatedString { parts, span } => {
-                self.desugar_interpolated_string(body, &parts, &span)
+    /// Lower an expression, or the error expression standing for a missing
+    /// one.
+    pub(crate) fn lower_expr_src(&mut self, src: &ExprSrc) -> HirExprId {
+        match src {
+            ExprSrc::Node(node) => self.lower_expr(node),
+            ExprSrc::Error(span) => self.alloc_expr(HirExpr::Error { span: span.clone() }),
+        }
+    }
+
+    /// Lower an expression node (an `Expression` wrapper or an `Expr*`
+    /// node), recording it in the source map.
+    pub(crate) fn lower_expr(&mut self, node: &SyntaxNode) -> HirExprId {
+        let node = unwrap_expr(node);
+        let id = self.lower_expr_node(&node);
+        self.source_map.record_expr(&node, id);
+        id
+    }
+
+    fn lower_expr_node(&mut self, node: &SyntaxNode) -> HirExprId {
+        let span = self.span(node);
+        match node.kind() {
+            SyntaxKind::ExprInteger => {
+                let value = HirLiteral::Integer(crate::pat::parse_int(&literal_text(node)));
+                self.alloc_literal(value, span)
             },
-            AstExpr::Array { elements, span } => {
-                let lowered: Vec<HirExprId> =
-                    elements.iter().map(|&e| self.lower_expr(body, e)).collect();
-                self.alloc_expr(HirExpr::Array {
-                    elements: lowered,
-                    span,
-                })
+            SyntaxKind::ExprFloat => {
+                let value = HirLiteral::Float(crate::pat::parse_float(&literal_text(node)));
+                self.alloc_literal(value, span)
             },
-            AstExpr::Dictionary { entries, span } => {
-                let lowered: Vec<HirDictEntry> = entries
-                    .iter()
-                    .map(|e| HirDictEntry {
-                        key: self.lower_expr(body, e.key),
-                        value: self.lower_expr(body, e.value),
+            SyntaxKind::ExprString | SyntaxKind::ExprRawString => {
+                let (value, escape_errors) = crate::literal::decode_string_literal_token(
+                    &literal_text(node),
+                    span.file_id,
+                    span.start,
+                );
+                let value = HirLiteral::String {
+                    value,
+                    escape_errors,
+                };
+                self.alloc_literal(value, span)
+            },
+            SyntaxKind::ExprChar => {
+                let (value, escape_errors) =
+                    crate::pat::parse_char_validated(&literal_text(node), &span, self.ctx);
+                let value = HirLiteral::Char {
+                    value,
+                    escape_errors,
+                };
+                self.alloc_literal(value, span)
+            },
+            SyntaxKind::ExprBool => {
+                let value = HirLiteral::Bool(literal_text(node) == "true");
+                self.alloc_literal(value, span)
+            },
+            SyntaxKind::ExprNull => self.alloc_literal(HirLiteral::Null, span),
+            SyntaxKind::ExprUnit => self.alloc_expr(HirExpr::Tuple {
+                elements: Vec::new(),
+                span,
+            }),
+            SyntaxKind::ExprInterpolatedString => self.desugar_interpolated_string(node, &span),
+            SyntaxKind::ExprArray => {
+                let elements = expr_children(node).map(|e| self.lower_expr(&e)).collect();
+                self.alloc_expr(HirExpr::Array { elements, span })
+            },
+            SyntaxKind::ExprDictionary => {
+                let entries = node
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::DictionaryEntry)
+                    .filter_map(|entry| {
+                        let mut exprs = expr_children(&entry);
+                        Some((exprs.next()?, exprs.next()?))
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|(key, value)| HirDictEntry {
+                        key: self.lower_expr(&key),
+                        value: self.lower_expr(&value),
                     })
                     .collect();
-                self.alloc_expr(HirExpr::Dict {
-                    entries: lowered,
-                    span,
-                })
+                self.alloc_expr(HirExpr::Dict { entries, span })
             },
-            AstExpr::Tuple { elements, span } => {
-                let lowered: Vec<HirExprId> =
-                    elements.iter().map(|&e| self.lower_expr(body, e)).collect();
-                self.alloc_expr(HirExpr::Tuple {
-                    elements: lowered,
-                    span,
-                })
+            SyntaxKind::ExprTuple => {
+                let elements = expr_children(node).map(|e| self.lower_expr(&e)).collect();
+                self.alloc_expr(HirExpr::Tuple { elements, span })
             },
-            AstExpr::Path { segments, span } => self.lower_path(body, &segments, &span),
-            AstExpr::MemberAccess {
-                base,
-                member,
-                type_args: _,
-                span,
-            } => {
-                // Standalone member access (not callee of Call) → Field
-                let lowered_base = self.lower_expr(body, base);
-                self.alloc_expr(HirExpr::Field {
-                    base: lowered_base,
-                    name: name_from_ast(member),
-                    span,
-                })
+            // Grouping is transparent: `(e)` is `e` (the parser already
+            // applied precedence, so nothing regroups across it).
+            SyntaxKind::ExprGrouping => match first_expr(node) {
+                Some(inner) => self.lower_expr(&inner),
+                None => self.alloc_expr(HirExpr::Error { span }),
             },
-            AstExpr::TupleIndex { base, index, span } => {
-                let lowered_base = self.lower_expr(body, base);
-                self.alloc_expr(HirExpr::TupleIndex {
-                    base: lowered_base,
-                    index,
-                    span,
-                })
+            SyntaxKind::ExprPath => {
+                let path = PathSyntax::of(node, self.file_id);
+                self.lower_path_chain(&path, path.members.len(), &span)
             },
-            AstExpr::ImplicitMember {
-                member,
-                arguments,
-                span,
-            } => {
-                let lowered_args = arguments.map(|args| self.lower_call_args(body, &args));
+            SyntaxKind::ExprTupleIndex => {
+                let base = ExprSrc::or_error(first_expr(node), &span);
+                let index = token(node, SyntaxKind::Integer)
+                    .and_then(|t| t.text().parse::<u32>().ok())
+                    .unwrap_or(0);
+                let base = self.lower_expr_src(&base);
+                self.alloc_expr(HirExpr::TupleIndex { base, index, span })
+            },
+            SyntaxKind::ExprImplicitMemberAccess => {
+                let name = node
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::Name)
+                    .and_then(|n| token(&n, SyntaxKind::Identifier))
+                    .or_else(|| token(node, SyntaxKind::Identifier))
+                    .map(|t| t.text().to_string());
+                let args = node
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::ArgumentList)
+                    .map(|list| {
+                        let args = arguments(&list, self.file_id);
+                        self.lower_call_args(&args)
+                    });
                 self.alloc_expr(HirExpr::ImplicitMember {
-                    name: name_from_ast(member),
-                    args: lowered_args,
+                    name: hir_name(name),
+                    args,
                     span,
                 })
             },
-            AstExpr::Unary { op, operand, span } => {
-                self.desugar_unary_op(body, &op, operand, &span)
+            SyntaxKind::ExprUnary => {
+                // An operator the parser does not produce means a malformed
+                // tree: lower to Error rather than guessing — a fallback here
+                // silently rewrites the program's meaning.
+                let Some(op) = unary_op(node) else {
+                    return self.alloc_expr(HirExpr::Error { span });
+                };
+                let operand = ExprSrc::or_error(first_expr(node), &span);
+                self.desugar_unary_op(&op, &operand, &span)
             },
-            AstExpr::Postfix { operand, op, span } => {
+            SyntaxKind::ExprPostfix => {
+                let Some(op) = postfix_op(node) else {
+                    return self.alloc_expr(HirExpr::Error { span });
+                };
+                let operand = ExprSrc::or_error(first_expr(node), &span);
                 // Both `!` (Unwrap) and `..` (RangeFrom) desugar to a
                 // ProtocolCall via the operator → protocol table.
-                self.desugar_postfix_op(body, &op, operand, &span)
+                self.desugar_postfix_op(&op, &operand, &span)
             },
-            AstExpr::Binary { .. } => self.lower_binary(body, id),
-            AstExpr::Assignment { lhs, rhs, span } => {
-                let target = self.lower_expr(body, lhs);
-                let value = self.lower_expr(body, rhs);
+            SyntaxKind::ExprBinary => {
+                // The parser already applied precedence and associativity
+                // (`kestrel-parser` `binary_binding_power`), so the nesting is
+                // final and `span` covers exactly this operator's operands.
+                let Some(op) = binary_op(node) else {
+                    return self.alloc_expr(HirExpr::Error { span });
+                };
+                let (lhs, rhs) = self.operands(node, &span);
+                let lhs = self.lower_expr_src(&lhs);
+                let rhs = self.lower_expr_src(&rhs);
+                self.desugar_binary_hir(op, lhs, rhs, &span)
+            },
+            SyntaxKind::ExprAssignment => {
+                let (lhs, rhs) = self.operands(node, &span);
+                let target = self.lower_expr_src(&lhs);
+                let value = self.lower_expr_src(&rhs);
                 self.alloc_expr(HirExpr::Assign {
                     target,
                     value,
                     span,
                 })
             },
-            AstExpr::CompoundAssignment { lhs, op, rhs, span } => {
-                self.desugar_compound_assign(body, lhs, &op, rhs, &span)
+            SyntaxKind::ExprCompoundAssignment => {
+                let Some(op) = compound_assign_op(node) else {
+                    return self.alloc_expr(HirExpr::Error { span });
+                };
+                let (lhs, rhs) = self.operands(node, &span);
+                self.desugar_compound_assign(&lhs, &op, &rhs, &span)
             },
-            AstExpr::Call {
-                callee,
-                arguments,
-                span,
-            } => self.lower_call(body, callee, &arguments, &span),
-            AstExpr::If {
-                conditions,
-                then_body,
-                else_body,
-                span,
-            } => self.lower_if(body, &conditions, &then_body, else_body.as_ref(), &span),
-            AstExpr::While {
-                label,
-                condition,
-                body: while_body,
-                span,
-            } => self.desugar_while(body, label.as_deref(), condition, &while_body, &span),
-            AstExpr::WhileLet {
-                label,
-                conditions,
-                body: while_body,
-                span,
-            } => self.desugar_while_let(body, label.as_deref(), &conditions, &while_body, &span),
-            AstExpr::Loop {
-                label,
-                body: loop_body,
-                span,
-            } => {
+            SyntaxKind::ExprCall => self.lower_call(node, &span),
+            SyntaxKind::ExprIf => self.lower_if(node, &span),
+            SyntaxKind::ExprWhile => {
+                let label = loop_label(node);
+                let body = BlockSyntax::of(code_block(node), self.file_id);
+                if node
+                    .children()
+                    .any(|c| c.kind() == SyntaxKind::WhileLetCondition)
+                {
+                    let conditions =
+                        let_conditions(node, SyntaxKind::WhileLetCondition, self.file_id);
+                    self.desugar_while_let(label.as_deref(), &conditions, &body, &span)
+                } else {
+                    // A plain `while` reads its first condition expression.
+                    let condition = ExprSrc::or_error(first_expr(node), &span);
+                    self.desugar_while(label.as_deref(), &condition, &body, &span)
+                }
+            },
+            SyntaxKind::ExprLoop => {
+                let label = loop_label(node);
+                let body = BlockSyntax::of(code_block(node), self.file_id);
                 self.push_loop(label.as_deref());
-                let lowered = self.lower_block(body, &loop_body);
+                let lowered = self.lower_block(&body);
                 self.pop_loop();
                 self.alloc_expr(HirExpr::Loop {
                     label,
@@ -154,23 +263,35 @@ impl LowerCtx<'_> {
                     span,
                 })
             },
-            AstExpr::For {
-                label,
-                pattern,
-                iterable,
-                body: for_body,
-                span,
-            } => self.desugar_for_loop(body, label.as_deref(), pattern, iterable, &for_body, &span),
-            AstExpr::Break { label, span } => {
+            SyntaxKind::ExprFor => {
+                let label = loop_label(node);
+                let pattern = PatSrc::or_error(
+                    node.children()
+                        .find(|c| c.kind() == SyntaxKind::ForPattern)
+                        .and_then(|p| first_pat(&p)),
+                    &span,
+                );
+                let iterable = ExprSrc::or_error(
+                    node.children()
+                        .find(|c| c.kind() == SyntaxKind::ForIterable)
+                        .and_then(|i| first_expr(&i)),
+                    &span,
+                );
+                let body = BlockSyntax::of(code_block(node), self.file_id);
+                self.desugar_for_loop(label.as_deref(), &pattern, &iterable, &body, &span)
+            },
+            SyntaxKind::ExprBreak => {
+                let label = jump_label(node);
                 self.validate_break_continue("break", &label, &span);
                 self.alloc_expr(HirExpr::Break { label, span })
             },
-            AstExpr::Continue { label, span } => {
+            SyntaxKind::ExprContinue => {
+                let label = jump_label(node);
                 self.validate_break_continue("continue", &label, &span);
                 self.alloc_expr(HirExpr::Continue { label, span })
             },
-            AstExpr::Return { value, span } => {
-                let lowered = value.map(|v| self.lower_expr(body, v));
+            SyntaxKind::ExprReturn => {
+                let lowered = first_expr(node).map(|v| self.lower_expr(&v));
                 // Bare return in effectful init: wrap () in .Some(())/.Ok(())
                 let wrapped = if lowered.is_none() {
                     self.wrap_init_success_value(span.clone())
@@ -182,63 +303,59 @@ impl LowerCtx<'_> {
                     span,
                 })
             },
-            AstExpr::Throw { value, span } => self.desugar_throw(body, value, &span),
-            AstExpr::Try { operand, span } => self.desugar_try(body, operand, &span),
-            AstExpr::Closure {
-                params,
-                body: closure_body,
-                span,
-            } => self.lower_closure(body, &params, &closure_body, &span),
-            AstExpr::Match {
-                scrutinee,
-                arms,
-                span,
-            } => self.lower_match(body, scrutinee, &arms, &span),
-            AstExpr::Block { body: block, span } => {
-                let lowered = self.lower_block(body, &block);
-                self.alloc_expr(HirExpr::Block {
-                    body: lowered,
-                    span: span.clone(),
-                })
+            SyntaxKind::ExprThrow => {
+                let value = ExprSrc::or_error(first_expr(node), &span);
+                self.desugar_throw(&value, &span)
             },
-            AstExpr::Paren { inner, .. } => self.lower_expr(body, inner),
-            AstExpr::Error { span } => self.alloc_expr(HirExpr::Error { span }),
+            SyntaxKind::ExprTry => {
+                let operand = ExprSrc::or_error(first_expr(node), &span);
+                self.desugar_try(&operand, &span)
+            },
+            SyntaxKind::ExprClosure => self.lower_closure(node, &span),
+            SyntaxKind::ExprMatch => self.lower_match(node, &span),
+            _ => self.alloc_expr(HirExpr::Error { span }),
         }
     }
 
-    /// Lower a literal expression.
-    fn lower_literal(&mut self, kind: &AstLiteral, span: &Span) -> HirExprId {
-        let value = match kind {
-            AstLiteral::Integer(s) => HirLiteral::Integer(crate::pat::parse_int(s)),
-            AstLiteral::Float(s) => HirLiteral::Float(crate::pat::parse_float(s)),
-            AstLiteral::String(s) | AstLiteral::RawString(s) => {
-                let (value, escape_errors) =
-                    crate::literal::decode_string_literal_token(s, span.file_id, span.start);
-                HirLiteral::String {
-                    value,
-                    escape_errors,
-                }
-            },
-            AstLiteral::Char(s) => {
-                let (value, escape_errors) = crate::pat::parse_char_validated(s, span, self.ctx);
-                HirLiteral::Char {
-                    value,
-                    escape_errors,
-                }
-            },
-            AstLiteral::Bool(b) => HirLiteral::Bool(*b),
-            AstLiteral::Null => HirLiteral::Null,
-            AstLiteral::Unit => {
-                return self.alloc_expr(HirExpr::Tuple {
-                    elements: Vec::new(),
-                    span: span.clone(),
-                });
-            },
+    fn alloc_literal(&mut self, value: HirLiteral, span: Span) -> HirExprId {
+        self.alloc_expr(HirExpr::Literal { value, span })
+    }
+
+    /// The two operands of a binary-shaped node, each an error at `span`
+    /// when absent.
+    fn operands(&self, node: &SyntaxNode, span: &Span) -> (ExprSrc, ExprSrc) {
+        let mut exprs = expr_children(node);
+        let lhs = ExprSrc::or_error(exprs.next(), span);
+        let rhs = ExprSrc::or_error(exprs.next(), span);
+        (lhs, rhs)
+    }
+
+    /// `HirExpr::Local` for a path segment naming a local, recorded in the
+    /// source map as a use of it.
+    fn alloc_local_ref(&mut self, local: kestrel_hir::res::LocalId, seg: &PathSeg) -> HirExprId {
+        let id = self.alloc_expr(HirExpr::Local(local, seg.span.clone()));
+        let range =
+            rowan::TextRange::new((seg.span.start as u32).into(), (seg.span.end as u32).into());
+        self.source_map.record_local_ref(range, id);
+        id
+    }
+
+    /// An `ExprPath` up to (not including) member `upto`: its base — a path
+    /// resolved by scope, or a computed expression — then `.member` accesses,
+    /// each a `Field` the solver resolves from the base's type.
+    fn lower_path_chain(&mut self, path: &PathSyntax, upto: usize, span: &Span) -> HirExprId {
+        let mut current = match &path.base {
+            PathBase::Segments(segments) => self.lower_path(segments, span),
+            PathBase::Expr(base) => self.lower_expr(base),
         };
-        self.alloc_expr(HirExpr::Literal {
-            value,
-            span: span.clone(),
-        })
+        for member in &path.members[..upto] {
+            current = self.alloc_expr(HirExpr::Field {
+                base: current,
+                name: hir_name(member.name.clone()),
+                span: span.clone(),
+            });
+        }
+        current
     }
 
     /// Lower a path expression. Check locals first, then name resolution.
@@ -248,28 +365,19 @@ impl LowerCtx<'_> {
     /// the remaining segments are member accesses on that value — the
     /// inference solver resolves each `Field` from the base's type. The
     /// `Local`- and `TypeParameter`-leading paths build the same chain inline.
-    fn lower_trailing_member_segments(
-        &mut self,
-        base: HirExprId,
-        rest: &[ExprPathSegment],
-    ) -> HirExprId {
+    fn lower_trailing_member_segments(&mut self, base: HirExprId, rest: &[PathSeg]) -> HirExprId {
         let mut current = base;
         for seg in rest {
             current = self.alloc_expr(HirExpr::Field {
                 base: current,
-                name: name_from_ast(seg.name.clone()),
+                name: HirName::Name(seg.name.clone()),
                 span: seg.span.clone(),
             });
         }
         current
     }
 
-    fn lower_path(
-        &mut self,
-        _body: &AstBody,
-        segments: &[ExprPathSegment],
-        span: &Span,
-    ) -> HirExprId {
+    fn lower_path(&mut self, segments: &[PathSeg], span: &Span) -> HirExprId {
         // Consume the callee-position marker up front so the nested
         // `lower_path` calls this function makes (and any path lowered inside
         // a callee expression) are checked as ordinary values.
@@ -285,11 +393,11 @@ impl LowerCtx<'_> {
         // Remaining segments become field accesses — type inference resolves them later.
         if first.type_args.is_none() {
             if let Some(local_id) = self.lookup_local(&first.name) {
-                let mut current = self.alloc_expr(HirExpr::Local(local_id, first.span.clone()));
+                let mut current = self.alloc_local_ref(local_id, first);
                 for seg in &segments[1..] {
                     current = self.alloc_expr(HirExpr::Field {
                         base: current,
-                        name: name_from_ast(seg.name.clone()),
+                        name: HirName::Name(seg.name.clone()),
                         span: seg.span.clone(),
                     });
                 }
@@ -342,7 +450,7 @@ impl LowerCtx<'_> {
                 for seg in &segments[1..] {
                     current = self.alloc_expr(HirExpr::Field {
                         base: current,
-                        name: name_from_ast(seg.name.clone()),
+                        name: HirName::Name(seg.name.clone()),
                         span: seg.span.clone(),
                     });
                 }
@@ -467,7 +575,7 @@ impl LowerCtx<'_> {
                 let base = self.lower_type_receiver_path(&segments[..segments.len() - 1]);
                 self.alloc_expr(HirExpr::Field {
                     base,
-                    name: name_from_ast(member_name),
+                    name: HirName::Name(member_name),
                     span: span.clone(),
                 })
             },
@@ -547,7 +655,7 @@ impl LowerCtx<'_> {
     /// deinit, ...) the call has no valid resolution — return `HirExpr::Error`
     /// so downstream passes don't cascade into argument-label / mutability
     /// errors that mislead the user.
-    fn is_self_init_call(&self, segments: &[ExprPathSegment]) -> bool {
+    fn is_self_init_call(&self, segments: &[PathSeg]) -> bool {
         use kestrel_ast_builder::NodeKind;
         if segments.len() < 2 {
             return false;
@@ -605,195 +713,342 @@ impl LowerCtx<'_> {
 
     /// Lower a call expression. Detect method calls vs direct calls.
     ///
-    /// Method calls come from two AST shapes:
-    /// 1. `AstExpr::MemberAccess { base, member }` — computed-base access like `expr.method()`
-    /// 2. `AstExpr::Path { segments: [local, method] }` — when parser emits `local.method()`
-    ///    as a path (first segment is a local variable, last segment is the method)
-    fn lower_call(
+    /// Method calls come from two callee shapes:
+    /// 1. a member access on a computed base — `expr.method()` (an `ExprPath`
+    ///    with members), lowered by [`Self::lower_member_call`];
+    /// 2. a multi-segment path — `local.method()`, `Type.staticMethod()`,
+    ///    `T.method()` — whose meaning depends on what its prefix names in
+    ///    scope, decided by [`Self::lower_path_call`].
+    fn lower_call(&mut self, node: &SyntaxNode, span: &Span) -> HirExprId {
+        let callee = ExprSrc::or_error(first_expr(node), span);
+        let args = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ArgumentList)
+            .map(|list| arguments(&list, self.file_id))
+            .unwrap_or_default();
+        let lowered_args = self.lower_call_args(&args);
+
+        let callee_path = callee
+            .inner()
+            .filter(|n| n.kind() == SyntaxKind::ExprPath)
+            .map(|n| PathSyntax::of(&n, self.file_id));
+        if let Some(path) = &callee_path
+            && !path.members.is_empty()
+        {
+            return self.lower_member_call(path, lowered_args, span);
+        }
+        if let Some(segments) = callee_path.as_ref().and_then(PathSyntax::as_segments)
+            && segments.len() >= 2
+        {
+            return self.lower_path_call(segments, &callee, lowered_args, span);
+        }
+
+        // Direct call
+        let lowered_callee = self.lower_callee(&callee);
+        self.alloc_expr(HirExpr::Call {
+            callee: lowered_callee,
+            args: lowered_args,
+            span: span.clone(),
+        })
+    }
+
+    /// `base.member(args)`: a static method named through a type
+    /// (`Type[Args].staticMethod()`) or an instance method call.
+    fn lower_member_call(
         &mut self,
-        body: &AstBody,
-        callee: ExprId,
-        arguments: &[CallArg],
+        path: &PathSyntax,
+        lowered_args: Vec<HirCallArg>,
         span: &Span,
     ) -> HirExprId {
-        let lowered_args = self.lower_call_args(body, arguments);
+        let last = path.members.len() - 1;
+        let member = &path.members[last];
 
-        // Check if callee is a member access → method call
-        match &body.exprs[callee] {
-            AstExpr::MemberAccess {
-                base,
-                member,
-                type_args,
-                ..
-            } => {
-                let base = *base;
-                let member = member.clone();
-                let type_args = type_args.clone();
+        // Check if this is a static method call on a type: Type[Args].staticMethod()
+        // Resolve directly as Call(Def) instead of MethodCall so type inference
+        // doesn't filter out the static method during member resolution.
+        // Multiple overloads become an OverloadSet the solver disambiguates.
+        let static_call = match (&member.name, static_call_base(path, self.file_id)) {
+            (Some(name), Some(base)) => self.try_resolve_static_call(&base, name),
+            _ => None,
+        };
+        if let Some((static_candidates, base_type_args)) = static_call {
+            let mut all_type_args = base_type_args;
+            if let Some(ref method_args) = member.type_args {
+                all_type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
+            }
+            let callee = if static_candidates.len() == 1 {
+                self.alloc_expr(HirExpr::Def(
+                    static_candidates[0],
+                    all_type_args,
+                    span.clone(),
+                ))
+            } else {
+                self.alloc_expr(HirExpr::OverloadSet {
+                    candidates: static_candidates,
+                    type_args: all_type_args,
+                    span: span.clone(),
+                })
+            };
+            return self.alloc_expr(HirExpr::Call {
+                callee,
+                args: lowered_args,
+                span: span.clone(),
+            });
+        }
 
-                // Check if this is a static method call on a type: Type[Args].staticMethod()
-                // Resolve directly as Call(Def) instead of MethodCall so type inference
-                // doesn't filter out the static method during member resolution.
-                // Multiple overloads become an OverloadSet the solver disambiguates.
-                if let Some((static_candidates, base_type_args)) =
-                    self.try_resolve_static_call(body, base, &member)
-                {
-                    let mut all_type_args = base_type_args;
-                    if let Some(ref method_args) = type_args {
-                        all_type_args.extend(method_args.iter().map(|t| self.lower_type(t)));
-                    }
-                    let callee = if static_candidates.len() == 1 {
-                        self.alloc_expr(HirExpr::Def(
-                            static_candidates[0],
-                            all_type_args,
-                            span.clone(),
-                        ))
-                    } else {
-                        self.alloc_expr(HirExpr::OverloadSet {
-                            candidates: static_candidates,
-                            type_args: all_type_args,
-                            span: span.clone(),
-                        })
-                    };
-                    return self.alloc_expr(HirExpr::Call {
-                        callee,
-                        args: lowered_args,
+        // Instance method call
+        let lowered_base = self.lower_path_chain(path, last, span);
+        let lowered_type_args = member
+            .type_args
+            .as_ref()
+            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+
+        self.alloc_expr(HirExpr::MethodCall {
+            receiver: lowered_base,
+            method: hir_name(member.name.clone()),
+            type_args: lowered_type_args,
+            args: lowered_args,
+            span: span.clone(),
+        })
+    }
+
+    /// `a.b.c(args)` with every segment an identifier. Which prefix is a
+    /// value and which segment the method is depends on scope: a local, a
+    /// type with a static method, a type parameter, a value-typed static…
+    fn lower_path_call(
+        &mut self,
+        segments: &[PathSeg],
+        callee: &ExprSrc,
+        lowered_args: Vec<HirCallArg>,
+        span: &Span,
+    ) -> HirExprId {
+        // `self.init(...)` is only legal inside another initializer;
+        // reject early so downstream passes don't cascade.
+        if self.is_self_init_call(segments) {
+            return self.emit_init_outside_initializer(span);
+        }
+        let first = &segments[0];
+        if first.type_args.is_none() && self.lookup_local(&first.name).is_some() {
+            // Lower all segments except the last as nested Field accesses
+            let last = &segments[segments.len() - 1];
+            let method = last.name.clone();
+            let type_args = last.type_args.clone();
+
+            // Build receiver from first N-1 segments
+            let current = self.lower_path_prefix(segments);
+
+            let lowered_type_args =
+                type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+
+            return self.alloc_expr(HirExpr::MethodCall {
+                receiver: current,
+                method: HirName::Name(method),
+                type_args: lowered_type_args,
+                args: lowered_args,
+                span: span.clone(),
+            });
+        }
+
+        // Not a local-based path — check for static method call.
+        // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
+        // resolve the static method directly so type inference doesn't need
+        // to handle it as a member constraint. Multiple overloads become
+        // an OverloadSet the solver disambiguates.
+        {
+            let last = &segments[segments.len() - 1];
+            if let Some((static_candidates, base_type_args)) =
+                self.try_resolve_static_call_from_segments(segments, &last.name)
+            {
+                let callee = if static_candidates.len() == 1 {
+                    self.alloc_expr(HirExpr::Def(
+                        static_candidates[0],
+                        base_type_args,
+                        span.clone(),
+                    ))
+                } else {
+                    self.alloc_expr(HirExpr::OverloadSet {
+                        candidates: static_candidates,
+                        type_args: base_type_args,
                         span: span.clone(),
-                    });
-                }
+                    })
+                };
+                return self.alloc_expr(HirExpr::Call {
+                    callee,
+                    args: lowered_args,
+                    span: span.clone(),
+                });
+            }
 
-                // Instance method call
-                let lowered_base = self.lower_expr(body, base);
-                let lowered_type_args =
-                    type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+            // No static method matched. If the prefix names a type and
+            // there's an instance method by that name, it's a misuse
+            // (`Counter.getValue()` on a non-static method). Emit an
+            // error and return Error so downstream phases short-circuit.
+            if self.is_instance_method_on_type(segments, &last.name) {
+                let method = last.name.clone();
+                return self.emit_instance_method_on_type(&method, span, MethodOnTypeUse::Call);
+            }
+        }
 
-                self.alloc_expr(HirExpr::MethodCall {
-                    receiver: lowered_base,
-                    method: name_from_ast(member),
+        // Type-level static call → MethodCall: `T.method(args)`,
+        // `T.Item.method(args)`, or — with no type parameter in the
+        // path — an associated type named from inside its protocol's
+        // extension (`Item.seed()`, `Item.Sub.seed()`, whose base is
+        // the implicit Self). The solver resolves the method via
+        // protocol bounds on the receiver.
+        'type_level: {
+            if segments.len() < 2 {
+                break 'type_level;
+            }
+            let first_result = self.ctx.query(ResolveValuePath {
+                segments: vec![segments[0].name.clone()],
+                context: self.owner,
+                root: self.root,
+            });
+            let first_is_param = matches!(first_result, ValueResolution::TypeParameter(_));
+            let prefix_segments: Vec<String> = segments[..segments.len() - 1]
+                .iter()
+                .map(|s| s.name.clone())
+                .collect();
+            let prefix_result = self.ctx.query(ResolveValuePath {
+                segments: prefix_segments,
+                context: self.owner,
+                root: self.root,
+            });
+            // Build receiver from the prefix resolution. An
+            // associated-type prefix (`B.Item`, `Item.Sub`) is a
+            // projection: lowering it as a `Def` of the alias entity
+            // would keep `Item` and drop `B`, so a bound on `A.Item`
+            // would be handed to `B.Item` (G17 S5, G26).
+            let prefix = &segments[..segments.len() - 1];
+            let receiver = match prefix_result {
+                ValueResolution::TypeParameter(entity) | ValueResolution::Def(entity)
+                    if first_is_param =>
+                {
+                    Some(self.lower_type_receiver_def(entity, &segments[0]))
+                },
+                ValueResolution::AssociatedType { .. } => {
+                    Some(self.lower_type_receiver_path(prefix))
+                },
+                _ => None,
+            };
+            let Some(receiver) = receiver else {
+                break 'type_level;
+            };
+            let last = &segments[segments.len() - 1];
+            let lowered_type_args = last
+                .type_args
+                .as_ref()
+                .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+            return self.alloc_expr(HirExpr::MethodCall {
+                receiver,
+                method: HirName::Name(last.name.clone()),
+                type_args: lowered_type_args,
+                args: lowered_args,
+                span: span.clone(),
+            });
+        }
+
+        // Value-prefix method call: `Type.staticProp.instanceMethod(args)`.
+        // If the first N-1 segments resolve to a value (Gettable field,
+        // enum-case value, field-through-field chain), the last segment
+        // is an instance method on that value. Emit MethodCall so type
+        // inference sees the correct receiver + method shape instead of
+        // treating the path as a namespace lookup that falls off a field.
+        {
+            use kestrel_ast_builder::{Gettable, NodeKind};
+            let prefix_names: Vec<String> = segments[..segments.len() - 1]
+                .iter()
+                .map(|s| s.name.clone())
+                .collect();
+            let prefix_result = self.ctx.query(ResolveValuePath {
+                segments: prefix_names,
+                context: self.owner,
+                root: self.root,
+            });
+            let is_value_prefix = match &prefix_result {
+                ValueResolution::Def(entity) => {
+                    matches!(
+                        self.ctx.get::<NodeKind>(*entity),
+                        Some(NodeKind::Field) | Some(NodeKind::EnumCase)
+                    ) || self.ctx.has::<Gettable>(*entity)
+                },
+                ValueResolution::FieldValue { .. } | ValueResolution::EnumCaseValue { .. } => true,
+                _ => false,
+            };
+            if is_value_prefix {
+                let prefix_slice = &segments[..segments.len() - 1];
+                let prefix_span = Span::new(
+                    segments[0].span.file_id,
+                    segments[0].span.start..prefix_slice.last().unwrap().span.end,
+                );
+                let receiver = self.lower_path(prefix_slice, &prefix_span);
+                let last = &segments[segments.len() - 1];
+                let lowered_type_args = last
+                    .type_args
+                    .as_ref()
+                    .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
+                return self.alloc_expr(HirExpr::MethodCall {
+                    receiver,
+                    method: HirName::Name(last.name.clone()),
                     type_args: lowered_type_args,
                     args: lowered_args,
                     span: span.clone(),
-                })
-            },
+                });
+            }
+        }
 
-            // Path where first segment is a local: `local.method(args)` → MethodCall
-            // The parser emits this as Path when the base is a simple name.
-            AstExpr::Path { segments, .. } if segments.len() >= 2 => {
-                // `self.init(...)` is only legal inside another initializer;
-                // reject early so downstream passes don't cascade.
-                if self.is_self_init_call(segments) {
-                    return self.emit_init_outside_initializer(span);
-                }
-                let first = &segments[0];
-                if first.type_args.is_none() && self.lookup_local(&first.name).is_some() {
-                    // Lower all segments except the last as nested Field accesses
-                    let last = &segments[segments.len() - 1];
-                    let method = last.name.clone();
-                    let type_args = last.type_args.clone();
-
-                    // Build receiver from first N-1 segments
-                    let current = self.lower_path_prefix(segments);
-
-                    let lowered_type_args =
-                        type_args.map(|args| args.iter().map(|t| self.lower_type(t)).collect());
-
-                    return self.alloc_expr(HirExpr::MethodCall {
-                        receiver: current,
-                        method: name_from_ast(method),
-                        type_args: lowered_type_args,
-                        args: lowered_args,
-                        span: span.clone(),
-                    });
-                }
-
-                // Not a local-based path — check for static method call.
-                // For Type[Args].staticMethod() or mod.Type[Args].staticMethod(),
-                // resolve the static method directly so type inference doesn't need
-                // to handle it as a member constraint. Multiple overloads become
-                // an OverloadSet the solver disambiguates.
-                {
-                    let last = &segments[segments.len() - 1];
-                    if let Some((static_candidates, base_type_args)) =
-                        self.try_resolve_static_call_from_segments(segments, &last.name)
-                    {
-                        let callee = if static_candidates.len() == 1 {
-                            self.alloc_expr(HirExpr::Def(
-                                static_candidates[0],
-                                base_type_args,
-                                span.clone(),
-                            ))
-                        } else {
-                            self.alloc_expr(HirExpr::OverloadSet {
-                                candidates: static_candidates,
-                                type_args: base_type_args,
-                                span: span.clone(),
-                            })
-                        };
-                        return self.alloc_expr(HirExpr::Call {
-                            callee,
-                            args: lowered_args,
-                            span: span.clone(),
-                        });
-                    }
-
-                    // No static method matched. If the prefix names a type and
-                    // there's an instance method by that name, it's a misuse
-                    // (`Counter.getValue()` on a non-static method). Emit an
-                    // error and return Error so downstream phases short-circuit.
-                    if self.is_instance_method_on_type(segments, &last.name) {
-                        let method = last.name.clone();
-                        return self.emit_instance_method_on_type(
-                            &method,
-                            span,
-                            MethodOnTypeUse::Call,
-                        );
-                    }
-                }
-
-                // Type-level static call → MethodCall: `T.method(args)`,
-                // `T.Item.method(args)`, or — with no type parameter in the
-                // path — an associated type named from inside its protocol's
-                // extension (`Item.seed()`, `Item.Sub.seed()`, whose base is
-                // the implicit Self). The solver resolves the method via
-                // protocol bounds on the receiver.
-                'type_level: {
-                    if segments.len() < 2 {
-                        break 'type_level;
-                    }
-                    let first_result = self.ctx.query(ResolveValuePath {
-                        segments: vec![segments[0].name.clone()],
-                        context: self.owner,
-                        root: self.root,
-                    });
-                    let first_is_param = matches!(first_result, ValueResolution::TypeParameter(_));
-                    let prefix_segments: Vec<String> = segments[..segments.len() - 1]
-                        .iter()
-                        .map(|s| s.name.clone())
-                        .collect();
-                    let prefix_result = self.ctx.query(ResolveValuePath {
-                        segments: prefix_segments,
-                        context: self.owner,
-                        root: self.root,
-                    });
-                    // Build receiver from the prefix resolution. An
-                    // associated-type prefix (`B.Item`, `Item.Sub`) is a
-                    // projection: lowering it as a `Def` of the alias entity
-                    // would keep `Item` and drop `B`, so a bound on `A.Item`
-                    // would be handed to `B.Item` (G17 S5, G26).
-                    let prefix = &segments[..segments.len() - 1];
-                    let receiver = match prefix_result {
-                        ValueResolution::TypeParameter(entity) | ValueResolution::Def(entity)
-                            if first_is_param =>
-                        {
-                            Some(self.lower_type_receiver_def(entity, &segments[0]))
-                        },
-                        ValueResolution::AssociatedType { .. } => {
-                            Some(self.lower_type_receiver_path(prefix))
-                        },
-                        _ => None,
-                    };
-                    let Some(receiver) = receiver else {
-                        break 'type_level;
-                    };
+        // Type-prefix protocol-extension static method call:
+        // `A.helper()` where `helper` lives in `extend SomeProto` and
+        // `A: SomeProto`. The full-path collapse to `Call(Def(helper))`
+        // loses the receiver `A`, so MIR can't compute the witness
+        // self_type. Emit `MethodCall(Def(A), "helper")` instead, so
+        // `lower_method_call` uses A's type as self_type.
+        {
+            use kestrel_ast_builder::NodeKind;
+            if segments.len() >= 2 {
+                let prefix_names: Vec<String> = segments[..segments.len() - 1]
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect();
+                let prefix_result = self.ctx.query(ResolveValuePath {
+                    segments: prefix_names,
+                    context: self.owner,
+                    root: self.root,
+                });
+                let full_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
+                let full_result = self.ctx.query(ResolveValuePath {
+                    segments: full_names,
+                    context: self.owner,
+                    root: self.root,
+                });
+                let prefix_is_type = matches!(
+                    &prefix_result,
+                    ValueResolution::Def(e) if matches!(
+                        self.ctx.get::<NodeKind>(*e),
+                        Some(&NodeKind::Struct | &NodeKind::Enum)
+                    )
+                );
+                let method_via_proto_ext = matches!(
+                    &full_result,
+                    ValueResolution::Def(method)
+                        if self.ctx.get::<NodeKind>(*method) == Some(&NodeKind::Function)
+                        && self.ctx.parent_of(*method).is_some_and(|p|
+                            self.ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension)
+                            && self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
+                                extension: p,
+                                root: self.root,
+                            }).is_some_and(|target|
+                                self.ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
+                            )
+                        )
+                );
+                if prefix_is_type && method_via_proto_ext {
+                    let prefix_slice = &segments[..segments.len() - 1];
+                    let prefix_span = Span::new(
+                        segments[0].span.file_id,
+                        segments[0].span.start..prefix_slice.last().unwrap().span.end,
+                    );
+                    let receiver = self.lower_path(prefix_slice, &prefix_span);
                     let last = &segments[segments.len() - 1];
                     let lowered_type_args = last
                         .type_args
@@ -801,159 +1056,30 @@ impl LowerCtx<'_> {
                         .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
                     return self.alloc_expr(HirExpr::MethodCall {
                         receiver,
-                        method: name_from_ast(last.name.clone()),
+                        method: HirName::Name(last.name.clone()),
                         type_args: lowered_type_args,
                         args: lowered_args,
                         span: span.clone(),
                     });
                 }
-
-                // Value-prefix method call: `Type.staticProp.instanceMethod(args)`.
-                // If the first N-1 segments resolve to a value (Gettable field,
-                // enum-case value, field-through-field chain), the last segment
-                // is an instance method on that value. Emit MethodCall so type
-                // inference sees the correct receiver + method shape instead of
-                // treating the path as a namespace lookup that falls off a field.
-                {
-                    use kestrel_ast_builder::{Gettable, NodeKind};
-                    let prefix_names: Vec<String> = segments[..segments.len() - 1]
-                        .iter()
-                        .map(|s| s.name.clone())
-                        .collect();
-                    let prefix_result = self.ctx.query(ResolveValuePath {
-                        segments: prefix_names,
-                        context: self.owner,
-                        root: self.root,
-                    });
-                    let is_value_prefix = match &prefix_result {
-                        ValueResolution::Def(entity) => {
-                            matches!(
-                                self.ctx.get::<NodeKind>(*entity),
-                                Some(NodeKind::Field) | Some(NodeKind::EnumCase)
-                            ) || self.ctx.has::<Gettable>(*entity)
-                        },
-                        ValueResolution::FieldValue { .. }
-                        | ValueResolution::EnumCaseValue { .. } => true,
-                        _ => false,
-                    };
-                    if is_value_prefix {
-                        let prefix_slice = &segments[..segments.len() - 1];
-                        let prefix_span = Span::new(
-                            segments[0].span.file_id,
-                            segments[0].span.start..prefix_slice.last().unwrap().span.end,
-                        );
-                        let receiver = self.lower_path(body, prefix_slice, &prefix_span);
-                        let last = &segments[segments.len() - 1];
-                        let lowered_type_args = last
-                            .type_args
-                            .as_ref()
-                            .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
-                        return self.alloc_expr(HirExpr::MethodCall {
-                            receiver,
-                            method: name_from_ast(last.name.clone()),
-                            type_args: lowered_type_args,
-                            args: lowered_args,
-                            span: span.clone(),
-                        });
-                    }
-                }
-
-                // Type-prefix protocol-extension static method call:
-                // `A.helper()` where `helper` lives in `extend SomeProto` and
-                // `A: SomeProto`. The full-path collapse to `Call(Def(helper))`
-                // loses the receiver `A`, so MIR can't compute the witness
-                // self_type. Emit `MethodCall(Def(A), "helper")` instead, so
-                // `lower_method_call` uses A's type as self_type.
-                {
-                    use kestrel_ast_builder::NodeKind;
-                    if segments.len() >= 2 {
-                        let prefix_names: Vec<String> = segments[..segments.len() - 1]
-                            .iter()
-                            .map(|s| s.name.clone())
-                            .collect();
-                        let prefix_result = self.ctx.query(ResolveValuePath {
-                            segments: prefix_names,
-                            context: self.owner,
-                            root: self.root,
-                        });
-                        let full_names: Vec<String> =
-                            segments.iter().map(|s| s.name.clone()).collect();
-                        let full_result = self.ctx.query(ResolveValuePath {
-                            segments: full_names,
-                            context: self.owner,
-                            root: self.root,
-                        });
-                        let prefix_is_type = matches!(
-                            &prefix_result,
-                            ValueResolution::Def(e) if matches!(
-                                self.ctx.get::<NodeKind>(*e),
-                                Some(&NodeKind::Struct | &NodeKind::Enum)
-                            )
-                        );
-                        let method_via_proto_ext = matches!(
-                            &full_result,
-                            ValueResolution::Def(method)
-                                if self.ctx.get::<NodeKind>(*method) == Some(&NodeKind::Function)
-                                && self.ctx.parent_of(*method).is_some_and(|p|
-                                    self.ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension)
-                                    && self.ctx.query(kestrel_name_res::ExtensionTargetEntity {
-                                        extension: p,
-                                        root: self.root,
-                                    }).is_some_and(|target|
-                                        self.ctx.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
-                                    )
-                                )
-                        );
-                        if prefix_is_type && method_via_proto_ext {
-                            let prefix_slice = &segments[..segments.len() - 1];
-                            let prefix_span = Span::new(
-                                segments[0].span.file_id,
-                                segments[0].span.start..prefix_slice.last().unwrap().span.end,
-                            );
-                            let receiver = self.lower_path(body, prefix_slice, &prefix_span);
-                            let last = &segments[segments.len() - 1];
-                            let lowered_type_args = last
-                                .type_args
-                                .as_ref()
-                                .map(|args| args.iter().map(|t| self.lower_type(t)).collect());
-                            return self.alloc_expr(HirExpr::MethodCall {
-                                receiver,
-                                method: name_from_ast(last.name.clone()),
-                                type_args: lowered_type_args,
-                                args: lowered_args,
-                                span: span.clone(),
-                            });
-                        }
-                    }
-                }
-
-                // Regular direct call (lowered as-is)
-                let lowered_callee = self.lower_callee(body, callee);
-                self.alloc_expr(HirExpr::Call {
-                    callee: lowered_callee,
-                    args: lowered_args,
-                    span: span.clone(),
-                })
-            },
-
-            _ => {
-                // Direct call
-                let lowered_callee = self.lower_callee(body, callee);
-                self.alloc_expr(HirExpr::Call {
-                    callee: lowered_callee,
-                    args: lowered_args,
-                    span: span.clone(),
-                })
-            },
+            }
         }
+
+        // Regular direct call (lowered as-is)
+        let lowered_callee = self.lower_callee(callee);
+        self.alloc_expr(HirExpr::Call {
+            callee: lowered_callee,
+            args: lowered_args,
+            span: span.clone(),
+        })
     }
 
     /// Lower a call's callee. Identical to `lower_expr` except that a path
     /// here is in *callee* position: it names something being invoked, so it
     /// is exempt from `lower_path`'s "instance method used as a value" check.
-    fn lower_callee(&mut self, body: &AstBody, callee: ExprId) -> HirExprId {
+    fn lower_callee(&mut self, callee: &ExprSrc) -> HirExprId {
         self.in_callee_position = true;
-        let lowered = self.lower_expr(body, callee);
+        let lowered = self.lower_expr_src(callee);
         // Cleared by the `lower_path` that consumed it; reset for callees that
         // are not paths at all (`(f)(x)`, `make()(x)`).
         self.in_callee_position = false;
@@ -1015,7 +1141,7 @@ impl LowerCtx<'_> {
     /// Whether the path `Type.member` (`segments[..-1]` resolving to a struct
     /// or enum) names an *instance* method on that type. Used to catch misuses
     /// like `Counter.getValue()` where `getValue` requires a `self`.
-    fn is_instance_method_on_type(&mut self, segments: &[ExprPathSegment], member: &str) -> bool {
+    fn is_instance_method_on_type(&mut self, segments: &[PathSeg], member: &str) -> bool {
         use kestrel_ast_builder::{Name, NodeKind};
 
         if segments.len() < 2 {
@@ -1053,7 +1179,7 @@ impl LowerCtx<'_> {
     /// methods named `member` on that type (one entity per overload).
     fn try_resolve_static_call_from_segments(
         &mut self,
-        segments: &[ExprPathSegment],
+        segments: &[PathSeg],
         member: &str,
     ) -> Option<(Vec<kestrel_hecs::Entity>, Vec<kestrel_hir::ty::HirTy>)> {
         use kestrel_ast_builder::{Name, NodeKind, Static};
@@ -1120,21 +1246,15 @@ impl LowerCtx<'_> {
         Some((matches, type_args))
     }
 
-    /// Check if `base_expr.member` is a static method call on a type.
+    /// Check if `segments.member` (a path naming a type) is a static method call.
     /// Returns `Some((candidates, type_args))` where `candidates` collects every
     /// static overload named `member` — the solver disambiguates by labels/arity.
     fn try_resolve_static_call(
         &mut self,
-        body: &AstBody,
-        base_expr: ExprId,
+        segments: &[PathSeg],
         member: &str,
     ) -> Option<(Vec<kestrel_hecs::Entity>, Vec<kestrel_hir::ty::HirTy>)> {
         use kestrel_ast_builder::{Name, NodeKind, Static};
-
-        // Base must be a Path expression (type reference)
-        let AstExpr::Path { segments, .. } = &body.exprs[base_expr] else {
-            return None;
-        };
 
         // Resolve the base path to an entity
         let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
@@ -1189,7 +1309,7 @@ impl LowerCtx<'_> {
     fn lower_type_receiver_def(
         &mut self,
         entity: kestrel_hecs::Entity,
-        first: &ExprPathSegment,
+        first: &PathSeg,
     ) -> HirExprId {
         let type_args: Vec<kestrel_hir::ty::HirTy> = first
             .type_args
@@ -1206,7 +1326,7 @@ impl LowerCtx<'_> {
     /// The one lowering for both callers: the receiver of a type-level static
     /// call (`B.Item.zero()`, G17 S5) and a value path ending in an
     /// associated type (`Item.Sub`, G26).
-    fn lower_type_receiver_path(&mut self, prefix: &[ExprPathSegment]) -> HirExprId {
+    fn lower_type_receiver_path(&mut self, prefix: &[PathSeg]) -> HirExprId {
         let (first, last) = (&prefix[0], &prefix[prefix.len() - 1]);
         let span = Span {
             file_id: first.span.file_id,
@@ -1231,55 +1351,51 @@ impl LowerCtx<'_> {
     /// Lower Path segments except the last one as receiver.
     /// For `[a, b, c]` returns `Field { base: Field { base: Local(a), name: "b" }, name: ... }`
     /// but stops before the last segment.
-    fn lower_path_prefix(&mut self, segments: &[ExprPathSegment]) -> HirExprId {
+    fn lower_path_prefix(&mut self, segments: &[PathSeg]) -> HirExprId {
         let first = &segments[0];
         let local_id = self.lookup_local(&first.name).unwrap();
-        let mut current = self.alloc_expr(HirExpr::Local(local_id, first.span.clone()));
+        let mut current = self.alloc_local_ref(local_id, first);
         // Build Field chain for all segments except first and last
         for seg in &segments[1..segments.len() - 1] {
             current = self.alloc_expr(HirExpr::Field {
                 base: current,
-                name: name_from_ast(seg.name.clone()),
+                name: HirName::Name(seg.name.clone()),
                 span: seg.span.clone(),
             });
         }
         current
     }
-
-    // ===== Binary expressions =====
-
-    /// Lower a binary expression. The parser already applied precedence and
-    /// associativity (`kestrel-parser` `binary_binding_power`), so the AST
-    /// nesting is final and `span` covers exactly this operator's operands.
-    fn lower_binary(&mut self, body: &AstBody, expr_id: ExprId) -> HirExprId {
-        let AstExpr::Binary { lhs, op, rhs, span } = &body.exprs[expr_id] else {
-            unreachable!("lower_binary on a non-binary expression");
-        };
-        let (lhs, op, rhs, span) = (*lhs, op.clone(), *rhs, span.clone());
-        let lhs = self.lower_expr(body, lhs);
-        let rhs = self.lower_expr(body, rhs);
-        self.desugar_binary_hir(op, lhs, rhs, &span)
-    }
-
     /// Lower call arguments.
-    fn lower_call_args(&mut self, body: &AstBody, args: &[CallArg]) -> Vec<HirCallArg> {
+    fn lower_call_args(&mut self, args: &[ArgSyntax]) -> Vec<HirCallArg> {
         args.iter()
             .map(|arg| HirCallArg {
                 label: arg.label.clone(),
-                value: self.lower_expr(body, arg.value),
+                value: self.lower_expr_src(&arg.value),
             })
             .collect()
     }
 
     /// Lower an if expression.
-    fn lower_if(
-        &mut self,
-        body: &AstBody,
-        conditions: &[IfCondition],
-        then_body: &AstBlock,
-        else_body: Option<&ElseBody>,
-        span: &Span,
-    ) -> HirExprId {
+    fn lower_if(&mut self, node: &SyntaxNode, span: &Span) -> HirExprId {
+        let conditions = if_conditions(node, self.file_id);
+        let then_body = BlockSyntax::of(code_block(node), self.file_id);
+        let else_body = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::ElseClause)
+            .map(|clause| {
+                // ElseClause contains either a CodeBlock or a nested `if`
+                if let Some(block) = code_block(&clause) {
+                    ElseSyntax::Block(BlockSyntax::of(Some(block), self.file_id))
+                } else if let Some(expr) = clause
+                    .children()
+                    .find(|c| matches!(c.kind(), SyntaxKind::ExprIf | SyntaxKind::Expression))
+                {
+                    ElseSyntax::ElseIf(expr)
+                } else {
+                    ElseSyntax::Block(BlockSyntax::empty())
+                }
+            });
+
         // If any condition is an `if let`, desugar through the shared condition
         // chain so pattern bindings stay in scope in the then-body (success =
         // then, fail = else). A single binding nests to one Match; chained
@@ -1287,28 +1403,24 @@ impl LowerCtx<'_> {
         // breaks OSSA dominance because bindings created inside the match don't
         // dominate the if's then-block (issue #126's if-let twin), so binding
         // conditions must never go through `lower_if_conditions`.
-        if conditions
-            .iter()
-            .any(|c| matches!(c, IfCondition::Let { .. }))
-        {
+        if conditions.iter().any(Cond::is_let) {
             let mut on_success = |this: &mut Self| {
-                let then_block = this.lower_block(body, then_body);
+                let then_block = this.lower_block(&then_body);
                 this.hir_block_to_expr(then_block, span)
             };
-            let mut on_fail = |this: &mut Self| match else_body {
+            let mut on_fail = |this: &mut Self| match &else_body {
                 None => this.alloc_expr(HirExpr::Tuple {
                     elements: Vec::new(),
                     span: span.clone(),
                 }),
-                Some(ElseBody::Block(block)) => {
-                    let eb = this.lower_block(body, block);
+                Some(ElseSyntax::Block(block)) => {
+                    let eb = this.lower_block(block);
                     this.hir_block_to_expr(eb, span)
                 },
-                Some(ElseBody::ElseIf(expr_id)) => this.lower_expr(body, *expr_id),
+                Some(ElseSyntax::ElseIf(expr)) => this.lower_expr(expr),
             };
             return self.lower_condition_chain(
-                body,
-                conditions,
+                &conditions,
                 MatchSource::IfLet,
                 span,
                 &mut on_success,
@@ -1318,14 +1430,14 @@ impl LowerCtx<'_> {
 
         // Regular if expression (no pattern binding)
         self.push_scope();
-        let condition = self.lower_if_conditions(body, conditions, MatchSource::IfLet, span);
-        let then_block = self.lower_block(body, then_body);
+        let condition = self.lower_if_conditions(&conditions, MatchSource::IfLet, span);
+        let then_block = self.lower_block(&then_body);
         self.pop_scope();
         let else_block = else_body.map(|eb| match eb {
-            ElseBody::Block(block) => self.lower_block(body, block),
-            ElseBody::ElseIf(expr_id) => {
+            ElseSyntax::Block(block) => self.lower_block(&block),
+            ElseSyntax::ElseIf(expr) => {
                 // Else-if: the expr is another If expression
-                let lowered = self.lower_expr(body, *expr_id);
+                let lowered = self.lower_expr(&expr);
                 HirBlock {
                     stmts: Vec::new(),
                     tail_expr: Some(lowered),
@@ -1348,8 +1460,7 @@ impl LowerCtx<'_> {
     /// diagnostic fires (IfLet → E302, WhileLet → E308, Guard → E309).
     pub(crate) fn lower_if_conditions(
         &mut self,
-        body: &AstBody,
-        conditions: &[IfCondition],
+        conditions: &[Cond],
         source: MatchSource,
         span: &Span,
     ) -> HirExprId {
@@ -1362,11 +1473,11 @@ impl LowerCtx<'_> {
 
         if conditions.len() == 1 {
             return match &conditions[0] {
-                IfCondition::Expr(expr_id) => self.lower_expr(body, *expr_id),
-                IfCondition::Let { pattern, value } => {
+                Cond::Expr(expr) => self.lower_expr_src(expr),
+                Cond::Let { pat, value } => {
                     // if let pattern = value → desugar to match with bool result
-                    let lowered_value = self.lower_expr(body, *value);
-                    let lowered_pat = self.lower_pat(body, *pattern);
+                    let lowered_value = self.lower_expr_src(value);
+                    let lowered_pat = self.lower_pat(pat);
 
                     // match value { pattern => true, _ => false }
                     let true_lit = self.alloc_expr(HirExpr::Literal {
@@ -1401,13 +1512,13 @@ impl LowerCtx<'_> {
         }
 
         // Multiple conditions: lower first, AND with rest
-        let first = self.lower_if_conditions(body, &conditions[..1], source, span);
-        let rest = self.lower_if_conditions(body, &conditions[1..], source, span);
+        let first = self.lower_if_conditions(&conditions[..1], source, span);
+        let rest = self.lower_if_conditions(&conditions[1..], source, span);
 
         // first && rest — through the same table-driven path as a written `&&`,
         // so a missing `LogicalAndOperator` conformance reports instead of
         // silently discarding `rest`.
-        self.desugar_binary_hir(BinaryOp::And, first, rest, span)
+        self.desugar_binary_hir(kestrel_ast::BinaryOp::And, first, rest, span)
     }
 
     /// Lower a closure expression.
@@ -1454,85 +1565,125 @@ impl LowerCtx<'_> {
         );
     }
 
-    fn lower_closure(
-        &mut self,
-        body: &AstBody,
-        params: &[ClosureParam],
-        closure_body: &AstBlock,
-        span: &Span,
-    ) -> HirExprId {
+    /// Lower a closure expression.
+    fn lower_closure(&mut self, node: &SyntaxNode, span: &Span) -> HirExprId {
+        // Implicit `it` parameter: a closure without a parameter header whose
+        // body refers to the name `it` gets `it` as its parameter — `{ it + 1 }`
+        // is `{ (it) in it + 1 }`. It belongs to the innermost header-less
+        // closure and always wins over an outer binding named `it` (both
+        // shadowings warn: E142/E143).
+        let header = closure_params(node, self.file_id);
+        let implicit_it = match header {
+            None => implicit_it_reference(node).map(|first_ref| self.span(&first_ref)),
+            Some(_) => None,
+        };
+        let params = header.unwrap_or_default();
+        let closure_body = closure_body_syntax(node, self.file_id);
+
         self.push_scope();
 
         // For complex patterns (tuple, struct), create a synthetic local
         // and prepend a match-based destructure to the closure body.
         let mut desugar_stmts = Vec::new();
         let mut param_counter = 0u32;
+        let mut hir_params: Vec<HirClosureParam> = Vec::with_capacity(params.len() + 1);
 
-        let hir_params: Vec<HirClosureParam> = params
-            .iter()
-            .map(|p| {
-                let pat = &body.pats[p.pattern];
-                let (name, is_mut, needs_desugar) = match pat {
-                    AstPat::Binding { name, is_mut, .. } => (name.clone(), *is_mut, false),
-                    AstPat::Wildcard { .. } => ("_".to_string(), false, false),
-                    _ => {
-                        // Complex pattern — use synthetic name, desugar later
-                        let name = format!("_cparam_{}", param_counter);
-                        param_counter += 1;
-                        (name, false, true)
-                    },
-                };
-                // A `mutating` closure param (`p.is_mut`) makes the binding
-                // mutable so `x`/`x.field` assignment is allowed (no E604/E201)
-                // and the body lowers the param as a by-reference place.
-                let param_is_mut = is_mut || p.is_mut;
-                if let Some(first_ref) = &p.implicit_it {
-                    self.warn_implicit_it_shadowing(first_ref);
-                }
-                let local = self.define_local(&name, param_is_mut, span.clone());
-                if let Some(first_ref) = &p.implicit_it {
-                    self.implicit_it_locals.insert(local, first_ref.clone());
-                }
-                let ty =
-                    p.ty.as_ref()
-                        .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));
+        if let Some(first_ref) = implicit_it {
+            self.warn_implicit_it_shadowing(&first_ref);
+            let local = self.define_local("it", false, span.clone());
+            self.implicit_it_locals.insert(local, first_ref);
+            hir_params.push(HirClosureParam {
+                local,
+                ty: None,
+                pattern: None,
+                is_mut: false,
+            });
+        }
 
-                let pattern = if needs_desugar {
-                    // Lower the pattern (creates locals for bindings)
-                    let hir_pat = self.lower_pat(body, p.pattern);
-                    let param_ref = self.alloc_expr(HirExpr::Local(local, span.clone()));
-                    let unit = self.alloc_expr(HirExpr::Tuple {
-                        elements: Vec::new(),
-                        span: span.clone(),
-                    });
-                    let match_expr = self.alloc_expr(HirExpr::Match {
-                        scrutinee: param_ref,
-                        arms: vec![HirMatchArm {
-                            pattern: hir_pat,
-                            guard: None,
-                            body: unit,
-                        }],
-                        source: MatchSource::ParamDestructure,
-                        span: span.clone(),
-                    });
-                    let stmt = self.alloc_stmt(HirStmt::Expr {
-                        expr: match_expr,
-                        span: span.clone(),
-                    });
-                    desugar_stmts.push(stmt);
-                    Some(hir_pat)
-                } else {
-                    None
-                };
+        for p in &params {
+            let pat = p.pat.clone().resolve(self.file_id);
+            // A plain binding names the parameter; `_` is anonymous; anything
+            // else gets a synthetic name and destructures in the body.
+            let binding = match &pat {
+                PatSrc::Node(n)
+                    if matches!(
+                        n.kind(),
+                        SyntaxKind::BindingPattern | SyntaxKind::RefBindingPattern
+                    ) =>
+                {
+                    token(n, SyntaxKind::Identifier).map(|name| {
+                        let is_mut = n.kind() == SyntaxKind::BindingPattern
+                            && crate::syntax::has_token(n, SyntaxKind::Var);
+                        (n.clone(), name, is_mut)
+                    })
+                },
+                _ => None,
+            };
+            let is_wildcard = pat.kind() == Some(SyntaxKind::WildcardPattern);
+            // A `mutating` closure param (`p.is_mut`) makes the binding
+            // mutable so `x`/`x.field` assignment is allowed (no E604/E201)
+            // and the body lowers the param as a by-reference place.
+            let (local, param_is_mut, needs_desugar) = match &binding {
+                Some((binding_node, name, is_mut)) => {
+                    let param_is_mut = *is_mut || p.is_mut;
+                    let local =
+                        self.define_named_local(binding_node, name, param_is_mut, span.clone());
+                    (local, param_is_mut, false)
+                },
+                None if is_wildcard => (
+                    self.define_local("_", p.is_mut, span.clone()),
+                    p.is_mut,
+                    false,
+                ),
+                None => {
+                    let name = format!("_cparam_{}", param_counter);
+                    param_counter += 1;
+                    (
+                        self.define_local(&name, p.is_mut, span.clone()),
+                        p.is_mut,
+                        true,
+                    )
+                },
+            };
+            let ty =
+                p.ty.as_ref()
+                    .map(|t| self.lower_type_in(t, crate::ty::RefPosition::Param));
 
-                HirClosureParam {
-                    local,
-                    ty,
-                    pattern,
-                    is_mut: param_is_mut,
-                }
-            })
-            .collect();
+            let pattern = if needs_desugar {
+                // Lower the pattern (creates locals for bindings)
+                let hir_pat = self.lower_pat(&pat);
+                let param_ref = self.alloc_expr(HirExpr::Local(local, span.clone()));
+                let unit = self.alloc_expr(HirExpr::Tuple {
+                    elements: Vec::new(),
+                    span: span.clone(),
+                });
+                let match_expr = self.alloc_expr(HirExpr::Match {
+                    scrutinee: param_ref,
+                    arms: vec![HirMatchArm {
+                        pattern: hir_pat,
+                        guard: None,
+                        body: unit,
+                    }],
+                    source: MatchSource::ParamDestructure,
+                    span: span.clone(),
+                });
+                let stmt = self.alloc_stmt(HirStmt::Expr {
+                    expr: match_expr,
+                    span: span.clone(),
+                });
+                desugar_stmts.push(stmt);
+                Some(hir_pat)
+            } else {
+                None
+            };
+
+            hir_params.push(HirClosureParam {
+                local,
+                ty,
+                pattern,
+                is_mut: param_is_mut,
+            });
+        }
 
         // A closure body is a separate function body: `break`/`continue` in it
         // cannot target a loop in the *enclosing* body. Without this the
@@ -1540,7 +1691,7 @@ impl LowerCtx<'_> {
         // and MIR's `lower_break` then finds no loop and emits a unit literal —
         // the `break` becomes a silent no-op.
         let saved_loops = std::mem::take(&mut self.loop_labels);
-        let mut lowered_body = self.lower_block(body, closure_body);
+        let mut lowered_body = self.lower_block(&closure_body);
         self.loop_labels = saved_loops;
 
         // Prepend destructure statements to closure body
@@ -1561,26 +1712,63 @@ impl LowerCtx<'_> {
     }
 
     /// Lower a match expression.
-    fn lower_match(
-        &mut self,
-        body: &AstBody,
-        scrutinee: ExprId,
-        arms: &[MatchArm],
-        span: &Span,
-    ) -> HirExprId {
-        let lowered_scrutinee = self.lower_expr(body, scrutinee);
+    fn lower_match(&mut self, node: &SyntaxNode, span: &Span) -> HirExprId {
+        let scrutinee = ExprSrc::or_error(first_expr(node), span);
+        let lowered_scrutinee = self.lower_expr_src(&scrutinee);
 
+        let arms: Vec<SyntaxNode> = node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::MatchArm)
+            .collect();
         let lowered_arms: Vec<HirMatchArm> = arms
             .iter()
             .map(|arm| {
+                let arm_span = self.span(arm);
+                let pat = PatSrc::or_error(first_pat(arm), &arm_span);
+                let guard = arm
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::MatchArmGuard)
+                    .map(|g| {
+                        let guard_span = self.span(&g);
+                        ExprSrc::or_error(first_expr(&g), &guard_span)
+                    });
+                let body = match expr_children(arm).last() {
+                    Some(expr) => {
+                        let inner = unwrap_expr(&expr);
+                        let headerless_closure = inner.kind() == SyntaxKind::ExprClosure
+                            && !inner
+                                .children()
+                                .any(|c| c.kind() == SyntaxKind::ClosureParams);
+                        if headerless_closure {
+                            ArmBody::Block(inner)
+                        } else {
+                            ArmBody::Expr(ExprSrc::Node(expr))
+                        }
+                    },
+                    None => ArmBody::Expr(ExprSrc::Error(arm_span)),
+                };
+
                 self.push_scope();
                 // `&` binder patterns are legal exactly here — user-match
                 // arm patterns (the place-mode lowering's domain).
                 let prev = std::mem::replace(&mut self.ref_patterns_allowed, true);
-                let pattern = self.lower_pat(body, arm.pattern);
+                let pattern = self.lower_pat(&pat);
                 self.ref_patterns_allowed = prev;
-                let guard = arm.guard.map(|g| self.lower_expr(body, g));
-                let arm_body = self.lower_expr(body, arm.body);
+                let guard = guard.map(|g| self.lower_expr_src(&g));
+                let arm_body = match &body {
+                    ArmBody::Expr(expr) => self.lower_expr_src(expr),
+                    ArmBody::Block(closure) => {
+                        let block = closure_body_syntax(closure, self.file_id);
+                        let lowered = self.lower_block(&block);
+                        let block_span = self.span(closure);
+                        let id = self.alloc_expr(HirExpr::Block {
+                            body: lowered,
+                            span: block_span,
+                        });
+                        self.source_map.record_expr(closure, id);
+                        id
+                    },
+                };
                 self.pop_scope();
 
                 HirMatchArm {
@@ -1599,10 +1787,10 @@ impl LowerCtx<'_> {
         })
     }
 
-    /// Lower an AST block to an HIR block.
-    pub(crate) fn lower_block(&mut self, body: &AstBody, block: &AstBlock) -> HirBlock {
+    /// Lower a block to an HIR block, in its own scope.
+    pub(crate) fn lower_block(&mut self, block: &BlockSyntax) -> HirBlock {
         self.push_scope();
-        let result = self.lower_block_stmts(body, &block.stmts, block.tail_expr);
+        let result = self.lower_block_stmts(&block.stmts, block.tail.as_ref());
         self.pop_scope();
         result
     }
@@ -1613,53 +1801,35 @@ impl LowerCtx<'_> {
     /// Chained `guard let`s nest naturally via recursion.
     pub(crate) fn lower_block_stmts(
         &mut self,
-        body: &AstBody,
-        stmts: &[StmtId],
-        tail_expr: Option<ExprId>,
+        stmts: &[StmtSyntax],
+        tail_expr: Option<&ExprSrc>,
     ) -> HirBlock {
-        use kestrel_ast::ast_body::{AstStmt, IfCondition};
-
-        for (i, &stmt_id) in stmts.iter().enumerate() {
+        for (i, stmt) in stmts.iter().enumerate() {
             // Any guard binding at least one `let` must CPS-transform so the
             // bindings flow into the continuation. A guard with several
             // comma-chained conditions (e.g. `guard let a = .., let b = ..`)
             // nests one match/if per condition — the boolean-AND fallback in
             // `lower_if_conditions` would evaluate each pattern only for its
             // truth value and drop the bindings, breaking OSSA.
-            let is_guard_let = matches!(
-                &body.stmts[stmt_id],
-                AstStmt::Guard { conditions, .. }
-                    if conditions.iter().any(|c| matches!(c, IfCondition::Let { .. }))
-            );
-            if !is_guard_let {
+            let StmtSyntax::Node(node) = stmt else {
+                continue;
+            };
+            if node.kind() != SyntaxKind::GuardStatement {
                 continue;
             }
-
-            let AstStmt::Guard {
-                conditions,
-                else_body,
-                span,
-            } = &body.stmts[stmt_id]
-            else {
-                unreachable!();
-            };
+            let (conditions, else_body) = self.guard_parts(node);
+            if !conditions.iter().any(Cond::is_let) {
+                continue;
+            }
+            let span = self.span(node);
 
             // Lower preceding statements normally
-            let prev: Vec<HirStmtId> = stmts[..i]
-                .iter()
-                .map(|&id| self.lower_stmt(body, id))
-                .collect();
+            let prev: Vec<HirStmtId> = stmts[..i].iter().map(|s| self.lower_stmt(s)).collect();
 
             // CPS: wrap remaining stmts + tail as the innermost continuation,
             // nesting one condition per level.
-            let match_expr = self.lower_guard_cps(
-                body,
-                conditions,
-                else_body,
-                &stmts[i + 1..],
-                tail_expr,
-                span,
-            );
+            let match_expr =
+                self.lower_guard_cps(&conditions, &else_body, &stmts[i + 1..], tail_expr, &span);
 
             return HirBlock {
                 stmts: prev,
@@ -1668,8 +1838,8 @@ impl LowerCtx<'_> {
         }
 
         // No guard-let found — lower everything normally
-        let lowered: Vec<HirStmtId> = stmts.iter().map(|&id| self.lower_stmt(body, id)).collect();
-        let tail = tail_expr.map(|id| self.lower_expr(body, id));
+        let lowered: Vec<HirStmtId> = stmts.iter().map(|s| self.lower_stmt(s)).collect();
+        let tail = tail_expr.map(|e| self.lower_expr_src(e));
         HirBlock {
             stmts: lowered,
             tail_expr: tail,
@@ -1713,8 +1883,7 @@ impl LowerCtx<'_> {
     /// "used but never defined" — issue #126 and its if-let/while-let twins).
     pub(crate) fn lower_condition_chain(
         &mut self,
-        body: &AstBody,
-        conditions: &[IfCondition],
+        conditions: &[Cond],
         source: MatchSource,
         span: &Span,
         on_success: &mut dyn FnMut(&mut Self) -> HirExprId,
@@ -1725,15 +1894,14 @@ impl LowerCtx<'_> {
             return on_success(self);
         }
         let fail = on_fail(self);
-        self.lower_condition_chain_with_fail(body, conditions, source, span, on_success, fail)
+        self.lower_condition_chain_with_fail(conditions, source, span, on_success, fail)
     }
 
     /// The recursive half of [`Self::lower_condition_chain`], with the fail
     /// continuation already lowered to a single id shared by every level.
     fn lower_condition_chain_with_fail(
         &mut self,
-        body: &AstBody,
-        conditions: &[IfCondition],
+        conditions: &[Cond],
         source: MatchSource,
         span: &Span,
         on_success: &mut dyn FnMut(&mut Self) -> HirExprId,
@@ -1747,16 +1915,16 @@ impl LowerCtx<'_> {
         };
 
         match first {
-            IfCondition::Let { pattern, value } => {
-                let scrutinee = self.lower_expr(body, *value);
+            Cond::Let { pat, value } => {
+                let scrutinee = self.lower_expr_src(value);
 
                 // Bindings are visible in the success continuation (deeper
                 // conditions + the body), not in the fail branch. Scope the
                 // pattern + continuation so the bindings don't leak into fail.
                 self.push_scope();
-                let pat = self.lower_pat(body, *pattern);
-                let success = self
-                    .lower_condition_chain_with_fail(body, rest, source, span, on_success, fail);
+                let pat = self.lower_pat(pat);
+                let success =
+                    self.lower_condition_chain_with_fail(rest, source, span, on_success, fail);
                 self.pop_scope();
 
                 let wildcard = self.alloc_pat(HirPat::Wildcard { span: span.clone() });
@@ -1779,10 +1947,10 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             },
-            IfCondition::Expr(expr_id) => {
-                let condition = self.lower_expr(body, *expr_id);
-                let success = self
-                    .lower_condition_chain_with_fail(body, rest, source, span, on_success, fail);
+            Cond::Expr(expr) => {
+                let condition = self.lower_expr_src(expr);
+                let success =
+                    self.lower_condition_chain_with_fail(rest, source, span, on_success, fail);
 
                 self.alloc_expr(HirExpr::If {
                     condition,
@@ -1806,23 +1974,21 @@ impl LowerCtx<'_> {
     /// checked on every `GuardLet` match's else arm by the analyzer.
     fn lower_guard_cps(
         &mut self,
-        body: &AstBody,
-        conditions: &[IfCondition],
-        else_body: &AstBlock,
-        remaining_stmts: &[StmtId],
-        tail_expr: Option<ExprId>,
+        conditions: &[Cond],
+        else_body: &BlockSyntax,
+        remaining_stmts: &[StmtSyntax],
+        tail_expr: Option<&ExprSrc>,
         span: &Span,
     ) -> HirExprId {
         let mut on_success = |this: &mut Self| {
-            let cont = this.lower_block_stmts(body, remaining_stmts, tail_expr);
+            let cont = this.lower_block_stmts(remaining_stmts, tail_expr);
             this.hir_block_to_expr(cont, span)
         };
         let mut on_fail = |this: &mut Self| {
-            let else_block = this.lower_block(body, else_body);
+            let else_block = this.lower_block(else_body);
             this.hir_block_to_expr(else_block, span)
         };
         self.lower_condition_chain(
-            body,
             conditions,
             MatchSource::GuardLet,
             span,
@@ -1876,4 +2042,12 @@ impl LowerCtx<'_> {
             );
         }
     }
+}
+
+/// The text of a literal's token (empty when the parser recovered without
+/// one).
+fn literal_text(node: &SyntaxNode) -> String {
+    first_token(node)
+        .map(|t| t.text().to_string())
+        .unwrap_or_default()
 }

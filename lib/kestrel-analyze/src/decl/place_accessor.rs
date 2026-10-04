@@ -26,7 +26,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Body, Computed, Gettable, NodeKind};
+use kestrel_ast_builder::{Computed, Gettable, NodeKind, Valued};
 use kestrel_hir_lower::PlaceAccessors;
 use kestrel_name_res::ExtensionTargetEntity;
 
@@ -85,7 +85,7 @@ impl DeclCheck for PlaceAccessorAnalyzer {
         let has_mutating_ref = accessors.is_some_and(|a| a.mutating_ref_accessor.is_some());
         // The parent carries the getter BODY when a `get` clause (or the
         // shorthand form) is present; pure-ref members are bodyless.
-        let has_getter = cx.query.get::<Body>(cx.entity).is_some();
+        let has_getter = cx.query.get::<Valued>(cx.entity).is_some();
         let span = util::entity_span(cx.query, cx.entity);
 
         // E621: ref accessors are rejected in protocols and protocol

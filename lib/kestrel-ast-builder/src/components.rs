@@ -8,7 +8,6 @@ use kestrel_hecs::Entity;
 use kestrel_span::Span;
 use kestrel_syntax_tree::{GreenNode, SyntaxNode, SyntaxNodePtr};
 
-use kestrel_ast::AstBody;
 use kestrel_ast::AstType;
 
 // ===== Identity (on every declaration entity) =====
@@ -187,7 +186,7 @@ pub struct AstParam {
     pub label: Option<String>,
     pub name: String,
     pub ty: Option<AstType>,
-    /// Entity for the default value expression (child entity with Body + TypeAnnotation).
+    /// Entity for the default value expression (child entity with `Valued` + TypeAnnotation).
     pub default_entity: Option<Entity>,
     /// Destructuring pattern for this parameter, if any.
     /// None for simple binding parameters (`x: Int`).
@@ -247,9 +246,12 @@ pub struct Settable;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MutatingAccessor;
 
-/// Has body/initializer — a handle to the body subtree (`CodeBlock`,
-/// `FunctionBody`, or initializer `Expression`). Resolve it with
-/// [`crate::syntax::valued_node`].
+/// Has a body to lower — a handle to the body subtree: a `CodeBlock`, a
+/// function's `= expr` (`FunctionBody`), a parameter default's `= expr`
+/// (`DefaultValue`), or a field initializer `Expression`. Resolve it with
+/// [`crate::syntax::valued_node`]; `kestrel-hir-lower`'s `LowerBody` lowers
+/// it on demand. This is the one "has a body" marker — every body entity
+/// carries it, and nothing else does.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Valued(pub SyntaxNodePtr);
 
@@ -259,10 +261,6 @@ impl Valued {
         self.0.try_to_node(root)
     }
 }
-
-/// Lowered body — arena-based AST for a function/getter/default value.
-#[derive(Clone, Debug)]
-pub struct Body(pub AstBody);
 
 /// Marker: accessed through type, not instance.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

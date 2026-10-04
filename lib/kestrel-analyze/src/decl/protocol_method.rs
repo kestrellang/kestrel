@@ -21,7 +21,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Body, NodeKind, Valued};
+use kestrel_ast_builder::{NodeKind, Valued};
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
     id: "E417",
@@ -53,8 +53,7 @@ impl DeclCheck for ProtocolMethodAnalyzer {
         // Iterate children looking for Function entities with bodies
         for child in util::children_of_kind(cx.query, cx.entity, NodeKind::Function) {
             // Check if this method has a body or computed value
-            let has_body =
-                cx.query.get::<Body>(child).is_some() || cx.query.get::<Valued>(child).is_some();
+            let has_body = cx.query.get::<Valued>(child).is_some();
             if !has_body {
                 continue;
             }

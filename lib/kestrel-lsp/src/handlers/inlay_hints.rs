@@ -1,7 +1,7 @@
 //! `textDocument/inlayHint` — type hints for `let` / `var` bindings without
 //! an explicit annotation.
 //!
-//! Walks every `Body` entity in the file, runs `LowerBody` + `InferBody`,
+//! Walks every body (`Valued`) entity in the file, runs `LowerBody` + `InferBody`,
 //! and emits a `: T` hint for each `HirStmt::Let { ty: None, .. }` whose
 //! local was bound from a real source pattern (skipping `$let_tmp`,
 //! `$iter`, and other desugaring synthetics whose names start with `$`).
@@ -12,7 +12,7 @@
 //! lowers via a `$let_tmp` indirection) are excluded by the `$`-name
 //! filter so we don't have to handle them here.
 
-use kestrel_ast_builder::{Body, FileId};
+use kestrel_ast_builder::{FileId, Valued};
 use kestrel_hir::body::HirStmt;
 use kestrel_hir_lower::LowerBody;
 use kestrel_span::Span;
@@ -54,7 +54,7 @@ pub async fn handle(state: SharedState, params: InlayHintParams) -> Option<Vec<I
             let mut hints: Vec<InlayHint> = Vec::new();
 
             let body_entities: Vec<_> = world
-                .iter_component::<Body>()
+                .iter_component::<Valued>()
                 .filter_map(|(e, _)| {
                     let fid = world.get::<FileId>(e)?;
                     (fid.0 == file_entity).then_some(e)
@@ -170,7 +170,7 @@ mod tests {
         let root = c.root();
         let ctx = world.query_context();
         let body_entities: Vec<_> = world
-            .iter_component::<Body>()
+            .iter_component::<Valued>()
             .filter_map(|(e, _)| {
                 let fid = world.get::<FileId>(e)?;
                 (fid.0 == f).then_some(e)

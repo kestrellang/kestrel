@@ -12,7 +12,6 @@ use super::params::extract_params;
 use super::type_param::build_type_parameters;
 use crate::ast_type::lower_opt_type;
 use crate::components::*;
-use crate::lower;
 
 /// Build a function declaration entity from CST.
 ///
@@ -69,13 +68,9 @@ pub fn build_function(
     // `{ … }` or `= expr`
     if let Some(body) = node.function_body() {
         if let Some(code_block) = body.code_block() {
-            set_block_body(world, entity, &code_block, file_id);
+            set_block_body(world, entity, &code_block);
         } else {
-            world.set(
-                entity,
-                Body(lower::lower_default_value(body.syntax(), file_id)),
-            );
-            world.set(entity, Valued(SyntaxNodePtr::new(&body.syntax())));
+            world.set(entity, Valued(SyntaxNodePtr::new(body.syntax())));
         }
     }
 
@@ -91,10 +86,9 @@ pub fn build_function(
     desugar_opaque_params(world, entity, file_entity, syntax);
 }
 
-/// Lower a `{ … }` body into the entity's `Body` and `Valued`.
-fn set_block_body(world: &mut World, entity: Entity, block: &ast::CodeBlock, file_id: usize) {
-    world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
-    world.set(entity, Valued(SyntaxNodePtr::new(&block.syntax())));
+/// Point the entity's `Valued` body at a `{ … }` block.
+fn set_block_body(world: &mut World, entity: Entity, block: &ast::CodeBlock) {
+    world.set(entity, Valued(SyntaxNodePtr::new(block.syntax())));
 }
 
 /// Build an initializer declaration entity from CST.
@@ -153,7 +147,7 @@ pub fn build_initializer(
     }
 
     if let Some(block) = node.function_body().and_then(|b| b.code_block()) {
-        set_block_body(world, entity, &block, file_id);
+        set_block_body(world, entity, &block);
     }
 
     set_visibility(world, entity, node);
@@ -193,7 +187,7 @@ pub fn build_deinit(
     );
 
     if let Some(block) = node.function_body().and_then(|b| b.code_block()) {
-        set_block_body(world, entity, &block, file_id);
+        set_block_body(world, entity, &block);
     }
 }
 

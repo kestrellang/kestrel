@@ -6,13 +6,13 @@
 //! `_param_N` name and a `ParamPattern`).
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{self, AstNode};
 
 use crate::ast_type::lower_opt_type;
 use crate::components::{
-    AstParam, Body, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation,
+    AstParam, FileId, NodeKind, ParamPattern, StructPatternField, TypeAnnotation, Valued,
 };
-use crate::lower;
 
 /// Extract the parameters of `list`. Creates child entities for default
 /// value expressions.
@@ -50,32 +50,24 @@ pub fn extract_params(
         })
         .collect();
 
-    // Detect defaults that reference sibling params. Replace the body with an
-    // empty one (suppresses "undefined name" from inference) and set a marker
-    // component so the analyzer can emit a proper diagnostic.
+    // Detect defaults that reference sibling params. The marker component
+    // lets the analyzer emit a proper diagnostic, and makes body lowering
+    // treat the default as empty (suppressing "undefined name" from
+    // inference).
     let param_names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
     for param in &params {
         let Some(default_entity) = param.default_entity else {
             continue;
         };
-        let Some(body) = world.get::<crate::components::Body>(default_entity) else {
+        let Some(default) =
+            crate::syntax::valued_node(&*world, default_entity).and_then(ast::DefaultValue::cast)
+        else {
             continue;
         };
-        if let Some(referenced) = default_body_references_param(&body.0, &param_names) {
+        if let Some(referenced) = default_references_param(&default, &param_names) {
             world.set(
                 default_entity,
                 crate::components::DefaultReferencesParam(referenced.to_string()),
-            );
-            // Replace with empty body so inference doesn't produce "undefined name"
-            world.set(
-                default_entity,
-                crate::components::Body(kestrel_ast::ast_body::AstBody {
-                    exprs: kestrel_ast::arena::Arena::new(),
-                    pats: kestrel_ast::arena::Arena::new(),
-                    stmts: kestrel_ast::arena::Arena::new(),
-                    statements: Vec::new(),
-                    tail_expr: None,
-                }),
             );
         }
     }
@@ -118,10 +110,7 @@ fn extract_single_param(
         let entity = world.spawn();
         world.set(entity, NodeKind::ParamDefault);
         world.set(entity, FileId(file_entity));
-        world.set(
-            entity,
-            Body(lower::lower_default_value(default.syntax(), file_id)),
-        );
+        world.set(entity, Valued(SyntaxNodePtr::new(default.syntax())));
         // Store the param's type annotation so inference checks the default against it
         if let Some(ref param_ty) = ty {
             world.set(entity, TypeAnnotation(param_ty.clone()));
@@ -198,23 +187,24 @@ fn extract_param_pattern(pat: &ast::Pat) -> Option<ParamPattern> {
     })
 }
 
-/// Check if a default value body's tail expression is a single-segment path
-/// matching a sibling parameter name. Returns the matched name if found.
-fn default_body_references_param<'a>(
-    body: &kestrel_ast::ast_body::AstBody,
+/// Whether a default value is exactly a bare name (`= x` — one identifier,
+/// no type arguments, no member access) matching a sibling parameter.
+/// Returns the matched name if found.
+fn default_references_param<'a>(
+    default: &ast::DefaultValue,
     param_names: &[&'a str],
 ) -> Option<&'a str> {
-    let tail_id = body.tail_expr?;
-    if let kestrel_ast::ast_body::AstExpr::Path { segments, .. } = &body.exprs[tail_id]
-        && segments.len() == 1
-        && segments[0].type_args.is_none()
+    let ast::Expr::ExprPath(path) = default.expression()?.expr()? else {
+        return None;
+    };
+    if path.expression().is_some()
+        || path.dot_token().is_some()
+        || path.type_argument_lists().next().is_some()
     {
-        return param_names
-            .iter()
-            .find(|&&p| p == segments[0].name)
-            .copied();
+        return None;
     }
-    None
+    let name = path.identifier_token()?;
+    param_names.iter().find(|&&p| p == name.text()).copied()
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use kestrel_ast_builder::{Body, Callable, FileId, Name, NodeKind, TypeParams};
+use kestrel_ast_builder::{Callable, FileId, Name, NodeKind, TypeParams, Valued};
 use kestrel_hecs::{Entity, QueryContext, World};
 use kestrel_hir::body::{HirBody, HirExpr};
 use kestrel_hir_lower::LowerBody;
@@ -266,7 +266,7 @@ fn body_entity_containing(
     mut entity: Entity,
 ) -> Option<Entity> {
     loop {
-        if world.get::<Body>(entity).is_some()
+        if world.get::<Valued>(entity).is_some()
             && world
                 .get::<FileId>(entity)
                 .map(|f| f.0 == file_entity)

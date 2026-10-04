@@ -3,7 +3,7 @@
 //! Most of M2's "what's at the cursor?" logic funnels through these helpers
 //! so handlers stay narrow and the lookup rules stay in one place.
 
-use kestrel_ast_builder::{Body, DeclSpan, FileId, FilePath, NodeKind, Valued};
+use kestrel_ast_builder::{DeclSpan, FileId, FilePath, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat, HirPatId};
 use kestrel_hir::ty::HirTy;
@@ -36,9 +36,6 @@ pub fn body_entity_at(world: &World, file_entity: Entity, offset: usize) -> Opti
             continue;
         };
         if fid.0 != file_entity {
-            continue;
-        }
-        if world.get::<Body>(entity).is_none() {
             continue;
         }
         let range = valued.0.text_range();
