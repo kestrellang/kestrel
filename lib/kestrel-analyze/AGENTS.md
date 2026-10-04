@@ -175,6 +175,9 @@ IDs follow the pattern `E<NNN>`:
 - **E500–E599**: Memory semantics (use-after-move, cloneable fields)
 - **E600–E699**: Functions and closures (missing body, wrong arity, FFI safety)
 - **E700–E799**: Literals and lexing (escape sequences, malformed literals)
+- **E800–E899**: Syntax — parser diagnostics. Not analyzer descriptors:
+  `kestrel-parser/src/syntax_error.rs` is the only place they are assigned,
+  and they reach codespan via `with_code`. E800–E809 allocated (2026-10).
 
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)

@@ -25,6 +25,7 @@ comes from the type checker.
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E625 — Closure kinds](#e624e625--closure-kinds)
 - [E700–E707 — String literals & escapes](#e700e707--string-literals--escapes)
+- [E800–E809 — Syntax](#e800e809--syntax)
 
 ---
 
@@ -484,3 +485,23 @@ func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 | E705 | multi-line string opener \`"""\` must be followed by a newline | Content starts on the line after the opening `"""`. |
 | E706 | multi-line string closer \`"""\` must be on its own line | Content ends on the line before the closing `"""`. |
 | E707 | unterminated string | The string literal is never closed. |
+
+## E800–E809 — Syntax
+
+Emitted by the parser (`kestrel-parser`, `syntax_error.rs`). Every syntax
+error carries one of these codes; the message names what was expected and
+what was found (`expected \`;\`, found identifier`). A missing `;`, `)` or `}`
+is reported on the token *before* the gap, where it belongs.
+
+| Code | Message | Explanation |
+|---|---|---|
+| E800 | expected {tokens}, found {token} | A specific token was required here (e.g. `:` after a parameter name, `=>` in a match arm). |
+| E801 | expected \`;\`, found {token} | A statement that is not `if`/`while`/`for`/`loop`/`match` must end with `;` unless it is the block's final value. |
+| E802 | expected \`)\` / \`]\` / \`}\`, found {token} | A bracket was opened and never closed. |
+| E803 | expected expression, found {token} | An expression was required (after an operator, as an argument, as a statement). |
+| E804 | expected identifier after \`.\` | A `.` must be followed by a member name (or a tuple index). |
+| E805 | expected expression after \`throw\` | `throw` needs the error value to throw. |
+| E806 | expected declaration / member declaration, found {token} | The token cannot begin a declaration in this position (e.g. `init` at the top level, `deinit` in an extension, a statement outside a function). |
+| E807 | expected type, found {token} | A type was required (after `:`, `->`, in `[...]` type arguments). |
+| E808 | expected pattern, found {token} | A pattern was required (after `let`, `case`-style match arms, parameters). |
+| E809 | expected a name, found {token} | A declaration's name is missing; a keyword in name position (`func case()`) is reported here. |

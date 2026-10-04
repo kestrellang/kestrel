@@ -50,17 +50,22 @@ impl ToDiagnostic for LexError {
 
 // ===== Parse errors =====
 
-/// A parser error with message and source location.
+/// A parser error with its `E8xx` code, message and source location.
 pub struct ParseError {
     pub message: String,
     pub span: Span,
+    pub code: Option<&'static str>,
 }
 
 impl ToDiagnostic for ParseError {
     fn to_diagnostic(&self) -> Diagnostic<usize> {
-        Diagnostic::error()
+        let mut diag = Diagnostic::error()
             .with_message(self.message.clone())
-            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())])
+            .with_labels(vec![Label::primary(self.span.file_id, self.span.range())]);
+        if let Some(code) = self.code {
+            diag = diag.with_code(code);
+        }
+        diag
     }
 }
 
