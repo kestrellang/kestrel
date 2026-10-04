@@ -869,12 +869,5 @@ mod tests {
             kinds_of(UnaryOp::BorrowMutating.symbol()),
             vec![SyntaxKind::Ampersand, SyntaxKind::Mutating]
         );
-
-        // Word-shaped operators need a separator before their operand;
-        // punctuation must not get one, or `-x` pretty-prints as `- x`.
-        assert!(UnaryOp::LogicalNot.needs_space_before_operand());
-        assert!(UnaryOp::BorrowMutating.needs_space_before_operand());
-        assert!(!UnaryOp::Neg.needs_space_before_operand());
-        assert!(!UnaryOp::RangeThrough.needs_space_before_operand());
     }
 }

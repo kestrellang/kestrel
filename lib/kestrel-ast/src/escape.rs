@@ -16,10 +16,11 @@
 //!   error path**, so `"\u{41} \(x)"` silently produced the text `u{41} `
 //!   with no diagnostic. Nothing re-decoded it downstream.
 //!
-//! This module lives in `kestrel-ast` because it is the deepest crate both
-//! `kestrel-ast-builder` and `kestrel-hir` can reach. Callers differ only in
-//! what they do with the outcome: strings and chars keep errors as data,
-//! interpolation segments keep whatever the decode produced.
+//! (Body lowering now reads interpolated strings straight from the CST, in
+//! `kestrel-hir-lower`; all three callers live there.) This module lives in
+//! `kestrel-ast` because `kestrel-hir` needs the error kinds too. Callers
+//! differ only in what they do with the outcome: strings and chars keep
+//! errors as data, interpolation segments keep whatever the decode produced.
 
 use std::iter::Peekable;
 use std::str::CharIndices;

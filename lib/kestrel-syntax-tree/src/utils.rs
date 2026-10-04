@@ -53,11 +53,6 @@ fn first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
     })
 }
 
-/// The first direct child node of `kind`.
-pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-    syntax.children().find(|n| n.kind() == kind)
-}
-
 /// The span of a node from its first non-trivia token.
 pub fn get_node_span(node: &SyntaxNode, file_id: usize) -> Span {
     let range = node.text_range();

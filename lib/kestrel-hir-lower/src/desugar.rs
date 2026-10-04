@@ -1386,7 +1386,7 @@ fn interpolated_string_parts(node: &SyntaxNode, span: &Span, file_id: usize) -> 
     // `literal::decode_string_literal_token`); an interpolated one strips
     // best-effort.
     if multiline {
-        body = kestrel_ast_builder::string_token::process_multiline_body(&body, 0, 0).value;
+        body = crate::string_token::process_multiline_body(&body, 0, 0).value;
     }
 
     let mut parts = Vec::new();

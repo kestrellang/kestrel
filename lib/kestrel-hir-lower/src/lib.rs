@@ -18,6 +18,7 @@ pub mod literal;
 pub(crate) mod pat;
 pub mod source_map;
 mod stmt;
+pub(crate) mod string_token;
 pub(crate) mod syntax;
 pub mod ty;
 

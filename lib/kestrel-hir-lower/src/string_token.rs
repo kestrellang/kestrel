@@ -3,8 +3,9 @@
 //! The lexer emits `Token::String` for both single-line and multi-line cooked
 //! strings, and `Token::RawString` for any pound-prefixed raw form. This
 //! module is the single source of truth for re-deriving the form from the
-//! token text and producing the cleaned body that downstream layers operate
-//! on (HIR-lower for escape decoding, AST-builder for `\(...)` splitting).
+//! token text and producing the cleaned body that lowering operates on
+//! (`literal` for escape decoding, the interpolated-string desugaring for
+//! multi-line indentation).
 
 /// Classification of a string-literal token's shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
