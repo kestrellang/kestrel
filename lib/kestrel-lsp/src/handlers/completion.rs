@@ -207,7 +207,8 @@ fn receiver_type_via_cst_dot(
     use kestrel_syntax_tree::SyntaxKind;
     use rowan::TextSize;
 
-    let cst = &world.get::<Valued>(body_entity)?.0;
+    world.get::<Valued>(body_entity)?;
+    let cst = kestrel_ast_builder::syntax::valued_node(world, body_entity)?;
     let pos = TextSize::from(offset as u32);
     // Find the smallest Dot token whose end == cursor (or whose range
     // contains the cursor).

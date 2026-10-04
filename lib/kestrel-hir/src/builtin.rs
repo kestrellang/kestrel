@@ -5,8 +5,9 @@
 //! source files with `@builtin(.FeatureName)`.
 //!
 //! **Resolution**: Forward lookup (entity → Builtin) uses `EntityBuiltin` query
-//! in kestrel-name-res. Reverse lookup (Builtin → entity) uses `ResolveBuiltin`
-//! with name-based resolution + `BuiltinIndex` attribute-scanning fallback.
+//! in kestrel-name-res. Reverse lookup (Builtin → entity) uses `ResolveBuiltin`,
+//! which consults the `BuiltinIndex` attribute scan only: a lang item is
+//! identified by its annotation, never by its source name.
 
 /// What kind of symbol a builtin expects, with kind-specific configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -289,12 +290,11 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    /// The type/protocol name as it appears in Kestrel source code.
-    ///
-    /// Used by `ResolveBuiltin` for name-based resolution (looking up types
-    /// that are auto-imported from std). For features that are NOT resolvable
-    /// by source name (protocol methods, enum cases, etc.), this returns the
-    /// `@builtin` attribute name instead.
+    /// A display name for the builtin: the type/protocol name as it usually
+    /// appears in Kestrel source code, or the `@builtin` attribute name for
+    /// features that have no source-level type (protocol methods, enum
+    /// cases, etc.). Used in diagnostics only — `ResolveBuiltin` does not
+    /// look builtins up by name.
     pub fn name(self) -> &'static str {
         match self {
             // Well-known types — resolved by source name
@@ -493,21 +493,12 @@ impl Builtin {
             // Indirection — resolves by source name (auto-imported from std.core).
             Self::Indirection => "Indirection",
 
-            // Shared box — deliberately NOT the conformer's source name.
-            // Returning "RcBox" would let `ResolveBuiltin`'s name-based fast
-            // path find `RcBox` whether or not it carries the attribute, so
-            // moving the binding to another conformer would silently not take
-            // effect. Resolution must go through the attribute index, exactly
-            // like `OptionalEnum` / `ArrayStruct`.
-            //
-            // The sentinel is deliberately NOT the protocol's name:
-            // `std.memory.SharedBox` is a real, auto-imported protocol, and
-            // `ResolveBuiltin`'s name-based strategy 1 would find that PROTOCOL
-            // entity before ever consulting the attribute index — the boxing
-            // site would instantiate the wrong entity. "SharedBoxBinding" has
-            // no source-level type, so resolution always falls through to the
-            // attribute index and finds whatever type carries
-            // `@builtin(.SharedBox)` (the swappable binding, `RcBox` today).
+            // Shared box — a display name only, deliberately neither the
+            // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
+            // the binding is whatever type carries `@builtin(.SharedBox)`
+            // (`RcBox` today), found through the attribute index like every
+            // builtin. (This sentinel predates index-only resolution, when a
+            // name-based lookup would have found the wrong entity.)
             Self::SharedBox => "SharedBoxBinding",
 
             // Unique box — same rationale as the shared box above: resolution
@@ -628,13 +619,12 @@ impl Builtin {
             // Boolean conditional
             "BooleanConditional" => Some(Self::BooleanConditional),
 
-            // Well-known types. `Bool` also resolves by source name (strategy 1
-            // in `ResolveBuiltin`), but without this arm the `@builtin(.Bool)`
-            // annotation is silently inert: `EntityBuiltin` returns `None`, the
-            // struct never enters `BuiltinIndex`, and there is no strategy-2
-            // fallback if the name lookup ever stops finding it. This arm also
-            // makes `every_stdlib_builtin_annotation_is_recognized` a live guard
-            // over the annotation.
+            // Well-known types. Without this arm the `@builtin(.Bool)`
+            // annotation would be silently inert: `EntityBuiltin` returns
+            // `None`, the struct never enters `BuiltinIndex`, and
+            // `ResolveBuiltin` (index only) would not find `Bool` at all. This
+            // arm also makes `every_stdlib_builtin_annotation_is_recognized` a
+            // live guard over the annotation.
             "Bool" => Some(Self::Bool),
 
             // Range operators
@@ -734,6 +724,26 @@ impl Builtin {
 
             _ => None,
         }
+    }
+
+    /// Whether this builtin denotes the *target* of the type alias that
+    /// carries its annotation rather than the alias itself.
+    /// `@builtin(.DefaultIntegerLiteralType) type IntegerLiteralType = Int64`
+    /// makes `Int64` the default integer literal type; the type operators
+    /// (`@builtin(.OptionalTypeOperator) type OptionalTypeOperator[T] = …`)
+    /// denote the alias.
+    pub fn denotes_alias_target(self) -> bool {
+        matches!(
+            self,
+            Self::DefaultIntegerLiteralType
+                | Self::DefaultFloatLiteralType
+                | Self::DefaultStringLiteralType
+                | Self::DefaultBooleanLiteralType
+                | Self::DefaultCharLiteralType
+                | Self::DefaultNullLiteralType
+                | Self::DefaultArrayLiteralType
+                | Self::DefaultDictionaryLiteralType
+        )
     }
 
     /// Metadata about what symbol kind this builtin expects.
@@ -990,10 +1000,9 @@ mod tests {
     ///
     /// An unrecognised name is silently inert, not an error: `EntityBuiltin`
     /// returns `None`, so the entity never enters `BuiltinIndex`, and
-    /// `ResolveBuiltin` falls through to its name-based strategy — the feature
-    /// keeps working by coincidence until the source name stops matching.
-    /// `DefaultArrayLiteralType` sat inert this way, masked by the type being
-    /// findable as `Array`.
+    /// `ResolveBuiltin` (index only) does not find the feature at all.
+    /// `DefaultArrayLiteralType` once sat inert this way, masked by a
+    /// since-removed name-based lookup finding `Array`.
     #[test]
     fn every_stdlib_builtin_annotation_is_recognized() {
         let root = stdlib_root();

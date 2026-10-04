@@ -11,7 +11,7 @@
 //! decl span (no body to trim). Doc comments are read from the
 //! `Documentation` component attached during AST building.
 
-use kestrel_ast_builder::{CstNode, DeclSpan, Documentation, Name, NodeKind, Valued};
+use kestrel_ast_builder::{DeclSpan, Documentation, Name, NodeKind, Valued};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId, HirPat};
 use kestrel_hir::res::LocalId;
@@ -229,7 +229,8 @@ fn local_at_binding(
     offset: usize,
     line_index: &crate::position::LineIndex,
 ) -> Option<(LocalId, ResolvedTy, Range)> {
-    let cst = world.get::<Valued>(body_entity)?.0.clone();
+    world.get::<Valued>(body_entity)?;
+    let cst = kestrel_ast_builder::syntax::valued_node(world, body_entity)?;
     let pos = TextSize::from(offset as u32);
 
     let mut best: Option<SyntaxNode> = None;
@@ -317,10 +318,10 @@ fn entity_hover_range(
         }
     }
     if let Some(decl) = semantic::enclosing_decl_at(world, file_entity, offset)
-        && let Some(cst) = world.get::<CstNode>(decl)
+        && let Some(cst) = kestrel_ast_builder::syntax::cst_node(world, decl)
         && let Some(decl_span) = world.get::<DeclSpan>(decl)
     {
-        if let Some(name_span) = get_name_span(&cst.0, decl_span.0.file_id) {
+        if let Some(name_span) = get_name_span(&cst, decl_span.0.file_id) {
             return line_index.range_for(name_span.start, name_span.end);
         }
         return line_index.range_for(decl_span.0.start, decl_span.0.end);
@@ -405,12 +406,12 @@ fn render_entity(
     if !is_renderable(kind) {
         return None;
     }
-    let cst = world.get::<CstNode>(entity)?;
+    let cst = kestrel_ast_builder::syntax::cst_node(world, entity)?;
     let decl_span = world.get::<DeclSpan>(entity)?.0.clone();
     let file_path = crate::semantic::entity_file_path(world, entity)?;
     let source = sources.get(&file_path)?;
 
-    let signature = signature_text(source, &cst.0, &decl_span);
+    let signature = signature_text(source, &cst, &decl_span);
     let docs = world
         .get::<Documentation>(entity)
         .map(|d| d.0.clone())

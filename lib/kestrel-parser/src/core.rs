@@ -451,10 +451,12 @@ impl<'s> Parser<'s> {
                 Ev::Error(e) => errors.push(e),
             }
         }
-        errors.sort_by_key(|e| (e.range.start, e.range.end));
-        errors.dedup_by(|a, b| a.range == b.range && a.message == b.message);
-        // One diagnostic per position: the first reported cause wins, the
-        // rest are cascades of the same missing token.
+        // One diagnostic per position: the rest are cascades of the same
+        // gap. An unclosed delimiter outranks whatever else ends there (a
+        // missing `;` before a missing `}` at end of file is the `}`'s
+        // cascade); otherwise the first reported cause wins (stable sort).
+        let unclosed = |e: &SyntaxError| e.code != crate::syntax_error::codes::UNCLOSED_DELIMITER;
+        errors.sort_by_key(|e| (e.range.start, unclosed(e), e.range.end));
         errors.dedup_by(|a, b| a.range.start == b.range.start);
         for e in errors {
             out.push(Event::Error {

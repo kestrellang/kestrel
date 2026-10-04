@@ -29,7 +29,7 @@
 use rowan::Language;
 
 // Re-export for use by parsers
-pub use rowan::GreenNodeBuilder;
+pub use rowan::{GreenNode, GreenNodeBuilder};
 
 mod generated;
 pub use generated::kinds::SyntaxKind;

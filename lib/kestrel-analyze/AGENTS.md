@@ -198,6 +198,8 @@ Current allocations:
 - E313: `wrong_variant_arity` (match_pattern.rs)
 - E314: `wrong_tuple_arity_in_pattern` (match_pattern.rs)
 - E315: `or_pattern_inconsistent_bindings` (match_pattern.rs)
+- E400: `duplicate_builtin` (decl/duplicate_builtin.rs) — a second `@builtin(.X)`
+  for the same lang item; `BuiltinIndex` keeps the first (2026-10, frontend rewrite).
 - E422: `disallowed_enum_conformance` (decl/conformance_rules.rs)
 - E423: `conflicting_copyable_opt_out` (decl/conformance_rules.rs)
 - E424: `negative_conformance_requires_language_feature` (decl/conformance_rules.rs)
@@ -237,7 +239,7 @@ Current allocations:
   **E4xx is allocated up to E479.** E480 and above are already emitted
   elsewhere (`kestrel-hir-lower/src/ty.rs`, `kestrel-semantics/src/staticness.rs`,
   `body/access_mode.rs`). The only free E4xx codes are the gaps
-  **E400–E410 and E414**. As of 2026-09-23 they are not emitted, documented or
+  **E401–E410 and E414** (E400 taken 2026-10). As of 2026-09-23 they are not emitted, documented or
   reserved anywhere. Take a new E4xx from those gaps.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a

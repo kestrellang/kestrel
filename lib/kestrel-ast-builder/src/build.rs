@@ -8,7 +8,7 @@ use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::components::{Os, TargetConfig};
+use crate::components::{FileSyntax, Os, TargetConfig};
 
 use crate::builders::{
     enum_decl, extension, field, function, import, module, protocol, struct_decl, subscript,
@@ -39,6 +39,8 @@ pub fn build_declarations(
     let Some(file) = ast::SourceFile::cast(tree.clone()) else {
         return;
     };
+    // The one place the tree lives: declarations keep pointers into it.
+    world.set(file_entity, FileSyntax(tree.green().into_owned()));
 
     // The file's module (from its `module` declaration, if any)
     let module_parent = file

@@ -43,7 +43,7 @@ use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{CstNode, Name, NodeKind};
+use kestrel_ast_builder::{Name, NodeKind};
 use kestrel_span::Span;
 
 static DESCRIPTORS: &[DiagnosticDescriptor] = &[
@@ -156,11 +156,10 @@ fn check_duplicates(
             continue;
         };
         if *child_kind == NodeKind::TypeAlias
-            && let Some(cst) = cx.query.get::<CstNode>(child)
+            && let Some(cst) = kestrel_ast_builder::syntax::cst_node(cx.query, child)
         {
             use kestrel_syntax_tree::SyntaxKind;
             if cst
-                .0
                 .children()
                 .any(|c| c.kind() == SyntaxKind::AssociatedTypeTarget)
             {

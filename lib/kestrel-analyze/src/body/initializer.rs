@@ -75,7 +75,7 @@ use crate::context::BodyContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, BodyCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Callable, CstNode, InitEffect, NodeKind, Settable};
+use kestrel_ast_builder::{Callable, InitEffect, NodeKind, Settable};
 use kestrel_hir::body::*;
 use kestrel_type_infer::result::ResolvedTy;
 
@@ -166,20 +166,15 @@ impl BodyCheck for InitializerAnalyzer {
             if cx.query.get::<Callable>(child).is_some() {
                 continue;
             }
-            // Skip shorthand computed properties (e.g. `var x: T { expr }`) —
-            // these have a CodeBlock/PropertyAccessors in the CST but no Callable
-            // because the builder doesn't recognize the shorthand form yet.
-            if let Some(cst) = cx.query.get::<CstNode>(child) {
-                use kestrel_syntax_tree::SyntaxKind;
-                let has_body_node = cst.0.children().any(|c| {
-                    matches!(
-                        c.kind(),
-                        SyntaxKind::CodeBlock | SyntaxKind::PropertyAccessors
-                    )
-                });
-                if has_body_node {
-                    continue;
-                }
+            // Skip every field with accessors (`Computed`: a `{ … }` block,
+            // including the `var x: T { expr }` shorthand) — no storage to
+            // initialize.
+            if cx
+                .query
+                .get::<kestrel_ast_builder::Computed>(child)
+                .is_some()
+            {
+                continue;
             }
             // Skip fields with default values — they don't need explicit init
             if cx.query.get::<kestrel_ast_builder::Body>(child).is_some() {

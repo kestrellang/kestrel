@@ -139,13 +139,13 @@ pub enum NodeKind {
 | `NodeKind` | Discriminant (always present). |
 | `Name(String)` | Declared identifier. |
 | `DeclSpan(Span)` | Declaration's own span. |
-| `CstNode(SyntaxNode)` | Backing CST reference. |
+| `CstNode(SyntaxNodePtr)` | Handle to the backing CST node; resolve with `kestrel_ast_builder::syntax::cst_node`. |
 | `FileId(Entity)` | Owning source file entity. |
 | `Vis` | Public / Private / Internal / Fileprivate. |
 | `Typed` (marker) | Can appear in type position. |
 | `TypeAnnotation(AstType)` | Has a declared type (fields, params, alias targets). |
 | `Callable` | Parameter list + receiver convention. |
-| `Valued(SyntaxNode)` / `Body(AstBody)` | Has a body/initializer (pre- / post-lower). |
+| `Valued(SyntaxNodePtr)` / `Body(AstBody)` | Has a body/initializer (pre- / post-lower). |
 | `Gettable` / `Settable` (markers) | Read / write capability. |
 | `Static` (marker) | Accessed via type, not instance. |
 | `Subscript` (marker) | Call-syntax accessor. |

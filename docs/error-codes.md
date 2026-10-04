@@ -17,7 +17,7 @@ comes from the type checker.
 - [E100–E121 — Type checking, parameters & literals](#e100e121--type-checking-parameters--literals)
 - [E200–E211 — Mutability, access modes & assignment](#e200e211--mutability-access-modes--assignment)
 - [E300–E316 — Patterns & exhaustiveness](#e300e316--patterns--exhaustiveness)
-- [E411–E479 — Declarations, generics & protocol conformance](#e411e479--declarations-generics--protocol-conformance)
+- [E400, E411–E479 — Declarations, generics & protocol conformance](#e400-e411e479--declarations-generics--protocol-conformance)
 - [E480–E499 — References & escape checking](#e480e499--references--escape-checking)
 - [E500–E507 — Moves & ownership](#e500e507--moves--ownership)
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
@@ -119,10 +119,11 @@ func unwrap(opt: Int64?) -> Int64 {
 }
 ```
 
-## E411–E479 — Declarations, generics & protocol conformance
+## E400, E411–E479 — Declarations, generics & protocol conformance
 
 | Code | Message | Explanation |
 |---|---|---|
+| E400 | duplicate @builtin(.{feature}): already declared by '{name}' | Two declarations carry the same `@builtin` annotation. A lang item is identified by its annotation alone, so only the first (in declaration order) is used. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |

@@ -259,7 +259,8 @@ fn entity_to_item(
 
     let selection_range = world
         .get::<kestrel_ast_builder::CstNode>(entity)
-        .and_then(|cst| kestrel_syntax_tree::utils::get_name_span(&cst.0, decl_span.file_id))
+        .and(kestrel_ast_builder::syntax::cst_node(world, entity))
+        .and_then(|cst| kestrel_syntax_tree::utils::get_name_span(&cst, decl_span.file_id))
         .map(|s| li.range_for(s.start, s.end))
         .unwrap_or(range);
 

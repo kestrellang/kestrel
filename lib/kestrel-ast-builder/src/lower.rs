@@ -740,6 +740,24 @@ impl LowerCtx {
                     });
                     continue;
                 }
+                // `base.` with no member at all (the parser reports it and
+                // leaves the name absent): an access with an empty member
+                // name, as for a pure path, so the LSP still finds a Field
+                // at the cursor.
+                if member_identifier_at(&elements, i).is_none()
+                    && !elements[i..].iter().any(|e| {
+                        e.as_token()
+                            .is_some_and(|t| t.kind() == SyntaxKind::Identifier)
+                    })
+                {
+                    current = self.alloc_expr(AstExpr::MemberAccess {
+                        base: current,
+                        member: String::new(),
+                        type_args: None,
+                        span: span.clone(),
+                    });
+                }
+                continue;
             }
             i += 1;
         }

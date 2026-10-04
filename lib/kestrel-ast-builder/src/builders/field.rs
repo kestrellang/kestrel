@@ -1,6 +1,7 @@
 //! Field declaration builder.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic};
 use kestrel_syntax_tree::utils::get_decl_span;
 
@@ -31,7 +32,7 @@ pub fn build_field(
     world.set(entity, NodeKind::Field);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
     if let Some(name) = node.name_text() {
@@ -79,7 +80,7 @@ pub fn build_field(
                     entity,
                     Body(lower::lower_default_value_expr(init.syntax(), file_id)),
                 );
-                world.set(entity, Valued(init.syntax().clone()));
+                world.set(entity, Valued(SyntaxNodePtr::new(&init.syntax())));
             }
         },
     }
@@ -154,14 +155,14 @@ fn build_accessors(
     if let Some(getter) = accessors.getter() {
         if let Some(body) = getter.code_block() {
             world.set(entity, Body(lower::lower_body(body.syntax(), file_id)));
-            world.set(entity, Valued(body.syntax().clone()));
+            world.set(entity, Valued(SyntaxNodePtr::new(&body.syntax())));
             world.set(entity, getter_callable());
         }
     } else if let Some(body) = accessors.code_block() {
         // Shorthand computed property `var foo: Type { expr }`: an implicit getter.
         world.set(entity, Gettable);
         world.set(entity, Body(lower::lower_body(body.syntax(), file_id)));
-        world.set(entity, Valued(body.syntax().clone()));
+        world.set(entity, Valued(SyntaxNodePtr::new(&body.syntax())));
         world.set(entity, getter_callable());
     } else if ref_clause.is_some() || mutating_ref_clause.is_some() {
         // Pure-ref member (`{ ref {…} }`, no getter): the parent stays

@@ -147,11 +147,13 @@ mod tests {
         }
     }
 
-    fn fake_syntax() -> kestrel_syntax_tree::SyntaxNode {
+    fn fake_syntax() -> kestrel_syntax_tree::SyntaxNodePtr {
         let mut b = kestrel_syntax_tree::GreenNodeBuilder::new();
         b.start_node(kestrel_syntax_tree::SyntaxKind::Root.into());
         b.finish_node();
-        kestrel_syntax_tree::SyntaxNode::new_root(b.finish())
+        kestrel_syntax_tree::SyntaxNodePtr::new(&kestrel_syntax_tree::SyntaxNode::new_root(
+            b.finish(),
+        ))
     }
 
     fn spawn_module(world: &mut World, parent: Option<Entity>, name: &str) -> Entity {

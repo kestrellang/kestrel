@@ -22,6 +22,19 @@ struct Scope {
    - Import declarations → processed as imports
    - Everything else → added to `declarations` by name
 
+   A **type scope** (struct, enum, protocol, extension) is different: its
+   `declarations` are the type's *member scope* — the non-instance members
+   (nested types, type aliases, enum cases, `static` members) of **every part
+   of the type**: its body and all of its extensions, so a body and its
+   extensions see the same names. The scope's own type parameters are added
+   too (another part's are not; extension LHS parameters resolve through
+   `ExtensionLhsParams`), and a qualified associated-type binding
+   (`type Iterable.Item = …`) names `Item` only inside its own extension.
+   **Instance members are never lexical bindings** — fields, methods,
+   subscripts and initializers are reached only through `self.` (audit H3: a
+   bare field name inside a method used to resolve to the field entity and
+   fail in codegen).
+
 2. **Processes imports** by type:
    - **Selective** (`import A.B.(Foo, Bar)`) → resolves module path, looks up named items, adds to `selective_imports`
    - **Aliased** (`import A.B as X`) → resolves module path, adds module entity under alias name in `selective_imports`
@@ -47,7 +60,7 @@ This means user code can write `Array[Int64]` without any import — `Array` is 
 
 Import processing resolves the module path first via `ResolveModulePath`, then handles the import kind:
 
-- **Selective**: For each named item in the import list, finds matching visible children in the resolved module
+- **Selective**: For each named item in the import list, finds the resolved module's children of that name that are visible from the importing file (`VisibleChildrenByName` with the import as context — the same rule wildcard imports apply; audit H5: selective imports used to bind private declarations)
 - **Aliased**: Maps the alias name to the module entity itself
 - **Wildcard**: Stores the module entity for lazy resolution during name lookup
 

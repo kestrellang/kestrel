@@ -61,7 +61,7 @@ Three queries connect the `@builtin(.Feature)` attribute system to entities:
 
 - `EntityBuiltin { entity }` — forward lookup: extract the `Builtin` from an entity's `Attributes` component, if any.
 - `BuiltinIndex { root }` — scans the whole hierarchy into an `Arc<BuiltinMap>` (`Builtin → Entity`); cached per revision so the scan runs at most once.
-- `ResolveBuiltin { builtin, root }` — reverse lookup: tries name-based `ResolveTypePath` first (auto-imported types like `Addable`, `Bool`), then falls back to the attribute index for features not importable by name (e.g. `OptionalEnum`).
+- `ResolveBuiltin { builtin, root }` — reverse lookup through `BuiltinIndex` **only**: a lang item is the declaration annotated `@builtin(.X)`, never whatever happens to share its source name (audit H2: a user `module Int64` used to become the integer type and break the stdlib). The index keeps the first annotation in declaration order; kestrel-analyze reports a second one as E400. For the default literal types (`Builtin::denotes_alias_target`) the annotation sits on an alias (`type IntegerLiteralType = Int64`) and the builtin denotes the alias's target.
 
 ## Std Modules
 

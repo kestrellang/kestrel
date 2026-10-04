@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{Body, CstNode, DeclSpan, FileId, NodeKind};
+use kestrel_ast_builder::{Body, DeclSpan, FileId, NodeKind};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::HirExpr;
 use kestrel_hir_lower::LowerBody;
@@ -132,13 +132,13 @@ fn build_entity_overrides(
         let Some(kind) = world.get::<NodeKind>(entity) else {
             continue;
         };
-        let Some(cst) = world.get::<CstNode>(entity) else {
+        let Some(cst) = kestrel_ast_builder::syntax::cst_node(world, entity) else {
             continue;
         };
         let Some(decl_span) = world.get::<DeclSpan>(entity) else {
             continue;
         };
-        if let Some(name_span) = get_name_span(&cst.0, decl_span.0.file_id) {
+        if let Some(name_span) = get_name_span(&cst, decl_span.0.file_id) {
             overrides.insert(name_span.start, node_kind_to_token_type(kind));
         }
     }

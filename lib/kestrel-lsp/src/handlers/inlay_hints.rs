@@ -12,7 +12,7 @@
 //! lowers via a `$let_tmp` indirection) are excluded by the `$`-name
 //! filter so we don't have to handle them here.
 
-use kestrel_ast_builder::{Body, FileId, Valued};
+use kestrel_ast_builder::{Body, FileId};
 use kestrel_hir::body::HirStmt;
 use kestrel_hir_lower::LowerBody;
 use kestrel_span::Span;
@@ -74,7 +74,7 @@ pub async fn handle(state: SharedState, params: InlayHintParams) -> Option<Vec<I
                 }) else {
                     continue;
                 };
-                let Some(cst) = world.get::<Valued>(body_entity).map(|v| v.0.clone()) else {
+                let Some(cst) = kestrel_ast_builder::syntax::valued_node(world, body_entity) else {
                     continue;
                 };
 
@@ -190,7 +190,7 @@ mod tests {
             }) else {
                 continue;
             };
-            let Some(cst) = world.get::<Valued>(body_entity).map(|v| v.0.clone()) else {
+            let Some(cst) = kestrel_ast_builder::syntax::valued_node(world, body_entity) else {
                 continue;
             };
             for (_id, stmt) in hir.stmts.iter() {

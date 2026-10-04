@@ -6,7 +6,7 @@
 
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::{GreenNode, SyntaxNode, SyntaxNodePtr};
 
 use kestrel_ast::AstBody;
 use kestrel_ast::AstType;
@@ -81,9 +81,34 @@ impl NodeKind {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DeclSpan(pub Span);
 
-/// Cheap Arc-backed CST reference for this declaration.
-#[derive(Clone, Debug)]
-pub struct CstNode(pub SyntaxNode);
+/// Where this declaration is in its file's syntax tree: a `Send`, hashable
+/// kind+range handle, never the node itself (a rowan `SyntaxNode` is `!Send`
+/// and pins the whole tree — audit F42). Resolve it with
+/// [`crate::syntax::cst_node`] (or [`CstNode::to_node`] against the file's
+/// [`FileSyntax`] root).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CstNode(pub SyntaxNodePtr);
+
+impl CstNode {
+    /// The declaration's node in `root` (its file's tree).
+    pub fn to_node(&self, root: &SyntaxNode) -> Option<SyntaxNode> {
+        self.0.try_to_node(root)
+    }
+}
+
+/// A file's parsed syntax tree, on the file entity: the immutable green tree
+/// (`Send + Sync`), from which [`FileSyntax::root`] rebuilds a cursor cheaply.
+/// Every `CstNode` / `Valued` / conformance / where-clause pointer of the
+/// file's declarations resolves against it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FileSyntax(pub GreenNode);
+
+impl FileSyntax {
+    /// The file's `SourceFile` node.
+    pub fn root(&self) -> SyntaxNode {
+        SyntaxNode::new_root(self.0.clone())
+    }
+}
 
 // ===== Naming & location =====
 
@@ -222,9 +247,18 @@ pub struct Settable;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MutatingAccessor;
 
-/// Has body/initializer — CstNode of the body subtree.
-#[derive(Clone, Debug)]
-pub struct Valued(pub SyntaxNode);
+/// Has body/initializer — a handle to the body subtree (`CodeBlock`,
+/// `FunctionBody`, or initializer `Expression`). Resolve it with
+/// [`crate::syntax::valued_node`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Valued(pub SyntaxNodePtr);
+
+impl Valued {
+    /// The body's node in `root` (its file's tree).
+    pub fn to_node(&self, root: &SyntaxNode) -> Option<SyntaxNode> {
+        self.0.try_to_node(root)
+    }
+}
 
 /// Lowered body — arena-based AST for a function/getter/default value.
 #[derive(Clone, Debug)]
@@ -352,19 +386,19 @@ pub enum WhereConstraint {
     Bound {
         subject: AstType,
         protocols: Vec<AstType>,
-        node: SyntaxNode,
+        node: SyntaxNodePtr,
     },
     /// `T.Assoc == Concrete` — associated type equality
     Equality {
         lhs: AstType,
         rhs: AstType,
-        node: SyntaxNode,
+        node: SyntaxNodePtr,
     },
     /// `T: not Protocol` — negative conformance bound
     NegativeBound {
         subject: AstType,
         protocol: AstType,
-        node: SyntaxNode,
+        node: SyntaxNodePtr,
     },
 }
 
@@ -378,9 +412,9 @@ pub struct Conformances(pub Vec<ConformanceItem>);
 #[derive(Clone, Debug)]
 pub enum ConformanceItem {
     /// `T: Protocol`
-    Positive(AstType, SyntaxNode),
+    Positive(AstType, SyntaxNodePtr),
     /// `T: not Protocol`
-    Negative(AstType, SyntaxNode),
+    Negative(AstType, SyntaxNodePtr),
 }
 
 /// The type being extended by an extension declaration.

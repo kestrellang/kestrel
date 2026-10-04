@@ -558,7 +558,11 @@ fn interpolation(p: &mut Parser<'_>) {
         p.error_expected_what("expression");
     }
     if !p.at_any(&[K::InterpEnd, K::Colon]) && !p.at_eof() {
-        p.error_expected(&[K::InterpEnd]);
+        // One diagnostic per broken hole: leftover tokens after an error
+        // in the expression are its cascade, not a second mistake.
+        if !p.has_errors_since(&cp) {
+            p.error_expected(&[K::InterpEnd]);
+        }
         while !p.at_any(&[K::InterpEnd, K::Colon]) && !p.at_eof() {
             p.bump_balanced();
         }

@@ -17,9 +17,18 @@ Variants: `Module`, `Struct`, `Enum`, `EnumCase`, `Protocol`, `Extension`, `Func
 **Purpose**: Source span excluding leading trivia. Used for error reporting and goto-definition.
 
 ### `CstNode`
-**Data**: `SyntaxNode` (Arc-backed)
+**Data**: `SyntaxNodePtr` (kind + text range; `Send`, hashable)
 **On**: every declaration entity
-**Purpose**: Cheap reference back to the CST for later phases that need expression details.
+**Purpose**: Handle back to the declaration's CST node. Resolve it with
+`kestrel_ast_builder::syntax::cst_node(world_or_ctx, entity)`. Components never
+hold a `SyntaxNode` (`!Send`, pins the tree — audit F42).
+
+### `FileSyntax`
+**Data**: `GreenNode` (the file's immutable green tree)
+**On**: every file entity
+**Purpose**: The one place a parsed tree lives in the World; every
+`CstNode` / `Valued` / conformance / where-clause pointer resolves against
+`FileSyntax::root()`.
 
 ## Naming & Location
 
@@ -66,7 +75,7 @@ Variants: `Module`, `Struct`, `Enum`, `EnumCase`, `Protocol`, `Extension`, `Func
 **Answers**: "Can this be written to?"
 
 ### `Valued`
-**Data**: `SyntaxNode` (CST subtree)
+**Data**: `SyntaxNodePtr` to the body subtree (resolve with `syntax::valued_node`)
 **On**: Function (body), Initializer (body), Deinit (body), Field (default value or getter body)
 **Answers**: "Does this have executable code?"
 

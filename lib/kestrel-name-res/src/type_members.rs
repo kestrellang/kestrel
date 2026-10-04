@@ -301,12 +301,14 @@ mod tests {
             s,
             Conformances(vec![ConformanceItem::Positive(
                 named_ast("P"),
-                kestrel_syntax_tree::SyntaxNode::new_root({
-                    let mut b = kestrel_syntax_tree::GreenNodeBuilder::new();
-                    b.start_node(kestrel_syntax_tree::SyntaxKind::Root.into());
-                    b.finish_node();
-                    b.finish()
-                }),
+                kestrel_syntax_tree::SyntaxNodePtr::new(
+                    &kestrel_syntax_tree::SyntaxNode::new_root({
+                        let mut b = kestrel_syntax_tree::GreenNodeBuilder::new();
+                        b.start_node(kestrel_syntax_tree::SyntaxKind::Root.into());
+                        b.finish_node();
+                        b.finish()
+                    }),
+                ),
             )]),
         );
 

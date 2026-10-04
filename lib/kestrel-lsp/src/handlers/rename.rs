@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use kestrel_ast_builder::{CstNode, DeclSpan, FilePath, Name, NodeKind};
+use kestrel_ast_builder::{DeclSpan, FilePath, Name, NodeKind};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirBody, HirExpr, HirExprId};
 use kestrel_hir::res::LocalId;
@@ -265,9 +265,9 @@ fn identifier_for_target(
             if matches!(world.get::<NodeKind>(*e), Some(&NodeKind::Module)) {
                 return None;
             }
-            let cst = world.get::<CstNode>(*e)?;
+            let cst = kestrel_ast_builder::syntax::cst_node(world, *e)?;
             let decl_span = world.get::<DeclSpan>(*e)?;
-            let span = get_name_span(&cst.0, decl_span.0.file_id)?;
+            let span = get_name_span(&cst, decl_span.0.file_id)?;
             (*e, name, span)
         },
         Target::Local { body, id } => {

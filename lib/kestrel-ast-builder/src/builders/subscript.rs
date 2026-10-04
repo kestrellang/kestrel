@@ -1,6 +1,7 @@
 //! Subscript declaration builder.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{self, AstNode, HasStatic};
 use kestrel_syntax_tree::utils::get_decl_span;
 
@@ -29,7 +30,7 @@ pub fn build_subscript(
     world.set(entity, NodeKind::Subscript);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set(entity, Subscript);
     world.set(entity, Gettable);
     world.set_parent(entity, parent);
@@ -70,7 +71,7 @@ pub fn build_subscript(
         } else if let Some(block) = body.code_block() {
             // Shorthand getter-only form: subscript(...) -> T { expr }
             world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
-            world.set(entity, Valued(block.syntax().clone()));
+            world.set(entity, Valued(SyntaxNodePtr::new(&block.syntax())));
         }
     }
 
@@ -102,7 +103,7 @@ fn build_accessors(
     }
     if let Some(block) = acc.getter().and_then(|g| g.code_block()) {
         world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
-        world.set(entity, Valued(block.syntax().clone()));
+        world.set(entity, Valued(SyntaxNodePtr::new(&block.syntax())));
     }
     let index_params = |world: &World| {
         world

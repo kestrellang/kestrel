@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use kestrel_ast_builder::{
-    AstParam, AstType, Callable, Computed, ConformanceItem, Conformances, CstNode, ExtensionTarget,
+    AstParam, AstType, Callable, Computed, ConformanceItem, Conformances, ExtensionTarget,
     FieldMutability, InitEffect, IsIndirect, MutatingAccessor, Name, NodeKind, ReceiverKind,
     Static, TypeAnnotation, TypeParams, Vis, WhereClause, WhereConstraint,
 };
@@ -65,12 +65,8 @@ pub fn visibility(world: &World, entity: Entity) -> Option<&'static str> {
             Vis::Fileprivate => "fileprivate",
         });
     }
-    let cst = world.get::<CstNode>(entity)?;
-    for tok in cst
-        .0
-        .descendants_with_tokens()
-        .filter_map(|e| e.into_token())
-    {
+    let cst = kestrel_ast_builder::syntax::cst_node(world, entity)?;
+    for tok in cst.descendants_with_tokens().filter_map(|e| e.into_token()) {
         match tok.kind() {
             SyntaxKind::Public => return Some("public"),
             SyntaxKind::Private => return Some("private"),

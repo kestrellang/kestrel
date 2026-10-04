@@ -7,11 +7,15 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use kestrel_ast_builder::{ImportAlias, ImportItems, ModulePath, Name, NodeKind};
+use kestrel_ast_builder::{
+    ImportAlias, ImportItems, ModulePath, Name, NodeKind, QualifiedTarget, Static,
+};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
+use crate::extensions::{ExtensionTargetEntity, ExtensionsFor};
 use crate::helpers::is_in_std_module;
 use crate::resolve_module::{ResolveModulePath, StdModules};
+use crate::visibility::VisibleChildrenByName;
 
 // ===== Scope =====
 
@@ -81,22 +85,31 @@ impl QueryFn for ScopeFor {
         let mut declarations: HashMap<String, Vec<Entity>> = HashMap::new();
         let mut wildcard_imports: Vec<Entity> = Vec::new();
 
-        // Process children
-        for &child in ctx.children_of(self.entity) {
-            let kind = ctx.get::<NodeKind>(child);
-
-            if kind == Some(&NodeKind::Import) {
-                // Process import declaration
-                process_import(
-                    ctx,
-                    child,
-                    self.root,
-                    &mut selective_imports,
-                    &mut wildcard_imports,
-                );
-            } else if let Some(name) = ctx.get::<Name>(child) {
-                // Non-import child with a name → local declaration
-                declarations.entry(name.0.clone()).or_default().push(child);
+        let is_type_scope = ctx
+            .get::<NodeKind>(self.entity)
+            .is_some_and(NodeKind::is_type_scope);
+        if is_type_scope {
+            // A type's lexical names are its member scope: every part of the
+            // type (body and all extensions) contributes the same names.
+            for child in member_scope_children(ctx, self.entity, self.root) {
+                if let Some(name) = ctx.get::<Name>(child) {
+                    declarations.entry(name.0.clone()).or_default().push(child);
+                }
+            }
+        } else {
+            for &child in ctx.children_of(self.entity) {
+                if ctx.get::<NodeKind>(child) == Some(&NodeKind::Import) {
+                    process_import(
+                        ctx,
+                        child,
+                        self.root,
+                        &mut selective_imports,
+                        &mut wildcard_imports,
+                    );
+                } else if let Some(name) = ctx.get::<Name>(child) {
+                    // Non-import child with a name → local declaration
+                    declarations.entry(name.0.clone()).or_default().push(child);
+                }
             }
         }
 
@@ -129,6 +142,79 @@ impl QueryFn for ScopeFor {
     }
 }
 
+/// The declarations a type scope binds lexically: the scope's own type
+/// parameters, plus every non-instance member (nested types, type aliases,
+/// enum cases, static members) of every part of the type — its body and all
+/// of its extensions — so a type body and its extensions see one member
+/// scope. Instance members are never lexical bindings; they are reached only
+/// through `self.` (audit H3: a bare field name used to resolve to the field
+/// entity and fail in codegen).
+fn member_scope_children(ctx: &QueryContext<'_>, scope: Entity, root: Entity) -> Vec<Entity> {
+    // Type parameters are per part: an extension's free RHS parameters and a
+    // body's `[T]` are not in scope in the other parts (extension LHS
+    // parameters resolve through `ExtensionLhsParams`).
+    let mut out: Vec<Entity> = ctx
+        .children_of(scope)
+        .iter()
+        .copied()
+        .filter(|&c| ctx.get::<NodeKind>(c) == Some(&NodeKind::TypeParameter))
+        .collect();
+    let nominal = if ctx.get::<NodeKind>(scope) == Some(&NodeKind::Extension) {
+        ctx.query(ExtensionTargetEntity {
+            extension: scope,
+            root,
+        })
+    } else {
+        Some(scope)
+    };
+    // An extension whose target does not resolve contributes only itself.
+    let parts: Vec<Entity> = match nominal {
+        Some(nominal) => std::iter::once(nominal)
+            .chain(ctx.query(ExtensionsFor {
+                target: nominal,
+                root,
+            }))
+            .collect(),
+        None => vec![scope],
+    };
+    for part in parts {
+        out.extend(ctx.children_of(part).iter().copied().filter(|&c| {
+            // A qualified associated-type binding (`type Iterable.Item = …`)
+            // witnesses one conformance; it names `Item` only inside its own
+            // extension, or it would collide with the type's own `Item`.
+            is_lexical_member(ctx, c) && (part == scope || ctx.get::<QualifiedTarget>(c).is_none())
+        }));
+    }
+    out.dedup();
+    out
+}
+
+/// Whether a member of a type is a lexical binding in the type's scope:
+/// everything but instance members and per-part type parameters.
+fn is_lexical_member(ctx: &QueryContext<'_>, member: Entity) -> bool {
+    match ctx.get::<NodeKind>(member) {
+        Some(
+            NodeKind::Field
+            | NodeKind::Function
+            | NodeKind::Subscript
+            | NodeKind::Initializer
+            | NodeKind::Deinit
+            | NodeKind::Setter
+            | NodeKind::RefAccessor,
+        ) => ctx.get::<Static>(member).is_some(),
+        Some(NodeKind::TypeParameter | NodeKind::Import | NodeKind::ParamDefault) | None => false,
+        Some(
+            NodeKind::Module
+            | NodeKind::Struct
+            | NodeKind::Enum
+            | NodeKind::EnumCase
+            | NodeKind::Protocol
+            | NodeKind::Extension
+            | NodeKind::TypeAlias,
+        ) => true,
+    }
+}
+
 /// Process a single import entity, adding to selective or wildcard imports.
 fn process_import(
     ctx: &QueryContext<'_>,
@@ -155,13 +241,14 @@ fn process_import(
     if let Some(items) = ctx.get::<ImportItems>(import) {
         // Selective import: `import A.B.(Foo, Bar as Baz)`
         for item in &items.0 {
-            // Find the item in the module's children
-            let matches: Vec<Entity> = ctx
-                .children_of(module_entity)
-                .iter()
-                .filter(|&&child| ctx.get::<Name>(child).is_some_and(|n| n.0 == item.name))
-                .copied()
-                .collect();
+            // The module's children of that name that the importing file may
+            // see — the same visibility rule wildcard imports apply (audit H5:
+            // a selective import used to bind private declarations).
+            let matches = ctx.query(VisibleChildrenByName {
+                parent: module_entity,
+                name: item.name.clone(),
+                context: import,
+            });
 
             // Use alias if provided, otherwise original name
             let import_name = item.alias.as_ref().unwrap_or(&item.name).clone();

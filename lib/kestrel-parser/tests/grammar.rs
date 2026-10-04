@@ -5,7 +5,7 @@
 mod common;
 
 use common::{first, parse, parse_ok, shape};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::SyntaxKind;
 
 #[test]
 fn separators_and_brackets_are_tokens_not_error_gaps() {

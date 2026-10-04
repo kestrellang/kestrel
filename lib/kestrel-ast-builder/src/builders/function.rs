@@ -3,6 +3,7 @@
 use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
 use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic};
 use kestrel_syntax_tree::utils::get_decl_span;
 
@@ -31,7 +32,7 @@ pub fn build_function(
     world.set(entity, NodeKind::Function);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
     if let Some(name) = node.name_text() {
@@ -74,7 +75,7 @@ pub fn build_function(
                 entity,
                 Body(lower::lower_default_value(body.syntax(), file_id)),
             );
-            world.set(entity, Valued(body.syntax().clone()));
+            world.set(entity, Valued(SyntaxNodePtr::new(&body.syntax())));
         }
     }
 
@@ -93,7 +94,7 @@ pub fn build_function(
 /// Lower a `{ … }` body into the entity's `Body` and `Valued`.
 fn set_block_body(world: &mut World, entity: Entity, block: &ast::CodeBlock, file_id: usize) {
     world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
-    world.set(entity, Valued(block.syntax().clone()));
+    world.set(entity, Valued(SyntaxNodePtr::new(&block.syntax())));
 }
 
 /// Build an initializer declaration entity from CST.
@@ -114,7 +115,7 @@ pub fn build_initializer(
     world.set(entity, NodeKind::Initializer);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
     let params = extract_params(world, node.parameter_list(), entity, file_entity, file_id);
@@ -178,7 +179,7 @@ pub fn build_deinit(
     world.set(entity, NodeKind::Deinit);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
     // Deinits receive &var self. The caller owns the memory and handles
@@ -235,7 +236,7 @@ fn desugar_opaque_params(
             world.set(tp, Name(tp_name.clone()));
             world.set(tp, FileId(file_entity));
             world.set(tp, DeclSpan(tp_span.clone()));
-            world.set(tp, CstNode(cst_node.clone()));
+            world.set(tp, CstNode(SyntaxNodePtr::new(&cst_node)));
             world.set_parent(tp, func_entity);
             synthetic_params.push(tp);
 
@@ -251,7 +252,7 @@ fn desugar_opaque_params(
             new_where_constraints.push(WhereConstraint::Bound {
                 subject: tp_ast.clone(),
                 protocols: bounds.clone(),
-                node: cst_node.clone(),
+                node: SyntaxNodePtr::new(&cst_node),
             });
 
             // `some P and not Copyable` in param position desugars to the
@@ -260,7 +261,7 @@ fn desugar_opaque_params(
                 new_where_constraints.push(WhereConstraint::NegativeBound {
                     subject: tp_ast.clone(),
                     protocol: (**negative).clone(),
-                    node: cst_node.clone(),
+                    node: SyntaxNodePtr::new(&cst_node),
                 });
             }
 

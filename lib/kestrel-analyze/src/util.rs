@@ -249,11 +249,10 @@ pub fn entity_span(ctx: &QueryContext<'_>, entity: Entity) -> Span {
 /// component's CodeBlock CST node). Returns `None` for expression bodies
 /// or entities without a `Valued` component.
 pub fn body_close_brace_span(ctx: &QueryContext<'_>, entity: Entity) -> Option<Span> {
-    let valued = ctx.get::<Valued>(entity)?;
-    let node = &valued.0;
-    if node.kind() != SyntaxKind::CodeBlock {
+    if ctx.get::<Valued>(entity)?.0.kind() != SyntaxKind::CodeBlock {
         return None;
     }
+    let node = kestrel_ast_builder::syntax::valued_node(ctx, entity)?;
     let file_id = ctx
         .get::<DeclSpan>(entity)
         .map(|s| s.0.file_id)

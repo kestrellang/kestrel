@@ -179,11 +179,11 @@ mod tests {
         Span::synthetic(0)
     }
 
-    fn fake_syntax() -> SyntaxNode {
+    fn fake_syntax() -> kestrel_syntax_tree::SyntaxNodePtr {
         let mut builder = GreenNodeBuilder::new();
         builder.start_node(SyntaxKind::Root.into());
         builder.finish_node();
-        SyntaxNode::new_root(builder.finish())
+        kestrel_syntax_tree::SyntaxNodePtr::new(&SyntaxNode::new_root(builder.finish()))
     }
 
     fn named_ast(name: &str) -> AstType {

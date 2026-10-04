@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
+
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{self, AstNode};
 use kestrel_syntax_tree::utils::get_decl_span;
 
@@ -36,7 +37,7 @@ pub fn build_extension(
     world.set(entity, NodeKind::Extension);
     world.set(entity, FileId(file_entity));
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
     if let Some(target_ty) = lower_opt_type(node.ty(), file_id) {
@@ -91,7 +92,7 @@ fn introduce_rhs_free_type_params(
     };
 
     let mut seen: HashSet<String> = lhs_names.into_iter().collect();
-    let mut new_params: Vec<(String, Span, SyntaxNode)> = Vec::new();
+    let mut new_params: Vec<(String, Span, SyntaxNodePtr)> = Vec::new();
 
     let cst = match world.get::<CstNode>(entity) {
         Some(node) => node.0.clone(),

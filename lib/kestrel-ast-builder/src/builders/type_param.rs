@@ -1,6 +1,7 @@
 //! Type parameter extraction and entity creation.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{AstNode, HasGenerics, HasName};
 use kestrel_syntax_tree::utils::get_decl_span;
 
@@ -30,7 +31,7 @@ pub fn build_type_parameters(
         world.set(entity, Name(name));
         world.set(entity, FileId(file_entity));
         world.set(entity, DeclSpan(get_decl_span(param.syntax(), file_id)));
-        world.set(entity, CstNode(param.syntax().clone()));
+        world.set(entity, CstNode(SyntaxNodePtr::new(&param.syntax())));
         world.set_parent(entity, parent);
 
         if let Some(ty) = param

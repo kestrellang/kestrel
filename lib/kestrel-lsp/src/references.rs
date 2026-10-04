@@ -24,7 +24,7 @@
 //!   entity isn't kept on the AST node. Add a `ResolveTypeRefs { file }`
 //!   query in `kestrel-name-res` when needed.
 
-use kestrel_ast_builder::{Body, CstNode, DeclSpan, FileId};
+use kestrel_ast_builder::{Body, DeclSpan, FileId};
 use kestrel_hecs::{Entity, World};
 use kestrel_hir::body::{HirExpr, HirPat};
 use kestrel_hir::res::LocalId;
@@ -264,9 +264,9 @@ pub fn span_spells_name(source: &str, span: &Span, name: &str) -> bool {
 /// to find the text it would edit, so the two agree by construction.
 pub fn decl_at_name_offset(world: &World, file_entity: Entity, offset: usize) -> Option<Entity> {
     let decl = crate::semantic::enclosing_decl_at(world, file_entity, offset)?;
-    let cst = world.get::<CstNode>(decl)?;
+    let cst = kestrel_ast_builder::syntax::cst_node(world, decl)?;
     let decl_span = world.get::<DeclSpan>(decl)?;
-    let name_span = get_name_span(&cst.0, decl_span.0.file_id)?;
+    let name_span = get_name_span(&cst, decl_span.0.file_id)?;
     (name_span.start <= offset && offset <= name_span.end).then_some(decl)
 }
 

@@ -1,6 +1,7 @@
 //! Protocol declaration builder.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{self, AstNode, HasName};
 use kestrel_syntax_tree::utils::get_decl_span;
 
@@ -26,7 +27,7 @@ pub fn build_protocol(
     world.set(entity, FileId(file_entity));
     world.set(entity, Typed);
     world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
-    world.set(entity, CstNode(syntax.clone()));
+    world.set(entity, CstNode(SyntaxNodePtr::new(&syntax)));
     world.set_parent(entity, parent);
 
     if let Some(name) = node.name_text() {

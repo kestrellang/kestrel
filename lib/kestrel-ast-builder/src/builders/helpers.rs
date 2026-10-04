@@ -6,6 +6,7 @@
 
 use kestrel_hecs::{Entity, World};
 use kestrel_span::Span;
+use kestrel_syntax_tree::SyntaxNodePtr;
 use kestrel_syntax_tree::ast::{
     self, AstNode, HasAttributes, HasConformances, HasGenerics, HasVisibility, VisibilityKind,
 };
@@ -217,7 +218,7 @@ pub fn set_conformances(
     let items: Vec<ConformanceItem> = list
         .conformance_items()
         .filter_map(|item| {
-            let syntax = item.syntax().clone();
+            let syntax = SyntaxNodePtr::new(item.syntax());
             match item.negative_conformance() {
                 Some(neg) => Some(ConformanceItem::Negative(
                     lower_opt_type(neg.ty(), file_id)?,
@@ -252,7 +253,7 @@ pub fn set_where_clause(
             ast::WhereConstraint::TypeEquality(e) => Some(WhereConstraint::Equality {
                 lhs: assoc_target_to_ast_type(&e.associated_type_target()?, file_id)?,
                 rhs: lower_opt_type(e.ty(), file_id)?,
-                node: e.syntax().clone(),
+                node: SyntaxNodePtr::new(&e.syntax()),
             }),
         })
         .collect();
@@ -269,7 +270,7 @@ fn type_bound(bound: &ast::TypeBound, file_id: usize) -> Option<WhereConstraint>
         Some(target) => assoc_target_to_ast_type(&target, file_id)?,
         None => name_to_ast_type(&bound.name()?, file_id)?,
     };
-    let node = bound.syntax().clone();
+    let node = SyntaxNodePtr::new(bound.syntax());
     if let Some(neg) = bound.negative_conformance() {
         let protocol = path_with_args(&neg.path()?, neg.type_argument_list(), file_id)?;
         return Some(WhereConstraint::NegativeBound {
@@ -383,7 +384,7 @@ pub fn spawn_setter(
     world.set(setter, NodeKind::Setter);
     world.set(setter, FileId(file_entity));
     world.set(setter, DeclSpan(get_decl_span(setter_clause, file_id)));
-    world.set(setter, CstNode(setter_clause.clone()));
+    world.set(setter, CstNode(SyntaxNodePtr::new(&setter_clause)));
     world.set_parent(setter, parent);
     // Setter → Subscript/Field → Container. Record the container so
     // downstream code can skip the intermediate hop without walking.
@@ -392,7 +393,7 @@ pub fn spawn_setter(
     }
     world.set(setter, Callable { params, receiver });
     world.set(setter, Body(lower::lower_body(setter_body, file_id)));
-    world.set(setter, Valued(setter_body.clone()));
+    world.set(setter, Valued(SyntaxNodePtr::new(&setter_body)));
     if is_static {
         world.set(setter, Static);
     }
@@ -424,7 +425,7 @@ pub fn spawn_ref_accessor(
     world.set(acc, NodeKind::RefAccessor);
     world.set(acc, FileId(file_entity));
     world.set(acc, DeclSpan(get_decl_span(clause, file_id)));
-    world.set(acc, CstNode(clause.clone()));
+    world.set(acc, CstNode(SyntaxNodePtr::new(&clause)));
     world.set_parent(acc, parent);
     // RefAccessor → Subscript/Field → Container (same hop-skip as Setter).
     if let Some(container) = world.parent_of(parent) {
@@ -432,7 +433,7 @@ pub fn spawn_ref_accessor(
     }
     world.set(acc, Callable { params, receiver });
     world.set(acc, Body(lower::lower_body(clause_body, file_id)));
-    world.set(acc, Valued(clause_body.clone()));
+    world.set(acc, Valued(SyntaxNodePtr::new(&clause_body)));
     if mutating {
         world.set(acc, MutatingAccessor);
     }

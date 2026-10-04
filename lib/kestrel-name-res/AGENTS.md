@@ -84,6 +84,26 @@ ambiguous, while a protocol default with *different* labels stays reachable as
 an overload. Suppressing protocol-extension candidates outright is the F10
 mistake in the other direction.
 
+## Lang items come from `@builtin` only
+
+`ResolveBuiltin` reads `BuiltinIndex` and nothing else. Never add a
+name-based shortcut back: a lookup by source name finds whatever the user
+declared with that name (`module Int64` turned every integer literal into the
+user's module and broke the stdlib — audit H2). The index keeps the first
+annotation in declaration order and kestrel-analyze reports later ones (E400).
+When an annotation sits on an alias whose *target* is the lang item (the
+default literal types), say so in `Builtin::denotes_alias_target`.
+
+## A type's lexical names are its member scope
+
+`ScopeFor` on a struct/enum/protocol/extension lists the type's non-instance
+members from **all** its parts (body + every extension), plus that part's own
+type parameters. Instance members (fields, methods, subscripts, inits) are
+never lexical bindings — only `self.x` reaches them (audit H3). Keep both
+halves when touching `member_scope_children`: dropping the extension walk
+makes a body and its extensions disagree about what `Inner` means; letting
+instance members back in makes bare `count` resolve and fail in codegen.
+
 ## Cycle discipline
 
 Walks over protocol inheritance or conformance carry a `visited` set —

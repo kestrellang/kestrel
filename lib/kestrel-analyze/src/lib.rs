@@ -71,6 +71,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
     r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
+    r.add_decl_check(decl::duplicate_builtin::DuplicateBuiltinAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);
     r.add_decl_check(decl::duplicate_deinit::DuplicateDeinitAnalyzer);
     r.add_decl_check(decl::duplicate_case::DuplicateCaseAnalyzer);
