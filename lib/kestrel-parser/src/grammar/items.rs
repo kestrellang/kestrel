@@ -450,9 +450,7 @@ fn function_decl(p: &mut Parser<'_>) {
     if p.at(K::Equals) {
         let b = p.start();
         p.bump(K::Equals);
-        let e = p.start();
         expr(p);
-        e.complete(p, K::Expression);
         b.complete(p, K::FunctionBody);
     } else {
         opt_block_body(p);

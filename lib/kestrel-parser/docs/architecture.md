@@ -68,8 +68,26 @@ line. Everything else is newline-insensitive, as before.
 closures, no assignment, no block-like primaries, a single prefix operator)
 instead of a second grammar. Bracketed sub-expressions lift it.
 
-**Operators are left-folded flat** (`ExprBinary`); precedence is applied
-later in HIR lowering. (Target: Pratt parsing here.)
+**Operators are parsed by precedence climbing** (`exprs::binary_bp`), so
+`ExprBinary` nodes already have the language's precedence and
+associativity — later stages lower them as written. Binding powers, loosest
+first: `or` 10, `??` 15 (right-associative), `and` 20, comparisons 30
+(non-chaining), `..=`/`..<` 40, `+ - | ^` 50, `* / % &` 60, `<< >>` 70.
+Each `ExprBinary` spans exactly its operands.
+
+**Interpolated strings are structured.** The lexer splits
+`"a\(x)b"` into `StringStart StringFragment InterpStart <tokens> InterpEnd
+… StringEnd` (a plain string stays one `String` token); the parser builds
+`ExprInterpolatedString > Interpolation > Expression (FormatSpec)?` and
+parses each hole as an ordinary expression in place. A broken hole is an
+`Error` node with a diagnostic prefixed "invalid expression in string
+interpolation"; nothing downstream re-lexes string text.
+
+**The tree conforms to `kestrel.ungram`.** Every error-free parse matches
+the grammar in `lib/kestrel-syntax-tree` (`tests/conformance.rs` checks the
+whole corpus; debug builds assert it on every parse), so the generated typed
+views read it correctly. Grouping parens in a type are a `TyParen` node; an
+expression body `func f() = e` is `FunctionBody('=' Expression)`.
 
 ## Error Recovery
 

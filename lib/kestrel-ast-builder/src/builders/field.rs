@@ -1,30 +1,13 @@
 //! Field declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::utils::{extract_name, find_child, get_decl_span};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic};
+use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::*;
 use crate::lower;
-
-/// Does this `PropertyAccessors` block provide any accessor *body*?
-///
-/// A bodyless block (`{ get }`, `{ get set }`) declares how storage may be
-/// accessed; only a bodied accessor (`{ get { … } }`, the `{ expr }` shorthand,
-/// `{ set { … } }`, `{ ref { … } }`) replaces storage with computation.
-fn accessor_block_has_body(accessors: &SyntaxNode) -> bool {
-    let clause_has_body = |kind| {
-        find_child(accessors, kind).is_some_and(|c| find_child(&c, SyntaxKind::CodeBlock).is_some())
-    };
-    // The `{ expr }` shorthand puts the CodeBlock directly under the block.
-    find_child(accessors, SyntaxKind::CodeBlock).is_some()
-        || clause_has_body(SyntaxKind::GetterClause)
-        || clause_has_body(SyntaxKind::SetterClause)
-        || find_child(accessors, SyntaxKind::RefClause).is_some()
-        || find_child(accessors, SyntaxKind::MutatingRefClause).is_some()
-}
 
 /// Build a field declaration entity from CST.
 ///
@@ -37,37 +20,29 @@ fn accessor_block_has_body(accessors: &SyntaxNode) -> bool {
 /// based on which accessors are present.
 pub fn build_field(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::FieldDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Field);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    if let Some(name) = extract_name(node) {
+    if let Some(name) = node.name_text() {
         world.set(entity, Name(name));
     }
-
-    // Type annotation
-    if let Some(ty) = node
-        .children()
-        .find(|c| is_type_kind(c.kind()))
-        .and_then(|c| ast_type_from_cst(&c, file_id))
-    {
+    if let Some(ty) = lower_opt_type(node.ty(), file_id) {
         world.set(entity, TypeAnnotation(ty));
     }
 
-    // Determine mutability from var/let keyword and capture it as a component
-    // so downstream analyzers don't need to re-scan tokens.
-    let is_var = node
-        .children_with_tokens()
-        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Var));
+    // Mutability as a component, so downstream analyzers don't re-scan tokens.
+    let is_var = node.var_token().is_some();
     world.set(
         entity,
         if is_var {
@@ -77,188 +52,39 @@ pub fn build_field(
         },
     );
 
-    // Check for computed property accessors
-    let has_accessors = find_child(node, SyntaxKind::PropertyAccessors).is_some();
-    if has_accessors {
-        world.set(entity, Computed);
-    }
-
-    if has_accessors {
-        // Computed property: Gettable/Settable based on get/set clauses
-        let accessors = find_child(node, SyntaxKind::PropertyAccessors).unwrap();
-
-        // Clauses wrap an accessor body; bare `Get`/`Set` tokens appear as
-        // direct children for protocol requirements (`{ get set }`) where
-        // accessors are declared without bodies.
-        let has_getter = find_child(&accessors, SyntaxKind::GetterClause).is_some()
-            || accessors
-                .children_with_tokens()
-                .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Get));
-        let has_setter = find_child(&accessors, SyntaxKind::SetterClause).is_some()
-            || accessors
-                .children_with_tokens()
-                .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::Set));
-        // Place accessors (stage 1.5): `ref` is a read provider (Gettable),
-        // `mutating ref` a write provider (Settable).
-        let has_ref = find_child(&accessors, SyntaxKind::RefClause).is_some();
-        let has_mutating_ref = find_child(&accessors, SyntaxKind::MutatingRefClause).is_some();
-
-        if has_getter || has_ref {
-            world.set(entity, Gettable);
-        }
-        if has_setter || has_mutating_ref {
-            world.set(entity, Settable);
-        }
-
-        // Store getter body as Valued + Body if present.
-        // Instance computed properties access `self` via a borrowing receiver;
-        // `static` fields and module-level computed globals have no receiver
-        // (the latter have no parent type to bind `self` to).
-        let is_static_field = has_static_modifier(node);
-        let parent_is_type = world
-            .get::<NodeKind>(parent)
-            .is_some_and(NodeKind::is_type_scope);
-        let receiver = if is_static_field || !parent_is_type {
-            None
-        } else {
-            Some(ReceiverKind::Borrowing)
-        };
-
-        if let Some(getter) = find_child(&accessors, SyntaxKind::GetterClause) {
-            if let Some(body) = find_child(&getter, SyntaxKind::CodeBlock) {
-                world.set(entity, Body(lower::lower_body(&body, file_id)));
-                world.set(entity, Valued(body));
-                world.set(
-                    entity,
-                    Callable {
-                        params: Vec::new(),
-                        receiver: receiver.clone(),
-                    },
-                );
-            }
-        } else if let Some(body) = find_child(&accessors, SyntaxKind::CodeBlock) {
-            // Shorthand computed property: `var foo: Type { expr }`
-            // The parser emits PropertyAccessors > CodeBlock without GetterClause.
-            // Treat as an implicit getter.
-            world.set(entity, Gettable);
-            world.set(entity, Body(lower::lower_body(&body, file_id)));
-            world.set(entity, Valued(body));
-            world.set(
-                entity,
-                Callable {
-                    params: Vec::new(),
-                    receiver: receiver.clone(),
-                },
-            );
-        } else if has_ref || has_mutating_ref {
-            // Pure-ref member (`{ ref {…} }`, no getter): the parent stays
-            // bodyless — reads route to the RefAccessor child — but still
-            // needs a Callable so member resolution sees the signature.
-            world.set(
-                entity,
-                Callable {
-                    params: Vec::new(),
-                    receiver: receiver.clone(),
-                },
-            );
-        }
-
-        // Setter accessor: spawn a child entity with its own Callable + Body.
-        // `newValue` is an implicit parameter typed as the field's type.
-        // Instance setters are Mutating (they write self's backing storage);
-        // static/global setters have no receiver.
-        if has_setter
-            && let Some(setter_clause) = find_child(&accessors, SyntaxKind::SetterClause)
-            && let Some(setter_body) = find_child(&setter_clause, SyntaxKind::CodeBlock)
-        {
-            let new_value_ty = world.get::<TypeAnnotation>(entity).map(|t| t.0.clone());
-            let setter_receiver = if is_static_field || !parent_is_type {
-                None
-            } else {
-                Some(ReceiverKind::Mutating)
-            };
-            let params = vec![AstParam {
-                label: None,
-                name: "newValue".into(),
-                ty: new_value_ty,
-                default_entity: None,
-                pattern: None,
-                is_mut: false,
-                is_consuming: false,
-            }];
-            spawn_setter(
+    let is_static = node.is_static();
+    let accessors = node.property_accessors();
+    match &accessors {
+        Some(accessors) => {
+            world.set(entity, Computed);
+            build_accessors(
                 world,
                 entity,
-                &setter_clause,
-                &setter_body,
-                params,
-                setter_receiver,
+                parent,
+                accessors,
                 file_entity,
                 file_id,
-                is_static_field,
+                is_static,
             );
-        }
-
-        // Place accessors (stage 1.5): spawn a RefAccessor child per clause.
-        // Field accessors take no params (no index, no newValue).
-        for (clause_kind, mutating) in [
-            (SyntaxKind::RefClause, false),
-            (SyntaxKind::MutatingRefClause, true),
-        ] {
-            if let Some(clause) = find_child(&accessors, clause_kind)
-                && let Some(clause_body) = find_child(&clause, SyntaxKind::CodeBlock)
-            {
-                let accessor_receiver = if is_static_field || !parent_is_type {
-                    None
-                } else if mutating {
-                    Some(ReceiverKind::Mutating)
-                } else {
-                    Some(ReceiverKind::Borrowing)
-                };
-                spawn_ref_accessor(
-                    world,
-                    entity,
-                    &clause,
-                    &clause_body,
-                    Vec::new(),
-                    accessor_receiver,
-                    mutating,
-                    file_entity,
-                    file_id,
-                    is_static_field,
-                );
+        },
+        None => {
+            // Stored property: always Gettable
+            world.set(entity, Gettable);
+            if is_var {
+                world.set(entity, Settable);
             }
-        }
-    } else {
-        // Stored property: always Gettable
-        world.set(entity, Gettable);
-        if is_var {
-            world.set(entity, Settable);
-        }
-
-        // Default value — field initializers are emitted as `= Expression`
-        // directly under FieldDeclaration (NOT wrapped in DefaultValue).
-        // Find the first Expression child after an Equals token.
-        let mut found_equals = false;
-        for child in node.children_with_tokens() {
-            if child
-                .as_token()
-                .is_some_and(|t| t.kind() == SyntaxKind::Equals)
-            {
-                found_equals = true;
-            } else if found_equals && let Some(expr_node) = child.into_node() {
-                // The parser wraps initializer exprs in Expression nodes
+            // `= expr` initializer
+            if let Some(init) = node.expression() {
                 world.set(
                     entity,
-                    Body(lower::lower_default_value_expr(&expr_node, file_id)),
+                    Body(lower::lower_default_value_expr(init.syntax(), file_id)),
                 );
-                world.set(entity, Valued(expr_node));
-                break;
+                world.set(entity, Valued(init.syntax().clone()));
             }
-        }
+        },
     }
 
-    if has_static_modifier(node) {
+    if is_static {
         world.set(entity, Static);
     }
 
@@ -271,8 +97,8 @@ pub fn build_field(
         Some(NodeKind::Extension) => FieldOwner::Extension,
         _ => FieldOwner::Module,
     };
-    let backing = match find_child(node, SyntaxKind::PropertyAccessors) {
-        Some(accessors) if accessor_block_has_body(&accessors) => FieldBacking::Computed,
+    let backing = match &accessors {
+        Some(accessors) if accessors.has_body() => FieldBacking::Computed,
         _ => FieldBacking::Stored,
     };
     world.set(
@@ -280,11 +106,123 @@ pub fn build_field(
         FieldClass {
             backing,
             owner,
-            is_static: has_static_modifier(node),
+            is_static,
         },
     );
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
-    set_documentation(world, entity, node);
+    set_documentation(world, entity, syntax);
+}
+
+/// A computed property's accessors: Gettable/Settable, the getter body,
+/// and a child entity per setter / place accessor.
+fn build_accessors(
+    world: &mut World,
+    entity: Entity,
+    parent: Entity,
+    accessors: &ast::PropertyAccessors,
+    file_entity: Entity,
+    file_id: usize,
+    is_static: bool,
+) {
+    // Place accessors (stage 1.5): `ref` is a read provider (Gettable),
+    // `mutating ref` a write provider (Settable).
+    let ref_clause = accessors.ref_clause();
+    let mutating_ref_clause = accessors.mutating_ref_clause();
+    let has_setter = accessors.declares_set();
+    if accessors.declares_get() || ref_clause.is_some() {
+        world.set(entity, Gettable);
+    }
+    if has_setter || mutating_ref_clause.is_some() {
+        world.set(entity, Settable);
+    }
+
+    // Instance computed properties access `self` via a borrowing receiver;
+    // `static` fields and module-level computed globals have no receiver
+    // (the latter have no parent type to bind `self` to).
+    let has_receiver = !is_static
+        && world
+            .get::<NodeKind>(parent)
+            .is_some_and(NodeKind::is_type_scope);
+    let receiver = has_receiver.then_some(ReceiverKind::Borrowing);
+    let getter_callable = || Callable {
+        params: Vec::new(),
+        receiver: receiver.clone(),
+    };
+
+    if let Some(getter) = accessors.getter() {
+        if let Some(body) = getter.code_block() {
+            world.set(entity, Body(lower::lower_body(body.syntax(), file_id)));
+            world.set(entity, Valued(body.syntax().clone()));
+            world.set(entity, getter_callable());
+        }
+    } else if let Some(body) = accessors.code_block() {
+        // Shorthand computed property `var foo: Type { expr }`: an implicit getter.
+        world.set(entity, Gettable);
+        world.set(entity, Body(lower::lower_body(body.syntax(), file_id)));
+        world.set(entity, Valued(body.syntax().clone()));
+        world.set(entity, getter_callable());
+    } else if ref_clause.is_some() || mutating_ref_clause.is_some() {
+        // Pure-ref member (`{ ref {…} }`, no getter): the parent stays
+        // bodyless — reads route to the RefAccessor child — but still
+        // needs a Callable so member resolution sees the signature.
+        world.set(entity, getter_callable());
+    }
+
+    // Setter: a child entity with its own Callable + Body. `newValue` is an
+    // implicit parameter typed as the field's type. Instance setters are
+    // Mutating (they write self's backing storage); static/global setters
+    // have no receiver.
+    if has_setter
+        && let Some(clause) = accessors.setter()
+        && let Some(body) = clause.code_block()
+    {
+        let params = vec![AstParam {
+            label: None,
+            name: "newValue".into(),
+            ty: world.get::<TypeAnnotation>(entity).map(|t| t.0.clone()),
+            default_entity: None,
+            pattern: None,
+            is_mut: false,
+            is_consuming: false,
+        }];
+        spawn_setter(
+            world,
+            entity,
+            clause.syntax(),
+            body.syntax(),
+            params,
+            has_receiver.then_some(ReceiverKind::Mutating),
+            file_entity,
+            file_id,
+            is_static,
+        );
+    }
+
+    // Place accessors: a RefAccessor child per clause. Field accessors take
+    // no params (no index, no newValue).
+    let ref_clauses = [
+        ref_clause.and_then(|c| Some((c.syntax().clone(), c.code_block()?, false))),
+        mutating_ref_clause.and_then(|c| Some((c.syntax().clone(), c.code_block()?, true))),
+    ];
+    for (clause, body, mutating) in ref_clauses.into_iter().flatten() {
+        let accessor_receiver = has_receiver.then_some(if mutating {
+            ReceiverKind::Mutating
+        } else {
+            ReceiverKind::Borrowing
+        });
+        spawn_ref_accessor(
+            world,
+            entity,
+            &clause,
+            body.syntax(),
+            Vec::new(),
+            accessor_receiver,
+            mutating,
+            file_entity,
+            file_id,
+            is_static,
+        );
+    }
 }

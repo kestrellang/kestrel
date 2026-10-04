@@ -1,60 +1,44 @@
 //! Type parameter extraction and entity creation.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::utils::{extract_name, find_child, get_decl_span};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::ast::{AstNode, HasGenerics, HasName};
+use kestrel_syntax_tree::utils::get_decl_span;
 
-use super::helpers::is_type_kind;
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::*;
 
-/// Extract type parameters from a TypeParameterList child and create entities.
-///
-/// Returns the list of type parameter entities and sets the TypeParams
-/// component on the parent entity.
+/// Create an entity per type parameter of `node`'s `[T, U = D]` list and
+/// set the TypeParams component on `parent`.
 pub fn build_type_parameters(
     world: &mut World,
     parent: Entity,
-    node: &SyntaxNode,
+    node: &impl HasGenerics,
     file_entity: Entity,
     file_id: usize,
 ) {
-    let tp_list = match find_child(node, SyntaxKind::TypeParameterList) {
-        Some(list) => list,
-        None => return,
+    let Some(list) = node.type_parameter_list() else {
+        return;
     };
 
     let mut param_entities = Vec::new();
-
-    for child in tp_list.children() {
-        if child.kind() != SyntaxKind::TypeParameter {
+    for param in list.type_parameters() {
+        let Some(name) = param.name_text() else {
             continue;
-        }
-
-        // TypeParameter has Name > Identifier in CST
-        let name = match extract_name(&child) {
-            Some(n) => n,
-            None => continue,
         };
-
         let entity = world.spawn();
         world.set(entity, NodeKind::TypeParameter);
         world.set(entity, Name(name));
         world.set(entity, FileId(file_entity));
-        world.set(entity, DeclSpan(get_decl_span(&child, file_id)));
-        world.set(entity, CstNode(child.clone()));
+        world.set(entity, DeclSpan(get_decl_span(param.syntax(), file_id)));
+        world.set(entity, CstNode(param.syntax().clone()));
         world.set_parent(entity, parent);
 
-        // Default type from DefaultType child
-        if let Some(default_node) = find_child(&child, SyntaxKind::DefaultType)
-            && let Some(ty) = default_node
-                .children()
-                .find(|c| is_type_kind(c.kind()))
-                .and_then(|c| ast_type_from_cst(&c, file_id))
+        if let Some(ty) = param
+            .default_type()
+            .and_then(|d| lower_opt_type(d.ty(), file_id))
         {
             world.set(entity, TypeAnnotation(ty));
         }
-
         param_entities.push(entity);
     }
 

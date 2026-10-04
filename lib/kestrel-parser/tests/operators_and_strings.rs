@@ -88,7 +88,10 @@ fn plain_string_is_one_token() {
 #[test]
 fn dictionary_colon_in_a_hole_is_not_a_format_spec() {
     let tree = parse_ok("func f() { \"\\([1: 2].count)\" }\n");
-    assert!(tree.descendants().all(|n| n.kind() != SyntaxKind::FormatSpecifier));
+    assert!(
+        tree.descendants()
+            .all(|n| n.kind() != SyntaxKind::FormatSpecifier)
+    );
     assert_eq!(
         tree.descendants()
             .filter(|n| n.kind() == SyntaxKind::ExprDictionary)

@@ -50,9 +50,13 @@ This enables IDE features (formatting, refactoring) and accurate error recovery.
 
 | File | Responsibility |
 |------|---------------|
-| `lib.rs` | `SyntaxKind` enum (~200 variants), `KestrelLanguage`, `Token → SyntaxKind` conversion |
-| `imports.rs` | Import-specific extraction: `ImportDeclarationSyntax`, `extract_import_declaration()` |
-| `utils.rs` | CST query utilities: `find_child()`, `extract_name()`, `get_node_span()`, `is_trivia()` |
+| `kinds.txt` | Every `SyntaxKind`, append-only, with token spellings (source of `src/generated/kinds.rs`) |
+| `kestrel.ungram` | The tree's shape: one rule per node kind (source of the typed views and validator rules) |
+| `lib.rs` | `KestrelLanguage`, kind predicates (`is_trivia`, `is_type`), rowan type aliases |
+| `ast/` | Typed views: `AstNode`, `AstChildren`, `AstPtr` (a `Send` kind+range handle), generated node structs/enums, `ext.rs` conveniences (`HasName`, `HasVisibility`, … traits) |
+| `validate/` | `validate()`: checks a tree against the grammar's rules (parser contract) |
+| `utils.rs` | Span helpers over untyped declaration nodes (`get_decl_span`, `get_name_span`, `get_node_span`) |
+| `tests/sourcegen.rs` | Generates and freshness-checks the three generated files |
 
 ## Dependencies
 

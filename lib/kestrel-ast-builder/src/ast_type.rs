@@ -1,270 +1,164 @@
 //! CST-to-AST type lowering.
 //!
-//! Converts CST type nodes into `AstType` data types (defined in kestrel-ast).
-//! The data types themselves live in `kestrel_ast::ast_type`.
+//! Converts typed `Ty` views into `AstType` data types (defined in
+//! kestrel-ast). Every `AstType` is spanned at the `Ty*` kind node it comes
+//! from; grouping parens (`TyParen`) are transparent.
 
 use kestrel_span::Span;
-use kestrel_syntax_tree::utils::{extract_path_segments, find_child};
+use kestrel_syntax_tree::ast::{self, AstNode};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-pub use kestrel_ast::{AstType, FnTypeKind, PathSegment};
+pub use kestrel_ast::{AstType, FnTypeKind, ParamConvention, PathSegment};
 
-/// Convert a CST type node to an AstType.
-///
-/// Walks the Ty* nodes from the syntax tree and produces the corresponding
-/// AstType variant. Returns None for unrecognized nodes.
+/// Lower a `Ty` view.
+pub fn lower_type(ty: &ast::Ty, file_id: usize) -> Option<AstType> {
+    lower_kind(&ty.ty_kind()?, file_id)
+}
+
+/// Lower an optional `Ty` (the common `node.ty()` result).
+pub fn lower_opt_type(ty: Option<ast::Ty>, file_id: usize) -> Option<AstType> {
+    lower_type(&ty?, file_id)
+}
+
+/// Lower every `Ty` of a list, dropping the ones that fail.
+pub fn lower_types(types: impl Iterator<Item = ast::Ty>, file_id: usize) -> Vec<AstType> {
+    types.filter_map(|t| lower_type(&t, file_id)).collect()
+}
+
+/// Untyped entry point: `node` is a `Ty` or one of its kinds.
 pub fn ast_type_from_cst(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
-    let span = node_span(node, file_id);
+    if let Some(ty) = ast::Ty::cast(node.clone()) {
+        return lower_type(&ty, file_id);
+    }
+    lower_kind(&ast::TyKind::cast(node.clone())?, file_id)
+}
 
-    match node.kind() {
-        SyntaxKind::TyPath => {
-            // Extract path segments from the Path child.
-            // Currently the parser puts type args on the TyPath (end of path),
-            // but we build per-segment PathSegments for forward compatibility
-            // with `Array[Int].Iterator` style paths.
-            let path_node = find_child(node, SyntaxKind::Path)?;
-            let names = extract_path_segments(&path_node);
+fn lower_kind(kind: &ast::TyKind, file_id: usize) -> Option<AstType> {
+    use ast::TyKind as K;
+    let span = node_span(kind.syntax(), file_id);
+    let boxed = |t: Option<ast::Ty>| lower_opt_type(t, file_id).map(Box::new);
+    Some(match kind {
+        K::TyPath(p) => {
+            let names = p.path()?.segments();
             if names.is_empty() {
                 return None;
             }
-
-            // Type arguments (currently only on the last segment)
-            let type_args: Vec<AstType> = find_child(node, SyntaxKind::TypeArgumentList)
-                .map(|args_node| {
-                    args_node
-                        .children()
-                        .filter(|c| is_type_node(c.kind()))
-                        .filter_map(|c| ast_type_from_cst(&c, file_id))
-                        .collect()
-                })
+            // Type arguments go on the last segment.
+            let type_args = p
+                .type_argument_list()
+                .map(|args| lower_types(args.types(), file_id))
                 .unwrap_or_default();
-
-            // Build PathSegments — type args go on the last segment
-            let segments: Vec<PathSegment> = names
-                .iter()
+            let last = names.len() - 1;
+            let segments = names
+                .into_iter()
                 .enumerate()
                 .map(|(i, name)| PathSegment {
-                    name: name.clone(),
-                    type_args: if i == names.len() - 1 {
-                        type_args.clone()
-                    } else {
-                        vec![]
-                    },
+                    name,
+                    type_args: if i == last { type_args.clone() } else { vec![] },
                     span: span.clone(),
                 })
                 .collect();
-
-            Some(AstType::Named { segments, span })
+            AstType::Named { segments, span }
         },
-
-        SyntaxKind::TyTuple => {
-            let elements: Vec<AstType> = node
-                .children()
-                .filter(|c| is_type_node(c.kind()))
-                .filter_map(|c| ast_type_from_cst(&c, file_id))
-                .collect();
-            Some(AstType::Tuple(elements, span))
+        K::TyTuple(t) => AstType::Tuple(lower_types(t.types(), file_id), span),
+        K::TyFunction(f) => lower_fn_type(f, span, file_id),
+        K::TyArray(a) => AstType::Array(boxed(a.ty())?, span),
+        K::TyDictionary(d) => AstType::Dictionary(boxed(d.key())?, boxed(d.value())?, span),
+        K::TyOptional(o) => AstType::Optional(boxed(o.ty())?, span),
+        K::TyResult(r) => AstType::Result {
+            ok: boxed(r.ty())?,
+            err: boxed(r.error())?,
+            span,
         },
-
-        SyntaxKind::TyFunction => {
-            // CST structure: TyFunction has exactly 2 child NODES:
-            //   1. TyList — parameter types (may be empty or contain Ty children)
-            //   2. Ty — return type
-            // plus, optionally, a leading kind keyword TOKEN before the TyList
-            // (`mutating` / `consuming` / the contextual `escaping`, which
-            // round-trips as an Identifier). It sits outside TyList precisely
-            // so the positional `mutating`-scan below cannot misread it as a
-            // param convention. `span` (the TyFunction node's range) already
-            // covers it — LSP signature help slices source by that span.
-            let kind = fn_type_kind(node);
-            let mut children = node.children();
-
-            // First child: TyList with parameter types. Walk tokens+nodes
-            // positionally so a `mutating` token attaches to the following
-            // param type as `MutBorrow`; otherwise the param is `Consuming`.
-            let (params, param_conventions) = children
-                .next()
-                .filter(|c| c.kind() == SyntaxKind::TyList)
-                .map(|ty_list| {
-                    let mut params: Vec<AstType> = Vec::new();
-                    let mut conventions: Vec<kestrel_ast::ParamConvention> = Vec::new();
-                    let mut pending_mut = false;
-                    for child in ty_list.children_with_tokens() {
-                        if let Some(tok) = child.as_token() {
-                            if tok.kind() == SyntaxKind::Mutating {
-                                pending_mut = true;
-                            }
-                        } else if let Some(n) = child.as_node()
-                            && is_type_node(n.kind())
-                        {
-                            if let Some(ty) = ast_type_from_cst(n, file_id) {
-                                params.push(ty);
-                                conventions.push(if pending_mut {
-                                    kestrel_ast::ParamConvention::MutBorrow
-                                } else {
-                                    kestrel_ast::ParamConvention::Consuming
-                                });
-                            }
-                            pending_mut = false;
-                        }
-                    }
-                    (params, conventions)
-                })
-                .unwrap_or_default();
-
-            // Second child: return type
-            let return_type = children
-                .next()
-                .filter(|c| is_type_node(c.kind()))
-                .and_then(|c| ast_type_from_cst(&c, file_id))
-                .unwrap_or(AstType::Unit(span.clone()));
-
-            Some(AstType::Function {
-                kind,
-                params,
-                param_conventions,
-                return_type: Box::new(return_type),
-                span,
-            })
+        K::TyUnit(_) => AstType::Unit(span),
+        K::TyNever(_) => AstType::Never(span),
+        K::TyInferred(_) => AstType::Inferred(span),
+        K::TyRef(r) => AstType::Ref {
+            inner: boxed(r.ty())?,
+            mutating: false,
+            span,
         },
-
-        SyntaxKind::TyArray => {
-            let inner = node
-                .children()
-                .find(|c| is_type_node(c.kind()))
-                .and_then(|c| ast_type_from_cst(&c, file_id))?;
-            Some(AstType::Array(Box::new(inner), span))
+        K::TyMutRef(r) => AstType::Ref {
+            inner: boxed(r.ty())?,
+            mutating: true,
+            span,
         },
-
-        SyntaxKind::TyDictionary => {
-            let mut types = node
-                .children()
-                .filter(|c| is_type_node(c.kind()))
-                .filter_map(|c| ast_type_from_cst(&c, file_id));
-            let key = types.next()?;
-            let value = types.next()?;
-            Some(AstType::Dictionary(Box::new(key), Box::new(value), span))
-        },
-
-        SyntaxKind::TyOptional => {
-            let inner = node
-                .children()
-                .find(|c| is_type_node(c.kind()))
-                .and_then(|c| ast_type_from_cst(&c, file_id))?;
-            Some(AstType::Optional(Box::new(inner), span))
-        },
-
-        SyntaxKind::TyResult => {
-            let mut types = node
-                .children()
-                .filter(|c| is_type_node(c.kind()))
-                .filter_map(|c| ast_type_from_cst(&c, file_id));
-            let ok = types.next()?;
-            let err = types.next()?;
-            Some(AstType::Result {
-                ok: Box::new(ok),
-                err: Box::new(err),
-                span,
-            })
-        },
-
-        SyntaxKind::TyUnit => Some(AstType::Unit(span)),
-        SyntaxKind::TyNever => Some(AstType::Never(span)),
-        SyntaxKind::TyInferred => Some(AstType::Inferred(span)),
-        // The `mutating` token of `&mutating T` lives inside the atomic
-        // TyMutRef node (never at TyList level), so the positional
-        // `mutating`-scan in the TyFunction arm above cannot see it.
-        SyntaxKind::TyRef | SyntaxKind::TyMutRef => {
-            let inner = node
-                .children()
-                .find(|c| is_type_node(c.kind()))
-                .and_then(|c| ast_type_from_cst(&c, file_id))?;
-            Some(AstType::Ref {
-                inner: Box::new(inner),
-                mutating: node.kind() == SyntaxKind::TyMutRef,
-                span,
-            })
-        },
-        SyntaxKind::TySome => {
-            // Positive bounds are direct type-node children; the negative
-            // bound (`and not Copyable`) is wrapped in a NegativeConformance
-            // node, so the filter below never picks it up as a bound.
-            let bounds: Vec<AstType> = node
-                .children()
-                .filter(|c| is_type_node(c.kind()))
-                .filter_map(|c| ast_type_from_cst(&c, file_id))
-                .collect();
-            let negative = node
-                .children()
-                .find(|c| c.kind() == SyntaxKind::NegativeConformance)
-                .and_then(|neg| {
-                    neg.children()
-                        .find(|c| is_type_node(c.kind()))
-                        .and_then(|c| ast_type_from_cst(&c, file_id))
-                })
-                .map(Box::new);
+        K::TySome(s) => {
+            // Positive bounds are the direct `Ty` children; the negative
+            // bound (`and not Copyable`) sits in a NegativeConformance.
+            let bounds = lower_types(s.types(), file_id);
             if bounds.is_empty() {
-                None
-            } else {
-                Some(AstType::Some {
-                    bounds,
-                    negative,
-                    span,
-                })
+                return None;
+            }
+            let negative = s
+                .negative_conformance()
+                .and_then(|n| lower_opt_type(n.ty(), file_id))
+                .map(Box::new);
+            AstType::Some {
+                bounds,
+                negative,
+                span,
             }
         },
+        // Grouping parens are transparent: the type keeps the inner span.
+        K::TyParen(p) => return lower_opt_type(p.ty(), file_id),
+    })
+}
 
-        // For wrapper nodes like Ty, recurse into the child
-        SyntaxKind::Ty => node
-            .children()
-            .find(|c| is_type_node(c.kind()))
-            .and_then(|c| ast_type_from_cst(&c, file_id)),
-
-        _ => None,
+/// `kind? (mutating? T, …) -> R`. A `mutating` inside the list marks the
+/// parameter after it as `MutBorrow`; every other parameter is `Consuming`.
+/// The node's span covers the kind keyword (LSP signature help slices
+/// source by it).
+fn lower_fn_type(f: &ast::TyFunction, span: Span, file_id: usize) -> AstType {
+    let mut params = Vec::new();
+    let mut param_conventions = Vec::new();
+    if let Some(list) = f.ty_list() {
+        let mut pending_mut = false;
+        for child in list.syntax().children_with_tokens() {
+            if child.kind() == SyntaxKind::Mutating {
+                pending_mut = true;
+                continue;
+            }
+            let Some(ty) = child.into_node().and_then(ast::Ty::cast) else {
+                continue;
+            };
+            if let Some(ty) = lower_type(&ty, file_id) {
+                params.push(ty);
+                param_conventions.push(if pending_mut {
+                    ParamConvention::MutBorrow
+                } else {
+                    ParamConvention::Consuming
+                });
+            }
+            pending_mut = false;
+        }
+    }
+    let return_type = lower_opt_type(f.ty(), file_id).unwrap_or(AstType::Unit(span.clone()));
+    AstType::Function {
+        kind: fn_type_kind(f),
+        params,
+        param_conventions,
+        return_type: Box::new(return_type),
+        span,
     }
 }
 
-/// Read the optional kind keyword that prefixes a `TyFunction` node.
-///
-/// Only tokens that are DIRECT children of `TyFunction` and appear before the
-/// `TyList` count — everything inside `TyList` belongs to the per-parameter
-/// convention scan. `escaping` is a contextual keyword, so it arrives as an
-/// `Identifier` and is matched by source text.
-fn fn_type_kind(node: &SyntaxNode) -> FnTypeKind {
-    for child in node.children_with_tokens() {
-        // The param list starts: anything further is a param convention or
-        // the arrow / return type, never the whole-type kind.
-        if child
-            .as_node()
-            .is_some_and(|n| n.kind() == SyntaxKind::TyList)
-        {
-            break;
-        }
-        let Some(tok) = child.as_token() else {
-            continue;
-        };
-        match tok.kind() {
-            SyntaxKind::Mutating => return FnTypeKind::Mutating,
-            SyntaxKind::Consuming => return FnTypeKind::Consuming,
-            SyntaxKind::Identifier if tok.text() == "escaping" => return FnTypeKind::Escaping,
-            _ => {},
-        }
+/// The kind keyword before the parameter list. `escaping` is contextual,
+/// so it arrives as an `Identifier` and is matched by text.
+fn fn_type_kind(f: &ast::TyFunction) -> FnTypeKind {
+    let Some(tok) = f.kind_token() else {
+        return FnTypeKind::Normal;
+    };
+    match tok.kind() {
+        SyntaxKind::Mutating => FnTypeKind::Mutating,
+        SyntaxKind::Consuming => FnTypeKind::Consuming,
+        SyntaxKind::Identifier if tok.text() == "escaping" => FnTypeKind::Escaping,
+        _ => FnTypeKind::Normal,
     }
-    FnTypeKind::Normal
 }
 
-/// Check if a SyntaxKind is a type node.
-///
-/// The set lives on [`SyntaxKind::is_type`] and is proved complete against the
-/// enum. This crate had two copies that disagreed about `TyRef`/`TyMutRef`.
-pub(crate) fn is_type_node(kind: SyntaxKind) -> bool {
-    kind.is_type()
-}
-
-/// Get byte-offset span from a syntax node.
-fn node_span(node: &SyntaxNode, file_id: usize) -> Span {
+/// Byte-offset span of a syntax node.
+pub(crate) fn node_span(node: &SyntaxNode, file_id: usize) -> Span {
     let range = node.text_range();
-    let start: usize = range.start().into();
-    let end: usize = range.end().into();
-    Span::new(file_id, start..end)
+    Span::new(file_id, range.start().into()..range.end().into())
 }

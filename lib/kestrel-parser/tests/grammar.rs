@@ -64,7 +64,12 @@ fn trailing_closure_must_start_on_the_same_line() {
     assert_eq!(result.errors[0].code, Some("E801"));
     let tree = result.tree;
     let call = first(&tree, SyntaxKind::ExprCall);
-    assert_eq!(call.descendants().filter(|n| n.kind() == SyntaxKind::Argument).count(), 0);
+    assert_eq!(
+        call.descendants()
+            .filter(|n| n.kind() == SyntaxKind::Argument)
+            .count(),
+        0
+    );
 }
 
 #[test]
@@ -111,9 +116,16 @@ fn function_body_trailing_return_is_the_value_but_inline_it_is_a_statement() {
 #[test]
 fn closure_header_needs_in() {
     let with = parse_ok("func f() { g { (a, b) in a } }\n");
-    assert_eq!(first(&with, SyntaxKind::ClosureParams).children().count(), 2);
+    assert_eq!(
+        first(&with, SyntaxKind::ClosureParams).children().count(),
+        2
+    );
     let without = parse_ok("func f() { g { (a, b) } }\n");
-    assert!(without.descendants().all(|n| n.kind() != SyntaxKind::ClosureParams));
+    assert!(
+        without
+            .descendants()
+            .all(|n| n.kind() != SyntaxKind::ClosureParams)
+    );
 }
 
 #[test]
@@ -154,7 +166,11 @@ fn double_optional_is_one_token() {
 fn enum_pattern_args_are_labels_or_patterns() {
     parse_ok("func f() { match o { .A(x, y: .B(_)) => 1, .C((a, b)) => 2, _ => 3 } }\n");
     // A bare identifier is a label, so it cannot carry `@` or `or`.
-    assert!(!parse("func f() { match o { .A(x @ 5) => 1 } }\n").errors.is_empty());
+    assert!(
+        !parse("func f() { match o { .A(x @ 5) => 1 } }\n")
+            .errors
+            .is_empty()
+    );
 }
 
 #[test]
@@ -226,8 +242,18 @@ fn stdlib_parses_without_errors_or_error_nodes() {
     for entry in walk(&root) {
         let source = std::fs::read_to_string(&entry).unwrap();
         let result = parse(&source);
-        assert!(result.errors.is_empty(), "{}: {:?}", entry.display(), result.errors);
-        assert_eq!(result.tree.text().to_string(), source, "{}", entry.display());
+        assert!(
+            result.errors.is_empty(),
+            "{}: {:?}",
+            entry.display(),
+            result.errors
+        );
+        assert_eq!(
+            result.tree.text().to_string(),
+            source,
+            "{}",
+            entry.display()
+        );
         assert!(
             result
                 .tree

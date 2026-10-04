@@ -212,7 +212,10 @@ impl<'s> Parser<'s> {
     /// Whether the token at absolute index `idx` starts exactly where the
     /// previous token ends (no trivia between them).
     pub fn joined_at(&self, idx: usize) -> bool {
-        match (idx.checked_sub(1).and_then(|i| self.tokens.get(i)), self.tokens.get(idx)) {
+        match (
+            idx.checked_sub(1).and_then(|i| self.tokens.get(i)),
+            self.tokens.get(idx),
+        ) {
             (Some(prev), Some(tok)) => prev.end == tok.start,
             _ => false,
         }
@@ -280,7 +283,10 @@ impl<'s> Parser<'s> {
 
     pub fn push_error(&mut self, mut error: SyntaxError) {
         if self.hole_depth > 0 {
-            error.message = format!("invalid expression in string interpolation: {}", error.message);
+            error.message = format!(
+                "invalid expression in string interpolation: {}",
+                error.message
+            );
         }
         self.events.push(Ev::Error(error));
     }
@@ -522,5 +528,4 @@ impl CompletedMarker {
         }
         new
     }
-
 }

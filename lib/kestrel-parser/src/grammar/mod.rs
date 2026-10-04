@@ -118,9 +118,8 @@ pub(crate) fn delimited(
     }
     // A hard stop ends the list even mid-recovery: the enclosing construct
     // owns it (`}` / `;` outside a brace list).
-    let hard_stop = |p: &Parser<'_>| {
-        p.at_eof() || (close != K::RBrace && p.at_any(&[K::RBrace, K::Semicolon]))
-    };
+    let hard_stop =
+        |p: &Parser<'_>| p.at_eof() || (close != K::RBrace && p.at_any(&[K::RBrace, K::Semicolon]));
     loop {
         let ok = item(p);
         if p.at(close) || hard_stop(p) {

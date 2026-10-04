@@ -1,151 +1,66 @@
+//! Span helpers over untyped nodes, for callers that hold a declaration's
+//! `SyntaxNode` without knowing its kind. Shape-specific reads go through
+//! the typed views in [`crate::ast`].
+
 use kestrel_span::Span;
 
+use crate::ast::{self, AstNode};
 use crate::{SyntaxElement, SyntaxKind, SyntaxNode};
 
-/// Find a direct child node with the specified kind.
-pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-    syntax.children().find(|n| n.kind() == kind)
-}
-
-/// Extract name from a `Name` node.
-pub fn extract_name(syntax: &SyntaxNode) -> Option<String> {
-    let name_node = find_child(syntax, SyntaxKind::Name)?;
-
-    name_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-        .map(|tok| tok.text().to_string())
-}
-
-/// Extract identifier text from a `Name` syntax node.
-pub fn extract_identifier_from_name(name_node: &SyntaxNode) -> Option<String> {
-    name_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::Identifier)
-        .map(|tok| tok.text().to_string())
-}
-
-/// Check if a `SyntaxKind` is trivia (whitespace, newline, or comment).
-///
-/// Free-function spelling of [`SyntaxKind::is_trivia`], kept for the call sites
-/// that read better that way. It carries no set of its own.
-pub fn is_trivia(kind: SyntaxKind) -> bool {
-    kind.is_trivia()
-}
-
-/// Extract visibility modifier from a node with a `Visibility` child.
-///
-/// Returns the keyword as a string (`public`, `private`, `internal`, `fileprivate`).
-pub fn extract_visibility(syntax: &SyntaxNode) -> Option<String> {
-    let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
-
-    let visibility_token = visibility_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| !is_trivia(tok.kind()))?;
-
-    let vis_text = match visibility_token.kind() {
-        SyntaxKind::Public => "public",
-        SyntaxKind::Private => "private",
-        SyntaxKind::Internal => "internal",
-        SyntaxKind::Fileprivate => "fileprivate",
-        _ => return None,
-    };
-
-    Some(vis_text.to_string())
-}
-
-/// Get the span of a syntax node, excluding leading trivia.
-pub fn get_node_span(node: &SyntaxNode, file_id: usize) -> Span {
-    let text_range = node.text_range();
-    let end: usize = text_range.end().into();
-
-    let start = find_first_non_trivia_start(node).unwrap_or_else(|| text_range.start().into());
-
-    Span::new(file_id, start..end)
-}
-
-/// Get the declaration span of a syntax node, excluding leading attributes and trivia.
-/// Use this for DeclSpan so diagnostics point at the `func`/`struct`/etc keyword
-/// rather than at a leading `@attribute`.
+/// The declaration span of a node: from its first non-trivia token outside
+/// a leading `AttributeList`, so diagnostics point at the `func`/`struct`/…
+/// keyword rather than at an `@attribute`.
 pub fn get_decl_span(node: &SyntaxNode, file_id: usize) -> Span {
     let text_range = node.text_range();
     let end: usize = text_range.end().into();
-
-    // Find the first non-trivia, non-attribute child
     let start = node
         .children_with_tokens()
         .find_map(|child| match child {
-            SyntaxElement::Token(t) if !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error => {
+            SyntaxElement::Token(t) if !t.kind().is_trivia() && t.kind() != SyntaxKind::Error => {
                 Some(t.text_range().start().into())
             },
             SyntaxElement::Node(n) if n.kind() != SyntaxKind::AttributeList => {
-                find_first_non_trivia_start(&n)
+                first_non_trivia_start(&n)
             },
             _ => None,
         })
         .unwrap_or_else(|| text_range.start().into());
-
     Span::new(file_id, start..end)
 }
 
 /// Span of a declaration's identifier token (`foo` in `func foo(...)`).
 ///
-/// Reads the `Name` child and returns its `Identifier` token span. Returns
-/// `None` for declarations without a `Name` child (e.g. `Module`, anonymous
-/// initializers) or when the name is missing — callers can fall back to
-/// [`get_decl_span`] for those cases.
+/// Returns `None` for declarations without a `Name` child (e.g. `Module`,
+/// anonymous initializers) or when the name is missing — callers can fall
+/// back to [`get_decl_span`] for those cases.
 ///
 /// Used by the LSP for `textDocument/rename` (to compute the edit range) and
 /// `documentSymbol.selectionRange` (to highlight just the name when an
 /// outline item is selected).
 pub fn get_name_span(node: &SyntaxNode, file_id: usize) -> Option<Span> {
-    let name_node = find_child(node, SyntaxKind::Name)?;
-    let ident = name_node
-        .children_with_tokens()
-        .filter_map(|elem| elem.into_token())
-        .find(|tok| tok.kind() == SyntaxKind::Identifier)?;
-    let range = ident.text_range();
+    let name = node.children().find_map(ast::Name::cast)?;
+    let range = name.identifier_token()?.text_range();
     Some(Span::new(file_id, range.start().into()..range.end().into()))
 }
 
-/// Get the span of the visibility node.
-pub fn get_visibility_span(syntax: &SyntaxNode, file_id: usize) -> Option<Span> {
-    let visibility_node = find_child(syntax, SyntaxKind::Visibility)?;
-    Some(get_node_span(&visibility_node, file_id))
+fn first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
+    node.children_with_tokens().find_map(|child| match child {
+        SyntaxElement::Token(t) if !t.kind().is_trivia() && t.kind() != SyntaxKind::Error => {
+            Some(t.text_range().start().into())
+        },
+        SyntaxElement::Token(_) => None,
+        SyntaxElement::Node(n) => first_non_trivia_start(&n),
+    })
 }
 
-/// Extract path segments from a `Path` syntax node.
-pub fn extract_path_segments(path_node: &SyntaxNode) -> Vec<String> {
-    path_node
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::PathElement)
-        .filter_map(|path_elem| {
-            path_elem
-                .children_with_tokens()
-                .filter_map(|elem| elem.into_token())
-                .find(|tok| tok.kind() == SyntaxKind::Identifier)
-                .map(|tok| tok.text().to_string())
-        })
-        .collect()
+/// The first direct child node of `kind`.
+pub fn find_child(syntax: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
+    syntax.children().find(|n| n.kind() == kind)
 }
 
-fn find_first_non_trivia_start(node: &SyntaxNode) -> Option<usize> {
-    for child in node.children_with_tokens() {
-        match child {
-            SyntaxElement::Token(t) => {
-                if !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error {
-                    return Some(t.text_range().start().into());
-                }
-            },
-            SyntaxElement::Node(n) => {
-                if let Some(start) = find_first_non_trivia_start(&n) {
-                    return Some(start);
-                }
-            },
-        }
-    }
-    None
+/// The span of a node from its first non-trivia token.
+pub fn get_node_span(node: &SyntaxNode, file_id: usize) -> Span {
+    let range = node.text_range();
+    let start = first_non_trivia_start(node).unwrap_or_else(|| range.start().into());
+    Span::new(file_id, start..range.end().into())
 }

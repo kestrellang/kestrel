@@ -2,13 +2,14 @@
 
 use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::utils::{extract_name, find_child, get_decl_span};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::ast::{self, AstNode, HasName, HasStatic};
+use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
 use super::params::extract_params;
 use super::type_param::build_type_parameters;
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::*;
 use crate::lower;
 
@@ -19,72 +20,80 @@ use crate::lower;
 /// [TypeParams], [WhereClause], [Attributes], [Documentation]
 pub fn build_function(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::FunctionDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Function);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    if let Some(name) = extract_name(node) {
+    if let Some(name) = node.name_text() {
         world.set(entity, Name(name));
     }
 
-    // Determine receiver: non-static functions inside type declarations are methods.
-    // Explicit keyword (mutating/consuming) overrides, otherwise defaults to Borrowing.
-    let is_static = has_static_modifier(node);
+    // Non-static functions inside type declarations are methods. An explicit
+    // `mutating`/`consuming` picks the receiver; the default is Borrowing.
+    let is_static = node.is_static();
     let parent_is_type = world
         .get::<NodeKind>(parent)
         .is_some_and(NodeKind::is_type_scope);
     let receiver = if is_static || !parent_is_type {
         None
+    } else if node.mutating_token().is_some() {
+        Some(ReceiverKind::Mutating)
+    } else if node.consuming_token().is_some() {
+        Some(ReceiverKind::Consuming)
     } else {
-        Some(extract_receiver_kind(node))
+        Some(ReceiverKind::Borrowing)
     };
 
     // Parameters (creates child entities for default value expressions)
-    let params = extract_params(world, node, entity, file_entity, file_id);
+    let params = extract_params(world, node.parameter_list(), entity, file_entity, file_id);
     world.set(entity, Callable { params, receiver });
 
-    // Return type from ReturnType child
-    if let Some(return_node) = find_child(node, SyntaxKind::ReturnType)
-        && let Some(ty) = return_node
-            .children()
-            .find(|c| is_type_kind(c.kind()))
-            .and_then(|c| ast_type_from_cst(&c, file_id))
+    if let Some(ty) = node
+        .return_type()
+        .and_then(|r| lower_opt_type(r.ty(), file_id))
     {
         world.set(entity, TypeAnnotation(ty));
     }
 
-    // Body — CST wraps it in FunctionBody > CodeBlock (block body)
-    // or FunctionBody > Expression (expression body: `= expr`)
-    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody) {
-        if let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock) {
-            world.set(entity, Body(lower::lower_body(&code_block, file_id)));
-            world.set(entity, Valued(code_block));
+    // `{ … }` or `= expr`
+    if let Some(body) = node.function_body() {
+        if let Some(code_block) = body.code_block() {
+            set_block_body(world, entity, &code_block, file_id);
         } else {
-            // Expression body: `func foo() -> T = expr`
-            world.set(entity, Body(lower::lower_default_value(&fn_body, file_id)));
-            world.set(entity, Valued(fn_body));
+            world.set(
+                entity,
+                Body(lower::lower_default_value(body.syntax(), file_id)),
+            );
+            world.set(entity, Valued(body.syntax().clone()));
         }
     }
 
-    if has_static_modifier(node) {
+    if is_static {
         world.set(entity, Static);
     }
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
-    set_documentation(world, entity, node);
+    set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
-    desugar_opaque_params(world, entity, file_entity, node);
+    desugar_opaque_params(world, entity, file_entity, syntax);
+}
+
+/// Lower a `{ … }` body into the entity's `Body` and `Valued`.
+fn set_block_body(world: &mut World, entity: Entity, block: &ast::CodeBlock, file_id: usize) {
+    world.set(entity, Body(lower::lower_body(block.syntax(), file_id)));
+    world.set(entity, Valued(block.syntax().clone()));
 }
 
 /// Build an initializer declaration entity from CST.
@@ -94,20 +103,21 @@ pub fn build_function(
 /// [Valued (body)], [TypeParams], [WhereClause], [Attributes], [Documentation]
 pub fn build_initializer(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::InitializerDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Initializer);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    let params = extract_params(world, node, entity, file_entity, file_id);
+    let params = extract_params(world, node.parameter_list(), entity, file_entity, file_id);
     // Inits always have a `self` receiver (mutating — they're building the instance)
     world.set(
         entity,
@@ -117,36 +127,22 @@ pub fn build_initializer(
         },
     );
 
-    // Init effect: ? (failable) or throws E (throwing).
-    // Sets TypeAnnotation to ()? or () throws E so the body return type is correct.
-    if let Some(effect_node) = find_child(node, SyntaxKind::InitEffect) {
-        let effect_span = get_decl_span(&effect_node, file_id);
-        let unit_ty = kestrel_ast::AstType::Unit(effect_span.clone());
-
-        let has_question = effect_node.children_with_tokens().any(|c| {
-            c.as_token()
-                .map(|t| t.kind() == SyntaxKind::Question)
-                .unwrap_or(false)
-        });
-
-        if has_question {
+    // Init effect: `?` (failable) or `throws E` (throwing). The body's
+    // return type becomes `()?` or `() throws E`.
+    if let Some(effect) = node.init_effect() {
+        let effect_span = get_decl_span(effect.syntax(), file_id);
+        let unit_ty = AstType::Unit(effect_span.clone());
+        if effect.question_token().is_some() {
             world.set(entity, InitEffect::Failable);
             world.set(
                 entity,
-                TypeAnnotation(kestrel_ast::AstType::Optional(
-                    Box::new(unit_ty),
-                    effect_span,
-                )),
+                TypeAnnotation(AstType::Optional(Box::new(unit_ty), effect_span)),
             );
-        } else if let Some(err_ty) = effect_node
-            .children()
-            .find(|c| is_type_kind(c.kind()))
-            .and_then(|c| ast_type_from_cst(&c, file_id))
-        {
+        } else if let Some(err_ty) = lower_opt_type(effect.ty(), file_id) {
             world.set(entity, InitEffect::Throwing);
             world.set(
                 entity,
-                TypeAnnotation(kestrel_ast::AstType::Result {
+                TypeAnnotation(AstType::Result {
                     ok: Box::new(unit_ty),
                     err: Box::new(err_ty),
                     span: effect_span,
@@ -155,17 +151,13 @@ pub fn build_initializer(
         }
     }
 
-    // Body — CST wraps it in FunctionBody > CodeBlock
-    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody)
-        && let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock)
-    {
-        world.set(entity, Body(lower::lower_body(&code_block, file_id)));
-        world.set(entity, Valued(code_block));
+    if let Some(block) = node.function_body().and_then(|b| b.code_block()) {
+        set_block_body(world, entity, &block, file_id);
     }
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
-    set_documentation(world, entity, node);
+    set_documentation(world, entity, syntax);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
 }
@@ -175,17 +167,18 @@ pub fn build_initializer(
 /// Components: NodeKind::Deinit, FileId, [Valued (body)]
 pub fn build_deinit(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::DeinitDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Deinit);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
     // Deinits receive &var self. The caller owns the memory and handles
@@ -198,28 +191,9 @@ pub fn build_deinit(
         },
     );
 
-    // Body — CST wraps it in FunctionBody > CodeBlock
-    if let Some(fn_body) = find_child(node, SyntaxKind::FunctionBody)
-        && let Some(code_block) = find_child(&fn_body, SyntaxKind::CodeBlock)
-    {
-        world.set(entity, Body(lower::lower_body(&code_block, file_id)));
-        world.set(entity, Valued(code_block));
+    if let Some(block) = node.function_body().and_then(|b| b.code_block()) {
+        set_block_body(world, entity, &block, file_id);
     }
-}
-
-/// Extract receiver kind from function modifier keywords.
-/// Defaults to Borrowing if no explicit keyword.
-fn extract_receiver_kind(node: &SyntaxNode) -> ReceiverKind {
-    for elem in node.children_with_tokens() {
-        if let Some(token) = elem.as_token() {
-            match token.kind() {
-                SyntaxKind::Mutating => return ReceiverKind::Mutating,
-                SyntaxKind::Consuming => return ReceiverKind::Consuming,
-                _ => {},
-            }
-        }
-    }
-    ReceiverKind::Borrowing
 }
 
 /// Desugar `some P` in parameter types to synthetic type parameters.

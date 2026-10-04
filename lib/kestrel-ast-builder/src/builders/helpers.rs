@@ -1,98 +1,90 @@
 //! Shared extraction helpers for building declaration entities.
 //!
-//! Extracts visibility, attributes, documentation, conformances, and
-//! where clauses from CST nodes.
+//! Read visibility, attributes, documentation, conformances, and where
+//! clauses through the typed CST views (`kestrel_syntax_tree::ast`), so a
+//! declaration's shape is named once, in `kestrel.ungram`.
 
 use kestrel_hecs::{Entity, World};
 use kestrel_span::Span;
-use kestrel_syntax_tree::utils::{
-    extract_path_segments, extract_visibility, find_child, get_decl_span, is_trivia,
+use kestrel_syntax_tree::ast::{
+    self, AstNode, HasAttributes, HasConformances, HasGenerics, HasVisibility, VisibilityKind,
 };
+use kestrel_syntax_tree::utils::get_decl_span;
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::ast_type::{AstType, PathSegment, ast_type_from_cst};
+use crate::ast_type::{AstType, PathSegment, lower_opt_type, lower_types};
 use crate::components::*;
 use crate::lower;
 
-/// Extract and set visibility component from a declaration node.
-pub fn set_visibility(world: &mut World, entity: Entity, node: &SyntaxNode) {
-    if let Some(vis_str) = extract_visibility(node) {
-        let vis = match vis_str.as_str() {
-            "public" => Vis::Public,
-            "private" => Vis::Private,
-            "internal" => Vis::Internal,
-            "fileprivate" => Vis::Fileprivate,
-            _ => return,
-        };
-        world.set(entity, vis);
-    }
+/// Set the `Vis` component from the declaration's visibility keyword.
+pub fn set_visibility(world: &mut World, entity: Entity, node: &impl HasVisibility) {
+    let Some(kind) = node.visibility().and_then(|v| v.kind()) else {
+        return;
+    };
+    let vis = match kind {
+        VisibilityKind::Public => Vis::Public,
+        VisibilityKind::Private => Vis::Private,
+        VisibilityKind::Internal => Vis::Internal,
+        VisibilityKind::Fileprivate => Vis::Fileprivate,
+    };
+    world.set(entity, vis);
 }
 
-/// Extract and set attributes from a declaration node.
-pub fn set_attributes(world: &mut World, entity: Entity, node: &SyntaxNode, file_id: usize) {
-    let attr_list = find_child(node, SyntaxKind::AttributeList);
-    let attrs: Vec<AstAttribute> = attr_list
-        .iter()
-        .flat_map(|list| list.children())
-        .filter(|child| child.kind() == SyntaxKind::Attribute)
-        .filter_map(|n| extract_attribute(&n, file_id))
+/// Set the `Attributes` component from the declaration's `@attributes`.
+pub fn set_attributes(
+    world: &mut World,
+    entity: Entity,
+    node: &impl HasAttributes,
+    file_id: usize,
+) {
+    let attrs: Vec<AstAttribute> = node
+        .attributes()
+        .filter_map(|a| extract_attribute(&a, file_id))
         .collect();
-
     if !attrs.is_empty() {
         world.set(entity, Attributes(attrs));
     }
 }
 
-/// Extract a single attribute from an Attribute CST node.
-fn extract_attribute(node: &SyntaxNode, file_id: usize) -> Option<AstAttribute> {
-    // Attribute name is the identifier token after @
-    let name_token = node
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)?;
-    let name = name_token.text().to_string();
-
-    // Extract args from AttributeArgs child if present
-    let args = find_child(node, SyntaxKind::AttributeArgs)
-        .map(|args_node| {
-            args_node
-                .children()
-                .filter(|c| c.kind() == SyntaxKind::AttributeArg)
-                .filter_map(|n| extract_attribute_arg(&n))
+/// Extract a single attribute.
+fn extract_attribute(attr: &ast::Attribute, file_id: usize) -> Option<AstAttribute> {
+    let name_token = attr.identifier_token()?;
+    let args = attr
+        .attribute_args()
+        .map(|args| {
+            args.attribute_args()
+                .filter_map(|a| extract_attribute_arg(&a))
                 .collect()
         })
         .unwrap_or_default();
-
-    // Use the identifier token's range — rowan Attribute nodes include leading
-    // trivia (previous line's newline), which would map the span to the wrong
-    // line for diagnostics.
+    // Span the name token: the node's range starts at its leading trivia
+    // (the previous line's newline), which would put diagnostics a line early.
     let range = name_token.text_range();
     let span = Span::new(file_id, (range.start().into())..(range.end().into()));
-
-    Some(AstAttribute { name, args, span })
+    Some(AstAttribute {
+        name: name_token.text().to_string(),
+        args,
+        span,
+    })
 }
 
-/// Extract a single attribute argument.
-fn extract_attribute_arg(node: &SyntaxNode) -> Option<AstAttributeArg> {
-    let tokens: Vec<_> = node
+/// Extract a single attribute argument: `label: value` or `value`.
+fn extract_attribute_arg(arg: &ast::AttributeArg) -> Option<AstAttributeArg> {
+    let tokens: Vec<_> = arg
+        .syntax()
         .children_with_tokens()
         .filter_map(|e| e.into_token())
-        .filter(|t| !is_trivia(t.kind()))
+        .filter(|t| !t.kind().is_trivia())
         .collect();
-
-    // Check for label: value pattern (has a Colon token)
-    let colon_pos = tokens.iter().position(|t| t.kind() == SyntaxKind::Colon);
-
-    if let Some(pos) = colon_pos {
-        let label = tokens
-            .get(pos.wrapping_sub(1))
-            .map(|t| t.text().to_string());
-        let value = extract_value_from_tokens(&tokens[(pos + 1)..]).unwrap_or_default();
-        Some(AstAttributeArg { label, value })
-    } else {
-        // Just a value, no label
-        let value = extract_value_from_tokens(&tokens)?;
-        Some(AstAttributeArg { label: None, value })
+    match tokens.iter().position(|t| t.kind() == SyntaxKind::Colon) {
+        Some(pos) => Some(AstAttributeArg {
+            label: pos.checked_sub(1).map(|i| tokens[i].text().to_string()),
+            value: extract_value_from_tokens(&tokens[(pos + 1)..]).unwrap_or_default(),
+        }),
+        None => Some(AstAttributeArg {
+            label: None,
+            value: extract_value_from_tokens(&tokens)?,
+        }),
     }
 }
 
@@ -212,212 +204,127 @@ fn strip_doc_block(text: &str) -> String {
     out.trim().to_string()
 }
 
-/// Extract and set conformances from a ConformanceList child.
-pub fn set_conformances(world: &mut World, entity: Entity, node: &SyntaxNode, file_id: usize) {
-    let conf_list = match find_child(node, SyntaxKind::ConformanceList) {
-        Some(list) => list,
-        None => return,
+/// Set the `Conformances` component from `: P, not Q`.
+pub fn set_conformances(
+    world: &mut World,
+    entity: Entity,
+    node: &impl HasConformances,
+    file_id: usize,
+) {
+    let Some(list) = node.conformance_list() else {
+        return;
     };
-
-    let items: Vec<ConformanceItem> = conf_list
-        .children()
-        .filter_map(|child| {
-            match child.kind() {
-                SyntaxKind::ConformanceItem => {
-                    // ConformanceItem wraps either a direct type (positive) or
-                    // a nested `NegativeConformance > <type>` (for `not Proto`).
-                    if let Some(neg) = child
-                        .children()
-                        .find(|c| c.kind() == SyntaxKind::NegativeConformance)
-                    {
-                        let ty = neg
-                            .children()
-                            .find(|c| is_type_kind(c.kind()))
-                            .and_then(|c| ast_type_from_cst(&c, file_id))?;
-                        Some(ConformanceItem::Negative(ty, child))
-                    } else {
-                        let ty = child
-                            .children()
-                            .find(|c| is_type_kind(c.kind()))
-                            .and_then(|c| ast_type_from_cst(&c, file_id))?;
-                        Some(ConformanceItem::Positive(ty, child))
-                    }
-                },
-                SyntaxKind::NegativeConformance => {
-                    // Legacy/alternate shape where NegativeConformance is a
-                    // direct child of ConformanceList.
-                    let ty = child
-                        .children()
-                        .find(|c| is_type_kind(c.kind()))
-                        .and_then(|c| ast_type_from_cst(&c, file_id))?;
-                    Some(ConformanceItem::Negative(ty, child))
-                },
-                _ => None,
+    let items: Vec<ConformanceItem> = list
+        .conformance_items()
+        .filter_map(|item| {
+            let syntax = item.syntax().clone();
+            match item.negative_conformance() {
+                Some(neg) => Some(ConformanceItem::Negative(
+                    lower_opt_type(neg.ty(), file_id)?,
+                    syntax,
+                )),
+                None => Some(ConformanceItem::Positive(
+                    lower_opt_type(item.ty(), file_id)?,
+                    syntax,
+                )),
             }
         })
         .collect();
-
     if !items.is_empty() {
         world.set(entity, Conformances(items));
     }
 }
 
-/// Extract and set where clause from a WhereClause child.
-///
-/// CST structure for TypeBound:
-/// ```text
-/// TypeBound " T: Comparable"
-///   Name " T"
-///     Identifier "T"
-///   Path ": Comparable"
-///     PathElement ": Comparable"
-///       Identifier "Comparable"
-/// ```
-/// Subject comes from Name, conformances come from Path children.
-pub fn set_where_clause(world: &mut World, entity: Entity, node: &SyntaxNode, file_id: usize) {
-    let where_node = match find_child(node, SyntaxKind::WhereClause) {
-        Some(w) => w,
-        None => return,
+/// Set the `WhereClause` component from `where …`.
+pub fn set_where_clause(
+    world: &mut World,
+    entity: Entity,
+    node: &impl HasGenerics,
+    file_id: usize,
+) {
+    let Some(clause) = node.where_clause() else {
+        return;
     };
-
-    let constraints: Vec<WhereConstraint> = where_node
-        .children()
-        .filter_map(|child| {
-            match child.kind() {
-                SyntaxKind::TypeBound => {
-                    // Subject is a Name (simple: T) or AssociatedTypeTarget (dotted: T.Item)
-                    let subject = bound_subject_to_ast_type(&child, file_id)?;
-
-                    // Negative bound: `T: not Proto` emits
-                    //   TypeBound > { Name, NegativeConformance > Path }
-                    // — the Path lives inside NegativeConformance, not as a
-                    // direct child of TypeBound, so handle that shape first.
-                    if let Some(neg) = child
-                        .children()
-                        .find(|c| c.kind() == SyntaxKind::NegativeConformance)
-                    {
-                        let path_node = neg.children().find(|c| c.kind() == SyntaxKind::Path)?;
-                        let mut ty = path_to_ast_type(&path_node, file_id)?;
-                        if let Some(args_node) = neg
-                            .children()
-                            .find(|c| c.kind() == SyntaxKind::TypeArgumentList)
-                            && let AstType::Named {
-                                ref mut segments, ..
-                            } = ty
-                        {
-                            let type_args: Vec<AstType> = args_node
-                                .children()
-                                .filter(|c| crate::ast_type::is_type_node(c.kind()))
-                                .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
-                                .collect();
-                            if let Some(last) = segments.last_mut() {
-                                last.type_args = type_args;
-                            }
-                        }
-                        return Some(WhereConstraint::NegativeBound {
-                            subject,
-                            protocol: ty,
-                            node: child,
-                        });
-                    }
-
-                    // Positive bound: protocols come from Path children, with
-                    // TypeArgumentList siblings carrying generic args.
-                    let protocols: Vec<_> = {
-                        let children: Vec<_> = child.children().collect();
-                        let mut protos = Vec::new();
-                        let mut i = 0;
-                        while i < children.len() {
-                            if children[i].kind() == SyntaxKind::Path {
-                                let mut ty = path_to_ast_type(&children[i], file_id);
-                                // Check for TypeArgumentList following the Path
-                                if i + 1 < children.len()
-                                    && children[i + 1].kind() == SyntaxKind::TypeArgumentList
-                                {
-                                    if let Some(AstType::Named {
-                                        ref mut segments, ..
-                                    }) = ty
-                                    {
-                                        let type_args: Vec<AstType> = children[i + 1]
-                                            .children()
-                                            .filter(|c| crate::ast_type::is_type_node(c.kind()))
-                                            .filter_map(|c| {
-                                                crate::ast_type::ast_type_from_cst(&c, file_id)
-                                            })
-                                            .collect();
-                                        if let Some(last) = segments.last_mut() {
-                                            last.type_args = type_args;
-                                        }
-                                    }
-                                    i += 1; // skip the TypeArgumentList
-                                }
-                                if let Some(t) = ty {
-                                    protos.push(t);
-                                }
-                            }
-                            i += 1;
-                        }
-                        protos
-                    };
-
-                    if protocols.is_empty() {
-                        return None;
-                    }
-
-                    Some(WhereConstraint::Bound {
-                        subject,
-                        protocols,
-                        node: child,
-                    })
-                },
-                SyntaxKind::TypeEquality => {
-                    // Type equality uses Ty nodes, Name/Path, or AssociatedTypeTarget (wraps a Path)
-                    let mut type_children = child.children().filter(|c| {
-                        is_type_kind(c.kind())
-                            || c.kind() == SyntaxKind::Name
-                            || c.kind() == SyntaxKind::Path
-                            || c.kind() == SyntaxKind::AssociatedTypeTarget
-                    });
-
-                    let lhs_node = type_children.next()?;
-                    let lhs = node_to_ast_type(&lhs_node, file_id)?;
-                    let rhs_node = type_children.next()?;
-                    let rhs = node_to_ast_type(&rhs_node, file_id)?;
-
-                    Some(WhereConstraint::Equality {
-                        lhs,
-                        rhs,
-                        node: child,
-                    })
-                },
-                _ => None,
-            }
+    let constraints: Vec<WhereConstraint> = clause
+        .where_constraints()
+        .filter_map(|c| match c {
+            ast::WhereConstraint::TypeBound(b) => type_bound(&b, file_id),
+            ast::WhereConstraint::TypeEquality(e) => Some(WhereConstraint::Equality {
+                lhs: assoc_target_to_ast_type(&e.associated_type_target()?, file_id)?,
+                rhs: lower_opt_type(e.ty(), file_id)?,
+                node: e.syntax().clone(),
+            }),
         })
         .collect();
-
     if !constraints.is_empty() {
         world.set(entity, WhereClause(constraints));
     }
 }
 
-/// Extract the subject of a TypeBound as AstType.
-/// Handles both simple `Name` (T) and `AssociatedTypeTarget` (T.Item) nodes.
-fn bound_subject_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
-    // Try AssociatedTypeTarget first (T.Item — contains a Path)
-    if let Some(assoc) = find_child(parent, SyntaxKind::AssociatedTypeTarget)
-        && let Some(path) = find_child(&assoc, SyntaxKind::Path)
-    {
-        return path_to_ast_type(&path, file_id);
+/// `T: P and Q[A]` or `T: not P`. The subject is a `Name` (`T`) or an
+/// `AssociatedTypeTarget` path (`T.Item`); each bound is a `Path` with an
+/// optional `TypeArgumentList` after it, applied to its last segment.
+fn type_bound(bound: &ast::TypeBound, file_id: usize) -> Option<WhereConstraint> {
+    let subject = match bound.associated_type_target() {
+        Some(target) => assoc_target_to_ast_type(&target, file_id)?,
+        None => name_to_ast_type(&bound.name()?, file_id)?,
+    };
+    let node = bound.syntax().clone();
+    if let Some(neg) = bound.negative_conformance() {
+        let protocol = path_with_args(&neg.path()?, neg.type_argument_list(), file_id)?;
+        return Some(WhereConstraint::NegativeBound {
+            subject,
+            protocol,
+            node,
+        });
     }
-    // Fall back to simple Name (T)
-    name_to_ast_type(parent, file_id)
+    // Pair each Path with the TypeArgumentList right after it, if any.
+    let mut protocols = Vec::new();
+    let mut children = bound.syntax().children().peekable();
+    while let Some(child) = children.next() {
+        let Some(path) = ast::Path::cast(child) else {
+            continue;
+        };
+        let args = children
+            .next_if(|c| c.kind() == SyntaxKind::TypeArgumentList)
+            .and_then(ast::TypeArgumentList::cast);
+        protocols.extend(path_with_args(&path, args, file_id));
+    }
+    if protocols.is_empty() {
+        return None;
+    }
+    Some(WhereConstraint::Bound {
+        subject,
+        protocols,
+        node,
+    })
 }
 
-/// Convert a Name node to AstType::Named.
-fn name_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
-    let name_node = find_child(parent, SyntaxKind::Name)?;
-    let ident = kestrel_syntax_tree::utils::extract_identifier_from_name(&name_node)?;
-    let range = name_node.text_range();
+/// A path type whose last segment takes `args`.
+fn path_with_args(
+    path: &ast::Path,
+    args: Option<ast::TypeArgumentList>,
+    file_id: usize,
+) -> Option<AstType> {
+    let mut ty = path_to_ast_type(path, file_id)?;
+    if let Some(args) = args
+        && let AstType::Named { segments, .. } = &mut ty
+        && let Some(last) = segments.last_mut()
+    {
+        last.type_args = lower_types(args.types(), file_id);
+    }
+    Some(ty)
+}
+
+/// The path of a where-clause `AssociatedTypeTarget` (`T.Item`).
+fn assoc_target_to_ast_type(target: &ast::AssociatedTypeTarget, file_id: usize) -> Option<AstType> {
+    path_to_ast_type(&target.path()?, file_id)
+}
+
+/// A one-segment named type for a `Name`.
+fn name_to_ast_type(name: &ast::Name, file_id: usize) -> Option<AstType> {
+    let ident = name.text()?;
+    let range = name.syntax().text_range();
     let span = Span::new(file_id, (range.start().into())..(range.end().into()));
     Some(AstType::Named {
         segments: vec![PathSegment {
@@ -429,102 +336,29 @@ fn name_to_ast_type(parent: &SyntaxNode, file_id: usize) -> Option<AstType> {
     })
 }
 
-/// Convert a Path node to AstType::Named.
-fn path_to_ast_type(path_node: &SyntaxNode, file_id: usize) -> Option<AstType> {
-    let names = extract_path_segments(path_node);
+/// A named type for a `Path` (no type arguments: those follow the path).
+fn path_to_ast_type(path: &ast::Path, file_id: usize) -> Option<AstType> {
+    let names = path.segments();
     if names.is_empty() {
         return None;
     }
-    // Start at the first identifier, not the node: in a where clause the
-    // separator before the path (`, ` / `: `) is an `Error` token inside its
-    // first `PathElement`, so the node range would label the separator — and,
-    // for a clause on its own line, the line before it.
-    let range = path_node.text_range();
-    let start = path_node
-        .descendants_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Identifier)
+    // Start at the first identifier rather than the node, whose range begins
+    // at leading trivia (for a clause on its own line, the line before it).
+    let range = path.syntax().text_range();
+    let start = path
+        .segment_tokens()
+        .next()
         .map_or(range.start(), |t| t.text_range().start());
     let span = Span::new(file_id, (start.into())..(range.end().into()));
-
-    // Extract type arguments (e.g., Factory[lang.i64] → [lang.i64])
-    // Type args appear as a TypeArgumentList child of the path node
-    let type_args: Vec<AstType> = find_child(path_node, SyntaxKind::TypeArgumentList)
-        .map(|args_node| {
-            args_node
-                .children()
-                .filter(|c| crate::ast_type::is_type_node(c.kind()))
-                .filter_map(|c| crate::ast_type::ast_type_from_cst(&c, file_id))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Type args go on the last segment
     let segments = names
         .into_iter()
-        .enumerate()
-        .map(|(i, name)| {
-            let seg_args = if i == 0 && !type_args.is_empty() {
-                // For single-segment paths, args go on the only segment
-                type_args.clone()
-            } else {
-                vec![]
-            };
-            PathSegment {
-                name,
-                type_args: seg_args,
-                span: span.clone(),
-            }
+        .map(|name| PathSegment {
+            name,
+            type_args: vec![],
+            span: span.clone(),
         })
-        .collect::<Vec<_>>();
-    // If multi-segment, put type args on last segment
-    let mut segments = segments;
-    if segments.len() > 1
-        && !type_args.is_empty()
-        && let Some(last) = segments.last_mut()
-    {
-        last.type_args = type_args;
-    }
+        .collect();
     Some(AstType::Named { segments, span })
-}
-
-/// Convert various node kinds to AstType.
-fn node_to_ast_type(node: &SyntaxNode, file_id: usize) -> Option<AstType> {
-    match node.kind() {
-        SyntaxKind::Name => {
-            let ident = kestrel_syntax_tree::utils::extract_identifier_from_name(node)?;
-            let range = node.text_range();
-            let span = Span::new(file_id, (range.start().into())..(range.end().into()));
-            Some(AstType::Named {
-                segments: vec![PathSegment {
-                    name: ident,
-                    type_args: vec![],
-                    span: span.clone(),
-                }],
-                span,
-            })
-        },
-        SyntaxKind::Path => path_to_ast_type(node, file_id),
-        // AssociatedTypeTarget wraps a Path (e.g., Item.Output in where clauses)
-        SyntaxKind::AssociatedTypeTarget => {
-            find_child(node, SyntaxKind::Path).and_then(|p| path_to_ast_type(&p, file_id))
-        },
-        _ if is_type_kind(node.kind()) => ast_type_from_cst(node, file_id),
-        _ => None,
-    }
-}
-
-/// Check if a SyntaxKind is a type-related node.
-///
-/// Delegates to [`SyntaxKind::is_type`]. This used to be a second, shorter
-/// list that had lost `TyRef`/`TyMutRef`.
-pub fn is_type_kind(kind: SyntaxKind) -> bool {
-    kind.is_type()
-}
-
-/// Check if a declaration node has a StaticModifier child.
-pub fn has_static_modifier(node: &SyntaxNode) -> bool {
-    find_child(node, SyntaxKind::StaticModifier).is_some()
 }
 
 /// Spawn a `NodeKind::Setter` child entity under a Field or Subscript.

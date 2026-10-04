@@ -1,0 +1,274 @@
+# Every SyntaxKind, in discriminant order. APPEND ONLY: rowan stores kinds
+# as raw u16 discriminants, so inserting renumbers every later kind.
+#
+#   node  <Name>                 a CST node
+#   token <Name> '<spelling>'    a lexer token; <spelling> is its name in kestrel.ungram
+#   trivia <Name>                a trivia token
+#   special <Name>               produced by the parser, not the lexer
+# A trailing `# text` becomes the variant's doc comment.
+
+node    Root
+node    SourceFile
+node    DeclarationItem
+node    Attribute                        # @name or @name(args)
+node    AttributeList                    # Zero or more attributes before a declaration
+node    AttributeArgs                    # (arg, arg, ...) argument list
+node    AttributeArg                     # Single argument: value or label: value
+node    ProtocolDeclaration
+node    ProtocolBody
+node    StructDeclaration
+node    StructBody
+node    ExtensionDeclaration
+node    ExtensionBody
+node    EnumDeclaration
+node    EnumBody
+node    EnumCaseDeclaration
+node    EnumCaseParameter
+node    EnumCaseParameterList
+node    IndirectModifier
+node    ImportDeclaration
+node    ImportItem
+node    ModuleDeclaration
+node    ModulePath
+node    Name
+node    TypeAliasDeclaration
+node    AliasedType
+node    FieldDeclaration
+node    GetterClause                     # get { ... }
+node    SetterClause                     # set { ... }
+node    PropertyAccessors                # { get { } set { } } or { get } { get set }
+node    FunctionDeclaration
+node    InitializerDeclaration
+node    InitEffect                       # ? or throws E after init params
+node    DeinitDeclaration
+node    SubscriptDeclaration
+node    SubscriptBody
+node    FunctionBody
+node    ParameterList
+node    Parameter
+node    ReturnType
+node    Visibility
+node    StaticModifier
+node    TypeParameterList                # [T, U, V]
+node    TypeParameter                    # T or T = Default
+node    TypeArgumentList                 # [Int, String] in type use position
+node    DefaultType                      # = SomeType (for type parameters)
+node    DefaultValue                     # = expression (for function parameters)
+node    WhereClause                      # where T: Proto, U: Other
+node    TypeBound                        # T: Proto and Proto2
+node    TypeEquality                     # T.Item == U (associated type equality constraint)
+node    AssociatedTypeBound              # T.Item: Proto (associated type bound constraint)
+node    AssociatedTypeTarget             # Iterator.Item or Add[Int].Output (qualified target in type binding)
+node    ConformanceList                  # : Proto1, Proto2 (after struct/protocol name)
+node    ConformanceItem                  # Each individual conformance (a type reference)
+node    NegativeConformance              # not Proto (opt-out of implicit conformance)
+node    Ty
+node    TyUnit
+node    TyNever
+node    TyTuple
+node    TyFunction
+node    TyPath
+node    TyArray                          # [T] - array/list type
+node    TyDictionary                     # [K: V] - dictionary/map type
+node    TyOptional                       # T? - optional type
+node    TyResult                         # T throws E - result type
+node    TyList
+node    TyInferred                       # _ - inferred type placeholder
+node    TySome                           # some P - opaque type
+node    Path
+node    PathElement
+node    CodeBlock                        # { statement; statement; expression }
+node    Statement                        # Wrapper for statement variants
+node    ExpressionStatement              # expression;
+node    VariableDeclaration              # let/var name: Type = expr;
+node    GuardStatement                   # guard <condition> else { block }
+node    DeinitStatement                  # deinit identifier; - explicit destructor call
+node    GuardCondition                   # let pattern = expr (in guard condition chain)
+node    Expression                       # Wrapper for expression variants
+node    ExprUnit                         # ()
+node    ExprInteger                      # 42, 0xFF, 0b1010, 0o17
+node    ExprFloat                        # 3.14, 1.0e10
+node    ExprString                       # "hello"
+node    ExprRawString                    # """hello""" (raw/multi-line string)
+node    ExprInterpolatedString           # "Hello \(name)!" - string with interpolations
+node    StringLiteralPart                # Literal text segment in interpolated string
+node    StringInterpolation              # \(expr) or \(expr:format) segment
+node    FormatSpecifier                  # :format_spec in string interpolation
+node    ExprChar                         # 'a', '\n', '\u{1F600}'
+node    ExprBool                         # true, false
+node    ExprArray                        # [1, 2, 3]
+node    ExprDictionary                   # ["key": value, ...]
+node    DictionaryEntry                  # key: value (single entry in dictionary literal)
+node    ExprTuple                        # (1, 2, 3)
+node    ExprGrouping                     # (expr)
+node    ExprPath                         # a.b.c (path expression)
+node    ExprUnary                        # -expr, !expr (prefix)
+node    ExprPostfix                      # expr! (postfix)
+node    ExprBinary                       # a + b, a * b, etc.
+node    ExprNull                         # null
+node    ExprCall                         # foo(1, 2) or expr(args)
+node    ExprAssignment                   # lhs = rhs
+node    ExprCompoundAssignment           # lhs += rhs, lhs -= rhs, etc.
+node    ExprIf                           # if condition { then } else { else }
+node    IfLetCondition                   # let pattern = expr (in if-let condition)
+node    ElseClause                       # else { ... } or else if ...
+node    ExprWhile                        # while condition { body }
+node    WhileLetCondition                # let pattern = expr (in while-let condition)
+node    ExprFor                          # for pattern in iterable { body }
+node    ForPattern                       # pattern in `for pattern in ...`
+node    ForIterable                      # iterable expression in `for ... in expression`
+node    ExprLoop                         # loop { body }
+node    ExprBreak                        # break or break label
+node    ExprContinue                     # continue or continue label
+node    ExprReturn                       # return or return expr
+node    ExprThrow                        # throw expr
+node    ExprTry                          # try expr
+node    ExprTupleIndex                   # tuple.0, tuple.1 (tuple element access)
+node    ExprClosure                      # { params in body } or { body }
+node    ClosureParams                    # (param, param) in closure
+node    ClosureParam                     # Single closure parameter: name or name: Type
+node    LoopLabel                        # label: (before while/loop)
+node    ArgumentList                     # (arg1, label: arg2, ...)
+node    Argument                         # Single argument: expr or label: expr
+node    ExprImplicitMemberAccess         # .Case or .Case(args)
+node    ExprMatch                        # match scrutinee { arms }
+node    MatchArm                         # pattern => expression
+node    MatchArmGuard                    # if condition (guard clause in match arm)
+node    Pattern                          # Root pattern wrapper
+node    WildcardPattern                  # _
+node    BindingPattern                   # name or var name
+node    TuplePattern                     # (p1, p2, ...)
+node    TuplePatternElement              # Single element in tuple pattern
+node    LiteralPattern                   # 42, "hello", 'c', true
+node    RangePattern                     # 0..=9 or 0..<10 (range pattern)
+node    EnumPattern                      # .Case or .Case(args)
+node    EnumPatternArg                   # Single arg in enum pattern: label or label: pattern
+node    NullPattern                      # null (sugar for .None on Optional)
+node    SomePattern                      # some PAT (sugar for .Some(PAT) on Optional)
+node    StructPattern                    # Point { x, y } or Point { x: a, y: b }
+node    StructPatternField               # Single field: name or name: pattern
+node    StructPatternRest                # .. (ignore remaining fields)
+node    ArrayPattern                     # [a, b, ..rest]
+node    ArrayPatternElement              # Single element in array pattern
+node    ArrayPatternRest                 # ..rest or .. (rest pattern in arrays)
+node    AtPattern                        # name @ pattern (binds name while matching pattern)
+node    RestPattern                      # .. (rest pattern in tuples)
+node    OrPattern                        # p1 or p2 or ... (or-pattern)
+node    ErrorPattern                     # Error recovery
+token   Identifier 'ident'
+token   String 'string'
+token   RawString 'raw_string'           # """...""" raw string literal
+token   Char 'char'                      # 'a' character literal
+token   Integer 'int'
+token   Float 'float'
+token   Boolean 'bool'
+token   Null 'null'
+token   Some 'some'
+token   As 'as'
+token   Break 'break'
+token   Case 'case'
+token   Consuming 'consuming'
+token   Continue 'continue'
+token   Deinit 'deinit'
+token   Else 'else'
+token   Enum 'enum'
+token   Extend 'extend'
+token   For 'for'
+token   Fileprivate 'fileprivate'
+token   Func 'func'
+token   If 'if'
+token   Import 'import'
+token   Indirect 'indirect'
+token   Loop 'loop'
+token   Init 'init'
+token   Internal 'internal'
+token   Let 'let'
+token   Module 'module'
+token   Mutating 'mutating'
+token   Private 'private'
+token   Protocol 'protocol'
+token   Public 'public'
+token   Return 'return'
+token   Throw 'throw'
+token   Try 'try'
+token   Throws 'throws'
+token   Static 'static'
+token   Struct 'struct'
+token   Type 'type'
+token   Var 'var'
+token   Where 'where'
+token   While 'while'
+token   In 'in'
+token   Match 'match'
+token   Guard 'guard'
+token   Get 'get'
+token   Set 'set'
+token   Subscript 'subscript'
+token   And 'and'
+token   Not 'not'
+token   Or 'or'
+token   LParen '('
+token   RParen ')'
+token   LBrace '{'
+token   RBrace '}'
+token   LBracket '['
+token   RBracket ']'
+token   Semicolon ';'
+token   Comma ','
+token   Dot '.'
+token   Colon ':'
+token   Question '?'
+token   Bang '!'
+token   Underscore '_'
+token   DotDotEquals '..='
+token   DotDotLess '..<'
+token   DotDot '..'
+token   LessLessEquals '<<='             # <<=
+token   GreaterGreaterEquals '>>='       # >>=
+token   LessLess '<<'
+token   GreaterGreater '>>'
+token   LessEquals '<='
+token   GreaterEquals '>='
+token   EqualsEquals '=='
+token   BangEquals '!='
+token   QuestionQuestion '??'
+token   Arrow '->'
+token   FatArrow '=>'
+token   PlusEquals '+='                  # +=
+token   MinusEquals '-='                 # -=
+token   StarEquals '*='                  # *=
+token   SlashEquals '/='                 # /=
+token   PercentEquals '%='               # %=
+token   AmpersandEquals '&='             # &=
+token   PipeEquals '|='                  # |=
+token   CaretEquals '^='                 # ^=
+token   Equals '='
+token   Plus '+'
+token   Minus '-'
+token   Star '*'
+token   Slash '/'
+token   Percent '%'
+token   Ampersand '&'
+token   Pipe '|'
+token   Caret '^'
+token   Less '<'
+token   Greater '>'
+token   At '@'
+trivia  Whitespace
+trivia  Newline
+trivia  LineComment
+trivia  BlockComment
+special Error
+special Missing
+node    TyRef                            # &T - shared reference type (parsed, rejected until stage 1)
+node    TyMutRef                         # &mutating T - mutable reference type
+node    RefClause                        # ref { ... } place accessor (stage 1.5)
+node    MutatingRefClause                # mutating ref { ... } place accessor (stage 1.5)
+node    RefBindingPattern                # &name / &mutating name binder pattern (stage 1.5 item 2)
+token   StringStart 'string_start'       # `"` or `"""` opening an interpolated string
+token   StringFragment 'string_fragment' # literal text between holes
+token   InterpStart 'interp_start'       # `\(`
+token   InterpEnd 'interp_end'           # `)` closing a hole
+token   FormatSpec 'format_spec'         # format spec text after a hole's `:`
+token   StringEnd 'string_end'           # `"` or `"""` closing an interpolated string
+node    TyParen                          # (T) - grouping parentheses around a type

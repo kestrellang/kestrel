@@ -2,30 +2,49 @@
 
 `SyntaxKind`, the rowan `Language` impl, and CST helpers.
 
+## Generated code: `kinds.txt` and `kestrel.ungram`
+
+Three files are generated and checked in; never edit them by hand:
+
+| Source | Generated | Contents |
+|--------|-----------|----------|
+| `kinds.txt` | `src/generated/kinds.rs` | `SyntaxKind`, `SyntaxKind::ALL`, `From<Token>` |
+| `kestrel.ungram` | `src/ast/generated.rs` | typed views (one struct per node, one enum per union) |
+| `kestrel.ungram` | `src/validate/generated.rs` | each node's rule, for `validate::validate` |
+
+After editing a source, run
+`UPDATE_GENERATED=1 cargo test -p kestrel-syntax-tree --test sourcegen`; the
+same test without the variable fails while any generated file is stale.
+Hand-written conveniences on the views (the `Has*` traits, text helpers) go in
+`src/ast/ext.rs`.
+
+`kestrel.ungram` is the single source of truth for tree **shape**: the parser
+must build trees that conform (`lib/kestrel-parser/tests/conformance.rs` checks
+the whole corpus; debug builds of the parser check every error-free parse), and
+CST readers go through the typed views instead of matching child kinds by hand.
+A shape change is an edit to the grammar first, then the parser, then the
+readers the regenerated views break.
+
 ## Adding a `SyntaxKind`
 
-**Append at the end. Never insert mid-enum.** rowan green trees store kinds as
-raw `u16` discriminants, so inserting shifts every later kind and corrupts
-cached trees.
+**Append at the end of `kinds.txt`. Never insert mid-file.** rowan green trees
+store kinds as raw `u16` discriminants, so inserting shifts every later kind
+and corrupts cached trees. Then regenerate (above). A node kind with a shape
+also needs a rule in `kestrel.ungram`, or an entry in sourcegen's `UNRULED`
+list with the reason it has none.
 
-Two places, in this order:
-
-1. the `SyntaxKind` enum, immediately before the `__NotAKind` marker;
-2. `SyntaxKind::ALL`, at the end.
-
-`syntax_kind_table_round_trips` fails loudly if you miss the second — it asserts
-`ALL` is ordered (`ALL[n] as u16 == n`), complete, and that an out-of-range raw
-value still reads back as `Error`.
+`syntax_kind_table_round_trips` asserts the generated `ALL` is ordered
+(`ALL[n] as u16 == n`), complete, and that an out-of-range raw value still
+reads back as `Error`.
 
 ### Why there is a table at all
 
-`kind_to_raw` is `kind as u16` and is derived. The inverse cannot be, without
-`unsafe` or a macro that would swallow the enum's inline comments — so `ALL` is
-hand-written and *proved* instead. It replaced 258 `const NAME: u16` declarations
-plus 258 match arms over `raw.0`; because the scrutinee was a `u16`, rustc could
-not check either list, and a kind appended without a matching arm silently read
-back as `Error` — the *recovery* marker, so the tree looked damaged rather than
-unknown (F27).
+`kind_to_raw` is `kind as u16` and is derived. The inverse needs a table, now
+generated from `kinds.txt` with the enum and *proved* by the round-trip test.
+It replaced 258 `const NAME: u16` declarations plus 258 match arms over
+`raw.0`; because the scrutinee was a `u16`, rustc could not check either list,
+and a kind appended without a matching arm silently read back as `Error` — the
+*recovery* marker, so the tree looked damaged rather than unknown (F27).
 
 ### `__NotAKind`
 

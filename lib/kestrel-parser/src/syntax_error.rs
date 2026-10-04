@@ -37,7 +37,11 @@ pub(crate) struct SyntaxError {
 }
 
 impl SyntaxError {
-    pub fn new(code: &'static str, message: impl Into<String>, range: std::ops::Range<usize>) -> Self {
+    pub fn new(
+        code: &'static str,
+        message: impl Into<String>,
+        range: std::ops::Range<usize>,
+    ) -> Self {
         Self {
             code,
             message: message.into(),
@@ -73,7 +77,11 @@ impl SyntaxError {
             [rest @ .., last] => format!("{} or {}", rest.join(", "), last),
             [] => "something else".to_string(),
         };
-        Self::new(code, format!("expected {expected}, found {}", describe(found)), range)
+        Self::new(
+            code,
+            format!("expected {expected}, found {}", describe(found)),
+            range,
+        )
     }
 
     /// "expected <what>, found Y".
@@ -89,7 +97,11 @@ impl SyntaxError {
             "pattern" => codes::EXPECTED_PATTERN,
             _ => codes::UNEXPECTED_TOKEN,
         };
-        Self::new(code, format!("expected {what}, found {}", describe(found)), range)
+        Self::new(
+            code,
+            format!("expected {what}, found {}", describe(found)),
+            range,
+        )
     }
 }
 

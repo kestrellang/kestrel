@@ -1,10 +1,11 @@
 //! Entry point for building declaration entities from a CST.
 //!
-//! Walks the CST using an iterative stack, dispatching to per-declaration
-//! builder functions. Container types (struct/enum/protocol/extension) push
-//! their body children onto the stack for processing.
+//! Walks the typed items with an explicit stack, dispatching to
+//! per-declaration builder functions. Container types
+//! (struct/enum/protocol/extension) push their member items onto the stack.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::components::{Os, TargetConfig};
@@ -35,197 +36,142 @@ pub fn build_declarations(
     target: Option<&TargetConfig>,
 ) {
     let file_id = file_entity.index();
+    let Some(file) = ast::SourceFile::cast(tree.clone()) else {
+        return;
+    };
 
-    // Find the module for this file (from ModuleDeclaration if present)
-    let module_parent = tree
-        .children()
-        .find(|c| c.kind() == SyntaxKind::ModuleDeclaration)
-        .map(|mod_node| module::resolve_module_path(world, root, &mod_node))
+    // The file's module (from its `module` declaration, if any)
+    let module_parent = file
+        .items()
+        .find_map(|item| match item {
+            ast::Item::ModuleDeclaration(m) => Some(m),
+            _ => None,
+        })
+        .map(|m| module::resolve_module_path(world, root, &m))
         .unwrap_or(root);
 
-    // Stack-based iteration: (node, parent_entity)
-    let mut stack: Vec<(SyntaxNode, Entity)> = Vec::new();
+    // (item, parent). Pushed in reverse so items are built in source order.
+    let mut stack: Vec<(ast::Item, Entity)> = Vec::new();
+    push_items(&mut stack, file.items().collect(), module_parent);
 
-    // Push top-level children (excluding the module declaration) in reverse
-    // order so they're processed left-to-right
-    let top_level: Vec<_> = tree
-        .children()
-        .filter(|c| c.kind() != SyntaxKind::ModuleDeclaration)
-        .collect();
-
-    for child in top_level.into_iter().rev() {
-        stack.push((child, module_parent));
-    }
-
-    // Process the stack
-    while let Some((node, parent)) = stack.pop() {
+    while let Some((item, parent)) = stack.pop() {
         // Skip declarations excluded by target-conditional attributes (@platform, etc.)
-        if is_excluded_by_target(&node, target) {
+        if is_excluded_by_target(&item, target) {
             continue;
         }
-
-        match node.kind() {
-            SyntaxKind::StructDeclaration => {
-                let (entity, body) =
-                    struct_decl::build_struct(world, &node, parent, file_entity, file_id);
-                push_body_children(&mut stack, body, entity);
+        use ast::Item as I;
+        match &item {
+            I::StructDeclaration(n) => {
+                let (entity, members) =
+                    struct_decl::build_struct(world, n, parent, file_entity, file_id);
+                push_items(&mut stack, members, entity);
             },
-
-            SyntaxKind::EnumDeclaration => {
-                let (entity, body) =
-                    enum_decl::build_enum(world, &node, parent, file_entity, file_id);
-                push_body_children(&mut stack, body, entity);
+            I::EnumDeclaration(n) => {
+                let (entity, members) =
+                    enum_decl::build_enum(world, n, parent, file_entity, file_id);
+                push_items(&mut stack, members, entity);
             },
-
-            SyntaxKind::EnumCaseDeclaration => {
-                enum_decl::build_enum_case(world, &node, parent, file_entity, file_id);
+            I::ProtocolDeclaration(n) => {
+                let (entity, members) =
+                    protocol::build_protocol(world, n, parent, file_entity, file_id);
+                push_items(&mut stack, members, entity);
             },
-
-            SyntaxKind::ProtocolDeclaration => {
-                let (entity, body) =
-                    protocol::build_protocol(world, &node, parent, file_entity, file_id);
-                push_body_children(&mut stack, body, entity);
+            I::ExtensionDeclaration(n) => {
+                let (entity, members) =
+                    extension::build_extension(world, n, parent, file_entity, file_id);
+                push_items(&mut stack, members, entity);
             },
-
-            SyntaxKind::ExtensionDeclaration => {
-                let (entity, body) =
-                    extension::build_extension(world, &node, parent, file_entity, file_id);
-                push_body_children(&mut stack, body, entity);
+            I::EnumCaseDeclaration(n) => {
+                enum_decl::build_enum_case(world, n, parent, file_entity, file_id)
             },
-
-            SyntaxKind::FunctionDeclaration => {
-                function::build_function(world, &node, parent, file_entity, file_id);
+            I::FunctionDeclaration(n) => {
+                function::build_function(world, n, parent, file_entity, file_id)
             },
-
-            SyntaxKind::InitializerDeclaration => {
-                function::build_initializer(world, &node, parent, file_entity, file_id);
+            I::InitializerDeclaration(n) => {
+                function::build_initializer(world, n, parent, file_entity, file_id)
             },
-
-            SyntaxKind::DeinitDeclaration => {
-                function::build_deinit(world, &node, parent, file_entity, file_id);
+            I::DeinitDeclaration(n) => {
+                function::build_deinit(world, n, parent, file_entity, file_id)
             },
-
-            SyntaxKind::FieldDeclaration => {
-                field::build_field(world, &node, parent, file_entity, file_id);
+            I::FieldDeclaration(n) => field::build_field(world, n, parent, file_entity, file_id),
+            I::SubscriptDeclaration(n) => {
+                subscript::build_subscript(world, n, parent, file_entity, file_id)
             },
-
-            SyntaxKind::SubscriptDeclaration => {
-                subscript::build_subscript(world, &node, parent, file_entity, file_id);
+            I::TypeAliasDeclaration(n) => {
+                type_alias::build_type_alias(world, n, parent, file_entity, file_id)
             },
-
-            SyntaxKind::TypeAliasDeclaration => {
-                type_alias::build_type_alias(world, &node, parent, file_entity, file_id);
-            },
-
-            SyntaxKind::ImportDeclaration => {
-                import::build_import(world, &node, parent, file_entity, file_id);
-            },
-
-            // Transparent wrapper nodes — push children through
-            SyntaxKind::DeclarationItem | SyntaxKind::SourceFile => {
-                let children: Vec<_> = node.children().collect();
-                for child in children.into_iter().rev() {
-                    stack.push((child, parent));
-                }
-            },
-
-            // Unknown nodes — skip silently
-            _ => {},
+            I::ImportDeclaration(n) => import::build_import(world, n, parent, file_entity, file_id),
+            // Handled above, before any item is built.
+            I::ModuleDeclaration(_) => {},
         }
     }
 }
 
-/// Push children of a body node onto the stack in reverse order.
-fn push_body_children(
-    stack: &mut Vec<(SyntaxNode, Entity)>,
-    body: Option<SyntaxNode>,
-    parent: Entity,
-) {
-    if let Some(body) = body {
-        let children: Vec<_> = body.children().collect();
-        for child in children.into_iter().rev() {
-            stack.push((child, parent));
-        }
+/// Push `items` so they pop in source order.
+fn push_items(stack: &mut Vec<(ast::Item, Entity)>, items: Vec<ast::Item>, parent: Entity) {
+    stack.extend(items.into_iter().rev().map(|item| (item, parent)));
+}
+
+/// The item's attributes, for the declarations that take any.
+fn item_attributes(item: &ast::Item) -> Vec<ast::Attribute> {
+    use ast::Item as I;
+    match item {
+        I::StructDeclaration(n) => n.attributes().collect(),
+        I::EnumDeclaration(n) => n.attributes().collect(),
+        I::ProtocolDeclaration(n) => n.attributes().collect(),
+        I::FunctionDeclaration(n) => n.attributes().collect(),
+        I::FieldDeclaration(n) => n.attributes().collect(),
+        I::TypeAliasDeclaration(n) => n.attributes().collect(),
+        I::InitializerDeclaration(n) => n.attributes().collect(),
+        I::SubscriptDeclaration(n) => n.attributes().collect(),
+        I::EnumCaseDeclaration(n) => n.attributes().collect(),
+        I::ModuleDeclaration(_)
+        | I::ImportDeclaration(_)
+        | I::ExtensionDeclaration(_)
+        | I::DeinitDeclaration(_) => Vec::new(),
     }
 }
 
-/// Check if a CST node should be excluded based on target-conditional attributes.
-/// Scans the node's AttributeList for conditional attributes (@platform, etc.)
-/// and compares each against the corresponding TargetConfig field.
-/// Excluded if ANY conditional attribute doesn't match the target.
-fn is_excluded_by_target(node: &SyntaxNode, target: Option<&TargetConfig>) -> bool {
+/// Whether a target-conditional attribute (`@platform`, …) excludes the
+/// item: excluded if ANY conditional attribute doesn't match the target.
+fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
     let Some(target) = target else {
         return false;
     };
-
-    let Some(attr_list) = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::AttributeList)
-    else {
-        return false;
-    };
-
-    for attr_node in attr_list
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::Attribute)
-    {
-        let attr_name = attr_node
-            .children_with_tokens()
-            .filter_map(|c| c.into_token())
-            .find(|tok| tok.kind() == SyntaxKind::Identifier)
-            .map(|tok| tok.text().to_string());
-
-        let Some(name) = attr_name else { continue };
-
-        // Check each conditional attribute type against its target dimension.
-        // Future: "arch" => { if is_excluded_by_arch(...) { return true; } }
-        if name == "platform" && is_excluded_by_platform(&attr_node, target) {
-            return true;
-        }
-    }
-
-    false
+    item_attributes(item).iter().any(|attr| {
+        // Future: "arch" => is_excluded_by_arch(...)
+        attr.identifier_token()
+            .is_some_and(|name| name.text() == "platform")
+            && is_excluded_by_platform(attr, target)
+    })
 }
 
-/// Check if a @platform attribute excludes this declaration for the given target.
-fn is_excluded_by_platform(attr_node: &SyntaxNode, target: &TargetConfig) -> bool {
+/// Whether `@platform(.os)` excludes the declaration for `target`.
+fn is_excluded_by_platform(attr: &ast::Attribute, target: &TargetConfig) -> bool {
     let Some(target_os) = target.os else {
         return false; // no OS target set — don't filter
     };
-
-    let Some(args_node) = attr_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::AttributeArgs)
-    else {
-        return false; // @platform with no args — let validation report
-    };
-
-    // Extract the implicit member value from the first arg
-    let Some(arg_node) = args_node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::AttributeArg)
+    // `@platform` with no args — let validation report
+    let Some(arg) = attr
+        .attribute_args()
+        .and_then(|a| a.attribute_args().next())
     else {
         return false;
     };
-
-    let tokens: Vec<_> = arg_node
+    // The implicit member `.os` of the first argument.
+    let Some(os) = arg
+        .syntax()
         .children_with_tokens()
         .filter_map(|c| c.into_token())
-        .collect();
-
-    let mut found_dot = false;
-    for tok in &tokens {
-        if tok.kind() == SyntaxKind::Dot {
-            found_dot = true;
-        } else if found_dot && tok.kind() == SyntaxKind::Identifier {
-            return match Os::from_name(tok.text()) {
-                Some(declared) => declared != target_os,
-                None => false, // unknown platform — let validation report
-            };
-        }
+        .skip_while(|t| t.kind() != SyntaxKind::Dot)
+        .find(|t| t.kind() == SyntaxKind::Identifier)
+    else {
+        return false; // no implicit member — don't exclude
+    };
+    match Os::from_name(os.text()) {
+        Some(declared) => declared != target_os,
+        None => false, // unknown platform — let validation report
     }
-
-    false // no implicit member — don't exclude
 }
 
 #[cfg(test)]
@@ -267,9 +213,8 @@ mod tests {
     /// says so.
     #[test]
     fn subscripts_carry_both_the_node_kind_and_the_marker() {
-        let (world, _root, _file) = build_from_source(
-            "struct Grid {\n    subscript(i: Int) -> Int { get { 0 } }\n}\n",
-        );
+        let (world, _root, _file) =
+            build_from_source("struct Grid {\n    subscript(i: Int) -> Int { get { 0 } }\n}\n");
 
         let by_kind: Vec<_> = world
             .iter_component::<NodeKind>()

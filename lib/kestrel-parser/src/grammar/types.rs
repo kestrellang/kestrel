@@ -102,9 +102,7 @@ fn base_ty(p: &mut Parser<'_>) -> Option<CompletedMarker> {
         Some(K::Bang) => Some(leaf(p, K::TyNever, K::Bang)),
         Some(K::Underscore) => Some(leaf(p, K::TyInferred, K::Underscore)),
         Some(K::Mutating | K::Consuming) if at_kinded_fn(p) => Some(kinded_fn(p)),
-        Some(K::Identifier) if p.nth_text(0) == "escaping" && at_kinded_fn(p) => {
-            Some(kinded_fn(p))
-        },
+        Some(K::Identifier) if p.nth_text(0) == "escaping" && at_kinded_fn(p) => Some(kinded_fn(p)),
         Some(K::LParen) => paren_type(p),
         Some(K::LBracket) => Some(array_or_dict(p)),
         Some(K::Identifier) => Some(path_type(p)),
@@ -209,10 +207,16 @@ fn paren_type(p: &mut Parser<'_>) -> Option<CompletedMarker> {
         ty(p)
     };
     if !p.at(K::Comma) {
+        // Grouping parens: `Ty > TyParen > ( Ty )`, so the parens belong to
+        // a node rather than leaking into whatever holds the type.
         p.expect(K::RParen);
-        tuple.abandon(p);
-        m.abandon(p);
-        return first;
+        if first.is_none() {
+            tuple.abandon(p);
+            m.abandon(p);
+            return None;
+        }
+        tuple.complete(p, K::TyParen);
+        return Some(m.complete(p, K::Ty));
     }
     while p.eat(K::Comma) {
         if p.at(K::RParen) {
@@ -264,10 +268,7 @@ fn type_path(p: &mut Parser<'_>) {
     e.complete(p, K::PathElement);
     loop {
         let dot = p.token_pos();
-        if !(p.at(K::Dot)
-            && p.nth_at(1, K::Identifier)
-            && adjacent(p, dot)
-            && adjacent(p, dot + 1))
+        if !(p.at(K::Dot) && p.nth_at(1, K::Identifier) && adjacent(p, dot) && adjacent(p, dot + 1))
         {
             break;
         }

@@ -1,12 +1,12 @@
 //! Enum and EnumCase declaration builders.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::utils::{extract_name, find_child, get_decl_span};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
+use kestrel_syntax_tree::ast::{self, AstNode, HasName};
+use kestrel_syntax_tree::utils::get_decl_span;
 
 use super::helpers::*;
 use super::type_param::build_type_parameters;
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::*;
 
 /// Build an enum declaration entity from CST.
@@ -16,101 +16,91 @@ use crate::components::*;
 /// [Attributes], [Documentation]
 pub fn build_enum(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::EnumDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
-) -> (Entity, Option<SyntaxNode>) {
+) -> (Entity, Vec<ast::Item>) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Enum);
     world.set(entity, FileId(file_entity));
     world.set(entity, Typed);
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    if let Some(name) = extract_name(node) {
+    if let Some(name) = node.name_text() {
         world.set(entity, Name(name));
     }
-
-    // Check for top-level indirect modifier
-    if find_child(node, SyntaxKind::IndirectModifier).is_some() {
+    if node.indirect_modifier().is_some() {
         world.set(entity, IsIndirect);
     }
 
     set_visibility(world, entity, node);
     set_attributes(world, entity, node, file_id);
-    set_documentation(world, entity, node);
+    set_documentation(world, entity, syntax);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
     build_type_parameters(world, entity, node, file_entity, file_id);
 
-    let body = node.children().find(|c| c.kind() == SyntaxKind::EnumBody);
-    (entity, body)
+    let members = node
+        .enum_body()
+        .map(|b| b.items().collect())
+        .unwrap_or_default();
+    (entity, members)
 }
 
 /// Build an enum case declaration entity from CST.
 ///
-/// Components: NodeKind::EnumCase, Name, FileId, Vis, [Callable], [Documentation]
+/// Components: NodeKind::EnumCase, Name, FileId, [Callable], [Documentation]
 pub fn build_enum_case(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::EnumCaseDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::EnumCase);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    if let Some(name) = extract_name(node) {
+    if let Some(name) = node.name_text() {
         world.set(entity, Name(name));
     }
+    set_documentation(world, entity, syntax);
 
-    set_visibility(world, entity, node);
-    set_documentation(world, entity, node);
-
-    // Enum cases with associated values get Callable (from EnumCaseParameterList)
-    if let Some(param_list) = find_child(node, SyntaxKind::EnumCaseParameterList) {
-        let params: Vec<AstParam> = param_list
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::EnumCaseParameter)
-            .map(|param_node| {
-                // Enum case params: label from Name > Identifier, type from Ty
-                let label = extract_name(&param_node);
-
-                let ty = param_node
-                    .children()
-                    .find(|c| is_type_kind(c.kind()))
-                    .and_then(|c| ast_type_from_cst(&c, file_id));
-
-                // For enum case params, the label IS the name
-                let name = label.clone().unwrap_or_default();
-                AstParam {
-                    label,
-                    name,
-                    ty,
-                    default_entity: None,
-                    pattern: None,
-                    is_mut: false,
-                    is_consuming: false,
-                }
-            })
-            .collect();
-
-        if !params.is_empty() {
-            world.set(
-                entity,
-                Callable {
-                    params,
-                    receiver: None,
-                },
-            );
-        }
+    // Associated values: `case some(value: T)`. The label is the name.
+    let params: Vec<AstParam> = node
+        .enum_case_parameter_list()
+        .into_iter()
+        .flat_map(|list| list.enum_case_parameters())
+        .map(|param| {
+            let label = param.name_text();
+            AstParam {
+                name: label.clone().unwrap_or_default(),
+                label,
+                ty: lower_opt_type(param.ty(), file_id),
+                default_entity: None,
+                pattern: None,
+                is_mut: false,
+                is_consuming: false,
+            }
+        })
+        .collect();
+    if !params.is_empty() {
+        world.set(
+            entity,
+            Callable {
+                params,
+                receiver: None,
+            },
+        );
     }
 }

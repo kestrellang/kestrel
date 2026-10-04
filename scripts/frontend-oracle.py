@@ -353,6 +353,37 @@ def collapse_interpolation(node, is_base):
             collapse_interpolation(c, is_base)
 
 
+def unwrap_ty_paren(node):
+    """Phase 3: grouping parens are `Ty > TyParen > ( Ty )`; the baseline
+    left the parens as bare tokens next to the inner `Ty`."""
+    if node.is_token:
+        return
+    kids = []
+    for c in node.children:
+        unwrap_ty_paren(c)
+        if (not c.is_token and c.kind == "Ty" and len(c.children) == 1
+                and not c.children[0].is_token and c.children[0].kind == "TyParen"):
+            kids.extend(c.children[0].children)
+        else:
+            kids.append(c)
+    node.children = kids
+
+
+def single_body_expression(node):
+    """Phase 3: `func f() = e` is `FunctionBody(= Expression)`; the baseline
+    wrapped the expression twice."""
+    if node.is_token:
+        return
+    for c in node.children:
+        single_body_expression(c)
+    if node.kind != "FunctionBody":
+        return
+    for i, c in enumerate(node.children):
+        if (not c.is_token and c.kind == "Expression" and len(c.children) == 1
+                and not c.children[0].is_token and c.children[0].kind == "Expression"):
+            node.children[i] = c.children[0]
+
+
 def drop_fixed_lexemes(node):
     if node.is_token:
         return
@@ -489,6 +520,8 @@ def compare_cst(path, btxt, ntxt):
     strip(nroot, False, False)
     fix_double_optional(broot)
     reorder_trailing_closures(nroot)
+    unwrap_ty_paren(nroot)
+    single_body_expression(broot)
     collapse_interpolation(broot, True)
     collapse_interpolation(nroot, False)
     flatten_binary(broot)
@@ -559,7 +592,9 @@ def fmt_diag(d):
     return f"{d['sev']}{code} {d['file']}:{d['line']}: {d['msg']}{lab}"
 
 
-def is_parse_error(d):
+def is_uncoded_error(d):
+    # Baseline parse errors are uncoded, but so are some name-resolution
+    # errors (`undefined name`): this is a hint, not a classification.
     return d["sev"] == "error" and (d["code"] == "" or d["code"].startswith("P"))
 
 
@@ -652,16 +687,30 @@ def diag_signature(text):
     return frozenset(Counter(diag_key(d) for d in parse_diags(text)).items())
 
 
+def diag_signature_no_line(text):
+    return frozenset(Counter((d["sev"], d["code"], d["msg"], d["file"], d["label"])
+                             for d in parse_diags(text)).items())
+
+
 def recheck(args, kind, path):
     """Re-run both binaries `args.recheck` times. The compiler has some
     pre-existing nondeterminism (diagnostic sets that vary run to run), so a
     file is `flaky` — not a difference — when some new run reproduces some
     baseline run exactly."""
+    base_texts = [output_text(args.base_bin, kind, path) for _ in range(args.recheck)]
+    new_texts = [output_text(args.new_bin, kind, path) for _ in range(args.recheck)]
     sig = diag_signature if kind == "diag" else (lambda t: t)
-    base_runs = {sig(output_text(args.base_bin, kind, path)) for _ in range(args.recheck)}
-    new_runs = {sig(output_text(args.new_bin, kind, path)) for _ in range(args.recheck)}
+    base_runs, new_runs = {sig(t) for t in base_texts}, {sig(t) for t in new_texts}
     if base_runs & new_runs:
         return "flaky" if len(base_runs) > 1 or len(new_runs) > 1 else "identical-on-rerun"
+    # Some diagnostics land on whichever of several equivalent sites the
+    # checker reaches first (`could not infer type` on one of many `self`s),
+    # so the *line* varies run to run. When the baseline itself varies, also
+    # accept a match that ignores lines.
+    if kind == "diag" and len(base_runs) > 1:
+        base_l = {diag_signature_no_line(t) for t in base_texts}
+        if base_l & {diag_signature_no_line(t) for t in new_texts}:
+            return "flaky-lines"
     return None
 
 
@@ -702,10 +751,10 @@ def cmd_compare(args):
                         stats[rc] += 1
                         details.append((f, rc, ""))
                         continue
-                only_parse = all(is_parse_error(dict(zip(
+                only_parse = all(is_uncoded_error(dict(zip(
                     ("sev", "code", "msg", "file", "line", "label", "notes"), k)))
                     for k in (bc - nc) + (nc - bc))
-                st = "different(parse-errors-only)" if only_parse else "different"
+                st = "different(uncoded-only)" if only_parse else "different"
                 stats[st] += 1
                 lines = [f"- {fmt_diag(dict(zip(('sev','code','msg','file','line','label','notes'), k)))}"
                          for k in (bc - nc).elements()]

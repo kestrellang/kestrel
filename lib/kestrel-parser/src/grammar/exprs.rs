@@ -136,7 +136,12 @@ pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
         K::Or => 10,
         K::QuestionQuestion => return Some((15, 15)),
         K::And => 20,
-        K::EqualsEquals | K::BangEquals | K::Less | K::Greater | K::LessEquals | K::GreaterEquals => 30,
+        K::EqualsEquals
+        | K::BangEquals
+        | K::Less
+        | K::Greater
+        | K::LessEquals
+        | K::GreaterEquals => 30,
         K::DotDotEquals | K::DotDotLess => 40,
         K::Plus | K::Minus | K::Pipe | K::Caret => 50,
         K::Star | K::Slash | K::Percent | K::Ampersand => 60,
@@ -150,13 +155,7 @@ fn is_unary_op(kind: Option<K>) -> bool {
     matches!(
         kind,
         Some(
-            K::Minus
-                | K::Plus
-                | K::Bang
-                | K::Not
-                | K::DotDotLess
-                | K::DotDotEquals
-                | K::Ampersand
+            K::Minus | K::Plus | K::Bang | K::Not | K::DotDotLess | K::DotDotEquals | K::Ampersand
         )
     )
 }
@@ -465,9 +464,9 @@ fn stmt_like(p: &mut Parser<'_>) -> ExprInfo {
 
 fn primary(p: &mut Parser<'_>) -> Option<Chain> {
     let info = match p.current() {
-        Some(
-            K::Integer | K::Float | K::String | K::RawString | K::Char | K::Boolean | K::Null,
-        ) => literal(p),
+        Some(K::Integer | K::Float | K::String | K::RawString | K::Char | K::Boolean | K::Null) => {
+            literal(p)
+        },
         Some(K::StringStart) => interpolated_string(p),
         Some(K::LBracket) => array_or_dict(p),
         Some(K::LParen) => paren(p),
@@ -485,9 +484,9 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
 
 fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
     let info = match p.current() {
-        Some(
-            K::Integer | K::Float | K::String | K::RawString | K::Char | K::Boolean | K::Null,
-        ) => literal(p),
+        Some(K::Integer | K::Float | K::String | K::RawString | K::Char | K::Boolean | K::Null) => {
+            literal(p)
+        },
         Some(K::StringStart) => interpolated_string(p),
         Some(K::LBracket) => array_or_dict(p),
         Some(K::LParen) => paren(p),
@@ -700,7 +699,15 @@ fn return_or_throw(p: &mut Parser<'_>) -> ExprInfo {
             range,
         ));
     }
-    finish2(p, m, if is_throw { K::ExprThrow } else { K::ExprReturn })
+    finish2(
+        p,
+        m,
+        if is_throw {
+            K::ExprThrow
+        } else {
+            K::ExprReturn
+        },
+    )
 }
 
 /// `.Case` or `.Case(args)`.

@@ -77,8 +77,14 @@ pub(super) fn opt_conformance_list(p: &mut Parser<'_>) {
             break;
         }
         // Trailing comma: the list ends at whatever cannot start a type.
-        if !p.at_any(&[K::Not, K::Identifier, K::LParen, K::LBracket, K::Bang, K::Underscore])
-            && !p.at_any(&[K::Some, K::Ampersand, K::Mutating, K::Consuming])
+        if !p.at_any(&[
+            K::Not,
+            K::Identifier,
+            K::LParen,
+            K::LBracket,
+            K::Bang,
+            K::Underscore,
+        ]) && !p.at_any(&[K::Some, K::Ampersand, K::Mutating, K::Consuming])
         {
             break;
         }

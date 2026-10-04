@@ -601,12 +601,14 @@ pub fn lex(
     source: &str,
     file_id: usize,
 ) -> impl Iterator<Item = Result<SpannedToken, Spanned<()>>> + '_ {
-    modal::lex_modal(source).into_iter().map(move |(token, span)| {
-        let span = Span::new(file_id, span);
-        token
-            .map(|t| Spanned::new(t, span.clone()))
-            .map_err(|_| Spanned::new((), span))
-    })
+    modal::lex_modal(source)
+        .into_iter()
+        .map(move |(token, span)| {
+            let span = Span::new(file_id, span);
+            token
+                .map(|t| Spanned::new(t, span.clone()))
+                .map_err(|_| Spanned::new((), span))
+        })
 }
 
 #[cfg(test)]
@@ -1071,7 +1073,13 @@ mod tests {
 
     #[test]
     fn plain_strings_stay_one_token() {
-        for source in [r#""hello""#, r#""""#, r#""a\"b""#, r#""\\(not a hole)""#, "\"\"\"\n x\n \"\"\""] {
+        for source in [
+            r#""hello""#,
+            r#""""#,
+            r#""a\"b""#,
+            r#""\\(not a hole)""#,
+            "\"\"\"\n x\n \"\"\"",
+        ] {
             assert_lossless(source);
             assert_eq!(kinds(source), vec![(T::String, source)], "{source}");
         }
@@ -1202,7 +1210,10 @@ mod tests {
     fn test_string_interpolation_edge_cases() {
         // Empty hole: diagnosed by the parser.
         let k: Vec<_> = kinds(r#""\()""#).into_iter().map(|(k, _)| k).collect();
-        assert_eq!(k, vec![T::StringStart, T::InterpStart, T::InterpEnd, T::StringEnd]);
+        assert_eq!(
+            k,
+            vec![T::StringStart, T::InterpStart, T::InterpEnd, T::StringEnd]
+        );
 
         // Consecutive holes.
         let k: Vec<_> = kinds(r#""\(a)\(b)""#).into_iter().map(|(k, _)| k).collect();

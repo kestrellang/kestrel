@@ -5,13 +5,12 @@
 //! Grouping parens are dropped, for-loops are NOT desugared.
 
 use crate::ast_type::ast_type_from_cst;
-use crate::builders::helpers::is_type_kind;
 use kestrel_ast::AstType;
 use kestrel_ast::arena::Arena;
-use kestrel_ast::escape::{Escaped, decode_escape};
 use kestrel_ast::ast_body::*;
+use kestrel_ast::escape::{Escaped, decode_escape};
 use kestrel_span::Span;
-use kestrel_syntax_tree::utils::{find_child, get_node_span, is_trivia};
+use kestrel_syntax_tree::utils::{find_child, get_node_span};
 use kestrel_syntax_tree::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 /// Lower a CodeBlock CST node into an AstBody.
@@ -201,7 +200,7 @@ impl LowerCtx {
         // Optional type annotation — find a type node
         let ty = node
             .children()
-            .find(|c| is_type_kind(c.kind()))
+            .find(|c| c.kind().is_type())
             .and_then(|c| ast_type_from_cst(&c, self.file_id));
 
         // Optional initializer — direct Expression child after Equals token.
@@ -596,7 +595,7 @@ impl LowerCtx {
         // vs an identifier token (pure path)
         let first_non_trivia = node
             .children_with_tokens()
-            .find(|e| !e.as_token().is_some_and(|t| is_trivia(t.kind())));
+            .find(|e| !e.as_token().is_some_and(|t| t.kind().is_trivia()));
 
         let has_expr_base = first_non_trivia.as_ref().is_some_and(|e| {
             e.as_node()
@@ -812,7 +811,7 @@ impl LowerCtx {
         let Some(mut op) = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
-            .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
+            .find(|t| !t.kind().is_trivia() && t.kind() != SyntaxKind::Error)
             .and_then(|t| token_to_unary_op(t.kind()))
         else {
             return self.alloc_expr(AstExpr::Error { span });
@@ -990,7 +989,7 @@ impl LowerCtx {
     fn extract_arg_label(&self, node: &SyntaxNode) -> Option<String> {
         let mut iter = node.children_with_tokens().filter(|e| {
             !e.as_token()
-                .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
+                .is_some_and(|t| t.kind().is_trivia() || t.kind() == SyntaxKind::Error)
         });
 
         let first = iter.next()?;
@@ -1288,7 +1287,7 @@ impl LowerCtx {
 
                         let ty = param_node
                             .children()
-                            .find(|c| is_type_kind(c.kind()))
+                            .find(|c| c.kind().is_type())
                             .and_then(|c| ast_type_from_cst(&c, self.file_id));
 
                         // A leading `mutating` token marks a by-reference param.
@@ -1645,7 +1644,7 @@ impl LowerCtx {
         let kind = node
             .children_with_tokens()
             .filter_map(|e| e.into_token())
-            .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
+            .find(|t| !t.kind().is_trivia() && t.kind() != SyntaxKind::Error)
             .map(|t| {
                 let text = t.text().to_string();
                 match t.kind() {
@@ -1682,7 +1681,7 @@ impl LowerCtx {
                     SyntaxKind::DotDotEquals | SyntaxKind::DotDotLess | SyntaxKind::DotDot => {
                         before_op = false;
                     },
-                    kind if !is_trivia(kind) && kind != SyntaxKind::Error => {
+                    kind if !kind.is_trivia() && kind != SyntaxKind::Error => {
                         let text = token.text().to_string();
                         let lit = match kind {
                             SyntaxKind::Integer => LitPatKind::Integer(text),
@@ -1797,7 +1796,7 @@ impl LowerCtx {
     fn extract_pattern_arg_label(&self, node: &SyntaxNode) -> Option<String> {
         let mut iter = node.children_with_tokens().filter(|e| {
             !e.as_token()
-                .is_some_and(|t| is_trivia(t.kind()) || t.kind() == SyntaxKind::Error)
+                .is_some_and(|t| t.kind().is_trivia() || t.kind() == SyntaxKind::Error)
         });
 
         let first = iter.next()?;
@@ -2106,7 +2105,7 @@ fn is_pattern_kind(kind: SyntaxKind) -> bool {
 fn first_token_text(node: &SyntaxNode) -> Option<String> {
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
-        .find(|t| !is_trivia(t.kind()) && t.kind() != SyntaxKind::Error)
+        .find(|t| !t.kind().is_trivia() && t.kind() != SyntaxKind::Error)
         .map(|t| t.text().to_string())
 }
 
@@ -2151,7 +2150,7 @@ fn member_identifier_at(elements: &[SyntaxElement], idx: usize) -> Option<String
 /// Extract type arguments from a TypeArgumentList node.
 fn extract_type_args(node: &SyntaxNode, file_id: usize) -> Vec<AstType> {
     node.children()
-        .filter(|c| is_type_kind(c.kind()))
+        .filter(|c| c.kind().is_type())
         .filter_map(|c| ast_type_from_cst(&c, file_id))
         .collect()
 }
@@ -2985,5 +2984,3 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
     }
     walk(node)
 }
-
-

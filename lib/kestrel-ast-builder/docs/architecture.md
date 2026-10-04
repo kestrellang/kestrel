@@ -25,9 +25,17 @@ The builder uses an **iterative stack** rather than recursion:
 
 1. Extract the module path from `ModuleDeclaration` (if present)
 2. Find-or-create the module hierarchy under the root entity
-3. Push top-level children onto the stack with the module as parent
-4. Pop nodes, dispatch by `SyntaxKind` to `build_*` functions
-5. Container types (struct/enum/protocol/extension) push their body children back onto the stack
+3. Push the top-level `ast::Item`s onto the stack with the module as parent
+4. Pop items, dispatch on the `ast::Item` variant to `build_*` functions
+5. Container types (struct/enum/protocol/extension) push their member items back onto the stack
+
+Declarations are read through the typed views generated from
+`lib/kestrel-syntax-tree/kestrel.ungram` (`kestrel_syntax_tree::ast`): each
+builder takes its declaration's view (`ast::FunctionDeclaration`, …) and the
+shared helpers take the `Has*` traits (`HasVisibility`, `HasAttributes`,
+`HasGenerics`, `HasConformances`), so no builder matches child kinds by hand.
+Types lower through `ast_type::lower_type(&ast::Ty)`. Expression bodies
+(`lower.rs`) still walk the untyped CST.
 
 ## Module Hierarchy
 

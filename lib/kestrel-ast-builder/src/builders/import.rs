@@ -1,8 +1,7 @@
 //! Import declaration builder.
 
 use kestrel_hecs::{Entity, World};
-use kestrel_syntax_tree::SyntaxNode;
-use kestrel_syntax_tree::imports::extract_import_declaration;
+use kestrel_syntax_tree::ast::{self, AstNode};
 use kestrel_syntax_tree::utils::get_decl_span;
 
 use crate::components::*;
@@ -13,43 +12,47 @@ use crate::components::*;
 /// [ImportAlias], [ImportItems]
 pub fn build_import(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::ImportDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
 ) {
-    let decl = match extract_import_declaration(node, file_id) {
-        Some(d) => d,
-        None => return,
+    let Some(path) = node.module_path() else {
+        return;
     };
-
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Import);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    // Module path as list of segment strings
-    let path: Vec<String> = decl.module_path.iter().map(|(s, _)| s.clone()).collect();
-    world.set(entity, ModulePath(path));
+    let segments = path
+        .segment_tokens()
+        .map(|t| t.text().to_string())
+        .collect();
+    world.set(entity, ModulePath(segments));
 
-    // Import alias (`import Foo as Bar`)
-    if let Some(alias) = decl.alias {
-        world.set(entity, ImportAlias(alias));
+    // `import Foo as Bar`
+    if !node.has_item_list()
+        && let Some(alias) = node.alias()
+    {
+        world.set(entity, ImportAlias(alias.text().to_string()));
     }
 
-    // Specific import items (`import Foo (Bar, Baz)`)
-    if !decl.items.is_empty() {
-        let items = decl
-            .items
-            .into_iter()
-            .map(|item| ImportItem {
-                name: item.name,
-                alias: item.alias,
+    // `import Foo.(Bar, Baz as Q)`
+    let items: Vec<ImportItem> = node
+        .import_items()
+        .filter_map(|item| {
+            Some(ImportItem {
+                name: item.identifier_token()?.text().to_string(),
+                alias: item.alias().map(|t| t.text().to_string()),
             })
-            .collect();
+        })
+        .collect();
+    if !items.is_empty() {
         world.set(entity, ImportItems(items));
     }
 }

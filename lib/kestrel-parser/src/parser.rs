@@ -140,6 +140,23 @@ impl Parser {
 
         let tree = TreeBuilder::new(source, sink.into_events()).build();
 
+        // Contract: an error-free tree has the shape `kestrel.ungram` names,
+        // which is what the generated typed views read. Checked in debug
+        // builds; `tests/conformance.rs` checks the corpus in any build.
+        #[cfg(debug_assertions)]
+        if errors.is_empty() {
+            let violations = kestrel_syntax_tree::validate::validate(&tree);
+            debug_assert!(
+                violations.is_empty(),
+                "parser built a tree that does not conform to kestrel.ungram: {}",
+                violations
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+        }
+
         ParseResult { tree, errors }
     }
 }
@@ -469,7 +486,10 @@ public struct B {}
         let result = parse_source(source, 0);
 
         let missing_count = count_nodes(&result.tree, SyntaxKind::Missing);
-        assert_eq!(missing_count, 0, "missing tokens are absent, not synthesized");
+        assert_eq!(
+            missing_count, 0,
+            "missing tokens are absent, not synthesized"
+        );
 
         let recovery_errors: Vec<_> = result
             .errors

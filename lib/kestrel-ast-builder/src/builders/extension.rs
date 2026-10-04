@@ -5,48 +5,45 @@ use std::collections::HashSet;
 use kestrel_ast::{AstType, PathSegment};
 use kestrel_hecs::{Entity, World};
 use kestrel_span::Span;
+use kestrel_syntax_tree::SyntaxNode;
+use kestrel_syntax_tree::ast::{self, AstNode};
 use kestrel_syntax_tree::utils::get_decl_span;
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use super::helpers::*;
-use crate::ast_type::ast_type_from_cst;
+use crate::ast_type::lower_opt_type;
 use crate::components::*;
 
 /// Build an extension declaration entity from CST.
 ///
 /// Components: NodeKind::Extension, FileId, ExtensionTarget,
-/// [Conformances], [WhereClause], [Attributes], [Documentation],
+/// [Conformances], [WhereClause], [Documentation],
 /// [TypeParams] — when the RHS conformance list introduces free type
 /// parameters that aren't bound by the extension target's own LHS args
 /// (e.g. `extend Int64: ArrayIndex[T]` → free `T`).
 ///
-/// Extensions have no Name — they extend an existing type.
+/// Extensions have no Name — they extend an existing type — and take no
+/// attributes (the grammar has none on `extend`).
 pub fn build_extension(
     world: &mut World,
-    node: &SyntaxNode,
+    node: &ast::ExtensionDeclaration,
     parent: Entity,
     file_entity: Entity,
     file_id: usize,
-) -> (Entity, Option<SyntaxNode>) {
+) -> (Entity, Vec<ast::Item>) {
+    let syntax = node.syntax();
     let entity = world.spawn();
 
     world.set(entity, NodeKind::Extension);
     world.set(entity, FileId(file_entity));
-    world.set(entity, DeclSpan(get_decl_span(node, file_id)));
-    world.set(entity, CstNode(node.clone()));
+    world.set(entity, DeclSpan(get_decl_span(syntax, file_id)));
+    world.set(entity, CstNode(syntax.clone()));
     world.set_parent(entity, parent);
 
-    // ExtensionTarget — the type being extended is the first type node
-    if let Some(target_ty) = node
-        .children()
-        .find(|c| is_type_kind(c.kind()))
-        .and_then(|c| ast_type_from_cst(&c, file_id))
-    {
+    if let Some(target_ty) = lower_opt_type(node.ty(), file_id) {
         world.set(entity, ExtensionTarget(target_ty));
     }
 
-    set_attributes(world, entity, node, file_id);
-    set_documentation(world, entity, node);
+    set_documentation(world, entity, syntax);
     set_conformances(world, entity, node, file_id);
     set_where_clause(world, entity, node, file_id);
 
@@ -57,10 +54,11 @@ pub fn build_extension(
 
     introduce_rhs_free_type_params(world, entity, file_entity, file_id, lhs_names);
 
-    let body = node
-        .children()
-        .find(|c| c.kind() == SyntaxKind::ExtensionBody);
-    (entity, body)
+    let members = node
+        .extension_body()
+        .map(|b| b.items().collect())
+        .unwrap_or_default();
+    (entity, members)
 }
 
 /// Scan the conformance RHS for free type parameters not already in scope

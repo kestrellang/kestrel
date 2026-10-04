@@ -20,13 +20,21 @@ pub fn parse_ok(source: &str) -> SyntaxNode {
         "unexpected errors {:?} in:\n{source}",
         result.errors
     );
-    assert_eq!(result.tree.text().to_string(), source, "tree must round-trip");
+    assert_eq!(
+        result.tree.text().to_string(),
+        source,
+        "tree must round-trip"
+    );
     let errors = result
         .tree
         .descendants_with_tokens()
         .filter(|e| e.kind() == SyntaxKind::Error)
         .count();
-    assert_eq!(errors, 0, "valid source produced Error elements:\n{:#?}", result.tree);
+    assert_eq!(
+        errors, 0,
+        "valid source produced Error elements:\n{:#?}",
+        result.tree
+    );
     result.tree
 }
 
@@ -61,4 +69,3 @@ pub fn first(node: &SyntaxNode, kind: SyntaxKind) -> SyntaxNode {
         .find(|n| n.kind() == kind)
         .unwrap_or_else(|| panic!("no {kind:?} in {node:#?}"))
 }
-
