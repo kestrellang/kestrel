@@ -24,7 +24,8 @@ The lexer produces `Spanned<Token>` values. Trivia tokens (whitespace, comments)
 | Category | Examples | Notes |
 |----------|----------|-------|
 | Trivia | `Whitespace`, `Newline`, `LineComment`, `BlockComment` | Preserved for CST positions |
-| Literals | `Integer`, `Float`, `String`, `Char`, `RawString`, `Boolean`, `Null` | |
+| Literals | `Integer`, `Float`, `String`, `Char`, `RawString`, `Boolean`, `Null` | `String` = a cooked string with no `\(…)` hole |
+| Interpolated strings | `StringStart`, `StringFragment`, `InterpStart`, `InterpEnd`, `FormatSpec`, `StringEnd` | Emitted by the modal driver |
 | Keywords | `func`, `struct`, `enum`, `let`, `var`, `if`, `while`, `match`, ... | ~40 keywords |
 | Operators | `+`, `-`, `==`, `->`, `=>`, `??`, `..=`, `..<`, `<<=`, ... | Longest-match ordering |
 | Punctuation | `(`, `)`, `{`, `}`, `[`, `]`, `;`, `,`, `.`, `:` | |
@@ -32,19 +33,31 @@ The lexer produces `Spanned<Token>` values. Trivia tokens (whitespace, comments)
 
 ## Lexing Strategy
 
-Built on the **logos** procedural macro framework. Simple tokens use regex patterns; complex tokens use custom callbacks:
+Built on the **logos** procedural macro framework for code, plus a small
+modal driver (`modal.rs`) for cooked strings. Simple tokens use regex
+patterns; complex tokens use custom callbacks:
 
-| Callback | Handles | Complexity |
-|----------|---------|-----------|
-| `parse_string` | String literals with `\(...)` interpolation | Nested strings inside interpolations |
-| `scan_interpolation` | Expression scanning inside `\(...)` | Tracks paren/bracket/brace depth |
-| `parse_raw_string` | `"""..."""` with variable quote depth | Counts opening/closing quotes |
-| `parse_block_comment` | `/* ... */` with nesting | Tracks comment depth |
-| `is_valid_identifier` | Unicode identifiers | XID_Start + XID_Continue rules |
+| Piece | Handles |
+|-------|---------|
+| `modal::lex_modal` | Cooked strings: a mode stack of *code* / *string* / *hole*. String mode scans literal text up to `\(` or the closer; hole mode lexes tokens with logos, counting `()[]{}` to find the closing `)`; a `:` at depth 0 starts the format spec. Nested strings push another frame. |
+| `parse_pound_string` | `#"…"#` raw strings with variable pound depth (one `RawString` token, no interpolation) |
+| `parse_block_comment` | `/* ... */` with nesting |
+| `is_valid_identifier` | Unicode identifiers (XID_Start + XID_Continue) |
 
 ## Key Design Decisions
 
-**Interpolated strings as single tokens.** The lexer emits the entire interpolated string `"\(expr)"` as one `String` token. The parser splits it later. This keeps the lexer stateless.
+**Interpolated strings are lexed modally.** `"a \(x:08x) b"` comes out as
+`StringStart StringFragment InterpStart Identifier Colon FormatSpec InterpEnd
+StringFragment StringEnd`: hole contents are ordinary tokens, so the parser
+parses them in place (no re-lexing anywhere downstream). A string with no
+hole is collapsed back into a single `String` token, so literal patterns and
+attribute arguments keep one token. In string mode `\` always consumes the
+next character (`\"` does not close, `\\(` is not a hole).
+
+**Unterminated strings.** A single-line string that never closes is cut at
+its first line break (a *closed* string may span lines), so the rest of the
+file still lexes; the token has no closer and is diagnosed downstream (E707
+for a plain string, the parser for an interpolated one).
 
 **Trivia preserved.** Unlike many lexers that discard whitespace, this one emits trivia tokens so the rowan-based CST can reconstruct exact source positions.
 
@@ -54,7 +67,8 @@ Built on the **logos** procedural macro framework. Simple tokens use regex patte
 
 | File | Responsibility |
 |------|---------------|
-| `lib.rs` | `Token` enum, `lex()` function, all custom parsing callbacks |
+| `lib.rs` | `Token` enum, `lex()` function, logos callbacks |
+| `modal.rs` | Modal lexing of cooked strings and interpolation holes |
 
 ## Dependencies
 

@@ -46,8 +46,16 @@ Enum: `lib/kestrel-ast/src/ast_body.rs:42`.
 ### AstExpr::InterpolatedString
 
 - Surface: `"hello \(name)!"`.
-- CST: `ExprInterpolatedString` (`lower.rs:339`).
-- AST-builder: `lower.rs:418` (`lower_interpolated_string`) — stores `Vec<StringPart>`.
+- Lexer: modal (`kestrel-lexer/src/modal.rs`) —
+  `StringStart (StringFragment | InterpStart <tokens> (Colon FormatSpec)? InterpEnd)* StringEnd`;
+  a string with no hole stays ONE `String` token (`ExprString`).
+- CST: `ExprInterpolatedString > StringStart StringFragment* StringInterpolation* StringEnd`,
+  `StringInterpolation > InterpStart (Expression | Error) FormatSpecifier? InterpEnd`.
+  Holes are parsed in place by the main parser; a hole that fails to parse is an
+  `Error` node and its errors read "invalid expression in string interpolation: …".
+- AST-builder: `lower_interpolated_string` — decodes fragments with the shared
+  escape table, lowers each hole from its CST node (real spans, no re-lexing),
+  stores `Vec<StringPart>`.
 - HIR lowering: `expr.rs:21` →
   `AstExpr::InterpolatedString { parts, span } => self.desugar_interpolated_string(body, &parts, &span)`.
   Implementation: `desugar.rs:697` — each `StringPart::Interpolation` becomes a
@@ -57,9 +65,8 @@ Enum: `lib/kestrel-ast/src/ast_body.rs:42`.
   entry below.
 - Solver: `solve_member` + `solve_conforms` (via ProtocolCall).
 - MIR: falls through the `ProtocolCall` / `MethodCall` paths.
-- Gotchas: parser currently emits the interpolated string as a single token;
-  `desugar_interpolated_string` skips escape decoding on `StringPart::Literal` text
-  (`desugar.rs:722-734`). When the parser splits interpolations, decode the structured parts.
+- Gotchas: `StringPart::Literal` text is already escape-decoded by the AST
+  builder; `desugar_interpolated_string` must not decode it again.
 
 ### AstExpr::Array
 
@@ -209,9 +216,10 @@ Enum: `lib/kestrel-ast/src/ast_body.rs:42`.
 - Surface: `a + b`, `a == b`, `a && b`, `a .. b`, `a ?? b`.
 - CST: `ExprBinary` (`lower.rs:372`).
 - AST-builder: `lower.rs:762` (`lower_binary`).
-- HIR lowering: `expr.rs:94` → `lower_binary_with_precedence` (`expr.rs:955`) flattens
-  nested `AstExpr::Binary` into operand / operator lists then Pratt-parses with
-  `pratt_parse`. Each reduction calls `desugar_binary_hir` (`desugar.rs:21`):
+- Precedence: decided by the parser (`kestrel-parser` `binary_binding_power`);
+  the CST/AST nesting is final.
+- HIR lowering: `expr.rs` → `lower_binary` lowers each `AstExpr::Binary` as
+  written and calls `desugar_binary_hir` (`desugar.rs`):
   - Short-circuit ops (`&&`, `||`, `??`) wrap RHS in a parameterless `HirExpr::Closure`
     then emit `HirExpr::ProtocolCall` (`desugar.rs:29-54`).
   - Regular ops emit `HirExpr::ProtocolCall` directly (`desugar.rs:57-71`).
@@ -507,11 +515,10 @@ Enum: `lib/kestrel-ast/src/ast_body.rs:42`.
 - AST-builder: `lower.rs:355`.
 - HIR lowering: `expr.rs:185` → `AstExpr::Paren { inner, .. } => self.lower_expr(body, inner)`.
   Unwrapped — no `HirExpr::Paren` exists.
-- Rationale: preserved at AST level so the Pratt parser (`lower_binary_with_precedence`
-  at `expr.rs:955`) doesn't merge across user-written grouping.
+- Rationale: preserved at AST level as the record of user-written grouping
+  (precedence itself is already in the tree from the parser).
 - Type-infer / MIR: N/A (unwrapped before reaching them).
-- Gotchas: don't flatten at AST level — `AstExpr::Paren` is load-bearing for
-  precedence. Only HIR removes it.
+- Gotchas: only HIR removes it.
 
 ### AstExpr::Error
 

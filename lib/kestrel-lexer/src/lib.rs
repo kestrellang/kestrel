@@ -1,5 +1,7 @@
 pub use kestrel_span::{Span, Spanned};
 use logos::Logos;
+
+mod modal;
 use unicode_xid::UnicodeXID;
 
 /// Check if a string is a valid Unicode identifier
@@ -111,258 +113,6 @@ fn scan_raw_close(
     true
 }
 
-/// Scan a nested string within an interpolation expression.
-/// Returns the number of bytes consumed (including the closing quote).
-fn scan_nested_string(chars: &mut std::iter::Peekable<std::str::Chars>, remainder: &str) -> usize {
-    let mut offset = 0;
-
-    while let Some(&c) = chars.peek() {
-        chars.next();
-        offset += c.len_utf8();
-
-        match c {
-            '"' => {
-                // End of nested string
-                return offset;
-            },
-            '\\' => {
-                // Escape sequence - consume the next character
-                if let Some(&next) = chars.peek() {
-                    chars.next();
-                    offset += next.len_utf8();
-
-                    if next == '(' {
-                        // Nested interpolation within nested string!
-                        offset += scan_interpolation(chars, remainder);
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    offset
-}
-
-/// Scan an interpolation expression `\(...)`.
-/// We've already consumed the `\(`. This scans until the matching `)`.
-/// Returns the number of additional bytes consumed.
-fn scan_interpolation(chars: &mut std::iter::Peekable<std::str::Chars>, remainder: &str) -> usize {
-    let mut offset = 0;
-    let mut paren_depth = 1; // We've already seen one '('
-    let mut bracket_depth = 0;
-    let mut brace_depth = 0;
-
-    while let Some(&c) = chars.peek() {
-        chars.next();
-        offset += c.len_utf8();
-
-        match c {
-            '(' => paren_depth += 1,
-            ')' => {
-                paren_depth -= 1;
-                if paren_depth == 0 {
-                    // End of interpolation
-                    return offset;
-                }
-            },
-            '[' => bracket_depth += 1,
-            ']' => {
-                if bracket_depth > 0 {
-                    bracket_depth -= 1;
-                }
-            },
-            '{' => brace_depth += 1,
-            '}' => {
-                if brace_depth > 0 {
-                    brace_depth -= 1;
-                }
-            },
-            '"' => {
-                // Nested string within interpolation
-                offset += scan_nested_string(chars, remainder);
-            },
-            '\'' => {
-                // Character literal within interpolation - scan it
-                offset += scan_char_literal(chars);
-            },
-            '/' => {
-                // Possible comment - check for // or /*
-                if let Some(&next) = chars.peek() {
-                    if next == '/' {
-                        // Line comment - skip to end of line
-                        chars.next();
-                        offset += 1;
-                        while let Some(&c) = chars.peek() {
-                            if c == '\n' {
-                                break;
-                            }
-                            chars.next();
-                            offset += c.len_utf8();
-                        }
-                    } else if next == '*' {
-                        // Block comment - skip with nesting
-                        chars.next();
-                        offset += 1;
-                        offset += scan_block_comment_in_interpolation(chars);
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    // Unterminated interpolation
-    offset
-}
-
-/// Scan a character literal within an interpolation.
-/// We've already consumed the opening `'`.
-fn scan_char_literal(chars: &mut std::iter::Peekable<std::str::Chars>) -> usize {
-    let mut offset = 0;
-
-    while let Some(&c) = chars.peek() {
-        chars.next();
-        offset += c.len_utf8();
-
-        match c {
-            '\'' => return offset, // End of char literal
-            '\\' => {
-                // Escape sequence - consume next char
-                if let Some(&next) = chars.peek() {
-                    chars.next();
-                    offset += next.len_utf8();
-                }
-            },
-            _ => {},
-        }
-    }
-
-    offset
-}
-
-/// Scan a block comment within an interpolation (handles nesting).
-/// We've already consumed `/*`.
-fn scan_block_comment_in_interpolation(chars: &mut std::iter::Peekable<std::str::Chars>) -> usize {
-    let mut offset = 0;
-    let mut depth = 1;
-
-    while let Some(&c) = chars.peek() {
-        chars.next();
-        offset += c.len_utf8();
-
-        if c == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            offset += 1;
-            depth += 1;
-        } else if c == '*' && chars.peek() == Some(&'/') {
-            chars.next();
-            offset += 1;
-            depth -= 1;
-            if depth == 0 {
-                return offset;
-            }
-        }
-    }
-
-    offset
-}
-
-/// Parse a cooked string literal. Dispatches to single-line or multi-line
-/// based on the opening sequence.
-///
-/// - `"..."` — single-line, supports escapes (`\n`, `\xHH`, `\u{HEX}`,
-///   `\<nl>` continuation) and `\(...)` interpolation.
-/// - `"""\n...\n"""` — multi-line; same escape and interpolation rules,
-///   plus indent strip applied downstream by the HIR lower / analyzer.
-///
-/// 3 consecutive UN-ESCAPED `"`s close a multi-line string. To embed `"""`
-/// literally inside multi-line content, escape one of the quotes (e.g.
-/// `\"""`) or use the raw form `#"""..."""#`.
-fn parse_string(lex: &mut logos::Lexer<Token>) -> bool {
-    let remainder = lex.remainder();
-    let bytes = remainder.as_bytes();
-    if bytes.len() >= 2 && bytes[0] == b'"' && bytes[1] == b'"' {
-        // `"""` opener. Consume 2 extra quotes here, then scan content.
-        return parse_multiline_cooked(lex);
-    }
-    parse_single_line_cooked(lex)
-}
-
-fn parse_single_line_cooked(lex: &mut logos::Lexer<Token>) -> bool {
-    let remainder = lex.remainder();
-    let mut chars = remainder.chars().peekable();
-    let mut offset = 0;
-
-    while let Some(&c) = chars.peek() {
-        chars.next();
-        offset += c.len_utf8();
-
-        match c {
-            '"' => {
-                // End of string
-                lex.bump(offset);
-                return true;
-            },
-            '\\' => {
-                // Escape sequence
-                if let Some(&next) = chars.peek() {
-                    chars.next();
-                    offset += next.len_utf8();
-
-                    if next == '(' {
-                        // Interpolation - scan the expression properly
-                        offset += scan_interpolation(&mut chars, remainder);
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    // Unterminated string - consume everything we've seen
-    lex.bump(offset);
-    true
-}
-
-fn parse_multiline_cooked(lex: &mut logos::Lexer<Token>) -> bool {
-    let remainder = lex.remainder();
-    let mut chars = remainder.chars().peekable();
-    // Skip the 2 extra opener quotes (the regex matched 1).
-    chars.next();
-    chars.next();
-    let mut offset = 2;
-    let mut consecutive_quotes = 0;
-
-    while let Some(&c) = chars.peek() {
-        chars.next();
-        offset += c.len_utf8();
-
-        if c == '"' {
-            consecutive_quotes += 1;
-            if consecutive_quotes == 3 {
-                lex.bump(offset);
-                return true;
-            }
-        } else {
-            consecutive_quotes = 0;
-            if c == '\\'
-                && let Some(&next) = chars.peek()
-            {
-                chars.next();
-                offset += next.len_utf8();
-                if next == '(' {
-                    offset += scan_interpolation(&mut chars, remainder);
-                }
-            }
-        }
-    }
-
-    // Unterminated multi-line string — consume everything we've seen.
-    lex.bump(offset);
-    true
-}
-
 /// Parse nested block comments and return the full comment as a token
 fn parse_block_comment(lex: &mut logos::Lexer<Token>) -> bool {
     let remainder = lex.remainder();
@@ -424,11 +174,33 @@ pub enum Token {
     #[regex(r"[\p{L}_][\p{L}\p{N}_]*", is_valid_identifier)]
     Identifier,
 
-    // Cooked string literals — the callback dispatches between single-line
-    // (`"..."`) and multi-line (`"""...\n...\n..."""`) forms. Both support
-    // escape sequences and `\(...)` interpolation.
-    #[regex(r#"""#, parse_string)]
+    // ===== Cooked strings (see `modal.rs`) =====
+    // Logos only recognises the opener; `lex` scans the body in string mode.
+    // A string without `\(…)` holes comes out as ONE `String` token (its
+    // whole source text); a string with holes comes out as
+    // `StringStart (StringFragment | InterpStart <hole tokens>
+    // (Colon FormatSpec)? InterpEnd)* StringEnd`.
+    /// A complete cooked string literal with no interpolation hole.
     String,
+
+    /// `"` or `"""` opening an interpolated string.
+    #[regex(r#""("")?"#)]
+    StringStart,
+
+    /// Literal text between holes (escapes still encoded).
+    StringFragment,
+
+    /// `\(` opening an interpolation hole.
+    InterpStart,
+
+    /// `)` closing an interpolation hole.
+    InterpEnd,
+
+    /// The format specification after a hole's top-level `:`, e.g. `08x`.
+    FormatSpec,
+
+    /// `"` or `"""` closing an interpolated string.
+    StringEnd,
 
     // Character literals - single quotes with escape support
     #[regex(r#"'([^'\\]|\\(.|\r|\n))*'"#)]
@@ -823,11 +595,13 @@ pub type SpannedToken = Spanned<Token>;
 /// Lex source code and return an iterator of tokens with their spans.
 ///
 /// The `file_id` is embedded in each token's span for use in diagnostics.
+/// Cooked strings are lexed modally (`modal.rs`): interpolation holes are
+/// ordinary tokens between `InterpStart` and `InterpEnd`.
 pub fn lex(
     source: &str,
     file_id: usize,
 ) -> impl Iterator<Item = Result<SpannedToken, Spanned<()>>> + '_ {
-    Token::lexer(source).spanned().map(move |(token, span)| {
+    modal::lex_modal(source).into_iter().map(move |(token, span)| {
         let span = Span::new(file_id, span);
         token
             .map(|t| Spanned::new(t, span.clone()))
@@ -1270,157 +1044,231 @@ mod tests {
         assert_eq!(tokens[0].span.range(), 0..source.len());
     }
 
+    /// Non-trivia token kinds of `source`, with each token's text.
+    fn kinds(source: &str) -> Vec<(Token, &str)> {
+        filter_trivia(lex(source, 0).collect())
+            .into_iter()
+            .map(|t| (t.value, &source[t.span.range()]))
+            .collect()
+    }
+
+    /// Lexing must cover the source exactly: every byte in exactly one token
+    /// (trivia included), in order.
+    fn assert_lossless(source: &str) {
+        let mut pos = 0;
+        for t in lex(source, 0) {
+            let span = match t {
+                Ok(t) => t.span,
+                Err(e) => e.span,
+            };
+            assert_eq!(span.start, pos, "gap or overlap in {source:?}");
+            pos = span.end;
+        }
+        assert_eq!(pos, source.len(), "lexing stopped early in {source:?}");
+    }
+
+    use Token as T;
+
+    #[test]
+    fn plain_strings_stay_one_token() {
+        for source in [r#""hello""#, r#""""#, r#""a\"b""#, r#""\\(not a hole)""#, "\"\"\"\n x\n \"\"\""] {
+            assert_lossless(source);
+            assert_eq!(kinds(source), vec![(T::String, source)], "{source}");
+        }
+    }
+
     #[test]
     fn test_string_interpolation_basic() {
-        // Simple interpolation
         let source = r#""Hello \(name)!""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-        // Verify the full string is captured
-        assert_eq!(tokens[0].span.range(), 0..source.len());
+        assert_lossless(source);
+        assert_eq!(
+            kinds(source),
+            vec![
+                (T::StringStart, "\""),
+                (T::StringFragment, "Hello "),
+                (T::InterpStart, "\\("),
+                (T::Identifier, "name"),
+                (T::InterpEnd, ")"),
+                (T::StringFragment, "!"),
+                (T::StringEnd, "\""),
+            ]
+        );
 
-        // Multiple interpolations
         let source = r#""\(a) and \(b)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-        assert_eq!(tokens[0].span.range(), 0..source.len());
+        assert_lossless(source);
+        let k: Vec<_> = kinds(source).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(
+            k,
+            vec![
+                T::StringStart,
+                T::InterpStart,
+                T::Identifier,
+                T::InterpEnd,
+                T::StringFragment,
+                T::InterpStart,
+                T::Identifier,
+                T::InterpEnd,
+                T::StringEnd,
+            ]
+        );
     }
 
     #[test]
     fn test_string_interpolation_nested_strings() {
-        // Nested string in interpolation: "\(dict["key"])"
+        // A string nested in a hole is lexed by the same scanner.
         let source = r#""\(dict["key"])""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-        assert_eq!(tokens[0].span.range(), 0..source.len());
-
-        // More complex: "\(a["b"]["c"])"
-        let source = r#""\(a["b"]["c"])""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-        assert_eq!(tokens[0].span.range(), 0..source.len());
+        assert_lossless(source);
+        assert_eq!(
+            kinds(source),
+            vec![
+                (T::StringStart, "\""),
+                (T::InterpStart, "\\("),
+                (T::Identifier, "dict"),
+                (T::LBracket, "["),
+                (T::String, "\"key\""),
+                (T::RBracket, "]"),
+                (T::InterpEnd, ")"),
+                (T::StringEnd, "\""),
+            ]
+        );
     }
 
     #[test]
     fn test_string_interpolation_nested_interpolation() {
-        // Nested interpolation: "\("inner \(x)")"
         let source = r#""\("inner \(x)")""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-        assert_eq!(tokens[0].span.range(), 0..source.len());
+        assert_lossless(source);
+        let k: Vec<_> = kinds(source).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(
+            k,
+            vec![
+                T::StringStart,
+                T::InterpStart,
+                T::StringStart,
+                T::StringFragment,
+                T::InterpStart,
+                T::Identifier,
+                T::InterpEnd,
+                T::StringEnd,
+                T::InterpEnd,
+                T::StringEnd,
+            ]
+        );
     }
 
     #[test]
     fn test_string_interpolation_with_expressions() {
-        // Interpolation with function call
-        let source = r#""\(foo(a, b))""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Interpolation with array subscript
-        let source = r#""\(arr[0])""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Interpolation with arithmetic
-        let source = r#""\(a + b * c)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Interpolation with closure
-        let source = r#""\(items.map { x in x * 2 })""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
+        for source in [
+            r#""\(foo(a, b))""#,
+            r#""\(a + b * c)""#,
+            r#""\(items.map { x in x * 2 })""#,
+        ] {
+            assert_lossless(source);
+            let toks = kinds(source);
+            assert_eq!(toks.first().unwrap().0, T::StringStart, "{source}");
+            assert_eq!(toks.last().unwrap().0, T::StringEnd, "{source}");
+            assert_eq!(toks[toks.len() - 2].0, T::InterpEnd, "{source}");
+        }
     }
 
     #[test]
     fn test_string_interpolation_with_format_spec() {
-        // Format specifier
-        let source = r#""\(x:>8)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Hex format
         let source = r#""\(n:08x)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
+        assert_lossless(source);
+        assert_eq!(
+            kinds(source),
+            vec![
+                (T::StringStart, "\""),
+                (T::InterpStart, "\\("),
+                (T::Identifier, "n"),
+                (T::Colon, ":"),
+                (T::FormatSpec, "08x"),
+                (T::InterpEnd, ")"),
+                (T::StringEnd, "\""),
+            ]
+        );
+    }
+
+    #[test]
+    fn colon_inside_brackets_is_not_a_format_spec() {
+        // Audit H4: `"\([1: 2].count)"` — the `:` belongs to a dictionary.
+        let source = r#""\([1: 2].count)""#;
+        assert_lossless(source);
+        let toks = kinds(source);
+        assert!(toks.iter().all(|(k, _)| *k != T::FormatSpec), "{toks:?}");
+        assert!(toks.iter().any(|(k, _)| *k == T::Colon));
     }
 
     #[test]
     fn test_string_interpolation_edge_cases() {
-        // Empty interpolation (will be caught as error later)
-        let source = r#""\()""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
+        // Empty hole: diagnosed by the parser.
+        let k: Vec<_> = kinds(r#""\()""#).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(k, vec![T::StringStart, T::InterpStart, T::InterpEnd, T::StringEnd]);
 
-        // Escaped backslash before paren (not interpolation)
-        let source = r#""\\(not interpolation)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Consecutive interpolations
-        let source = r#""\(a)\(b)\(c)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Interpolation at boundaries
-        let source = r#""\(x)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
+        // Consecutive holes.
+        let k: Vec<_> = kinds(r#""\(a)\(b)""#).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(
+            k,
+            vec![
+                T::StringStart,
+                T::InterpStart,
+                T::Identifier,
+                T::InterpEnd,
+                T::InterpStart,
+                T::Identifier,
+                T::InterpEnd,
+                T::StringEnd,
+            ]
+        );
     }
 
     #[test]
     fn test_string_interpolation_with_char_literal() {
-        // Char literal inside interpolation
-        let source = r#""\(c == 'x')""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Char literal with escape
-        let source = r#""\(c == '\n')""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
+        for source in [r#""\(c == ')')""#, r#""\(c == '\n')""#] {
+            assert_lossless(source);
+            let toks = kinds(source);
+            assert!(toks.iter().any(|(k, _)| *k == T::Char), "{source}");
+            assert_eq!(toks.last().unwrap().0, T::StringEnd, "{source}");
+        }
     }
 
     #[test]
     fn test_string_interpolation_with_comments() {
-        // Line comment in interpolation
-        let source = "\"\\(x // comment\n)\"";
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
-
-        // Block comment in interpolation
-        let source = r#""\(x /* comment */ + y)""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0].value, Token::String);
+        for source in ["\"\\(x // comment\n)\"", r#""\(x /* ) */ + y)""#] {
+            assert_lossless(source);
+            assert_eq!(kinds(source).last().unwrap().0, T::StringEnd, "{source}");
+        }
     }
 
     #[test]
     fn test_string_after_interpolated_string() {
-        // Ensure next string is correctly tokenized
         let source = r#""\(x)" "y""#;
-        let tokens = filter_trivia(lex(source, 0).collect());
-        assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].value, Token::String);
-        assert_eq!(tokens[1].value, Token::String);
+        assert_lossless(source);
+        let toks = kinds(source);
+        assert_eq!(toks.last().unwrap(), &(T::String, "\"y\""));
+    }
+
+    #[test]
+    fn multiline_interpolated_string() {
+        let source = "\"\"\"\n  a \\(x) \"quoted\"\n  \"\"\"";
+        assert_lossless(source);
+        let toks = kinds(source);
+        assert_eq!(toks.first().unwrap(), &(T::StringStart, "\"\"\""));
+        assert_eq!(toks.last().unwrap(), &(T::StringEnd, "\"\"\""));
+    }
+
+    #[test]
+    fn unterminated_single_line_string_stops_at_the_line_break() {
+        let source = "let s = \"abc\nlet t = 1";
+        assert_lossless(source);
+        let toks = kinds(source);
+        assert_eq!(toks[3], (T::String, "\"abc"));
+        // The next line is code again.
+        assert_eq!(toks[4].0, T::Let);
+    }
+
+    #[test]
+    fn single_line_string_may_span_lines_when_closed() {
+        let source = "\"abc\ndef\"";
+        assert_eq!(kinds(source), vec![(T::String, source)]);
     }
 }

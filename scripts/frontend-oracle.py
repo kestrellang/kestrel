@@ -312,6 +312,47 @@ def fix_double_optional(node):
         inner.children.pop()
 
 
+def flatten_binary(node):
+    """Phase 2: the parser applies precedence, the baseline left-folded every
+    operator chain. Compare chains as flat `operand op operand …` lists."""
+    if node.is_token:
+        return
+    for c in node.children:
+        flatten_binary(c)
+    if node.kind != "Expression" or len(node.children) != 1:
+        return
+    inner = node.children[0]
+    if inner.is_token or inner.kind != "ExprBinary":
+        return
+    flat = []
+    for c in inner.children:
+        if (not c.is_token and c.kind == "Expression" and len(c.children) == 1
+                and not c.children[0].is_token and c.children[0].kind == "BinaryChain"):
+            flat.extend(c.children[0].children)
+        else:
+            flat.append(c)
+    chain = Node("BinaryChain")
+    chain.children = flat
+    node.children = [chain]
+
+
+def collapse_interpolation(node, is_base):
+    """Phase 2: interpolated strings are structured in the new tree; the
+    baseline had one `String` token. Compare both as an opaque literal."""
+    if node.is_token:
+        return
+    for i, c in enumerate(node.children):
+        if not c.is_token and c.kind == "ExprInterpolatedString":
+            s = Node("ExprString")
+            s.children = [Node("String", '"<interpolated>"')]
+            node.children[i] = s
+        elif (not c.is_token and c.kind == "ExprString" and c.children
+              and c.children[0].is_token and "\\\\(" in c.children[0].text):
+            c.children[0].text = '"<interpolated>"'
+        else:
+            collapse_interpolation(c, is_base)
+
+
 def drop_fixed_lexemes(node):
     if node.is_token:
         return
@@ -353,6 +394,10 @@ def align_and_drop(base, new):
     bt, nt = tokens(base, []), tokens(new, [])
     drop, i, j = set(), 0, 0
     while j < len(nt):
+        # The dump truncates long token text, so a baseline interpolated
+        # string may not show its `\(`: accept any String there.
+        if (i < len(bt) and nt[j].text == '"<interpolated>"' and bt[i].kind == "String"):
+            bt[i].text = nt[j].text
         if i < len(bt) and same_token(bt[i], nt[j]):
             # `]]` in new vs `]` in base: the baseline kept the *outer*
             # bracket, so drop the inner (first) one.
@@ -444,6 +489,10 @@ def compare_cst(path, btxt, ntxt):
     strip(nroot, False, False)
     fix_double_optional(broot)
     reorder_trailing_closures(nroot)
+    collapse_interpolation(broot, True)
+    collapse_interpolation(nroot, False)
+    flatten_binary(broot)
+    flatten_binary(nroot)
     mismatch = align_and_drop(broot, nroot)
     b, n = render(broot), render(nroot)
     status = "identical" if b == n and not notes else "different"
@@ -591,6 +640,31 @@ def read(p):
         return None
 
 
+def output_text(binary, kind, path):
+    """Recompute one output (same format as `collect`) without caching."""
+    with tempfile.TemporaryDirectory() as td:
+        dest = Path(td) / "out"
+        collect_one(os.path.abspath(binary), str(dest), kind, path)
+        return read(out_path(str(dest), kind, path))
+
+
+def diag_signature(text):
+    return frozenset(Counter(diag_key(d) for d in parse_diags(text)).items())
+
+
+def recheck(args, kind, path):
+    """Re-run both binaries `args.recheck` times. The compiler has some
+    pre-existing nondeterminism (diagnostic sets that vary run to run), so a
+    file is `flaky` — not a difference — when some new run reproduces some
+    baseline run exactly."""
+    sig = diag_signature if kind == "diag" else (lambda t: t)
+    base_runs = {sig(output_text(args.base_bin, kind, path)) for _ in range(args.recheck)}
+    new_runs = {sig(output_text(args.new_bin, kind, path)) for _ in range(args.recheck)}
+    if base_runs & new_runs:
+        return "flaky" if len(base_runs) > 1 or len(new_runs) > 1 else "identical-on-rerun"
+    return None
+
+
 def cmd_compare(args):
     kinds = args.kinds.split(",")
     files = corpus(args.filter)
@@ -622,6 +696,12 @@ def cmd_compare(args):
                 if bc == nc:
                     stats["identical"] += 1
                     continue
+                if args.recheck:
+                    rc = recheck(args, kind, f)
+                    if rc:
+                        stats[rc] += 1
+                        details.append((f, rc, ""))
+                        continue
                 only_parse = all(is_parse_error(dict(zip(
                     ("sev", "code", "msg", "file", "line", "label", "notes"), k)))
                     for k in (bc - nc) + (nc - bc))
@@ -635,6 +715,9 @@ def cmd_compare(args):
             elif kind == "exec":
                 if b == n:
                     stats["identical"] += 1
+                elif args.recheck and (rc := recheck(args, kind, f)):
+                    stats[rc] += 1
+                    details.append((f, rc, ""))
                 else:
                     stats["different"] += 1
                     details.append((f, "different", f"base:\n{b[:400]}\nnew:\n{n[:400]}"))
@@ -666,6 +749,10 @@ def main():
     k.add_argument("--kinds", default="cst,diag")
     k.add_argument("--filter")
     k.add_argument("--verbose", "-v", action="store_true")
+    k.add_argument("--recheck", type=int, default=0,
+                   help="re-run differing diag/exec files N times with both binaries")
+    k.add_argument("--base-bin", help="baseline binary (for --recheck)")
+    k.add_argument("--new-bin", help="new binary (for --recheck)")
     a = ap.parse_args()
     {"collect": cmd_collect, "compare": cmd_compare}[a.cmd](a)
 

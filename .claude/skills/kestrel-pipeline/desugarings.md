@@ -35,9 +35,9 @@ Emits witness-based method dispatch.
 
 ### Source: binary operators
 
-- Trigger: `AstExpr::Binary` (including chained Pratt-parsed expressions).
-- Site: `desugar.rs:21` (`desugar_binary_hir`) — invoked by `lower_binary_with_precedence`
-  (`expr.rs:955`) for each reduction.
+- Trigger: `AstExpr::Binary` (precedence already applied by the parser).
+- Site: `desugar.rs` (`desugar_binary_hir`) — invoked by `lower_binary` in
+  `expr.rs` for each binary node.
 - Shape:
   ```
   ProtocolCall {
@@ -475,8 +475,8 @@ unwraps it:
 AstExpr::Paren { inner, .. } => self.lower_expr(body, inner),
 ```
 
-AstExpr::Paren exists only so the Pratt parser in `lower_binary_with_precedence`
-doesn't flatten across user-written grouping.
+AstExpr::Paren records user-written grouping; precedence is already in the
+tree (the parser applies it), so HIR just unwraps it.
 
 ---
 

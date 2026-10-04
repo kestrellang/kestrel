@@ -45,6 +45,7 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::Integer,
         K::Float,
         K::String,
+        K::StringStart,
         K::RawString,
         K::Char,
         K::Boolean,
@@ -115,33 +116,34 @@ fn is_compound_assign(kind: Option<K>) -> bool {
     )
 }
 
-fn is_binary_op(kind: Option<K>) -> bool {
-    matches!(
-        kind,
-        Some(
-            K::Plus
-                | K::Minus
-                | K::Star
-                | K::Slash
-                | K::Percent
-                | K::Ampersand
-                | K::Pipe
-                | K::Caret
-                | K::LessLess
-                | K::GreaterGreater
-                | K::Less
-                | K::Greater
-                | K::LessEquals
-                | K::GreaterEquals
-                | K::EqualsEquals
-                | K::BangEquals
-                | K::And
-                | K::Or
-                | K::QuestionQuestion
-                | K::DotDotEquals
-                | K::DotDotLess
-        )
-    )
+/// Binding power of a binary operator: `(left, right)`. Higher binds
+/// tighter. Left-associative operators have `right = left + 1`; `??` is
+/// right-associative (`right = left`). **This is the operator table** — the
+/// AST and HIR take the tree it produces as is.
+///
+/// | power | operators |
+/// |------:|-----------|
+/// | 10 | `or` |
+/// | 15 | `??` (right-assoc) |
+/// | 20 | `and` |
+/// | 30 | `==` `!=` `<` `>` `<=` `>=` (left-assoc: `a < b < c` is `(a < b) < c`) |
+/// | 40 | `..=` `..<` |
+/// | 50 | `+` `-` `\|` `^` |
+/// | 60 | `*` `/` `%` `&` |
+/// | 70 | `<<` `>>` |
+pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
+    let prec = match kind {
+        K::Or => 10,
+        K::QuestionQuestion => return Some((15, 15)),
+        K::And => 20,
+        K::EqualsEquals | K::BangEquals | K::Less | K::Greater | K::LessEquals | K::GreaterEquals => 30,
+        K::DotDotEquals | K::DotDotLess => 40,
+        K::Plus | K::Minus | K::Pipe | K::Caret => 50,
+        K::Star | K::Slash | K::Percent | K::Ampersand => 60,
+        K::LessLess | K::GreaterGreater => 70,
+        _ => return None,
+    };
+    Some((prec, prec + 1))
 }
 
 fn is_unary_op(kind: Option<K>) -> bool {
@@ -190,14 +192,22 @@ fn finish2(p: &mut Parser<'_>, (e, k): (Marker, Marker), kind: K) -> ExprInfo {
     }
 }
 
+/// Precedence climbing over [`binary_binding_power`]: operands bind to the
+/// tightest operator, so the CST has the final shape.
 fn binary(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
+    binary_bp(p, cond, 0)
+}
+
+fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
     let mut lhs = operand(p, cond)?;
-    while is_binary_op(p.current()) {
+    while let Some((left, right)) = p.current().and_then(binary_binding_power) {
+        if left < min_bp {
+            break;
+        }
         lhs = wrap(p, lhs.cm, K::ExprBinary, |p| {
             p.bump_any();
-            if operand(p, cond).is_none() {
-                // operand() already reported
-            }
+            // operand() reports a missing right-hand side.
+            binary_bp(p, cond, right);
         });
     }
     Some(lhs)
@@ -458,6 +468,7 @@ fn primary(p: &mut Parser<'_>) -> Option<Chain> {
         Some(
             K::Integer | K::Float | K::String | K::RawString | K::Char | K::Boolean | K::Null,
         ) => literal(p),
+        Some(K::StringStart) => interpolated_string(p),
         Some(K::LBracket) => array_or_dict(p),
         Some(K::LParen) => paren(p),
         Some(K::Break | K::Continue) => jump(p),
@@ -477,6 +488,7 @@ fn cond_primary(p: &mut Parser<'_>) -> Option<Chain> {
         Some(
             K::Integer | K::Float | K::String | K::RawString | K::Char | K::Boolean | K::Null,
         ) => literal(p),
+        Some(K::StringStart) => interpolated_string(p),
         Some(K::LBracket) => array_or_dict(p),
         Some(K::LParen) => paren(p),
         Some(K::Dot) => implicit_member(p),
@@ -502,6 +514,70 @@ fn literal(p: &mut Parser<'_>) -> ExprInfo {
     let m = start2(p);
     p.bump_any();
     finish2(p, m, kind)
+}
+
+/// `"text \(expr) text \(expr:spec)"` — `ExprInterpolatedString` with
+/// `StringFragment` tokens and one `StringInterpolation` node per hole.
+fn interpolated_string(p: &mut Parser<'_>) -> ExprInfo {
+    let m = start2(p);
+    let start = p.token_pos();
+    p.bump(K::StringStart);
+    loop {
+        match p.current() {
+            Some(K::StringFragment) => p.bump(K::StringFragment),
+            Some(K::InterpStart) => interpolation(p),
+            Some(K::StringEnd) => {
+                p.bump(K::StringEnd);
+                break;
+            },
+            _ => {
+                let range = p.range_of(start);
+                p.push_error(SyntaxError::new(
+                    codes::UNCLOSED_DELIMITER,
+                    "unterminated string literal",
+                    range,
+                ));
+                break;
+            },
+        }
+    }
+    finish2(p, m, K::ExprInterpolatedString)
+}
+
+/// `\( expr (: spec)? )`. A hole that does not parse cleanly keeps its
+/// tokens in an `Error` node, so nothing downstream lowers half an
+/// expression; its errors say they are in an interpolation.
+fn interpolation(p: &mut Parser<'_>) {
+    let m = p.start();
+    p.bump(K::InterpStart);
+    let cp = p.checkpoint();
+    p.enter_hole();
+    let body = p.start();
+    if !p.at(K::InterpEnd) && !p.at(K::Colon) {
+        expr(p);
+    } else {
+        p.error_expected_what("expression");
+    }
+    if !p.at_any(&[K::InterpEnd, K::Colon]) && !p.at_eof() {
+        p.error_expected(&[K::InterpEnd]);
+        while !p.at_any(&[K::InterpEnd, K::Colon]) && !p.at_eof() {
+            p.bump_balanced();
+        }
+    }
+    p.exit_hole();
+    if p.has_errors_since(&cp) {
+        body.complete(p, K::Error);
+    } else {
+        body.abandon(p);
+    }
+    if p.at(K::Colon) {
+        let f = p.start();
+        p.bump(K::Colon);
+        p.eat(K::FormatSpec);
+        f.complete(p, K::FormatSpecifier);
+    }
+    p.expect(K::InterpEnd);
+    m.complete(p, K::StringInterpolation);
 }
 
 /// `name[args]? (. name[args]?)*` — dots may follow line breaks.

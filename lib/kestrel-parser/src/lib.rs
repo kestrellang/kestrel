@@ -37,10 +37,9 @@ mod grammar;
 pub mod parser;
 pub mod syntax_error;
 
-use event::{EventSink, TreeBuilder};
+use event::EventSink;
 use kestrel_lexer::Token;
 use kestrel_span::Span;
-use kestrel_syntax_tree::SyntaxNode;
 
 pub use parser::{ParseError, ParseErrorKind, ParseResult, Parser};
 pub use syntax_error::codes;
@@ -63,15 +62,6 @@ where
     run(source, tokens, sink, grammar::source_file);
 }
 
-/// Parse a lone expression into `sink`. Trailing tokens are reported and
-/// kept in an `Error` node.
-pub fn parse_expr<I>(source: &str, tokens: I, sink: &mut EventSink)
-where
-    I: Iterator<Item = (Token, Span)> + Clone,
-{
-    run(source, tokens, sink, grammar::expression_only);
-}
-
 /// File id carried by the first token, or 0 when there are none.
 fn extract_file_id<I>(tokens: &I) -> usize
 where
@@ -91,41 +81,4 @@ where
 {
     let file_id = extract_file_id(&tokens);
     Parser::parse(source, tokens, parse_source_file, file_id)
-}
-
-/// A standalone expression's syntax tree (rooted at `Expression`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Expression {
-    pub syntax: SyntaxNode,
-    pub span: Span,
-}
-
-/// Parse a lone expression. On any syntax error the tree is
-/// `Expression > Error` covering the input, so callers can treat it as
-/// unparseable without inspecting diagnostics.
-pub fn parse_expr_from_source<I>(source: &str, tokens: I) -> Expression
-where
-    I: Iterator<Item = (Token, Span)> + Clone,
-{
-    let file_id = extract_file_id(&tokens);
-    let mut sink = EventSink::new(file_id);
-    parse_expr(source, tokens, &mut sink);
-    let failed = sink
-        .events()
-        .iter()
-        .any(|e| matches!(e, event::Event::Error { .. }));
-    let events = if failed {
-        let mut sink = EventSink::new(file_id);
-        sink.start_node(kestrel_syntax_tree::SyntaxKind::Expression);
-        sink.start_node(kestrel_syntax_tree::SyntaxKind::Error);
-        sink.finish_node();
-        sink.finish_node();
-        sink.into_events()
-    } else {
-        sink.into_events()
-    };
-    Expression {
-        syntax: TreeBuilder::new(source, events).build(),
-        span: Span::new(file_id, 0..source.len()),
-    }
 }

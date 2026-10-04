@@ -61,7 +61,7 @@ Three kinds of work in a single pass:
 ```
 lib.rs          — LowerBody query entry point
 ctx.rs          — LowerCtx: arenas, scope stack, local allocation
-expr.rs         — Expression lowering, path resolution, call shape detection, Pratt parser
+expr.rs         — Expression lowering, path resolution, call shape detection
 stmt.rs         — Statement lowering (let, expr, guard-let, deinit)
 pat.rs          — Pattern lowering, literal parsing utilities
 desugar.rs      — Operator/loop/try/throw/unwrap/interpolation desugaring
@@ -90,21 +90,15 @@ All mutable state for one body lives in `LowerCtx`:
 
 ## Design Decisions
 
-### Operator precedence is applied here, not in the parser
+### Operator precedence is the parser's
 
-The parser (chumsky-based) emits binary expressions as **flat, left-associative
-chains** with no precedence applied. This is documented in the parser:
-`Binary expression: a + b (flat, no precedence applied yet)`.
-
-This crate corrects precedence via a Pratt parser in `expr.rs`:
-1. `flatten_binary` recursively collects all operands and operators from the
-   nested `AstExpr::Binary` tree into flat lists
-2. `pratt_parse` re-assembles them with correct precedence and associativity
-3. Each operator is then desugared to a `ProtocolCall` via `desugar_binary_hir`
-
-This split is intentional — chumsky's combinator style makes left-recursive
-precedence climbing awkward, and deferring it to the lowerer keeps the parser
-simpler.
+The parser applies precedence and associativity (`kestrel-parser`
+`grammar/exprs.rs::binary_binding_power` is the operator table), so the CST,
+the AST and the spans already have the final shape. `lower_binary` lowers each
+`AstExpr::Binary` as written and desugars it to a `ProtocolCall` via
+`desugar_binary_hir`, with the node's own span. (It used to flatten a
+left-folded chain and re-associate it here, which gave mixed-precedence
+operators the wrong spans — audit H6.)
 
 ### Call shape detection: method calls vs direct calls
 

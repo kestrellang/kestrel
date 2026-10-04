@@ -2,7 +2,7 @@
 
 Expressions are stored in an `Arena<AstExpr>` inside `AstBody`, addressed by `ExprId`. They are unresolved — paths are just names, no symbol resolution, no embedded types.
 
-Grouping parentheses are dropped during lowering. For-loops are NOT desugared. Binary operators are flat (no precedence tree at the AST level).
+Grouping parentheses are dropped during lowering. For-loops are NOT desugared. Binary operators nest with their final precedence (the parser applies it).
 
 ## `AstExpr` Variants
 

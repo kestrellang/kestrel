@@ -36,20 +36,6 @@ pub(crate) fn source_file(p: &mut Parser<'_>) {
     m.complete(p, K::SourceFile);
 }
 
-/// A lone expression (used for interpolation holes). The caller checks that
-/// the whole input was consumed.
-pub(crate) fn expression_only(p: &mut Parser<'_>) {
-    exprs::expr(p);
-    if !p.at_eof() {
-        p.error_expected_what("end of expression");
-        let m = p.start();
-        while !p.at_eof() {
-            p.bump_any();
-        }
-        m.complete(p, K::Error);
-    }
-}
-
 /// Tokens a parameter label or argument label may be spelled with:
 /// identifiers and every keyword except the access modes.
 pub(crate) fn is_label_keyword(kind: K) -> bool {

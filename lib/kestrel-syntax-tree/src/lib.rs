@@ -344,6 +344,13 @@ pub enum SyntaxKind {
     RefClause,         // ref { ... } place accessor (stage 1.5)
     MutatingRefClause, // mutating ref { ... } place accessor (stage 1.5)
     RefBindingPattern, // &name / &mutating name binder pattern (stage 1.5 item 2)
+    // Interpolated strings (modal lexing; see kestrel-lexer `modal.rs`)
+    StringStart,    // `"` or `"""` opening an interpolated string
+    StringFragment, // literal text between holes
+    InterpStart,    // `\(`
+    InterpEnd,      // `)` closing a hole
+    FormatSpec,     // format spec text after a hole's `:`
+    StringEnd,      // `"` or `"""` closing an interpolated string
 
     /// Not a syntax kind — the end-of-enum marker.
     ///
@@ -684,6 +691,12 @@ impl SyntaxKind {
         SyntaxKind::RefClause,
         SyntaxKind::MutatingRefClause,
         SyntaxKind::RefBindingPattern,
+        SyntaxKind::StringStart,
+        SyntaxKind::StringFragment,
+        SyntaxKind::InterpStart,
+        SyntaxKind::InterpEnd,
+        SyntaxKind::FormatSpec,
+        SyntaxKind::StringEnd,
     ];
 }
 
@@ -698,6 +711,12 @@ impl From<Token> for SyntaxKind {
             // Literals
             Token::Identifier => SyntaxKind::Identifier,
             Token::String => SyntaxKind::String,
+            Token::StringStart => SyntaxKind::StringStart,
+            Token::StringFragment => SyntaxKind::StringFragment,
+            Token::InterpStart => SyntaxKind::InterpStart,
+            Token::InterpEnd => SyntaxKind::InterpEnd,
+            Token::FormatSpec => SyntaxKind::FormatSpec,
+            Token::StringEnd => SyntaxKind::StringEnd,
             Token::RawString => SyntaxKind::RawString,
             Token::Char => SyntaxKind::Char,
             Token::Integer => SyntaxKind::Integer,

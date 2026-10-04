@@ -73,13 +73,6 @@ struct LowerCtx {
     pats: Arena<AstPat>,
     stmts: Arena<AstStmt>,
     file_id: usize,
-    /// Byte offset added to every span produced while lowering. Non-zero only
-    /// while re-lowering a `\(...)` interpolation hole, whose sub-expression
-    /// is re-lexed/re-parsed against a substring — the resulting CST spans are
-    /// relative to that substring (offset 0), so without rebasing they would
-    /// point at the file start (#166). The offset re-anchors them to the
-    /// hole's true position in the original file.
-    span_offset: usize,
 }
 
 impl LowerCtx {
@@ -89,20 +82,11 @@ impl LowerCtx {
             pats: Arena::new(),
             stmts: Arena::new(),
             file_id,
-            span_offset: 0,
         }
     }
 
     fn span(&self, node: &SyntaxNode) -> Span {
-        self.rebase(get_node_span(node, self.file_id))
-    }
-
-    /// Shift a substring-relative span into original-file coordinates by the
-    /// active interpolation-hole offset (a no-op when `span_offset` is 0).
-    fn rebase(&self, mut span: Span) -> Span {
-        span.start += self.span_offset;
-        span.end += self.span_offset;
-        span
+        get_node_span(node, self.file_id)
     }
 
     fn alloc_expr(&mut self, expr: AstExpr) -> ExprId {
@@ -348,7 +332,7 @@ impl LowerCtx {
                     span,
                 })
             },
-            SyntaxKind::ExprInterpolatedString => self.lower_string_token(&node),
+            SyntaxKind::ExprInterpolatedString => self.lower_interpolated_string(&node),
 
             // Collections
             SyntaxKind::ExprArray => self.lower_array(&node),
@@ -427,124 +411,98 @@ impl LowerCtx {
 
     // ----- Interpolated String -----
 
-    /// Lower a String-token-bearing node — both `ExprString` and
-    /// `ExprInterpolatedString` carry the literal as a single raw `String` token
-    /// (the parser never emits structured `StringLiteralPart`/`StringInterpolation`
-    /// children), so they lower identically: parse the token for `\(...)` holes
-    /// if the body contains interpolation, else emit a plain string literal.
-    ///
-    /// This is the single source of truth for string lowering. The parser only
-    /// promotes *top-level* strings to `ExprInterpolatedString`; nested strings
-    /// (inside calls, and reparsed interpolation holes) arrive as `ExprString`.
-    /// Both must take this path so nested `\(...)` holes are lowered rather than
-    /// dumped verbatim (#197).
+    /// Lower a plain string literal (`ExprString`): one `String` token whose
+    /// text HIR lowering decodes (escapes, multi-line indentation).
     fn lower_string_token(&mut self, node: &SyntaxNode) -> ExprId {
-        let Some(text) = first_token_text(node) else {
-            return self.lower_literal(node, AstLiteral::String);
-        };
-        // The body span depends on whether this is single-line `"..."` or
-        // multi-line `"""..."""`, so route through `classify`.
-        let form = crate::string_token::classify_string_token(&text);
-        if form.body_end > form.body_start
-            && string_contains_interpolation(&text[form.body_start..form.body_end])
-        {
-            self.lower_interpolated_string_from_token(&text, node)
-        } else {
-            self.lower_literal(node, AstLiteral::String)
-        }
+        self.lower_literal(node, AstLiteral::String)
     }
 
-    /// Parse a string token (e.g. `"hello \(name)!"` or
-    /// `"""\n  hello \(name)\n  """`) into an `InterpolatedString` AST node.
-    /// Used when the parser left this as a plain `ExprString` because it
-    /// only promotes top-level expressions.
-    fn lower_interpolated_string_from_token(
-        &mut self,
-        token_text: &str,
-        node: &SyntaxNode,
-    ) -> ExprId {
+    /// Lower `ExprInterpolatedString`. The lexer split the literal into
+    /// `StringFragment` tokens and `StringInterpolation` nodes, and the
+    /// parser parsed every hole in place, so nothing is re-lexed here: the
+    /// fragments are decoded with the shared escape table and each hole is
+    /// lowered from its own CST node, with real file spans (#166 by
+    /// construction).
+    ///
+    /// Multi-line literals need indentation stripped across lines that may
+    /// contain holes, so the body is assembled with one placeholder
+    /// character per hole, processed as text, and split back at the
+    /// placeholders.
+    fn lower_interpolated_string(&mut self, node: &SyntaxNode) -> ExprId {
         let span = self.span(node);
-        let form = crate::string_token::classify_string_token(token_text);
-        let body = &token_text[form.body_start..form.body_end];
-        // File offset of the start of `inner` (the unescaped body). For
-        // single-line strings `inner == body`, so a byte offset `k` within
-        // `inner` maps to file offset `span.start + form.body_start + k`.
-        // Multi-line bodies are re-processed (indent-stripped / CRLF
-        // normalized) into a fresh buffer whose offsets no longer line up, so
-        // we fall back to anchoring holes at the string token start rather
-        // than risk a wrong offset.
-        let inner_file_base = span.start + form.body_start;
+        let multiline = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::StringStart)
+            .is_some_and(|t| t.text() == "\"\"\"");
+        let holes: Vec<SyntaxNode> = node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::StringInterpolation)
+            .collect();
 
-        // Multi-line cooked: indent-strip + `\r\n` normalize, then split.
-        // We swallow indent errors here for now — the non-interpolated path
-        // (HIR-lower's `decode_string_literal_token`) reports them; surfacing
-        // them through the interpolation pipeline would require new
-        // diagnostic plumbing in `LowerCtx`.
-        let processed_owned;
-        let inner: &str = if form.is_multiline {
-            processed_owned = crate::string_token::process_multiline_body(body, 0, 0).value;
-            &processed_owned
-        } else {
-            body
-        };
+        // The body with each hole replaced by a placeholder no fragment uses.
+        let fragments: String = node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| t.kind() == SyntaxKind::StringFragment)
+            .map(|t| t.text().to_string())
+            .collect();
+        let placeholder = (0xE000u32..)
+            .filter_map(char::from_u32)
+            .find(|c| !fragments.contains(*c))
+            .expect("a free private-use character");
+        let mut body = String::new();
+        for element in node.children_with_tokens() {
+            match element {
+                rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::StringFragment => {
+                    body.push_str(t.text())
+                },
+                rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::StringInterpolation => {
+                    body.push(placeholder)
+                },
+                _ => {},
+            }
+        }
+        // Indent errors are reported for plain multi-line literals by HIR
+        // lowering; an interpolated one strips best-effort.
+        if multiline {
+            body = crate::string_token::process_multiline_body(&body, 0, 0).value;
+        }
 
         let mut parts = Vec::new();
-        let mut chars = inner.char_indices().peekable();
+        let mut holes = holes.into_iter();
         let mut literal = String::new();
-        while let Some((i, c)) = chars.next() {
+        let mut chars = body.char_indices().peekable();
+        while let Some((_, c)) = chars.next() {
+            if c == placeholder {
+                if !literal.is_empty() {
+                    parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+                }
+                if let Some(hole) = holes.next() {
+                    parts.push(self.lower_interpolation_hole(&hole, &span));
+                }
+                continue;
+            }
             if c != '\\' {
                 literal.push(c);
                 continue;
             }
-            // The literal segments between holes go through the SAME escape
-            // table as a plain string (`kestrel_ast::escape`). They used to use
-            // a private `unescape_char_simple` with no `\x` arm, no `\u` arm
-            // and no error path, so `"\u{41} \(x)"` silently produced the text
-            // `u{41} ` — a wrong value with no diagnostic, and nothing
-            // re-decoded it downstream (F26).
+            // The literal segments go through the SAME escape table as a
+            // plain string (`kestrel_ast::escape`, F26).
             let decoded = decode_escape(&mut chars);
             match decoded.result {
-                Ok(Escaped::Interpolation) => {
-                    // Flush accumulated literal
-                    if !literal.is_empty() {
-                        parts.push(StringPart::Literal(std::mem::take(&mut literal)));
-                    }
-
-                    // Extract expression text + optional format spec.
-                    // `i + 2` is the byte offset of the hole expression
-                    // within `inner` (past the `\(`).
-                    let (expr_text, format_spec, _interp_end) =
-                        extract_interpolation(&mut chars, inner, i + 2);
-
-                    // Rebase hole-expression spans onto the original file.
-                    // Single-line: precise; multi-line: anchor at the
-                    // string token start (see `inner_file_base`).
-                    let hole_offset = if form.is_multiline {
-                        span.start
-                    } else {
-                        inner_file_base + i + 2
-                    };
-
-                    // Re-lex and re-parse the expression
-                    let expr = self.reparse_interpolation_expr(&expr_text, &span, hole_offset);
-                    parts.push(StringPart::Interpolation {
-                        expr,
-                        format: format_spec,
-                    });
-                },
                 Ok(Escaped::Scalar(cp)) => match char::from_u32(cp) {
                     Some(ch) => literal.push(ch),
                     None => literal.push_str(&decoded.raw),
                 },
                 Ok(Escaped::LineContinuation) => {},
-                // Malformed escapes keep their source text. `LowerCtx` has no
-                // diagnostic sink, so reporting is the non-interpolated path's
-                // job — same as the multi-line indent errors above.
-                Err(_) => literal.push_str(&decoded.raw),
+                // `\(` never reaches here — the lexer turned every hole
+                // into a node. Malformed escapes keep their source text;
+                // `LowerCtx` has no diagnostic sink, so reporting is the
+                // plain-literal path's job.
+                Ok(Escaped::Interpolation) | Err(_) => literal.push_str(&decoded.raw),
             }
         }
-
-        // Flush any remaining literal
         if !literal.is_empty() {
             parts.push(StringPart::Literal(literal));
         }
@@ -552,44 +510,35 @@ impl LowerCtx {
         self.alloc_expr(AstExpr::InterpolatedString { parts, span })
     }
 
-    /// Re-lex, re-parse, and lower a sub-expression extracted from inside
-    /// `\(...)`. `hole_offset` is the byte offset of `expr_text` in the
-    /// original file; it rebases the substring-relative spans the re-parse
-    /// produces back onto the file (#166).
-    fn reparse_interpolation_expr(
-        &mut self,
-        expr_text: &str,
-        parent_span: &Span,
-        hole_offset: usize,
-    ) -> ExprId {
-        let file_id = self.file_id;
-
-        let tokens: Vec<_> = kestrel_lexer::lex(expr_text, file_id)
-            .filter_map(|t| t.ok())
-            .map(|spanned| (spanned.value, spanned.span))
-            .collect();
-
-        if tokens.is_empty() {
-            return self.alloc_expr(AstExpr::Error {
-                span: parent_span.clone(),
-            });
-        }
-
-        let parsed = kestrel_parser::parse_expr_from_source(expr_text, tokens.into_iter());
-
-        // Lower the hole's expression with spans rebased to file coordinates.
-        // Save/restore so nested interpolation holes compose correctly.
-        let prev_offset = self.span_offset;
-        self.span_offset = hole_offset;
-        let result = if let Some(expr_node) = parsed.syntax.children().next() {
-            self.lower_expr(&expr_node)
-        } else {
-            self.alloc_expr(AstExpr::Error {
-                span: parent_span.clone(),
-            })
+    /// One `\( expr (: spec)? )` hole. A hole the parser could not parse is
+    /// an `Error` node (its error is already reported) and lowers to
+    /// `AstExpr::Error` spanning the hole.
+    fn lower_interpolation_hole(&mut self, hole: &SyntaxNode, string_span: &Span) -> StringPart {
+        let expr = match hole
+            .children()
+            .find(|c| c.kind() == SyntaxKind::Expression || is_expr_kind(c.kind()))
+        {
+            Some(e) => self.lower_expr(&e),
+            None => {
+                let span = if hole.text_range().is_empty() {
+                    string_span.clone()
+                } else {
+                    self.span(hole)
+                };
+                self.alloc_expr(AstExpr::Error { span })
+            },
         };
-        self.span_offset = prev_offset;
-        result
+        let format = hole
+            .children()
+            .find(|c| c.kind() == SyntaxKind::FormatSpecifier)
+            .map(|f| {
+                f.children_with_tokens()
+                    .filter_map(|e| e.into_token())
+                    .filter(|t| t.kind() == SyntaxKind::FormatSpec)
+                    .map(|t| t.text().to_string())
+                    .collect::<String>()
+            });
+        StringPart::Interpolation { expr, format }
     }
 
     // ----- Collections -----
@@ -683,7 +632,7 @@ impl LowerCtx {
             if let Some(token) = elem.as_token() {
                 if token.kind() == SyntaxKind::Identifier {
                     let name = token.text().to_string();
-                    let tok_span = self.rebase(Span::new(self.file_id, token.text_range().into()));
+                    let tok_span = Span::new(self.file_id, token.text_range().into());
 
                     // Check for type arguments following this identifier
                     let type_args = elements
@@ -3011,18 +2960,9 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
         for child in node.children_with_tokens() {
             match &child {
                 rowan::NodeOrToken::Token(token) => {
+                    // Interpolation holes are ordinary CST nodes, so an `it`
+                    // inside `\(...)` is found by this same walk.
                     if token.kind() == SyntaxKind::Identifier && token.text() == "it" {
-                        return true;
-                    }
-                    // Interpolated strings are a single `String` token in the
-                    // CST (holes are only re-parsed during body lowering), so
-                    // an `it` inside `\(...)` is invisible to the Identifier
-                    // check above — extract and re-parse the holes.
-                    // `RawString` tokens never interpolate (lowered as plain
-                    // literals), so they are deliberately excluded.
-                    if token.kind() == SyntaxKind::String
-                        && string_token_references_it(token.text())
-                    {
                         return true;
                     }
                 },
@@ -3046,133 +2986,4 @@ fn closure_body_references_it(node: &SyntaxNode) -> bool {
     walk(node)
 }
 
-/// Does any interpolation hole in this string token reference `it`?
-/// Mirrors the hole extraction in `lower_interpolated_string_from_token`;
-/// only answers the reference question, so spans don't matter and the
-/// re-parse uses a dummy file id.
-fn string_token_references_it(token_text: &str) -> bool {
-    let form = crate::string_token::classify_string_token(token_text);
-    if form.body_end <= form.body_start {
-        return false;
-    }
-    let body = &token_text[form.body_start..form.body_end];
-    if !string_contains_interpolation(body) {
-        return false;
-    }
-    let processed_owned;
-    let inner: &str = if form.is_multiline {
-        processed_owned = crate::string_token::process_multiline_body(body, 0, 0).value;
-        &processed_owned
-    } else {
-        body
-    };
-
-    let mut chars = inner.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        if c != '\\' {
-            continue;
-        }
-        if let Some(&(_, next)) = chars.peek() {
-            if next == '(' {
-                chars.next(); // skip '('
-                let (expr_text, _format, _end) = extract_interpolation(&mut chars, inner, i + 2);
-                if interpolation_expr_references_it(&expr_text) {
-                    return true;
-                }
-            } else {
-                chars.next(); // skip escaped char
-            }
-        }
-    }
-    false
-}
-
-/// Re-lex + re-parse a hole expression and run the same `it`-reference walk
-/// over its CST. Recursing through `closure_body_references_it` keeps the
-/// nested-closure exclusion and handles strings-within-holes.
-fn interpolation_expr_references_it(expr_text: &str) -> bool {
-    let tokens: Vec<_> = kestrel_lexer::lex(expr_text, 0)
-        .filter_map(|t| t.ok())
-        .map(|spanned| (spanned.value, spanned.span))
-        .collect();
-    if tokens.is_empty() {
-        return false;
-    }
-    let parsed = kestrel_parser::parse_expr_from_source(expr_text, tokens.into_iter());
-    closure_body_references_it(&parsed.syntax)
-}
-
-// ===== String interpolation helpers =====
-
-/// Quick check: does the unquoted string body contain `\(`?
-fn string_contains_interpolation(text: &str) -> bool {
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if chars.peek() == Some(&'(') {
-                return true;
-            }
-            chars.next();
-        }
-    }
-    false
-}
-
-/// Scan from just after `\(` to the matching `)`, tracking paren depth and
-/// nested string/char literals. Returns `(expr_text, format_spec, end_offset)`
-/// where `end_offset` is the index in `input` just past the closing `)`.
-fn extract_interpolation(
-    chars: &mut std::iter::Peekable<std::str::CharIndices>,
-    input: &str,
-    start: usize,
-) -> (String, Option<String>, usize) {
-    let mut depth: u32 = 1;
-    let mut in_string = false;
-    let mut in_char = false;
-    let mut format_start: Option<usize> = None;
-
-    while let Some(&(i, c)) = chars.peek() {
-        chars.next();
-
-        if c == '"' && !in_char {
-            in_string = !in_string;
-        }
-        if c == '\'' && !in_string {
-            in_char = !in_char;
-        }
-
-        if in_string || in_char {
-            if c == '\\' {
-                chars.next(); // skip escaped char inside nested literal
-            }
-            continue;
-        }
-
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    let end = i + 1;
-                    if let Some(fmt_start) = format_start {
-                        let expr_text = input[start..fmt_start].to_string();
-                        let fmt_text = input[fmt_start + 1..i].to_string();
-                        return (expr_text, Some(fmt_text), end);
-                    } else {
-                        let expr_text = input[start..i].to_string();
-                        return (expr_text, None, end);
-                    }
-                }
-            },
-            ':' if depth == 1 && format_start.is_none() => {
-                format_start = Some(i);
-            },
-            _ => {},
-        }
-    }
-
-    // Unterminated interpolation — return what we have
-    let expr_text = input[start..].to_string();
-    (expr_text, None, input.len())
-}
 

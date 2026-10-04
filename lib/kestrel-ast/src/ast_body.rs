@@ -461,30 +461,6 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
-    /// Binding power for Pratt parsing (higher = tighter binding).
-    pub fn precedence(&self) -> u8 {
-        match self {
-            BinaryOp::Or => 10,
-            BinaryOp::Coalesce => 15,
-            BinaryOp::And => 20,
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Gt
-            | BinaryOp::Le
-            | BinaryOp::Ge => 30,
-            BinaryOp::RangeInclusive | BinaryOp::RangeExclusive => 40,
-            BinaryOp::Add | BinaryOp::Sub | BinaryOp::BitOr | BinaryOp::BitXor => 50,
-            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem | BinaryOp::BitAnd => 60,
-            BinaryOp::Shl | BinaryOp::Shr => 70,
-        }
-    }
-
-    /// Whether this operator is right-associative (only Coalesce).
-    pub fn is_right_assoc(&self) -> bool {
-        matches!(self, BinaryOp::Coalesce)
-    }
-
     /// How this operator is spelled in Kestrel source.
     ///
     /// **The only place operator spellings live.** There was a second copy in

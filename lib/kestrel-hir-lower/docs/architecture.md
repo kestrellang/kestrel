@@ -54,7 +54,6 @@ What this crate does **not** do: method/field resolution, overload resolution, t
 
 See [design.md](design.md) for detailed rationale on:
 
-- Operator precedence via Pratt parser (applied here, not in the parser)
 - Call shape detection: method vs direct (heuristic on first path segment)
 - Self type resolution walking the owner hierarchy
 - Type alias transparency for simple aliases

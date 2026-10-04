@@ -104,7 +104,7 @@ impl LowerCtx<'_> {
                 // ProtocolCall via the operator → protocol table.
                 self.desugar_postfix_op(body, &op, operand, &span)
             },
-            AstExpr::Binary { .. } => self.lower_binary_with_precedence(body, id),
+            AstExpr::Binary { .. } => self.lower_binary(body, id),
             AstExpr::Assignment { lhs, rhs, span } => {
                 let target = self.lower_expr(body, lhs);
                 let value = self.lower_expr(body, rhs);
@@ -1242,79 +1242,19 @@ impl LowerCtx<'_> {
         current
     }
 
-    // ===== Binary expression Pratt parsing =====
+    // ===== Binary expressions =====
 
-    /// Flatten a nested Binary chain into operands + operators, then Pratt parse
-    /// to produce correct precedence.
-    fn lower_binary_with_precedence(&mut self, body: &AstBody, expr_id: ExprId) -> HirExprId {
-        let mut operands: Vec<ExprId> = Vec::new();
-        let mut operators: Vec<(BinaryOp, Span)> = Vec::new();
-
-        Self::flatten_binary(body, expr_id, &mut operands, &mut operators);
-
-        if operands.len() == 1 {
-            return self.lower_expr(body, operands[0]);
-        }
-
-        self.pratt_parse(
-            body,
-            &mut operands.into_iter().peekable(),
-            &mut operators.into_iter().peekable(),
-            0,
-        )
-    }
-
-    /// Recursively flatten nested Binary exprs into flat operand/operator lists.
-    fn flatten_binary(
-        body: &AstBody,
-        expr_id: ExprId,
-        operands: &mut Vec<ExprId>,
-        operators: &mut Vec<(BinaryOp, Span)>,
-    ) {
-        match &body.exprs[expr_id] {
-            AstExpr::Binary { lhs, op, rhs, span } => {
-                let (lhs, op, rhs, span) = (*lhs, op.clone(), *rhs, span.clone());
-                Self::flatten_binary(body, lhs, operands, operators);
-                operators.push((op, span));
-                Self::flatten_binary(body, rhs, operands, operators);
-            },
-            _ => {
-                operands.push(expr_id);
-            },
-        }
-    }
-
-    /// Pratt parser: precedence climbing over flat operand/operator lists.
-    fn pratt_parse<I, J>(
-        &mut self,
-        body: &AstBody,
-        operands: &mut std::iter::Peekable<I>,
-        operators: &mut std::iter::Peekable<J>,
-        min_bp: u8,
-    ) -> HirExprId
-    where
-        I: Iterator<Item = ExprId>,
-        J: Iterator<Item = (BinaryOp, Span)>,
-    {
-        let first = operands.next().expect("pratt_parse: no operand");
-        let mut lhs = self.lower_expr(body, first);
-
-        loop {
-            let Some((op, _)) = operators.peek() else {
-                break;
-            };
-            let prec = op.precedence();
-            if prec < min_bp {
-                break;
-            }
-
-            let (op, span) = operators.next().unwrap();
-            let next_min = if op.is_right_assoc() { prec } else { prec + 1 };
-            let rhs = self.pratt_parse(body, operands, operators, next_min);
-            lhs = self.desugar_binary_hir(op, lhs, rhs, &span);
-        }
-
-        lhs
+    /// Lower a binary expression. The parser already applied precedence and
+    /// associativity (`kestrel-parser` `binary_binding_power`), so the AST
+    /// nesting is final and `span` covers exactly this operator's operands.
+    fn lower_binary(&mut self, body: &AstBody, expr_id: ExprId) -> HirExprId {
+        let AstExpr::Binary { lhs, op, rhs, span } = &body.exprs[expr_id] else {
+            unreachable!("lower_binary on a non-binary expression");
+        };
+        let (lhs, op, rhs, span) = (*lhs, op.clone(), *rhs, span.clone());
+        let lhs = self.lower_expr(body, lhs);
+        let rhs = self.lower_expr(body, rhs);
+        self.desugar_binary_hir(op, lhs, rhs, &span)
     }
 
     /// Lower call arguments.

@@ -71,6 +71,8 @@ pub(crate) struct Parser<'s> {
     pos: usize,
     events: Vec<Ev>,
     fuel: std::cell::Cell<u32>,
+    /// Nesting depth of interpolation holes being parsed.
+    hole_depth: u32,
 }
 
 /// Saved parser state for [`Parser::rollback`].
@@ -123,6 +125,7 @@ impl<'s> Parser<'s> {
             pos: 0,
             events: Vec::new(),
             fuel: std::cell::Cell::new(FUEL),
+            hole_depth: 0,
         }
     }
 
@@ -275,8 +278,27 @@ impl<'s> Parser<'s> {
 
     // ----- errors -------------------------------------------------------------
 
-    pub fn push_error(&mut self, error: SyntaxError) {
+    pub fn push_error(&mut self, mut error: SyntaxError) {
+        if self.hole_depth > 0 {
+            error.message = format!("invalid expression in string interpolation: {}", error.message);
+        }
         self.events.push(Ev::Error(error));
+    }
+
+    /// Errors reported until [`Parser::exit_hole`] are inside a `\( … )`.
+    pub fn enter_hole(&mut self) {
+        self.hole_depth += 1;
+    }
+
+    pub fn exit_hole(&mut self) {
+        self.hole_depth -= 1;
+    }
+
+    /// Byte range of the token at absolute index `idx`.
+    pub fn range_of(&self, idx: usize) -> std::ops::Range<usize> {
+        self.tokens
+            .get(idx)
+            .map_or_else(|| self.error_range(), |t| t.start..t.end)
     }
 
     /// "expected X, found Y" at the current token.

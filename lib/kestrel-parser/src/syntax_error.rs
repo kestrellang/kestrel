@@ -214,6 +214,11 @@ pub(crate) fn kind_spelling(kind: SyntaxKind) -> &'static str {
         K::Less => "<",
         K::Greater => ">",
         K::At => "@",
+        K::InterpStart => "\\(",
+        K::InterpEnd => ")",
+        K::StringStart | K::StringEnd => "\"",
+        K::StringFragment => "string text",
+        K::FormatSpec => "format specification",
         _ => "token",
     }
 }
