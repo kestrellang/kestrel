@@ -8,5 +8,5 @@ module Test
 @builtin(.Copyable)
 protocol Copyable1 {}
 
-@builtin(.Copyable)
-protocol Copyable2 {} // ERROR: duplicate @builtin(.Copyable): already declared by 'Copyable1'
+@builtin(.Copyable) // ERROR: duplicate @builtin(.Copyable): already declared by 'Copyable1'
+protocol Copyable2 {}
