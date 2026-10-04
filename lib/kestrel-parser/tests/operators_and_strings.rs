@@ -143,3 +143,24 @@ fn unterminated_string_does_not_swallow_the_file() {
         2
     );
 }
+
+#[test]
+fn broken_hole_reports_once() {
+    // `n.0.0` lexes as `n` `.` `0.0`: the hole's first error is the cause;
+    // the leftover tokens are its cascade, not a second diagnostic.
+    let result = parse("func f() { let _ = \"v=\\(n.0.0)\"; }\n");
+    assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+}
+
+#[test]
+fn unclosed_brace_outranks_missing_semicolon_at_the_same_gap() {
+    // The closure takes the function's `}`; at end of file the missing `}`
+    // is the cause and the missing `;` before it is its cascade.
+    let result = parse("func f() {\n    let g = { 42\n}\n");
+    assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+    assert!(
+        result.errors[0].message.starts_with("expected `}`"),
+        "{:?}",
+        result.errors
+    );
+}

@@ -849,3 +849,106 @@ fn std_module_does_not_auto_import_itself() {
         scope.wildcard_imports.len()
     );
 }
+
+// ================================================================
+// Frontend rewrite: lang items, member scopes, import visibility
+// ================================================================
+
+fn resolve_name(
+    ctx: &kestrel_hecs::QueryContext<'_>,
+    name: &str,
+    context: Entity,
+    root: Entity,
+) -> Vec<Entity> {
+    match ctx.query(ResolveName {
+        name: name.to_string(),
+        context,
+        root,
+    }) {
+        NameResolution::Found(es) | NameResolution::Ambiguous(es) => es,
+        NameResolution::NotFound => Vec::new(),
+    }
+}
+
+/// A lang item is the declaration carrying `@builtin`, never a declaration
+/// that merely shares the builtin's source name (audit H2).
+#[test]
+fn builtin_resolves_through_the_annotation_only() {
+    let (world, root) = build_two_files(
+        "module std.core\n@builtin(.Copyable)\npublic protocol Copyable {}",
+        // No `module` line: a root-level struct that shares the name.
+        "struct Copyable {}",
+    );
+    let ctx = world.query_context();
+    let core = find_child(
+        &ctx,
+        find_child(&ctx, root, NodeKind::Module, "std"),
+        NodeKind::Module,
+        "core",
+    );
+    let protocol = find_child(&ctx, core, NodeKind::Protocol, "Copyable");
+    let resolved = ctx.query(ResolveBuiltin {
+        builtin: kestrel_hir::Builtin::Copyable,
+        root,
+    });
+    assert_eq!(resolved, Some(protocol));
+}
+
+/// Instance members are never lexical bindings: a bare field name inside a
+/// method does not resolve (audit H3); `self.count` is the only way in.
+#[test]
+fn instance_members_are_not_lexical() {
+    let (world, root, _) = build_from_source(
+        "module M\nstruct S {\n    var count: lang.i64;\n    static var shared: lang.i64 { 0 }\n    func f() {}\n}",
+    );
+    let ctx = world.query_context();
+    let m = find_child(&ctx, root, NodeKind::Module, "M");
+    let s = find_child(&ctx, m, NodeKind::Struct, "S");
+    let f = find_child(&ctx, s, NodeKind::Function, "f");
+    assert!(resolve_name(&ctx, "count", f, root).is_empty());
+    assert!(resolve_name(&ctx, "f", f, root).is_empty());
+    assert_eq!(resolve_name(&ctx, "shared", f, root).len(), 1);
+}
+
+/// A type's body and its extensions share one member scope.
+#[test]
+fn extensions_see_the_member_scope_of_their_type() {
+    let (world, root, _) = build_from_source(
+        "module M\nstruct S {\n    struct Inner {}\n}\nextend S {\n    func g() {}\n    static func make() {}\n}",
+    );
+    let ctx = world.query_context();
+    let m = find_child(&ctx, root, NodeKind::Module, "M");
+    let s = find_child(&ctx, m, NodeKind::Struct, "S");
+    let inner = find_child(&ctx, s, NodeKind::Struct, "Inner");
+    let ext = ctx
+        .children_of(m)
+        .iter()
+        .copied()
+        .find(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::Extension))
+        .expect("extension");
+    let g = find_child(&ctx, ext, NodeKind::Function, "g");
+    // The body's nested type is visible in the extension...
+    assert_eq!(resolve_name(&ctx, "Inner", g, root), vec![inner]);
+    // ...and the extension's static member is visible from the body.
+    assert_eq!(resolve_name(&ctx, "make", inner, root).len(), 1);
+}
+
+/// Selective imports bind only declarations visible from the importing file
+/// (audit H5).
+#[test]
+fn selective_import_respects_visibility() {
+    let (world, root) = build_two_files(
+        "module Lib\nprivate struct Secret {}\npublic struct Open {}",
+        "module App\nimport Lib.(Secret, Open)",
+    );
+    let ctx = world.query_context();
+    let app = find_child(&ctx, root, NodeKind::Module, "App");
+    let scope = ctx.query(ScopeFor { entity: app, root });
+    assert!(
+        scope
+            .selective_imports
+            .get("Secret")
+            .is_none_or(|v| v.is_empty())
+    );
+    assert_eq!(scope.selective_imports.get("Open").map(Vec::len), Some(1));
+}
