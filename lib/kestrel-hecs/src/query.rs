@@ -5,7 +5,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::accumulator::AccumulatorStore;
-use crate::change::ChangeSet;
 use crate::component::{Component, ComponentStore};
 use crate::entity::Entity;
 use crate::fingerprint::Fingerprint;
@@ -206,7 +205,8 @@ struct ActiveQuery {
 pub struct QueryContext<'a> {
     pub(crate) revision: Revision,
     pub(crate) components: &'a ComponentStore,
-    pub(crate) changes: &'a ChangeSet,
+    /// Per-entity `last_changed` stamps — the invalidation signal.
+    pub(crate) entities: &'a [crate::world::EntityRecord],
     pub(crate) hierarchy: &'a crate::world::Hierarchy,
     pub(crate) queries: &'a RefCell<QueryStorage>,
     pub(crate) accumulators: &'a RefCell<AccumulatorStore>,
@@ -222,7 +222,7 @@ impl<'a> QueryContext<'a> {
     pub(crate) fn new(
         revision: Revision,
         components: &'a ComponentStore,
-        changes: &'a ChangeSet,
+        entities: &'a [crate::world::EntityRecord],
         hierarchy: &'a crate::world::Hierarchy,
         queries: &'a RefCell<QueryStorage>,
         accumulators: &'a RefCell<AccumulatorStore>,
@@ -231,7 +231,7 @@ impl<'a> QueryContext<'a> {
         Self {
             revision,
             components,
-            changes,
+            entities,
             hierarchy,
             queries,
             accumulators,
@@ -481,7 +481,11 @@ impl<'a> QueryContext<'a> {
 
     /// Check if all dependencies are still unchanged.
     ///
-    /// For component deps, checks the ChangeSet directly.
+    /// For component deps, the entity is changed if it was stamped after
+    /// `since` (the memo's `verified_at`). The stamp is durable: unlike the
+    /// per-revision `ChangeSet`, it is still visible revisions later, so a
+    /// change made in a revision where no query read the entity is not lost.
+    /// A despawned entity keeps its record, stamped at despawn.
     /// For sub-query deps, recursively verifies the sub-query via its
     /// registered type-erased verifier and checks if its changed_at
     /// is still within bounds.
@@ -489,7 +493,11 @@ impl<'a> QueryContext<'a> {
         for dep in deps {
             match dep {
                 Dependency::Component { entity, .. } => {
-                    if self.changes.is_changed(*entity) {
+                    let stamped_after = self
+                        .entities
+                        .get(entity.index())
+                        .is_none_or(|record| record.last_changed > since);
+                    if stamped_after {
                         return false;
                     }
                 },

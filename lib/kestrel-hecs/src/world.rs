@@ -26,9 +26,14 @@ impl Revision {
 }
 
 /// Metadata for a single entity. Clone support enables `World::snapshot()`.
+///
+/// `last_changed` is the durable invalidation signal: every mutation of the
+/// entity (components, hierarchy, spawn/despawn) stamps the current revision,
+/// and a memo is stale when any entity it read was stamped after the memo was
+/// last verified (`QueryContext::deps_unchanged`).
 #[derive(Clone)]
-struct EntityRecord {
-    last_changed: Revision,
+pub(crate) struct EntityRecord {
+    pub(crate) last_changed: Revision,
     alive: bool,
 }
 
@@ -131,6 +136,11 @@ pub struct World {
     /// Counter for actual query executions (not cache hits).
     /// Incremented by QueryContext::execute_query().
     query_exec_count: Cell<u64>,
+    /// Whether a query context was handed out in the current revision. A
+    /// mutation after that must not share the revision memos were verified
+    /// at — it would look "not newer" and be missed — so the first such
+    /// mutation opens a new revision (`touch`).
+    observed: Cell<bool>,
 }
 
 impl World {
@@ -144,6 +154,7 @@ impl World {
             queries: RefCell::new(QueryStorage::new()),
             accumulators: RefCell::new(AccumulatorStore::new()),
             query_exec_count: Cell::new(0),
+            observed: Cell::new(false),
         }
     }
 
@@ -152,7 +163,18 @@ impl World {
     pub fn begin_revision(&mut self) -> Revision {
         self.revision = self.revision.next();
         self.changes.advance();
+        self.observed.set(false);
         self.revision
+    }
+
+    /// Called first by every mutation: if queries already ran in this
+    /// revision, start a new one so the mutation is stamped strictly after
+    /// anything they verified. Callers may still call `begin_revision`
+    /// explicitly; this only removes the ordering hazard (audit F20).
+    fn touch(&mut self) {
+        if self.observed.get() {
+            self.begin_revision();
+        }
     }
 
     pub fn revision(&self) -> Revision {
@@ -161,6 +183,7 @@ impl World {
 
     /// Allocate a fresh entity. Returns a unique handle.
     pub fn spawn(&mut self) -> Entity {
+        self.touch();
         let entity = Entity::from_raw(self.entities.len() as u32);
         self.entities.push(EntityRecord {
             last_changed: self.revision,
@@ -185,6 +208,7 @@ impl World {
         if !self.is_alive(entity) {
             return;
         }
+        self.touch();
         self.components.despawn_all(entity);
         let former_parent = self.hierarchy.detach(entity);
         self.entities[entity.index()].alive = false;
@@ -213,6 +237,7 @@ impl World {
 
     /// Attach a component to an entity. Marks the entity as changed.
     pub fn set<T: Component>(&mut self, entity: Entity, value: T) {
+        self.touch();
         self.components.insert(entity, value);
         self.entities[entity.index()].last_changed = self.revision;
         self.changes.mark_changed(entity);
@@ -225,6 +250,7 @@ impl World {
 
     /// Get a mutable component reference.
     pub fn get_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
+        self.touch();
         self.entities[entity.index()].last_changed = self.revision;
         self.changes.mark_changed(entity);
         self.components.get_mut::<T>(entity)
@@ -237,6 +263,7 @@ impl World {
 
     /// Remove a component from an entity.
     pub fn remove_component<T: Component>(&mut self, entity: Entity) -> bool {
+        self.touch();
         if self.components.remove::<T>(entity) {
             self.entities[entity.index()].last_changed = self.revision;
             self.changes.mark_changed(entity);
@@ -254,6 +281,7 @@ impl World {
     // -- Hierarchy --
 
     pub fn set_parent(&mut self, child: Entity, parent: Entity) {
+        self.touch();
         // Snapshot the old parent before mutation so we can mark it
         // changed too — moving a child away from `old_parent` mutates
         // its children list, and queries that read it must re-fire.
@@ -300,10 +328,11 @@ impl World {
     /// During the query phase, the world is borrowed immutably.
     /// All reads go through the QueryContext which records dependencies.
     pub fn query_context(&self) -> QueryContext<'_> {
+        self.observed.set(true);
         QueryContext::new(
             self.revision,
             &self.components,
-            &self.changes,
+            &self.entities,
             &self.hierarchy,
             &self.queries,
             &self.accumulators,
@@ -335,6 +364,7 @@ impl World {
             queries: RefCell::new(self.queries.borrow().clone()),
             accumulators: RefCell::new(AccumulatorStore::new()),
             query_exec_count: Cell::new(0),
+            observed: Cell::new(false),
         }
     }
 

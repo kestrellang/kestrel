@@ -158,8 +158,9 @@ The target design's remaining pieces:
   entities are not yet stable across edits (no item tree), so a body is
   re-lowered whenever its declarations are rebuilt.
 - **Stable identity.** Entities are respawned with fresh IDs when a file is
-  rebuilt, and the query engine's invalidation is per-revision (see the hECS
-  review); both block real incremental reuse. (Thread safety is done:
+  rebuilt, which blocks real incremental reuse. (Invalidation itself is now
+  durable: memos compare against `EntityRecord::last_changed`, not the
+  per-revision change set — audit F20.) (Thread safety is done:
   `ParseResult` holds a `GreenNode`, kestrel-hecs requires `Send + Sync`, and
   `World: Send` is asserted — audit F42, `e7179d31`.)
 
