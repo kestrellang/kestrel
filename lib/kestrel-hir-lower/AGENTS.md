@@ -48,3 +48,29 @@ non-terminating dummy value, which breaks any context that expects a real type
 (branch merges, returns). When recovering inside a desugaring, wrap the
 `HirExpr::Error` in the same `Sugar`/diagnostic shape the success path uses (see
 `desugar_try` / `desugar_compound_assign`) so consumers see a uniform node.
+
+## Missing syntax lowers to an explicit error form — never `""`
+
+An absent child in the CST (a recovered parse) lowers to `ExprSrc::Error` →
+`HirExpr::Error`, `PatSrc::Error` → `HirPat::Error`, or `HirName::Missing` for
+an absent member/case name. Never synthesize an empty-string name: `""` looks
+like a real identifier to every later stage (name resolution, the solver, the
+LSP) and produces nonsense diagnostics instead of a silent, already-reported
+gap. This is the recovery case of the rule above.
+
+## HIR ids are allocated in source order
+
+Allocate expression/pattern/statement ids in the order their syntax appears.
+Diagnostic order, `while_conditions`, and several analyzers walk the arenas in
+id order and assume it matches the source. When a desugaring needs a node
+before its operands exist, still lower the operands first.
+
+## Record every user-spelled binding and path segment in the source map
+
+`BodySourceMap` is the only way tools get from a position to HIR and back
+(`src/source_map.rs`). Define a local the user wrote with
+`define_named_local` (binding node + identifier), and record each path segment
+with `alloc_seg` / `record_segments`. A local with no single declaring
+identifier — a desugaring temporary, `self`, an implicit `it`, a struct-pattern
+shorthand — stays UNRECORDED on purpose, so rename/references fail closed
+instead of guessing (audit F2).

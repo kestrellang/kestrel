@@ -115,3 +115,11 @@ Additional docs cover specific subsystems in depth. Each crate chooses topics ba
 - When adding a major subsystem to an existing crate: add a topic document
 - When renaming or removing a crate: update this map
 - When changing a crate's pipeline position or core types: update its architecture doc
+
+## Formatting
+
+Run `rustfmt --edition 2024 <file>` on the specific files you changed, not
+`cargo fmt` and not `rustfmt` on a crate's `lib.rs`: rustfmt follows `mod`
+declarations, so formatting a `lib.rs` also reformats every child module, and
+several files in the tree are not rustfmt-clean today. Formatting them in a
+feature commit buries the real change in unrelated hunks.
