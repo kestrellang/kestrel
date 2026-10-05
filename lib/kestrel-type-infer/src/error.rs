@@ -11,7 +11,7 @@ use crate::ty::{LiteralKind, TyVar};
 
 /// A type inference error. Accumulated during solving; each produces
 /// a `TyKind::Error` TyVar that silently absorbs further constraints.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub enum InferError {
     /// Types don't match (structural mismatch).
     TypeMismatch {

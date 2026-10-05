@@ -4,7 +4,9 @@
 //! All TyVars have been resolved to `ResolvedTy`.
 
 use std::collections::HashMap;
+use std::hash::Hash;
 
+use kestrel_ast::arena::Idx;
 use kestrel_hecs::Entity;
 use kestrel_hir::body::HirExprId;
 use kestrel_hir::res::LocalId;
@@ -87,53 +89,50 @@ pub struct IndirectionPeel {
 }
 
 /// Manual Hash: hash each map as sorted (key, value) pairs for determinism.
-/// Uses raw index values for sorting since Idx<T> doesn't implement Ord.
-impl std::hash::Hash for TypedBody {
+///
+/// This hash is `InferBody`'s whole change signal: hECS backdates the memo when
+/// the fingerprint is unchanged, and dependents (including the query that
+/// accumulates the diagnostics) then keep their cached results. So it must
+/// cover **every** field — the destructuring below has no `..`, so adding a
+/// field to `TypedBody` without hashing it is a compile error (audit F19).
+impl Hash for TypedBody {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.errors.len().hash(state);
+        let TypedBody {
+            expr_types,
+            local_types,
+            resolutions,
+            field_subscripts,
+            promotions,
+            type_args,
+            errors,
+            error_details,
+            opaque_concrete_type,
+            indirection_peels,
+            kind_coercions,
+        } = self;
+        hash_sorted(expr_types, state);
+        hash_sorted(local_types, state);
+        hash_sorted(resolutions, state);
+        hash_sorted(field_subscripts, state);
+        hash_sorted(promotions, state);
+        hash_sorted(type_args, state);
+        errors.hash(state);
+        error_details.hash(state);
+        opaque_concrete_type.hash(state);
+        hash_sorted(indirection_peels, state);
+        hash_sorted(kind_coercions, state);
+    }
+}
 
-        // Hash expr_types
-        let mut expr_pairs: Vec<_> = self.expr_types.iter().collect();
-        expr_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &expr_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash local_types
-        let mut local_pairs: Vec<_> = self.local_types.iter().collect();
-        local_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &local_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash resolutions
-        let mut res_pairs: Vec<_> = self.resolutions.iter().collect();
-        res_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &res_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash opaque_concrete_type
-        self.opaque_concrete_type.hash(state);
-
-        // Hash indirection_peels (sorted by expr for determinism)
-        let mut peel_pairs: Vec<_> = self.indirection_peels.iter().collect();
-        peel_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &peel_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
-
-        // Hash kind_coercions (sorted by expr for determinism)
-        let mut kind_pairs: Vec<_> = self.kind_coercions.iter().collect();
-        kind_pairs.sort_by_key(|(k, _)| k.raw());
-        for (k, v) in &kind_pairs {
-            k.hash(state);
-            v.hash(state);
-        }
+/// Hash an `Idx`-keyed map in key order (`Idx` has no `Ord`, so sort by raw
+/// index). The length prefix keeps adjacent maps from aliasing.
+fn hash_sorted<T, V: Hash, H: std::hash::Hasher>(map: &HashMap<Idx<T>, V>, state: &mut H) {
+    let mut pairs: Vec<_> = map.iter().collect();
+    pairs.sort_by_key(|(k, _)| k.raw());
+    pairs.len().hash(state);
+    for (k, v) in pairs {
+        k.raw().hash(state);
+        v.hash(state);
     }
 }
 
@@ -198,7 +197,7 @@ pub enum ResolvedTy {
 }
 
 /// Resolved promotion info (no TyVars).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct ResolvedPromotion {
     pub method: Entity,
     pub target: ResolvedTy,
@@ -780,5 +779,76 @@ fn describe_static_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> O
             ))
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use kestrel_ast::arena::Arena;
+    use kestrel_hecs::{Fingerprint, World};
+    use kestrel_hir::body::HirExpr;
+    use kestrel_span::Span;
+
+    use super::*;
+
+    fn empty() -> TypedBody {
+        TypedBody {
+            expr_types: HashMap::new(),
+            local_types: HashMap::new(),
+            resolutions: HashMap::new(),
+            field_subscripts: HashMap::new(),
+            promotions: HashMap::new(),
+            type_args: HashMap::new(),
+            errors: Vec::new(),
+            error_details: Vec::new(),
+            opaque_concrete_type: None,
+            indirection_peels: HashMap::new(),
+            kind_coercions: HashMap::new(),
+        }
+    }
+
+    /// Regression for audit F19: `TypedBody`'s fingerprint is `InferBody`'s
+    /// whole change signal, so changing any one field must change it — the
+    /// five fields below used to be skipped (`errors` by length only), which
+    /// backdated a re-inferred body and left stale diagnostics on screen.
+    #[test]
+    fn fingerprint_covers_every_field() {
+        let mut exprs = Arena::new();
+        let e = exprs.alloc(HirExpr::Error { span: Span::synthetic(0) });
+        let mut world = World::new();
+        let (a, b) = (world.spawn(), world.spawn());
+        let ty = |entity| ResolvedTy::Named { entity, args: Vec::new() };
+        let error = |span| InferError::FromHir { span };
+
+        let mut base = empty();
+        base.errors.push(error(Span::new(0, 0..1)));
+        base.error_details.push("type 'A'".into());
+        let base_fp = Fingerprint::of(&base);
+
+        let variants: Vec<(&str, TypedBody)> = vec![
+            ("field_subscripts", TypedBody {
+                field_subscripts: [(e, a)].into(),
+                ..base.clone()
+            }),
+            ("promotions", TypedBody {
+                promotions: [(e, ResolvedPromotion { method: a, target: ty(b) })].into(),
+                ..base.clone()
+            }),
+            ("type_args", TypedBody {
+                type_args: [(e, vec![ty(a)])].into(),
+                ..base.clone()
+            }),
+            ("errors (same length)", TypedBody {
+                errors: vec![error(Span::new(0, 4..9))],
+                ..base.clone()
+            }),
+            ("error_details", TypedBody {
+                error_details: vec!["type 'B'".into()],
+                ..base.clone()
+            }),
+        ];
+        for (field, body) in variants {
+            assert_ne!(Fingerprint::of(&body), base_fp, "fingerprint ignores `{field}`");
+        }
     }
 }
