@@ -157,8 +157,11 @@ The target design's remaining pieces:
 - **Incremental bodies.** `LowerBodyWithSourceMap` is keyed by entity, and
   entities are not yet stable across edits (no item tree), so a body is
   re-lowered whenever its declarations are rebuilt.
-- The query cache still holds `ParseResult { tree: SyntaxNode }`, so the
-  World is not yet `Send` even though components are syntax-free.
+- **Stable identity.** Entities are respawned with fresh IDs when a file is
+  rebuilt, and the query engine's invalidation is per-revision (see the hECS
+  review); both block real incremental reuse. (Thread safety is done:
+  `ParseResult` holds a `GreenNode`, kestrel-hecs requires `Send + Sync`, and
+  `World: Send` is asserted — audit F42, `e7179d31`.)
 
 ## Verification
 
