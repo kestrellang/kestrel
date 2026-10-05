@@ -23,7 +23,7 @@ claim needs a reproduction and the commit it was measured at; anything else is a
 G22/G24 are what this costs when skipped — a `high` finding filed against a compiler
 173 commits stale.
 
-**Progress: 52 fixed · 4 partial · 3 blocked · 18 open · 1 withdrawn** — 73 top-level (F1–F43, G1–G30).
+**Progress: 53 fixed · 4 partial · 3 blocked · 17 open · 1 withdrawn** — 73 top-level (F1–F43, G1–G30).
 Partial: F2, F28, F29, F43. Blocked on a maintainer decision: F11, F29, G16.
 F33 and F43 are roll-ups that expand into 19 independently-fixable sub-items, tracked
 underneath them, so the real work item count is 79.
@@ -71,7 +71,6 @@ These are not "unstarted" — they were investigated and the obvious fix is wron
 ## Query-framework and incremental hazards
 
 - [ ] **F19** `medium` `incremental-hazard` — `TypedBody`'s hand-written `Hash` omits five output fields and hashes `errors` by length only
-- [ ] **F20** `medium` `ordering-dependency` — The LSP despawns *before* `begin_revision()`, erasing the only invalidation despawn produces
 - [ ] **F21** `medium` `incremental-hazard` — `World::snapshot` clones query memos but resets the accumulator store — and both docs say the opposite
 - [ ] **F23** `low` `incremental-hazard` — Accumulated values are never pruned by revision or despawn
 
@@ -261,6 +260,13 @@ Completed findings, moved here from their original sections. Grouped by the sect
   - The 258 `const NAME: u16` declarations and 258 `match` arms over `raw.0` are deleted (~520 lines). `kind_from_raw` indexes `SyntaxKind::ALL`, a single declaration-order table, because `kind_to_raw` is `kind as u16`
   - `ALL` is hand-written but **proved**: `syntax_kind_table_round_trips` asserts it is ordered (`ALL[n] as u16 == n`), complete, and that out-of-range still reads `Error`. Completeness needs the variant count, which comes from a `#[doc(hidden)] __NotAKind` end-marker — without it a *truncated* table round-trips happily, since every entry it holds is correct and the missing kinds are simply never tested
   - Verified non-inert: deleting the last entry fails with "SyntaxKind::ALL is missing 1 kind(s)"
+
+### Query-framework and incremental hazards
+
+- [x] **F20** `medium` `ordering-dependency` — The LSP despawns *before* `begin_revision()`, erasing the only invalidation despawn produces — **fixed** `0dd5ef87` (branch `fix/hecs-invalidation`)
+  - Fixed in the engine, not by reordering the LSP: the ordering was never the real defect. `deps_unchanged` read the per-revision `ChangeSet`, so *any* change older than one revision was forgotten — the audit's ordering is one way to hit that; a revision nobody queries (a parse-only LSP request between edits) is another, and it is **not** masked on a content edit: a cross-file rename followed by a parse-only request and then an unrelated edit left the importer error-free. `QueryContext` now reads the durable `EntityRecord::last_changed` (the record with zero callers) and a component dependency is stale iff `last_changed > verified_at`. `World::touch` starts a new revision on the first mutation after a `query_context()` was handed out, so mutate-after-query in one revision is also seen. The `ChangeSet` is kept as an informational API and no longer drives invalidation
+  - Tests: `kestrel-hecs/tests/invalidation.rs` (4 of 5 fail at `7e9a9d54`; the fifth pins that unrelated mutations still hit the cache), and LSP worker tests `deleting_an_imported_file_invalidates_the_importer` (this finding's scenario) and `cross_file_rename_survives_an_unobserved_revision` — both fail at `7e9a9d54` with `[]` vs `["undefined name 'fa'"]`
+  - Verified at `0dd5ef87`: `cargo test --workspace --exclude kestrel-test-suite --no-fail-fast` — all pass except the known F28 `every_seeded_intrinsic_has_a_lowering`, plus one run of `kestrel-lsp` integration `diagnostics_stay_put_after_closing_an_edited_buffer` that timed out on its fixed 2 s settle sleep; it passed 5/5 in isolation and 3/3 whole-file at `--test-threads=3` on the fix, and 3/3 on `7e9a9d54`. Not run through triage (not installed in this container)
 
 ### Remaining single-source-of-truth duplication
 
