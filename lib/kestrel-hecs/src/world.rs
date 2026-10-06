@@ -1,6 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
+use rustc_hash::FxHashSet;
+
 use crate::accumulator::AccumulatorStore;
 use crate::change::ChangeSet;
 use crate::component::{Component, ComponentStore};
@@ -141,6 +143,9 @@ pub struct World {
     /// at — it would look "not newer" and be missed — so the first such
     /// mutation opens a new revision (`touch`).
     observed: Cell<bool>,
+    /// Despawned since the last `sweep_despawned`; their readers' accumulated
+    /// values are dropped before any query runs again (audit F23).
+    despawned: RefCell<Vec<Entity>>,
 }
 
 impl World {
@@ -155,6 +160,7 @@ impl World {
             accumulators: RefCell::new(AccumulatorStore::new()),
             query_exec_count: Cell::new(0),
             observed: Cell::new(false),
+            despawned: RefCell::new(Vec::new()),
         }
     }
 
@@ -214,6 +220,7 @@ impl World {
         self.entities[entity.index()].alive = false;
         self.entities[entity.index()].last_changed = self.revision;
         self.changes.mark_changed(entity);
+        self.despawned.get_mut().push(entity);
         // Detaching mutated the parent's children list — mark it
         // changed so queries that walked `children_of(parent)` see
         // the despawned entity disappear from cache.
@@ -328,6 +335,7 @@ impl World {
     /// During the query phase, the world is borrowed immutably.
     /// All reads go through the QueryContext which records dependencies.
     pub fn query_context(&self) -> QueryContext<'_> {
+        self.sweep_despawned();
         self.observed.set(true);
         QueryContext::new(
             self.revision,
@@ -350,11 +358,14 @@ impl World {
 
     /// Create a structural clone of this world for reuse across compilations.
     ///
-    /// Clones entities, components, hierarchy, and change tracking. Starts
-    /// with fresh query caches and accumulators — they rebuild lazily on
-    /// first access. Keeps the same revision so `begin_revision()` works
-    /// normally on the snapshot.
+    /// Clones entities, components, hierarchy, change tracking, query memos
+    /// and accumulated values. The last two travel together: a memo that
+    /// verifies as a cache hit in the snapshot never re-files its values, so
+    /// a snapshot without them silently loses every cached query's
+    /// diagnostics (audit F21). Keeps the same revision so
+    /// `begin_revision()` works normally on the snapshot.
     pub fn snapshot(&self) -> World {
+        self.sweep_despawned();
         World {
             revision: self.revision,
             entities: self.entities.clone(),
@@ -362,9 +373,10 @@ impl World {
             hierarchy: self.hierarchy.clone(),
             changes: self.changes.clone(),
             queries: RefCell::new(self.queries.borrow().clone()),
-            accumulators: RefCell::new(AccumulatorStore::new()),
+            accumulators: RefCell::new(self.accumulators.borrow().clone()),
             query_exec_count: Cell::new(0),
             observed: Cell::new(false),
+            despawned: RefCell::new(Vec::new()),
         }
     }
 
@@ -372,7 +384,35 @@ impl World {
 
     /// Collect all accumulated values of type T into a Vec.
     pub fn accumulated<T: Clone + Send + Sync + 'static>(&self) -> Vec<T> {
+        self.sweep_despawned();
         self.accumulators.borrow().all::<T>().cloned().collect()
+    }
+
+    /// Drop the accumulated values of every query that read an entity
+    /// despawned since the last sweep (audit F23).
+    ///
+    /// Such a query is either demanded again — and then it re-executes,
+    /// because its dependency on the dead entity is stale, and re-files its
+    /// values — or never demanded again, typically because its key names
+    /// the dead entity, and nothing else would ever clear them. Only
+    /// *direct* readers qualify: a query that saw the entity only through a
+    /// sub-query may be backdated and never re-run, so its values must stay.
+    ///
+    /// Runs lazily, before a query can execute or values are read. Sweeping
+    /// in `despawn` would cost a scan of every memo per entity, and an LSP
+    /// edit despawns a whole file's subtree at once. Lazy is also exact: no
+    /// query runs between a despawn and the sweep, because both entry
+    /// points sweep first, so every memo it inspects predates the despawn.
+    fn sweep_despawned(&self) {
+        if self.despawned.borrow().is_empty() {
+            return;
+        }
+        let dead: FxHashSet<Entity> = self.despawned.take().into_iter().collect();
+        let readers = self.queries.borrow().readers_of(&dead);
+        let mut accumulators = self.accumulators.borrow_mut();
+        for query in &readers {
+            accumulators.remove_for_query(query);
+        }
     }
 }
 

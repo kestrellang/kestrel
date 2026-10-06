@@ -766,6 +766,72 @@ mod tests {
         );
     }
 
+    /// Audit F23: deleting a function despawns its entity, so nothing
+    /// ever demands its queries again. The errors they filed must not
+    /// outlive it.
+    #[test]
+    fn deleting_a_function_drops_its_errors() {
+        let v1 = "module a\nfunc ok() {}\nfunc bad() { nope() }\n";
+        let v2 = "module a\nfunc ok() {}\n";
+        let mut state = WorkerState::fresh();
+        sync_stdlib(&mut state, &HashMap::new());
+
+        sync_user(&mut state, &[("/tmp/a.ks".to_string(), v1.to_string())].into(), false);
+        let before = full_check_messages(&state);
+        assert!(
+            before.iter().any(|m| m.contains("nope")),
+            "v1 should report the undefined name: {before:?}"
+        );
+
+        sync_user(&mut state, &[("/tmp/a.ks".to_string(), v2.to_string())].into(), false);
+        let worker = full_check_messages(&state);
+        assert_eq!(
+            worker,
+            fresh_build_messages(&[("/tmp/a.ks", v2)]),
+            "a deleted function's errors are still reported"
+        );
+    }
+
+    /// Audit F23, whole-file form: a deleted file's errors must go too.
+    #[test]
+    fn deleting_a_file_drops_its_errors() {
+        let a = "module a\nfunc bad() { nope() }\n";
+        let b = "module b\nfunc ok() {}\n";
+        let mut state = WorkerState::fresh();
+        sync_stdlib(&mut state, &HashMap::new());
+
+        let both: HashMap<String, String> = [("/tmp/a.ks", a), ("/tmp/b.ks", b)]
+            .into_iter()
+            .map(|(p, t)| (p.to_string(), t.to_string()))
+            .collect();
+        sync_user(&mut state, &both, false);
+        assert!(!full_check_messages(&state).is_empty());
+
+        sync_user(&mut state, &[("/tmp/b.ks".to_string(), b.to_string())].into(), false);
+        assert_eq!(
+            full_check_messages(&state),
+            fresh_build_messages(&[("/tmp/b.ks", b)]),
+            "a deleted file's errors are still reported"
+        );
+    }
+
+    /// Sorted diagnostic messages after the LSP's full check on `state`.
+    fn full_check_messages(state: &WorkerState) -> Vec<String> {
+        use kestrel_compiler_driver::CompilerDriver;
+
+        let driver = CompilerDriver::new(&state.compiler);
+        let _ = driver.infer_all();
+        let _ = driver.analyze_all(false);
+        let mut msgs: Vec<String> = state
+            .compiler
+            .diagnostics()
+            .iter()
+            .map(|d| d.message.clone())
+            .collect();
+        msgs.sort();
+        msgs
+    }
+
     /// End-to-end regression: rebuild user code in the persistent
     /// compiler and confirm diagnostics still match a CLI-style fresh
     /// build. This is the path the live LSP exercises on every edit

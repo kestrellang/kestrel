@@ -1,4 +1,4 @@
-use rustc_hash::{FxHashMap, FxHasher};
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::hash::{Hash, Hasher};
@@ -88,23 +88,27 @@ struct MemoEntry<V> {
 /// without knowing the sub-query's concrete type.
 type VerifierFn = Arc<dyn Fn(&QueryContext<'_>) -> Revision + Send + Sync>;
 
-/// Type-erased store that can be cloned. Pairs a `Box<dyn Any>` with a
-/// clone function so we can duplicate query caches across snapshots.
+/// One query type's memo map, type-erased. The fn pointers are the only
+/// operations that need the concrete `Q`: cloning (snapshots) and finding
+/// the memos that read given entities (`World::despawn`).
 struct ErasedStore {
     data: Box<dyn Any + Send + Sync>,
     clone_fn: fn(&(dyn Any + Send + Sync)) -> Box<dyn Any + Send + Sync>,
+    readers_fn: fn(&(dyn Any + Send + Sync), &FxHashSet<Entity>, &mut Vec<QueryKey>),
 }
 
 impl ErasedStore {
-    fn new<T: Clone + Send + Sync + 'static>(value: T) -> Self {
+    fn new<Q: QueryFn>() -> Self {
         Self {
-            data: Box::new(value),
-            clone_fn: |any| {
-                Box::new(
-                    any.downcast_ref::<T>()
-                        .expect("type mismatch in ErasedStore clone")
-                        .clone(),
-                )
+            data: Box::new(MemoMap::<Q>::default()),
+            clone_fn: |any| Box::new(downcast_memos::<Q>(any).clone()),
+            readers_fn: |any, entities, out| {
+                out.extend(
+                    downcast_memos::<Q>(any)
+                        .iter()
+                        .filter(|(_, memo)| memo.reads_any(entities))
+                        .map(|(q, _)| query_key(q)),
+                );
             },
         }
     }
@@ -112,8 +116,25 @@ impl ErasedStore {
     fn clone_store(&self) -> Self {
         Self {
             data: (self.clone_fn)(&*self.data),
-            clone_fn: self.clone_fn,
+            ..*self
         }
+    }
+}
+
+type MemoMap<Q> = FxHashMap<Q, MemoEntry<<Q as QueryFn>::Output>>;
+
+fn downcast_memos<Q: QueryFn>(any: &(dyn Any + Send + Sync)) -> &MemoMap<Q> {
+    any.downcast_ref::<MemoMap<Q>>()
+        .expect("type mismatch in query storage")
+}
+
+impl<V> MemoEntry<V> {
+    /// Whether this memo read a component (or the children) of one of
+    /// `entities` itself — not through a sub-query.
+    fn reads_any(&self, entities: &FxHashSet<Entity>) -> bool {
+        self.deps.iter().any(|dep| {
+            matches!(dep, Dependency::Component { entity, .. } if entities.contains(entity))
+        })
     }
 }
 
@@ -138,16 +159,16 @@ impl QueryStorage {
     fn get_memo<Q: QueryFn>(&self, key: &Q) -> Option<&MemoEntry<Q::Output>> {
         self.stores
             .get(&TypeId::of::<Q>())
-            .and_then(|s| s.data.downcast_ref::<FxHashMap<Q, MemoEntry<Q::Output>>>())
+            .and_then(|s| s.data.downcast_ref::<MemoMap<Q>>())
             .and_then(|map| map.get(key))
     }
 
     fn insert_memo<Q: QueryFn>(&mut self, key: Q, entry: MemoEntry<Q::Output>) {
         self.stores
             .entry(TypeId::of::<Q>())
-            .or_insert_with(|| ErasedStore::new(FxHashMap::<Q, MemoEntry<Q::Output>>::default()))
+            .or_insert_with(ErasedStore::new::<Q>)
             .data
-            .downcast_mut::<FxHashMap<Q, MemoEntry<Q::Output>>>()
+            .downcast_mut::<MemoMap<Q>>()
             .expect("type mismatch in query storage")
             .insert(key, entry);
     }
@@ -156,7 +177,7 @@ impl QueryStorage {
         if let Some(store) = self.stores.get_mut(&TypeId::of::<Q>())
             && let Some(map) = store
                 .data
-                .downcast_mut::<FxHashMap<Q, MemoEntry<Q::Output>>>()
+                .downcast_mut::<MemoMap<Q>>()
             && let Some(memo) = map.get_mut(key)
         {
             memo.verified_at = revision;
@@ -165,6 +186,15 @@ impl QueryStorage {
 
     fn register_verifier(&mut self, key: QueryKey, verifier: VerifierFn) {
         self.verifiers.insert(key, verifier);
+    }
+
+    /// Every memoized query that directly read one of `entities`.
+    pub(crate) fn readers_of(&self, entities: &FxHashSet<Entity>) -> Vec<QueryKey> {
+        let mut out = Vec::new();
+        for store in self.stores.values() {
+            (store.readers_fn)(&*store.data, entities, &mut out);
+        }
+        out
     }
 }
 
