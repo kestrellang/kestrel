@@ -1,6 +1,7 @@
 # Bidirectional type checking for `kestrel-type-infer` — design
 
-**Status:** design exploration, not implemented. Prototype hooks exist only on
+**Status:** design exploration, not implemented. Language rulings D2, D3, D7
+were made on 2026-10-06; see *Maintainer rulings* below. Prototype hooks exist only on
 the local branch `bidi-design` (never pushed).
 **Base:** `arch/fixes` @ `ae1aeedaa33cd983c4d186c733224b261547fecf`
 (`ae1aeeda test: pin memory-safety holes, miscompiles and front-end bugs from
@@ -13,6 +14,46 @@ in §15, which are inert unless their `KESTREL_DEBUG` category is set.
 checker in §15.3, which models the rules but not the real compiler.
 
 ---
+
+## Maintainer rulings (2026-10-06)
+
+These override the recommendations below wherever they disagree. The rest of
+the document is unchanged and still argues for the original recommendations;
+read it with this section in mind.
+
+| # | Ruling | Replaces |
+|---|---|---|
+| D2 | **Rust-style numeric literals.** An integer or float literal is an open var for the whole body: any later line may determine it, and if nothing does it takes its default (`Int64` / `Float64`) at the end of the body. No statement regions. | §3: end-of-statement defaulting |
+| D2′ | **Collection and string literals default at their first use as a receiver.** `var out = []` stays open; at `out.append(x)` its head becomes `Array` (likewise `String`, `Dictionary`) and its *element* stays a body-scoped general var, so `x` still decides it. Rust has no equivalent (its `Vec::new()` / `""` are never polymorphic). | — |
+| D3 | **A member access needs its receiver's head type (Rust E0282).** If it is still unknown after flushing obligations, error with an "annotate" fix-it. A still-open **numeric** literal as a method/field receiver (`let x = 7; x.abs()`) is that error too (Rust E0689); it is never defaulted on the spot. | §6 (unchanged, now also covers numeric literals) |
+| D7 | **(i): `FromValue` promotes at every check leaf**, `Optional` and `Result` alike. Nested types (`T??`, `Result[Result[…]]`) wrap into the innermost type that fits. | §9 open question |
+| — | **Overflow is a separate design.** Under D2, `let x = 100; takes8(x); let w = x * 2` types `x : Int8` and, because integer arithmetic wraps by documented design, `w` is `-56` (N4). Rust's safety net is a debug-build overflow panic; whether Kestrel adopts one is a follow-up design, not part of this checker. N4 gets a pinned test documenting today's behaviour. | §3.4 |
+
+**Measured cost of D2 + D2′ + D3** **[M]**: `bidi-recv` alone (statement
+regions off) on `6f838c5c`'s release build, stdlib + 17 `lang/` packages +
+13 examples, all units compiling with 0 errors:
+
+| Receiver at a method/field site | stdlib | `lang/` + examples | Outcome |
+|---|---:|---:|---|
+| open numeric literal var | 0 | 0 | D3 error; costs nothing |
+| open `[]` / `""` / `[:]` literal var | 1 | 232 | D2′ defaults the head; costs nothing |
+| unknown, rooted in a literal | 4 | 49 | to classify in P2 (mostly chains off the row above) |
+
+Operators on open literal vars are 159 (stdlib) and 510 (packages) sites;
+they need the operator rule below rather than a known receiver.
+
+**What changes in the plan.**
+- **P2 shrinks.** No statement regions and no 9 stdlib annotations; the 4
+  testdata files of §13.6 keep their current verdicts. P2 is now Rule L (N3),
+  D2′, and the *operator rule for open numeric vars*: as in Rust's built-in
+  binop rule, the two operands of a homogeneous arithmetic/comparison operator
+  unify, and the protocol conformance is a queued obligation settled when the
+  var is determined or defaulted. Shifts and other heterogeneous protocols
+  are excluded, as in Rust. Whether every numeric `Addable` etc. has
+  `Output = Self` (needed to type `x + 1` before `x` is known) must be
+  checked first.
+- **N4 is not fixed by the checker**; see the overflow ruling.
+- D3's E106 now also fires for numeric literal receivers (0 sites measured).
 
 ## 0. Summary
 
