@@ -35,10 +35,10 @@ use kestrel_compiler_driver::CompilerDriver;
 struct StdlibCache {
     compiler: std::sync::Mutex<Compiler>,
     /// Rendered stdlib-side errors ("path:line: message") found while building
-    /// the cache. Diagnostics are emitted into the CACHE compiler's sink at
-    /// first query execution; per-test compilers get memoized cache hits that
-    /// never re-emit, so without this record a stdlib type error is invisible
-    /// to every test and only surfaces as a mysterious downstream mono ICE.
+    /// the cache. Per-test snapshots carry these diagnostics too (audit F21),
+    /// but mixed in with the test's own; this record lets `check_no_errors`
+    /// blame a broken stdlib by name first, instead of letting it surface as
+    /// an unrelated-looking failure in every test.
     errors: Vec<String>,
 }
 
@@ -68,7 +68,7 @@ fn stdlib_cache() -> &'static StdlibCache {
         compiler.load_dir(&std_path);
         CompilerDriver::new(&compiler).infer_all();
         // Render error-severity diagnostics NOW, against the cache compiler's
-        // own world — per-test compilers can't recover them (see field doc).
+        // own world (see field doc).
         let errors = render_stdlib_errors(&compiler);
         // Clear the changed set so cached queries survive snapshot.
         // Queries whose deps point to unchanged stdlib entities will

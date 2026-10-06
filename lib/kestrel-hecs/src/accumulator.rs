@@ -14,6 +14,7 @@ trait AnyAccumulator: Any + Send + Sync {
     /// Put an erased `Vec<T>` produced by `take_for_query` back, replacing
     /// whatever is currently filed under `query`.
     fn restore_for_query(&mut self, query: &QueryKey, values: Box<dyn Any + Send + Sync>);
+    fn clone_box(&self) -> Box<dyn AnyAccumulator>;
 }
 
 /// Everything filed under one `QueryKey`, across every accumulator type.
@@ -76,6 +77,11 @@ impl<T: Clone + Send + Sync + 'static> AnyAccumulator for TypedAccumulator<T> {
             .downcast::<Vec<T>>()
             .expect("type mismatch restoring an accumulator snapshot");
         self.restore_for_query(query, values);
+    }
+    fn clone_box(&self) -> Box<dyn AnyAccumulator> {
+        Box::new(TypedAccumulator {
+            by_query: self.by_query.clone(),
+        })
     }
 }
 
@@ -140,6 +146,15 @@ impl AccumulatorStore {
         }
     }
 
+    /// Drop everything filed under `query`, of every type. For a query that
+    /// will never run again (see `World::despawn`); a query about to
+    /// re-execute uses `take_for_query`, so an unwind can put them back.
+    pub fn remove_for_query(&mut self, query: &QueryKey) {
+        for store in self.stores.values_mut() {
+            drop(store.take_for_query(query));
+        }
+    }
+
     /// Iterate over all accumulated values of type T.
     pub fn all<T: Clone + Send + Sync + 'static>(&self) -> impl Iterator<Item = &T> {
         self.store::<T>().into_iter().flat_map(|s| s.all())
@@ -158,6 +173,21 @@ impl AccumulatorStore {
             .as_any_mut()
             .downcast_mut::<TypedAccumulator<T>>()
             .expect("type mismatch in accumulator store")
+    }
+}
+
+/// A snapshot shares the original's query memos, and a memo that verifies
+/// as a cache hit never re-files its values — so the values must travel
+/// with the memos, or every cached query's diagnostics vanish (audit F21).
+impl Clone for AccumulatorStore {
+    fn clone(&self) -> Self {
+        Self {
+            stores: self
+                .stores
+                .iter()
+                .map(|(&type_id, store)| (type_id, store.clone_box()))
+                .collect(),
+        }
     }
 }
 
