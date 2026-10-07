@@ -9,7 +9,7 @@
 
 use std::borrow::Cow;
 
-use crate::constraint::{CallArg, ConformsOrigin, Constraint, labels_match};
+use crate::constraint::{CallArg, ConformsOrigin, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::generate::SubjectRoot;
@@ -570,7 +570,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
         // downstream `report_unresolved_slots` (phase 4.5) doesn't double-
         // diagnose the same slot with the generic "could not infer type".
         let (err, poison_tv) = match constraint {
-            Constraint::Equal { a, b, span } => {
+            Constraint::Equal { a, b, span, reason } => {
                 let a_err = ctx.is_error(ctx.resolve(a));
                 let b_err = ctx.is_error(ctx.resolve(b));
                 if a_err || b_err {
@@ -584,7 +584,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     }
                     continue;
                 }
-                let err = mismatch_error(ctx, a, b, span);
+                let err = mismatch_error(ctx, a, b, span).with_reason(&reason);
                 report_and_poison(ctx, err, a, b);
                 continue;
             },
@@ -593,6 +593,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 to,
                 expr,
                 span,
+                reason,
             } => {
                 let from_err = ctx.is_error(ctx.resolve(from));
                 let to_err = ctx.is_error(ctx.resolve(to));
@@ -609,7 +610,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if ctx.errored_coerce_exprs.contains(&expr) {
                     continue;
                 }
-                let err = mismatch_error(ctx, to, from, span);
+                let err = mismatch_error(ctx, to, from, span).with_reason(&reason);
                 ctx.errored_coerce_exprs.insert(expr);
                 report_and_poison(ctx, err, from, to);
                 continue;
@@ -627,6 +628,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 value,
                 target,
                 span,
+                reason,
             } => {
                 // `apply_ref_decay_defaults` settles every deferred decay,
                 // so an unsolved one means a side never resolved — report
@@ -642,7 +644,7 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                     }
                     continue;
                 }
-                let err = mismatch_error(ctx, target, value, span);
+                let err = mismatch_error(ctx, target, value, span).with_reason(&reason);
                 report_and_poison(ctx, err, value, target);
                 continue;
             },
@@ -850,11 +852,31 @@ enum SolveResult {
     Error(InferError),
 }
 
+/// Carry a constraint's `Reason` into what solving it produced: a type
+/// mismatch takes it as its cause, and a deferred Equal / Coerce /
+/// EqualDecayed — the same check, retried later — keeps it.
+fn carry_reason(r: SolveResult, reason: &Reason) -> SolveResult {
+    match r {
+        SolveResult::Error(e) => SolveResult::Error(e.with_reason(reason)),
+        SolveResult::Deferred(mut c) => {
+            if let Constraint::Equal { reason: r, .. }
+            | Constraint::Coerce { reason: r, .. }
+            | Constraint::EqualDecayed { reason: r, .. } = &mut c
+                && *r == Reason::Unspecified
+            {
+                *r = reason.clone();
+            }
+            SolveResult::Deferred(c)
+        },
+        SolveResult::Solved => SolveResult::Solved,
+    }
+}
+
 /// Dispatch a constraint to the appropriate solver.
 fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     match c {
-        Constraint::Equal { a, b, span } => {
-            let r = solve_equal(ctx, a, b, span);
+        Constraint::Equal { a, b, span, reason } => {
+            let r = carry_reason(solve_equal(ctx, a, b, span), &reason);
             if matches!(r, SolveResult::Error(_)) {
                 poison_if_unresolved(ctx, a);
                 poison_if_unresolved(ctx, b);
@@ -868,8 +890,9 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             to,
             expr,
             span,
+            reason,
         } => {
-            let r = solve_coerce(ctx, from, to, expr, span);
+            let r = carry_reason(solve_coerce(ctx, from, to, expr, span), &reason);
             if matches!(r, SolveResult::Error(_)) {
                 // Cascade suppression: poison unresolved sides AND inner type
                 // args so expressions with a literal default (e.g. `null` →
@@ -891,7 +914,8 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             value,
             target,
             span,
-        } => solve_equal_decayed(ctx, value, target, span),
+            reason,
+        } => carry_reason(solve_equal_decayed(ctx, value, target, span), &reason),
         Constraint::AssignTarget {
             value,
             target,
@@ -1404,6 +1428,7 @@ fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveR
                 a: new_a,
                 b: new_b,
                 span,
+                reason: Reason::Unspecified,
             });
         }
     }
@@ -1440,7 +1465,12 @@ fn solve_equal(ctx: &mut InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> SolveR
             if ctx.is_concrete(a) && ctx.is_concrete(b) {
                 SolveResult::Error(mismatch_error(ctx, a, b, span))
             } else {
-                SolveResult::Deferred(Constraint::Equal { a, b, span })
+                SolveResult::Deferred(Constraint::Equal {
+                    a,
+                    b,
+                    span,
+                    reason: Reason::Unspecified,
+                })
             }
         },
         Err(UnifyError::OccursCheck) => SolveResult::Error(InferError::InfiniteType { span }),
@@ -1492,6 +1522,7 @@ fn mismatch_error(ctx: &InferCtx<'_>, a: TyVar, b: TyVar, span: Span) -> InferEr
         expected: a,
         got: b,
         span,
+        reason: Reason::Unspecified,
     }
 }
 
@@ -1593,6 +1624,7 @@ fn solve_equal_decayed(
                 value,
                 target,
                 span,
+                reason: Reason::Unspecified,
             });
         },
     };
@@ -1611,6 +1643,7 @@ fn solve_equal_decayed(
                     value,
                     target,
                     span,
+                    reason: Reason::Unspecified,
                 });
             },
             // Non-ref (or literal) target: decay to the pointee below.
@@ -1678,6 +1711,7 @@ fn break_stalled_assign_targets(ctx: &mut InferCtx<'_>) {
                 to: target,
                 expr,
                 span,
+                reason: Reason::Unspecified,
             };
         }
     }
@@ -1766,6 +1800,7 @@ fn solve_coerce(
                     to,
                     expr,
                     span,
+                    reason: Reason::Unspecified,
                 });
             },
         }
@@ -1790,6 +1825,7 @@ fn solve_coerce(
                 to,
                 expr,
                 span,
+                reason: Reason::Unspecified,
             });
         }
         let fp = *fp;
@@ -1815,6 +1851,7 @@ fn solve_coerce(
             to,
             expr,
             span,
+            reason: Reason::Unspecified,
         });
     }
 
@@ -1897,6 +1934,7 @@ fn solve_coerce(
             to,
             expr,
             span,
+            reason: Reason::Unspecified,
         });
     }
 
@@ -1942,6 +1980,7 @@ fn solve_coerce(
                         expected: param_tv,
                         got: from,
                         span,
+                        reason: Reason::Unspecified,
                     });
                 }
             }
@@ -3303,12 +3342,14 @@ fn solve_call(
             // run every `coerce` so the param/return types unify regardless —
             // reporting the convention error without a spurious cascade.
             let mut conv_err: Option<InferError> = None;
-            for (arg, param) in args.iter().zip(params.iter()) {
+            for (index, (arg, param)) in args.iter().zip(params.iter()).enumerate() {
                 let e = reconcile_fn_convention(ctx, arg, *param, &span);
                 if conv_err.is_none() {
                     conv_err = e;
                 }
-                ctx.coerce(arg.ty, *param, arg.value, span.clone());
+                // Only the function type is known here, not its declaration.
+                let reason = Reason::Param { index, decl: None };
+                ctx.coerce_because(arg.ty, *param, arg.value, span.clone(), reason);
             }
             // Ref-aware: a direct callee's Function type carries `ret: &T`
             // (intrinsics like lang.ptr_ref); the result may already be
@@ -5010,6 +5051,7 @@ fn solve_tuple_rest_pat(
             expected: scrutinee,
             got: scrutinee,
             span,
+            reason: Reason::Unspecified,
         });
     }
 

@@ -7,6 +7,7 @@ use kestrel_ast_builder::Vis;
 use kestrel_hecs::Entity;
 use kestrel_span::Span;
 
+use crate::constraint::Reason;
 use crate::ty::{LiteralKind, TyVar};
 
 /// A type inference error. Accumulated during solving; each produces
@@ -18,6 +19,9 @@ pub enum InferError {
         expected: TyVar,
         got: TyVar,
         span: Span,
+        /// Why `expected` was expected; set by the solver from the
+        /// constraint that failed (`with_reason`).
+        reason: Reason,
     },
 
     /// Type doesn't conform to a protocol.
@@ -323,6 +327,9 @@ pub struct RenderedInferError {
     pub label: Option<String>,
     /// Trailing explanatory notes.
     pub notes: Vec<String>,
+    /// Secondary labels: other places that explain the error, e.g. the
+    /// annotation that set the expected type ("expected because of this").
+    pub secondary: Vec<(Span, String)>,
 }
 
 impl InferError {
@@ -337,6 +344,7 @@ impl InferError {
             message,
             label: Some(detail.to_string()),
             notes: Vec::new(),
+            secondary: Vec::new(),
         };
         // Shorthand: `self.code()` + a message + a fixed label, ignoring `detail`.
         let labeled = |message: String, label: String| RenderedInferError {
@@ -344,10 +352,15 @@ impl InferError {
             message,
             label: Some(label),
             notes: Vec::new(),
+            secondary: Vec::new(),
         };
 
         match self {
-            Self::TypeMismatch { .. } => detailed("type mismatch".into()),
+            Self::TypeMismatch { reason, .. } => {
+                let mut r = detailed("type mismatch".into());
+                reason.explain(&mut r);
+                r
+            },
 
             Self::DoesNotConform { .. } => detailed(
                 "type mismatch: does not conform to protocol; does not satisfy constraint".into(),
@@ -393,6 +406,7 @@ impl InferError {
                 message: "error in expression".into(),
                 label: None,
                 notes: Vec::new(),
+                secondary: Vec::new(),
             },
 
             Self::ImplicitMemberNotFound { name, .. } => {
@@ -473,6 +487,7 @@ impl InferError {
                      or at the binding (e.g. `let x: T = f(...)`)"
                         .into(),
                 ],
+                secondary: Vec::new(),
             },
 
             Self::CannotInferType { .. } => labeled(
@@ -502,6 +517,7 @@ impl InferError {
                 notes: vec![format!(
                     "primitive methods cannot be used as first-class values; use '.{method}()' instead"
                 )],
+                secondary: Vec::new(),
             },
 
             Self::CircularOpaqueReturn { .. } => RenderedInferError {
@@ -511,6 +527,7 @@ impl InferError {
                 notes: vec![
                     "mutually recursive functions with 'some' return types must have at least one non-opaque base case".into(),
                 ],
+                secondary: Vec::new(),
             },
 
             Self::OpaqueUnderlierNotCopyable { .. } => RenderedInferError {
@@ -520,6 +537,7 @@ impl InferError {
                 notes: vec![
                     "a plain 'some P' promises callers a Copyable value; write 'some P and not Copyable' to allow a move-only concrete type".into(),
                 ],
+                secondary: Vec::new(),
             },
 
             Self::ConventionMismatch { .. } => labeled(
@@ -542,6 +560,7 @@ impl InferError {
                 ),
                 label: Some(format!("this is {}", describe_fn_kind(*actual))),
                 notes: vec![kind_mismatch_note(*expected, *actual)],
+                secondary: Vec::new(),
             },
 
             Self::RefFunctionAsValue { .. } => RenderedInferError {
@@ -555,6 +574,7 @@ impl InferError {
                 notes: vec![
                     "capturing or storing it would erase the ret_borrow calling convention".into(),
                 ],
+                secondary: Vec::new(),
             },
 
             Self::RefInTypeArgument { .. } => RenderedInferError {
@@ -566,11 +586,24 @@ impl InferError {
                 notes: vec![
                     "bind the value first (`let x = ...;`) to store an owned copy".into(),
                 ],
+                secondary: Vec::new(),
             },
         }
     }
 
     /// The source span where this error occurred.
+    /// Attach the cause of the expectation to a type mismatch; other errors
+    /// are returned unchanged. A reason already present is kept: it is the
+    /// more specific one.
+    pub fn with_reason(mut self, reason: &Reason) -> Self {
+        if let Self::TypeMismatch { reason: r, .. } = &mut self
+            && *r == Reason::Unspecified
+        {
+            *r = reason.clone();
+        }
+        self
+    }
+
     /// The diagnostic code for this error. One exhaustive match — no
     /// wildcard — so a new variant must choose its code here; `render` reads
     /// it from nowhere else. Codes and their meanings are listed in
@@ -644,6 +677,32 @@ impl InferError {
             | Self::RefInTypeArgument { span }
             | Self::ConventionMismatch { span }
             | Self::KindMismatch { span, .. } => span,
+        }
+    }
+}
+
+impl Reason {
+    /// Add this cause of an expectation to a rendered mismatch: a secondary
+    /// label at the cause, or a note when there is no real span to point at.
+    fn explain(&self, r: &mut RenderedInferError) {
+        let (span, text) = match self {
+            Reason::Unspecified => return,
+            Reason::Annotation(s) => (s, "expected because of this annotation"),
+            Reason::Return(s) => (s, "expected because of this return type"),
+            Reason::Param { decl: Some(s), .. } => (s, "expected because of this parameter"),
+            Reason::Param { index, decl: None } => {
+                r.notes.push(format!(
+                    "expected because of the type of parameter {}",
+                    index + 1
+                ));
+                return;
+            },
+            Reason::FirstArm(s) => (s, "expected because the first branch has this type"),
+            Reason::Element(s) => (s, "expected because the first element has this type"),
+            Reason::Assign(s) => (s, "expected because of the type of this target"),
+        };
+        if !span.is_synthetic() {
+            r.secondary.push((span.clone(), text.into()));
         }
     }
 }

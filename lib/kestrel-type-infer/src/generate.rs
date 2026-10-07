@@ -13,7 +13,7 @@ use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAn
 use kestrel_name_res::ResolveBuiltin;
 use kestrel_span::Span;
 
-use crate::constraint::{CallArg, Constraint, labels_match};
+use crate::constraint::{CallArg, Constraint, Reason, labels_match};
 use crate::ctx::InferCtx;
 use crate::error::InferError;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
@@ -57,7 +57,8 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
             ) {
                 mark_arm_value(ctx, hir, tail);
             }
-            ctx.coerce(tail_tv, ctx.return_ty, tail, span);
+            let reason = return_reason(ctx);
+            ctx.coerce_because(tail_tv, ctx.return_ty, tail, span, reason);
         }
     }
 
@@ -505,10 +506,16 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // deferred for local reads (pattern-payload ref bindings
                 // resolve after generation), eager-peel otherwise.
                 match then_body.tail_expr {
-                    Some(tail) => {
-                        equate_decaying_value(ctx, hir, tail, then_tv, result_tv, then_span)
-                    },
-                    None => ctx.equal(then_tv, result_tv, then_span),
+                    Some(tail) => equate_decaying_value(
+                        ctx,
+                        hir,
+                        tail,
+                        then_tv,
+                        result_tv,
+                        then_span.clone(),
+                        Reason::Unspecified,
+                    ),
+                    None => ctx.equal(then_tv, result_tv, then_span.clone()),
                 }
                 mark_arm_value_block(ctx, hir, then_body);
                 // Guard desugars to `if cond {} else { body }` where the
@@ -519,10 +526,21 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     let else_span =
                         block_value_span(hir, else_block).unwrap_or_else(|| span.clone());
                     match else_block.tail_expr {
-                        Some(tail) => {
-                            equate_decaying_value(ctx, hir, tail, else_tv, result_tv, else_span)
-                        },
-                        None => ctx.equal(else_tv, result_tv, else_span),
+                        Some(tail) => equate_decaying_value(
+                            ctx,
+                            hir,
+                            tail,
+                            else_tv,
+                            result_tv,
+                            else_span,
+                            Reason::FirstArm(then_span),
+                        ),
+                        None => ctx.equal_because(
+                            else_tv,
+                            result_tv,
+                            else_span,
+                            Reason::FirstArm(then_span),
+                        ),
                     }
                     mark_arm_value_block(ctx, hir, else_block);
                 }
@@ -560,6 +578,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.poison(result_tv);
             }
 
+            // The first arm's value fixes the result type; it is the reason
+            // for a later arm's mismatch.
+            let mut first_arm_span: Option<Span> = None;
             for arm in arms {
                 // Pattern constrains scrutinee type
                 gen_pat(ctx, hir, arm.pattern, scrut_tv, *source);
@@ -580,7 +601,11 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Arm values decay to the pointee UNLESS the result position
                 // is a ref (stage 2b): deferred for local reads, eager-peel
                 // otherwise.
-                equate_decaying_value(ctx, hir, arm.body, body_tv, result_tv, body_span);
+                let reason = first_arm_span
+                    .clone()
+                    .map_or(Reason::Unspecified, Reason::FirstArm);
+                first_arm_span.get_or_insert_with(|| body_span.clone());
+                equate_decaying_value(ctx, hir, arm.body, body_tv, result_tv, body_span, reason);
                 // Arm-value decay applies only where the arm value is the
                 // user's expression. GuardLet is CPS-desugared — its pattern
                 // arm is the CONTINUATION, and marking it would decay a legal
@@ -639,12 +664,14 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ) {
                     mark_arm_value(ctx, hir, *val);
                 }
-                ctx.coerce(val_tv, ctx.return_ty, *val, span.clone());
+                let reason = return_reason(ctx);
+                ctx.coerce_because(val_tv, ctx.return_ty, *val, span.clone(), reason);
             } else {
                 // Bare return — coerce unit against return type so
                 // `return` in a non-void function is a type mismatch
                 let unit_tv = ctx.tuple(vec![]);
-                ctx.coerce(unit_tv, ctx.return_ty, id, span.clone());
+                let reason = return_reason(ctx);
+                ctx.coerce_because(unit_tv, ctx.return_ty, id, span.clone(), reason);
             }
             ctx.never()
         },
@@ -686,7 +713,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if route_via_assign_target {
                 ctx.assign_target(value_tv, target_tv, *value, span.clone());
             } else {
-                ctx.coerce(value_tv, target_tv, *value, span.clone());
+                let reason = Reason::Assign(expr_span(hir, *target));
+                ctx.coerce_because(value_tv, target_tv, *value, span.clone(), reason);
             }
             ctx.tuple(vec![]) // assignment returns unit
         },
@@ -714,16 +742,27 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // constraints run. This way each element is compared against the
             // target element type, not against whatever literal kind the first
             // element happens to have.
-            if let Some(hint_elem) = ctx.expected_array_elem.take() {
-                ctx.equal(elem_tv, hint_elem, span.clone());
-            }
-            for &e in elements {
+            let hinted = match ctx.expected_array_elem.take() {
+                Some(hint_elem) => {
+                    ctx.equal(elem_tv, hint_elem, span.clone());
+                    true
+                },
+                None => false,
+            };
+            // Without an annotation's hint, the first element fixes the
+            // element type and is the reason for every later mismatch.
+            let first_span = elements.first().map(|&e| expr_span(hir, e));
+            for (i, &e) in elements.iter().enumerate() {
                 let e_tv = gen_expr(ctx, hir, e);
                 let e_span = expr_span(hir, e);
                 let e_tv = peel_ref_tv(ctx, e_tv);
+                let reason = match &first_span {
+                    Some(first) if i > 0 && !hinted => Reason::Element(first.clone()),
+                    _ => Reason::Unspecified,
+                };
                 // Order (elem_tv, e_tv) so diagnostics read "expected <target>
                 // got <element>" rather than the reverse.
-                ctx.equal(elem_tv, e_tv, e_span);
+                ctx.equal_because(elem_tv, e_tv, e_span, reason);
                 // Literal elements always decay refs to owned (stage 1.5).
                 mark_arm_value(ctx, hir, e);
             }
@@ -977,7 +1016,10 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // POINTEE directly.
                     ctx.binding_init_exprs.insert(*val);
                     // Value flows to the binding (allows promotion)
-                    ctx.coerce(val_tv, local_tv, *val, span.clone());
+                    let reason = ty
+                        .as_ref()
+                        .map_or(Reason::Unspecified, |t| Reason::Annotation(hir_ty_span(t)));
+                    ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
                 }
             }
         },
@@ -1309,10 +1351,14 @@ fn gen_struct_init(
 
             // Constrain args against the matched init's param types
             if let Some(param_tys) = qctx.query(LowerCallableTypes { entity: init, root }) {
-                for (arg, param_ty) in args.iter().zip(param_tys.iter()) {
+                for (index, (arg, param_ty)) in args.iter().zip(param_tys.iter()).enumerate() {
                     if let Some(hir_ty) = param_ty {
                         let param_tv = lower_hir_ty_with_subs(ctx, hir_ty, &init_subs);
-                        ctx.coerce(arg.ty, param_tv, arg.value, span.clone());
+                        let reason = Reason::Param {
+                            index,
+                            decl: Some(hir_ty_span(hir_ty)),
+                        };
+                        ctx.coerce_because(arg.ty, param_tv, arg.value, span.clone(), reason);
                     }
                 }
             }
@@ -1397,13 +1443,17 @@ fn gen_struct_init(
             }
         }
 
-        for (arg, &field) in args.iter().zip(fields.iter()) {
+        for (index, (arg, &field)) in args.iter().zip(fields.iter()).enumerate() {
             if let Some(hir_ty) = qctx.query(LowerTypeAnnotation {
                 entity: field,
                 root,
             }) {
                 let field_tv = lower_hir_ty_with_subs(ctx, &hir_ty, &struct_subs);
-                ctx.coerce(arg.ty, field_tv, arg.value, span.clone());
+                let reason = Reason::Param {
+                    index,
+                    decl: Some(hir_ty_span(&hir_ty)),
+                };
+                ctx.coerce_because(arg.ty, field_tv, arg.value, span.clone(), reason);
             }
         }
     }
@@ -1578,6 +1628,8 @@ fn gen_closure(
     let closure_ret_tv = ctx.fresh();
     let saved_return_ty = ctx.return_ty;
     ctx.return_ty = closure_ret_tv;
+    // A closure's return type has no declaration to point at.
+    let saved_return_ty_span = ctx.return_ty_span.take();
 
     // Infer body
     let body_tv = gen_block(ctx, hir, body);
@@ -1611,6 +1663,7 @@ fn gen_closure(
     }
 
     ctx.return_ty = saved_return_ty;
+    ctx.return_ty_span = saved_return_ty_span;
 
     // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
     // otherwise `Consuming` (the default, matching ordinary closures). The
@@ -2573,13 +2626,25 @@ fn equate_decaying_value(
     value_tv: TyVar,
     target_tv: TyVar,
     span: Span,
+    reason: Reason,
 ) {
     if value_expr_is_local(hir, value_expr) {
-        ctx.equal_decayed(value_tv, target_tv, span);
+        ctx.equal_decayed_because(value_tv, target_tv, span, reason);
     } else {
         let peeled = peel_ref_tv(ctx, value_tv);
-        ctx.equal(peeled, target_tv, span);
+        // Target first, like `EqualDecayed` and array elements: a mismatch
+        // reads "expected <result type> got <this arm>", which is what the
+        // `FirstArm` reason explains.
+        ctx.equal_because(target_tv, peeled, span, reason);
     }
+}
+
+/// The reason a value is checked against the function's return type: its
+/// declared return type, when there is one to point at.
+fn return_reason(ctx: &InferCtx<'_>) -> Reason {
+    ctx.return_ty_span
+        .clone()
+        .map_or(Reason::Unspecified, Reason::Return)
 }
 
 /// Shallow ref peel for Equal-based decay sites (match scrutinee wiring,
@@ -2646,7 +2711,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
 }
 
 /// Extract a span from a HirTy.
-fn hir_ty_span(ty: &HirTy) -> Span {
+pub(crate) fn hir_ty_span(ty: &HirTy) -> Span {
     match ty {
         HirTy::Struct { span, .. }
         | HirTy::Enum { span, .. }

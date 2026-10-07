@@ -85,3 +85,49 @@ fn messages_never_print_the_error_placeholder() {
     );
     assert!(text[0].contains("(_) -> _"), "unexpected rendering: {text:?}");
 }
+
+/// Secondary-label texts of every diagnostic, in order.
+fn secondary_labels(src: &str) -> Vec<String> {
+    let mut compiler = Compiler::new();
+    let file = compiler.set_source("/tmp/reasons.ks", src.to_string());
+    compiler.build(file);
+    let _ = CompilerDriver::new(&compiler).infer_all();
+    compiler
+        .diagnostics()
+        .iter()
+        .flat_map(|d| {
+            d.labels
+                .iter()
+                .filter(|l| l.style == codespan_reporting::diagnostic::LabelStyle::Secondary)
+                .map(|l| l.message.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn a_type_mismatch_says_why_the_type_was_expected() {
+    // One mismatch per expectation source (bidi P0d).
+    let src = "module Main\n\
+               struct P { var a: lang.i8 }\n\
+               func ret(b: lang.i64) -> lang.i8 { b }\n\
+               func f(c: lang.i64, d: lang.i8) {\n\
+                   let x: lang.i8 = c;\n\
+                   if true { d } else { c };\n\
+                   let xs = [d, c];\n\
+                   let p = P(a: c);\n\
+               }\n";
+    let labels = secondary_labels(src);
+    for expected in [
+        "expected because of this return type",
+        "expected because of this annotation",
+        "expected because the first branch has this type",
+        "expected because the first element has this type",
+        "expected because of this parameter",
+    ] {
+        assert!(
+            labels.iter().any(|l| l == expected),
+            "missing {expected:?} in {labels:?}"
+        );
+    }
+}
