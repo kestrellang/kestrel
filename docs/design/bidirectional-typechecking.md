@@ -55,6 +55,29 @@ they need the operator rule below rather than a known receiver.
 - **N4 is not fixed by the checker**; see the overflow ruling.
 - D3's E106 now also fires for numeric literal receivers (0 sites measured).
 
+## Implementation status (2026-10-07)
+
+**P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
+
+| Part | What | Verified |
+|---|---|---|
+| P0a | Fx hashing in `kestrel-type-infer`; `report_unresolved_slots` in source order; `Compiler::diagnostics()` sorted; driver tracks printed diagnostics by key | full `.ks` suite = baseline (3856 / 26 known); determinism tests fail before ("run 1 differs from run 0") |
+| P0b | `InferError::code()` — one exhaustive match, E102–E118 (table in `docs/error-codes.md`); E100 only on the never-shown `FromHir` | full suite = baseline |
+| P0c | `?` and the `Error` placeholder print as `_` | pending |
+| P0d | `Reason` on `Equal` / `Coerce` / `EqualDecayed`, carried into `TypeMismatch` by the dispatcher; secondary label "expected because of this annotation / return type / parameter / first branch / first element / target" | pending |
+
+**Deviation in P0c.** §10's "a type containing `Error` suppresses the
+diagnostic" is **not** implemented: `InferCtx::poison` creates `Error`
+without reporting, so a mismatch mentioning `Error` can be the *only*
+diagnostic (e.g. `closure_arity_mismatch_too_few.ks`) and suppressing it
+would make a wrong program compile. The rule needs §10's invariant —
+`report_error` is the only producer of `Error` — which P3 establishes.
+Until then the placeholder is rendered as `_`.
+
+**Not yet carrying a reason:** literal-vs-annotation mismatches (they surface
+as conformance errors, E107/E114), assignments to locals (`AssignTarget`),
+and closure returns.
+
 ## 0. Summary
 
 ### Recommended design in ten points
