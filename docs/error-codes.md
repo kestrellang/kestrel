@@ -8,8 +8,9 @@
 > `kestrel-analyze`).
 
 Most diagnostics print as `message [E-code]` with source labels. Inference
-errors are all surfaced under the umbrella code **E100**; the detailed message
-comes from the type checker.
+errors carry a code per kind (E102–E118 below); the detailed message comes from
+the type checker, and the code is assigned in one place,
+`InferError::code` in `kestrel-type-infer/src/error.rs`.
 
 ## Contents
 
@@ -49,8 +50,21 @@ comes from the type checker.
 
 | Code | Message | Explanation |
 |---|---|---|
-| E100 | type mismatch: {detail} | Umbrella code for all type-inference errors (mismatched types, unknown members, ambiguous overloads, unsatisfied bounds, …). The detail text comes from the solver. |
+| E100 | *(retired umbrella)* | Used to cover every inference error. Now carried only by an internal error that is never shown (an expression HIR lowering already reported); each kind below has its own code. |
 | E101 | {kind} condition must be Bool | An `if`/`while`/`guard` condition has a non-`Bool` type. |
+| E102 | no member '{name}' on type '{type}' | The member, associated type or tuple element does not exist on the receiver's type (includes tuple index out of bounds and member access on a primitive). |
+| E103 | ambiguous member / call to '{name}' | More than one candidate fits equally well. |
+| E104 | implicit member '.{name}' not found | `.Case` / `.member` has no match on the expected type. |
+| E105 | could not infer type / cannot infer type parameter | Nothing determines the type; add an annotation. |
+| E107 | does not conform to protocol | A type does not satisfy a required conformance or where clause. |
+| E108 | implicit 'it' parameter requires single-parameter context | `it` was used where the closure's expected type does not take exactly one parameter. |
+| E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |
+| E113 | wrong number of arguments / wrong label / no matching overload | The call's shape (arity, argument labels, type-argument count) fits no declaration. |
+| E114 | literal not accepted | The literal's kind cannot be written as the expected type. |
+| E115 | member '{name}' is not accessible | Visibility forbids the access from this scope. |
+| E116 | wrong kind of member use | A static member used on an instance, an instance method on a type, a type parameter as a value, or a method not called. |
+| E117 | infinite type | Unification would build a recursive type. |
+| E118 | opaque return type error | A circular `some P` return, or a `some P` that hides a non-`Copyable` type. |
 | E110 | duplicate binding '{name}' in parameter pattern | The same name is bound twice in one parameter's destructuring pattern. |
 | E111 | tuple pattern has {n} elements but type has {m} | A tuple-destructuring parameter doesn't match the tuple type's arity. |
 | E112 | tuple pattern used with non-tuple type | A parameter uses tuple destructuring but its type is not a tuple. |
@@ -77,11 +91,11 @@ comes from the type checker.
 | E142 *(warning)* | implicit parameter 'it' shadows the 'it' of an enclosing closure | A closure written without a parameter list uses `it` inside another such closure; the inner `it` is the inner closure's own parameter. Name one of the parameters to make the intent explicit. |
 | E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |
 
-### Example — E100 (type mismatch)
+### Example — E109 (type mismatch)
 
 ```kestrel
 func pick(cond: Bool) -> Int64 {
-    if cond { 42 } else { "hello" }  // error[E100]: both branches must have the same type
+    if cond { 42 } else { "hello" }  // error[E109]: both branches must have the same type
 }
 ```
 
@@ -391,7 +405,7 @@ func outlives() -> Int64 {
 
 | Code | Message | Explanation |
 |---|---|---|
-| E600 | *(reserved — not emitted)* | The check moved into the constraint solver, where an arity-mismatched `it` surfaces as an inference error under **E100**. The code is held so it is not reallocated. |
+| E600 | *(reserved — not emitted)* | The check moved into the constraint solver, where an arity-mismatched `it` surfaces as inference error **E108**. The code is held so it is not reallocated. |
 | E601 | closure has {actual} parameters, but expected {expected} | The closure's parameter count doesn't match the expected function type. |
 | E602 | *(reserved — not implemented)* | Closure escape analysis; the descriptor is registered but no emit site exists yet. |
 | E603 | cannot assign to captured variable '{name}' | A **normal** closure captures read-only views, so any assignment target rooted at a capture — the bare local or a projection like `c.n = 5` — is rejected. The note points at the fix: give the closure a `mutating` expected type (e.g. `mutating () -> ()`) to write back to the original, or fold the value and return it. Lifted for `mutating` (its views are `&mutating`) and for `consuming` / `escaping` (they own their captures). |
@@ -416,7 +430,7 @@ let inc: (Int64) -> Int64 = { (a, b) in a }
 ```
 
 `{ it + 1 }` against a two-parameter type is the same mistake, but it is caught
-by the solver and reported as **E100**, not E600.
+by the solver and reported as **E108**, not E600.
 
 ## E615–E618 — Entry point
 

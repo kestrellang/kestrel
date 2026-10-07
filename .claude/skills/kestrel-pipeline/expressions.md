@@ -121,7 +121,7 @@ node is recorded in the body's `BodySourceMap`.
     `Field`s; `AssociatedType { container: Some }` → `lower_type_receiver_path` (`TypeRef`);
     `AssociatedTypeStaticMember` → `Field { base: TypeRef }`; `Ambiguous` → E133,
     `SelfNotInScope` → E134, `NotFound` → E132, each `HirExpr::Error`.
-  - `Type.instanceMethod` used as a value (not in callee position) → E100.
+  - `Type.instanceMethod` used as a value (not in callee position) → E116.
   Every segment that lowers to its own expression is recorded in the body's
   `BodySourceMap` (`alloc_seg` / `record_segments`).
 - Type-infer: per-variant — see `HirExpr::Local` / `::Def` / `::OverloadSet` / `::Field`.
@@ -248,7 +248,7 @@ node is recorded in the body's `BodySourceMap`.
      - `self.init(…)` outside an initializer → E136.
      - first segment a local → `MethodCall { receiver: Local + Field chain (lower_path_prefix) }`.
      - static method via `try_resolve_static_call_from_segments` → `Call { callee: Def | OverloadSet }`.
-     - instance method named through a type → E100 + `HirExpr::Error`.
+     - instance method named through a type → E116 + `HirExpr::Error`.
      - type-level (type parameter / associated-type prefix) → `MethodCall { receiver: Def(T) | TypeRef }`.
      - value prefix (a static field / enum case value) → `MethodCall { receiver: lower_path(prefix) }`.
      - type prefix + protocol-extension static → `MethodCall { receiver: Def(Type) }`.

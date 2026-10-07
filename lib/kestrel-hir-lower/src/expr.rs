@@ -1133,7 +1133,8 @@ impl LowerCtx<'_> {
         };
         self.ctx.accumulate(
             Diagnostic::error()
-                .with_code("E100")
+                // Same family as the solver's `InferError::InstanceMethodAsStatic`.
+                .with_code("E116")
                 .with_message(message)
                 .with_labels(vec![
                     Label::primary(span.file_id, span.range()).with_message(label),

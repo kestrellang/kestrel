@@ -315,8 +315,7 @@ fn kind_mismatch_note(
 /// `InferError` variant means adding exactly one arm, here.
 #[derive(Clone, Debug)]
 pub struct RenderedInferError {
-    /// Diagnostic code. `E100` is the documented umbrella for inference errors
-    /// that have no more specific code of their own (`docs/error-codes.md`).
+    /// Diagnostic code, from `InferError::code` (`docs/error-codes.md`).
     pub code: &'static str,
     /// Headline message, without the code.
     pub message: String,
@@ -331,17 +330,17 @@ impl InferError {
     /// the solver produced alongside it (`TypedBody::error_details`), already
     /// substituted; several variants use it verbatim as their message.
     pub fn render(&self, detail: &str) -> RenderedInferError {
-        // Shorthand: `E100` + a message + `detail` as the label text — by far
+        // Shorthand: `self.code()` + a message + `detail` as the label text — by far
         // the most common shape.
         let detailed = |message: String| RenderedInferError {
-            code: "E100",
+            code: self.code(),
             message,
             label: Some(detail.to_string()),
             notes: Vec::new(),
         };
-        // Shorthand: `E100` + a message + a fixed label, ignoring `detail`.
+        // Shorthand: `self.code()` + a message + a fixed label, ignoring `detail`.
         let labeled = |message: String, label: String| RenderedInferError {
-            code: "E100",
+            code: self.code(),
             message,
             label: Some(label),
             notes: Vec::new(),
@@ -390,7 +389,7 @@ impl InferError {
             // Propagated from an earlier phase (parse / name resolution), which
             // already reported the real error — carry no label text of its own.
             Self::FromHir { .. } => RenderedInferError {
-                code: "E100",
+                code: self.code(),
                 message: "error in expression".into(),
                 label: None,
                 notes: Vec::new(),
@@ -465,7 +464,7 @@ impl InferError {
             },
 
             Self::UnresolvedTypeParam { .. } => RenderedInferError {
-                code: "E100",
+                code: self.code(),
                 message: "cannot infer type parameter".into(),
                 label: Some(detail.to_string()),
                 notes: vec![
@@ -497,7 +496,7 @@ impl InferError {
             ),
 
             Self::MethodNotCalled { method, .. } => RenderedInferError {
-                code: "E100",
+                code: self.code(),
                 message: detail.to_string(),
                 label: Some("add () to call this method".into()),
                 notes: vec![format!(
@@ -506,7 +505,7 @@ impl InferError {
             },
 
             Self::CircularOpaqueReturn { .. } => RenderedInferError {
-                code: "E100",
+                code: self.code(),
                 message: "circular opaque return type".into(),
                 label: Some("concrete type cannot be determined".into()),
                 notes: vec![
@@ -515,7 +514,7 @@ impl InferError {
             },
 
             Self::OpaqueUnderlierNotCopyable { .. } => RenderedInferError {
-                code: "E100",
+                code: self.code(),
                 message: "opaque return type hides a non-Copyable type".into(),
                 label: Some(detail.to_string()),
                 notes: vec![
@@ -535,7 +534,7 @@ impl InferError {
             Self::KindMismatch {
                 expected, actual, ..
             } => RenderedInferError {
-                code: "E624",
+                code: self.code(),
                 message: format!(
                     "closure kind mismatch: expected {}, found {}",
                     describe_fn_kind(*expected),
@@ -546,7 +545,7 @@ impl InferError {
             },
 
             Self::RefFunctionAsValue { .. } => RenderedInferError {
-                code: "E491",
+                code: self.code(),
                 message: "a reference-returning function cannot be used as a value".into(),
                 label: Some(
                     "call it instead — `-> &T` is a return convention, not part of a \
@@ -559,7 +558,7 @@ impl InferError {
             },
 
             Self::RefInTypeArgument { .. } => RenderedInferError {
-                code: "E492",
+                code: self.code(),
                 message: "a reference cannot be a generic type argument".into(),
                 label: Some(
                     "this would store the reference; references are second-class".into(),
@@ -572,6 +571,45 @@ impl InferError {
     }
 
     /// The source span where this error occurred.
+    /// The diagnostic code for this error. One exhaustive match — no
+    /// wildcard — so a new variant must choose its code here; `render` reads
+    /// it from nowhere else. Codes and their meanings are listed in
+    /// `docs/error-codes.md` (E102–E118). E100 is left only on `FromHir`,
+    /// which is never shown (HIR lowering already reported the real error).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::NoMember { .. }
+            | Self::MemberAccessOnPrimitive { .. }
+            | Self::NoAssociatedType { .. }
+            | Self::TupleIndexOnNonTuple { .. }
+            | Self::TupleIndexOutOfBounds { .. } => "E102",
+            Self::AmbiguousMember { .. } => "E103",
+            Self::ImplicitMemberNotFound { .. } => "E104",
+            Self::CannotInferType { .. } | Self::UnresolvedTypeParam { .. } => "E105",
+            Self::DoesNotConform { .. } => "E107",
+            Self::ItWrongArity { .. } => "E108",
+            Self::TypeMismatch { .. } | Self::ConventionMismatch { .. } => "E109",
+            Self::ArgCountMismatch { .. }
+            | Self::LabelMismatch { .. }
+            | Self::MemberwiseInitArity { .. }
+            | Self::MemberwiseInitLabel { .. }
+            | Self::NoMatchingOverload { .. }
+            | Self::TypeArgCountMismatch { .. } => "E113",
+            Self::LiteralNotAccepted { .. } => "E114",
+            Self::MemberNotVisible { .. } => "E115",
+            Self::MemberIsStatic { .. }
+            | Self::InstanceMethodAsStatic { .. }
+            | Self::TypeParamAsValue { .. }
+            | Self::MethodNotCalled { .. } => "E116",
+            Self::InfiniteType { .. } => "E117",
+            Self::CircularOpaqueReturn { .. } | Self::OpaqueUnderlierNotCopyable { .. } => "E118",
+            Self::KindMismatch { .. } => "E624",
+            Self::RefFunctionAsValue { .. } => "E491",
+            Self::RefInTypeArgument { .. } => "E492",
+            Self::FromHir { .. } => "E100",
+        }
+    }
+
     pub fn span(&self) -> &Span {
         match self {
             Self::TypeMismatch { span, .. }
