@@ -460,7 +460,7 @@ impl TypeResolver for WorldResolver<'_> {
                 None => {
                     // Expand to parent protocols for the full closure
                     let mut expanded = bound_protocols;
-                    let mut visited = std::collections::HashSet::new();
+                    let mut visited = crate::collections::HashSet::default();
                     for p in &expanded {
                         visited.insert(*p);
                     }
@@ -550,7 +550,7 @@ impl TypeResolver for WorldResolver<'_> {
                 .iter()
                 .any(|&c| self.matches_labels(c, &arg_labels_for_fallback));
         if !direct_label_match {
-            let mut seen_signatures: std::collections::HashSet<_> = all_candidates
+            let mut seen_signatures: crate::collections::HashSet<_> = all_candidates
                 .iter()
                 .map(|&c| self.label_signature(c))
                 .collect();
@@ -789,7 +789,7 @@ impl TypeResolver for WorldResolver<'_> {
             TyKind::Opaque { bounds, .. } => {
                 // Expand all bounds through superprotocol chains
                 let mut all_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
-                let mut visited = std::collections::HashSet::new();
+                let mut visited = crate::collections::HashSet::default();
                 for p in &all_protocols {
                     visited.insert(*p);
                 }
@@ -881,7 +881,7 @@ impl TypeResolver for WorldResolver<'_> {
         // instead of `gather_bounds_from_where_clause`'s last-segment collapse,
         // which is the aliasing this check exists to undo.
         let mut saw_other_receiver = false;
-        let mut checked = std::collections::HashSet::new();
+        let mut checked = crate::collections::HashSet::default();
         let mut current = Some(self.body_owner);
         while let Some(entity) = current {
             if checked.insert(entity) {
@@ -2091,9 +2091,9 @@ impl WorldResolver<'_> {
         // parent protocols, and the `"init"` / `"subscript"` sentinels for
         // nameless Callable entities.
         let mut all_candidates = Vec::new();
-        let mut seen_entities = std::collections::HashSet::new();
+        let mut seen_entities = crate::collections::HashSet::default();
         for proto in protocols {
-            let mut seen_in_proto = std::collections::HashSet::new();
+            let mut seen_in_proto = crate::collections::HashSet::default();
             let members = self.ctx.query(kestrel_name_res::ProtocolMembersByName {
                 protocol: *proto,
                 name: name.to_string(),
@@ -2337,7 +2337,7 @@ impl WorldResolver<'_> {
     fn collect_assoc_type_direct_bounds_inner(
         &self,
         alias_entity: Entity,
-    ) -> (Vec<Entity>, std::collections::HashSet<Entity>) {
+    ) -> (Vec<Entity>, crate::collections::HashSet<Entity>) {
         let (mut protocols, mut visited, mut checked) =
             self.collect_assoc_type_receiver_free_bounds_inner(alias_entity);
 
@@ -2374,12 +2374,12 @@ impl WorldResolver<'_> {
         alias_entity: Entity,
     ) -> (
         Vec<Entity>,
-        std::collections::HashSet<Entity>,
-        std::collections::HashSet<Entity>,
+        crate::collections::HashSet<Entity>,
+        crate::collections::HashSet<Entity>,
     ) {
         let mut protocols = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        let mut checked = std::collections::HashSet::new();
+        let mut visited = crate::collections::HashSet::default();
+        let mut checked = crate::collections::HashSet::default();
 
         // Check Conformances on the TypeAlias itself (e.g., `type Iter: Iterator`)
         if let Some(conformances) = self.ctx.get::<Conformances>(alias_entity) {
@@ -2426,7 +2426,7 @@ impl WorldResolver<'_> {
             return true;
         }
         let mut protocols = vec![declared];
-        let mut visited: std::collections::HashSet<Entity> = protocols.iter().copied().collect();
+        let mut visited: crate::collections::HashSet<Entity> = protocols.iter().copied().collect();
         expand_protocol_closure_in_place(self.ctx, self.root, &mut protocols, &mut visited);
         protocols.contains(&wanted)
     }
@@ -2577,10 +2577,10 @@ impl WorldResolver<'_> {
     fn collect_param_direct_bounds_inner(
         &self,
         param_entity: Entity,
-    ) -> (Vec<Entity>, std::collections::HashSet<Entity>) {
+    ) -> (Vec<Entity>, crate::collections::HashSet<Entity>) {
         let mut protocols = Vec::new();
-        let mut visited = std::collections::HashSet::new();
-        let mut checked = std::collections::HashSet::new();
+        let mut visited = crate::collections::HashSet::default();
+        let mut checked = crate::collections::HashSet::default();
 
         // Check param's direct parent (function/method that declares the type param)
         if let Some(parent) = self.ctx.parent_of(param_entity) {
@@ -2637,7 +2637,7 @@ impl WorldResolver<'_> {
         param_entity: Entity,
         entity: Entity,
         protocols: &mut Vec<Entity>,
-        visited: &mut std::collections::HashSet<Entity>,
+        visited: &mut crate::collections::HashSet<Entity>,
     ) {
         for proto in self.where_clause_bounds_on(param_entity, entity) {
             if visited.insert(proto) {

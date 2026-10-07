@@ -113,6 +113,41 @@ fn resolve_span(span: Option<&Span>, entity: Entity, world: &World) -> Span {
         .unwrap_or_else(|| Span::synthetic(0))
 }
 
+/// `source_order`'s key: (file, start, end, severity — errors first, code,
+/// message). Also a diagnostic's identity for "already printed" tracking.
+pub type SourceOrder = (
+    usize,
+    usize,
+    usize,
+    std::cmp::Reverse<codespan_reporting::diagnostic::Severity>,
+    Option<String>,
+    String,
+);
+
+/// Sort key putting diagnostics in source order: file, then the primary
+/// label's range, errors before warnings at the same spot, then code and
+/// message so that equal positions still order deterministically. A
+/// diagnostic with no label sorts after every located one.
+pub fn source_order(d: &Diagnostic<usize>) -> SourceOrder {
+    use codespan_reporting::diagnostic::LabelStyle;
+    let primary = d
+        .labels
+        .iter()
+        .find(|l| l.style == LabelStyle::Primary)
+        .or(d.labels.first());
+    let (file, start, end) = primary.map_or((usize::MAX, 0, 0), |l| {
+        (l.file_id, l.range.start, l.range.end)
+    });
+    (
+        file,
+        start,
+        end,
+        std::cmp::Reverse(d.severity),
+        d.code.clone(),
+        d.message.clone(),
+    )
+}
+
 pub fn mir_verify_error_to_diagnostic(
     error: &kestrel_mir::verify::VerifyError,
     world: &World,

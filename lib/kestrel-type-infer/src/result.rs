@@ -3,7 +3,7 @@
 //! `TypedBody` is the final output of type inference for a single body.
 //! All TyVars have been resolved to `ResolvedTy`.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::hash::Hash;
 
 use kestrel_ast::arena::Idx;
@@ -793,17 +793,17 @@ mod tests {
 
     fn empty() -> TypedBody {
         TypedBody {
-            expr_types: HashMap::new(),
-            local_types: HashMap::new(),
-            resolutions: HashMap::new(),
-            field_subscripts: HashMap::new(),
-            promotions: HashMap::new(),
-            type_args: HashMap::new(),
+            expr_types: HashMap::default(),
+            local_types: HashMap::default(),
+            resolutions: HashMap::default(),
+            field_subscripts: HashMap::default(),
+            promotions: HashMap::default(),
+            type_args: HashMap::default(),
             errors: Vec::new(),
             error_details: Vec::new(),
             opaque_concrete_type: None,
-            indirection_peels: HashMap::new(),
-            kind_coercions: HashMap::new(),
+            indirection_peels: HashMap::default(),
+            kind_coercions: HashMap::default(),
         }
     }
 
@@ -814,10 +814,15 @@ mod tests {
     #[test]
     fn fingerprint_covers_every_field() {
         let mut exprs = Arena::new();
-        let e = exprs.alloc(HirExpr::Error { span: Span::synthetic(0) });
+        let e = exprs.alloc(HirExpr::Error {
+            span: Span::synthetic(0),
+        });
         let mut world = World::new();
         let (a, b) = (world.spawn(), world.spawn());
-        let ty = |entity| ResolvedTy::Named { entity, args: Vec::new() };
+        let ty = |entity| ResolvedTy::Named {
+            entity,
+            args: Vec::new(),
+        };
         let error = |span| InferError::FromHir { span };
 
         let mut base = empty();
@@ -826,29 +831,56 @@ mod tests {
         let base_fp = Fingerprint::of(&base);
 
         let variants: Vec<(&str, TypedBody)> = vec![
-            ("field_subscripts", TypedBody {
-                field_subscripts: [(e, a)].into(),
-                ..base.clone()
-            }),
-            ("promotions", TypedBody {
-                promotions: [(e, ResolvedPromotion { method: a, target: ty(b) })].into(),
-                ..base.clone()
-            }),
-            ("type_args", TypedBody {
-                type_args: [(e, vec![ty(a)])].into(),
-                ..base.clone()
-            }),
-            ("errors (same length)", TypedBody {
-                errors: vec![error(Span::new(0, 4..9))],
-                ..base.clone()
-            }),
-            ("error_details", TypedBody {
-                error_details: vec!["type 'B'".into()],
-                ..base.clone()
-            }),
+            (
+                "field_subscripts",
+                TypedBody {
+                    field_subscripts: [(e, a)].into_iter().collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "promotions",
+                TypedBody {
+                    promotions: [(
+                        e,
+                        ResolvedPromotion {
+                            method: a,
+                            target: ty(b),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "type_args",
+                TypedBody {
+                    type_args: [(e, vec![ty(a)])].into_iter().collect(),
+                    ..base.clone()
+                },
+            ),
+            (
+                "errors (same length)",
+                TypedBody {
+                    errors: vec![error(Span::new(0, 4..9))],
+                    ..base.clone()
+                },
+            ),
+            (
+                "error_details",
+                TypedBody {
+                    error_details: vec!["type 'B'".into()],
+                    ..base.clone()
+                },
+            ),
         ];
         for (field, body) in variants {
-            assert_ne!(Fingerprint::of(&body), base_fp, "fingerprint ignores `{field}`");
+            assert_ne!(
+                Fingerprint::of(&body),
+                base_fp,
+                "fingerprint ignores `{field}`"
+            );
         }
     }
 }

@@ -11,7 +11,8 @@ use std::fmt;
 use std::panic::AssertUnwindSafe;
 
 use kestrel_ast_builder::{Name, NodeKind, Valued};
-use kestrel_compiler::{Compiler, InferWithDiagnostics, diagnostic::WorldFiles};
+use kestrel_compiler::diagnostic::{SourceOrder, WorldFiles, source_order};
+use kestrel_compiler::{Compiler, InferWithDiagnostics};
 use kestrel_hecs::Entity;
 use kestrel_type_infer::error::InferError;
 
@@ -28,16 +29,19 @@ use kestrel_type_infer::error::InferError;
 ///
 /// The driver now remembers for them. `analyze_all` records its summary, and
 /// `emit_diagnostics` / `has_errors` read **both** halves, so no consumer can
-/// see only one. Emission is also idempotent: the accumulator is append-only
-/// within a revision, so repeated calls print only what is new (`build` emits
-/// once before codegen and again after).
+/// see only one. Emission is also idempotent: repeated calls print only what
+/// has not been printed yet (`build` emits once before codegen and again
+/// after).
 pub struct CompilerDriver<'a> {
     compiler: &'a Compiler,
     /// The analyzer half, recorded by `analyze_all`. `None` until analysis runs
     /// — an un-analyzed compilation legitimately has no analyzer diagnostics.
     analyze: std::cell::RefCell<Option<AnalyzeSummary>>,
-    /// How many accumulator diagnostics `emit_diagnostics` has already printed.
-    emitted_accumulated: std::cell::Cell<usize>,
+    /// Accumulator diagnostics `emit_diagnostics` has already printed, by
+    /// their source-order key. A key, not a count: the accumulator's order is
+    /// not append-only, so a count prefix could reprint one diagnostic and
+    /// skip another.
+    emitted_accumulated: std::cell::RefCell<std::collections::HashSet<SourceOrder>>,
     /// Whether the analyzer half has already been printed.
     emitted_analyze: std::cell::Cell<bool>,
 }
@@ -47,7 +51,7 @@ impl<'a> CompilerDriver<'a> {
         Self {
             compiler,
             analyze: std::cell::RefCell::new(None),
-            emitted_accumulated: std::cell::Cell::new(0),
+            emitted_accumulated: std::cell::RefCell::default(),
             emitted_analyze: std::cell::Cell::new(false),
         }
     }
@@ -199,7 +203,9 @@ impl<'a> CompilerDriver<'a> {
     /// Analyzer diagnostics that belong on stderr: errors only.
     ///
     /// Warnings and info are reported through the summary, not printed here.
-    fn emittable_analyze_errors(summary: &AnalyzeSummary) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
+    fn emittable_analyze_errors(
+        summary: &AnalyzeSummary,
+    ) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
         summary
             .diagnostics
             .iter()
@@ -214,9 +220,14 @@ impl<'a> CompilerDriver<'a> {
     /// Idempotent: only diagnostics not already printed by an earlier call are
     /// emitted, so a caller may flush at several points without duplicating.
     pub fn emit_diagnostics(&self) -> Result<(), codespan_reporting::files::Error> {
-        let accumulated = self.compiler.diagnostics();
-        let already = self.emitted_accumulated.get().min(accumulated.len());
-        let fresh = &accumulated[already..];
+        let fresh: Vec<_> = {
+            let mut emitted = self.emitted_accumulated.borrow_mut();
+            self.compiler
+                .diagnostics()
+                .into_iter()
+                .filter(|d| emitted.insert(source_order(d)))
+                .collect()
+        };
 
         let analyze = self.analyze.borrow();
         let analyzer_diags = match analyze.as_ref() {
@@ -229,10 +240,9 @@ impl<'a> CompilerDriver<'a> {
         }
 
         let files = WorldFiles::from_world(self.compiler.world(), self.compiler.files());
-        let mut to_emit: Vec<codespan_reporting::diagnostic::Diagnostic<usize>> = fresh.to_vec();
+        let mut to_emit: Vec<codespan_reporting::diagnostic::Diagnostic<usize>> = fresh;
         to_emit.extend(analyzer_diags.iter().map(|d| analyze_to_codespan(d)));
 
-        self.emitted_accumulated.set(accumulated.len());
         if analyze.is_some() {
             self.emitted_analyze.set(true);
         }
@@ -249,12 +259,7 @@ impl<'a> CompilerDriver<'a> {
             .diagnostics()
             .iter()
             .any(|d| d.severity >= codespan_reporting::diagnostic::Severity::Error);
-        accumulated
-            || self
-                .analyze
-                .borrow()
-                .as_ref()
-                .is_some_and(|s| s.errors > 0)
+        accumulated || self.analyze.borrow().as_ref().is_some_and(|s| s.errors > 0)
     }
 }
 

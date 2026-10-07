@@ -5,7 +5,7 @@
 //! provide the conformance-specific substitutions for `Self` and associated
 //! type bindings, and comparison reduces aliases/projections into `ResolvedTy`.
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 
 use kestrel_ast_builder::{Name, TypeAnnotation, TypeParams};
 use kestrel_hecs::{Entity, QueryContext};

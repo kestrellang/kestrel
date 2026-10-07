@@ -234,11 +234,11 @@ pub fn extract_ast_type_args(ast_ty: &AstType) -> Vec<AstType> {
 /// `Conformances` component) use this to complete the transitive closure.
 /// Used internally by `ConformingProtocols`; exposed for use by
 /// `kestrel-type-infer` on type-parameter / associated-type bounds.
-pub fn expand_protocol_closure_in_place(
+pub fn expand_protocol_closure_in_place<S: std::hash::BuildHasher>(
     ctx: &QueryContext<'_>,
     root: Entity,
     protocols: &mut Vec<Entity>,
-    visited: &mut HashSet<Entity>,
+    visited: &mut HashSet<Entity, S>,
 ) {
     let mut i = 0;
     while i < protocols.len() {
@@ -281,12 +281,12 @@ pub fn expand_protocol_closure(
 
 /// Gather protocols from an entity's `Conformances` component, recursively
 /// walking inherited protocols (protocol parents).
-fn gather_protocol_conformances(
+fn gather_protocol_conformances<S: std::hash::BuildHasher>(
     ctx: &QueryContext<'_>,
     entity: Entity,
     root: Entity,
     protocols: &mut Vec<Entity>,
-    visited: &mut HashSet<Entity>,
+    visited: &mut HashSet<Entity, S>,
 ) {
     for resolved in declared_conformance_protocols(ctx, entity, root) {
         if !visited.insert(resolved) {

@@ -217,17 +217,29 @@ fn default_never_fallback(ctx: &mut InferCtx<'_>) {
 /// Skips slots that are already poisoned with `TyKind::Error` — an earlier
 /// error already covers them.
 fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
-    // Snapshot the entries so we can mutate `ctx` while iterating.
-    let expr_entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> =
+    // Snapshot the entries so we can mutate `ctx` while iterating, in source
+    // order (start, then the innermost span first). Order decides which
+    // expression reports: reporting poisons the shared var, which silences
+    // every later expression typed by it. In map order that winner — and
+    // whether one or two errors came out — changed from run to run.
+    let mut expr_entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> =
         ctx.expr_types.iter().map(|(&id, &tv)| (id, tv)).collect();
-    let local_entries: Vec<(kestrel_hir::res::LocalId, TyVar)> =
+    expr_entries.sort_by_key(|&(id, _)| {
+        let span = expr_span(&hir.exprs[id]);
+        (span.start, span.end, id.raw())
+    });
+    let mut local_entries: Vec<(kestrel_hir::res::LocalId, TyVar)> =
         ctx.local_types.iter().map(|(&id, &tv)| (id, tv)).collect();
+    local_entries.sort_by_key(|&(id, _)| {
+        let span = &hir.locals[id].span;
+        (span.start, span.end, id.raw())
+    });
 
     // Only report one diagnostic per statement/expression tree — otherwise a
     // single unresolvable subexpression produces a cascade of errors across
     // every parent expression that inherited its type.
-    let mut seen_spans: std::collections::HashSet<(usize, std::ops::Range<usize>)> =
-        std::collections::HashSet::new();
+    let mut seen_spans: crate::collections::HashSet<(usize, std::ops::Range<usize>)> =
+        crate::collections::HashSet::default();
 
     for (id, tv) in expr_entries {
         let resolved = ctx.resolve(tv);
@@ -301,13 +313,13 @@ fn poison_if_unresolved(ctx: &mut InferCtx<'_>, tv: TyVar) {
 /// structural mismatch (e.g. `null` default → `Optional[?]` vs concrete
 /// `i64`).
 fn poison_unresolved_type_args(ctx: &mut InferCtx<'_>, tv: TyVar) {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::collections::HashSet::default();
     poison_inner(ctx, tv, &mut seen);
 
     fn poison_inner(
         ctx: &mut InferCtx<'_>,
         tv: TyVar,
-        seen: &mut std::collections::HashSet<TyVar>,
+        seen: &mut crate::collections::HashSet<TyVar>,
     ) {
         let resolved = ctx.resolve(tv);
         if !seen.insert(resolved) {
@@ -338,7 +350,7 @@ fn poison_unresolved_type_args(ctx: &mut InferCtx<'_>, tv: TyVar) {
 }
 
 fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
-    fn walk(ctx: &InferCtx<'_>, tv: TyVar, seen: &mut std::collections::HashSet<TyVar>) -> bool {
+    fn walk(ctx: &InferCtx<'_>, tv: TyVar, seen: &mut crate::collections::HashSet<TyVar>) -> bool {
         let resolved = ctx.resolve(tv);
         if !seen.insert(resolved) {
             return false;
@@ -380,7 +392,7 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
         }
     }
 
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::collections::HashSet::default();
     match ctx.slot(tv) {
         TySlot::Resolved(_) => walk(ctx, tv, &mut seen),
         _ => false,
@@ -445,7 +457,7 @@ fn find_ref_violation(
     ctx: &InferCtx<'_>,
     tv: TyVar,
     pos: RefPos,
-    seen: &mut std::collections::HashSet<TyVar>,
+    seen: &mut crate::collections::HashSet<TyVar>,
 ) -> Option<RefPos> {
     let r = ctx.resolve(tv);
     if !seen.insert(r) {
@@ -497,7 +509,7 @@ fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         if ctx.direct_callee_exprs.contains(&expr_id) {
             continue;
         }
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::collections::HashSet::default();
         let Some(pos) = find_ref_violation(ctx, tv, RefPos::Top, &mut seen) else {
             continue;
         };
@@ -5465,10 +5477,10 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
     // level. Level 2 removes all blocking; levels 0–1 block arg-position
     // literals whose receiver is still unresolved; level 0 additionally
     // blocks InterpolationLink accumulators.
-    let blocked: std::collections::HashSet<TyVar> = if relax_level >= 2 {
-        std::collections::HashSet::new()
+    let blocked: crate::collections::HashSet<TyVar> = if relax_level >= 2 {
+        crate::collections::HashSet::default()
     } else {
-        let mut set = std::collections::HashSet::new();
+        let mut set = crate::collections::HashSet::default();
 
         // InterpolationLink blocking — only at level 0. At level 1+,
         // string interpolation accumulators default normally, unblocking

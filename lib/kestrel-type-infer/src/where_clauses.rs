@@ -797,7 +797,7 @@ fn nearest_level_assoc(
     assoc_name: &str,
     root: Entity,
 ) -> Vec<Entity> {
-    let mut visited: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut visited: crate::collections::HashSet<Entity> = crate::collections::HashSet::default();
     level.retain(|&p| visited.insert(p));
     while !level.is_empty() {
         let mut found: Vec<Entity> = Vec::new();

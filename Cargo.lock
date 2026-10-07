@@ -1144,6 +1144,7 @@ dependencies = [
  "kestrel-semantics",
  "kestrel-span",
  "kestrel-syntax-tree",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]

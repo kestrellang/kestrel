@@ -133,14 +133,21 @@ impl Compiler {
         ctx.query(ParseFile { entity })
     }
 
-    /// Collect all diagnostics from the current revision.
+    /// Collect all diagnostics from the current revision, in source order.
     ///
     /// Returns codespan-reporting `Diagnostic`s accumulated by lex, parse,
     /// and type inference queries. Use `CompilerDriver::emit_diagnostics()`
     /// (from `kestrel-compiler-driver`) to render them to a terminal.
+    ///
+    /// The accumulator holds values per query in map order, so this is the
+    /// one place that gives every consumer (CLI, LSP, test harness) the same
+    /// deterministic order: by file, then primary-label position.
     pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
-        self.world
-            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>()
+        let mut diags = self
+            .world
+            .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
+        diags.sort_by_cached_key(diagnostic::source_order);
+        diags
     }
 
     /// Begin a new compilation cycle. Call before updating sources.

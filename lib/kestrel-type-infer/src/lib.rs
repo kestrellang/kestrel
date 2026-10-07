@@ -10,6 +10,7 @@
 //! ```
 
 pub mod captures;
+mod collections;
 pub mod compare;
 pub mod conformance;
 pub mod constraint;
@@ -24,7 +25,7 @@ pub mod ty;
 pub mod unify;
 pub mod where_clauses;
 
-use std::collections::HashMap;
+use crate::collections::HashMap;
 use std::sync::Arc;
 
 use kestrel_ast_builder::{Callable, EnclosingContainer, NodeKind, TypeParams};
@@ -702,7 +703,7 @@ fn emit_container_where_clauses(
 
     // Cache for associated type TyVars so we reuse the same TyVar
     // if the same associated type appears in multiple constraints
-    let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::new();
+    let mut assoc_type_tvs: HashMap<Entity, ty::TyVar> = HashMap::default();
 
     let clauses = query_ctx.query(crate::where_clauses::WhereClausesOf {
         entity: where_entity,
