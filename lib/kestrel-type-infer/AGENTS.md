@@ -7,7 +7,10 @@ A new variant must be mirrored in **three** files — miss any and the build fai
 1. **`lib/kestrel-type-infer/src/error.rs`**
    - Add the variant to `pub enum InferError`.
    - Add the span arm in `impl InferError::span()`.
-   - Add the arm in `impl InferError::render()` — code, message, label, notes.
+   - Add the arm in `impl InferError::code()` — the diagnostic code. The match
+     has no wildcard on purpose; pick an existing E1xx family or allocate one
+     in `docs/error-codes.md`.
+   - Add the arm in `impl InferError::render()` — message, label, notes.
      This is the ONE place a user-facing inference message lives; the codespan
      renderer in `kestrel-compiler/src/diagnostic.rs` is a thin wrapper and
      needs no change (F15).
@@ -132,9 +135,9 @@ introduce one silently.
 
 ## `InferError::render` is the ONLY description of an inference error
 
-Code, headline message, primary-label text and notes all come from
-`error.rs::render`. Adding an `InferError` variant means adding exactly one
-arm, there.
+Headline message, primary-label text and notes come from `error.rs::render`;
+the code comes from `error.rs::code`, which `render` reads. Adding an
+`InferError` variant means one arm in each.
 
 There used to be two full per-variant `match`es — `ResolvedInferError::to_diagnostic`
 in `kestrel-compiler` and `TypeCheckAnalyzer::format_error` in `kestrel-analyze`.
@@ -144,10 +147,10 @@ test harness each open-coded a "skip E100" filter to hide it; the LSP had none,
 so editors showed two squiggles on the same range). `TypeCheckAnalyzer` is
 deleted; `to_diagnostic` is a thin wrapper (F15).
 
-`E100` is the documented umbrella code for variants with no more specific code
-of their own. A variant that deserves its own code (E624 / E491 / E492) names it
-in its `render` arm — and that code must also be in `docs/error-codes.md`, which
-is *not* covered by the analyzer-registry doc test (it only walks descriptors).
+Every variant has a specific code (E102–E118, plus E624 / E491 / E492);
+the old umbrella `E100` survives only on `FromHir`, which is never shown.
+A code used in `code()` must also be in `docs/error-codes.md`, which is *not*
+covered by the analyzer-registry doc test (it only walks descriptors).
 
 ## A type in expression position must be consumed, or it is an error
 

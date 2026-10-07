@@ -69,16 +69,16 @@ let result = apply({ it * 2 }, 21);  // Returns 42
 ### Rules for `it`
 
 - `it` is only available when the expected function type has exactly 1 parameter
-- Using `it` when arity is 0 or 2+ is an error (reported by the solver under **E100**)
+- Using `it` when arity is 0 or 2+ is an error (reported by the solver as **E108**)
 - Explicit parameters shadow `it` — you cannot use both
 - `it` belongs to the innermost enclosing closure **written without a parameter list**. A nested closure that declares its parameters (`{ (y) in … }`) is transparent: an `it` inside it is the enclosing closure's.
 - When a closure's `it` hides another `it` in scope, it still refers to the closure's own parameter, and the compiler warns: **E142** if the hidden `it` belongs to an enclosing closure, **E143** if it is any other binding (a `let it`, a parameter named `it`). A closure never captures an outer binding named `it` through the implicit parameter.
 
 ```kestrel
-// ERROR[E100]: it used but arity is 0
+// ERROR[E108]: it used but arity is 0
 let f: () -> Int64 = { it };
 
-// ERROR[E100]: it used but arity is 2
+// ERROR[E108]: it used but arity is 2
 let g: (Int64, Int64) -> Int64 = { it };
 
 // ERROR: it not available with explicit params
@@ -915,7 +915,7 @@ let g: (Int64) -> Int64 = { (x, y) in x + y };
 // ERROR: return type mismatch
 let h: (Int64) -> String = { (x) in x * 2 };
 
-// ERROR[E100]: parameter type mismatch (E602 is reserved and not implemented)
+// ERROR[E109]: parameter type mismatch (E602 is reserved and not implemented)
 let i: (Int64) -> Int64 = { (x: String) in 42 };
 
 // ERROR: closure assigned to non-function type
@@ -1062,7 +1062,7 @@ closure_kind ::= 'mutating' | 'consuming' | 'escaping'
 | [E503](../error-codes.md#e500e507--moves--ownership) | Owning capture of a non-`Copyable` value the frame only borrows |
 | [E506](../error-codes.md#e500e507--moves--ownership) | Moving a capture out of a normal / `mutating` / `escaping` body (lifted in `consuming`) |
 | [E507](../error-codes.md#e500e507--moves--ownership) | The freeze rule: destroying a viewed place, or letting a view outlive it |
-| [E100](../error-codes.md#e100e121--type-checking-parameters--literals) | `it` used where the expected arity isn't 1 — caught by the solver (the E600 descriptor is reserved and never fires) |
+| [E108](../error-codes.md#e100e141--type-checking-names-parameters--literals) | `it` used where the expected arity isn't 1 — caught by the solver (the E600 descriptor is reserved and never fires) |
 | [E601](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Closure parameter count doesn't match the expected type |
 
 | [E603](../error-codes.md#e600e614-e623--closures-externs--declaration-shape) | Assigning to a capture in a normal body — the note points at `mutating` |
