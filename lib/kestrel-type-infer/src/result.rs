@@ -381,8 +381,8 @@ pub(crate) fn describe_tyvar(ctx: &InferCtx<'_>, tv: TyVar) -> String {
     match &ctx.types[resolved.0 as usize] {
         TySlot::Resolved(kind) => describe_tykind(ctx, kind),
         TySlot::Unresolved { literal: Some(lit) } => literal_kind_name(*lit).into(),
-        TySlot::Unresolved { literal: None } => "?".into(),
-        TySlot::Redirect(_) => "?redirect".into(),
+        // An open var prints `_` — never `?` (bidi design §10).
+        TySlot::Unresolved { literal: None } | TySlot::Redirect(_) => "_".into(),
     }
 }
 
@@ -494,7 +494,11 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
             }
         },
         TyKind::Never => "Never".into(),
-        TyKind::Error => "Error".into(),
+        // The `Error` absorber is an internal placeholder, not a type the
+        // user wrote: print it like an open var. It can't be suppressed
+        // instead — `InferCtx::poison` makes `Error` without a diagnostic, so
+        // an error mentioning it may be the only one (bidi design §10, P0c).
+        TyKind::Error => "_".into(),
     }
 }
 
