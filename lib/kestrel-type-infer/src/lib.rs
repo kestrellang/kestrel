@@ -559,6 +559,7 @@ fn create_return_type(
         root: ctx.root,
     });
 
+    ctx.return_ty_span = hir_ty.as_ref().map(generate::hir_ty_span);
     match hir_ty {
         Some(ref hir) if contains_hir_opaque(hir) => create_return_type_with_opaque(ctx, hir),
         Some(hir_ty) => generate::lower_hir_ty(ctx, &hir_ty),

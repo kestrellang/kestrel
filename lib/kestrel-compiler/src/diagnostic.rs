@@ -91,10 +91,17 @@ impl ToDiagnostic for ResolvedInferError<'_> {
             label = label.with_message(text);
         }
 
+        let mut labels = vec![label];
+        labels.extend(
+            r.secondary
+                .iter()
+                .map(|(s, text)| Label::secondary(s.file_id, s.range()).with_message(text.clone())),
+        );
+
         Diagnostic::error()
             .with_code(r.code)
             .with_message(r.message)
-            .with_labels(vec![label])
+            .with_labels(labels)
             .with_notes(r.notes)
     }
 }

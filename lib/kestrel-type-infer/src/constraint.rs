@@ -41,12 +41,41 @@ pub enum AssocKey {
     Name(String),
 }
 
+/// Why a type was expected at a check — shown on a type mismatch as
+/// "expected because of …", pointing at the thing that set the expectation
+/// (bidi design §10, P0d). Carried by `Equal` / `Coerce` / `EqualDecayed` and
+/// attached to the `TypeMismatch` their solving produces.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Reason {
+    /// No user-facing cause (internal plumbing constraints).
+    #[default]
+    Unspecified,
+    /// A type annotation, e.g. `let x: T = …`.
+    Annotation(Span),
+    /// The enclosing function's declared return type.
+    Return(Span),
+    /// Parameter `index` (0-based) of the callee; `decl` is the parameter's
+    /// declared type, when the declaration is known.
+    Param { index: usize, decl: Option<Span> },
+    /// The first branch of an `if` / `match`, which fixed the result type.
+    FirstArm(Span),
+    /// The first element of an array literal.
+    Element(Span),
+    /// The target of an assignment.
+    Assign(Span),
+}
+
 /// A type constraint emitted during constraint generation.
 #[derive(Clone, Debug)]
 pub enum Constraint {
     /// `a = b` — structural type equality.
     /// Used where types must be identical: if/match branches, array elements.
-    Equal { a: TyVar, b: TyVar, span: Span },
+    Equal {
+        a: TyVar,
+        b: TyVar,
+        span: Span,
+        reason: Reason,
+    },
 
     /// `from → to` — value flows from source to target.
     /// Tries Equal first; on failure, falls back to promotion (FromValue).
@@ -56,6 +85,7 @@ pub enum Constraint {
         to: TyVar,
         expr: HirExprId,
         span: Span,
+        reason: Reason,
     },
 
     /// `&inner → Ref { pointee }` — a borrow expression's pointee
@@ -86,6 +116,7 @@ pub enum Constraint {
         value: TyVar,
         target: TyVar,
         span: Span,
+        reason: Reason,
     },
 
     /// `value → local target` — an assignment whose target is a LOCAL read.

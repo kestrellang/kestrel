@@ -12,7 +12,7 @@ use kestrel_span::Span;
 
 use kestrel_hir::ty::HirTy;
 
-use crate::constraint::{CallArg, Constraint};
+use crate::constraint::{CallArg, Constraint, Reason};
 use crate::error::InferError;
 use crate::resolve::TypeResolver;
 use crate::ty::{LiteralKind, TyKind, TySlot, TyVar};
@@ -217,6 +217,9 @@ pub struct InferCtx<'a> {
 
     /// The function's declared return type TyVar.
     pub(crate) return_ty: TyVar,
+    /// Span of the declared return type, when there is one — the
+    /// `Reason::Return` of checks against `return_ty`.
+    pub(crate) return_ty_span: Option<Span>,
 
     /// Entity being inferred (function/init/getter).
     #[allow(dead_code)]
@@ -414,6 +417,7 @@ impl<'a> InferCtx<'a> {
             expr_types: HashMap::default(),
             local_types: HashMap::default(),
             return_ty: TyVar(0),
+            return_ty_span: None,
             owner,
             root,
             where_clause_assoc_subs: Vec::new(),
@@ -910,15 +914,34 @@ impl<'a> InferCtx<'a> {
     // ===== Constraint emission =====
 
     pub fn equal(&mut self, a: TyVar, b: TyVar, span: Span) {
-        self.constraints.push(Constraint::Equal { a, b, span });
+        self.equal_because(a, b, span, Reason::Unspecified);
+    }
+
+    /// `equal` with the user-facing cause of the expectation on `a`.
+    pub fn equal_because(&mut self, a: TyVar, b: TyVar, span: Span, reason: Reason) {
+        self.constraints
+            .push(Constraint::Equal { a, b, span, reason });
     }
 
     pub fn coerce(&mut self, from: TyVar, to: TyVar, expr: HirExprId, span: Span) {
+        self.coerce_because(from, to, expr, span, Reason::Unspecified);
+    }
+
+    /// `coerce` with the user-facing cause of the expected type `to`.
+    pub fn coerce_because(
+        &mut self,
+        from: TyVar,
+        to: TyVar,
+        expr: HirExprId,
+        span: Span,
+        reason: Reason,
+    ) {
         self.constraints.push(Constraint::Coerce {
             from,
             to,
             expr,
             span,
+            reason,
         });
     }
 
@@ -932,10 +955,22 @@ impl<'a> InferCtx<'a> {
 
     /// Equal with the ref-decay dimension — see `Constraint::EqualDecayed`.
     pub fn equal_decayed(&mut self, value: TyVar, target: TyVar, span: Span) {
+        self.equal_decayed_because(value, target, span, Reason::Unspecified);
+    }
+
+    /// `equal_decayed` with the user-facing cause of the expectation on `target`.
+    pub fn equal_decayed_because(
+        &mut self,
+        value: TyVar,
+        target: TyVar,
+        span: Span,
+        reason: Reason,
+    ) {
         self.constraints.push(Constraint::EqualDecayed {
             value,
             target,
             span,
+            reason,
         });
     }
 
