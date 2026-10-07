@@ -1,6 +1,9 @@
 # Integer overflow — design
 
-**Status:** proposal, not implemented. Needs a maintainer ruling on §3.
+**Status:** accepted 2026-10-07, not implemented. Rulings: **O1 (b)** Rust
+model — trap when overflow checks are on (default at `-O0`), wrap when off;
+**O2** `*Wrapping` methods (operators deferred); **O3** `MIN / -1` traps when
+checks are on. Rollout per §4: flag default-off, measure, convert, then flip.
 **Why now:** the bidirectional-checker ruling D2 (2026-10-06,
 `bidirectional-typechecking.md` § *Maintainer rulings*) chose Rust-style
 literals. Under that rule `let x = 100; takes8(x); let w = x * 2` types `x`
