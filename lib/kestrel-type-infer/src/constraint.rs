@@ -126,10 +126,7 @@ pub enum Constraint {
     /// (`if let .Some(w) = call()`) resolves only when the deferred
     /// ImplicitPat fires, and an eager Coerce would pin `w` from the RHS
     /// literal first — the late payload equate then collided ("expected
-    /// Int64 got &mutating Int64"). Targets nothing ever resolves fall back
-    /// to the plain Coerce after the literal-relaxation loop exhausts
-    /// (`break_stalled_assign_targets`), so plain `x = 5` shapes cannot
-    /// deadlock. Mutability legality is analyze's job (E200/E208), not
+    /// Int64 got &mutating Int64"). Mutability legality is analyze's job (E200/E208), not
     /// typing's.
     AssignTarget {
         value: TyVar,

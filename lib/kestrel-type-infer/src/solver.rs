@@ -44,8 +44,9 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Level 1 (relaxed): InterpolationLink blocking lifted — string
     //   interpolation literals default to their type, unblocking
     //   downstream chains (bytes subscript → UInt8 → == context).
-    // Level 2 (force): all blocking removed — genuinely unconstrained
-    //   literals get their fallback default.
+    // (A former level 2 force-defaulted arg-position literals; it never
+    // made progress over the corpus once receivers are resolved eagerly —
+    // bidi P4, measured with the `p4` probes — and was removed.)
     let mut relax_level = 0u8;
     loop {
         // Stage 2-pre operator shape projection — must run BEFORE literal
@@ -56,7 +57,6 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         // parameterized bounds can pin the literal through the fixpoint
         // instead (see the fn doc).
         if apply_operator_shape_projections(ctx) {
-            kestrel_debug::ktrace!("p4", "P4PROBE shape_projection");
             fixpoint(ctx);
             relax_level = 0;
             continue;
@@ -65,14 +65,12 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         // right operand's type. Must run before literal defaulting, which
         // would otherwise pin the receiver literal to Int64 first.
         if apply_operator_literal_adoption(ctx) {
-            kestrel_debug::ktrace!("p4", "P4PROBE rule_l_at_end");
             fixpoint(ctx);
             relax_level = 0;
             continue;
         }
         let progress = apply_literal_defaults(ctx, relax_level);
         if progress {
-            kestrel_debug::ktrace!("p4", "P4PROBE literal_defaults_level{relax_level}");
             fixpoint(ctx);
             relax_level = 0;
             continue;
@@ -84,22 +82,15 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         // (`let y = ru8; y + 1` must pin `1` to UInt8 via y's decay, not
         // force-default it to Int64).
         if apply_ref_decay_defaults(ctx) {
-            kestrel_debug::ktrace!("p4", "P4PROBE ref_decay_at_end");
             fixpoint(ctx);
             relax_level = 0;
             continue;
         }
         relax_level += 1;
-        if relax_level > 2 {
+        if relax_level > 1 {
             break;
         }
     }
-
-    // AssignTarget stall-breaker: any assignment still waiting on an
-    // unresolved local target falls back to the plain Coerce — at this
-    // point the system is at a fixpoint (every fireable pattern has
-    // fired), so the target's type has no other source.
-    break_stalled_assign_targets(ctx);
 
     // Pattern-binder gate drops for the same reason: every fireable
     // ImplicitPat has fired, so a still-unresolved binder has no
@@ -109,11 +100,7 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     ctx.synth_gate = false;
 
     // Phase 3: solve again with defaults
-    let before = ctx.constraints.len();
     fixpoint(ctx);
-    if ctx.constraints.len() != before {
-        kestrel_debug::ktrace!("p4", "P4PROBE phase3_progress");
-    }
 
     // Phase 3.5: apply deferred type-parameter defaults (e.g. H = DefaultHasher).
     // Only unconstrained TyVars get their default — inside a generic body
@@ -671,10 +658,11 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 span,
                 ..
             } => {
-                // `break_stalled_assign_targets` converts every still-deferred
-                // AssignTarget to a plain Coerce before this runs, so an
-                // unsolved one means a side never resolved — report like
-                // Equal (poison-propagation included), as EqualDecayed does.
+                // An unsolved AssignTarget means its target never resolved
+                // (the former stall-breaker that turned it into a plain
+                // Coerce never fired over the corpus and was removed in
+                // bidi P4) — report like Equal (poison-propagation
+                // included), as EqualDecayed does.
                 let v_err = ctx.is_error(ctx.resolve(value));
                 let t_err = ctx.is_error(ctx.resolve(target));
                 if v_err || t_err {
@@ -1773,8 +1761,7 @@ fn solve_equal_decayed(
 /// ref-typed target is store-through — the RHS coerces to the POINTEE; a
 /// resolved non-ref (or literal-kinded) target is a plain Coerce; an
 /// unresolved target WAITS for whatever owns its type (a deferred
-/// ImplicitPat's payload, an annotation). The post-relaxation
-/// stall-breaker (`break_stalled_assign_targets`) guarantees progress.
+/// ImplicitPat's payload, an annotation).
 fn solve_assign_target(
     ctx: &mut InferCtx<'_>,
     value: TyVar,
@@ -1806,31 +1793,6 @@ fn solve_assign_target(
 /// the system is at a fixpoint and waiting longer cannot help. This keeps
 /// assignment-driven inference (`x = 5` pinning `x`) working for locals
 /// whose type has no other source.
-fn break_stalled_assign_targets(ctx: &mut InferCtx<'_>) {
-    for i in 0..ctx.constraints.len() {
-        let Constraint::AssignTarget {
-            value,
-            target,
-            expr,
-            span,
-        } = &ctx.constraints[i]
-        else {
-            continue;
-        };
-        let (value, target, expr, span) = (*value, *target, *expr, span.clone());
-        if matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
-            kestrel_debug::ktrace!("p4", "P4PROBE break_stalled_assign");
-            ctx.constraints[i] = Constraint::Coerce {
-                from: value,
-                to: target,
-                expr,
-                span,
-                reason: Reason::Unspecified,
-            };
-        }
-    }
-}
-
 fn solve_coerce(
     ctx: &mut InferCtx<'_>,
     from: TyVar,
@@ -1976,7 +1938,6 @@ fn solve_coerce(
         && !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
         && (ctx.pattern_binder_tvs.contains(&from) || ctx.pattern_binder_tvs.contains(&fr))
     {
-        kestrel_debug::ktrace!("p4", "P4PROBE pattern_binder_gate_defer");
         return SolveResult::Deferred(Constraint::Coerce {
             from,
             to,
@@ -2005,7 +1966,7 @@ fn solve_coerce(
     // is falsely rejected with E201. Only fires once both sides resolve to
     // Functions (else it no-ops and the unify below defers, re-running coerce).
     if ctx.closure_literal_exprs.contains(&expr)
-        && let Some(err) = reconcile_closure_conventions(ctx, from, to, expr, &span)
+        && let Some(err) = reconcile_closure_conventions(ctx, from, to, &span)
     {
         ctx.errored_coerce_exprs.insert(expr);
         return SolveResult::Error(err);
@@ -2158,7 +2119,6 @@ fn solve_coerce(
     {
         let from_root = ctx.resolve(from);
         if pa.is_empty() && ctx.closure_flex.contains(&from_root) {
-            kestrel_debug::ktrace!("p4", "P4PROBE closure_flex_adapt");
             // Adapt: ignore expected params, just equate return types
             ctx.equal(*ret_a, *ret_b, span);
             return SolveResult::Solved;
@@ -3281,7 +3241,6 @@ fn reconcile_fn_kinds(
     // trailing-closure call site carries the WRAPPER's id in the `Coerce`.
     if ctx.closure_literal_exprs.contains(&expr) {
         if from_kind != to_kind {
-            kestrel_debug::ktrace!("p4", "P4PROBE closure_kind_retrofit");
             ctx.set_function_kind(fr, to_kind);
         }
         return None;
@@ -3290,7 +3249,6 @@ fn reconcile_fn_kinds(
     // (2) Bare-value adoption (either direction; both bare stays bare).
     let (from_flex, to_flex) = (ctx.kind_flex.contains(&fr), ctx.kind_flex.contains(&tr));
     if from_flex || to_flex {
-        kestrel_debug::ktrace!("p4", "P4PROBE kind_flex_adopt");
         if from_flex && !to_flex && from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
             ctx.kind_coercions.insert(expr, (from_kind, to_kind));
@@ -3375,26 +3333,19 @@ fn reconcile_fn_convention(
     param: TyVar,
     span: &Span,
 ) -> Option<InferError> {
-    reconcile_closure_conventions(ctx, arg.ty, param, arg.value, span)
+    reconcile_closure_conventions(ctx, arg.ty, param, span)
 }
 
-/// Reconcile a closure/function value's param conventions against an expected
-/// function type. For a closure *literal*, a non-`MutBorrow` param is upgraded
-/// in place to `MutBorrow` when the expected type demands it — this is what lets
-/// `arr.modify { it.len += 1 }` (call arg) AND `let f: (mutating T) -> () = {…}`
-/// (annotated binding) infer the convention without an explicit `mutating` on
-/// the param. Passing a `MutBorrow` closure where a non-mutating param is
-/// expected is a hard error. Returns `Some(err)` only on that mismatch; the
-/// upgrade is an in-place side effect on `actual_ty`'s resolved slot.
-///
-/// `value_expr` identifies the closure literal expression (so the upgrade only
-/// applies to literals we lower — never to an opaque function value whose
-/// convention is fixed).
+/// Check a closure/function value's param conventions against an expected
+/// function type: passing a `MutBorrow` closure where a non-mutating param is
+/// expected is a hard error. (A closure *literal* no longer needs an in-place
+/// `MutBorrow` upgrade here: `check_closure` builds it with the expected
+/// type's conventions — bidi §8. The upgrade never fired over the corpus
+/// after P3 and was removed in P4.)
 fn reconcile_closure_conventions(
     ctx: &mut InferCtx<'_>,
     actual_ty: TyVar,
     expected_ty: TyVar,
-    value_expr: kestrel_hir::body::HirExprId,
     span: &Span,
 ) -> Option<InferError> {
     use kestrel_ast::ParamConvention::MutBorrow;
@@ -3410,27 +3361,13 @@ fn reconcile_closure_conventions(
         _ => return None,
     };
 
-    let is_literal = ctx.closure_literal_exprs.contains(&value_expr);
-    let mut upgraded = actual.clone();
-    let mut changed = false;
-    for j in 0..expected.len().min(actual.len()) {
-        let exp_mut = expected[j] == MutBorrow;
-        let act_mut = actual[j] == MutBorrow;
-        if exp_mut && !act_mut && is_literal {
-            // No-annotation literal lent a mutable place: infer `MutBorrow`.
-            upgraded[j] = MutBorrow;
-            changed = true;
-        } else if !exp_mut && act_mut {
-            // A mutating closure can't be passed where the callee promises no
-            // mutable place.
-            return Some(InferError::ConventionMismatch { span: span.clone() });
-        }
-    }
-    if changed {
-        kestrel_debug::ktrace!("p4", "P4PROBE closure_convention_upgrade");
-        ctx.set_function_conventions(actual_ty, upgraded);
-    }
-    None
+    // A mutating closure can't be passed where the callee promises no
+    // mutable place.
+    let mismatch = expected
+        .iter()
+        .zip(&actual)
+        .any(|(e, a)| *e != MutBorrow && *a == MutBorrow);
+    mismatch.then(|| InferError::ConventionMismatch { span: span.clone() })
 }
 
 fn solve_call(
@@ -5628,7 +5565,6 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
         ) {
             ctx.types[literal_tv.0 as usize] = TySlot::Redirect(*context_tv);
             progress = true;
-            kestrel_debug::ktrace!("p4", "P4PROBE context_literal");
         }
     }
     progress
@@ -5678,9 +5614,7 @@ pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u
     // level. Level 2 removes all blocking; levels 0–1 block arg-position
     // literals whose receiver is still unresolved; level 0 additionally
     // blocks InterpolationLink accumulators.
-    let blocked: crate::collections::HashSet<TyVar> = if relax_level >= 2 {
-        crate::collections::HashSet::default()
-    } else {
+    let blocked: crate::collections::HashSet<TyVar> = {
         let mut set = crate::collections::HashSet::default();
 
         // InterpolationLink blocking — only at level 0. At level 1+,

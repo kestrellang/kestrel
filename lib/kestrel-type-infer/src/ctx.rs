@@ -808,30 +808,12 @@ impl<'a> InferCtx<'a> {
     /// Overwrite the resolved `TyKind::Function` *kind* of `tv` in place — the
     /// closure-literal retrofit (`{ … }` is always built at `Normal`; the
     /// expected type selects the real kind) and the `kind_flex` adoption.
-    /// No-op if `tv` does not resolve to a function type (mirrors
-    /// [`Self::set_function_conventions`]).
+    /// No-op if `tv` does not resolve to a function type.
     pub fn set_function_kind(&mut self, tv: TyVar, kind: kestrel_ast::FnTypeKind) {
         let root = self.resolve(tv);
         if let TySlot::Resolved(TyKind::Function { kind: k, .. }) = &mut self.types[root.0 as usize]
         {
             *k = kind;
-        }
-    }
-
-    /// Overwrite the resolved `TyKind::Function` conventions of `tv` in place.
-    /// Used by `solve_call` to upgrade a closure literal's inferred param
-    /// convention (e.g. `Consuming` → `MutBorrow`) once the expected parameter
-    /// type is known. No-op if `tv` does not resolve to a function type.
-    pub fn set_function_conventions(
-        &mut self,
-        tv: TyVar,
-        conventions: Vec<kestrel_ast::ParamConvention>,
-    ) {
-        let root = self.resolve(tv);
-        if let TySlot::Resolved(TyKind::Function { conventions: c, .. }) =
-            &mut self.types[root.0 as usize]
-        {
-            *c = conventions;
         }
     }
 
