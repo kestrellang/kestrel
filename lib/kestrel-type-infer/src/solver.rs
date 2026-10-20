@@ -92,11 +92,9 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         }
     }
 
-    // Pattern-binder gate drops for the same reason: every fireable
-    // ImplicitPat has fired, so a still-unresolved binder has no
-    // pattern-side source left — let its uses pin it (old behavior)
-    // rather than stall to "could not infer type".
-    ctx.pattern_binder_gate = false;
+    // The synth gate drops here: every call/member that could type a
+    // check-mode leaf has fired, so a leaf typed only by its target
+    // (`none()`) may now unify with it.
     ctx.synth_gate = false;
 
     // Phase 3: solve again with defaults
@@ -1915,30 +1913,6 @@ fn solve_coerce(
         && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
         && matches!(ctx.slot(tr), TySlot::Resolved(_))
     {
-        return SolveResult::Deferred(Constraint::Coerce {
-            from,
-            to,
-            expr,
-            span,
-            reason: Reason::Unspecified,
-        });
-    }
-
-    // Stage 2d: a PATTERN BINDER's type comes from its pattern, never its
-    // uses (the AssignTarget principle applied to use-site coercions).
-    // While the binder's ImplicitPat may still fire, a use against an
-    // already-pinned target (`sum + x` racing the array literal's
-    // defaulting in `for x in [1,2,3].refs()`) must WAIT — plain unify
-    // here pinned the binder to the use's type and the late payload
-    // equate manufactured "expected Int64 got &Int64". The gate drops
-    // next to the AssignTarget stall-breaker, so a binder whose pattern
-    // never fires falls back to use-pinning instead of deadlocking.
-    if ctx.pattern_binder_gate
-        && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
-        && !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
-        && (ctx.pattern_binder_tvs.contains(&from) || ctx.pattern_binder_tvs.contains(&fr))
-    {
-        kestrel_debug::ktrace!("p4", "P4PROBE pattern_binder_gate_defer");
         return SolveResult::Deferred(Constraint::Coerce {
             from,
             to,
