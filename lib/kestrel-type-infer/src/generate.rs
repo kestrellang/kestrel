@@ -732,6 +732,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // A ref-binding scrutinee (`match r`) matches its POINTEE —
             // patterns never see a ref (the MIR scrutinee decay copies).
             let scrut_tv = peel_ref_tv(ctx, scrut_tv);
+            // Patterns are checked against a synthesized scrutinee (bidi
+            // §6.1 / P3f): settle it first, so binders get their types here
+            // rather than from a deferred ImplicitPat.
+            settle_scrutinee(ctx, scrut_tv);
             let result_tv = ctx.fresh();
 
             // Empty match has no arms to pin the result type. An analyzer
@@ -1931,6 +1935,19 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
         span: span.clone(),
     });
     ctx.poison(open);
+}
+
+/// Settle a match scrutinee before its patterns are generated: solve the
+/// left side and default the open literals it is built from (unless it is
+/// itself a literal, which literal patterns may still type).
+fn settle_scrutinee(ctx: &mut InferCtx<'_>, scrut: TyVar) {
+    if !receiver_open(ctx, scrut) {
+        return;
+    }
+    settle_left(ctx);
+    if open_literal(ctx, peel_ref_var(ctx, scrut)).is_none() && default_literal_roots(ctx, scrut) {
+        settle_left(ctx);
+    }
 }
 
 /// Run the solver over everything generated so far, Rule L included.

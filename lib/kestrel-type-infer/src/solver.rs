@@ -1938,6 +1938,7 @@ fn solve_coerce(
         && !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
         && (ctx.pattern_binder_tvs.contains(&from) || ctx.pattern_binder_tvs.contains(&fr))
     {
+        kestrel_debug::ktrace!("p4", "P4PROBE pattern_binder_gate_defer");
         return SolveResult::Deferred(Constraint::Coerce {
             from,
             to,
