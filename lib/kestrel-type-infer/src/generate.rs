@@ -386,7 +386,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let callee_tv = gen_expr(ctx, hir, *callee);
             // Consuming a Def(TypeParameter) as a Call callee is valid (T() = init)
             ctx.type_param_defs.remove(callee);
-            let arg_tvs = gen_call_args(ctx, hir, args);
+            let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
 
             // If the callee is a known function returning Never (e.g., lang.panic),
             // use Never directly so divergence propagates through control flow.
@@ -406,6 +406,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             };
 
             ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
+            finish_postponed(ctx, hir, postponed);
             result_tv
         },
 
@@ -417,7 +418,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             span,
         } => {
             let recv_tv = gen_expr(ctx, hir, *receiver);
-            let arg_tvs = gen_call_args(ctx, hir, args);
+            let (arg_tvs, postponed) = gen_call_args_phased(ctx, hir, args);
             let result_tv = ctx.fresh();
 
             // A MethodCall whose receiver is a type-level reference (struct,
@@ -449,8 +450,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // Parser already reported "expected identifier after `.`";
                 // short-circuit to Error so downstream constraints absorb.
                 ctx.poison(result_tv);
+                finish_postponed(ctx, hir, postponed);
                 return result_tv;
             };
+
+            if !is_static_ctx {
+                require_known_receiver(ctx, recv_tv, method_str, span);
+            }
 
             if is_static_ctx {
                 let ext_args = if has_explicit {
@@ -490,6 +496,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     span.clone(),
                 );
             }
+            finish_postponed(ctx, hir, postponed);
             result_tv
         },
 
@@ -564,6 +571,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
             match name {
                 HirName::Name(name_str) => {
+                    if !is_type_level(ctx, hir, *base) {
+                        require_known_receiver(ctx, base_tv, name_str, span);
+                    }
                     // Member constraint with no args (field/property access)
                     ctx.member(
                         base_tv,
@@ -885,7 +895,8 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // its inferred param convention (the no-annotation `MutBorrow`
             // inference applies to literals only, not named function values).
             ctx.closure_literal_exprs.insert(id);
-            gen_closure(ctx, hir, params, body)
+            let expected_fn = expect.map(|(e, _)| e);
+            gen_closure(ctx, hir, params, body, expected_fn)
         },
 
         // === Aggregates ===
@@ -1783,7 +1794,11 @@ fn gen_closure(
     hir: &HirBody,
     params: &[HirClosureParam],
     body: &HirBlock,
+    expected: Option<TyVar>,
 ) -> TyVar {
+    if let Some(shape) = expected.and_then(|e| expected_closure_shape(ctx, hir, params, e)) {
+        return check_closure(ctx, hir, params, body, shape);
+    }
     // Fresh TyVars for each param (may have type annotation)
     let param_tvs: Vec<TyVar> = params
         .iter()
@@ -1800,49 +1815,11 @@ fn gen_closure(
 
     // A closure has its OWN return type: a `return e` inside the body returns
     // from the CLOSURE (closure-local return, Swift-style), checked against the
-    // closure's return type — NOT the enclosing function's. Without this swap,
-    // returns coerce against the enclosing `ctx.return_ty`, the closure types as
-    // `() -> Never`, its body lowers to a trap, and generic-callee inference
-    // collapses the param to the Never-typed return (#199).
+    // closure's return type — NOT the enclosing function's (#199). The tail is
+    // a value position and refs do not cross the closure boundary: a
+    // ref-returning tail call decays to the pointee (#195).
     let closure_ret_tv = ctx.fresh();
-    let saved_return_ty = ctx.return_ty;
-    ctx.return_ty = closure_ret_tv;
-    // A closure's return type has no declaration to point at.
-    let saved_return_ty_span = ctx.return_ty_span.take();
-
-    // Infer body
-    let body_tv = gen_block(ctx, hir, body);
-
-    // Reconcile the body's fall-through value with the closure's return type,
-    // mirroring `generate()` for a function body. `return` statements already
-    // coerced to `closure_ret_tv` via the swapped `ctx.return_ty` above.
-    //
-    // A closure's tail is a value (return) position and refs do not cross the
-    // closure boundary (stage-1) — a ref-returning tail call decays to the
-    // pointee (#195). Without this the raw `&T` becomes the closure's return
-    // type, mismatching a `() -> T` expectation (or reaching MIR as a non-
-    // ret_borrow `@guaranteed` return → OSSA ICE).
-    match body.tail_expr {
-        Some(tail) => {
-            mark_arm_value(ctx, hir, tail);
-            // A value tail flows to the return type; a diverging tail
-            // (`return e`) is Never and the coerce is a well-defined no-op
-            // (it does not pin `closure_ret_tv` to Never).
-            if tail_is_exhaustive(hir, tail) {
-                let span = expr_span(hir, tail);
-                ctx.coerce(body_tv, closure_ret_tv, tail, span);
-            }
-        },
-        // No tail that falls through to unit pins the return type to unit; a
-        // body that diverges via `return` statements is constrained by those.
-        None if !block_diverges(hir, &body.stmts) => {
-            let _ = unify::unify(ctx, body_tv, closure_ret_tv);
-        },
-        None => {},
-    }
-
-    ctx.return_ty = saved_return_ty;
-    ctx.return_ty_span = saved_return_ty_span;
+    gen_closure_body(ctx, hir, body, closure_ret_tv);
 
     // Param conventions: an explicit `mutating` closure param is `MutBorrow`;
     // otherwise `Consuming` (the default, matching ordinary closures). The
@@ -1883,6 +1860,212 @@ fn gen_closure(
     }
 
     fn_tv
+}
+
+/// Is `base` a type-level reference (`T.staticProp`, `B.Item.x`)?
+fn is_type_level(ctx: &InferCtx<'_>, hir: &HirBody, base: HirExprId) -> bool {
+    match &hir.exprs[base] {
+        HirExpr::TypeRef { .. } => true,
+        HirExpr::Def(entity, _, _) => matches!(
+            ctx.query_ctx.get::<NodeKind>(*entity),
+            Some(&NodeKind::Struct)
+                | Some(&NodeKind::Enum)
+                | Some(&NodeKind::Protocol)
+                | Some(&NodeKind::TypeAlias)
+                | Some(&NodeKind::TypeParameter)
+        ),
+        _ => false,
+    }
+}
+
+/// Bidi ruling D3 (§2.3 `structurally_resolve`): a member access needs its
+/// receiver's head type where it is checked. Solve everything generated so
+/// far; if the receiver is still unknown, report E106 and poison it instead
+/// of deferring the lookup to whatever a later statement decides. An open
+/// numeric literal as a method/field receiver is the same error (Rust E0689),
+/// never defaulted on the spot. Other open literals (`[]`, `""`) wait for
+/// their default (D2′).
+fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, span: &Span) {
+    if !receiver_open(ctx, recv) {
+        return;
+    }
+    crate::solver::fixpoint(ctx);
+    if !receiver_open(ctx, recv) {
+        return;
+    }
+    let numeric = matches!(
+        ctx.slot(ctx.resolve(recv)),
+        TySlot::Unresolved {
+            literal: Some(LiteralKind::Integer | LiteralKind::Float)
+        }
+    );
+    let open_var = matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: None });
+    if !(numeric || open_var) {
+        return;
+    }
+    ctx.report_error(InferError::TypeMustBeKnown {
+        member: member.to_string(),
+        span: span.clone(),
+    });
+    ctx.poison(recv);
+}
+
+/// Unresolved (a ref's pointee counts: dispatch peels refs).
+fn receiver_open(ctx: &InferCtx<'_>, recv: TyVar) -> bool {
+    match ctx.slot(ctx.resolve(recv)) {
+        TySlot::Unresolved { .. } => true,
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            matches!(ctx.slot(ctx.resolve(*pointee)), TySlot::Unresolved { .. })
+        },
+        _ => false,
+    }
+}
+
+/// The function type a closure literal is checked against (bidi §8).
+struct ClosureShape {
+    kind: kestrel_ast::FnTypeKind,
+    params: Vec<TyVar>,
+    conventions: Vec<kestrel_ast::ParamConvention>,
+    ret: TyVar,
+}
+
+/// `expected` as a [`ClosureShape`] when the closure can be checked against
+/// it directly: a resolved function type of the closure's exact arity (an
+/// `it` closure needs arity 1). Anything else — an open var, a
+/// parameterless closure adapting to any arity — takes the synth path and
+/// the solver's coercion rules.
+fn expected_closure_shape(
+    ctx: &InferCtx<'_>,
+    hir: &HirBody,
+    params: &[HirClosureParam],
+    expected: TyVar,
+) -> Option<ClosureShape> {
+    let TySlot::Resolved(TyKind::Function {
+        kind,
+        params: eparams,
+        conventions,
+        ret,
+    }) = ctx.slot(ctx.resolve(expected))
+    else {
+        return None;
+    };
+    if params.is_empty() || eparams.len() != params.len() {
+        return None;
+    }
+    let _ = hir;
+    Some(ClosureShape {
+        kind: *kind,
+        params: eparams.clone(),
+        conventions: conventions.clone(),
+        ret: *ret,
+    })
+}
+
+/// `check(closure, E)` (bidi §8): parameters, conventions, kind and return
+/// type come from E, so the body is generated with its parameter types
+/// already known. An annotated parameter must equal E's.
+fn check_closure(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    params: &[HirClosureParam],
+    body: &HirBlock,
+    shape: ClosureShape,
+) -> TyVar {
+    let mut conventions = Vec::with_capacity(params.len());
+    for ((p, &eparam), &econv) in params.iter().zip(&shape.params).zip(&shape.conventions) {
+        let tv = match &p.ty {
+            Some(ty) => {
+                let lowered = lower_hir_ty(ctx, ty);
+                ctx.equal(eparam, lowered, hir_ty_span(ty));
+                lowered
+            },
+            None => eparam,
+        };
+        ctx.local_types.insert(p.local, tv);
+        // An explicit `mutating` stays MutBorrow (a mismatch is the
+        // coercion's to report); otherwise the expected convention.
+        conventions.push(if p.is_mut {
+            kestrel_ast::ParamConvention::MutBorrow
+        } else {
+            econv
+        });
+    }
+    let param_tvs: Vec<TyVar> = params.iter().map(|p| ctx.local_types[&p.local]).collect();
+    gen_closure_body(ctx, hir, body, shape.ret);
+    ctx.function_conv(shape.kind, param_tvs, conventions, shape.ret)
+}
+
+/// Generate a closure body against its return type `ret_tv` (a `return`
+/// inside returns from the closure).
+fn gen_closure_body(ctx: &mut InferCtx<'_>, hir: &HirBody, body: &HirBlock, ret_tv: TyVar) {
+    let saved_return_ty = ctx.return_ty;
+    ctx.return_ty = ret_tv;
+    let saved_return_ty_span = ctx.return_ty_span.take();
+    let body_tv = gen_block(ctx, hir, body);
+    match body.tail_expr {
+        Some(tail) => {
+            mark_arm_value(ctx, hir, tail);
+            if tail_is_exhaustive(hir, tail) {
+                let span = expr_span(hir, tail);
+                ctx.coerce(body_tv, ret_tv, tail, span);
+            }
+        },
+        None if !block_diverges(hir, &body.stmts) => {
+            let _ = unify::unify(ctx, body_tv, ret_tv);
+        },
+        None => {},
+    }
+    ctx.return_ty = saved_return_ty;
+    ctx.return_ty_span = saved_return_ty_span;
+}
+
+/// Phase 1 of a call's arguments (bidi §8, Rust's two-pass
+/// `check_argument_types`): closure literals get a placeholder var and are
+/// generated by [`finish_postponed`] once the call is emitted, so they are
+/// checked against the parameter type the other arguments determined.
+fn gen_call_args_phased(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    args: &[HirCallArg],
+) -> (Vec<CallArg>, Vec<(TyVar, HirExprId)>) {
+    let mut postponed = Vec::new();
+    let args = args
+        .iter()
+        .map(|arg| {
+            let ty = if matches!(hir.exprs[arg.value], HirExpr::Closure { .. }) {
+                let placeholder = ctx.fresh();
+                // The call's own coercion treats it as the closure literal it
+                // stands for.
+                ctx.closure_literal_exprs.insert(arg.value);
+                postponed.push((placeholder, arg.value));
+                placeholder
+            } else {
+                gen_expr(ctx, hir, arg.value)
+            };
+            CallArg {
+                label: arg.label.clone(),
+                ty,
+                value: arg.value,
+            }
+        })
+        .collect();
+    (args, postponed)
+}
+
+/// Phase 2: solve what the call and its other arguments determined, then
+/// check each postponed closure against its parameter type, in source order.
+fn finish_postponed(ctx: &mut InferCtx<'_>, hir: &HirBody, postponed: Vec<(TyVar, HirExprId)>) {
+    if postponed.is_empty() {
+        return;
+    }
+    crate::solver::fixpoint(ctx);
+    for (placeholder, closure) in postponed {
+        ctx.expectation = Some((placeholder, Reason::Unspecified));
+        let closure_tv = gen_expr(ctx, hir, closure);
+        ctx.expectation = None;
+        let span = expr_span(hir, closure);
+        ctx.coerce(closure_tv, placeholder, closure, span);
+    }
 }
 
 /// Instantiate an entity's type: reads the ECS to determine what kind of

@@ -120,6 +120,11 @@ pub enum InferError {
     /// Type parameter used as a standalone value (e.g., `let x = T`).
     TypeParamAsValue { span: Span },
 
+    /// A member access whose receiver's type is still unknown where the
+    /// access is checked (bidi ruling D3, Rust E0282/E0689): nothing to its
+    /// left determined it. `member` is the accessed name.
+    TypeMustBeKnown { member: String, span: Span },
+
     /// Wrong number of type arguments (e.g., `identity[Int, String](42)` on a 1-param generic).
     TypeArgCountMismatch {
         expected: usize,
@@ -423,6 +428,11 @@ impl InferError {
                 detailed(format!("instance method '{name}' cannot be called on a type"))
             },
 
+            Self::TypeMustBeKnown { member, .. } => labeled(
+                format!("the type of this value must be known here to look up '{member}'"),
+                "type must be known at this point; add a type annotation where it is defined".into(),
+            ),
+
             Self::TypeParamAsValue { .. } => labeled(
                 "type parameter cannot be used as a value".into(),
                 "not a value".into(),
@@ -635,6 +645,7 @@ impl InferError {
             | Self::TypeParamAsValue { .. }
             | Self::MethodNotCalled { .. } => "E116",
             Self::InfiniteType { .. } => "E117",
+            Self::TypeMustBeKnown { .. } => "E106",
             Self::CircularOpaqueReturn { .. } | Self::OpaqueUnderlierNotCopyable { .. } => "E118",
             Self::KindMismatch { .. } => "E624",
             Self::RefFunctionAsValue { .. } => "E491",
@@ -659,6 +670,7 @@ impl InferError {
             | Self::LabelMismatch { span, .. }
             | Self::InstanceMethodAsStatic { span, .. }
             | Self::TypeParamAsValue { span }
+            | Self::TypeMustBeKnown { span, .. }
             | Self::TypeArgCountMismatch { span, .. }
             | Self::NoMatchingOverload { span, .. }
             | Self::MemberwiseInitArity { span, .. }

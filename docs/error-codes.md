@@ -56,6 +56,7 @@ the type checker, and the code is assigned in one place,
 | E103 | ambiguous member / call to '{name}' | More than one candidate fits equally well. |
 | E104 | implicit member '.{name}' not found | `.Case` / `.member` has no match on the expected type. |
 | E105 | could not infer type / cannot infer type parameter | Nothing determines the type; add an annotation. |
+| E106 | the type of this value must be known here | A member is accessed on a value whose type nothing to its left determined (bidi ruling D3; Rust E0282). Annotate where the value is defined. |
 | E107 | does not conform to protocol | A type does not satisfy a required conformance or where clause. |
 | E108 | implicit 'it' parameter requires single-parameter context | `it` was used where the closure's expected type does not take exactly one parameter. |
 | E109 | type mismatch | The value's type is not the one the context requires (also: a mutating closure where a non-mutating one is expected). |

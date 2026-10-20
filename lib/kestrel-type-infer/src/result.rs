@@ -611,6 +611,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             format!("instance method '{}' cannot be called on a type", name)
         },
         InferError::TypeParamAsValue { .. } => "type parameter cannot be used as a value".into(),
+        InferError::TypeMustBeKnown { member, .. } => {
+            format!("type must be known to look up '{member}'")
+        },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             if *got < *expected {
                 format!("too few type arguments: expected {}, got {}", expected, got)
