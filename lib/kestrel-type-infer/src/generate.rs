@@ -539,6 +539,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             ctx.protocol_dispatch_members.insert(id);
             if *from_operator {
                 ctx.operator_members.insert(id, *protocol);
+                unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
             }
             // Resolve method on the protocol
             ctx.member(
@@ -1972,6 +1973,50 @@ fn resolve_call_now(ctx: &mut InferCtx<'_>, callee: TyVar) {
     }
     let call = ctx.constraints.pop().expect("checked above");
     crate::solver::solve_now(ctx, call);
+}
+
+/// The P2 operator rule (bidi ruling D2; Rust's built-in binop rule): the
+/// two operands of a homogeneous arithmetic / comparison / bitwise operator
+/// unify while both are still open numeric literals, so `1 + 2.5` is one
+/// Float64 (int ⊔ float = float). Shifts and ranges are heterogeneous and
+/// excluded. The operator's conformance stays an obligation, settled when
+/// the joined literal is determined or defaulted.
+fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar, args: &[CallArg]) {
+    use kestrel_hir::builtin::Builtin;
+    const HOMOGENEOUS: [Builtin; 14] = [
+        Builtin::AddOperatorProtocol,
+        Builtin::SubtractOperatorProtocol,
+        Builtin::MultiplyOperatorProtocol,
+        Builtin::DivideOperatorProtocol,
+        Builtin::ModuloOperatorProtocol,
+        Builtin::EqualsOperatorProtocol,
+        Builtin::NotEqualsOperatorProtocol,
+        Builtin::LessThanOperatorProtocol,
+        Builtin::GreaterThanOperatorProtocol,
+        Builtin::LessOrEqualOperatorProtocol,
+        Builtin::GreaterOrEqualOperatorProtocol,
+        Builtin::BitwiseAndOperatorProtocol,
+        Builtin::BitwiseOrOperatorProtocol,
+        Builtin::BitwiseXorOperatorProtocol,
+    ];
+    let [arg] = args else {
+        return;
+    };
+    let numeric = |ctx: &InferCtx<'_>, tv: TyVar| {
+        matches!(
+            open_literal(ctx, tv),
+            Some(LiteralKind::Integer | LiteralKind::Float)
+        )
+    };
+    if !numeric(ctx, recv) || !numeric(ctx, arg.ty) {
+        return;
+    }
+    if HOMOGENEOUS
+        .iter()
+        .any(|&b| ctx.resolver.builtin(b) == Some(protocol))
+    {
+        let _ = unify::unify(ctx, recv, arg.ty);
+    }
 }
 
 /// Run the solver over everything generated so far, Rule L included.
