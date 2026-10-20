@@ -56,6 +56,7 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         // parameterized bounds can pin the literal through the fixpoint
         // instead (see the fn doc).
         if apply_operator_shape_projections(ctx) {
+            kestrel_debug::ktrace!("p4", "P4PROBE shape_projection");
             fixpoint(ctx);
             relax_level = 0;
             continue;
@@ -64,12 +65,14 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         // right operand's type. Must run before literal defaulting, which
         // would otherwise pin the receiver literal to Int64 first.
         if apply_operator_literal_adoption(ctx) {
+            kestrel_debug::ktrace!("p4", "P4PROBE rule_l_at_end");
             fixpoint(ctx);
             relax_level = 0;
             continue;
         }
         let progress = apply_literal_defaults(ctx, relax_level);
         if progress {
+            kestrel_debug::ktrace!("p4", "P4PROBE literal_defaults_level{relax_level}");
             fixpoint(ctx);
             relax_level = 0;
             continue;
@@ -81,6 +84,7 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
         // (`let y = ru8; y + 1` must pin `1` to UInt8 via y's decay, not
         // force-default it to Int64).
         if apply_ref_decay_defaults(ctx) {
+            kestrel_debug::ktrace!("p4", "P4PROBE ref_decay_at_end");
             fixpoint(ctx);
             relax_level = 0;
             continue;
@@ -105,7 +109,11 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     ctx.synth_gate = false;
 
     // Phase 3: solve again with defaults
+    let before = ctx.constraints.len();
     fixpoint(ctx);
+    if ctx.constraints.len() != before {
+        kestrel_debug::ktrace!("p4", "P4PROBE phase3_progress");
+    }
 
     // Phase 3.5: apply deferred type-parameter defaults (e.g. H = DefaultHasher).
     // Only unconstrained TyVars get their default — inside a generic body
@@ -1811,6 +1819,7 @@ fn break_stalled_assign_targets(ctx: &mut InferCtx<'_>) {
         };
         let (value, target, expr, span) = (*value, *target, *expr, span.clone());
         if matches!(ctx.slot(ctx.resolve(target)), TySlot::Unresolved { .. }) {
+            kestrel_debug::ktrace!("p4", "P4PROBE break_stalled_assign");
             ctx.constraints[i] = Constraint::Coerce {
                 from: value,
                 to: target,
@@ -1967,6 +1976,7 @@ fn solve_coerce(
         && !matches!(ctx.slot(tr), TySlot::Unresolved { literal: None })
         && (ctx.pattern_binder_tvs.contains(&from) || ctx.pattern_binder_tvs.contains(&fr))
     {
+        kestrel_debug::ktrace!("p4", "P4PROBE pattern_binder_gate_defer");
         return SolveResult::Deferred(Constraint::Coerce {
             from,
             to,
@@ -2148,6 +2158,7 @@ fn solve_coerce(
     {
         let from_root = ctx.resolve(from);
         if pa.is_empty() && ctx.closure_flex.contains(&from_root) {
+            kestrel_debug::ktrace!("p4", "P4PROBE closure_flex_adapt");
             // Adapt: ignore expected params, just equate return types
             ctx.equal(*ret_a, *ret_b, span);
             return SolveResult::Solved;
@@ -3270,6 +3281,7 @@ fn reconcile_fn_kinds(
     // trailing-closure call site carries the WRAPPER's id in the `Coerce`.
     if ctx.closure_literal_exprs.contains(&expr) {
         if from_kind != to_kind {
+            kestrel_debug::ktrace!("p4", "P4PROBE closure_kind_retrofit");
             ctx.set_function_kind(fr, to_kind);
         }
         return None;
@@ -3278,6 +3290,7 @@ fn reconcile_fn_kinds(
     // (2) Bare-value adoption (either direction; both bare stays bare).
     let (from_flex, to_flex) = (ctx.kind_flex.contains(&fr), ctx.kind_flex.contains(&tr));
     if from_flex || to_flex {
+        kestrel_debug::ktrace!("p4", "P4PROBE kind_flex_adopt");
         if from_flex && !to_flex && from_kind != to_kind {
             ctx.set_function_kind(fr, to_kind);
             ctx.kind_coercions.insert(expr, (from_kind, to_kind));
@@ -3414,6 +3427,7 @@ fn reconcile_closure_conventions(
         }
     }
     if changed {
+        kestrel_debug::ktrace!("p4", "P4PROBE closure_convention_upgrade");
         ctx.set_function_conventions(actual_ty, upgraded);
     }
     None
@@ -5614,6 +5628,7 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
         ) {
             ctx.types[literal_tv.0 as usize] = TySlot::Redirect(*context_tv);
             progress = true;
+            kestrel_debug::ktrace!("p4", "P4PROBE context_literal");
         }
     }
     progress
