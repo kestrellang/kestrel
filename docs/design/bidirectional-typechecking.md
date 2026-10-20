@@ -96,6 +96,26 @@ path is kept so the pinned diagnostic wordings (§14 risk 7) do not move
 without a maintainer-approved annotation rewrite. Suite: 3859 ok / 22 failed,
 no verdict changed except the targeted ones.
 
+**P3 (b)/(c) — two-phase closure arguments, done** (`00f649bc`): closure
+literal arguments of a `Call`/`MethodCall` get a placeholder; after the call
+constraint is emitted and the left side solved, each closure is generated
+against the instantiated parameter type (`check_closure`: params,
+conventions, kind and return from E). Suite: no verdict changed.
+
+**P3 (a) — known receivers, E106 (D3), done** (`329ab4fe`, `2bc7271d`):
+`require_known_receiver` before every instance method/field lookup solves
+what is to its left (fixpoint + Rule L), then defaults the open literals the
+receiver is built from — D2′ for `[]`/`""`/`[:]` receivers, and §5.2 step 4
+for calls, subscripts, operators, tuple fields, pattern binders and
+interpolations waiting on a literal — and gives a ref-initialized binding its
+copy-out decay. A receiver still unknown after that is E106; so is an open
+numeric literal that is itself the receiver (D3, Rust E0689). Also:
+`solve_member` solves a peeled ref receiver immediately instead of
+re-queueing it. Suite: 3859 ok / 24 failed; the 2 new failures are
+`codegen/arithmetic/int_checked_overflow_intrinsics{,__llvm}.ks`, which call
+`(6).multiplyChecked(7)` — rejected by D3 by design; awaiting a maintainer
+decision on updating them.
+
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
 | Part | What | Verified |
