@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod collect;
+mod entail;
 pub mod expand;
 pub mod mangle;
 pub mod types;

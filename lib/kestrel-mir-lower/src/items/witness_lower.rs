@@ -162,6 +162,7 @@ fn lower_witnesses_for_type(
                     &mut wc,
                 );
             }
+            crate::items::function_sig::lower_equality_constraints(ctx, *source, &mut wc);
             witness.constraints = wc.constraints;
         }
 

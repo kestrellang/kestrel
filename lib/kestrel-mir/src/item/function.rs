@@ -135,6 +135,11 @@ pub enum WhereConstraint {
         type_param: Entity,
         protocol: Entity,
     },
+    /// `subject = rhs` — an equality clause (`where T = Int64`,
+    /// `where I.Item = U`), lowered from the front end's resolved
+    /// `WhereClausesOf`. Decided at witness selection by the entailment
+    /// kernel (`mono::entail`).
+    Equal { subject: crate::TyId, rhs: crate::TyId },
 }
 
 impl WhereConstraint {

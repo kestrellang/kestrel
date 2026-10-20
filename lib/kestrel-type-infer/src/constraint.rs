@@ -272,6 +272,29 @@ pub enum Constraint {
         acc_tv: TyVar,
         span: Span,
     },
+
+    /// A member was committed while its applicability was still `Unknown`
+    /// (bidi design §5.1 step 6): the receiver had an open var, so the
+    /// extension's where clauses (or the protocol conformance it was reached
+    /// through) could not be decided yet. Re-evaluated through the entailment
+    /// kernel as the receiver resolves; `Fails` is reported as the lookup
+    /// failure it stands for ("no member"), never permitted (N1).
+    Applicable {
+        receiver: TyVar,
+        source: ApplicableSource,
+        name: String,
+        is_call: bool,
+        span: Span,
+    },
+}
+
+/// What a tagged member commitment still has to prove.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicableSource {
+    /// The extension that declared the member.
+    Extension(Entity),
+    /// The protocol the member was resolved through.
+    Protocol(Entity),
 }
 
 /// Argument in a call: optional label + type variable + source expression.

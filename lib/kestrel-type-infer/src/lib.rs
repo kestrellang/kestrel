@@ -9,7 +9,6 @@
 //! HIR Lowering (HirBody) → Type Inference (this crate) → TypedBody
 //! ```
 
-mod bidi_probe;
 pub mod captures;
 mod collections;
 pub mod compare;
@@ -17,6 +16,8 @@ pub mod conformance;
 pub mod constraint;
 pub mod ctx;
 pub mod entailment;
+mod entail_layer;
+mod solver_entail;
 pub mod error;
 pub mod generate;
 pub mod resolve;

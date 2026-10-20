@@ -60,9 +60,10 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
             relax_level = 0;
             continue;
         }
-        // BIDI PROTOTYPE: symmetric operator literal rule (N3).
-        if kestrel_debug::is_enabled("bidi-op") && crate::bidi_probe::op_literal_adopts_operand(ctx)
-        {
+        // Rule L (bidi design §4, N3): a literal LEFT operand adopts the
+        // right operand's type. Must run before literal defaulting, which
+        // would otherwise pin the receiver literal to Int64 first.
+        if apply_operator_literal_adoption(ctx) {
             fixpoint(ctx);
             relax_level = 0;
             continue;
@@ -140,10 +141,6 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // use of a ret_borrow function (E491 — the convention is not
     // expressible in function types).
     validate_ref_placement(ctx, hir);
-
-    // BIDI PROTOTYPE measurement (inert unless KESTREL_DEBUG=bidi-n4).
-    crate::bidi_probe::report_literal_lets(ctx, hir);
-    crate::bidi_probe::report_omitted_return(ctx);
 
     // Phase 4.5: report any expression or local whose TyVar stayed unresolved.
     // These slots would otherwise surface as `MirTy::Error` downstream and
@@ -694,6 +691,15 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
                 if ctx.is_error(ctx.resolve(ty)) {
                     continue;
                 }
+                // Re-queued as Unknown because a type arg never resolved: the
+                // open var gets its own "could not infer" diagnostic; a
+                // "does not conform" on top would blame the wrong thing.
+                if matches!(ctx.slot(ctx.resolve(ty)), TySlot::Resolved(_))
+                    && crate::solver_entail::has_open_var(ctx, ty)
+                {
+                    kestrel_debug::ktrace!("entail", "conformance left undecided by an open var");
+                    continue;
+                }
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
@@ -845,6 +851,13 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             // Unresolved InterpolationLink: the accumulator was resolved by
             // literal defaults. Absorb silently.
             Constraint::InterpolationLink { .. } => continue,
+            // Still Unknown at body end: the receiver's open var is reported
+            // by its own "could not infer" diagnostic, so this obligation
+            // adds nothing a user could act on.
+            Constraint::Applicable { name, .. } => {
+                kestrel_debug::ktrace!("entail", "applicability of '{name}' never decided");
+                continue;
+            },
         };
         ctx.report_error(err);
         if let Some(tv) = poison_tv {
@@ -1050,6 +1063,61 @@ fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
             acc_tv,
             span,
         } => solve_interpolation_link(ctx, result_tv, acc_tv, span),
+
+        Constraint::Applicable {
+            receiver,
+            source,
+            name,
+            is_call,
+            span,
+        } => solve_applicable(ctx, receiver, source, name, is_call, span),
+    }
+}
+
+/// Re-evaluate a tagged member commitment (see `Constraint::Applicable`).
+fn solve_applicable(
+    ctx: &mut InferCtx<'_>,
+    receiver: TyVar,
+    source: crate::constraint::ApplicableSource,
+    name: String,
+    is_call: bool,
+    span: Span,
+) -> SolveResult {
+    let verdict = match ctx.slot(ctx.resolve(receiver)) {
+        TySlot::Resolved(kind) => applicability(ctx, source, &kind.clone()),
+        _ => kestrel_entail::Tri::Unknown,
+    };
+    match verdict {
+        kestrel_entail::Tri::Holds => SolveResult::Solved,
+        kestrel_entail::Tri::Fails => SolveResult::Error(InferError::NoMember {
+            receiver,
+            name,
+            is_call,
+            span,
+        }),
+        kestrel_entail::Tri::Unknown => SolveResult::Deferred(Constraint::Applicable {
+            receiver,
+            source,
+            name,
+            is_call,
+            span,
+        }),
+    }
+}
+
+/// Is a member reached through `source` applicable to a receiver of kind
+/// `recv`? One kernel question either way.
+fn applicability(
+    ctx: &InferCtx<'_>,
+    source: crate::constraint::ApplicableSource,
+    recv: &TyKind,
+) -> kestrel_entail::Tri {
+    use crate::constraint::ApplicableSource;
+    match source {
+        ApplicableSource::Extension(ext) => {
+            crate::solver_entail::extension_applicability(ctx, ext, recv)
+        },
+        ApplicableSource::Protocol(proto) => crate::solver_entail::kind_conformance(ctx, recv, proto),
     }
 }
 
@@ -2129,14 +2197,22 @@ fn solve_conforms(
                             TySlot::Resolved(k) => k.clone(),
                             _ => unreachable!(),
                         };
-                        ctx.resolver.conforms_to(&kind, protocol) && {
-                            let hir = reify_tv(ctx, resolved);
-                            crate::conformance::type_satisfies(
-                                ctx.query_ctx,
-                                &hir,
-                                protocol,
-                                ctx.root,
-                            )
+                        if !ctx.resolver.conforms_to(&kind, protocol) {
+                            false
+                        } else {
+                            match crate::solver_entail::conformance(ctx, resolved, protocol) {
+                                kestrel_entail::Tri::Holds => true,
+                                kestrel_entail::Tri::Fails => false,
+                                kestrel_entail::Tri::Unknown => {
+                                    return SolveResult::Deferred(Constraint::Conforms {
+                                        ty,
+                                        protocol,
+                                        span,
+                                        poison_ty_on_failure,
+                                        origin,
+                                    });
+                                },
+                            }
                         }
                     },
                 };
@@ -2186,12 +2262,27 @@ fn solve_conforms(
                 // is why `projection_base_admits` has to sit here: for an
                 // associated-type projection `conforms_to` is the SOLE decider,
                 // and it answers declares-only (G17 C4).
-                ctx.resolver.conforms_to(&kind, protocol)
-                    && projection_base_admits(ctx, &kind, protocol)
-                    && {
-                        let hir = reify_tv(ctx, resolved);
-                        crate::conformance::type_satisfies(ctx.query_ctx, &hir, protocol, ctx.root)
+                if !(ctx.resolver.conforms_to(&kind, protocol)
+                    && projection_base_admits(ctx, &kind, protocol))
+                {
+                    false
+                } else {
+                    match crate::solver_entail::conformance(ctx, resolved, protocol) {
+                        kestrel_entail::Tri::Holds => true,
+                        kestrel_entail::Tri::Fails => false,
+                        // An open var in the type args: re-queue until it
+                        // resolves — never permit on the guess (N1).
+                        kestrel_entail::Tri::Unknown => {
+                            return SolveResult::Deferred(Constraint::Conforms {
+                                ty,
+                                protocol,
+                                span,
+                                poison_ty_on_failure,
+                                origin,
+                            });
+                        },
                     }
+                }
             };
             if conforms {
                 // Parameterized bounds: `where R: P[Int16]` must also pin the
@@ -3521,15 +3612,6 @@ fn solve_overloaded_call(
                 .copied()
                 .filter(|&c| types_compatible(ctx, c, &args))
                 .collect();
-            // BIDI PROTOTYPE measurement: a free-function call whose candidates
-            // survive label filtering, so argument TYPES pick the overload.
-            kestrel_debug::ktrace!(
-                "bidi-ovl",
-                "type-overload name={overload_name} label_matches={} type_matches={} owner={}",
-                matched.len(),
-                compatible.len(),
-                crate::bidi_probe::owner_name(ctx)
-            );
 
             match compatible.len() {
                 0 => SolveResult::Error(InferError::NoMember {
@@ -4221,10 +4303,12 @@ fn solve_member(
                 .iter()
                 .copied()
                 .filter(|(_, ext, _)| match ext {
-                    Some(ext) => {
-                        extension_type_args_compatible(ctx, *ext, &recv_kind)
-                            && extension_where_clauses_satisfied(ctx, *ext, &recv_kind)
-                    },
+                    Some(ext) => !applicability(
+                        ctx,
+                        crate::constraint::ApplicableSource::Extension(*ext),
+                        &recv_kind,
+                    )
+                    .fails(),
                     None => true,
                 })
                 .collect();
@@ -4297,43 +4381,44 @@ fn solve_member(
         },
     };
 
-    // Check extension type arg compatibility and where clause satisfaction
-    if let Some(ext) = resolution.from_extension {
-        if !extension_type_args_compatible(ctx, ext, &recv_kind) {
-            return SolveResult::Error(InferError::NoMember {
+    // Applicability (bidi §5.1 steps 4 and 6): the declaring extension's
+    // target pattern and where clauses — equality clauses included (N2) —
+    // must hold for this receiver. A member resolved THROUGH a protocol (the
+    // multi-match collapse in `try_resolve_through_protocol`) carries no
+    // single `from_extension`; the receiver must then genuinely conform to
+    // that protocol for THIS instantiation (`Box(0).show()` over
+    // `extend Box[lang.i64]: Show` + `extend Box[lang.i32]: Show`).
+    // `Fails` is "no member". `Unknown` (an open var in the receiver)
+    // commits the member *tagged*: an `Applicable` obligation re-checks it
+    // once the var resolves, and is never permitted on the guess (N1).
+    let sources = resolution
+        .from_extension
+        .map(crate::constraint::ApplicableSource::Extension)
+        .into_iter()
+        .chain(
+            resolution
+                .via_protocol
+                .map(crate::constraint::ApplicableSource::Protocol),
+        );
+    for source in sources {
+        match applicability(ctx, source, &recv_kind) {
+            kestrel_entail::Tri::Holds => {},
+            kestrel_entail::Tri::Fails => {
+                return SolveResult::Error(InferError::NoMember {
+                    receiver,
+                    name: name.to_string(),
+                    is_call,
+                    span,
+                });
+            },
+            kestrel_entail::Tri::Unknown => ctx.constraints.push(Constraint::Applicable {
                 receiver,
+                source,
                 name: name.to_string(),
                 is_call,
-                span,
-            });
+                span: span.clone(),
+            }),
         }
-        if !extension_where_clauses_satisfied(ctx, ext, &recv_kind) {
-            return SolveResult::Error(InferError::NoMember {
-                receiver,
-                name: name.to_string(),
-                is_call,
-                span,
-            });
-        }
-    }
-
-    // A member resolved THROUGH a protocol (the multi-match collapse in
-    // `try_resolve_through_protocol`, which merges several same-requirement
-    // extension methods) carries no single `from_extension`, so the check above
-    // can't catch it. Verify the receiver genuinely conforms to that protocol
-    // for THIS instantiation — not merely by nominal. `Box(0).show()` over
-    // `extend Box[lang.i64]: Show` + `extend Box[lang.i32]: Show` resolves `show`
-    // via `Show`, but neither extension applies to `Box[Int64]`; without this it
-    // type-checked and only failed (post-fix: cleanly) at mono.
-    if let Some(proto) = resolution.via_protocol
-        && !receiver_conforms_to_protocol_concretely(ctx, &recv_kind, proto)
-    {
-        return SolveResult::Error(InferError::NoMember {
-            receiver,
-            name: name.to_string(),
-            is_call,
-            span,
-        });
     }
 
     // Field/property used as a call → field access + call on the field value.
@@ -5089,139 +5174,60 @@ fn solve_tuple_rest_pat(
     SolveResult::Solved
 }
 
-/// Check if an extension's explicit type args are compatible with the receiver's type args.
-/// Returns false only when we can definitively prove incompatibility.
-/// Does `recv_kind` genuinely conform to `protocol` for its concrete
-/// instantiation — i.e. is the conformance declared on the type body, or
-/// provided by an extension whose self-type args are compatible with the
-/// receiver? A purely nominal conformance (e.g. `Box` declares `Show` only via
-/// `extend Box[lang.i64]`) does NOT apply to a differently-specialized receiver
-/// (`Box[Int64]`). Mirrors the per-extension check mono uses for witnesses.
-fn receiver_conforms_to_protocol_concretely(
-    ctx: &InferCtx<'_>,
-    recv_kind: &TyKind,
-    protocol: Entity,
-) -> bool {
-    let Some(nominal) = recv_kind.entity() else {
-        return true; // structural / non-nominal — don't second-guess
-    };
-    let insts = ctx
-        .query_ctx
-        .query(kestrel_name_res::ConformingProtocolInstantiations {
-            entity: nominal,
-            root: ctx.root,
-        });
-    let mut saw_provider = false;
-    for (proto, source, _args) in &insts {
-        if *proto != protocol {
-            continue;
-        }
-        saw_provider = true;
-        // Conformance on the type body (source == the type) applies to every
-        // instantiation. An extension applies only if its self-type args match.
-        if *source == nominal || extension_type_args_compatible(ctx, *source, recv_kind) {
-            return true;
-        }
-    }
-    // No provider at all: defer (inheritance/refinement/blanket sources the
-    // instantiation query may not enumerate — stay permissive, the witness
-    // backstop catches a genuine miss). Providers existed but none applied: reject.
-    !saw_provider
-}
-
-fn extension_type_args_compatible(
-    ctx: &InferCtx<'_>,
-    extension: Entity,
-    recv_kind: &TyKind,
-) -> bool {
-    use crate::ty::TySlot;
-    use kestrel_hir::ty::HirTy;
-    use kestrel_hir_lower::LowerExtensionTargetTypeArgs;
-
-    let Some(ext_args) = ctx.query_ctx.query(LowerExtensionTargetTypeArgs {
-        extension,
-        root: ctx.root,
-    }) else {
-        return true;
-    };
-
-    if ext_args.is_empty() {
-        return true; // Generic extension
-    }
-
-    let recv_args = recv_kind.args();
-    if recv_args.is_empty() && !recv_kind.is_nominal_concrete() && !recv_kind.is_type_alias() {
-        return true;
-    }
-
-    for (i, ext_arg) in ext_args.iter().enumerate() {
-        let Some(&recv_tv) = recv_args.get(i) else {
-            continue;
-        };
-
-        // Determine the extension arg's entity (if it's a nominal type).
-        let ext_entity_opt: Option<Entity> = match ext_arg {
-            HirTy::Struct { entity, .. }
-            | HirTy::Enum { entity, .. }
-            | HirTy::Protocol { entity, .. }
-            | HirTy::AliasUse { entity, .. } => Some(*entity),
-            HirTy::SelfType(entity, _) => Some(*entity),
-            _ => None,
-        };
-        let Some(ext_entity) = ext_entity_opt else {
-            continue;
-        };
-
-        // Skip generic (type parameter) positions — they match anything.
-        // (TypeParameter entities shouldn't appear via the nominal variants,
-        // but allow a defensive check.)
-        if ctx.query_ctx.get::<NodeKind>(ext_entity) == Some(&NodeKind::TypeParameter) {
-            continue;
-        }
-
-        // Concrete extension arg — resolve receiver arg and compare entities.
-        let resolved_recv = ctx.resolve(recv_tv);
-        match ctx.slot(resolved_recv) {
-            TySlot::Resolved(k) if k.entity() == Some(ext_entity) => continue,
-            TySlot::Resolved(k) if k.entity().is_some() => return false,
-            TySlot::Resolved(_) => return false,
-            TySlot::Unresolved { literal: Some(lit) } => {
-                // Unresolved literal — check if the expected type is compatible.
-                let ext_ty = TyKind::Struct {
-                    entity: ext_entity,
-                    args: vec![],
-                };
-                if !crate::unify::conforms_to_literal_protocol(ctx, &ext_ty, *lit) {
-                    return false;
-                }
-            },
-            _ => continue, // Truly unresolved — allow
-        }
-    }
-
-    true
-}
-
-/// Check if an extension's where clause constraints are satisfied by the receiver type.
-/// For `extend Box[T] where T: Equatable`, verifies that the receiver's T arg conforms.
-///
-/// Reifies the receiver and delegates to the single bound-aware evaluator
-/// (`crate::conformance::extension_bounds_hold`) so member-resolution extension
-/// selection and `type_satisfies` share one implementation. The previous inline
-/// version mapped where-clause params via the *target type's* `TypeParams`
-/// instead of the *extension's own* target args — so the param entities didn't
-/// match and every bound was silently skipped. Delegation fixes that (the
-/// substitution now comes from `LowerExtensionTargetTypeArgs`).
-fn extension_where_clauses_satisfied(
-    ctx: &InferCtx<'_>,
-    extension: Entity,
-    recv_kind: &TyKind,
-) -> bool {
-    let recv = reify_kind(ctx, recv_kind);
-    crate::conformance::extension_bounds_hold(ctx.query_ctx, extension, &recv, ctx.root)
-}
-
 // ===== Literal defaults =====
+
+/// Rule L (bidi design §4 step 2; Rust's built-in binop rule): for
+/// `lit op x`, an operator whose receiver is still an open literal var adopts
+/// the right operand's type `B` when `B` is concrete, `B` can be written as
+/// that literal, and `B` conforms to the operator's protocol. The mirror,
+/// `x op lit`, already works through argument coercion. Returns true on
+/// progress.
+fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
+    let mut pairs: Vec<(TyVar, TyVar)> = Vec::new();
+    for c in &ctx.constraints {
+        let Constraint::Member {
+            receiver,
+            args,
+            expr,
+            ..
+        } = c
+        else {
+            continue;
+        };
+        let Some(&protocol) = ctx.operator_members.get(expr) else {
+            continue;
+        };
+        if args.len() != 1 {
+            continue;
+        }
+        let recv = ctx.resolve(*receiver);
+        let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(recv) else {
+            continue;
+        };
+        let arg = ctx.resolve(args[0].ty);
+        let TySlot::Resolved(kind) = ctx.slot(arg) else {
+            continue;
+        };
+        if !kind.is_nominal_concrete()
+            || !crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
+            || !ctx.resolver.conforms_to(kind, protocol)
+        {
+            continue;
+        }
+        pairs.push((recv, arg));
+    }
+    let mut progress = false;
+    for (recv, arg) in pairs {
+        // An earlier pair may already have pinned this receiver.
+        if matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: Some(_) })
+            && crate::unify::unify(ctx, recv, arg).is_ok()
+        {
+            kestrel_debug::ktrace!("rule-l", "literal receiver adopts the right operand's type");
+            progress = true;
+        }
+    }
+    progress
+}
 
 /// Apply deferred type-parameter defaults for TyVars that are still
 /// unconstrained. Returns true if any default was applied.
@@ -5309,7 +5315,7 @@ pub(crate) fn apply_operator_shape_projections(ctx: &mut InferCtx<'_>) -> bool {
         };
         // Operator desugars only — HIR marks them (ProtocolCall.from_operator)
         // and generate records the expr ids.
-        if !ctx.operator_members.contains(expr) {
+        if !ctx.operator_members.contains_key(expr) {
             continue;
         }
         let recv = ctx.resolve(*receiver);
@@ -5495,8 +5501,7 @@ fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
     progress
 }
 
-/// BIDI PROTOTYPE split: the context-driven first pass of
-/// `apply_literal_defaults`, callable on its own at statement boundaries.
+/// The context-driven first pass of `apply_literal_defaults`.
 pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
 
@@ -5518,7 +5523,7 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
             ..
         } = constraint
         {
-            if !ctx.operator_members.contains(expr) {
+            if !ctx.operator_members.contains_key(expr) {
                 continue;
             }
             collect_context_literal(ctx, *receiver, *result, &mut context_types);
@@ -5549,7 +5554,7 @@ pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u
     apply_literal_defaults_from(ctx, relax_level, 0)
 }
 
-/// BIDI PROTOTYPE: defaulting restricted to TyVars allocated at or after `start`.
+/// Literal defaulting restricted to TyVars allocated at or after `start`.
 pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u8, start: usize) -> bool {
     let mut progress = false;
 

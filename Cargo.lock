@@ -921,6 +921,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kestrel-entail"
+version = "0.17.0"
+dependencies = [
+ "kestrel-hecs",
+]
+
+[[package]]
 name = "kestrel-hecs"
 version = "0.17.0"
 dependencies = [
@@ -998,6 +1005,7 @@ dependencies = [
  "indexmap",
  "kestrel-copy-fold",
  "kestrel-debug",
+ "kestrel-entail",
  "kestrel-hecs",
  "kestrel-span",
  "rustc-hash 2.1.2",
@@ -1135,6 +1143,7 @@ dependencies = [
  "kestrel-ast-builder",
  "kestrel-copy-fold",
  "kestrel-debug",
+ "kestrel-entail",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-hir-lower",

@@ -179,7 +179,9 @@ pub struct InferCtx<'a> {
     /// `Output = Self`-by-convention operator protocols, which licenses the
     /// solver's literal passes (receiver-from-result inference, operator
     /// shape projection) — for-in/try sugar must NOT get that reasoning.
-    pub(crate) operator_members: HashSet<HirExprId>,
+    /// Maps the expr to its operator protocol (`Addable`, `Equal`, …), which
+    /// Rule L checks the right operand against.
+    pub(crate) operator_members: HashMap<HirExprId, Entity>,
 
     // === Results (populated during solving) ===
     /// Resolved entity for MethodCall/Field expressions.
@@ -355,13 +357,6 @@ pub struct InferCtx<'a> {
     /// form independent TyVar trees for the same concrete type.
     pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
 
-    /// BIDI PROTOTYPE (local, uncommitted): nesting depth of closure bodies
-    /// during generation. Statement-boundary literal defaulting only fires at
-    /// depth 0 — a closure body's statements are checked once its expected
-    /// type is known, which here is the end of the enclosing statement.
-    pub(crate) probe_closure_depth: u32,
-    /// BIDI PROTOTYPE: the body has a tail value and no declared return type.
-    pub(crate) probe_omitted_return: bool,
 }
 
 /// Info about a promotion inserted at a Coerce site.
@@ -415,7 +410,7 @@ impl<'a> InferCtx<'a> {
             pattern_binder_gate: true,
             poison_protocol_call_recv_on_failure: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
-            operator_members: HashSet::default(),
+            operator_members: HashMap::default(),
             resolutions: HashMap::default(),
             indirection_peels: HashMap::default(),
             field_subscripts: HashMap::default(),
@@ -447,8 +442,6 @@ impl<'a> InferCtx<'a> {
             opaque_return: None,
             type_param_defaults: Vec::new(),
             reported_typearg_conformance: HashSet::default(),
-            probe_closure_depth: 0,
-            probe_omitted_return: false,
         }
     }
 

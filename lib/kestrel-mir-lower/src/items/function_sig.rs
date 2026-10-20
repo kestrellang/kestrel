@@ -326,6 +326,7 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
                 lower_where_constraint(ctx, ast_constraint, e, &mut wc);
             }
         }
+        lower_equality_constraints(ctx, e, &mut wc);
         if ctx
             .world
             .get::<TypeParams>(e)
@@ -337,6 +338,46 @@ fn populate_where_clause(ctx: &mut LowerCtx, entity: Entity, def: &mut FunctionD
     }
     if !wc.constraints.is_empty() || has_type_params {
         def.where_clause = Some(wc);
+    }
+}
+
+/// `owner`'s equality clauses (`where T = Int64`, `where I.Item = U`), read
+/// from the front end's resolved `WhereClausesOf` — never re-resolved from
+/// the AST. Mono's witness selection decides them through the entailment
+/// kernel; they used to be dropped here.
+pub(crate) fn lower_equality_constraints(ctx: &mut LowerCtx, owner: Entity, out: &mut WhereClause) {
+    use kestrel_type_infer::resolve::WhereClause as InferClause;
+    let clauses = ctx.query.query(kestrel_type_infer::where_clauses::WhereClausesOf {
+        entity: owner,
+        root: ctx.root,
+    });
+    for clause in clauses.iter() {
+        let InferClause::Equality { subject, rhs } = clause else {
+            continue;
+        };
+        let Some(subject) = subject_hir(subject) else {
+            continue;
+        };
+        let subject = crate::ty::lower_type(ctx, &subject);
+        let rhs = crate::ty::lower_type(ctx, rhs);
+        out.add_constraint(WhereConstraint::Equal { subject, rhs });
+    }
+}
+
+/// A where-clause subject as a type. `Self` has no type at this vantage (it
+/// is the receiver mono judges), so a `Self`-rooted subject is skipped.
+fn subject_hir(subject: &kestrel_type_infer::resolve::WhereSubject) -> Option<kestrel_hir::ty::HirTy> {
+    use kestrel_hir::ty::HirTy;
+    use kestrel_type_infer::resolve::WhereSubject;
+    let span = kestrel_span::Span::synthetic(0);
+    match subject {
+        WhereSubject::Param(p) => Some(HirTy::Param(*p, span)),
+        WhereSubject::SelfType => None,
+        WhereSubject::Projection { base, assoc } => Some(HirTy::AssocProjection {
+            base: Box::new(subject_hir(base)?),
+            assoc: *assoc,
+            span,
+        }),
     }
 }
 
