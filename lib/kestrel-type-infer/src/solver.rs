@@ -2296,8 +2296,21 @@ fn solve_conforms(
                         kestrel_entail::Tri::Holds => true,
                         kestrel_entail::Tri::Fails => false,
                         // An open var in the type args: re-queue until it
-                        // resolves — never permit on the guess (N1).
+                        // resolves — never permit on the guess (N1). The
+                        // bound's protocol args still pin it now (the element
+                        // of `100..=200` against `RandomBounds[Int16]`),
+                        // before literal defaulting can pick Int64.
                         kestrel_entail::Tri::Unknown => {
+                            if unify_bound_protocol_args(ctx, ty, resolved, protocol).is_err() {
+                                if poison_ty_on_failure {
+                                    ctx.poison(ty);
+                                }
+                                return SolveResult::Error(InferError::DoesNotConform {
+                                    ty,
+                                    protocol,
+                                    span,
+                                });
+                            }
                             return SolveResult::Deferred(Constraint::Conforms {
                                 ty,
                                 protocol,
