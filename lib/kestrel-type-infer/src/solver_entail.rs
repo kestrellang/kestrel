@@ -102,29 +102,40 @@ impl EntailLayer for SolverLayer<'_, '_> {
 pub(crate) fn extension_applicability(ctx: &InferCtx<'_>, extension: Entity, recv: &TyKind) -> Tri {
     let layer = SolverLayer::new(ctx);
     let recv = layer.kind_ety(recv);
+    let open = recv.has_var();
     let target = layer.fe.extension_target(extension);
     let clauses = layer.fe.extension_clauses(extension);
-    kestrel_entail::extension_applies(&layer, &target, &clauses, &recv)
+    settle_abstract(kestrel_entail::extension_applies(&layer, &target, &clauses, &recv), open)
 }
 
 /// Does `ty` satisfy `protocol`, conditional conformances included?
+///
+/// Callers have already confirmed the conformance is *declared*
+/// (`TypeResolver::conforms_to`, which consults a param's bounds). So an
+/// `Unknown` caused only by an abstract position (a param, an unreduced
+/// projection) is that declaration's answer and holds; only an open var
+/// keeps the goal `Unknown` (re-queued until it resolves).
 pub(crate) fn conformance(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Tri {
     let layer = SolverLayer::new(ctx);
-    let goal = Goal::Conforms {
-        ty: layer.ety(ty),
-        protocol,
-    };
-    kestrel_entail::entails(&layer, &goal)
+    let ety = layer.ety(ty);
+    let open = ety.has_var();
+    let verdict = kestrel_entail::entails(&layer, &Goal::Conforms { ty: ety, protocol });
+    settle_abstract(verdict, open)
+}
+
+/// `Unknown` with no open var anywhere in the question can never become
+/// known by solving further: it is an abstract position the caller's own
+/// declared-conformance check already vouched for.
+fn settle_abstract(verdict: Tri, open: bool) -> Tri {
+    if verdict == Tri::Unknown && !open { Tri::Holds } else { verdict }
 }
 
 /// [`conformance`] for an already-resolved receiver kind.
 pub(crate) fn kind_conformance(ctx: &InferCtx<'_>, recv: &TyKind, protocol: Entity) -> Tri {
     let layer = SolverLayer::new(ctx);
-    let goal = Goal::Conforms {
-        ty: layer.kind_ety(recv),
-        protocol,
-    };
-    kestrel_entail::entails(&layer, &goal)
+    let ety = layer.kind_ety(recv);
+    let open = ety.has_var();
+    settle_abstract(kestrel_entail::entails(&layer, &Goal::Conforms { ty: ety, protocol }), open)
 }
 
 /// Does the type still mention an open var (so an Unknown verdict is

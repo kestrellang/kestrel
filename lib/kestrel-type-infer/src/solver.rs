@@ -854,9 +854,30 @@ fn report_unsolved(ctx: &mut InferCtx<'_>) {
             // Still Unknown at body end: the receiver's open var is reported
             // by its own "could not infer" diagnostic, so this obligation
             // adds nothing a user could act on.
-            Constraint::Applicable { name, .. } => {
-                kestrel_debug::ktrace!("entail", "applicability of '{name}' never decided");
-                continue;
+            Constraint::Applicable {
+                receiver,
+                source,
+                name,
+                is_call,
+                span,
+            } => {
+                let verdict = match ctx.slot(ctx.resolve(receiver)) {
+                    TySlot::Resolved(kind) => applicability(ctx, source, &kind.clone()),
+                    _ => kestrel_entail::Tri::Unknown,
+                };
+                if !verdict.fails() || ctx.is_error(ctx.resolve(receiver)) {
+                    kestrel_debug::ktrace!("entail", "applicability of '{name}' never decided");
+                    continue;
+                }
+                (
+                    InferError::NoMember {
+                        receiver,
+                        name,
+                        is_call,
+                        span,
+                    },
+                    None,
+                )
             },
         };
         ctx.report_error(err);
@@ -1089,13 +1110,17 @@ fn solve_applicable(
     };
     match verdict {
         kestrel_entail::Tri::Holds => SolveResult::Solved,
-        kestrel_entail::Tri::Fails => SolveResult::Error(InferError::NoMember {
-            receiver,
-            name,
-            is_call,
-            span,
-        }),
-        kestrel_entail::Tri::Unknown => SolveResult::Deferred(Constraint::Applicable {
+        // A failure decided by a still-open literal waits for the literal to
+        // settle, so the diagnostic names `Box[String]`, not a literal.
+        kestrel_entail::Tri::Fails if !crate::solver_entail::has_open_var(ctx, receiver) => {
+            SolveResult::Error(InferError::NoMember {
+                receiver,
+                name,
+                is_call,
+                span,
+            })
+        },
+        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => SolveResult::Deferred(Constraint::Applicable {
             receiver,
             source,
             name,
@@ -4403,7 +4428,7 @@ fn solve_member(
     for source in sources {
         match applicability(ctx, source, &recv_kind) {
             kestrel_entail::Tri::Holds => {},
-            kestrel_entail::Tri::Fails => {
+            kestrel_entail::Tri::Fails if !crate::solver_entail::has_open_var(ctx, receiver) => {
                 return SolveResult::Error(InferError::NoMember {
                     receiver,
                     name: name.to_string(),
@@ -4411,7 +4436,7 @@ fn solve_member(
                     span,
                 });
             },
-            kestrel_entail::Tri::Unknown => ctx.constraints.push(Constraint::Applicable {
+            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => ctx.constraints.push(Constraint::Applicable {
                 receiver,
                 source,
                 name: name.to_string(),
