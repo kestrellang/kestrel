@@ -42,6 +42,19 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
     // exhaustive_return analyzer (E001) reports that more precisely, and
     // the redundant E100 here would mask it at diagnostic-match time.
     if let Some(tail) = hir.tail_expr {
+        // The tail is checked against the return type (bidi §2.1): arms and
+        // block tails inside it are leaves and may promote (`T` → `T?`,
+        // `T` → `Result[T, E]`).
+        if tail_is_exhaustive(hir, tail) && expectation_known(ctx, ctx.return_ty) {
+            let reason = return_reason(ctx);
+            let (tail_tv, pushed) = check_expr(ctx, hir, tail, ctx.return_ty, reason);
+            if !pushed {
+                mark_synth_pending(ctx, hir, tail, tail_tv);
+                finish_tail(ctx, hir, tail, tail_tv);
+            }
+            emit_type_param_value_errors(ctx);
+            return;
+        }
         let tail_tv = gen_expr(ctx, hir, tail);
         if tail_is_exhaustive(hir, tail) {
             let span = expr_span(hir, tail);
@@ -61,18 +74,132 @@ pub fn generate(ctx: &mut InferCtx<'_>, hir: &HirBody, param_types: &[TyVar], re
             ctx.coerce_because(tail_tv, ctx.return_ty, tail, span, reason);
         }
     }
+    emit_type_param_value_errors(ctx);
+}
 
-    // Report type parameters used as standalone values (not consumed by MethodCall/Call)
+/// The return-tail coerce for a tail `check_expr` could not push into.
+fn finish_tail(ctx: &mut InferCtx<'_>, hir: &HirBody, tail: HirExprId, tail_tv: TyVar) {
+    let span = expr_span(hir, tail);
+    // Return-tail is a value position: a ref-returning call decays to the
+    // pointee when the declared return type is non-ref (see the synth path).
+    if !matches!(
+        ctx.slot(ctx.resolve(ctx.return_ty)),
+        TySlot::Resolved(TyKind::Ref { .. })
+    ) {
+        mark_arm_value(ctx, hir, tail);
+    }
+    let reason = return_reason(ctx);
+    ctx.coerce_because(tail_tv, ctx.return_ty, tail, span, reason);
+}
+
+/// Report type parameters used as standalone values (not consumed by
+/// MethodCall/Call).
+fn emit_type_param_value_errors(ctx: &mut InferCtx<'_>) {
     let stale_defs: Vec<Span> = ctx.type_param_defs.drain().map(|(_, s)| s).collect();
     for span in stale_defs {
         ctx.report_error(InferError::TypeParamAsValue { span });
     }
 }
 
+/// `check(e, E@r)` (bidi design §2.1). Introduction forms (`if`/`match`/
+/// block/array/dictionary) push `E` inward and coerce at their leaves; the
+/// result's `.1` is then `true` and the caller must not coerce `e` again.
+/// Otherwise `e` is synthesized (`.1` is `false`) and the caller coerces as
+/// before. `E` is pushed only when its head is already known — an open var
+/// gives the leaves nothing to promote against, and pushing it would only
+/// change which arm fixes the type.
+fn check_expr(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    id: HirExprId,
+    expected: TyVar,
+    reason: Reason,
+) -> (TyVar, bool) {
+    if !expectation_known(ctx, expected) || expected_is_ref(ctx, expected) {
+        return (gen_expr(ctx, hir, id), false);
+    }
+    ctx.expectation = Some((expected, reason));
+    ctx.expectation_pushed = false;
+    let tv = gen_expr(ctx, hir, id);
+    // A form that does not consume the expectation leaves it unread only if
+    // `gen_expr` never ran; it always takes it on entry.
+    ctx.expectation = None;
+    let pushed = std::mem::take(&mut ctx.expectation_pushed);
+    (tv, pushed)
+}
+
+/// Check a leaf against `expected`: push into a nested introduction form,
+/// or synthesize and coerce (the one place `FromValue` promotion may fire).
+fn check_leaf(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, expected: TyVar, reason: Reason) {
+    let (tv, pushed) = check_expr(ctx, hir, id, expected, reason.clone());
+    if !pushed {
+        mark_synth_pending(ctx, hir, id, tv);
+        let span = expr_span(hir, id);
+        ctx.coerce_because(tv, expected, id, span, reason);
+    }
+}
+
+/// Record a leaf whose type its own call/method/operator constraint will
+/// produce (see `InferCtx::synth_pending_exprs`).
+fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: TyVar) {
+    let computed = matches!(
+        hir.exprs[id],
+        HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
+    );
+    if computed && matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None }) {
+        ctx.synth_pending_exprs.insert(id);
+    }
+}
+
+/// `check` for a block: its statements, then its tail as a leaf.
+fn check_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock, expected: TyVar, reason: Reason) {
+    for &stmt_id in &block.stmts {
+        gen_stmt(ctx, hir, stmt_id);
+    }
+    match block.tail_expr {
+        Some(tail) => {
+            check_leaf(ctx, hir, tail, expected, reason);
+            mark_arm_value(ctx, hir, tail);
+        },
+        None => {
+            // No tail: unit, or `!` when the block diverges — both flow
+            // into the expectation like any other value.
+            let tv = if block_diverges(hir, &block.stmts) {
+                ctx.never()
+            } else {
+                ctx.tuple(vec![])
+            };
+            let span = block
+                .stmts
+                .last()
+                .map(|&s| stmt_span(hir, s))
+                .unwrap_or_else(|| Span::synthetic(0));
+            ctx.equal_because(expected, tv, span, reason);
+        },
+    }
+}
+
+/// Is `tv`'s head known at generation time (so check mode has something to
+/// push)?
+fn expectation_known(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    matches!(
+        ctx.slot(ctx.resolve(tv)),
+        TySlot::Resolved(kind) if !matches!(kind, TyKind::Error)
+    )
+}
+
+/// A ref expectation (`-> &T`) keeps the synth path: ref decay and the
+/// return-position borrow rules live in `solve_coerce` / `EqualDecayed`.
+fn expected_is_ref(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(TyKind::Ref { .. }))
+}
+
 // ===== Expression generation =====
 
 /// Generate constraints for an expression, returning its TyVar.
 fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
+    // Only this expression may use a `check_expr` expectation, never a child.
+    let expect = ctx.expectation.take();
     let tv = match &hir.exprs[id] {
         // === Literals ===
         HirExpr::Literal { value, .. } => match value {
@@ -493,6 +620,18 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // when stdlib code uses lang intrinsics directly in conditions.
             let _cond_tv = gen_expr(ctx, hir, *condition);
 
+            // Check mode: every arm is checked against the expectation, so a
+            // bare arm value promotes at its own leaf (D7).
+            if let (Some((expected, reason)), Some(else_block)) = (expect.clone(), else_body)
+                && !is_guard_if(hir, id)
+            {
+                check_block(ctx, hir, then_body, expected, reason.clone());
+                check_block(ctx, hir, else_block, expected, reason);
+                ctx.expectation_pushed = true;
+                ctx.expr_types.insert(id, expected);
+                return expected;
+            }
+
             let then_tv = gen_block(ctx, hir, then_body);
 
             if let Some(else_block) = else_body {
@@ -555,7 +694,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             scrutinee,
             arms,
             source,
-            ..
+            span,
         } => {
             let scrut_tv = gen_expr(ctx, hir, *scrutinee);
             // Stage-1 transparent place: a scrutinee is a VALUE context, so a
@@ -596,6 +735,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 // match keyword. Never-arms don't pin the result (see the
                 // `Never` branch in `unify`); if every arm turns out to be
                 // Never, `default_never_fallback` settles it.
+                if let Some((expected, reason)) = expect.clone() {
+                    check_leaf(ctx, hir, arm.body, expected, reason);
+                    if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
+                        mark_arm_value(ctx, hir, arm.body);
+                    }
+                    continue;
+                }
                 let body_tv = gen_expr(ctx, hir, arm.body);
                 let body_span = expr_span(hir, arm.body);
                 // Arm values decay to the pointee UNLESS the result position
@@ -615,6 +761,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 if matches!(*source, MatchSource::UserMatch | MatchSource::IfLet) {
                     mark_arm_value(ctx, hir, arm.body);
                 }
+            }
+            if let Some((expected, _)) = expect.filter(|_| !arms.is_empty()) {
+                ctx.equal(result_tv, expected, span.clone());
+                ctx.expectation_pushed = true;
             }
             result_tv
         },
@@ -742,7 +892,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // constraints run. This way each element is compared against the
             // target element type, not against whatever literal kind the first
             // element happens to have.
-            let hinted = match ctx.expected_array_elem.take() {
+            let hint = expect
+                .as_ref()
+                .and_then(|(expected, _)| extract_array_elem_hint(ctx, *expected));
+            let hinted = match hint {
                 Some(hint_elem) => {
                     ctx.equal(elem_tv, hint_elem, span.clone());
                     true
@@ -753,6 +906,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             // element type and is the reason for every later mismatch.
             let first_span = elements.first().map(|&e| expr_span(hir, e));
             for (i, &e) in elements.iter().enumerate() {
+                // Check mode: an element is a leaf checked against the
+                // expected element type, so it may promote (D7).
+                if hinted {
+                    check_leaf(ctx, hir, e, elem_tv, Reason::Unspecified);
+                    mark_arm_value(ctx, hir, e);
+                    continue;
+                }
                 let e_tv = gen_expr(ctx, hir, e);
                 let e_span = expr_span(hir, e);
                 let e_tv = peel_ref_tv(ctx, e_tv);
@@ -775,7 +935,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             let val_tv = ctx.fresh();
             ctx.associated(dict_tv, "Key", key_tv, span.clone());
             ctx.associated(dict_tv, "Value", val_tv, span.clone());
-            let expected_entry = ctx.expected_dict_entry.take();
+            let expected_entry = expect
+                .as_ref()
+                .and_then(|(expected, _)| extract_dict_entry_hint(ctx, *expected));
             if let Some((hint_key, hint_val)) = expected_entry {
                 ctx.equal(key_tv, hint_key, span.clone());
                 ctx.equal(val_tv, hint_val, span.clone());
@@ -843,6 +1005,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         // Block expression: execute stmts, result is the tail expr
         HirExpr::Block { body, .. } => {
+            if let (Some((expected, reason)), Some(_)) = (expect.clone(), body.tail_expr) {
+                check_block(ctx, hir, body, expected, reason);
+                ctx.expectation_pushed = true;
+                ctx.expr_types.insert(id, expected);
+                return expected;
+            }
             let tv = gen_block(ctx, hir, body);
             if let Some(tail) = body.tail_expr {
                 propagate_closure_literal(ctx, tail, id);
@@ -985,18 +1153,19 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                 // Bidirectional hint: if the annotation is `Array[E]` and the
                 // RHS is an array literal, feed `E` down so the array's element
                 // TyVar is pinned to the target before element equates run.
-                let prev_hint = ctx.expected_array_elem;
-                if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Array { .. }) {
-                    ctx.expected_array_elem = extract_array_elem_hint(ctx, local_tv);
-                }
-                let prev_dict_hint = ctx.expected_dict_entry;
-                if ty.is_some() && matches!(&hir.exprs[*val], HirExpr::Dict { .. }) {
-                    ctx.expected_dict_entry = extract_dict_entry_hint(ctx, local_tv);
-                }
-                let val_tv = gen_expr(ctx, hir, *val);
-                ctx.expected_array_elem = prev_hint;
-                ctx.expected_dict_entry = prev_dict_hint;
-                if matches!(&hir.exprs[*val], HirExpr::Borrow { .. }) {
+                // An annotated binding is a check: the annotation is pushed
+                // into introduction forms (arms, elements, block tails).
+                let reason = ty
+                    .as_ref()
+                    .map_or(Reason::Unspecified, |t| Reason::Annotation(hir_ty_span(t)));
+                let (val_tv, pushed) = if ty.is_some() {
+                    check_expr(ctx, hir, *val, local_tv, reason.clone())
+                } else {
+                    (gen_expr(ctx, hir, *val), false)
+                };
+                if pushed {
+                    ctx.binding_init_exprs.insert(*val);
+                } else if matches!(&hir.exprs[*val], HirExpr::Borrow { .. }) {
                     // Named ref binding (`let r = &expr;`): the one binding
                     // form that is NOT a value context — no decay-set entry,
                     // no Coerce (the from-ref arm would decay the Ref to its
@@ -1016,9 +1185,6 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // POINTEE directly.
                     ctx.binding_init_exprs.insert(*val);
                     // Value flows to the binding (allows promotion)
-                    let reason = ty
-                        .as_ref()
-                        .map_or(Reason::Unspecified, |t| Reason::Annotation(hir_ty_span(t)));
                     ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
                 }
             }
@@ -2888,5 +3054,13 @@ fn gen_struct_pat(
         if let Some(pat) = field.pattern {
             gen_pat(ctx, hir, pat, field_tv, source);
         }
+    }
+}
+
+fn stmt_span(hir: &HirBody, id: HirStmtId) -> Span {
+    match &hir.stmts[id] {
+        HirStmt::Let { span, .. } | HirStmt::Expr { span, .. } | HirStmt::Deinit { span, .. } => {
+            span.clone()
+        },
     }
 }

@@ -102,6 +102,7 @@ pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // pattern-side source left — let its uses pin it (old behavior)
     // rather than stall to "could not infer type".
     ctx.pattern_binder_gate = false;
+    ctx.synth_gate = false;
 
     // Phase 3: solve again with defaults
     fixpoint(ctx);
@@ -1934,6 +1935,22 @@ fn solve_coerce(
         }
         let fp = *fp;
         return solve_coerce(ctx, fp, to, expr, span);
+    }
+
+    // Check-mode leaf with a pending synthesized type (see
+    // `InferCtx::synth_pending_exprs`): wait for it, so promotion can apply.
+    if ctx.synth_gate
+        && ctx.synth_pending_exprs.contains(&expr)
+        && matches!(ctx.slot(fr), TySlot::Unresolved { literal: None })
+        && matches!(ctx.slot(tr), TySlot::Resolved(_))
+    {
+        return SolveResult::Deferred(Constraint::Coerce {
+            from,
+            to,
+            expr,
+            span,
+            reason: Reason::Unspecified,
+        });
     }
 
     // Stage 2d: a PATTERN BINDER's type comes from its pattern, never its

@@ -158,6 +158,16 @@ pub struct InferCtx<'a> {
     /// pin it (old behavior) rather than deadlock.
     pub(crate) pattern_binder_gate: bool,
 
+    /// Check-mode leaves whose type comes from their OWN pending constraint
+    /// (a call, method call or operator — bidi §2.1 synth). While
+    /// `synth_gate` is up, a Coerce from such a leaf waits for that type
+    /// instead of unifying it with the target first, so `n * 2` in a
+    /// `-> Int64 throws E` tail synthesizes `Int64` and then promotes to
+    /// `.Ok` (the "3-i" bug). The gate drops at the stall-breaker, so a call
+    /// whose type only the target can give (`none()`) still unifies.
+    pub(crate) synth_pending_exprs: HashSet<HirExprId>,
+    pub(crate) synth_gate: bool,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -290,18 +300,16 @@ pub struct InferCtx<'a> {
     /// `default_never_fallback`.
     pub(crate) never_fallback_targets: HashSet<TyVar>,
 
-    /// Bidirectional hint for the *element* type of the next array literal to be
-    /// lowered. Set by `HirStmt::Let` when the annotation is `Array[E]`; read and
-    /// cleared by `HirExpr::Array`. Pre-seeding `elem_tv` with the annotated
-    /// element type stops the first element from dictating `elem_tv`'s literal
-    /// kind and surfacing confusing "expected bool literal got integer literal"
-    /// errors for mixed-type arrays.
-    pub(crate) expected_array_elem: Option<TyVar>,
+    /// The expectation `check_expr` hands to the next `gen_expr` (bidi
+    /// design §2.1, `check(e, E@r)`). `gen_expr` takes it on entry, so it is
+    /// never seen by a child. Introduction forms (`if`/`match`/block/array/
+    /// dictionary) push it inward and coerce at their leaves, which is what
+    /// makes `FromValue` promotion position-independent (D7).
+    pub(crate) expectation: Option<(TyVar, crate::constraint::Reason)>,
 
-    /// Bidirectional hint for the key/value types of the next dictionary
-    /// literal. Set by `HirStmt::Let` when the annotation is `Dictionary[K, V]`
-    /// or the `[K: V]` type operator has already lowered to Dictionary.
-    pub(crate) expected_dict_entry: Option<(TyVar, TyVar)>,
+    /// Set by a form that consumed `expectation` by checking its leaves, so
+    /// `check_expr`'s caller must not coerce the whole expression again.
+    pub(crate) expectation_pushed: bool,
 
     /// Expression ID of the accumulator init call inside a Sugar::StringInterpolation.
     /// Set by `mark_sugar_primary`, consumed by `gen_expr` for Call. Replaces the
@@ -408,6 +416,8 @@ impl<'a> InferCtx<'a> {
             binding_init_exprs: HashSet::default(),
             pattern_binder_tvs: HashSet::default(),
             pattern_binder_gate: true,
+            synth_pending_exprs: HashSet::default(),
+            synth_gate: true,
             poison_protocol_call_recv_on_failure: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
@@ -432,8 +442,8 @@ impl<'a> InferCtx<'a> {
             kind_coercions: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
             never_fallback_targets: HashSet::default(),
-            expected_array_elem: None,
-            expected_dict_entry: None,
+            expectation: None,
+            expectation_pushed: false,
             interpolation_init_expr: None,
             interpolation_acc_tv: None,
             wildcard_tvars: HashSet::default(),
