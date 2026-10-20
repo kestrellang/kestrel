@@ -1,6 +1,6 @@
 # Bidirectional type checking for `kestrel-type-infer` — design
 
-**Status:** design exploration, not implemented. Language rulings D2, D3, D7
+**Status:** being implemented — see *Implementation status*. Language rulings D2, D3, D7
 were made on 2026-10-06; see *Maintainer rulings* below. Prototype hooks exist only on
 the local branch `bidi-design` (never pushed).
 **Base:** `arch/fixes` @ `ae1aeedaa33cd983c4d186c733224b261547fecf`
@@ -55,7 +55,33 @@ they need the operator rule below rather than a known receiver.
 - **N4 is not fixed by the checker**; see the overflow ruling.
 - D3's E106 now also fires for numeric literal receivers (0 sites measured).
 
-## Implementation status (2026-10-07)
+## Implementation status (2026-10-20)
+
+All phases are developed on branch `bidi-p0-clean`. Suites are run with
+`cargo test --release -p kestrel-test-suite` (triage is not installed in the
+cloud containers); baseline = this branch at P0 (`157533d6`):
+**3857 ok / 25 failed**, every failure a pinned "EXPECTED TO FAIL" test.
+
+**P1 — done** (`1fb8442b`, `aeeb2a85`, `7308b287`): new leaf crate
+`kestrel-entail` (three-valued kernel over its own `ETy`, 11 unit tests).
+`conformance::type_satisfies` / `extension_bounds_hold`, the solver's member
+applicability, `via_protocol` check and `solve_conforms` and mono's
+`witness_constraints_hold` all route through it; the three private evaluators
+in `solver.rs` are deleted. An open var is `Unknown` and is kept as an
+`Applicable` / `Conforms` obligation (N1); equality clauses are evaluated (N2)
+and lowered into MIR `WhereConstraint::Equal` from `WhereClausesOf`.
+Suite: N1 + N2 pinned tests fixed, no other verdict changed.
+Deviations: (1) an abstract param with no declared bound is `Unknown`, not
+`Fails`, and the solver settles an abstract-only `Unknown` to the declared
+answer (`conforms_to` already vouched) — the asking site's Γ is not threaded
+yet; (2) mono keeps its MIR pattern matcher and AST-lowered bounds (the
+resolved `WhereClausesOf` drops `not P` bounds) and its own specificity rule;
+(3) analyze's `entailment.rs` is kept as the Γ oracle the kernel's param
+supply consults.
+
+**P2 — Rule L done** (`1fb8442b`): `apply_operator_literal_adoption` in the
+relax loop; the N3 pinned test passes. The `bidi_probe` prototype is deleted
+(D2 ruling: no statement regions).
 
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
@@ -63,8 +89,8 @@ they need the operator rule below rather than a known receiver.
 |---|---|---|
 | P0a | Fx hashing in `kestrel-type-infer`; `report_unresolved_slots` in source order; `Compiler::diagnostics()` sorted; driver tracks printed diagnostics by key | full `.ks` suite = baseline (3856 / 26 known); determinism tests fail before ("run 1 differs from run 0") |
 | P0b | `InferError::code()` — one exhaustive match, E102–E118 (table in `docs/error-codes.md`); E100 only on the never-shown `FromHir` | full suite = baseline |
-| P0c | `?` and the `Error` placeholder print as `_` | pending |
-| P0d | `Reason` on `Equal` / `Coerce` / `EqualDecayed`, carried into `TypeMismatch` by the dispatcher; secondary label "expected because of this annotation / return type / parameter / first branch / first element / target" | pending |
+| P0c | `?` and the `Error` placeholder print as `_` | full suite = baseline (2026-10-20) |
+| P0d | `Reason` on `Equal` / `Coerce` / `EqualDecayed`, carried into `TypeMismatch` by the dispatcher; secondary label "expected because of this annotation / return type / parameter / first branch / first element / target" | full suite = baseline (2026-10-20) |
 
 **Deviation in P0c.** §10's "a type containing `Error` suppresses the
 diagnostic" is **not** implemented: `InferCtx::poison` creates `Error`
