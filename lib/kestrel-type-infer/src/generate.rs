@@ -3341,22 +3341,23 @@ fn gen_implicit_variant_pat(
     span: &Span,
     source: MatchSource,
 ) {
-    let arg_tys: Vec<TyVar> = args
-        .iter()
-        .map(|arg| {
-            let tv = ctx.fresh();
-            gen_pat(ctx, hir, arg.pattern, tv, source);
-            tv
-        })
-        .collect();
-
-    ctx.constraints
-        .push(crate::constraint::Constraint::ImplicitPat {
-            scrutinee: scrutinee_tv,
-            name: name.to_string(),
-            arg_tys,
-            span: span.clone(),
-        });
+    let arg_tys: Vec<TyVar> = args.iter().map(|_| ctx.fresh()).collect();
+    // Resolve the case against the (settled) scrutinee first, so each
+    // sub-pattern is generated against its known payload type (bidi P3f).
+    let pat = crate::constraint::Constraint::ImplicitPat {
+        scrutinee: scrutinee_tv,
+        name: name.to_string(),
+        arg_tys: arg_tys.clone(),
+        span: span.clone(),
+    };
+    if receiver_open(ctx, scrutinee_tv) {
+        ctx.constraints.push(pat);
+    } else {
+        crate::solver::solve_now(ctx, pat);
+    }
+    for (arg, &tv) in args.iter().zip(&arg_tys) {
+        gen_pat(ctx, hir, arg.pattern, tv, source);
+    }
 }
 
 /// Generate constraints for a struct pattern.
