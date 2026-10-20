@@ -83,6 +83,19 @@ supply consults.
 relax loop; the N3 pinned test passes. The `bidi_probe` prototype is deleted
 (D2 ruling: no statement regions).
 
+**P3 (d) — check mode, done** (`eea11f42`, `20d2dc98`): `check_expr` /
+`check_leaf` / `check_block` in `generate.rs`. An annotated `let`, a function
+tail and nested `if`/`match`/block/array/dict forms push a known expectation
+inward and coerce at each leaf, so `FromValue` promotion no longer depends on
+position (D7(i)): the `if`-arm, array-element and computed-tail shapes of §1
+now compile (`inference/promotion/*`, `types/optional/value_promotion_computed_expr.ks`,
+formerly the "3-i" known bug). Replaces the `expected_array_elem` /
+`expected_dict_entry` hints. Deviation: expectations are pushed only where a
+leaf can promote (the target conforms to `FromValue`); elsewhere the synth
+path is kept so the pinned diagnostic wordings (§14 risk 7) do not move
+without a maintainer-approved annotation rewrite. Suite: 3859 ok / 22 failed,
+no verdict changed except the targeted ones.
+
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
 | Part | What | Verified |
