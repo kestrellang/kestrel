@@ -630,8 +630,22 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 ctx.poison(result_tv);
                 return result_tv;
             };
+            // Check mode (bidi §2.1): look `.Case` up on the expected type,
+            // or on its promotion target (`.Red` against `Color?` is a
+            // `Color`, then promoted by the caller's coercion).
+            let home = expect
+                .as_ref()
+                .and_then(|(e, _)| implicit_case_home(ctx, *e, name_str));
+            if let Some(home) = home {
+                ctx.equal(result_tv, home, span.clone());
+            }
             // Implicit constraint: resolved against expected type
             ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
+            if home.is_some() {
+                let implicit = ctx.constraints.pop().expect("just pushed");
+                crate::solver::fixpoint(ctx);
+                crate::solver::solve_now(ctx, implicit);
+            }
             result_tv
         },
 
@@ -2017,6 +2031,30 @@ fn unify_literal_operands(ctx: &mut InferCtx<'_>, protocol: Entity, recv: TyVar,
     {
         let _ = unify::unify(ctx, recv, arg.ty);
     }
+}
+
+/// The type `.name` resolves on when checked against `expected`: `expected`
+/// itself when its nominal declares a member `name`, else the first type
+/// argument that does (the `FromValue` promotion target of `Optional[T]` /
+/// `Result[T, E]`). `None` leaves the lookup to the solver.
+fn implicit_case_home(ctx: &InferCtx<'_>, expected: TyVar, name: &str) -> Option<TyVar> {
+    let declares = |tv: TyVar| match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Resolved(TyKind::Struct { entity, .. } | TyKind::Enum { entity, .. }) => ctx
+            .query_ctx
+            .children_of(*entity)
+            .iter()
+            .any(|&c| ctx.query_ctx.get::<Name>(c).is_some_and(|n| n.0 == name)),
+        _ => false,
+    };
+    if declares(expected) {
+        return Some(expected);
+    }
+    let TySlot::Resolved(TyKind::Struct { args, .. } | TyKind::Enum { args, .. }) =
+        ctx.slot(ctx.resolve(expected))
+    else {
+        return None;
+    };
+    args.iter().copied().find(|&a| declares(a))
 }
 
 /// Run the solver over everything generated so far, Rule L included.
