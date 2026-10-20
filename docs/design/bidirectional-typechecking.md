@@ -116,6 +116,22 @@ re-queueing it. Suite: 3859 ok / 24 failed; the 2 new failures are
 `(6).multiplyChecked(7)` — rejected by D3 by design; awaiting a maintainer
 decision on updating them.
 
+**P3 (e)/(f) and Rule C — done** (`1b031345`, `3514df98`): a `match`
+scrutinee is settled before its patterns; Rule C (§4) replaces the
+`Output = Self` context-literal pass (candidates from the expected result
+plus the default; qualified `type P.Output` aliases are matched to their
+protocol). Suite: 3860 ok / 24 failed, no verdict changed.
+
+**P4 — in progress.** Deleted after `p4` never-fires probes over the full
+suite + stdlib: `break_stalled_assign_targets` (0), the closure-literal
+convention upgrade (0), literal-default relax level 2 (0), the
+pattern-binder gate (2, from ~135k before P3f). Still firing on
+`3514df98` (per suite run): synth-gate deferrals 193k (by design),
+level-0 literal defaults 49.7k, Rule C/context 5.3k, level-1 defaults
+1.7k, Rule L at body end 575, closure-kind retrofit 73, operator shape
+projection 47 (from 240; generic-bound results Rule C cannot see),
+kind-flex adoption 23, ref-decay defaults 16, closure-flex arity 2.
+
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
 | Part | What | Verified |
