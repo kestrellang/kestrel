@@ -168,6 +168,10 @@ pub struct InferCtx<'a> {
     pub(crate) synth_pending_exprs: HashSet<HirExprId>,
     pub(crate) synth_gate: bool,
 
+    /// Nesting depth of string-interpolation desugarings being generated;
+    /// their accumulator calls are exempt from the known-receiver rule.
+    pub(crate) interpolation_depth: u32,
+
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
     /// `ProtocolCall` arm of `gen_expr` sees its own `id` in this set, it
@@ -418,6 +422,7 @@ impl<'a> InferCtx<'a> {
             pattern_binder_gate: true,
             synth_pending_exprs: HashSet::default(),
             synth_gate: true,
+            interpolation_depth: 0,
             poison_protocol_call_recv_on_failure: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),

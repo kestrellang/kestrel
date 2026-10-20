@@ -1051,7 +1051,12 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
         // Type-of(Sugar) == type-of(inner) (structurally transparent).
         HirExpr::Sugar { kind, inner, span } => {
             mark_sugar_primary(ctx, hir, *kind, *inner);
+            // An interpolation is one literal checked in place (bidi §6.1):
+            // its desugared accumulator calls are not user receivers.
+            let interp = matches!(kind, kestrel_hir::body::SugarKind::StringInterpolation);
+            ctx.interpolation_depth += interp as u32;
             let result_tv = gen_expr(ctx, hir, *inner);
+            ctx.interpolation_depth -= interp as u32;
 
             // Link the interpolation's result type to its accumulator so that
             // an expected type (from a let annotation or function parameter)
@@ -1886,10 +1891,25 @@ fn is_type_level(ctx: &InferCtx<'_>, hir: &HirBody, base: HirExprId) -> bool {
 /// never defaulted on the spot. Other open literals (`[]`, `""`) wait for
 /// their default (D2′).
 fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, span: &Span) {
-    if !receiver_open(ctx, recv) {
+    if ctx.interpolation_depth > 0 || !receiver_open(ctx, recv) {
         return;
     }
-    crate::solver::fixpoint(ctx);
+    // Solve what is to the left — Rule L included, so `0..<n` types its
+    // literal from `n` the way the end-of-body relax loop would.
+    settle_left(ctx);
+    // D2′: an open string / array / dictionary / char / bool literal used as
+    // a receiver takes its default head now (its element stays open).
+    if let Some(lit) = open_literal(ctx, recv)
+        && !matches!(lit, LiteralKind::Integer | LiteralKind::Float)
+        && crate::solver::default_literal_var(ctx, ctx.resolve(recv), lit)
+    {
+        settle_left(ctx);
+    }
+    // A call producing the receiver that waits only on a literal argument
+    // decides by the literal's default (bidi §5.2 step 4, §6.1).
+    if receiver_open(ctx, recv) && default_pending_call_literals(ctx, recv) {
+        settle_left(ctx);
+    }
     if !receiver_open(ctx, recv) {
         return;
     }
@@ -1903,11 +1923,65 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if !(numeric || open_var) {
         return;
     }
+    let target = ctx.resolve(recv);
+    for c in &ctx.constraints {
+        kestrel_debug::ktrace!("e106", "pending for '{member}' (recv {target:?}): {c:?}");
+    }
     ctx.report_error(InferError::TypeMustBeKnown {
         member: member.to_string(),
         span: span.clone(),
     });
     ctx.poison(recv);
+}
+
+/// Run the solver over everything generated so far, Rule L included.
+fn settle_left(ctx: &mut InferCtx<'_>) {
+    crate::solver::fixpoint(ctx);
+    while crate::solver::apply_operator_literal_adoption(ctx) {
+        crate::solver::fixpoint(ctx);
+    }
+}
+
+fn open_literal(ctx: &InferCtx<'_>, tv: TyVar) -> Option<LiteralKind> {
+    match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Unresolved { literal } => *literal,
+        _ => None,
+    }
+}
+
+/// Default the open literal arguments of the pending call/member whose
+/// result is `recv`. Returns true if any defaulted.
+fn default_pending_call_literals(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
+    let target = ctx.resolve(recv);
+    let mut literals: Vec<(TyVar, LiteralKind)> = Vec::new();
+    for c in &ctx.constraints {
+        // The literal inputs of the constraint producing `recv`: a call's
+        // arguments, or the protocol argument an associated-type projection
+        // waits on (`xs(unchecked: 0)` resolves through `α.Output`).
+        let inputs: Vec<TyVar> = match c {
+            Constraint::Call { result, args, .. } | Constraint::Member { result, args, .. }
+                if ctx.resolve(*result) == target =>
+            {
+                args.iter().map(|a| a.ty).collect()
+            },
+            Constraint::Associated {
+                container, result, ..
+            } if ctx.resolve(*result) == target => vec![*container],
+            _ => continue,
+        };
+        for tv in inputs {
+            if let Some(lit) = open_literal(ctx, tv) {
+                literals.push((ctx.resolve(tv), lit));
+            }
+        }
+    }
+    let mut progress = false;
+    for (tv, lit) in literals {
+        if open_literal(ctx, tv).is_some() {
+            progress |= crate::solver::default_literal_var(ctx, tv, lit);
+        }
+    }
+    progress
 }
 
 /// Unresolved (a ref's pointee counts: dispatch peels refs).

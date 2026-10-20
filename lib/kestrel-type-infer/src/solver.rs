@@ -5237,7 +5237,7 @@ fn solve_tuple_rest_pat(
 /// that literal, and `B` conforms to the operator's protocol. The mirror,
 /// `x op lit`, already works through argument coercion. Returns true on
 /// progress.
-fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
+pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
     let mut pairs: Vec<(TyVar, TyVar)> = Vec::new();
     for c in &ctx.constraints {
         let Constraint::Member {
@@ -5610,6 +5610,38 @@ pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u
 }
 
 /// Literal defaulting restricted to TyVars allocated at or after `start`.
+/// Give the open literal var `resolved` its `Default<Kind>LiteralType`.
+/// The single place a literal takes its default. Returns false when the
+/// builtin is absent (`// stdlib: false`), leaving the literal open.
+pub(crate) fn default_literal_var(ctx: &mut InferCtx<'_>, resolved: TyVar, literal: LiteralKind) -> bool {
+    let feature = match literal {
+        LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
+        LiteralKind::Float => Builtin::DefaultFloatLiteralType,
+        LiteralKind::String => Builtin::DefaultStringLiteralType,
+        LiteralKind::Bool => Builtin::DefaultBooleanLiteralType,
+        LiteralKind::Char => Builtin::DefaultCharLiteralType,
+        LiteralKind::Null => Builtin::DefaultNullLiteralType,
+        LiteralKind::Array => Builtin::DefaultArrayLiteralType,
+        LiteralKind::Dictionary => Builtin::DefaultDictionaryLiteralType,
+        LiteralKind::StringInterpolation => Builtin::DefaultStringInterpolation,
+    };
+    let Some(entity) = ctx.resolver.builtin(feature) else {
+        return false;
+    };
+    // Fresh TyVars for the default's type params, so `DefaultArrayLiteralType[T]`
+    // becomes `Array[?]` with a real inference slot that later Associated /
+    // Coerce constraints flow element types into.
+    let type_param_count = ctx
+        .query_ctx
+        .get::<TypeParams>(entity)
+        .map(|tp| tp.0.len())
+        .unwrap_or(0);
+    let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
+    let default_tv = ctx.named(entity, args);
+    ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
+    true
+}
+
 pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u8, start: usize) -> bool {
     let mut progress = false;
 
@@ -5688,32 +5720,7 @@ pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u
             _ => continue,
         };
 
-        let feature = match literal {
-            LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
-            LiteralKind::Float => Builtin::DefaultFloatLiteralType,
-            LiteralKind::String => Builtin::DefaultStringLiteralType,
-            LiteralKind::Bool => Builtin::DefaultBooleanLiteralType,
-            LiteralKind::Char => Builtin::DefaultCharLiteralType,
-            LiteralKind::Null => Builtin::DefaultNullLiteralType,
-            LiteralKind::Array => Builtin::DefaultArrayLiteralType,
-            LiteralKind::Dictionary => Builtin::DefaultDictionaryLiteralType,
-            LiteralKind::StringInterpolation => Builtin::DefaultStringInterpolation,
-        };
-
-        if let Some(entity) = ctx.resolver.builtin(feature) {
-            // Create fresh TyVars for each of the default entity's type parameters
-            // so e.g. `DefaultArrayLiteralType[T]` becomes `Array[?]` with a real
-            // inference slot — letting later Associated/Coerce constraints flow
-            // element types into T. `ctx.named(entity, vec![])` would leave args
-            // empty, breaking substitution in solve_associated.
-            let type_param_count = ctx
-                .query_ctx
-                .get::<TypeParams>(entity)
-                .map(|tp| tp.0.len())
-                .unwrap_or(0);
-            let args: Vec<TyVar> = (0..type_param_count).map(|_| ctx.fresh()).collect();
-            let default_tv = ctx.named(entity, args);
-            ctx.types[resolved.0 as usize] = TySlot::Redirect(default_tv);
+        if default_literal_var(ctx, resolved, literal) {
             progress = true;
         }
         // Without the `Default<Kind>LiteralType` builtin (e.g. `// stdlib: false`
