@@ -79,9 +79,14 @@ resolved `WhereClausesOf` drops `not P` bounds) and its own specificity rule;
 (3) analyze's `entailment.rs` is kept as the Γ oracle the kernel's param
 supply consults.
 
-**P2 — Rule L done** (`1fb8442b`): `apply_operator_literal_adoption` in the
-relax loop; the N3 pinned test passes. The `bidi_probe` prototype is deleted
-(D2 ruling: no statement regions).
+**P2 — done.** Rule L (`1fb8442b`): `apply_operator_literal_adoption` in the
+relax loop (and in the eager settle); the N3 pinned test passes. D2′
+(`329ab4fe`): a `[]`/`""`/`[:]` receiver takes its default head at its use.
+Operator rule (`22a6be11`): open numeric-literal operands of a homogeneous
+arithmetic/comparison/bitwise operator unify at generation (`1 + 2.5` is one
+Float64; shifts and ranges excluded) — `inference/literal_operands_unify_before_defaulting.ks`.
+Suite 3861 ok / 24 failed. The `bidi_probe` prototype is deleted (D2 ruling:
+no statement regions).
 
 **P3 (d) — check mode, done** (`eea11f42`, `20d2dc98`): `check_expr` /
 `check_leaf` / `check_block` in `generate.rs`. An annotated `let`, a function
