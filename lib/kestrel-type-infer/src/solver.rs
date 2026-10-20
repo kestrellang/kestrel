@@ -4328,6 +4328,29 @@ fn solve_member(
                 .map(|(c, e, _)| (c, e))
                 .collect();
 
+            // A pick that rests on an Unknown applicability (an open var in
+            // the receiver) waits: once the var resolves, a more specific
+            // candidate may turn out not to apply (bidi §5.1 step 6).
+            let winner_unknown = top.iter().any(|(_, ext)| {
+                ext.is_some_and(|e| {
+                    applicability(ctx, crate::constraint::ApplicableSource::Extension(e), &recv_kind)
+                        == kestrel_entail::Tri::Unknown
+                })
+            });
+            if winner_unknown && crate::solver_entail::has_open_var(ctx, receiver) {
+                return SolveResult::Deferred(Constraint::Member {
+                    receiver,
+                    name: name.to_string(),
+                    args,
+                    result,
+                    expr,
+                    is_call,
+                    is_static_context,
+                    explicit_type_args: explicit_type_args.to_vec(),
+                    span,
+                });
+            }
+
             if let [(winner, ext)] = top.as_slice() {
                 match ctx.resolver.resolve_single_member(&recv_kind, *winner) {
                     Ok(mut res) => {
