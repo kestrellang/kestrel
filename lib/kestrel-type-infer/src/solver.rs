@@ -4198,18 +4198,21 @@ fn solve_member(
     // compound-assign/interpolation funnel through solve_member. The
     // receiver EXPRESSION's var is never rebound, so its recorded type
     // stays `&T`; mutability is policed in analyze (E207), like E203-E206.
+    // Solved on the pointee right away: a re-queue is not fixpoint progress,
+    // so it would wait for some unrelated constraint to move first.
     if let TyKind::Ref { pointee, .. } = &recv_kind {
-        return SolveResult::Deferred(Constraint::Member {
-            receiver: *pointee,
-            name: name.to_string(),
+        return solve_member(
+            ctx,
+            *pointee,
+            name,
             args,
             result,
             expr,
             is_call,
             is_static_context,
-            explicit_type_args: explicit_type_args.to_vec(),
+            explicit_type_args,
             span,
-        });
+        );
     }
 
     // If the receiver is an AssocProjection or a TypeAlias whose entity is
@@ -5294,6 +5297,14 @@ pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
 /// lives in `solve_coerce` arm 2: an annotation pinning the target to the
 /// ref TYPE (`let o: Optional[&Int64] = .Some(r)`) must win the race.
 pub(crate) fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
+    apply_ref_decay_defaults_into(ctx, None)
+}
+
+/// [`apply_ref_decay_defaults`], restricted to coercions whose target is
+/// `only` when given: the checker needs one binding's type NOW (its use as
+/// a receiver, bidi D3), and the copy-out decay is that binding's default.
+pub(crate) fn apply_ref_decay_defaults_into(ctx: &mut InferCtx<'_>, only: Option<TyVar>) -> bool {
+    let only = only.map(|t| ctx.resolve(t));
     let mut decays: Vec<(TyVar, TyVar)> = Vec::new();
     for c in &ctx.constraints {
         let (from, to) = match c {
@@ -5306,6 +5317,9 @@ pub(crate) fn apply_ref_decay_defaults(ctx: &mut InferCtx<'_>) -> bool {
         let TySlot::Resolved(TyKind::Ref { pointee, .. }) = ctx.slot(fr) else {
             continue;
         };
+        if only.is_some_and(|o| ctx.resolve(*to) != o) {
+            continue;
+        }
         if matches!(
             ctx.slot(ctx.resolve(*to)),
             TySlot::Unresolved { literal: None }

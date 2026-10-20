@@ -121,7 +121,11 @@ fn check_expr(
     // got String" at the arm/element, bidi §14 risk 7) stay as they are.
     // Array/dictionary literals always take it: they use the expected
     // element type as a hint and apply this same gate per element.
-    let aggregate = matches!(hir.exprs[id], HirExpr::Array { .. } | HirExpr::Dict { .. });
+    // Closures too: they take params, conventions and kind from it (§8).
+    let aggregate = matches!(
+        hir.exprs[id],
+        HirExpr::Array { .. } | HirExpr::Dict { .. } | HirExpr::Closure { .. }
+    );
     if !expectation_known(ctx, expected)
         || expected_is_ref(ctx, expected)
         || !(aggregate || crate::solver::target_accepts_promotion(ctx, expected))
@@ -1897,41 +1901,36 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     // Solve what is to the left — Rule L included, so `0..<n` types its
     // literal from `n` the way the end-of-body relax loop would.
     settle_left(ctx);
-    // D2′: an open string / array / dictionary / char / bool literal used as
-    // a receiver takes its default head now (its element stays open).
-    if let Some(lit) = open_literal(ctx, recv)
-        && !matches!(lit, LiteralKind::Integer | LiteralKind::Float)
-        && crate::solver::default_literal_var(ctx, ctx.resolve(recv), lit)
-    {
+    // An open numeric literal that IS the receiver is E106 (D3, Rust
+    // E0689), never defaulted on the spot. Any other open literal the
+    // receiver is built from takes its default now: a `[]`/`""` receiver
+    // (D2′), a call waiting on a literal argument (§5.2 step 4), an operator
+    // over a literal (`5...`, `-5`), an interpolation's accumulator.
+    if !is_numeric_literal(ctx, recv) && default_literal_roots(ctx, recv) {
         settle_left(ctx);
     }
-    // A call producing the receiver that waits only on a literal argument
-    // decides by the literal's default (bidi §5.2 step 4, §6.1).
-    if receiver_open(ctx, recv) && default_pending_call_literals(ctx, recv) {
+    // A binding initialized from a ref (`let s = r`) takes its copy-out
+    // decay — the default the relax loop would give it at body end.
+    if receiver_open(ctx, recv) && crate::solver::apply_ref_decay_defaults_into(ctx, Some(recv)) {
         settle_left(ctx);
     }
     if !receiver_open(ctx, recv) {
         return;
     }
-    let numeric = matches!(
-        ctx.slot(ctx.resolve(recv)),
-        TySlot::Unresolved {
-            literal: Some(LiteralKind::Integer | LiteralKind::Float)
-        }
-    );
-    let open_var = matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: None });
-    if !(numeric || open_var) {
+    // Still open: only an unresolved var or a numeric literal is an error;
+    // other open literals have no default here (`// stdlib: false`).
+    let open = peel_ref_var(ctx, recv);
+    if !(is_numeric_literal(ctx, recv)
+        || matches!(ctx.slot(open), TySlot::Unresolved { literal: None }))
+    {
         return;
     }
-    let target = ctx.resolve(recv);
-    for c in &ctx.constraints {
-        kestrel_debug::ktrace!("e106", "pending for '{member}' (recv {target:?}): {c:?}");
-    }
+    kestrel_debug::ktrace!("e106", "receiver of '{member}' unknown at its use: {open:?}");
     ctx.report_error(InferError::TypeMustBeKnown {
         member: member.to_string(),
         span: span.clone(),
     });
-    ctx.poison(recv);
+    ctx.poison(open);
 }
 
 /// Run the solver over everything generated so far, Rule L included.
@@ -1949,39 +1948,96 @@ fn open_literal(ctx: &InferCtx<'_>, tv: TyVar) -> Option<LiteralKind> {
     }
 }
 
-/// Default the open literal arguments of the pending call/member whose
-/// result is `recv`. Returns true if any defaulted.
-fn default_pending_call_literals(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
-    let target = ctx.resolve(recv);
-    let mut literals: Vec<(TyVar, LiteralKind)> = Vec::new();
-    for c in &ctx.constraints {
-        // The literal inputs of the constraint producing `recv`: a call's
-        // arguments, or the protocol argument an associated-type projection
-        // waits on (`xs(unchecked: 0)` resolves through `α.Output`).
-        let inputs: Vec<TyVar> = match c {
-            Constraint::Call { result, args, .. } | Constraint::Member { result, args, .. }
-                if ctx.resolve(*result) == target =>
-            {
-                args.iter().map(|a| a.ty).collect()
-            },
-            Constraint::Associated {
-                container, result, ..
-            } if ctx.resolve(*result) == target => vec![*container],
-            _ => continue,
-        };
-        for tv in inputs {
-            if let Some(lit) = open_literal(ctx, tv) {
-                literals.push((ctx.resolve(tv), lit));
-            }
-        }
+/// `tv` with one ref layer peeled (dispatch reads through refs).
+fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
+    match ctx.slot(ctx.resolve(tv)) {
+        TySlot::Resolved(TyKind::Ref { pointee, .. }) => ctx.resolve(*pointee),
+        _ => ctx.resolve(tv),
     }
+}
+
+fn is_numeric_literal(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
+    matches!(
+        open_literal(ctx, peel_ref_var(ctx, tv)),
+        Some(LiteralKind::Integer | LiteralKind::Float)
+    )
+}
+
+/// Default every open literal `recv` is built from, walking back through
+/// the pending constraints that produce it. Returns true on progress.
+fn default_literal_roots(ctx: &mut InferCtx<'_>, recv: TyVar) -> bool {
+    let mut roots = Vec::new();
+    collect_literal_roots(ctx, recv, 4, &mut roots);
     let mut progress = false;
-    for (tv, lit) in literals {
-        if open_literal(ctx, tv).is_some() {
-            progress |= crate::solver::default_literal_var(ctx, tv, lit);
+    for tv in roots {
+        if let Some(lit) = open_literal(ctx, tv) {
+            progress |= crate::solver::default_literal_var(ctx, ctx.resolve(tv), lit);
         }
     }
     progress
+}
+
+/// The open literal vars `tv` is produced from: itself, or the inputs of
+/// the pending constraint whose result it is (a call's or member's receiver
+/// and arguments, an associated type's container, an interpolation's
+/// accumulator), up to `depth` steps back.
+fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Vec<TyVar>) {
+    let target = peel_ref_var(ctx, tv);
+    if open_literal(ctx, target).is_some() {
+        if !out.contains(&target) {
+            out.push(target);
+        }
+        return;
+    }
+    if depth == 0 || !matches!(ctx.slot(target), TySlot::Unresolved { .. }) {
+        return;
+    }
+    let produced_by = |r: &TyVar| peel_ref_var(ctx, *r) == target;
+    let mut inputs: Vec<TyVar> = Vec::new();
+    for c in &ctx.constraints {
+        match c {
+            Constraint::Call {
+                callee,
+                result,
+                args,
+                ..
+            } if produced_by(result) => {
+                inputs.push(*callee);
+                inputs.extend(args.iter().map(|a| a.ty));
+            },
+            Constraint::Member {
+                result,
+                receiver,
+                args,
+                ..
+            } if produced_by(result) => {
+                inputs.push(*receiver);
+                inputs.extend(args.iter().map(|a| a.ty));
+            },
+            Constraint::Associated {
+                container, result, ..
+            } if produced_by(result) => inputs.push(*container),
+            Constraint::InterpolationLink {
+                result_tv, acc_tv, ..
+            } if produced_by(result_tv) => inputs.push(*acc_tv),
+            Constraint::TupleIndex { tuple, result, .. } if produced_by(result) => {
+                inputs.push(*tuple)
+            },
+            // A pattern binder comes from its scrutinee.
+            Constraint::ImplicitPat {
+                scrutinee, arg_tys, ..
+            } if arg_tys.iter().any(produced_by) => inputs.push(*scrutinee),
+            // A deferred value flow into it (an argument into a protocol
+            // argument, a binding's initializer).
+            Constraint::Coerce { from, to, .. } if produced_by(to) => inputs.push(*from),
+            Constraint::Equal { a, b, .. } if produced_by(a) => inputs.push(*b),
+            Constraint::Equal { a, b, .. } if produced_by(b) => inputs.push(*a),
+            _ => {},
+        }
+    }
+    for input in inputs {
+        collect_literal_roots(ctx, input, depth - 1, out);
+    }
 }
 
 /// Unresolved (a ref's pointee counts: dispatch peels refs).
