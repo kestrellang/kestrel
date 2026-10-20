@@ -1604,7 +1604,7 @@ fn report_and_poison(ctx: &mut InferCtx<'_>, err: InferError, a: TyVar, b: TyVar
 /// LiteralGuard failure in `solve_coerce` is definitely unsalvageable (and
 /// can surface `DoesNotConform` now) or might still succeed after literal
 /// defaulting.
-fn target_accepts_promotion(ctx: &InferCtx<'_>, to: TyVar) -> bool {
+pub(crate) fn target_accepts_promotion(ctx: &InferCtx<'_>, to: TyVar) -> bool {
     let resolved = ctx.resolve(to);
     let to_kind = match ctx.slot(resolved) {
         TySlot::Resolved(k) => k,

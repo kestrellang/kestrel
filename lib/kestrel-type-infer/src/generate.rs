@@ -115,7 +115,17 @@ fn check_expr(
     expected: TyVar,
     reason: Reason,
 ) -> (TyVar, bool) {
-    if !expectation_known(ctx, expected) || expected_is_ref(ctx, expected) {
+    // Pushing only changes meaning where a leaf may PROMOTE (the expected
+    // type conforms to `FromValue`: Optional, Result). Elsewhere the synth
+    // path is kept, so the ~850 pinned diagnostic wordings ("expected i64
+    // got String" at the arm/element, bidi §14 risk 7) stay as they are.
+    // Array/dictionary literals always take it: they use the expected
+    // element type as a hint and apply this same gate per element.
+    let aggregate = matches!(hir.exprs[id], HirExpr::Array { .. } | HirExpr::Dict { .. });
+    if !expectation_known(ctx, expected)
+        || expected_is_ref(ctx, expected)
+        || !(aggregate || crate::solver::target_accepts_promotion(ctx, expected))
+    {
         return (gen_expr(ctx, hir, id), false);
     }
     ctx.expectation = Some((expected, reason));
@@ -908,7 +918,10 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             for (i, &e) in elements.iter().enumerate() {
                 // Check mode: an element is a leaf checked against the
                 // expected element type, so it may promote (D7).
-                if hinted {
+                if let Some(h) = hint
+                    && expectation_known(ctx, h)
+                    && crate::solver::target_accepts_promotion(ctx, h)
+                {
                     check_leaf(ctx, hir, e, elem_tv, Reason::Unspecified);
                     mark_arm_value(ctx, hir, e);
                     continue;
