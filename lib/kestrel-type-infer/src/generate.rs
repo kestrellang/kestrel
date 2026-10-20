@@ -409,6 +409,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             };
 
             ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
+            resolve_call_now(ctx, callee_tv);
             finish_postponed(ctx, hir, postponed);
             result_tv
         },
@@ -549,6 +550,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 true,
                 span.clone(),
             );
+            resolve_member_now(ctx, recv_tv);
             result_tv
         },
 
@@ -1957,6 +1959,19 @@ fn resolve_member_now(ctx: &mut InferCtx<'_>, recv: TyVar) {
     }
     let member = ctx.constraints.pop().expect("checked above");
     crate::solver::solve_now(ctx, member);
+}
+
+/// [`resolve_member_now`] for the `Call` constraint just emitted, when the
+/// callee's head is known.
+fn resolve_call_now(ctx: &mut InferCtx<'_>, callee: TyVar) {
+    if receiver_open(ctx, callee) {
+        return;
+    }
+    if !matches!(ctx.constraints.last(), Some(Constraint::Call { .. })) {
+        return;
+    }
+    let call = ctx.constraints.pop().expect("checked above");
+    crate::solver::solve_now(ctx, call);
 }
 
 /// Run the solver over everything generated so far, Rule L included.
