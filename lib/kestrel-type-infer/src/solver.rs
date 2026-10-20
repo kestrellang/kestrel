@@ -34,21 +34,6 @@ use kestrel_span::Span;
 /// Run the full solver: fixpoint loop, literal defaults, final fixpoint,
 /// then report any remaining unsolved constraints as errors.
 pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
-    for c in &ctx.constraints {
-        let kind = match c {
-            Constraint::Member { .. } => "Member",
-            Constraint::Call { .. } => "Call",
-            Constraint::OverloadedCall { .. } => "OverloadedCall",
-            Constraint::Implicit { .. } => "Implicit",
-            Constraint::ImplicitPat { .. } => "ImplicitPat",
-            Constraint::Coerce { .. } => "Coerce",
-            Constraint::Equal { .. } => "Equal",
-            Constraint::Conforms { .. } => "Conforms",
-            Constraint::Associated { .. } => "Associated",
-            _ => "other",
-        };
-        kestrel_debug::ktrace!("p5", "P5LEFT {kind}");
-    }
     // Phase 1: main solving
     fixpoint(ctx);
 

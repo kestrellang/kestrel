@@ -132,6 +132,23 @@ level-0 literal defaults 49.7k, Rule C/context 5.3k, level-1 defaults
 projection 47 (from 240; generic-bound results Rule C cannot see),
 kind-flex adoption 23, ref-decay defaults 16, closure-flex arity 2.
 
+**P3 (a) — eager resolution, done** (`47b43082`, `7b52caa2`, `47cc7c75`,
+`2e5cc065`): every decay registration (arm values, binding inits,
+scrutinees, returned values, closure tails) now happens *before* its
+expression is generated, so a constraint solved during generation sees it.
+Method/field members, operators and plain calls whose receiver/callee is
+known are solved where the walker meets them (`solver::solve_now`); an enum
+pattern resolves its case against the settled scrutinee before its
+sub-patterns are generated. An overload pick resting on an `Unknown`
+applicability waits (§5.1 step 6). Suite: 3860 ok / 24 failed, unchanged.
+
+What still reaches `solve()` (stdlib, one check, `47cc7c75`): Coerce 8941,
+Equal 7376, Conforms 4527, Member 1225 (operators on still-open literals —
+body-scoped per D2), Implicit 710 (`.Case`, resolved through the coercion's
+promotion target), ImplicitPat 315, Associated 290, OverloadedCall 20,
+Call 1. P5 (the solver as an obligation queue) needs the Member-on-literal
+and `.Case` shapes turned into obligations first.
+
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
 | Part | What | Verified |
