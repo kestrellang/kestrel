@@ -9,6 +9,7 @@
 //! HIR Lowering (HirBody) → Type Inference (this crate) → TypedBody
 //! ```
 
+mod bidi_probe;
 pub mod captures;
 mod collections;
 pub mod compare;
