@@ -154,6 +154,25 @@ promotion target), ImplicitPat 315, Associated 290, OverloadedCall 20,
 Call 1. P5 (the solver as an obligation queue) needs the Member-on-literal
 and `.Case` shapes turned into obligations first.
 
+**`.Case` in check mode — done** (`430b0942`): an implicit member checked
+against a pushed expectation is looked up on it, or on its promotion target
+(`.Red` against `Color?` is a `Color`, then promoted), and resolved at once.
+Suite 3863 ok / 24 failed, unchanged.
+
+**P5 — not started; what it needs.** After P3/P4 the end of a body still
+runs `solve()`: the fixpoint over what is left, literal defaulting (levels
+0–1), type-parameter defaults, never-fallback, and the reports. In the
+design that end-of-body step remains (D2 keeps numeric literals
+body-scoped, so they default there); P5 is about what it still *solves*.
+Before the solver can shrink to the obligation queue (`Conforms`/`ProjEq`/
+`Equal`), these must stop reaching it as solver-driven constraints:
+operator `Member`s on still-open literals (become an `OpLit` obligation
+settled at defaulting), `.Case` without a pushed expectation (needs
+expectations pushed beyond promotable targets — blocked on the pinned
+diagnostic wordings, §14 risk 7), `ImplicitPat` on an unsettled scrutinee,
+`OverloadedCall` (20 in the stdlib), and the ref-decay / kind-flex /
+closure-flex / shape-projection passes that still fire (P4 table above).
+
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
 | Part | What | Verified |
