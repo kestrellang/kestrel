@@ -537,6 +537,18 @@ pub(crate) fn fixpoint(ctx: &mut InferCtx<'_>) {
 
 /// One round of constraint solving: drain all constraints, try to solve each.
 /// Returns true if any progress was made.
+/// Solve one constraint right away (the checker resolving a member as it
+/// walks, bidi §2.3): solved, re-queued if it still waits, or reported.
+pub(crate) fn solve_now(ctx: &mut InferCtx<'_>, constraint: Constraint) {
+    match try_solve(ctx, constraint) {
+        SolveResult::Solved => {},
+        SolveResult::Deferred(c) => ctx.constraints.push(c),
+        SolveResult::Error(err) => {
+            ctx.report_error(err);
+        },
+    }
+}
+
 fn solve_round(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     let constraints = std::mem::take(&mut ctx.constraints);
