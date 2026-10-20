@@ -344,11 +344,11 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
             .map(|tp| tp.0.iter().copied().zip(args.iter().cloned()).collect())
             .unwrap_or_default();
         let mut found: Vec<ETy> = Vec::new();
-        if let Some(t) = self.assoc_binding_in(*entity, name) {
+        if let Some(t) = self.assoc_binding_in(*entity, name, assoc) {
             found.push(kestrel_entail::subst(&t, &own_params, base));
         }
         for &ext in extensions.iter() {
-            let Some(t) = self.assoc_binding_in(ext, name) else {
+            let Some(t) = self.assoc_binding_in(ext, name, assoc) else {
                 continue;
             };
             // An extension's params bind through its target pattern.
@@ -378,22 +378,46 @@ impl FrontEndLayer<'_, '_> {
         }
     }
 
-    /// A `type <name> = …` child of `owner` with a lowerable annotation.
-    fn assoc_binding_in(&self, owner: Entity, name: &str) -> Option<ETy> {
+    /// A `type <name> = …` child of `owner` with a lowerable annotation that
+    /// witnesses `assoc`: unqualified, or qualified by the protocol that
+    /// declares `assoc` (`type Addable.Output = Int8` witnesses
+    /// `Addable.Output`, not `Equal.Output`).
+    fn assoc_binding_in(&self, owner: Entity, name: &str, assoc: Entity) -> Option<ETy> {
+        let declaring = self.ctx.parent_of(assoc);
         self.ctx.children_of(owner).iter().copied().find_map(|child| {
-            (self.ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
+            let named = self.ctx.get::<NodeKind>(child) == Some(&NodeKind::TypeAlias)
                 && self
                     .ctx
                     .get::<kestrel_ast_builder::Name>(child)
-                    .is_some_and(|n| n.0 == name))
-            .then(|| {
-                self.ctx.query(kestrel_hir_lower::LowerTypeAnnotation {
+                    .is_some_and(|n| n.0 == name);
+            if !named || !self.qualifier_matches(child, declaring) {
+                return None;
+            }
+            self.ctx
+                .query(kestrel_hir_lower::LowerTypeAnnotation {
                     entity: child,
                     root: self.root,
                 })
-            })
-            .flatten()
-            .map(|t| self.hir_to_ety(&t))
+                .map(|t| self.hir_to_ety(&t))
         })
+    }
+
+    /// Does alias `child`'s qualifier (if any) name `protocol`?
+    fn qualifier_matches(&self, child: Entity, protocol: Option<Entity>) -> bool {
+        let Some(target) = self.ctx.get::<kestrel_ast_builder::QualifiedTarget>(child) else {
+            return true;
+        };
+        let kestrel_ast::AstType::Named { segments, .. } = &target.0 else {
+            return true;
+        };
+        let resolved = self.ctx.query(kestrel_name_res::resolve_type::ResolveTypePath {
+            segments: segments.iter().map(|s| s.name.clone()).collect(),
+            context: child,
+            root: self.root,
+        });
+        match resolved {
+            kestrel_name_res::resolve_type::TypeResolution::Found(e) => Some(e) == protocol,
+            _ => true,
+        }
     }
 }

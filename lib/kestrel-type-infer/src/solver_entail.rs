@@ -143,3 +143,81 @@ pub(crate) fn kind_conformance(ctx: &InferCtx<'_>, recv: &TyKind, protocol: Enti
 pub(crate) fn has_open_var(ctx: &InferCtx<'_>, ty: TyVar) -> bool {
     SolverLayer::new(ctx).ety(ty).has_var()
 }
+
+/// Rule C (bidi design §4): the type an open literal receiver of an operator
+/// takes from the operator's *expected result*. Candidates are the
+/// argument-free nominal types mentioned in the result, plus the literal's
+/// default; a candidate survives when it can be written as the literal, has
+/// the operator method, and that method's return type fits the result. One
+/// survivor wins; several pick the default; none decides nothing (the
+/// literal defaults later and the mismatch is reported against the
+/// expectation). The candidate set is syntactic and local (§11.2): no
+/// enumeration of every conformer of the literal protocol.
+pub(crate) fn rule_c_pick(
+    ctx: &InferCtx<'_>,
+    literal: LiteralKind,
+    result: TyVar,
+    method: &str,
+    args: &[crate::constraint::CallArg],
+) -> Option<Entity> {
+    use kestrel_hir::builtin::Builtin;
+    let layer = SolverLayer::new(ctx);
+    let expected = layer.ety(result);
+    if matches!(expected, ETy::Var | ETy::LitVar(_)) {
+        return None;
+    }
+    let default = match literal {
+        LiteralKind::Integer => ctx.resolver.builtin(Builtin::DefaultIntegerLiteralType),
+        LiteralKind::Float => ctx.resolver.builtin(Builtin::DefaultFloatLiteralType),
+        _ => None,
+    }?;
+    let mut candidates = Vec::new();
+    collect_plain_nominals(ctx, &expected, &mut candidates);
+    if !candidates.contains(&default) {
+        candidates.push(default);
+    }
+    let survivors: Vec<Entity> = candidates
+        .into_iter()
+        .filter(|&c| {
+            let kind = TyKind::Struct {
+                entity: c,
+                args: Vec::new(),
+            };
+            if !crate::unify::conforms_to_literal_protocol(ctx, &kind, literal) {
+                return false;
+            }
+            let Ok(resolution) = ctx.resolver.resolve_member(&kind, method, args) else {
+                return false;
+            };
+            let output = layer.fe.hir_to_ety(&resolution.return_type);
+            !kestrel_entail::entails(&layer, &Goal::Equal(output, expected.clone())).fails()
+        })
+        .collect();
+    match survivors.as_slice() {
+        [one] => Some(*one),
+        [] => None,
+        many if many.contains(&default) => Some(default),
+        _ => None,
+    }
+}
+
+/// Argument-free struct/enum entities mentioned anywhere in `ty`.
+fn collect_plain_nominals(ctx: &InferCtx<'_>, ty: &ETy, out: &mut Vec<Entity>) {
+    match ty {
+        ETy::Nominal { entity, args } => {
+            let generic = ctx
+                .query_ctx
+                .get::<kestrel_ast_builder::TypeParams>(*entity)
+                .is_some_and(|tp| !tp.0.is_empty());
+            if args.is_empty() && !generic && !out.contains(entity) {
+                out.push(*entity);
+            }
+            for a in args {
+                collect_plain_nominals(ctx, a, out);
+            }
+        },
+        ETy::Tuple(elems) => elems.iter().for_each(|e| collect_plain_nominals(ctx, e, out)),
+        ETy::Ref { inner, .. } => collect_plain_nominals(ctx, inner, out),
+        _ => {},
+    }
+}

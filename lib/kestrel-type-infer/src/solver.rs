@@ -5491,48 +5491,59 @@ fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
 ///
 /// Returns `true` when this call made any change.
 fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
-    let mut progress = apply_context_literals(ctx);
-    progress |= apply_literal_defaults_rest(ctx, relax_level);
-    progress
+    // Context first, and alone: a context pick can unblock arguments the
+    // solver should type from it (`100 + 27` against `Int8` pins `100`, then
+    // `27` must flow from `add`'s parameter, not default to Int64).
+    if apply_context_literals(ctx) {
+        return true;
+    }
+    apply_literal_defaults_rest(ctx, relax_level)
 }
 
 /// The context-driven first pass of `apply_literal_defaults`.
+/// Literals typed by their context before any default applies:
+/// - an operator's open literal receiver takes the type Rule C picks from
+///   the operator's expected result (`let y: Int8 = 100 + 27`,
+///   `let r: ClosedRange[Int16] = 100..=200`, `-1` into an `Int32` slot,
+///   `let c: Bool = 1 == 2` → `Int64`);
+/// - a literal callee of a subscript-like `Call` takes the call's resolved
+///   result type.
 pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
-    let mut progress = false;
-
-    // First pass: collect context-driven types for literals that have deferred
-    // Member constraints with already-resolved result TyVars. The receiver :=
-    // result inference is only justified for operator members (`Output = Self`
-    // by convention: `-1` into an Int32 slot → negate's result is Int32, so
-    // the literal is Int32). A non-operator member's result says nothing about
-    // its receiver (`i.raw → lang.i64` must NOT pin `i` to the intrinsic), so
-    // gate Member on operator provenance (HIR ProtocolCall.from_operator, via
-    // ctx.operator_members); `Call` (subscript-like callee) keeps the old
-    // unconditional behavior.
+    let mut picks: Vec<(TyVar, Entity)> = Vec::new();
     let mut context_types: Vec<(TyVar, TyVar)> = Vec::new();
     for constraint in &ctx.constraints {
-        if let Constraint::Member {
-            receiver,
-            result,
-            expr,
-            ..
-        } = constraint
-        {
-            if !ctx.operator_members.contains_key(expr) {
-                continue;
-            }
-            collect_context_literal(ctx, *receiver, *result, &mut context_types);
-        } else if let Constraint::Call {
-            callee: receiver,
-            result,
-            ..
-        } = constraint
-        {
-            collect_context_literal(ctx, *receiver, *result, &mut context_types);
+        match constraint {
+            Constraint::Member {
+                receiver,
+                result,
+                expr,
+                name,
+                args,
+                ..
+            } if ctx.operator_members.contains_key(expr) => {
+                let recv = ctx.resolve(*receiver);
+                let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(recv) else {
+                    continue;
+                };
+                if let Some(c) = crate::solver_entail::rule_c_pick(ctx, *lit, *result, name, args) {
+                    picks.push((recv, c));
+                }
+            },
+            Constraint::Call {
+                callee: receiver,
+                result,
+                ..
+            } => collect_context_literal(ctx, *receiver, *result, &mut context_types),
+            _ => {},
         }
     }
-
-    // Apply context-driven types
+    let mut progress = false;
+    for (recv, entity) in picks {
+        if matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: Some(_) }) {
+            let ty = ctx.named(entity, Vec::new());
+            progress |= unify::unify(ctx, recv, ty).is_ok();
+        }
+    }
     for (literal_tv, context_tv) in &context_types {
         if matches!(
             &ctx.types[literal_tv.0 as usize],
