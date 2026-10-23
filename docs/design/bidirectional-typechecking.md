@@ -27,6 +27,7 @@ read it with this section in mind.
 | D2′ | **Collection and string literals default at their first use as a receiver.** `var out = []` stays open; at `out.append(x)` its head becomes `Array` (likewise `String`, `Dictionary`) and its *element* stays a body-scoped general var, so `x` still decides it. Rust has no equivalent (its `Vec::new()` / `""` are never polymorphic). | — |
 | D3 | **A member access needs its receiver's head type (Rust E0282).** If it is still unknown after flushing obligations, error with an "annotate" fix-it. A still-open **numeric** literal as a method/field receiver (`let x = 7; x.abs()`) is that error too (Rust E0689); it is never defaulted on the spot. | §6 (unchanged, now also covers numeric literals) |
 | D7 | **(i): `FromValue` promotes at every check leaf**, `Optional` and `Result` alike. Nested types (`T??`, `Result[Result[…]]`) wrap into the innermost type that fits. | §9 open question |
+| D3′ | **(2026-10-23) A bare numeric literal as a method/field receiver takes its default on the spot** (Rule R, §3.1): `(6).multiplyChecked(7)` is `Int64`. This relaxes D3's E0689 clause; E106 remains for receivers that are genuinely unknown. | D3 (numeric-literal clause) |
 | — | **Overflow is a separate design.** Under D2, `let x = 100; takes8(x); let w = x * 2` types `x : Int8` and, because integer arithmetic wraps by documented design, `w` is `-56` (N4). Rust's safety net is a debug-build overflow panic; whether Kestrel adopts one is a follow-up design, not part of this checker. N4 gets a pinned test documenting today's behaviour. | §3.4 |
 
 **Measured cost of D2 + D2′ + D3** **[M]**: `bidi-recv` alone (statement
@@ -118,8 +119,8 @@ numeric literal that is itself the receiver (D3, Rust E0689). Also:
 `solve_member` solves a peeled ref receiver immediately instead of
 re-queueing it. Suite: 3859 ok / 24 failed; the 2 new failures are
 `codegen/arithmetic/int_checked_overflow_intrinsics{,__llvm}.ks`, which call
-`(6).multiplyChecked(7)` — rejected by D3 by design; awaiting a maintainer
-decision on updating them.
+`(6).multiplyChecked(7)` — fixed by ruling D3′ (Rule R restored for bare
+numeric literal receivers).
 
 **P3 (e)/(f) and Rule C — done** (`1b031345`, `3514df98`): a `match`
 scrutinee is settled before its patterns; Rule C (§4) replaces the

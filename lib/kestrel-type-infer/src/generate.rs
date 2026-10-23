@@ -1916,12 +1916,12 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     // Solve what is to the left — Rule L included, so `0..<n` types its
     // literal from `n` the way the end-of-body relax loop would.
     settle_left(ctx);
-    // An open numeric literal that IS the receiver is E106 (D3, Rust
-    // E0689), never defaulted on the spot. Any other open literal the
-    // receiver is built from takes its default now: a `[]`/`""` receiver
-    // (D2′), a call waiting on a literal argument (§5.2 step 4), an operator
-    // over a literal (`5...`, `-5`), an interpolation's accumulator.
-    if !is_numeric_literal(ctx, recv) && default_literal_roots(ctx, recv) {
+    // Every open literal the receiver is built from takes its default now:
+    // a numeric literal that IS the receiver (`(6).multiplyChecked(7)`,
+    // Rule R — maintainer ruling 2026-10-23 relaxed D3 here), a `[]`/`""`
+    // receiver (D2′), a call waiting on a literal argument (§5.2 step 4), an
+    // operator over a literal (`5...`, `-5`), an interpolation's accumulator.
+    if default_literal_roots(ctx, recv) {
         settle_left(ctx);
     }
     // A binding initialized from a ref (`let s = r`) takes its copy-out
@@ -1932,12 +1932,10 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if !receiver_open(ctx, recv) {
         return;
     }
-    // Still open: only an unresolved var or a numeric literal is an error;
-    // other open literals have no default here (`// stdlib: false`).
+    // Still open: only an unresolved var is an error; an open literal has
+    // no default here (`// stdlib: false`) and is left to its uses.
     let open = peel_ref_var(ctx, recv);
-    if !(is_numeric_literal(ctx, recv)
-        || matches!(ctx.slot(open), TySlot::Unresolved { literal: None }))
-    {
+    if !matches!(ctx.slot(open), TySlot::Unresolved { literal: None }) {
         return;
     }
     kestrel_debug::ktrace!("e106", "receiver of '{member}' unknown at its use: {open:?}");
@@ -2080,12 +2078,6 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
     }
 }
 
-fn is_numeric_literal(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
-    matches!(
-        open_literal(ctx, peel_ref_var(ctx, tv)),
-        Some(LiteralKind::Integer | LiteralKind::Float)
-    )
-}
 
 /// Default every open literal `recv` is built from, walking back through
 /// the pending constraints that produce it. Returns true on progress.
