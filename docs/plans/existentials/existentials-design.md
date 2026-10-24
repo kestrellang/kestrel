@@ -213,8 +213,10 @@ Required stdlib changes:
   - `RcBox`'s hand-computed `valueOffset = sizeof(Int64)` (`rcbox.ks:110`)
     becomes a layout computation that honours the payload's alignment.
   - `UniqueBox`'s equivalent changes the same way.
-  - This is a latent bug for over-aligned payloads today, and a hard
-    requirement once the alignment is only known at runtime.
+  - No Kestrel type can be aligned above 8 bytes today (there is no
+    `@align` and no 128-bit integer), so the fixed offset is not a live
+    bug yet. It becomes one the moment the alignment is only known at
+    runtime, which existentials introduce.
 
 ### 4. Forming an existential
 
@@ -427,9 +429,9 @@ if shape is not Square { ... }
 - **No narrowing.** `if x is Circle { ... }` does not change `x`'s type
   inside the branch, because Kestrel has no flow-sensitive typing. Use the
   pattern form `if let c is Circle = x` to get a name with the narrowed type.
-- **Precedence.** Comparison level, non-associative:
-  - `a is Circle == b` is a parse error;
-  - `x is Circle and y is Square` is fine.
+- **Precedence.** Comparison level, grouping like the other comparison
+  operators (which today chain left to right: `a < b == c` is accepted).
+  `x is Circle and y is Square` works as expected.
 - **Left operand** must be an existential (`B[rawany P]`). A statically
   known type is an error (E152), since the answer is already known. A
   generic `T` is also rejected for now: answering per monomorphized
@@ -457,9 +459,11 @@ if shape is not Square { ... }
 
 - **Where they work.** These patterns work in `match`, `if let`,
   `guard let` and `while let`.
-- **`or`-patterns.** `c is Circle or c is Square` is rejected by the
-  existing rule that a binding must have the same type in every
-  alternative. `is Circle or is Square` is fine.
+- **`or`-patterns.** `c is Circle or c is Square` binds `c` at two
+  different types and is rejected (E154). There is no such check today:
+  `.A(v) or .B(v)` with different payload types is accepted at `80297742`.
+  E154 is therefore a new general or-pattern rule, not only an existential
+  one. `is Circle or is Square` is fine.
 - **Exhaustiveness.** The set of payload types is open, so a match on an
   existential is never exhaustive without `_`.
   - `kestrel-pattern-matching` treats each `is T` as one constructor of an
@@ -555,6 +559,7 @@ free). They need to be confirmed there before use.
 | E151 | Associated-type binding unsatisfied on conversion | `cannot convert 'Range[Int64]' to 'any Iterator[Item = String]': its 'Item' is 'Int64'` |
 | E152 | `is` on a non-existential left operand | `'is' needs an existential on the left: 'Circle' is known at compile time` (variant: `'T' is a generic parameter`) |
 | E153 | `var` binding in an `is` pattern | `an 'is' pattern binds a borrow of the payload, so it cannot be 'var'` |
+| E154 | A binding has different types across or-pattern alternatives | `variable 'c' has different types in or-pattern alternatives` |
 | E402 | `B` in `any[B] P` is not a valid box | `'Array' cannot box an existential: its type parameter is not declared 'not Sized'` (variants: `it does not conform to 'ExistentialBox'`, `field 'items' stores 'T' by value`) |
 | E403 | Unsized type parameter used by value | `'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field` |
 | E404 | `any` box argument applied | `the box in 'any[...]' is written without type arguments: 'any[RcBox] Shape'` |
@@ -595,8 +600,8 @@ free). They need to be confirmed there before use.
 - **`as?` to a protocol** (`x as? any Q`) is not in scope. Only concrete
   targets are supported. It needs conformance tables at runtime.
 - **Over-aligned payloads**: payload offsets are computed from the table's
-  `align`, which fixes the existing fixed-offset assumption in
-  `RcBox`/`UniqueBox`.
+  `align`, which removes the fixed-offset assumption in `RcBox`/`UniqueBox`.
+  Not testable until a type can be aligned above 8 bytes.
 
 ## Open questions (resolved)
 

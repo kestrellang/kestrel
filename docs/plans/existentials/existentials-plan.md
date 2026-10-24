@@ -85,16 +85,16 @@ M1 and M2 don't depend on it.
 - [ ] `is_struct_pattern_without_is.ks`: `Rect { width, .. }` on
       `any Shape` is the existing struct-pattern type mismatch.
 - [ ] `is_or_pattern_binding_types.ks`: `c is Circle or c is Square` is
-      the existing or-pattern binding-type error; `is Circle or is Square`
-      is accepted.
+      E154 (new: no or-pattern binding-type check exists today);
+      `is Circle or is Square` is accepted.
 - [ ] `is_match_not_exhaustive.ks`: a match on `any Shape` without `_`
       is the existing non-exhaustive error, and a repeated `is Circle` arm
       warns as unreachable.
-- [ ] `is_chained_parse_error.ks`: `a is Circle == b` is a parse error.
 - [ ] `is_always_fails.ks`: E149 `// WARNING:` on the operator and on a
       pattern.
 
-**MIR snapshots:**
+**MIR snapshots** (written in Phase 10, once the MIR shape exists to
+snapshot):
 
 - [ ] `vtable_layout_mir.ks`: one protocol with a parent and two
       requirements. Snapshot the `VTableDef`: header, parent pointer, and
@@ -131,8 +131,6 @@ M1 and M2 don't depend on it.
       `Box[String]: Shape` in one array (two tables).
 - [ ] `nested_existential_exec.ks`: `any[UniqueBox] Shape` built from an
       `any Shape` through self-conformance.
-- [ ] `overaligned_payload_exec.ks`: a payload with alignment > 8 in each
-      stdlib box; fields read back intact.
 - [ ] `downcast_exec.ks`: `as?` hit and miss; `if let` / `guard let`.
 - [ ] `consuming_downcast_exec.ks`: `consuming x as? T` on
       `any[UniqueBox] P`. A hit moves the value out; a miss returns `.Err`
@@ -146,13 +144,8 @@ M1 and M2 don't depend on it.
       `r is T { .. }` in `match`, `if let`, `guard let` and `while let`;
       `x @ is T` binds the whole existential.
 
-**Stdlib regression** (`stdlib/memory/`, independent of existentials):
-
-- [ ] `rcbox_overaligned_payload_exec.ks` and the `UniqueBox` equivalent.
-      These document the fixed-offset bug (design §3) that exists today.
-
 - [ ] Run `/triage` with pattern `types/existential` and record the
-      baseline. Everything except the stdlib regression should fail.
+      baseline.
 
 ### Phase 1: Lexer and CST
 
@@ -204,7 +197,7 @@ Files: `lib/kestrel-parser/src/grammar/types.rs`,
       before a `CastExpr`. There is no general `consuming <expr>` form
       today, so nothing else may parse.
 - [ ] **`is` operator.** A binary operator at comparison precedence,
-      non-associative. The right operand is parsed as a type, not an
+      grouping like the other comparisons. The right operand is parsed as a type, not an
       expression. `is not` is one operator.
 - [ ] **`is` patterns** in the pattern grammar (`grammar/patterns.rs`):
       an optional binding name, then `is`, a type, and optional struct
@@ -257,7 +250,7 @@ Files: `lib/kestrel-ast/src/ast_type.rs`, `lib/kestrel-ast-builder/src/ast_type.
       in `lower_pat_node`. `var` → E153.
 - [ ] **Diagnostic codes.** Allocate E144 and E404 per
       `lib/kestrel-analyze/AGENTS.md` (registry, `docs/error-codes.md`).
-      Reserve E145–E153 and E402–E403 together, so later phases don't
+      Reserve E145–E154 and E402–E403 together, so later phases don't
       collide with other agents.
 - [ ] **Update the two bare-protocol tests to `any P` (approved):**
       - `declarations/extensions/extension_conformance_on_generic_type.ks`
@@ -332,8 +325,6 @@ Files: `lang/std/core/indirection.ks`, `lang/std/memory/{sharedbox,rcbox,cowbox,
       `uniquebox.ks`) with an offset computed from the payload's alignment.
       - Sized `T`: `Layout.of[T]().align`.
       - Unsized `T`: a new `lang.alignOfVal(ptr)`, lowered in Phase 9.
-      - The stdlib overaligned-payload regression tests should pass after
-        this, independent of existentials.
 - [ ] **`UniqueBox` conformances:** `Indirection`, `MutableIndirection`,
       `ExistentialBox`, `ConsumingIndirection`, and
       `extend UniqueBox[T]: Cloneable where T: Cloneable`.
