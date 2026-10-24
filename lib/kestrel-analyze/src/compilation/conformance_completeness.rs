@@ -1682,6 +1682,10 @@ fn substitute_clause(
             subject: substitute_subject(subject, proto_subs)?,
             rhs: rhs.try_rename_params(&mut |p| rename_param(p, proto_subs))?,
         }),
+        ResolvedWhereClause::NotBound { subject, protocol } => Some(ResolvedWhereClause::NotBound {
+            subject: substitute_subject(subject, proto_subs)?,
+            protocol: *protocol,
+        }),
     }
 }
 

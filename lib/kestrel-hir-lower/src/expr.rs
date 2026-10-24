@@ -458,6 +458,14 @@ impl LowerCtx<'_> {
                 root: self.root,
             });
             if let ValueResolution::TypeParameter(entity) = first_result {
+                // `B.Item.zero`: the longest prefix naming an associated type
+                // of the param is a projection — lower it as the *type* (as
+                // the call form `B.Item.zero()` does) so it keeps its base,
+                // and only the rest are member accesses (G26).
+                if let Some(k) = self.assoc_type_prefix_len(segments) {
+                    let base = self.lower_type_receiver_path(&segments[..k]);
+                    return self.lower_trailing_member_segments(base, &segments[k..]);
+                }
                 let first_type_args: Vec<kestrel_hir::ty::HirTy> = segments[0]
                     .type_args
                     .iter()
@@ -1337,6 +1345,25 @@ impl LowerCtx<'_> {
             .map(|t| self.lower_type(t))
             .collect();
         self.alloc_seg(HirExpr::Def(entity, type_args, first.span.clone()), first)
+    }
+
+    /// Length of the longest proper prefix of `segments` (at least two
+    /// segments, leaving a member after it) that resolves to an associated
+    /// type off its base (`B.Item` in `B.Item.zero`).
+    fn assoc_type_prefix_len(&self, segments: &[PathSeg]) -> Option<usize> {
+        (2..segments.len()).rev().find(|&k| {
+            matches!(
+                self.ctx.query(ResolveValuePath {
+                    segments: segments[..k].iter().map(|s| s.name.clone()).collect(),
+                    context: self.owner,
+                    root: self.root,
+                }),
+                ValueResolution::AssociatedType {
+                    container: Some(_),
+                    ..
+                }
+            )
+        })
     }
 
     /// An associated-type projection in expression position, lowered as the

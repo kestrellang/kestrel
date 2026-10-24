@@ -18,6 +18,7 @@ pub mod ctx;
 pub mod entailment;
 mod entail_layer;
 mod solver_entail;
+pub mod obligations;
 pub mod error;
 pub mod generate;
 pub mod resolve;
@@ -104,7 +105,7 @@ impl QueryFn for InferBody {
         generate::generate(&mut infer_ctx, &hir, &param_types, return_ty);
 
         // Solve
-        solver::solve(&mut infer_ctx, &hir);
+        obligations::finish_body(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.
@@ -335,6 +336,9 @@ fn emit_method_where_clauses(ctx: &mut InferCtx<'_>, query_ctx: &QueryContext<'_
     // in clause iteration order — exactly as the inline match arms did.
     for clause in clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            resolve::WhereClause::NotBound { .. } => {},
             // The one real consumer of a projection subject: dispatch on the
             // subject's shape rather than on a sibling clause variant.
             resolve::WhereClause::Bound {
@@ -714,6 +718,9 @@ fn emit_container_where_clauses(
     });
     for clause in clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            resolve::WhereClause::NotBound { .. } => {},
             resolve::WhereClause::Bound {
                 subject,
                 protocol,
@@ -958,6 +965,9 @@ fn emit_protocol_assoc_type_where_clauses(
         // Emit the TypeAlias's own where clauses
         for clause in clauses {
             match clause {
+                // `T: not P` emits nothing here: negative bounds gate member
+                // applicability (the kernel) and copy semantics, not body solving.
+                resolve::WhereClause::NotBound { .. } => {},
                 resolve::WhereClause::Bound {
                     subject,
                     protocol: bound_proto,

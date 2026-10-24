@@ -258,8 +258,20 @@ fn resolve_explicit_where_clauses(
                         Err(None) => {},
                     }
                 },
-                WhereConstraint::NegativeBound { .. } => {
-                    // Negative bounds are not modeled in inference where clauses.
+                // `T: not P` — the same subject resolution a bound gets.
+                WhereConstraint::NegativeBound {
+                    subject, protocol, ..
+                } => {
+                    let resolved =
+                        resolve_bound(ctx, subject, std::slice::from_ref(protocol), entity, root);
+                    if let Some(ResolvedBound { subject, protocols }) = resolved {
+                        for (protocol, _) in protocols {
+                            result.push(WhereClause::NotBound {
+                                subject: subject.clone(),
+                                protocol,
+                            });
+                        }
+                    }
                 },
             }
         }

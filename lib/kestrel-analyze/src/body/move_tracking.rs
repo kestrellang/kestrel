@@ -462,9 +462,11 @@ fn analyze_expr(
             // propagation point that can widen a view's extent: storing a
             // view-carrying value into an OUTER binding lets it outlive the
             // place it views, with no move and no `deinit` anywhere.
+            // The destination is the target's place ROOT: `h.f = { r.v }`
+            // widens `r`'s view to `h`'s extent just as `h = ...` would.
             let carried = carried_places(mcx, &state, *value);
             if !carried.is_empty()
-                && let Some(tid) = rhs_local(hir, *target)
+                && let Some(tid) = place_root(hir, *target)
             {
                 let dest_depth = state.local_depth.get(&tid).copied().unwrap_or(0);
                 check_outlives(mcx, &mut state, diags, &carried, dest_depth, *value);

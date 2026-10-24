@@ -275,6 +275,20 @@ pub fn extension_applies<L: EntailLayer + ?Sized>(
 pub fn more_specific(a_args: &[ETy], a_clauses: usize, b_args: &[ETy], b_clauses: usize) -> bool {
     let a_inst_of_b = pattern_instance(b_args, a_args);
     let b_inst_of_a = pattern_instance(a_args, b_args);
+    more_specific_rule(a_inst_of_b, b_inst_of_a, a_clauses, b_clauses)
+}
+
+/// The specificity rule itself, for a layer that matches patterns with its
+/// own matcher (mono matches MIR-only shapes such as pointers and function
+/// types): `a` beats `b` when `a`'s pattern is strictly an instance of
+/// `b`'s; at equal pattern specificity, the one with more where clauses
+/// wins. One rule, so front end and mono cannot pick different witnesses.
+pub fn more_specific_rule(
+    a_inst_of_b: bool,
+    b_inst_of_a: bool,
+    a_clauses: usize,
+    b_clauses: usize,
+) -> bool {
     if a_inst_of_b != b_inst_of_a {
         return a_inst_of_b;
     }

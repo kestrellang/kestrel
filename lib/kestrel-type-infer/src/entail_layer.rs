@@ -163,6 +163,10 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
                 WhereClause::Equality { subject, rhs } => {
                     Goal::Equal(self.subject_ety(subject, target), self.hir_to_ety(rhs))
                 },
+                WhereClause::NotBound { subject, protocol } => Goal::NotConforms {
+                    ty: self.subject_ety(subject, target),
+                    protocol: *protocol,
+                },
             })
             .collect()
     }
@@ -171,6 +175,16 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
         match subject {
             WhereSubject::SelfType => ETy::SelfTy,
             WhereSubject::Param(p) if Some(*p) == target => ETy::SelfTy,
+            // A bare associated-type name in a protocol extension's clause
+            // (`extend Source where Item: P`) is `Self.Item`, not a param.
+            WhereSubject::Param(p)
+                if self.ctx.get::<NodeKind>(*p) == Some(&NodeKind::TypeAlias) =>
+            {
+                ETy::Proj {
+                    base: Box::new(ETy::SelfTy),
+                    assoc: *p,
+                }
+            },
             WhereSubject::Param(p) => ETy::Param(*p),
             WhereSubject::Projection { base, assoc } => ETy::Proj {
                 base: Box::new(self.subject_ety(base, target)),

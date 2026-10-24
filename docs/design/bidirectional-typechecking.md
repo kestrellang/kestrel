@@ -72,13 +72,19 @@ in `solver.rs` are deleted. An open var is `Unknown` and is kept as an
 `Applicable` / `Conforms` obligation (N1); equality clauses are evaluated (N2)
 and lowered into MIR `WhereConstraint::Equal` from `WhereClausesOf`.
 Suite: N1 + N2 pinned tests fixed, no other verdict changed.
-Deviations: (1) an abstract param with no declared bound is `Unknown`, not
-`Fails`, and the solver settles an abstract-only `Unknown` to the declared
-answer (`conforms_to` already vouched) — the asking site's Γ is not threaded
-yet; (2) mono keeps its MIR pattern matcher and AST-lowered bounds (the
-resolved `WhereClausesOf` drops `not P` bounds) and its own specificity rule;
-(3) analyze's `entailment.rs` is kept as the Γ oracle the kernel's param
-supply consults.
+Deviations: (1) *closed 2026-10-24*: a type-param goal the param's own
+declaration cannot prove is decided against the asking body's Γ (the
+resolver's param bounds: declaring item + body owner chain) — a definite
+Holds/Fails in the solver (`declarations/extensions/extension_bound_on_type_param_decided_from_body_assumptions.ks`);
+the analyzer, which has no body, still treats that Unknown as permit; (2) *closed 2026-10-24*: `not P` bounds are kept (`WhereClause::NotBound`,
+decided by the kernel as `NotConforms`); mono's `WhereConstraint`s are
+lowered from the front end's `ExplicitWhereClauses` (the AST re-resolution
+in `function_sig.rs` is deleted; the implicit Copyable/Static bounds are
+deliberately not lowered — mono has no witnesses for them); the specificity
+rule is the kernel's `more_specific_rule`. Mono keeps its own structural
+matcher, because it returns the MIR substitutions mono needs — a different
+job from entailment; (3) analyze's `entailment.rs` is the Γ oracle the
+kernel's param supply consults (it now also entails `NotBound`).
 
 **P2 — done.** Rule L (`1fb8442b`): `apply_operator_literal_adoption` in the
 relax loop (and in the eager settle); the N3 pinned test passes. D2′
@@ -173,6 +179,25 @@ expectations pushed beyond promotable targets — blocked on the pinned
 diagnostic wordings, §14 risk 7), `ImplicitPat` on an unsettled scrutinee,
 `OverloadedCall` (20 in the stdlib), and the ref-decay / kind-flex /
 closure-flex / shape-projection passes that still fire (P4 table above).
+
+**P4 — done to the load-bearing floor** (probe run on `abdf2e87`, full
+suite + stdlib, after pushing expectations everywhere): every pass that
+still fires is a rule the design keeps — literal defaults at body end
+(level 0: 48.1k; level 1, interpolation accumulators: 69) are D2's
+end-of-body step; Rule C 5.3k; Rule L at body end 572; closure-kind
+retrofit 73 (closure literals still synthesized, e.g. unannotated
+`let f = { … }`); operator shape projection 47 (generic-bound results Rule C
+cannot see); kind-flex adoption 24 (a bare function value passed where a
+closure kind is expected, §9 step 6); end-of-body ref decay 16; closure-flex
+arity 2 (§8 keeps "a parameterless closure adapts to any arity"). None is
+dead, so nothing further is deleted without first moving its rule into the
+walker.
+
+**Expectations pushed into every check leaf** (maintainer ruling
+2026-10-23, §14 risk 7 resolved by an approved annotation rewrite): the
+promotable-target gate is gone. Suite: 3861 ok, no verdict changed; 4 tests
+changed only in wording/position and were rewritten — see the commit.
+Ruling D3′ (2026-10-23): bare numeric literal receivers default (Rule R).
 
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 

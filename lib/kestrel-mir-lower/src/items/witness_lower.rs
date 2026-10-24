@@ -148,21 +148,9 @@ fn lower_witnesses_for_type(
         if matches!(
             ctx.world.get::<NodeKind>(*source),
             Some(NodeKind::Extension)
-        ) && let Some(ast_wc) = ctx
-            .world
-            .get::<kestrel_ast_builder::WhereClause>(*source)
-            .cloned()
-        {
+        ) {
             let mut wc = kestrel_mir::item::function::WhereClause::new();
-            for ast_constraint in &ast_wc.0 {
-                crate::items::function_sig::lower_where_constraint(
-                    ctx,
-                    ast_constraint,
-                    *source,
-                    &mut wc,
-                );
-            }
-            crate::items::function_sig::lower_equality_constraints(ctx, *source, &mut wc);
+            crate::items::function_sig::lower_where_clauses(ctx, *source, &mut wc);
             witness.constraints = wc.constraints;
         }
 

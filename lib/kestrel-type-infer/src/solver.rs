@@ -1,11 +1,8 @@
-//! Fixpoint solver: iterates constraints until no more progress is made.
-//!
-//! Phases:
-//! 1. Main solving — iterate until fixpoint
-//! 2. Apply literal defaults for unconstrained literals
-//! 3. Solve again with defaults applied
-//! 4. Report any unresolved generic type parameters at call sites
-//! 5. Report any remaining unsolved constraints as errors
+//! Constraint solving: `try_solve` for each constraint kind, `solve_now` for
+//! the walker resolving one constraint where it meets it, and `fixpoint`
+//! for flushing what is still queued. The end of a body — the flush, the
+//! end-of-body defaults and the reports — is orchestrated by
+//! [`crate::obligations::finish_body`].
 
 use std::borrow::Cow;
 
@@ -31,124 +28,12 @@ use kestrel_semantics::{
 };
 use kestrel_span::Span;
 
-/// Run the full solver: fixpoint loop, literal defaults, final fixpoint,
-/// then report any remaining unsolved constraints as errors.
-pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
-    // Phase 1: main solving
-    fixpoint(ctx);
-
-    // Phase 2: literal defaults with graduated blocking relaxation.
-    //
-    // Level 0 (strict): InterpolationLink accumulators and arg-position
-    //   literals in deferred Member/Call constraints are both blocked.
-    // Level 1 (relaxed): InterpolationLink blocking lifted — string
-    //   interpolation literals default to their type, unblocking
-    //   downstream chains (bytes subscript → UInt8 → == context).
-    // (A former level 2 force-defaulted arg-position literals; it never
-    // made progress over the corpus once receivers are resolved eagerly —
-    // bidi P4, measured with the `p4` probes — and was removed.)
-    let mut relax_level = 0u8;
-    loop {
-        // Stage 2-pre operator shape projection — must run BEFORE literal
-        // defaulting: a deferred operator member's literal RECEIVER is not
-        // in the blocked set, so `apply_literal_defaults` would pin it to
-        // Int64 on the very first pass. Give the result var its nominal
-        // shape (`100..=200` → `ClosedRange[?lit]`) so annotations and
-        // parameterized bounds can pin the literal through the fixpoint
-        // instead (see the fn doc).
-        if apply_operator_shape_projections(ctx) {
-            fixpoint(ctx);
-            relax_level = 0;
-            continue;
-        }
-        // Rule L (bidi design §4, N3): a literal LEFT operand adopts the
-        // right operand's type. Must run before literal defaulting, which
-        // would otherwise pin the receiver literal to Int64 first.
-        if apply_operator_literal_adoption(ctx) {
-            fixpoint(ctx);
-            relax_level = 0;
-            continue;
-        }
-        let progress = apply_literal_defaults(ctx, relax_level);
-        if progress {
-            fixpoint(ctx);
-            relax_level = 0;
-            continue;
-        }
-        // Stage 2b decay defaulting: before relaxing literal blocking
-        // further, decay any deferred ref→unresolved coercion whose target
-        // nothing else pinned — those targets often gate the very literals
-        // the next relax level would FORCE to the wrong default
-        // (`let y = ru8; y + 1` must pin `1` to UInt8 via y's decay, not
-        // force-default it to Int64).
-        if apply_ref_decay_defaults(ctx) {
-            fixpoint(ctx);
-            relax_level = 0;
-            continue;
-        }
-        relax_level += 1;
-        if relax_level > 1 {
-            break;
-        }
-    }
-
-    // The synth gate drops here: every call/member that could type a
-    // check-mode leaf has fired, so a leaf typed only by its target
-    // (`none()`) may now unify with it.
-    ctx.synth_gate = false;
-
-    // Phase 3: solve again with defaults
-    fixpoint(ctx);
-
-    // Phase 3.5: apply deferred type-parameter defaults (e.g. H = DefaultHasher).
-    // Only unconstrained TyVars get their default — inside a generic body
-    // like Set.init(), the TyVar for H is already constrained by `self.dict`'s
-    // field type and stays untouched.
-    if apply_type_param_defaults(ctx) {
-        fixpoint(ctx);
-    }
-
-    // Phase 4: report unresolved type parameters at generic call sites.
-    // Runs before `report_unsolved` so unresolved TyVars are poisoned
-    // and downstream cascade constraints get suppressed silently.
-    report_unresolved_type_params(ctx);
-
-    // Phase 4.25: never-fallback. Any TyVar that `unify` saw meet `Never`
-    // while still unresolved (so the Never-branch intentionally didn't
-    // bind it — see `unify.rs`) but which fixpoint hasn't since pinned to
-    // anything else gets defaulted to `Never` now. Mirror of Rust's
-    // `never_type_fallback`: divergent match arms, branches that always
-    // return, loops whose only break values are `!`, etc.
-    default_never_fallback(ctx);
-
-    // Phase 5: report remaining unsolved constraints as errors. Runs before
-    // phase 4.5 so real `TypeMismatch` / `DoesNotConform` errors fire on
-    // deferred `Equal` / `Coerce` constraints (and poison their TyVars via
-    // `report_and_poison`) before the generic "could not infer type" fallback
-    // gets a chance to eat them.
-    report_unsolved(ctx);
-
-    // Phase 5.25 (stage-1 references): refs are second-class — legal only as
-    // the TOP-LEVEL type of an expression. A ref nested in a generic arg or
-    // tuple leaked through inference (E492, e.g. `[box.peek()]` →
-    // `Array[&T]`); a function type carrying a ref return is a non-callee
-    // use of a ret_borrow function (E491 — the convention is not
-    // expressible in function types).
-    validate_ref_placement(ctx, hir);
-
-    // Phase 4.5: report any expression or local whose TyVar stayed unresolved.
-    // These slots would otherwise surface as `MirTy::Error` downstream and
-    // trigger misleading Cranelift type-mismatch panics. Runs after phase 5
-    // so constraints that can name a better error already have.
-    report_unresolved_slots(ctx, hir);
-}
-
 /// Diagnose type parameters at generic call sites that inference couldn't
 /// pin down. Lib1 silently defaulted these to `Never` (RFC 1216-style
 /// fallback) — we deliberately don't, to avoid silent witness-selection
 /// drift. Each unresolved slot becomes an `UnresolvedTypeParam` error
 /// pointing at the call site, with the param's name in the label.
-fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
+pub(crate) fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
     // Snapshot to avoid borrow conflicts when we call `report_error`/`poison`.
     let entries: Vec<(kestrel_hir::body::HirExprId, Vec<TyVar>, Span)> = ctx
         .type_args
@@ -199,7 +84,7 @@ fn report_unresolved_type_params(ctx: &mut InferCtx<'_>) {
 /// Bind any TyVar that `unify` saw meet `Never` (with the Unresolved
 /// side deliberately left unbound) to `Never`, if fixpoint settled with
 /// no other constraint pinning it. Rust's `never_type_fallback`.
-fn default_never_fallback(ctx: &mut InferCtx<'_>) {
+pub(crate) fn default_never_fallback(ctx: &mut InferCtx<'_>) {
     let targets: Vec<TyVar> = ctx.never_fallback_targets.iter().copied().collect();
     for tv in targets {
         let resolved = ctx.resolve(tv);
@@ -218,7 +103,7 @@ fn default_never_fallback(ctx: &mut InferCtx<'_>) {
 ///
 /// Skips slots that are already poisoned with `TyKind::Error` — an earlier
 /// error already covers them.
-fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+pub(crate) fn report_unresolved_slots(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Snapshot the entries so we can mutate `ctx` while iterating, in source
     // order (start, then the innermost span first). Order decides which
     // expression reports: reporting poisons the shared var, which silences
@@ -510,7 +395,7 @@ fn find_ref_violation(
 }
 
 /// Stage-1 second-class enforcement over the solved expression types.
-fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+pub(crate) fn validate_ref_placement(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     let entries: Vec<(kestrel_hir::body::HirExprId, TyVar)> =
         ctx.expr_types.iter().map(|(k, v)| (*k, *v)).collect();
     for (expr_id, tv) in entries {
@@ -582,7 +467,7 @@ fn solve_round(ctx: &mut InferCtx<'_>) -> bool {
 ///
 /// To prevent cascading errors, we skip constraints where a key TyVar is already
 /// poisoned with `TyKind::Error` (meaning an earlier error already covers it).
-fn report_unsolved(ctx: &mut InferCtx<'_>) {
+pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
     let constraints = std::mem::take(&mut ctx.constraints);
 
     for constraint in constraints {
@@ -3868,6 +3753,9 @@ fn emit_resolved_call(
     let where_clauses = qctx.query(crate::where_clauses::WhereClausesOf { entity, root });
     for clause in where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,
@@ -4810,6 +4698,9 @@ fn solve_member(
     let self_entity = resolution.self_type;
     for clause in &resolution.where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,
@@ -4981,6 +4872,36 @@ fn solve_member(
             let param_tv = lower_hir_ty_sub(ctx, &param_info.ty, self_entity, receiver, &subs);
             ctx.coerce(args[*ai].ty, param_tv, args[*ai].value, span.clone());
         }
+    }
+
+    // An UNAPPLIED static method (`let f = T.zero`) is a function value:
+    // its type is `(params) -> ret`, not its call result. `Box.stat` reaches
+    // the same type through name resolution; a static requirement named
+    // through a type parameter or projection (`T.zero`, `B.Item.zero`)
+    // arrives here as a field access (G26).
+    if !is_call
+        && resolution.kind == crate::resolve::MemberKind::Method
+        && ctx
+            .query_ctx
+            .has::<kestrel_ast_builder::Static>(resolution.entity)
+    {
+        let params: Vec<TyVar> = resolution
+            .param_types
+            .iter()
+            .map(|p| lower_hir_ty_sub(ctx, &p.ty, self_entity, receiver, &subs))
+            .collect();
+        let conventions = vec![kestrel_ast::ParamConvention::Consuming; params.len()];
+        let ret = lower_opaque_aware(
+            ctx,
+            &resolution.return_type,
+            resolution.entity,
+            self_entity,
+            receiver,
+            &subs,
+        );
+        let fn_tv = ctx.function_conv(kestrel_ast::FnTypeKind::Normal, params, conventions, ret);
+        ctx.equal(result, fn_tv, span);
+        return SolveResult::Solved;
     }
 
     // Equate result with return type (ref-aware: scrutinee decay / pinned
@@ -5303,6 +5224,22 @@ fn solve_tuple_rest_pat(
 /// that literal, and `B` conforms to the operator's protocol. The mirror,
 /// `x op lit`, already works through argument coercion. Returns true on
 /// progress.
+/// Rule L's test for one operator: the receiver is an open literal and the
+/// right operand a concrete nominal that can be written as that literal and
+/// conforms to the operator protocol. Shared by the walker (at the operator)
+/// and the end-of-body pass (for operands that became known later).
+pub(crate) fn rule_l_applies(ctx: &InferCtx<'_>, recv: TyVar, arg: TyVar, protocol: Entity) -> bool {
+    let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(ctx.resolve(recv)) else {
+        return false;
+    };
+    let TySlot::Resolved(kind) = ctx.slot(ctx.resolve(arg)) else {
+        return false;
+    };
+    kind.is_nominal_concrete()
+        && crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
+        && ctx.resolver.conforms_to(kind, protocol)
+}
+
 pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
     let mut pairs: Vec<(TyVar, TyVar)> = Vec::new();
     for c in &ctx.constraints {
@@ -5321,21 +5258,9 @@ pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
         if args.len() != 1 {
             continue;
         }
-        let recv = ctx.resolve(*receiver);
-        let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(recv) else {
-            continue;
-        };
-        let arg = ctx.resolve(args[0].ty);
-        let TySlot::Resolved(kind) = ctx.slot(arg) else {
-            continue;
-        };
-        if !kind.is_nominal_concrete()
-            || !crate::unify::conforms_to_literal_protocol(ctx, kind, *lit)
-            || !ctx.resolver.conforms_to(kind, protocol)
-        {
-            continue;
+        if rule_l_applies(ctx, *receiver, args[0].ty, protocol) {
+            pairs.push((ctx.resolve(*receiver), ctx.resolve(args[0].ty)));
         }
-        pairs.push((recv, arg));
     }
     let mut progress = false;
     for (recv, arg) in pairs {
@@ -5479,66 +5404,71 @@ pub(crate) fn apply_operator_shape_projections(ctx: &mut InferCtx<'_>) -> bool {
 
     let mut progress = false;
     for (recv, res, name, args) in candidates {
-        // A previous projection in this batch may have pinned either side.
-        if !matches!(
-            ctx.slot(ctx.resolve(recv)),
-            TySlot::Unresolved { literal: Some(_) }
-        ) {
-            continue;
-        }
-        let lit = match ctx.slot(ctx.resolve(recv)) {
-            TySlot::Unresolved { literal: Some(l) } => *l,
-            _ => unreachable!(),
-        };
-        let feature = match lit {
-            LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
-            LiteralKind::Float => Builtin::DefaultFloatLiteralType,
-            _ => continue,
-        };
-        let Some(default_entity) = ctx.resolver.builtin(feature) else {
-            continue;
-        };
-        let default_kind = TyKind::Struct {
-            entity: default_entity,
-            args: vec![],
-        };
-        let Ok(resolution) = ctx.resolver.resolve_member(&default_kind, &name, &args) else {
-            continue;
-        };
-        // Project only the generic-wrapper shape: a nominal head other than
-        // the default type, whose args mention the default type. Anything
-        // else (Self-typed returns, params, aliases, fn types) declines —
-        // this stage must never guess where unanimity across the numeric
-        // family isn't structurally plausible.
-        if !projectable_wrapper_return(&resolution.return_type, default_entity) {
-            continue;
-        }
-        let res_was_unresolved = matches!(
-            ctx.slot(ctx.resolve(res)),
-            TySlot::Unresolved { literal: None }
-        );
-        let subs = [(default_entity, ctx.resolve(recv))];
-        let projected = lower_hir_ty_sub(ctx, &resolution.return_type, None, res, &subs);
-        let ok = unify::unify(ctx, res, projected).is_ok();
-        // Progress only when the projection ADDED information: the result
-        // gained its shape, or the receiver literal got pinned through an
-        // already-shaped result. A projection that merely re-unifies fresh
-        // vars (nothing downstream ever pins the element) must NOT count,
-        // or the relax loop re-fires it forever and never defaults.
-        let recv_pinned = !matches!(
-            ctx.slot(ctx.resolve(recv)),
-            TySlot::Unresolved { literal: Some(_) }
-        );
-        kestrel_debug::ktrace!(
-            "op-shape",
-            "project {name}: ret={:?} ok={ok} res_new={res_was_unresolved} recv_pinned={recv_pinned}",
-            resolution.return_type
-        );
-        if ok && (res_was_unresolved || recv_pinned) {
-            progress = true;
-        }
+        progress |= project_operator_shape(ctx, recv, res, &name, &args);
     }
     progress
+}
+
+/// The shape projection for one operator (see
+/// [`apply_operator_shape_projections`]): give `res` the default type's
+/// generic-wrapper return shape with the literal `recv` in the element
+/// position. Called by the walker at the operator (bidi P5) and by the
+/// end-of-body pass for operators it could not decide then. Returns true
+/// when it added information.
+pub(crate) fn project_operator_shape(
+    ctx: &mut InferCtx<'_>,
+    recv: TyVar,
+    res: TyVar,
+    name: &str,
+    args: &[CallArg],
+) -> bool {
+    let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(ctx.resolve(recv)) else {
+        return false;
+    };
+    let feature = match lit {
+        LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
+        LiteralKind::Float => Builtin::DefaultFloatLiteralType,
+        _ => return false,
+    };
+    let Some(default_entity) = ctx.resolver.builtin(feature) else {
+        return false;
+    };
+    let default_kind = TyKind::Struct {
+        entity: default_entity,
+        args: vec![],
+    };
+    let Ok(resolution) = ctx.resolver.resolve_member(&default_kind, name, args) else {
+        return false;
+    };
+    // Project only the generic-wrapper shape: a nominal head other than the
+    // default type, whose args mention the default type. Anything else
+    // (Self-typed returns, params, aliases, fn types) declines — this stage
+    // must never guess where unanimity across the numeric family isn't
+    // structurally plausible.
+    if !projectable_wrapper_return(&resolution.return_type, default_entity) {
+        return false;
+    }
+    let res_was_unresolved = matches!(
+        ctx.slot(ctx.resolve(res)),
+        TySlot::Unresolved { literal: None }
+    );
+    let subs = [(default_entity, ctx.resolve(recv))];
+    let projected = lower_hir_ty_sub(ctx, &resolution.return_type, None, res, &subs);
+    let ok = unify::unify(ctx, res, projected).is_ok();
+    // Progress only when the projection ADDED information: the result gained
+    // its shape, or the receiver literal got pinned through an already-shaped
+    // result. A projection that merely re-unifies fresh vars must NOT count,
+    // or the end-of-body loop re-fires it forever and never defaults.
+    let recv_pinned = !matches!(
+        ctx.slot(ctx.resolve(recv)),
+        TySlot::Unresolved { literal: Some(_) }
+    );
+    kestrel_debug::ktrace!(
+        "op-shape",
+        "project {name}: ret={:?} ok={ok} res_new={res_was_unresolved} recv_pinned={recv_pinned}",
+        resolution.return_type
+    );
+    ok && (res_was_unresolved || recv_pinned)
 }
 
 /// Shared body of the context-driven pass in `apply_literal_defaults`: a
@@ -5595,7 +5525,7 @@ fn projectable_wrapper_return(ty: &kestrel_hir::ty::HirTy, default_entity: Entit
         && mentions
 }
 
-fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
+pub(crate) fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     let defaults = std::mem::take(&mut ctx.type_param_defaults);
     for (tv, hir_ty) in &defaults {
@@ -5627,7 +5557,7 @@ fn apply_type_param_defaults(ctx: &mut InferCtx<'_>) -> bool {
 ///   2 — force: all blocking removed.
 ///
 /// Returns `true` when this call made any change.
-fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
+pub(crate) fn apply_literal_defaults(ctx: &mut InferCtx<'_>, relax_level: u8) -> bool {
     // Context first, and alone: a context pick can unblock arguments the
     // solver should type from it (`100 + 27` against `Int8` pins `100`, then
     // `27` must flow from `add`'s parameter, not default to Int64).
@@ -6168,6 +6098,9 @@ fn emit_type_alias_where_clauses(
     });
     for clause in clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,

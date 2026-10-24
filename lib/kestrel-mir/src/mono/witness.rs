@@ -344,17 +344,18 @@ fn witness_more_specific(arena: &TyArena, a: &WitnessDef, b: &WitnessDef) -> boo
     let mut ba = HashMap::new();
     let b_is_instance_of_a =
         match_pattern(arena, a.implementing_type, b.implementing_type, &mut ba);
-    // A strictly narrower implementing type wins.
-    if a_is_instance_of_b != b_is_instance_of_a {
-        return a_is_instance_of_b;
-    }
-    // Equal implementing-type specificity (same pattern, or genuinely
-    // incomparable): the witness carrying MORE `where` constraints is more
-    // specific. Candidates only reach selection after `witness_constraints_hold`
-    // confirmed their bounds are satisfied, so `extend Box[T] where T: Show`
-    // (1 constraint) beats `extend Box[T]` (0) for a `Box[Int64]` self when
-    // `Int64: Show` — order-independently (#182).
-    a.constraints.len() > b.constraints.len()
+    // The kernel's rule (shared with the front end): a strictly narrower
+    // implementing type wins; at equal pattern specificity, more `where`
+    // constraints win. Candidates only reach selection after
+    // `witness_constraints_hold` confirmed their bounds, so
+    // `extend Box[T] where T: Show` beats `extend Box[T]` for `Box[Int64]`
+    // when `Int64: Show` — order-independently (#182).
+    kestrel_entail::more_specific_rule(
+        a_is_instance_of_b,
+        b_is_instance_of_a,
+        a.constraints.len(),
+        b.constraints.len(),
+    )
 }
 
 /// Check whether a witness's protocol type args match the expected concrete

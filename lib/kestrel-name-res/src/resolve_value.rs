@@ -275,6 +275,10 @@ fn walk_path_from(
     root: Entity,
 ) -> ValueResolution {
     let mut current = first_entity;
+    // Set once a segment walked into an associated type off a param or
+    // projection (`B.Item`): from there on the base matters, and only the
+    // type checker's base-aware lookup can judge a member.
+    let mut via_assoc = false;
     for (i, segment) in segments[1..].iter().enumerate() {
         let is_last = i == segments.len() - 2;
 
@@ -294,6 +298,7 @@ fn walk_path_from(
                 };
             }
             current = found;
+            via_assoc = true;
             continue;
         }
 
@@ -342,6 +347,19 @@ fn walk_path_from(
             }
             current = found;
             continue;
+        }
+
+        // A static member off a projection (`B.Item.zero`) that the
+        // declaration-level search above cannot see — its bound may come
+        // from a where clause (`where B.Item: Zero`). Keep the projection
+        // and let the type checker's base-aware lookup accept or reject it
+        // (G26); falling through here turned the path into a field chain on
+        // `B` ("no member 'Item' on type 'B'").
+        if is_last && via_assoc && ctx.get::<NodeKind>(current) == Some(&NodeKind::TypeAlias) {
+            return ValueResolution::AssociatedTypeStaticMember {
+                entity: current,
+                assoc_type: current,
+            };
         }
 
         // Check for enum case or field/getter used as intermediate value;

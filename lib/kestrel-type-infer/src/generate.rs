@@ -532,6 +532,14 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if *from_operator {
                 ctx.operator_members.insert(id, *protocol);
                 unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
+                type_literal_operator(ctx, *protocol, method, recv_tv, &arg_tvs, expect.as_ref());
+            }
+            // An operator over a still-open literal gets its result's shape
+            // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
+            // annotation on the result can pin the literal (bidi P5: the
+            // walker, not the end of the body).
+            if *from_operator && open_literal(ctx, recv_tv).is_some() {
+                crate::solver::project_operator_shape(ctx, recv_tv, result_tv, method_str, &arg_tvs);
             }
             // Resolve method on the protocol
             ctx.member(
@@ -1223,6 +1231,17 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // the new local — it is defined after the init lowers.)
                     ctx.local_types.insert(*local, val_tv);
                 } else {
+                    // An unannotated binding is a value context (bidi §9: "an
+                    // unannotated `let` decays"): a ref initializer whose type
+                    // is already known gives the binding its pointee here,
+                    // instead of the end-of-body ref-decay default.
+                    if ty.is_none()
+                        && let TySlot::Resolved(TyKind::Ref { pointee, .. }) =
+                            ctx.slot(ctx.resolve(val_tv))
+                    {
+                        let pointee = *pointee;
+                        let _ = unify::unify(ctx, local_tv, pointee);
+                    }
                     // Value flows to the binding (allows promotion)
                     ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
                 }
@@ -2073,6 +2092,41 @@ fn implicit_case_home(ctx: &InferCtx<'_>, expected: TyVar, name: &str) -> Option
     args.iter().copied().find(|&a| declares(a))
 }
 
+/// Type an operator's open literal receiver where the walker meets it
+/// (bidi §4): Rule L from a known right operand (`100 + small`), else
+/// Rule C from the pushed expected result (`let y: Int8 = 100 + 27`). What
+/// neither decides waits for the end-of-body passes and defaulting.
+fn type_literal_operator(
+    ctx: &mut InferCtx<'_>,
+    protocol: Entity,
+    method: &HirName,
+    recv: TyVar,
+    args: &[CallArg],
+    expect: Option<&(TyVar, Reason)>,
+) {
+    let Some(lit) = open_literal(ctx, recv) else {
+        return;
+    };
+    if let [arg] = args
+        && crate::solver::rule_l_applies(ctx, recv, arg.ty, protocol)
+    {
+        let _ = unify::unify(ctx, recv, arg.ty);
+        return;
+    }
+    let (Some((expected, _)), Some(name)) = (expect, method.as_str()) else {
+        return;
+    };
+    if !expectation_known(ctx, *expected) {
+        return;
+    }
+    let result = ctx.fresh();
+    let _ = unify::unify(ctx, result, *expected);
+    if let Some(entity) = crate::solver_entail::rule_c_pick(ctx, lit, result, name, args) {
+        let ty = ctx.named(entity, Vec::new());
+        let _ = unify::unify(ctx, recv, ty);
+    }
+}
+
 /// Run the solver over everything generated so far, Rule L included.
 fn settle_left(ctx: &mut InferCtx<'_>) {
     crate::solver::fixpoint(ctx);
@@ -2156,6 +2210,11 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             } if produced_by(result_tv) => inputs.push(*acc_tv),
             Constraint::TupleIndex { tuple, result, .. } if produced_by(result) => {
                 inputs.push(*tuple)
+            },
+            // A borrow's pointee comes from the borrowed expression
+            // (`let e = &xs(at: 0)`).
+            Constraint::BorrowPointee { inner, pointee, .. } if produced_by(pointee) => {
+                inputs.push(*inner)
             },
             // A pattern binder comes from its scrutinee.
             Constraint::ImplicitPat {
@@ -2630,6 +2689,9 @@ fn emit_where_clause_constraints_with_subs(
     });
     for clause in where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,
