@@ -42,7 +42,7 @@ func main() -> Int64 {
     if let .Some(first) = a.next() { if first != 1 { return 1 } } else { return 2 }
     if sum(Upto(n: 0, limit: 4)) != 10 { return 3 }
     if sum(Repeat(v: 5, left: 2)) != 10 { return 4 }
-    let doubled = Upto(n: 0, limit: 2).map { it * 2 };
+    let doubled = Upto(n: 0, limit: 2).map(as: { it * 2 });
     let b: any Iterator[Item = Int64] = doubled;
     if sum(b) != 6 { return 5 }
     0

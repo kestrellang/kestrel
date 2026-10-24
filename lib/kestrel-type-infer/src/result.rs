@@ -69,6 +69,33 @@ pub struct TypedBody {
     /// value/slot types (see `InferCtx::kind_coercions`); this map is the
     /// audit trail of the solver's passing-table decisions.
     pub kind_coercions: HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
+
+    /// Existential conversions at check leaves: `expr` (of type `from`)
+    /// becomes the existential `to` by the recorded rule. MIR lowering emits
+    /// them from here and never re-derives one (existentials design §4).
+    pub existential_conversions: HashMap<HirExprId, ExistentialConversion>,
+}
+
+/// How a value becomes an existential (existentials design §4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ConversionKind {
+    /// A sized `T` is boxed: `B[T].init(consuming:)`, then unsized.
+    Box,
+    /// `B[T]` widens to `B[rawany P]` in place; no allocation.
+    Unsize,
+    /// `B[rawany Q]` becomes `B[rawany P]` for a `P` that `Q` implies; the
+    /// table pointer moves to the parent table.
+    Upcast,
+}
+
+/// One accepted existential conversion, fully resolved.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExistentialConversion {
+    pub kind: ConversionKind,
+    /// The expression's own type.
+    pub from: ResolvedTy,
+    /// The existential it becomes (`B[rawany P]`).
+    pub to: ResolvedTy,
 }
 
 /// One level of an `Indirection` member peel: the concrete pointee accessors
@@ -109,6 +136,7 @@ impl Hash for TypedBody {
             opaque_concrete_type,
             indirection_peels,
             kind_coercions,
+            existential_conversions,
         } = self;
         hash_sorted(expr_types, state);
         hash_sorted(local_types, state);
@@ -121,6 +149,7 @@ impl Hash for TypedBody {
         opaque_concrete_type.hash(state);
         hash_sorted(indirection_peels, state);
         hash_sorted(kind_coercions, state);
+        hash_sorted(existential_conversions, state);
     }
 }
 
@@ -395,6 +424,20 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
             })
             .collect(),
         kind_coercions: ctx.kind_coercions.clone(),
+        existential_conversions: ctx
+            .existential_conversions
+            .iter()
+            .map(|(&expr, c)| {
+                (
+                    expr,
+                    ExistentialConversion {
+                        kind: c.kind,
+                        from: resolve_to_concrete(ctx, c.from),
+                        to: resolve_to_concrete(ctx, c.to),
+                    },
+                )
+            })
+            .collect(),
     }
 }
 
@@ -560,7 +603,7 @@ fn describe_existential(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<String> {
 }
 
 /// `P and Q[Item = Int64]`: each bound, with the associated types it pins.
-fn describe_existential_bounds(
+pub(crate) fn describe_existential_bounds(
     ctx: &InferCtx<'_>,
     bounds: &[(Entity, Vec<TyVar>)],
     bindings: &[(Entity, TyVar)],
@@ -705,6 +748,15 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
         InferError::TypeParamAsValue { .. } => "type parameter cannot be used as a value".into(),
         InferError::TypeMustBeKnown { member, .. } => {
             format!("type must be known to look up '{member}'")
+        },
+        InferError::NotDispatchable { message, .. }
+        | InferError::ExistentialAccess { message, .. }
+        | InferError::NotSelfConforming { message, .. } => message.clone(),
+        InferError::ExistentialBoxMismatch { from, to, .. } => {
+            format!("'{from}' and '{to}' use different boxes")
+        },
+        InferError::ExistentialBindingMismatch { assoc, actual, .. } => {
+            format!("its '{assoc}' is '{actual}'")
         },
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             if *got < *expected {
@@ -925,6 +977,7 @@ mod tests {
             opaque_concrete_type: None,
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
+            existential_conversions: HashMap::default(),
         }
     }
 
@@ -992,6 +1045,22 @@ mod tests {
                 "error_details",
                 TypedBody {
                     error_details: vec!["type 'B'".into()],
+                    ..base.clone()
+                },
+            ),
+            (
+                "existential_conversions",
+                TypedBody {
+                    existential_conversions: [(
+                        e,
+                        ExistentialConversion {
+                            kind: ConversionKind::Box,
+                            from: ty(a),
+                            to: ty(b),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
                     ..base.clone()
                 },
             ),

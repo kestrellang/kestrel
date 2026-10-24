@@ -4,9 +4,14 @@
 //! downstream phases need so analyzers, type inference, move tracking, and MIR
 //! lowering do not each reinterpret raw conformance syntax differently.
 
+pub mod existential;
 pub mod sizedness;
 pub mod staticness;
 
+pub use existential::{
+    Dispatch, ExistentialLayout, Layout, RequirementDispatch, SelfConformance, bound_closure,
+    is_requirement, reachable_protocols, self_conformance,
+};
 pub use sizedness::{
     NominalSizedness, SizeRequirement, SizedLayer, Sizedness, TypeParamSizeRequirement,
     assoc_may_be_unsized, hir_type_is_sized, instance_is_sized, last_stored_field,

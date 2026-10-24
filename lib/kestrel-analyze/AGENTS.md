@@ -252,8 +252,9 @@ Current allocations:
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
     analyzers. **Free E4xx gaps are now E405–E410 and E414.**
   - E1xx E144–E155 are existentials too: E144, E150, E153–E155 are emitted
-    by hir-lower today; E145–E149 and E151–E152 arrive with type checking
-    (existentials M3/M5). Next free E1xx: **E156**.
+    by hir-lower; E145–E148 and E151 by type inference (`InferError`
+    variants, `kestrel-type-infer/src/existential.rs`); E149 and E152 arrive
+    with `as?`/`is` (existentials M5). Next free E1xx: **E156**.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a
     where-clause equality (`Item.Out = X`) is declared by two or more of the

@@ -43,6 +43,7 @@ import std.memory.(ExistentialBox, Layout, Pointer, RawPointer, Allocator, Syste
 // `T: not Copyable, not Sized, not Static`: the payload may be move-only, a
 // raw existential, or reference-bearing. Members that move a `T` say
 // `where T: Sized`.
+@builtin(.OwnedBox)
 public struct OwnedBox[T]: not Copyable where T: not Copyable, T: not Sized, T: not Static {
     fileprivate var ptr: Pointer[T]
     // False once `consumePointee` has handed the payload out and freed the

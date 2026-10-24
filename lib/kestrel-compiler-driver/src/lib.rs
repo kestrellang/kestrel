@@ -365,6 +365,11 @@ fn error_variant_name(err: &InferError) -> &'static str {
         InferError::InstanceMethodAsStatic { .. } => "InstanceMethodAsStatic",
         InferError::TypeParamAsValue { .. } => "TypeParamAsValue",
         InferError::TypeMustBeKnown { .. } => "TypeMustBeKnown",
+        InferError::ExistentialBoxMismatch { .. } => "ExistentialBoxMismatch",
+        InferError::NotDispatchable { .. } => "NotDispatchable",
+        InferError::ExistentialAccess { .. } => "ExistentialAccess",
+        InferError::NotSelfConforming { .. } => "NotSelfConforming",
+        InferError::ExistentialBindingMismatch { .. } => "ExistentialBindingMismatch",
         InferError::TypeArgCountMismatch { .. } => "TypeArgCountMismatch",
         InferError::NoMatchingOverload { .. } => "NoMatchingOverload",
         InferError::MemberwiseInitArity { .. } => "MemberwiseInitArity",
@@ -459,6 +464,21 @@ fn format_error(err: &InferError) -> String {
         InferError::TypeMustBeKnown { member, .. } => {
             format!("TypeMustBeKnown '{}' at {}:{}", member, span.file_id, span.start)
         },
+        InferError::NotDispatchable { message, .. }
+        | InferError::ExistentialAccess { message, .. }
+        | InferError::NotSelfConforming { message, .. } => {
+            format!("{} at {}:{}", message, span.file_id, span.start)
+        },
+        InferError::ExistentialBoxMismatch { from, to, .. } => format!(
+            "ExistentialBoxMismatch '{}' -> '{}' at {}:{}",
+            from, to, span.file_id, span.start
+        ),
+        InferError::ExistentialBindingMismatch {
+            from, to, assoc, ..
+        } => format!(
+            "ExistentialBindingMismatch '{}' -> '{}' ({}) at {}:{}",
+            from, to, assoc, span.file_id, span.start
+        ),
         InferError::TypeArgCountMismatch { expected, got, .. } => {
             format!(
                 "TypeArgCountMismatch expected={} got={} at {}:{}",

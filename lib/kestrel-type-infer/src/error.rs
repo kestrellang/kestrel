@@ -156,6 +156,34 @@ pub enum InferError {
     /// Implicit `it` parameter used in a context expecting != 1 parameter.
     ItWrongArity { expected: usize, span: Span },
 
+    /// E147: an existential converted into an existential with a different
+    /// box. Boxes are never interconverted (existentials design §4). The
+    /// types are described when the error is raised.
+    ExistentialBoxMismatch { from: String, to: String, span: Span },
+
+    /// E145: a requirement that can't be called through an existential
+    /// (static, generic, `Self`-using, or naming an unbound associated
+    /// type). `message` is complete; it names the member and the reason.
+    NotDispatchable { message: String, span: Span },
+
+    /// E146: an existential passed where `T: P` is needed, but `any P: P`
+    /// doesn't hold. `message` names the blocking requirement.
+    NotSelfConforming { message: String, span: Span },
+
+    /// E148: the existential's box doesn't grant the access a call needs
+    /// (`consuming` without `ConsumingIndirection`, `mutating` without
+    /// `MutableIndirection`). `message` is complete.
+    ExistentialAccess { message: String, span: Span },
+
+    /// E151: a value converted to `any P[A = X]` whose own `A` is not `X`.
+    ExistentialBindingMismatch {
+        from: String,
+        to: String,
+        assoc: String,
+        actual: String,
+        span: Span,
+    },
+
     /// A literal of a given kind can't be accepted by the target type.
     /// Emitted when an unresolved literal TyVar meets a concrete type that
     /// doesn't conform to the corresponding `ExpressibleBy*Literal` protocol.
@@ -484,6 +512,38 @@ impl InferError {
                 )
             },
 
+            Self::ExistentialBoxMismatch { from, to, .. } => labeled(
+                format!(
+                    "cannot convert '{from}' to '{to}': existentials in different boxes are \
+                     different types"
+                ),
+                format!("this is '{from}'"),
+            ),
+
+            Self::NotDispatchable { message, .. } => labeled(
+                message.clone(),
+                "not callable through an existential".into(),
+            ),
+
+            Self::ExistentialAccess { message, .. } => {
+                labeled(message.clone(), "the box does not allow this".into())
+            },
+
+            Self::NotSelfConforming { message, .. } => {
+                labeled(message.clone(), "an existential is needed to conform here".into())
+            },
+
+            Self::ExistentialBindingMismatch {
+                from,
+                to,
+                assoc,
+                actual,
+                ..
+            } => labeled(
+                format!("cannot convert '{from}' to '{to}': its '{assoc}' is '{actual}'"),
+                format!("'{from}.{assoc}' is '{actual}'"),
+            ),
+
             Self::ItWrongArity { expected, .. } => labeled(
                 "implicit 'it' parameter requires single-parameter context".into(),
                 format!("expected {expected} parameter(s)"),
@@ -637,6 +697,11 @@ impl InferError {
             Self::CannotInferType { .. } | Self::UnresolvedTypeParam { .. } => "E105",
             Self::DoesNotConform { .. } => "E107",
             Self::ItWrongArity { .. } => "E108",
+            Self::NotDispatchable { .. } => "E145",
+            Self::NotSelfConforming { .. } => "E146",
+            Self::ExistentialBoxMismatch { .. } => "E147",
+            Self::ExistentialAccess { .. } => "E148",
+            Self::ExistentialBindingMismatch { .. } => "E151",
             Self::TypeMismatch { .. } | Self::ConventionMismatch { .. } => "E109",
             Self::ArgCountMismatch { .. }
             | Self::LabelMismatch { .. }
@@ -697,6 +762,11 @@ impl InferError {
             | Self::MemberwiseInitArity { span, .. }
             | Self::MemberwiseInitLabel { span, .. }
             | Self::ItWrongArity { span, .. }
+            | Self::ExistentialBoxMismatch { span, .. }
+            | Self::NotDispatchable { span, .. }
+            | Self::ExistentialAccess { span, .. }
+            | Self::NotSelfConforming { span, .. }
+            | Self::ExistentialBindingMismatch { span, .. }
             | Self::LiteralNotAccepted { span, .. }
             | Self::UnresolvedTypeParam { span, .. }
             | Self::CannotInferType { span, .. }

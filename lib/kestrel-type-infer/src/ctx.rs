@@ -278,6 +278,12 @@ pub struct InferCtx<'a> {
     pub(crate) kind_coercions:
         HashMap<HirExprId, (kestrel_ast::FnTypeKind, kestrel_ast::FnTypeKind)>,
 
+    /// Existential conversions accepted at check leaves (`T → any P`,
+    /// `B[T] → any[B] P`, `any Q → any P`), keyed by the converted
+    /// expression. Surfaced on `TypedBody.existential_conversions`; the
+    /// single source MIR lowering reads them from (existentials design §4).
+    pub(crate) existential_conversions: HashMap<HirExprId, crate::existential::PendingConversion>,
+
     /// HirExprIds of closure-*literal* expressions, recorded during constraint
     /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
     /// convention upgrade to literals only — a named function value's
@@ -434,6 +440,7 @@ impl<'a> InferCtx<'a> {
             closure_it: HashSet::default(),
             kind_flex: HashSet::default(),
             kind_coercions: HashMap::default(),
+            existential_conversions: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,

@@ -786,7 +786,7 @@ pub(crate) fn report_unsolved(ctx: &mut InferCtx<'_>) {
 }
 
 /// Result of attempting to solve a single constraint.
-enum SolveResult {
+pub(crate) enum SolveResult {
     /// Constraint was fully resolved.
     Solved,
     /// Not enough info yet — put back for later.
@@ -1918,6 +1918,17 @@ fn solve_coerce(
         _ => unreachable!(),
     };
 
+    // Existential conversions (Box / Unsize / Upcast, E147, E151) at this
+    // check leaf, before promotion: an existential target is never
+    // `FromValue`.
+    if let Some(result) = crate::existential::try_convert(ctx, from, to, expr, &span) {
+        if matches!(result, SolveResult::Error(_)) {
+            ctx.errored_coerce_exprs.insert(expr);
+            ctx.poison(from);
+        }
+        return result;
+    }
+
     if let Some(method) = ctx.resolver.check_promotion(&from_kind, &to_kind) {
         // Verify the source type matches the `from` method's `value: T` parameter
         // once T is bound to the target's type args. Without this, any source
@@ -1964,19 +1975,6 @@ fn solve_coerce(
                 target_ty: to,
             },
         );
-        return SolveResult::Solved;
-    }
-
-    // Check protocol conformance: if the target is a protocol and the source conforms,
-    // the coercion is valid (protocol existential boxing handled at codegen).
-    // `SelfType { entity: P }` acts as an abstract `P` for this purpose.
-    let to_protocol_entity = match &to_kind {
-        TyKind::Protocol { entity, .. } | TyKind::SelfType { entity } => Some(*entity),
-        _ => None,
-    };
-    if let Some(to_entity) = to_protocol_entity
-        && ctx.resolver.conforms_to(&from_kind, to_entity)
-    {
         return SolveResult::Solved;
     }
 
@@ -2159,8 +2157,11 @@ fn solve_conforms(
                 // is why `projection_base_admits` has to sit here: for an
                 // associated-type projection `conforms_to` is the SOLE decider,
                 // and it answers declares-only (G17 C4).
-                if !(ctx.resolver.conforms_to(&kind, protocol)
-                    && projection_base_admits(ctx, &kind, protocol))
+                // An existential that names `protocol` declares it in effect
+                // (`any P: P`); the kernel decides whether it holds.
+                let declared = ctx.resolver.conforms_to(&kind, protocol)
+                    || crate::existential::names_protocol(ctx, resolved, protocol);
+                if !(declared && projection_base_admits(ctx, &kind, protocol))
                 {
                     false
                 } else {
@@ -2216,7 +2217,11 @@ fn solve_conforms(
                 if poison_ty_on_failure {
                     ctx.poison(ty);
                 }
-                SolveResult::Error(InferError::DoesNotConform { ty, protocol, span })
+                // E146 names what blocks `any P: P`.
+                SolveResult::Error(
+                    crate::existential::self_conformance_error(ctx, resolved, protocol, &span)
+                        .unwrap_or(InferError::DoesNotConform { ty, protocol, span }),
+                )
             }
         },
         TySlot::Redirect(_) => unreachable!("resolve() follows redirects"),
@@ -2521,7 +2526,7 @@ fn tv_definitely_incompatible(ctx: &InferCtx<'_>, tv: TyVar, hir: &kestrel_hir::
 /// inspects (nominal / `()` / `!` / type-param) are reified faithfully; anything
 /// else maps to `HirTy::Error`, which `type_satisfies` permits. Unresolved slots
 /// likewise map to `Error` (permit) — this only runs on otherwise-resolved types.
-fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy {
+pub(crate) fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy {
     let resolved = ctx.resolve(tv);
     match ctx.slot(resolved) {
         TySlot::Resolved(kind) => reify_kind(ctx, &kind.clone()),
@@ -2529,7 +2534,7 @@ fn reify_tv(ctx: &InferCtx<'_>, tv: TyVar) -> kestrel_hir::ty::HirTy {
     }
 }
 
-fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
+pub(crate) fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
     use kestrel_hir::ty::HirTy;
     let span = Span::synthetic(0);
     let reify_args = |args: &[TyVar]| args.iter().map(|&a| reify_tv(ctx, a)).collect();
@@ -2557,6 +2562,26 @@ fn reify_kind(ctx: &InferCtx<'_>, kind: &TyKind) -> kestrel_hir::ty::HirTy {
         TyKind::Ref { pointee, mutating } => HirTy::Ref {
             inner: Box::new(reify_tv(ctx, *pointee)),
             mutating: *mutating,
+            span,
+        },
+        // Keep the bounds: conformance of an existential is decided from
+        // them (`any P: P`, existentials design §6).
+        TyKind::RawExistential { bounds, bindings } => HirTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .map(|(entity, args)| HirTy::Protocol {
+                    entity: *entity,
+                    args: reify_args(args),
+                    span: span.clone(),
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|&(assoc, ty)| kestrel_hir::ty::HirAssocBinding {
+                    assoc,
+                    ty: reify_tv(ctx, ty),
+                })
+                .collect(),
             span,
         },
         _ => HirTy::Error(span),
@@ -2898,7 +2923,7 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
     }
 }
 
-fn solve_associated(
+pub(crate) fn solve_associated(
     ctx: &mut InferCtx<'_>,
     container: TyVar,
     key: crate::constraint::AssocKey,
@@ -2926,6 +2951,13 @@ fn solve_associated(
         TySlot::Resolved(k) => k.clone(),
         _ => unreachable!(),
     };
+
+    // A raw existential pins associated types in its bindings
+    // (`rawany Iterator[Item = Int64]`, existentials design §9).
+    if let Some(bound) = crate::existential::pinned_assoc_of(ctx, &kind, &key) {
+        ctx.equal(result, bound, span);
+        return SolveResult::Solved;
+    }
 
     let found = match key {
         crate::constraint::AssocKey::Entity(assoc) => ctx
@@ -4022,7 +4054,7 @@ fn types_compatible(ctx: &InferCtx<'_>, entity: Entity, args: &[CallArg]) -> boo
 /// returning that pointee TyVar for the caller to requeue the member on.
 /// Returns `None` (no peel) when the receiver isn't a nominal or doesn't
 /// conform to `Indirection`.
-fn try_indirection_peel(
+pub(crate) fn try_indirection_peel(
     ctx: &mut InferCtx<'_>,
     recv_kind: &TyKind,
     receiver: TyVar,
@@ -4143,6 +4175,33 @@ fn solve_member(
         );
     }
 
+    // Existential receiver (`B[rawany P]`): protocol members first, then
+    // the box's own (existentials design §7). Operators and for-in go
+    // through self-conformance instead, so they skip the peel.
+    if !ctx.protocol_dispatch_members.contains(&expr)
+        && let Some(peeled) =
+            crate::existential::peel_for_member(ctx, receiver, &recv_kind, name, &args, expr, &span)
+    {
+        return match peeled {
+            Ok(payload) => solve_member(
+                ctx,
+                payload,
+                name,
+                args,
+                result,
+                expr,
+                is_call,
+                is_static_context,
+                explicit_type_args,
+                span,
+            ),
+            Err(err) => {
+                ctx.poison(result);
+                SolveResult::Error(err)
+            },
+        };
+    }
+
     // If the receiver is an AssocProjection or a TypeAlias whose entity is
     // bound via a where-clause equality AND that bound resolves to a concrete
     // type, substitute the bound TyVar before member dispatch. If the bound is
@@ -4242,9 +4301,22 @@ fn solve_member(
     // A projection receiver carries its base spine so the bound search sees
     // only bounds that name *this* receiver (G17 S4).
     let spine = projection_base_spine(ctx, &recv_kind);
-    let lookup = ctx
-        .resolver
-        .resolve_member_with_base(&recv_kind, spine.as_deref(), name, &args);
+    // On an existential, an extension method of its protocol (and anything
+    // operators / for-in reach) resolves with the box itself as `Self`,
+    // through `any P: P` (existentials design §6).
+    let lookup = match crate::existential::self_conformance_member(
+        ctx,
+        receiver,
+        &recv_kind,
+        name,
+        &args,
+        ctx.protocol_dispatch_members.contains(&expr),
+    ) {
+        Some(res) => Ok(res),
+        None => ctx
+            .resolver
+            .resolve_member_with_base(&recv_kind, spine.as_deref(), name, &args),
+    };
     let resolution = match lookup {
         Ok(res) => res,
         Err(crate::resolve::MemberError::NotFound) => {

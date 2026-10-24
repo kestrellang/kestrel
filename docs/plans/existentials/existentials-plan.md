@@ -286,95 +286,54 @@ M3+ (conversions, member lookup, dispatch, casts).
 `stdlib/` 299/299, `types/pointer` 45/45, `memory_model` 363/374 and
 closures 273/277 with every failure also failing on base `80297742`.
 
-### Phase 6: Conversions at check leaves
+### Phases 6–8: type checking (M3) — done
 
-Files: `lib/kestrel-type-infer/src/solver.rs`, `lib/kestrel-type-infer/src/ctx.rs`,
-`lib/kestrel-type-infer/src/result.rs`
+Landed on `feature/existentials`, after merging `bidi-p0-clean` (`c63bef15`).
+As built:
 
-- [ ] **Replace the old coercion.** Remove the `T → Protocol` coercion
-      (`solver.rs:2080-2091`), including the `SelfType{P}` arm. Replace it
-      with the three rules of §4, applied when the expected type is
-      `B[RawExistential]`:
-      - **Box:** found a sized `T` with `T: every bound` and the
-        associated-type bindings satisfied.
-      - **Unsize:** found `B[T]` with the same `B`.
-      - **Upcast:** found `B[RawExistential Q]` where `Q`'s bounds
-        imply the expected bounds (a parent, or a subset of a composition).
-- [ ] **Record the conversion.** One side table,
-      `ctx.existential_conversions[expr] = ExistentialConversion { kind: Box | Unsize | Upcast { path }, concrete: TyId, target: TyId }`,
-      surfaced through `InferResult` the way `PromotionInfo` is. Single
-      source of truth for MIR lowering.
-- [ ] **Errors.**
-      - Different box → E147.
-      - Associated-type binding not satisfied → E151.
-      - Unknown associated-type name → E150. Checked when lowering the
-        type, in HIR or the type resolver, whichever owns `some P[A = X]`
-        today; use the same place.
-- [ ] **Error paths poison.** Failed conversions poison the expression's
-      type variable rather than unifying with the target. See the
-      `cascading_infer_errors` memory.
-- [ ] **New `InferError` variants** need arms in `error.rs`, in
-      `result.rs` `describe_error`, and in the driver's
-      `describe`/`format_error` (`lib/kestrel-type-infer/AGENTS.md`).
-
-### Phase 7: Dispatchability and member lookup
-
-Files: `lib/kestrel-semantics/src/` (new query), `lib/kestrel-type-infer/src/solver.rs`,
-`lib/kestrel-type-infer/src/resolve.rs`
-
-- [ ] **`ExistentialLayout(protocol)` query.** It returns:
-      - the ordered dispatchable requirements;
-      - the reason each excluded requirement is excluded (static,
-        generic, `Self` outside the receiver, or the names of the
-        associated types it mentions);
-      - the parent list.
-
-      It depends only on the protocol's declaration (design §5,
-      incremental). Type-infer (for errors) and MIR (for slot indices)
-      both read it; nobody recomputes slot order.
-- [ ] **Protocol-first peel.** In `solve_member`, when the receiver is
-      `B[RawExistential]`, peel *before* wrapper lookup, like the eager
-      `&T` arm (`solver.rs:4255-4290`), and resolve against the bounds.
-      Fall back to the box's own members only on a miss. Record it in
-      `ctx.indirection_peels` the same way, so the MIR replay
-      (`mir-lower/src/body/expr.rs:617-690`) needs no new path for the
-      peel itself.
-- [ ] **Requirement access check.**
-      - A resolved requirement that isn't dispatchable → E145, with the
-        reason from `ExistentialLayout`.
-      - The box lacks the access the requirement needs (mutating with no
-        `MutableIndirection`, consuming with no `ConsumingIndirection`)
-        → E148.
-- [ ] **Extension methods.** Protocol extension methods resolve through
-      self-conformance (Phase 8), not the table.
-
-### Phase 8: Self-conformance, associated types, composition
-
-Files: `lib/kestrel-type-infer/src/entail_layer.rs`,
-`lib/kestrel-type-infer/src/resolve.rs`, conformance queries in
-`lib/kestrel-semantics/src/`
-
-- [ ] **Synthesized conformances.** In the conformance query (the
-      `conforms_to` / `ConformingProtocolInstantiations` path):
-      - `RawExistential{bounds}` conforms to each bound and each bound's
-        parents when every requirement is dispatchable.
-      - `B[RawExistential]` conforms when, in addition, `B` grants every
-        requirement's access.
-- [ ] **Remove the old `Holds` shortcut.** Drop the "protocol-typed
-      receiver is an existential" case (`entail_layer.rs:218-220`); the
-      synthesized conformance replaces it.
-- [ ] **E146.** When a `T: P` obligation fails only because
-      self-conformance doesn't hold, report E146 naming the blocking
-      requirement (from `ExistentialLayout`), not a generic "does not
-      conform".
-- [ ] **Associated-type projection.** On `RawExistential` (and on the
-      box, through self-conformance), projecting an associated type
-      returns the bound type. An unbound associated type has no
-      projection; members mentioning it are excluded by Phase 7.
-- [ ] **Operators and `for-in`** on existentials go through
-      self-conformance (`ctx.protocol_dispatch_members` stays unpeeled).
-- [ ] **Triage:** every diagnostics test in `types/existential/` passes.
-      This is the **M3 exit**.
+- **Conversions** (`kestrel-type-infer/src/existential.rs::try_convert`),
+  called from `solve_coerce` at the check leaf, before `FromValue`
+  promotion. Box (sized `T: P`), Unsize (`B[T]`), Upcast (same box, every
+  target bound refined by a source bound, bindings equal). Recorded in
+  `InferCtx::existential_conversions` and surfaced as
+  `TypedBody::existential_conversions` (`ConversionKind`, resolved
+  `from`/`to`) for MIR. The old `T → Protocol` / `SelfType` coercion arm is
+  gone.
+  - E147 for a different box; E151 when a pinned associated type differs
+    (the source's projection is solved on the spot, so the message names
+    the actual type); a non-conforming payload is the ordinary E107.
+- **Dispatchability** (`kestrel-semantics/src/existential.rs`):
+  `RequirementDispatch` (static / initializer, generic, `Self` outside the
+  receiver, or the associated types it needs) and `ExistentialLayout`
+  (own requirements in declaration order + parents). Declaration-only
+  queries; MIR reads the same layout for slot order in M4.
+- **Member lookup.** `peel_for_member`: on `B[rawany P]`, a requirement of
+  `P` is checked (E145, E148) and the box is peeled eagerly, before the
+  box's own members. Extension methods, and every member an operator or
+  `for-in` reaches, resolve with the **box** as `Self` through
+  self-conformance (`self_conformance_member`). The resolver treats
+  `RawExistential` like `Opaque` (bounds) for members and declared
+  conformance.
+- **Self-conformance** (`entail_layer.rs::existential_supply`): holds for
+  a protocol in the bounds' declared-refinement closure when every
+  requirement is dispatchable and the box grants `MutableIndirection` /
+  `ConsumingIndirection` as needed; a protocol reached by a blanket
+  `extend Q: R` (`Iterator → Iterable`) holds through `Q`. E146 names the
+  blocking requirement. `reify_kind` / `solver_ety` now keep a raw
+  existential's bounds instead of erasing it to `Error`.
+- **Associated types.** A projection on `rawany P[A = X]` (by entity or
+  name) or on its box (by entity only, so `Indirection.Target` is never
+  shadowed) returns the binding.
+- **New builtins:** `MutableIndirection`, `OwnedBox` (for the E148 hint).
+- **Not done here:** the `Protocol`-is-`Copyable`/`Static` arms stay. A
+  bare protocol is no longer a value type (E144), and the arms still serve
+  `Protocol` kinds in bound and `Self` positions, so deleting them buys
+  nothing. Mutation through `any[CowBox] P` waits for M4
+  (`CowBox: MutableIndirection` is sized-only until a payload can be
+  cloned through its table).
+- **Open:** whether an existential converts implicitly into a different
+  box via `any P: P` (`nested_existential_exec`) or that is E147
+  (`any_box_mismatch`). The two tests disagree; E147 is what's built.
 
 ### Phase 9: MIR types, fat pointers, unsized layout
 

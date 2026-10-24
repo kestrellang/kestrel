@@ -452,10 +452,11 @@ impl TypeResolver for WorldResolver<'_> {
             return self.resolve_projection_member(*entity, None, name, _args);
         }
 
-        // Opaque types: delegate member resolution to the protocol bounds.
-        // Only the protocol interface and protocol extensions are visible;
-        // concrete-type extensions must NOT leak through.
-        if let TyKind::Opaque { bounds, .. } = receiver_ty {
+        // Opaque types and raw existentials: delegate member resolution to
+        // the protocol bounds. Only the protocol interface and protocol
+        // extensions are visible; concrete-type extensions must NOT leak
+        // through.
+        if let TyKind::Opaque { bounds, .. } | TyKind::RawExistential { bounds, .. } = receiver_ty {
             let bound_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
             let arg_labels: Vec<Option<&str>> = _args.iter().map(|a| a.label.as_deref()).collect();
             match self.select_bound_candidate(&bound_protocols, name, &arg_labels)? {
@@ -800,7 +801,7 @@ impl TypeResolver for WorldResolver<'_> {
                 let bound_protocols = self.collect_assoc_type_protocol_bounds(*assoc);
                 bound_protocols.contains(&protocol)
             },
-            TyKind::Opaque { bounds, .. } => {
+            TyKind::Opaque { bounds, .. } | TyKind::RawExistential { bounds, .. } => {
                 // Expand all bounds through superprotocol chains
                 let mut all_protocols: Vec<Entity> = bounds.iter().map(|(p, _)| *p).collect();
                 let mut visited = crate::collections::HashSet::default();

@@ -268,6 +268,9 @@ pub enum Builtin {
     /// `Indirection` — opt-in transparent member access: `wrapper.foo` peels
     /// to `Target.foo` via `pointeeRef()`. Explicit conformance, non-marker.
     Indirection,
+    /// `MutableIndirection` — the wrapper also hands out `&mutating Target`.
+    /// A `mutating` requirement called through `any[B] P` needs it.
+    MutableIndirection,
 
     // ===== Shared-ownership box (implicit boxing) =====
     /// The generic struct the compiler instantiates for implicit boxing —
@@ -304,6 +307,9 @@ pub enum Builtin {
     /// A box that can give up its payload: consuming requirements and
     /// `consuming x as? T` go through `consumePointee`.
     ConsumingIndirection,
+    /// The stdlib's single-owner box (`OwnedBox`): the box diagnostics
+    /// suggest when an existential's payload must be consumed.
+    OwnedBox,
 }
 
 impl Builtin {
@@ -509,6 +515,7 @@ impl Builtin {
 
             // Indirection — resolves by source name (auto-imported from std.core).
             Self::Indirection => "Indirection",
+            Self::MutableIndirection => "MutableIndirection",
 
             // Shared box — a display name only, deliberately neither the
             // conformer's name (`RcBox`) nor the protocol's (`SharedBox`):
@@ -529,6 +536,7 @@ impl Builtin {
             Self::Sized => "Sized",
             Self::ExistentialBox => "ExistentialBox",
             Self::ConsumingIndirection => "ConsumingIndirection",
+            Self::OwnedBox => "OwnedBox",
         }
     }
 
@@ -739,6 +747,7 @@ impl Builtin {
 
             // Indirection / smart-pointer member peel
             "Indirection" => Some(Self::Indirection),
+            "MutableIndirection" => Some(Self::MutableIndirection),
 
             // Shared-ownership box (implicit boxing)
             "SharedBox" => Some(Self::SharedBox),
@@ -751,6 +760,7 @@ impl Builtin {
             "Sized" => Some(Self::Sized),
             "ExistentialBox" => Some(Self::ExistentialBox),
             "ConsumingIndirection" => Some(Self::ConsumingIndirection),
+            "OwnedBox" => Some(Self::OwnedBox),
 
             _ => None,
         }
@@ -967,7 +977,7 @@ impl Builtin {
 
             // Indirection: non-marker protocol with a required `pointeeRef()`
             // method; explicit conformance (NOT implicit, unlike Copyable).
-            Self::Indirection => BuiltinKind::protocol(),
+            Self::Indirection | Self::MutableIndirection => BuiltinKind::protocol(),
             // Structural like `Static`: computed, never declared.
             Self::Sized => BuiltinKind::Protocol {
                 implicit_conformance: true,
@@ -986,6 +996,7 @@ impl Builtin {
             // Unique box: the annotated symbol is the generic *struct* the
             // compiler instantiates (`UniqueBox`).
             Self::UniqueBox => BuiltinKind::Struct,
+            Self::OwnedBox => BuiltinKind::Struct,
 
             // Well-known types — `Bool` resolves by name first, but carries
             // `@builtin(.Bool)` as the attribute anchor so strategy 2 works too.

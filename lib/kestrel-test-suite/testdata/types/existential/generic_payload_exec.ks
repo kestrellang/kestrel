@@ -19,7 +19,7 @@ extend Box[Int64]: Sized2 {
     public func weight() -> Int64 { self.v }
 }
 extend Box[String]: Sized2 {
-    public func weight() -> Int64 { self.v.byteCount }
+    public func weight() -> Int64 { self.v.bytes.count }
 }
 
 @main

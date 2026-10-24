@@ -32,6 +32,7 @@ public protocol Indirection {
 /// `pointeeMutRef()` is `mutating` so a copy-on-write wrapper can fork its
 /// storage before handing out the mutable view; wrappers that don't need to
 /// (raw `Pointer`, `RcBox`) still mark it `mutating` — the marker is harmless.
+@builtin(.MutableIndirection)
 public protocol MutableIndirection: Indirection {
     /// A mutating reference to the pointee. Member WRITES / RMW / mutating
     /// methods peel through this.

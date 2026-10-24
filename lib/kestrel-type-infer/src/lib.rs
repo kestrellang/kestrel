@@ -20,6 +20,7 @@ mod entail_layer;
 mod solver_entail;
 pub mod obligations;
 pub mod error;
+mod existential;
 pub mod generate;
 pub mod resolve;
 pub mod result;
