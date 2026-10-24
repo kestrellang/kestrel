@@ -74,3 +74,22 @@ with `alloc_seg` / `record_segments`. A local with no single declaring
 identifier — a desugaring temporary, `self`, an implicit `it`, a struct-pattern
 shorthand — stays UNRECORDED on purpose, so rename/references fail closed
 instead of guessing (audit F2).
+
+## A protocol is a type only through `any` / `some` (E144)
+
+`lower_ast_type` is the **value-position** entry point: a path that resolves
+to a protocol there is E144 (`reject_bare_protocol`), never `HirTy::Protocol`.
+A position that names the protocol *itself* lowers through
+`lower_bound_type` instead, which resolves the same path without E144:
+
+- `some P` and `any P` bounds,
+- `extend P` targets (`lower_self_hir_ty`),
+- the `P` of a qualified `P.Item` (`build_assoc_projection_base`).
+
+When you add a new place that names a protocol (a new bound syntax, a new
+qualified form), route it through `lower_bound_type`. If it goes through
+`lower_ast_type`, every stdlib `extend Iterator { … }` style use starts
+failing with E144 (the M1 work hit both of those cases).
+Unused declarations never get lowered, so `type_annotation_resolution`
+forces the lowering when an annotation names a protocol in a value position
+(the same gate it uses for reference types).
