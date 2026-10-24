@@ -782,6 +782,42 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
 
+        // Unapplied static METHOD as a value (`let f = T.zero`, G26): a
+        // function value, not a call. A protocol requirement named through a
+        // type param / projection dispatches through the witness of the
+        // receiver type, so mono binds it to the conformer's implementation.
+        let is_method =
+            resolved.is_some_and(|e| self.ctx.world.get::<NodeKind>(e) == Some(&NodeKind::Function));
+        let value_ty = self.resolve_expr_type(expr_id);
+        if is_method
+            && is_static
+            && matches!(
+                self.ctx.module.ty_arena.get(value_ty),
+                MirTy::FuncThick { .. } | MirTy::FuncThin { .. }
+            )
+        {
+            let method = resolved.unwrap();
+            self.ctx.register_name(method);
+            let self_type = self.type_from_type_ref(base);
+            let method_type_args = self.resolve_type_args(expr_id);
+            let callee = match self.ctx.is_protocol_method(method) {
+                Some(protocol) => {
+                    self.ctx.register_name(protocol);
+                    Callee::Witness {
+                        protocol,
+                        method: self.ctx.witness_method_key(method),
+                        self_type,
+                        method_type_args,
+                    }
+                },
+                None => {
+                    let type_args = self.prepend_receiver_type_args(self_type, method_type_args);
+                    Callee::direct_with_args(method, type_args, None)
+                },
+            };
+            return self.emit_apply_partial(callee, vec![], value_ty);
+        }
+
         // Computed property → getter call
         if is_callable {
             // Stage 1.5 read-provider routing: a computed property with a

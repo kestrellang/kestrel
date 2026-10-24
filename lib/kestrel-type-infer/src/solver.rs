@@ -4772,6 +4772,36 @@ fn solve_member(
         }
     }
 
+    // An UNAPPLIED static method (`let f = T.zero`) is a function value:
+    // its type is `(params) -> ret`, not its call result. `Box.stat` reaches
+    // the same type through name resolution; a static requirement named
+    // through a type parameter or projection (`T.zero`, `B.Item.zero`)
+    // arrives here as a field access (G26).
+    if !is_call
+        && resolution.kind == crate::resolve::MemberKind::Method
+        && ctx
+            .query_ctx
+            .has::<kestrel_ast_builder::Static>(resolution.entity)
+    {
+        let params: Vec<TyVar> = resolution
+            .param_types
+            .iter()
+            .map(|p| lower_hir_ty_sub(ctx, &p.ty, self_entity, receiver, &subs))
+            .collect();
+        let conventions = vec![kestrel_ast::ParamConvention::Consuming; params.len()];
+        let ret = lower_opaque_aware(
+            ctx,
+            &resolution.return_type,
+            resolution.entity,
+            self_entity,
+            receiver,
+            &subs,
+        );
+        let fn_tv = ctx.function_conv(kestrel_ast::FnTypeKind::Normal, params, conventions, ret);
+        ctx.equal(result, fn_tv, span);
+        return SolveResult::Solved;
+    }
+
     // Equate result with return type (ref-aware: scrutinee decay / pinned
     // result — see bind_call_result)
     let ret_tv = lower_opaque_aware(
