@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@builtin("Copyable")
+@builtin("Copyable") // ERROR: expected a builtin like '.Name', found '"Copyable"'
 protocol Foo {}

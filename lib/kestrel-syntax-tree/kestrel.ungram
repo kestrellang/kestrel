@@ -51,7 +51,7 @@ ImportItem =
   'ident' ('as' alias:'ident')?
 
 ExtensionDeclaration =
-  'extend' Ty ConformanceList? WhereClause? ExtensionBody
+  AttributeList? 'extend' Ty ConformanceList? WhereClause? ExtensionBody
 
 ExtensionBody =
   '{' Item* '}'
@@ -102,7 +102,7 @@ InitEffect =
   '?' | 'throws' Ty
 
 DeinitDeclaration =
-  'deinit' FunctionBody
+  AttributeList? 'deinit' FunctionBody
 
 FunctionBody =
   CodeBlock

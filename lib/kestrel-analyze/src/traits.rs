@@ -80,7 +80,7 @@ pub enum AnalyzerId {
     ExtensionConflict,
     ConformanceCompleteness,
     TypeAnnotationResolution,
-    UnknownAttribute,
+    AttributeValidation,
     EntryPoint,
 }
 
@@ -148,7 +148,7 @@ impl AnalyzerId {
             AnalyzerId::ExtensionConflict => "extension_conflict",
             AnalyzerId::ConformanceCompleteness => "conformance_completeness",
             AnalyzerId::TypeAnnotationResolution => "type_annotation_resolution",
-            AnalyzerId::UnknownAttribute => "unknown_attribute",
+            AnalyzerId::AttributeValidation => "attribute_validation",
             AnalyzerId::EntryPoint => "entry_point",
         }
     }

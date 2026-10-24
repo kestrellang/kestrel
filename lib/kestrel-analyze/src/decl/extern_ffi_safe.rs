@@ -5,7 +5,6 @@
 //! - Cannot be generic (no stable ABI for generics)
 //! - Cannot have a body (implemented externally)
 //! - Parameters cannot use mutating access mode (must be consuming)
-//! - Must specify a calling convention (e.g. @extern(.C))
 //!
 //! ## Diagnostics
 //!
@@ -13,13 +12,16 @@
 //! - E609: extern function cannot be generic
 //! - E610: extern function cannot have a body
 //! - E611: extern parameter must use consuming access mode
-//! - E612: @extern requires a calling convention
+//!
+//! E612 (`@extern` requires a calling convention) is reported by the
+//! `AttributeValidation` analyzer, from the attribute registry.
 
 use crate::context::DeclContext;
 use crate::diagnostic::*;
 use crate::traits::{AnalyzerId, DeclCheck, Describe};
 use crate::util;
-use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, TypeParams, Valued};
+use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{Callable, Intrinsic, NodeKind, TypeParams, Valued};
 use kestrel_hir::builtin::Builtin;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::LowerCallableTypes;
@@ -50,12 +52,6 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
         default_severity: Severity::Error,
         category: Category::Correctness,
     },
-    DiagnosticDescriptor {
-        id: "E612",
-        name: "extern_requires_calling_convention",
-        default_severity: Severity::Error,
-        category: Category::Correctness,
-    },
 ];
 
 pub struct ExternFfiSafeAnalyzer;
@@ -75,30 +71,14 @@ impl DeclCheck for ExternFfiSafeAnalyzer {
     }
 
     fn check(&self, cx: &DeclContext<'_>) -> Vec<AnalyzeDiagnostic> {
-        let Some(attrs) = cx.query.get::<Attributes>(cx.entity) else {
+        // `mentions`: the FFI rules hold for a malformed `@extern` too; its
+        // argument errors (E612, E903) are AttributeValidation's.
+        if !attrs_of(cx.query, cx.entity).mentions("extern") {
             return vec![];
-        };
-        let Some(extern_attr) = attrs.0.iter().find(|a| a.name == "extern") else {
-            return vec![];
-        };
+        }
 
         let span = util::entity_span(cx.query, cx.entity);
         let mut diags = Vec::new();
-
-        // @extern requires a calling convention argument like @extern(.C)
-        if extern_attr.args.is_empty() {
-            diags.push(AnalyzeDiagnostic {
-                descriptor_id: "E612",
-                severity: Severity::Error,
-                message: "@extern requires a calling convention".into(),
-                labels: vec![DiagLabel {
-                    span: span.clone(),
-                    message: "missing calling convention (e.g. @extern(.C))".into(),
-                    is_primary: true,
-                }],
-                notes: vec![],
-            });
-        }
 
         // Extern functions cannot be generic — if generic, skip FFISafe checks
         // since type params can't be checked for conformance

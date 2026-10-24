@@ -19,9 +19,9 @@ import std.text.(String)
 ///     // macOS-specific path
 /// }
 /// ```
-@platform(.darwin)
+@platform(.Darwin)
 public func platform() -> String { "darwin" }
 
-/// Linux-specific definition of `platform()`. Selected by `@platform(.linux)`.
-@platform(.linux)
+/// Linux-specific definition of `platform()`. Selected by `@platform(.Linux)`.
+@platform(.Linux)
 public func platform() -> String { "linux" }

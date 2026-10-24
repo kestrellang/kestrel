@@ -7,7 +7,8 @@
 
 use std::path::PathBuf;
 
-use kestrel_ast_builder::{Attributes, FileId, FilePath, Settable, Valued};
+use kestrel_ast_builder::attrs::attrs_of;
+use kestrel_ast_builder::{FileId, FilePath, Settable, Valued};
 use kestrel_hecs::Entity;
 use kestrel_mir::body::OssaBody;
 use kestrel_mir::item::function::{FunctionDef, FunctionKind};
@@ -419,10 +420,8 @@ fn extract_literal_initializer(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Opti
 }
 
 fn extract_file_constant(ctx: &LowerCtx, entity: Entity, ty: TyId) -> Option<FileConstantData> {
-    let attrs = ctx.world.get::<Attributes>(entity)?;
-    let attr = attrs.0.iter().find(|a| a.name == "fileconstant")?;
-    let raw = &attr.args.first()?.value;
-    let relative_path = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"'))?;
+    let attrs = attrs_of(&ctx.query, entity);
+    let relative_path = attrs.file_constant()?;
 
     let element_ty = match ctx.module.ty_arena.get(ty) {
         MirTy::Named { type_args, .. } if type_args.len() == 1 => type_args[0],
