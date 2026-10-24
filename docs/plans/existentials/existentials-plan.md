@@ -489,7 +489,7 @@ Files: `lib/kestrel-mir/src/ty.rs`, `lib/kestrel-mir/src/passes/layout.rs`,
       pointer to call the table's drop slot. Lowered in `intrinsic.rs`
       (`:1316`, `:1417`). On a sized pointee they fold to the static values.
 - [ ] **Unsized function-table pointer.** `Pointer[RcBoxStorage[rawany P]]`
-      carries the table of the `(RcBox, T, P)` table. The table pointer passes
+      carries the `(RcBox, T, P)` table. The table pointer passes
       through the unsized-tail struct unchanged.
 
 ### Phase 10: Function tables, thunks, dynamic calls
