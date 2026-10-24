@@ -75,6 +75,7 @@ pub enum AnalyzerId {
     TypeAliasValidation,
     RestrictedSignature,
     AttributeSemantics,
+    DeriveSite,
 
     // Compilation checks (run via `analyze_compilation`, never the `Analyze` query)
     TypeAliasCycles,
@@ -149,6 +150,7 @@ impl AnalyzerId {
             AnalyzerId::TypeAliasValidation => "type_alias_validation",
             AnalyzerId::RestrictedSignature => "restricted_signature",
             AnalyzerId::AttributeSemantics => "attribute_semantics",
+            AnalyzerId::DeriveSite => "derive_site",
             AnalyzerId::TypeAliasCycles => "type_alias_cycles",
             AnalyzerId::StructCycles => "struct_cycles",
             AnalyzerId::ProtocolCycles => "protocol_cycles",

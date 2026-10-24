@@ -143,9 +143,11 @@ impl Compiler {
     /// one place that gives every consumer (CLI, LSP, test harness) the same
     /// deterministic order: by file, then primary-label position.
     pub fn diagnostics(&self) -> Vec<codespan_reporting::diagnostic::Diagnostic<usize>> {
-        let mut diags = self
+        let diags = self
             .world
             .accumulated::<codespan_reporting::diagnostic::Diagnostic<usize>>();
+        let derived = diagnostic::DerivedSources::new(&self.world, self.root);
+        let mut diags: Vec<_> = diags.into_iter().filter_map(|d| derived.remap(d)).collect();
         diags.sort_by_cached_key(diagnostic::source_order);
         diags
     }
@@ -182,7 +184,8 @@ impl Compiler {
     }
 
     /// Despawn the file entity and every declaration entity owned by it
-    /// (anything carrying `FileId(file_entity)`). Drops the path from
+    /// (anything carrying `FileId(file_entity)`, or declared in a file its
+    /// `@derive`s expanded to). Drops the path from
     /// the path → entity map so a subsequent `set_source` allocates a
     /// fresh entity. Modules are not despawned — they span files and
     /// stay live for other consumers.
@@ -191,10 +194,18 @@ impl Compiler {
     /// `build()` on its new source. Phase 1 calls this for every user
     /// file on any user-side change; Phase 2 calls it per-file.
     pub fn unbuild_file(&mut self, file_entity: Entity) {
+        // The file, and the files its `@derive`s expanded to.
+        let mut files: Vec<Entity> = self
+            .world
+            .iter_component::<kestrel_ast_builder::DerivedFile>()
+            .filter_map(|(e, d)| (d.origin == file_entity).then_some(e))
+            .collect();
+        files.push(file_entity);
         let owned: Vec<Entity> = self
             .world
             .iter_component::<kestrel_ast_builder::FileId>()
-            .filter_map(|(e, fid)| (fid.0 == file_entity).then_some(e))
+            .filter_map(|(e, fid)| files.contains(&fid.0).then_some(e))
+            .chain(files.iter().copied().filter(|&f| f != file_entity))
             .collect();
         for e in owned {
             self.world.despawn(e);
@@ -998,6 +1009,43 @@ mod tests {
             !c.files.contains_key("t.ks"),
             "path entry should be dropped"
         );
+    }
+
+    #[test]
+    fn unbuild_file_removes_derived_declarations() {
+        // `@derive` builds its extensions in a file of their own; unbuilding
+        // the source file removes that file and everything in it.
+        use kestrel_ast_builder::{DerivedFile, DerivedFrom, FileId};
+        let mut c = Compiler::new();
+        let f = c.set_source(
+            "t.ks",
+            "module M\n@derive(Equatable) struct Foo { var x: Int64 }".into(),
+        );
+        c.build(f);
+
+        let derived_files: Vec<_> = c
+            .world
+            .iter_component::<DerivedFile>()
+            .filter(|(_, d)| d.origin == f)
+            .map(|(e, _)| e)
+            .collect();
+        assert_eq!(derived_files.len(), 1, "one file per '@derive'");
+        let derived_decls: Vec<_> = c
+            .world
+            .iter_component::<FileId>()
+            .filter(|(_, fid)| derived_files.contains(&fid.0))
+            .map(|(e, _)| e)
+            .collect();
+        assert!(
+            derived_decls.iter().any(|&e| c.world.has::<DerivedFrom>(e)),
+            "the derived extension is built"
+        );
+
+        c.unbuild_file(f);
+
+        for e in derived_files.iter().chain(&derived_decls) {
+            assert!(!c.world.is_alive(*e), "{e:?} should be despawned");
+        }
     }
 
     #[test]

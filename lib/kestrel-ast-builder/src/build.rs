@@ -37,7 +37,6 @@ pub fn build_declarations(
     root: Entity,
     target: Option<&TargetConfig>,
 ) {
-    let file_id = file_entity.index();
     let Some(file) = ast::SourceFile::cast(tree.clone()) else {
         return;
     };
@@ -54,61 +53,116 @@ pub fn build_declarations(
         .map(|m| module::resolve_module_path(world, root, &m))
         .unwrap_or(root);
 
+    let built = build_items(
+        world,
+        file_entity,
+        file.items().collect(),
+        module_parent,
+        target,
+    );
+    crate::derive::expand(world, file_entity, module_parent, target, &built);
+}
+
+/// What [`build_items`] built, for passes that run after it.
+#[derive(Default)]
+pub(crate) struct Built {
+    /// Container entities built directly under `outer`.
+    pub top_level: Vec<Entity>,
+    /// Every struct, enum and extension, with its syntax.
+    pub containers: Vec<(Entity, ast::Item)>,
+}
+
+/// Build `items` (and, recursively, their members) under `outer`.
+pub(crate) fn build_items(
+    world: &mut World,
+    file_entity: Entity,
+    items: Vec<ast::Item>,
+    outer: Entity,
+    target: Option<&TargetConfig>,
+) -> Built {
+    let file_id = file_entity.index();
+    let mut built = Built::default();
     // (item, parent). Pushed in reverse so items are built in source order.
     let mut stack: Vec<(ast::Item, Entity)> = Vec::new();
-    push_items(&mut stack, file.items().collect(), module_parent);
+    push_items(&mut stack, items, outer);
 
-    while let Some((item, parent)) = stack.pop() {
+    while let Some((item, item_parent)) = stack.pop() {
         // Skip declarations excluded by target-conditional attributes (@platform, etc.)
         if is_excluded_by_target(&item, target) {
             continue;
         }
+        let parent = item_parent;
         use ast::Item as I;
-        match &item {
+        let entity = match &item {
             I::StructDeclaration(n) => {
                 let (entity, members) =
                     struct_decl::build_struct(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                built.containers.push((entity, item.clone()));
+                Some(entity)
             },
             I::EnumDeclaration(n) => {
                 let (entity, members) =
                     enum_decl::build_enum(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                built.containers.push((entity, item.clone()));
+                Some(entity)
             },
             I::ProtocolDeclaration(n) => {
                 let (entity, members) =
                     protocol::build_protocol(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                Some(entity)
             },
             I::ExtensionDeclaration(n) => {
                 let (entity, members) =
                     extension::build_extension(world, n, parent, file_entity, file_id);
                 push_items(&mut stack, members, entity);
+                built.containers.push((entity, item.clone()));
+                Some(entity)
             },
             I::EnumCaseDeclaration(n) => {
-                enum_decl::build_enum_case(world, n, parent, file_entity, file_id)
+                enum_decl::build_enum_case(world, n, parent, file_entity, file_id);
+                None
             },
             I::FunctionDeclaration(n) => {
-                function::build_function(world, n, parent, file_entity, file_id)
+                function::build_function(world, n, parent, file_entity, file_id);
+                None
             },
             I::InitializerDeclaration(n) => {
-                function::build_initializer(world, n, parent, file_entity, file_id)
+                function::build_initializer(world, n, parent, file_entity, file_id);
+                None
             },
             I::DeinitDeclaration(n) => {
-                function::build_deinit(world, n, parent, file_entity, file_id)
+                function::build_deinit(world, n, parent, file_entity, file_id);
+                None
             },
-            I::FieldDeclaration(n) => field::build_field(world, n, parent, file_entity, file_id),
+            I::FieldDeclaration(n) => {
+                field::build_field(world, n, parent, file_entity, file_id);
+                None
+            },
             I::SubscriptDeclaration(n) => {
-                subscript::build_subscript(world, n, parent, file_entity, file_id)
+                subscript::build_subscript(world, n, parent, file_entity, file_id);
+                None
             },
             I::TypeAliasDeclaration(n) => {
-                type_alias::build_type_alias(world, n, parent, file_entity, file_id)
+                type_alias::build_type_alias(world, n, parent, file_entity, file_id);
+                None
             },
-            I::ImportDeclaration(n) => import::build_import(world, n, parent, file_entity, file_id),
-            // Handled above, before any item is built.
-            I::ModuleDeclaration(_) => {},
+            I::ImportDeclaration(n) => {
+                import::build_import(world, n, parent, file_entity, file_id);
+                None
+            },
+            // Handled by `build_declarations`, before any item is built.
+            I::ModuleDeclaration(_) => None,
+        };
+        if let Some(entity) = entity
+            && item_parent == outer
+        {
+            built.top_level.push(entity);
         }
     }
+    built
 }
 
 /// Push `items` so they pop in source order.
@@ -142,7 +196,7 @@ fn item_attributes(item: &ast::Item) -> Vec<ast::Attribute> {
 /// registry schema and parser `AttrsOf` uses. A malformed `@platform` (bad
 /// arguments, or written twice) never excludes: the declaration is kept so
 /// `AttrsOf` can report it.
-fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
+pub(crate) fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
     let Some(target_os) = target.and_then(|t| t.os) else {
         return false; // no OS target set — don't filter
     };

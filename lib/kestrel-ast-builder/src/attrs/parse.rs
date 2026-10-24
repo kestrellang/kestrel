@@ -571,6 +571,16 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
                 name.to_string(),
             )
         },
+        "default" => ParsedAttr::Default,
+        "derive" => ParsedAttr::Derive(
+            args.all(0)
+                .iter()
+                .filter_map(|v| match v {
+                    AttrValue::Path(p) => Some(p.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
         "deprecated" => ParsedAttr::Restricted(Restriction {
             kind: RestrictionKind::Deprecated,
             message: args.str(0),

@@ -163,6 +163,17 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "Marks a standard-library declaration as a language item the compiler refers to.",
     },
     AttrDef {
+        name: "default",
+        targets: TargetSet::of(&[T::EnumCase]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::Build,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Marks the case a derived 'Defaultable' enum starts as: '@derive(Defaultable)' on an enum needs exactly one '@default' case.",
+    },
+    AttrDef {
         name: "deprecated",
         targets: USABLE,
         params: &[
@@ -180,6 +191,26 @@ pub static REGISTRY: &[AttrDef] = &[
         needs_body: false,
         repeat_hint: None,
         doc: "Warns at every use of the declaration (E908). '@deprecated(\"message\", since: \"0.18\", replacement: \"newName\")'; all arguments are optional.",
+    },
+    AttrDef {
+        name: "derive",
+        targets: TargetSet::of(&[T::Struct, T::Enum, T::Extension]),
+        params: &[ParamDef {
+            label: None,
+            kind: ParamKind::Path,
+            required: true,
+            variadic: true,
+            missing_code: None,
+            what: "a protocol to derive: '@derive(Equatable)'",
+        }],
+        // One list per declaration, so the conformances it adds read in
+        // one place.
+        repeatable: false,
+        phase: AttrPhase::Build,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: Some("list every protocol in one '@derive(...)'"),
+        doc: "Has the compiler write the conformance: '@derive(Equatable, Hashable)'. Derivable: Equatable, Hashable, Comparable, Formattable, Defaultable. On a generic type, each type parameter used by a field must conform too.",
     },
     AttrDef {
         name: "doc",

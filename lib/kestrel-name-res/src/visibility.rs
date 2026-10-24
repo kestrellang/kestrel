@@ -3,7 +3,7 @@
 //! Determines whether a declaration is visible from a given context,
 //! respecting public/private/internal/fileprivate modifiers.
 
-use kestrel_ast_builder::{FileId, Name, NodeKind, Vis};
+use kestrel_ast_builder::{DerivedFrom, FileId, Name, NodeKind, Vis};
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 
 use crate::helpers::{ancestor_module, is_ancestor_of};
@@ -24,6 +24,7 @@ impl QueryFn for IsVisibleFrom {
     type Output = bool;
 
     fn execute(&self, ctx: &QueryContext<'_>) -> bool {
+        let context = derived_context(ctx, self.context);
         match ctx.get::<Vis>(self.target) {
             // No visibility modifier → always visible (default)
             None => true,
@@ -33,12 +34,12 @@ impl QueryFn for IsVisibleFrom {
                 let Some(scope) = ctx.parent_of(self.target) else {
                     return true;
                 };
-                is_ancestor_of(ctx, scope, self.context)
+                is_ancestor_of(ctx, scope, context)
             },
             Some(Vis::Fileprivate) => {
                 // Visible within the same file
                 let target_file = find_file_id(ctx, self.target);
-                let context_file = find_file_id(ctx, self.context);
+                let context_file = find_file_id(ctx, context);
                 match (target_file, context_file) {
                     (Some(t), Some(c)) => t == c,
                     // If no file info, fall back to parent scope check
@@ -46,7 +47,7 @@ impl QueryFn for IsVisibleFrom {
                         let Some(scope) = ctx.parent_of(self.target) else {
                             return true;
                         };
-                        is_ancestor_of(ctx, scope, self.context)
+                        is_ancestor_of(ctx, scope, context)
                     },
                 }
             },
@@ -54,12 +55,28 @@ impl QueryFn for IsVisibleFrom {
                 // Visible within the same top-level module subtree
                 match (
                     internal_boundary(ctx, self.target),
-                    internal_boundary(ctx, self.context),
+                    internal_boundary(ctx, context),
                 ) {
                     (Some(t), Some(c)) => t == c,
                     _ => true,
                 }
             },
+        }
+    }
+}
+
+/// Code `@derive` generated reads the type's private fields, so it sees
+/// what code written inside the type would: the context inside a
+/// `DerivedFrom` extension is the type itself.
+fn derived_context(ctx: &QueryContext<'_>, context: Entity) -> Entity {
+    let mut current = context;
+    loop {
+        if let Some(derived) = ctx.get::<DerivedFrom>(current) {
+            return derived.ty;
+        }
+        match ctx.parent_of(current) {
+            Some(parent) => current = parent,
+            None => return context,
         }
     }
 }

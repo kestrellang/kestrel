@@ -182,6 +182,12 @@ impl<'a> CompilerDriver<'a> {
             root,
             is_executable,
         ));
+        // Diagnostics inside `@derive`-generated code move to the attribute.
+        let derived = kestrel_compiler::diagnostic::DerivedSources::new(world, root);
+        let diags: Vec<_> = diags
+            .into_iter()
+            .filter_map(|d| derived.remap_analyze(d))
+            .collect();
 
         let mut summary = AnalyzeSummary::default();
         for d in &diags {

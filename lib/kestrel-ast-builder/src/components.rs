@@ -440,6 +440,33 @@ pub struct ExtensionLhsParamNames(pub Vec<String>);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct QualifiedTarget(pub AstType);
 
+// ===== Derives =====
+
+/// On the file entity of the source one `@derive(...)` expanded to (see
+/// `crate::derive`). The file has a `FileSyntax` but no `SourceText`: it is
+/// never shown. Its declarations are owned by `origin` (unbuilding `origin`
+/// removes them), and diagnostics inside it are reported at `attr_span`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DerivedFile {
+    pub origin: Entity,
+    /// The declaration carrying the `@derive`.
+    pub site: Entity,
+    /// The whole attribute, `@` to `)`.
+    pub attr_span: Span,
+}
+
+/// On an extension `@derive` generated: `extend S: P { <witnesses> }`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DerivedFrom {
+    /// The declaration carrying the `@derive` (the type, or an extension of it).
+    pub site: Entity,
+    /// The type whose fields the witnesses read. Code in the extension sees
+    /// the type's private members as if written inside it.
+    pub ty: Entity,
+    /// The protocol path as written in `@derive(...)`.
+    pub protocol: Vec<String>,
+}
+
 // ===== Modifiers =====
 
 /// Marker: enum has indirect representation.

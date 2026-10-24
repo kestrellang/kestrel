@@ -813,6 +813,7 @@ name = "kestrel-ast-builder"
 version = "0.17.0"
 dependencies = [
  "kestrel-ast",
+ "kestrel-debug",
  "kestrel-hecs",
  "kestrel-hir",
  "kestrel-lexer",

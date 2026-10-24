@@ -576,7 +576,8 @@ is reported on the token *before* the gap, where it belongs.
 E900–E949 are attributes, E950–E999 are derives. The shape checks (E900–E907,
 E914, plus E461 and E612 above) are decided next to the attribute registry
 (`kestrel-ast-builder/src/attrs/`) and reported by the `attribute_validation`
-analyzer. See `docs/plans/attributes/attributes-design.md`.
+analyzer. The derive checks (E950–E958) are the `derive_site` analyzer's.
+See `docs/plans/attributes/attributes-design.md`.
 
 | Code | Message | Explanation |
 |---|---|---|
@@ -595,3 +596,10 @@ analyzer. See `docs/plans/attributes/attributes-design.md`.
 | E912 | cannot borrow '{place}' in place: '{name}' is packed, so the field may be misaligned | `&h.length`, `&mutating h.length`, a `mutating` method on `h.length`, or `h.length` passed to a `mutating` parameter. Copy it first: `var n = h.length`. Reads and whole-field writes are fine. |
 | E913 | '{name}' is unavailable[: {message}][; use '{replacement}' instead] | A use of an `@unavailable` declaration. Reported everywhere, including inside other unavailable code. An unavailable protocol requirement needs no witness. |
 | E914 *(warning)* | '.{old}' is the old spelling; write '.{New}' | `@platform(.linux)` / `.darwin`: accepted for one release, renamed to `.Linux` / `.Darwin` in 0.18. |
+| E950 | cannot find protocol '{P}' | A `@derive` argument doesn't resolve, or resolves to something that isn't a protocol (`'Point' in '@derive' is not a protocol`). |
+| E951 | '{P}' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable | The protocol has no built-in deriver. `Copyable` and `Cloneable` say why instead: `'Cloneable' is not derived: whether 'Doc' is Cloneable follows from its fields`. |
+| E952 | cannot derive '{P}' for '{S}': field '{f}' has type '{T}', which is not '{P}' | A field (or enum payload: `payload 'radius' of case 'Circle'`) doesn't conform. For a generic type the derived bound `T: P` is assumed. `Defaultable` skips fields with an initializer and reads only the `@default` case. |
+| E953 | '{S}' already declares '{P}' | The type also declares the protocol itself, or a member written for it implements a requirement (`'Point' derives 'Equatable' but also implements 'isEqual'; remove one`), or `@derive` names the protocol twice. |
+| E954 | '@derive' on an extension needs a type declared in this module | `@derive` on an extension of another module's type, or (0.18) of a type declared in another file; also `cannot derive 'P' for 'S': its last field is unsized`. |
+| E957 | cannot derive 'Defaultable' for '{E}': mark exactly one case '@default' | An enum derives `Defaultable` by building its one `@default` case. |
+| E958 | deriving '{P}' requires '{S}' to be '{Q}'; add '{Q}' to '@derive' | A parent protocol doesn't hold. Parents are never derived implicitly: derive them alongside, declare them, or derive them in another `@derive`. |

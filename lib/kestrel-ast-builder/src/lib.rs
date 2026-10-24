@@ -11,6 +11,7 @@ pub mod attrs;
 pub mod build;
 pub mod builders;
 pub mod components;
+pub mod derive;
 pub mod lang_module;
 pub mod qualified_name;
 pub mod syntax;

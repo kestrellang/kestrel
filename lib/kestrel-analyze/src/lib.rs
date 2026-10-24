@@ -105,6 +105,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::type_alias_validation::TypeAliasValidationAnalyzer);
     r.add_decl_check(decl::restricted_signature::RestrictedSignatureAnalyzer);
     r.add_decl_check(decl::attribute_semantics::AttributeSemanticsAnalyzer);
+    r.add_decl_check(decl::derive_site::DeriveSiteAnalyzer);
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);

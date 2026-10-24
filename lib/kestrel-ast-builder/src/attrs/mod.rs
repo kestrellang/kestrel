@@ -168,6 +168,23 @@ impl ParsedAttrs {
             .any(|e| matches!(e.attr, ParsedAttr::NonExhaustive))
     }
 
+    /// The protocol paths of `@derive(...)`, as written.
+    pub fn derives(&self) -> &[Vec<String>] {
+        self.attrs
+            .iter()
+            .find_map(|e| match &e.attr {
+                ParsedAttr::Derive(paths) => Some(paths.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    pub fn is_default_case(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::Default))
+    }
+
     /// `@layout(...)`.
     pub fn layout(&self) -> Option<LayoutOption> {
         self.find(|a| match a {

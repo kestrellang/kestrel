@@ -117,6 +117,10 @@ pub enum ParsedAttr {
     Restricted(Restriction),
     Doc(DocOption),
     NonExhaustive,
+    /// `@derive(P, Q)`: the protocol paths as written.
+    Derive(Vec<Vec<String>>),
+    /// `@default` on an enum case.
+    Default,
     /// `@align(N)`, already checked to be a power of two in range (E909).
     Align(u64),
     Layout(LayoutOption),
