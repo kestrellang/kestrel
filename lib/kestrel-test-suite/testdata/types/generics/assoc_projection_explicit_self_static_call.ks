@@ -2,14 +2,10 @@
 // stdlib: true
 // expect-stdout: a=5 b=5\n
 
-// Found while closing G26: inside `extend Outer`, a static call on an
-// associated type works when spelled `Item.seed()` but not `Self.Item.seed()`
-// — the explicit-Self spelling is rejected with E100 "no matching subscript
-// on type 'Item'". The prefix `Self.Item` resolves through the protocol entity
-// to a plain `Def` of the alias, not an associated-type projection, so
-// `lower_call` never builds the type-level `MethodCall`. The implicit-Self
-// half is the control. EXPECTED TO FAIL until the explicit spelling resolves
-// like the implicit one.
+// Inside `extend Outer`, a static call on an associated type spelled with
+// explicit Self (`Self.Item.seed()`) dispatches like the implicit spelling
+// (`Item.seed()`): name resolution classifies `Self.Item` as the implicit-Self
+// associated type, not a plain `Def` of the alias.
 
 module Test
 

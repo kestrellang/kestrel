@@ -204,6 +204,26 @@ fn resolve_multi_segment(
             Some(target) => target,
             None => return ValueResolution::SelfNotInScope,
         };
+        // `Self.Item` inside a protocol (or its extension) is the same
+        // implicit-Self associated type as a bare `Item`, not a plain `Def`
+        // of the alias — so it lowers as a projection on Self.
+        if let [_, name] = segments
+            && ctx.get::<NodeKind>(first_entity) == Some(&NodeKind::Protocol)
+            && let Some(assoc) = ctx
+                .query(VisibleChildrenByName {
+                    parent: first_entity,
+                    name: name.clone(),
+                    context,
+                })
+                .iter()
+                .copied()
+                .find(|&e| ctx.get::<NodeKind>(e) == Some(&NodeKind::TypeAlias))
+        {
+            return ValueResolution::AssociatedType {
+                entity: assoc,
+                container: None,
+            };
+        }
         return walk_path_from(ctx, first_entity, segments, context, root);
     }
 
