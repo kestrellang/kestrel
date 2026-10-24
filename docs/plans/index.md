@@ -22,6 +22,7 @@
 | [Dictionary Literals](dictionary-literals/) | Shipped | dictionary-literals-design, dictionary-literals-plan |
 | [Drop Shim Activation](drop-shim-activation/) | Shipped (empty dir — plan never written; drop shims exist in MIR) | — |
 | [Enums](enums/) | Shipped | enum-plan, enum-new-plan |
+| [Existentials (`any P`)](existentials/) | Design | existentials-design |
 | [Execution Graph](execution-graph/) | Superseded (original MIR plan; MIR has since been rewritten — see [docs/refactor/](../refactor/)) | execution-graph-implementation |
 | [Exitable `@main` Returns](exitable-main-return.md) | Shipped | exitable-main-return |
 | [Expression-Bodied Functions](expression-bodied-functions/) | Shipped | expression-bodied-functions-design, expression-bodied-functions-plan |
