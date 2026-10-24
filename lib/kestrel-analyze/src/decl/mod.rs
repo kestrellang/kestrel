@@ -9,6 +9,7 @@ pub mod conformance_rules;
 pub mod default_param_ordering;
 pub mod duplicate_callable;
 pub mod duplicate_case;
+pub mod copyable_deinit;
 pub mod duplicate_deinit;
 pub mod duplicate_label;
 pub mod duplicate_symbol;

@@ -353,7 +353,7 @@ extend TcpStream {
 /// # Memory Model
 ///
 /// Owns its fd; closed on drop.
-public struct TcpListener {
+public struct TcpListener: not Copyable {
     var fd: Int32
 
     /// @name From Fd
