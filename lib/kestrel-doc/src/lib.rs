@@ -165,7 +165,7 @@ fn build_page(
         if !is_public_top_level(world, child) {
             continue;
         }
-        if signature::is_private(world, child) {
+        if signature::is_private(world, child) || is_doc_hidden(world, child) {
             continue;
         }
         if let Some(item) = build_item(world, child, protocol_index, extensions_by_target) {
@@ -282,7 +282,7 @@ fn build_member_groups(
             if !is_member_kind(kind) {
                 continue;
             }
-            if signature::is_private(world, child) {
+            if signature::is_private(world, child) || is_doc_hidden(world, child) {
                 continue;
             }
             let raw_name = world
@@ -544,6 +544,12 @@ fn is_public_top_level(world: &World, entity: Entity) -> bool {
         return matches!(vis, Vis::Public);
     }
     matches!(signature::visibility(world, entity), Some("public"))
+}
+
+/// `@doc(.Hidden)`, on the declaration or on the `extend` that declares it.
+/// The declaration stays usable; it is only left off the docs pages.
+fn is_doc_hidden(world: &World, entity: Entity) -> bool {
+    kestrel_ast_builder::attrs::is_doc_hidden(&world.query_context(), entity)
 }
 
 fn is_documented(kind: &NodeKind) -> bool {

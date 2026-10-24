@@ -1,9 +1,12 @@
 //! Struct lowering — converts ECS struct entities into MIR StructDefs.
 
+use kestrel_ast_builder::attrs::{LayoutOption, attrs_of};
 use kestrel_ast_builder::{FieldClass, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
+use kestrel_hir::builtin::Builtin;
 use kestrel_mir::item::struct_def::{FieldDef, StructDef};
-use kestrel_mir::{CopyBehavior, DropBehavior, TypeInfo, TypeParamDef};
+use kestrel_mir::{CopyBehavior, DropBehavior, LayoutAttrs, LayoutKind, TypeInfo, TypeParamDef};
+use kestrel_name_res::{ConformingProtocols, ResolveBuiltin};
 use kestrel_semantics::{ConditionalCopyableParams, CopySemantics, NominalCopySemantics};
 
 use crate::context::LowerCtx;
@@ -24,6 +27,7 @@ pub fn lower_struct(ctx: &mut LowerCtx, entity: Entity) {
         entity,
         root: ctx.root,
     });
+    def.layout_attrs = lower_layout_attrs(ctx, entity);
 
     // Stored instance fields only. This loop DEFINES every FieldIdx, so it must
     // use `FieldClass` and nothing else — the old `!Callable && !Static` test
@@ -99,4 +103,36 @@ pub(crate) fn collect_type_params(ctx: &mut LowerCtx, entity: Entity) -> Vec<Typ
             TypeParamDef::new(tp_entity, tp_name)
         })
         .collect()
+}
+
+/// `@layout` and `@align` of a struct or enum, as the one MIR value every
+/// layout computation reads. A type that conforms to `FFISafe` crosses the C
+/// boundary, so without an explicit `@layout` it gets `.C` (D-Q11).
+pub(crate) fn lower_layout_attrs(ctx: &LowerCtx, entity: Entity) -> LayoutAttrs {
+    let attrs = attrs_of(&ctx.query, entity);
+    let kind = match attrs.layout() {
+        Some(LayoutOption::C) => LayoutKind::C,
+        Some(LayoutOption::Packed) => LayoutKind::Packed,
+        None if conforms_to_ffi_safe(ctx, entity) => LayoutKind::C,
+        None => LayoutKind::Default,
+    };
+    LayoutAttrs {
+        kind,
+        min_align: attrs.align(),
+    }
+}
+
+fn conforms_to_ffi_safe(ctx: &LowerCtx, entity: Entity) -> bool {
+    let Some(ffi_safe) = ctx.query.query(ResolveBuiltin {
+        builtin: Builtin::FFISafe,
+        root: ctx.root,
+    }) else {
+        return false;
+    };
+    ctx.query
+        .query(ConformingProtocols {
+            entity,
+            root: ctx.root,
+        })
+        .contains(&ffi_safe)
 }

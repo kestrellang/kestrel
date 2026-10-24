@@ -115,6 +115,11 @@ impl TargetSet {
         TargetSet(bits)
     }
 
+    /// This set minus `target`.
+    pub const fn without(self, target: AttrTarget) -> TargetSet {
+        TargetSet(self.0 & !(1 << target as u8))
+    }
+
     pub fn contains(self, target: AttrTarget) -> bool {
         self.0 & (1 << target as u8) != 0
     }

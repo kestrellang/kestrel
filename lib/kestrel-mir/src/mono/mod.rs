@@ -874,7 +874,7 @@ fn resolve_types_and_layouts(
                     let subst =
                         build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), type_args);
 
-                    let mut layout = StructLayout::new();
+                    let mut layout = StructLayout::with_attrs(sdef.layout_attrs);
                     let mut all_resolved = true;
                     let mut fields = Vec::new();
 
@@ -922,9 +922,7 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        if !layout.unsized_tail {
-                            layout.pad_to_align();
-                        }
+                        let layout = layout.finish();
                         layout_cache.insert(cache_key, (layout.size, layout.align));
                         let mut ms = MonoStruct::new(*entity, type_args.clone());
                         ms.fields = fields;
@@ -982,7 +980,11 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        let enum_layout = build_enum_layout(&variant_layouts, edef.cases.len());
+                        let enum_layout = build_enum_layout(
+                            &variant_layouts,
+                            edef.cases.len(),
+                            edef.layout_attrs,
+                        );
                         layout_cache.insert(cache_key, (enum_layout.size, enum_layout.align));
                         let mut me = MonoEnum::new(
                             *entity,

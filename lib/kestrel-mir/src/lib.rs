@@ -26,7 +26,7 @@ pub use id::{BlockId, FieldIdx, MonoFuncId, MonoVTableId, TyId, ValueId, Variant
 pub use immediate::{Immediate, ImmediateKind};
 pub use item::WitnessMethodKey;
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
-pub use layout::{EnumLayout, StructLayout};
+pub use layout::{EnumLayout, LayoutAttrs, LayoutKind, StructLayout};
 pub use op::{
     DivGuard, FloatBits, FloatMathKind, FloatPredicateKind, IntBits, Op, Signedness, op_type,
     op_type_mut,

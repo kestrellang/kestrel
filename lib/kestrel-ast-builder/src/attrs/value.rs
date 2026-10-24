@@ -36,6 +36,67 @@ pub enum InlineMode {
     Never,
 }
 
+/// `@doc`'s option.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DocOption {
+    /// `@doc(.Hidden)`: left out of docs and completion.
+    Hidden,
+}
+
+/// `@layout`'s argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LayoutOption {
+    /// `@layout(.C)`: C's layout rules.
+    C,
+    /// `@layout(.Packed)`: every field at alignment 1, no padding.
+    Packed,
+}
+
+/// Which use restriction a declaration carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RestrictionKind {
+    /// `@deprecated`: every use warns (E908).
+    Deprecated,
+    /// `@unavailable`: every use is an error (E913).
+    Unavailable,
+}
+
+/// `@deprecated(message, since:, replacement:)` or
+/// `@unavailable(message, replacement:)`. One type, because the two share
+/// targets, use-site walks and wording; only the severity differs.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Restriction {
+    pub kind: RestrictionKind,
+    pub message: Option<String>,
+    /// `@deprecated` only.
+    pub since: Option<String>,
+    pub replacement: Option<String>,
+}
+
+impl Restriction {
+    /// "'X' is deprecated since 0.18: reason; use 'Y' instead", given the
+    /// already-quoted name of the declaration.
+    pub fn describe(&self, quoted_name: &str) -> String {
+        let mut out = format!(
+            "{quoted_name} is {}",
+            match self.kind {
+                RestrictionKind::Deprecated => "deprecated",
+                RestrictionKind::Unavailable => "unavailable",
+            }
+        );
+        if let Some(since) = &self.since {
+            out.push_str(&format!(" since {since}"));
+        }
+        if let Some(message) = &self.message {
+            out.push_str(&format!(": {message}"));
+        }
+        if let Some(replacement) = &self.replacement {
+            out.push_str(&format!("; use '{replacement}' instead"));
+        }
+        out
+    }
+}
+
 /// One well-formed attribute.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ParsedAttr {
@@ -52,6 +113,13 @@ pub enum ParsedAttr {
     },
     Platform(Vec<Os>),
     Inline(InlineMode),
+    /// `@deprecated` or `@unavailable`.
+    Restricted(Restriction),
+    Doc(DocOption),
+    NonExhaustive,
+    /// `@align(N)`, already checked to be a power of two in range (E909).
+    Align(u64),
+    Layout(LayoutOption),
     Dummy,
 }
 

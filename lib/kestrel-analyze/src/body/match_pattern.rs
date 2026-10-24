@@ -428,7 +428,11 @@ fn variant_arity(cx: &BodyContext<'_>, case: Entity) -> usize {
 /// Look up an enum case by name on a resolved enum type. Returns the case
 /// entity if found, `None` otherwise (caller distinguishes "unknown case"
 /// from "scrutinee isn't an enum").
-fn lookup_enum_case(cx: &BodyContext<'_>, ty: &ResolvedTy, name: &str) -> Option<Entity> {
+pub(crate) fn lookup_enum_case(
+    cx: &BodyContext<'_>,
+    ty: &ResolvedTy,
+    name: &str,
+) -> Option<Entity> {
     let ResolvedTy::Named { entity, .. } = ty else {
         return None;
     };

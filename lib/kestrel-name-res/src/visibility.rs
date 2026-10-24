@@ -52,15 +52,11 @@ impl QueryFn for IsVisibleFrom {
             },
             Some(Vis::Internal) => {
                 // Visible within the same top-level module subtree
-                let target_mod = ancestor_module(ctx, self.target);
-                let context_mod = ancestor_module(ctx, self.context);
-                match (target_mod, context_mod) {
-                    (Some(t), Some(c)) => {
-                        // Walk to find the top-level module (child of root)
-                        let t_top = top_level_module(ctx, t);
-                        let c_top = top_level_module(ctx, c);
-                        t_top == c_top
-                    },
+                match (
+                    internal_boundary(ctx, self.target),
+                    internal_boundary(ctx, self.context),
+                ) {
+                    (Some(t), Some(c)) => t == c,
                     _ => true,
                 }
             },
@@ -77,6 +73,14 @@ fn find_file_id(ctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
         }
         current = ctx.parent_of(current)?;
     }
+}
+
+/// The module subtree `internal` visibility stops at: the top-level module
+/// (direct child of the root) enclosing `entity`. Two entities with the same
+/// boundary see each other's `internal` declarations, and `@nonExhaustive`
+/// enums are closed inside it. `None` when `entity` is in no module.
+pub fn internal_boundary(ctx: &QueryContext<'_>, entity: Entity) -> Option<Entity> {
+    ancestor_module(ctx, entity).map(|m| top_level_module(ctx, m))
 }
 
 /// Find the top-level module (direct child of root) for a given module.

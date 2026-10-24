@@ -18,7 +18,8 @@ use codespan_reporting::diagnostic::{
 use kestrel_analyze::{AnalyzeDiagnostic, DiagLabel, Severity as AnalyzeSeverity};
 use kestrel_span::Span;
 use tower_lsp::lsp_types::{
-    DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range, Url,
+    DiagnosticRelatedInformation, DiagnosticSeverity, DiagnosticTag, Location, NumberOrString,
+    Range, Url,
 };
 
 use crate::position::LineIndex;
@@ -143,7 +144,9 @@ pub fn from_analyze(
             } else {
                 Some(related)
             },
-            tags: None,
+            // E908 (use of a `@deprecated` declaration): editors strike the
+            // use through.
+            tags: (diag.descriptor_id == "E908").then(|| vec![DiagnosticTag::DEPRECATED]),
             data: None,
         },
     ))

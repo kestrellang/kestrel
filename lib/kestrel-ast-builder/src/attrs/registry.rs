@@ -84,6 +84,8 @@ pub enum AttrPhase {
     Semantic,
     /// Read by MIR lowering, which turns it into a typed MIR field.
     Lowering,
+    /// Read only by tools: `kestrel-doc` and the LSP (`@doc`).
+    Tooling,
     /// No effect (`@dummy`).
     None,
 }
@@ -115,6 +117,14 @@ use AttrTarget as T;
 /// Every named declaration (the targets of `@builtin`, `@dummy`, ...).
 const ANY_DECL: TargetSet = TargetSet::ALL;
 
+/// Everything a program can name and use: every declaration except a
+/// `deinit`, which nothing calls. `@deprecated` and `@unavailable` apply to
+/// these, and to an `extend` (meaning every member it declares).
+const USABLE: TargetSet = TargetSet::ALL.without(T::Deinit);
+
+/// `@deprecated`'s and `@unavailable`'s `replacement:` parameter.
+const REPLACEMENT: ParamDef = labeled("replacement", ParamKind::Str, "the name to use instead");
+
 fn is_builtin_name(name: &str) -> bool {
     kestrel_hir::Builtin::from_attribute_name(name).is_some()
 }
@@ -122,6 +132,21 @@ fn is_builtin_name(name: &str) -> bool {
 /// The registry. Sorted by name only for readability; lookups are linear
 /// over a couple dozen entries.
 pub static REGISTRY: &[AttrDef] = &[
+    AttrDef {
+        name: "align",
+        targets: TargetSet::of(&[T::Struct, T::Enum]),
+        params: &[positional(
+            ParamKind::Int,
+            true,
+            "an alignment: '@align(16)'",
+        )],
+        repeatable: false,
+        phase: AttrPhase::Lowering,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Raises the type's alignment to at least N bytes, a power of two from 1 to 4096; the size is rounded up to match. Never lowers it.",
+    },
     AttrDef {
         name: "builtin",
         targets: ANY_DECL,
@@ -136,6 +161,40 @@ pub static REGISTRY: &[AttrDef] = &[
         needs_body: false,
         repeat_hint: None,
         doc: "Marks a standard-library declaration as a language item the compiler refers to.",
+    },
+    AttrDef {
+        name: "deprecated",
+        targets: USABLE,
+        params: &[
+            positional(
+                ParamKind::Str,
+                false,
+                "a message: '@deprecated(\"use 'parse' instead\")'",
+            ),
+            labeled("since", ParamKind::Str, "a version"),
+            REPLACEMENT,
+        ],
+        repeatable: false,
+        phase: AttrPhase::Semantic,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Warns at every use of the declaration (E908). '@deprecated(\"message\", since: \"0.18\", replacement: \"newName\")'; all arguments are optional.",
+    },
+    AttrDef {
+        name: "doc",
+        targets: USABLE,
+        params: &[positional(
+            ParamKind::Cases("doc option", &["Hidden"]),
+            true,
+            "a doc option: '@doc(.Hidden)'",
+        )],
+        repeatable: false,
+        phase: AttrPhase::Tooling,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "'@doc(.Hidden)' leaves a public declaration out of generated documentation and editor completion. It stays usable; on an extension it hides every member the extension declares.",
     },
     AttrDef {
         name: "dummy",
@@ -223,6 +282,23 @@ pub static REGISTRY: &[AttrDef] = &[
         doc: "Asks the optimizer to inline the function: '@inline' is a hint, '@inline(.Always)' and '@inline(.Never)' are directives. Has no effect in the Cranelift backend.",
     },
     AttrDef {
+        name: "layout",
+        targets: TargetSet::of(&[T::Struct, T::Enum]),
+        params: &[positional(
+            ParamKind::Cases("layout", &["C", "Packed"]),
+            true,
+            "a layout: '@layout(.C)'",
+        )],
+        repeatable: false,
+        phase: AttrPhase::Lowering,
+        // `.Packed` with `@align` is E906 too, but `.C` with `@align` is
+        // fine, so that pair is checked on the parsed values (`parse`).
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Fixes the type's memory layout. '.C' follows C's rules (on a payload-less enum, an Int32 tag); '.Packed' places every field at alignment 1 with no padding. Without it the layout is unspecified.",
+    },
+    AttrDef {
         name: "main",
         targets: ANY_DECL,
         params: &[],
@@ -232,6 +308,17 @@ pub static REGISTRY: &[AttrDef] = &[
         needs_body: false,
         repeat_hint: None,
         doc: "Marks the program's entry point.",
+    },
+    AttrDef {
+        name: "nonExhaustive",
+        targets: TargetSet::of(&[T::Enum]),
+        params: &[],
+        repeatable: false,
+        phase: AttrPhase::Semantic,
+        conflicts: &[],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Lets a public enum gain cases without a breaking release: a 'match' on it outside its module must have a catch-all arm.",
     },
     AttrDef {
         name: "platform",
@@ -254,6 +341,33 @@ pub static REGISTRY: &[AttrDef] = &[
         needs_body: false,
         repeat_hint: Some("list every platform in one '@platform(...)'"),
         doc: "Compiles the declaration only when building for one of the given platforms: '@platform(.Linux, .Darwin)'.",
+    },
+    AttrDef {
+        name: "unavailable",
+        targets: USABLE,
+        params: &[
+            positional(
+                ParamKind::Str,
+                false,
+                "a message: '@unavailable(\"removed in 0.18\")'",
+            ),
+            REPLACEMENT,
+        ],
+        repeatable: false,
+        phase: AttrPhase::Semantic,
+        conflicts: &[
+            Conflict {
+                with: "deprecated",
+                reason: "an unavailable declaration cannot be used at all",
+            },
+            Conflict {
+                with: "main",
+                reason: "the entry point must be usable",
+            },
+        ],
+        needs_body: false,
+        repeat_hint: None,
+        doc: "Makes every use of the declaration an error (E913), for APIs that were removed or cannot work yet. '@unavailable(\"message\", replacement: \"newName\")'; both arguments are optional.",
     },
 ];
 

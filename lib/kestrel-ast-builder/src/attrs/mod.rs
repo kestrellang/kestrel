@@ -21,7 +21,10 @@ use kestrel_span::Span;
 
 pub use registry::{AttrDef, AttrPhase, REGISTRY, lookup};
 pub use target::{AttrTarget, TargetSet, attr_target};
-pub use value::{Abi, AttrEntry, AttrError, AttrValue, InlineMode, ParsedAttr};
+pub use value::{
+    Abi, AttrEntry, AttrError, AttrValue, DocOption, InlineMode, LayoutOption, ParsedAttr,
+    Restriction, RestrictionKind,
+};
 
 use crate::components::{Attributes, DeclSpan, NodeKind, Os, Valued};
 
@@ -141,6 +144,46 @@ impl ParsedAttrs {
         })
     }
 
+    /// `@deprecated` or `@unavailable` written on this declaration itself.
+    /// Consumers want [`UseRestrictionOf`], which also looks at the
+    /// enclosing extension.
+    pub fn restriction(&self) -> Option<&Restriction> {
+        self.attrs.iter().find_map(|e| match &e.attr {
+            ParsedAttr::Restricted(r) => Some(r),
+            _ => None,
+        })
+    }
+
+    /// `@doc(.Hidden)` written on this declaration itself. Consumers want
+    /// [`is_doc_hidden`], which also looks at the enclosing extension.
+    pub fn doc_hidden(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::Doc(DocOption::Hidden)))
+    }
+
+    pub fn is_non_exhaustive(&self) -> bool {
+        self.attrs
+            .iter()
+            .any(|e| matches!(e.attr, ParsedAttr::NonExhaustive))
+    }
+
+    /// `@layout(...)`.
+    pub fn layout(&self) -> Option<LayoutOption> {
+        self.find(|a| match a {
+            ParsedAttr::Layout(l) => Some(*l),
+            _ => None,
+        })
+    }
+
+    /// `@align(N)`.
+    pub fn align(&self) -> Option<u64> {
+        self.find(|a| match a {
+            ParsedAttr::Align(n) => Some(*n),
+            _ => None,
+        })
+    }
+
     pub fn file_constant(&self) -> Option<&str> {
         self.attrs.iter().find_map(|e| match &e.attr {
             ParsedAttr::FileConstant { path } => Some(path.as_str()),
@@ -160,4 +203,50 @@ impl ParsedAttrs {
 /// Shorthand for `ctx.query(AttrsOf { entity })`.
 pub fn attrs_of(ctx: &QueryContext<'_>, entity: Entity) -> Arc<ParsedAttrs> {
     ctx.query(AttrsOf { entity })
+}
+
+/// The use restriction (`@deprecated` / `@unavailable`) that applies to
+/// using `entity`: its own, or else the one on the `extend` that declares it
+/// (an attribute on an extension applies to every member it declares).
+/// Accessors answer for their property or subscript.
+///
+/// The single source of truth for "may this be used, and what do we say if
+/// not": the use-site analyzers and the LSP both read it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct UseRestrictionOf {
+    pub entity: Entity,
+}
+
+impl QueryFn for UseRestrictionOf {
+    type Output = Option<Restriction>;
+
+    fn execute(&self, ctx: &QueryContext<'_>) -> Option<Restriction> {
+        let mut entity = self.entity;
+        if matches!(
+            ctx.get::<NodeKind>(entity),
+            Some(NodeKind::Setter | NodeKind::RefAccessor)
+        ) {
+            entity = ctx.parent_of(entity)?;
+        }
+        if let Some(r) = attrs_of(ctx, entity).restriction() {
+            return Some(r.clone());
+        }
+        let parent = ctx.parent_of(entity)?;
+        if ctx.get::<NodeKind>(parent) != Some(&NodeKind::Extension) {
+            return None;
+        }
+        attrs_of(ctx, parent).restriction().cloned()
+    }
+}
+
+/// Whether docs and completion leave `entity` out: `@doc(.Hidden)` on it, or
+/// on the `extend` that declares it. Not a visibility level: lookups and
+/// access checks never read it.
+pub fn is_doc_hidden(ctx: &QueryContext<'_>, entity: Entity) -> bool {
+    if attrs_of(ctx, entity).doc_hidden() {
+        return true;
+    }
+    ctx.parent_of(entity).is_some_and(|p| {
+        ctx.get::<NodeKind>(p) == Some(&NodeKind::Extension) && attrs_of(ctx, p).doc_hidden()
+    })
 }

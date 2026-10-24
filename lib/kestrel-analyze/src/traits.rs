@@ -35,6 +35,8 @@ pub enum AnalyzerId {
     StringEscape,
     IntegerLiteralRange,
     TypeTest,
+    RestrictedUse,
+    PackedFieldBorrow,
 
     // Decl checks
     FunctionBody,
@@ -71,6 +73,8 @@ pub enum AnalyzerId {
     TypeArgArity,
     Visibility,
     TypeAliasValidation,
+    RestrictedSignature,
+    AttributeSemantics,
 
     // Compilation checks (run via `analyze_compilation`, never the `Analyze` query)
     TypeAliasCycles,
@@ -107,6 +111,8 @@ impl AnalyzerId {
             AnalyzerId::StringEscape => "string_escape",
             AnalyzerId::IntegerLiteralRange => "integer_literal_range",
             AnalyzerId::TypeTest => "type_test",
+            AnalyzerId::RestrictedUse => "restricted_use",
+            AnalyzerId::PackedFieldBorrow => "packed_field_borrow",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",
@@ -141,6 +147,8 @@ impl AnalyzerId {
             AnalyzerId::TypeArgArity => "type_arg_arity",
             AnalyzerId::Visibility => "visibility",
             AnalyzerId::TypeAliasValidation => "type_alias_validation",
+            AnalyzerId::RestrictedSignature => "restricted_signature",
+            AnalyzerId::AttributeSemantics => "attribute_semantics",
             AnalyzerId::TypeAliasCycles => "type_alias_cycles",
             AnalyzerId::StructCycles => "struct_cycles",
             AnalyzerId::ProtocolCycles => "protocol_cycles",

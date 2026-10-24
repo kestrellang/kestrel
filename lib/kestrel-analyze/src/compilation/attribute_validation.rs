@@ -52,6 +52,9 @@
 //! ### E907 — `attribute_too_many_arguments` (Error, Correctness)
 //! **Message:** "'@{name}' takes at most one argument"
 //!
+//! ### E909 — `attribute_bad_alignment` (Error, Correctness)
+//! **Message:** "'@align({n})' must be a power of two between 1 and 4096"
+//!
 //! ### E914 — `deprecated_attribute_spelling` (Warning, Style)
 //! **Message:** "'.{old}' is the old spelling; write '.{New}'" (`@platform(.linux)`)
 //!
@@ -84,6 +87,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[
     error("E905", "attribute_needs_body"),
     error("E906", "conflicting_attributes"),
     error("E907", "attribute_too_many_arguments"),
+    error("E909", "attribute_bad_alignment"),
     DiagnosticDescriptor {
         id: "E914",
         name: "deprecated_attribute_spelling",

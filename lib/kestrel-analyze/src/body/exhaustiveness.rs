@@ -28,6 +28,11 @@
 //! | E307 | Warning  | overlapping range patterns |
 //! | E308 | Warning  | irrefutable pattern in while-let condition |
 //! | E309 | Warning  | irrefutable pattern in guard-let condition |
+//!
+//! A `@nonExhaustive` enum matched outside its module has an open case list
+//! (`MatchSite`), so only a catch-all completes the match; E305 then carries
+//! the note "'{Enum}' is '@nonExhaustive'; add a '_' arm, since cases may be
+//! added", and a `_` after every listed case is not E306.
 
 use crate::context::BodyContext;
 use crate::diagnostic::*;
@@ -209,7 +214,8 @@ fn check_user_match(
         return;
     }
 
-    let result = pattern::check_match(cx.hir, cx.query, cx.root, scrutinee_ty, arms);
+    let site = pattern::MatchSite::of(cx.query, cx.root, cx.entity);
+    let result = pattern::check_match(cx.hir, cx.query, site, scrutinee_ty, arms);
 
     // E305: non-exhaustive match.
     if !result.is_exhaustive {
@@ -228,7 +234,15 @@ fn check_user_match(
                 message: "not all cases covered".into(),
                 is_primary: true,
             }],
-            notes: vec!["help: add a wildcard pattern '_' or cover the missing cases".into()],
+            notes: match pattern::open_enum_at(cx.query, site, scrutinee_ty) {
+                // A `@nonExhaustive` enum from another module: listing every
+                // case today is not enough.
+                Some(e) => vec![format!(
+                    "'{}' is '@nonExhaustive'; add a '_' arm, since cases may be added",
+                    util::entity_name(cx.query, e)
+                )],
+                None => vec!["help: add a wildcard pattern '_' or cover the missing cases".into()],
+            },
         });
     }
 
@@ -305,7 +319,7 @@ fn check_irrefutable_let(
     let is_irrefutable = kestrel_pattern_matching::is_irrefutable(
         cx.hir,
         cx.query,
-        cx.root,
+        kestrel_pattern_matching::MatchSite::of(cx.query, cx.root, cx.entity),
         user_arm.pattern,
         scrutinee_ty,
     );

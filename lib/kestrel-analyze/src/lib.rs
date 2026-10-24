@@ -65,6 +65,8 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     // Literal/lexing checks (E700-E799)
     r.add_body_check(body::string_escape::StringEscapeAnalyzer);
     r.add_body_check(body::integer_literal_range::IntegerLiteralRangeAnalyzer);
+    r.add_body_check(body::restricted_use::RestrictedUseAnalyzer);
+    r.add_body_check(body::packed_field_borrow::PackedFieldBorrowAnalyzer);
 
     // Declaration checks
     r.add_decl_check(decl::function_body::FunctionBodyAnalyzer);
@@ -101,6 +103,8 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::generics::TypeArgArityAnalyzer);
     r.add_decl_check(decl::visibility::VisibilityAnalyzer);
     r.add_decl_check(decl::type_alias_validation::TypeAliasValidationAnalyzer);
+    r.add_decl_check(decl::restricted_signature::RestrictedSignatureAnalyzer);
+    r.add_decl_check(decl::attribute_semantics::AttributeSemanticsAnalyzer);
 
     // Compilation checks
     r.add_compilation_check(compilation::type_alias_cycles::TypeAliasCycleAnalyzer);

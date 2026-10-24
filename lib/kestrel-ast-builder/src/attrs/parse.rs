@@ -87,6 +87,10 @@ pub fn parse_attributes(
         match match_args(def, attr, decl_span) {
             Ok(args) => {
                 errors.extend(spelling_warnings(def, attr));
+                if let Some(e) = value_error(def, attr, &args) {
+                    errors.push(e);
+                    continue;
+                }
                 if let Some(parsed) = build(def, &args) {
                     entries.push(AttrEntry {
                         attr: parsed,
@@ -97,7 +101,60 @@ pub fn parse_attributes(
             Err(mut errs) => errors.append(&mut errs),
         }
     }
+    errors.extend(packed_with_align(&mut entries));
     (entries, errors)
+}
+
+/// The largest `@align`: what `posix_memalign` and the stack provide without
+/// a special path.
+const MAX_ALIGN: i128 = 4096;
+
+/// A well-typed argument whose value is out of range.
+fn value_error(def: &AttrDef, attr: &AstAttribute, args: &Args) -> Option<AttrError> {
+    if def.name != "align" {
+        return None;
+    }
+    let AttrValue::Int(n) = args.get(0)? else {
+        return None;
+    };
+    if (1..=MAX_ALIGN).contains(n) && n.count_ones() == 1 {
+        return None;
+    }
+    Some(AttrError::new(
+        "E909",
+        format!("'@align({n})' must be a power of two between 1 and {MAX_ALIGN}"),
+        "invalid alignment",
+        attr.args
+            .first()
+            .map_or_else(|| attr.span.clone(), |a| a.span.clone()),
+    ))
+}
+
+/// `@layout(.Packed)` with `@align` (E906). Not a registry conflict, because
+/// `@layout(.C)` with `@align` is fine. Reported on whichever comes second,
+/// which is dropped like any other rejected attribute.
+fn packed_with_align(entries: &mut Vec<AttrEntry>) -> Option<AttrError> {
+    let packed = entries.iter().position(|e| {
+        matches!(
+            e.attr,
+            ParsedAttr::Layout(super::value::LayoutOption::Packed)
+        )
+    })?;
+    let align = entries
+        .iter()
+        .position(|e| matches!(e.attr, ParsedAttr::Align(_)))?;
+    let (first, second) = (packed.min(align), packed.max(align));
+    let dropped = entries.remove(second);
+    Some(
+        AttrError::new(
+            "E906",
+            "'@layout(.Packed)' cannot be combined with '@align': a packed type has alignment 1"
+                .into(),
+            "conflicting attribute",
+            dropped.span,
+        )
+        .with_secondary(entries[first].span.clone(), "conflicts with this"),
+    )
 }
 
 /// Parse one attribute's arguments alone, with no target, repeat or conflict
@@ -500,9 +557,13 @@ fn edit_distance(a: &str, b: &str) -> usize {
 /// Build the typed value of a well-formed attribute. One arm per registry
 /// entry; `None` only for an entry whose arguments were already rejected.
 fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
-    use super::value::{Abi, InlineMode};
+    use super::value::{Abi, DocOption, InlineMode, LayoutOption, Restriction, RestrictionKind};
     use crate::components::Os;
     Some(match def.name {
+        "align" => match args.get(0)? {
+            AttrValue::Int(n) => ParsedAttr::Align(u64::try_from(*n).ok()?),
+            _ => return None,
+        },
         "builtin" => {
             let name = args.case(0)?;
             ParsedAttr::Builtin(
@@ -510,7 +571,18 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
                 name.to_string(),
             )
         },
+        "deprecated" => ParsedAttr::Restricted(Restriction {
+            kind: RestrictionKind::Deprecated,
+            message: args.str(0),
+            since: args.str(1),
+            replacement: args.str(2),
+        }),
+        "doc" => ParsedAttr::Doc(match args.case(0)? {
+            "Hidden" => DocOption::Hidden,
+            _ => return None,
+        }),
         "dummy" => ParsedAttr::Dummy,
+        "nonExhaustive" => ParsedAttr::NonExhaustive,
         "extern" => ParsedAttr::Extern {
             abi: match args.case(0)? {
                 "C" => Abi::C,
@@ -519,6 +591,11 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
             mangle_name: args.str(1),
         },
         "fileconstant" => ParsedAttr::FileConstant { path: args.str(0)? },
+        "layout" => ParsedAttr::Layout(match args.case(0)? {
+            "C" => LayoutOption::C,
+            "Packed" => LayoutOption::Packed,
+            _ => return None,
+        }),
         "main" => ParsedAttr::Main,
         "inline" => ParsedAttr::Inline(match args.case(0) {
             None => InlineMode::Hint,
@@ -535,6 +612,12 @@ fn build(def: &AttrDef, args: &Args) -> Option<ParsedAttr> {
                 })
                 .collect(),
         ),
+        "unavailable" => ParsedAttr::Restricted(Restriction {
+            kind: RestrictionKind::Unavailable,
+            message: args.str(0),
+            since: None,
+            replacement: args.str(1),
+        }),
         _ => return None,
     })
 }

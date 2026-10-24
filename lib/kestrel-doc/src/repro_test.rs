@@ -259,4 +259,41 @@ mod multi_subscript_diag {
             );
         }
     }
+
+    #[test]
+    fn extract_skips_doc_hidden() {
+        let src = "module T\n\
+                   @doc(.Hidden) public struct Hook {}\n\
+                   public struct S {\n  @doc(.Hidden) public var raw: Int64\n  public var y: Int64\n}\n\
+                   @doc(.Hidden) extend S {\n  public func internalHelper() {}\n}\n";
+        let mut c = Compiler::new();
+        let f = c.set_source("/tmp/hidden.ks", src.into());
+        c.build(f);
+
+        let (_, pages) = crate::extract(c.world(), c.root());
+        let page = pages.into_iter().find(|p| p.path == "T").expect("page");
+        let names: Vec<_> = page.items.iter().map(|it| it.name.clone()).collect();
+        assert!(
+            !names.contains(&"Hook".to_string()),
+            "hidden type: {:?}",
+            names
+        );
+        let s = page.items.iter().find(|it| it.name == "S").expect("S");
+        let members: Vec<_> = s
+            .member_groups
+            .iter()
+            .flat_map(|g| g.members.iter().map(|m| m.name.clone()))
+            .collect();
+        assert!(members.contains(&"y".to_string()));
+        assert!(
+            !members.contains(&"raw".to_string()),
+            "hidden field: {:?}",
+            members
+        );
+        assert!(
+            !members.contains(&"internalHelper".to_string()),
+            "member of a hidden extension: {:?}",
+            members
+        );
+    }
 }

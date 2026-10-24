@@ -10,7 +10,9 @@ use kestrel_mir::item::struct_def::FieldDef;
 use kestrel_mir::{DropBehavior, TypeInfo};
 
 use crate::context::LowerCtx;
-use crate::items::struct_lower::{collect_type_params, find_user_deinit, lower_copy_behavior};
+use crate::items::struct_lower::{
+    collect_type_params, find_user_deinit, lower_copy_behavior, lower_layout_attrs,
+};
 use crate::ty::resolve_callable_types;
 
 pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
@@ -30,6 +32,7 @@ pub fn lower_enum(ctx: &mut LowerCtx, entity: Entity) {
             entity,
             root: ctx.root,
         });
+    def.layout_attrs = lower_layout_attrs(ctx, entity);
 
     let children: Vec<Entity> = ctx.world.children_of(entity).to_vec();
     for child in children {

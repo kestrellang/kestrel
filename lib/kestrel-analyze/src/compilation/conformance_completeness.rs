@@ -283,6 +283,15 @@ fn check_protocol_requirements(
         if cx.query.get::<kestrel_ast_builder::Valued>(child).is_some() {
             continue;
         }
+        // An `@unavailable` requirement can never be called, so it needs no
+        // witness (attributes design §B6).
+        if cx
+            .query
+            .query(kestrel_ast_builder::attrs::UseRestrictionOf { entity: child })
+            .is_some_and(|r| r.kind == kestrel_ast_builder::attrs::RestrictionKind::Unavailable)
+        {
+            continue;
+        }
         let child_kind = cx.query.get::<NodeKind>(child);
         let Some(name) = member_lookup_name(cx, child) else {
             continue;
