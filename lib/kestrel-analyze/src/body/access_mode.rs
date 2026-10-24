@@ -489,9 +489,10 @@ fn pat_has_mutating_ref_binder(cx: &BodyContext<'_>, pat: kestrel_hir::body::Hir
         HirPat::Variant { args, .. } | HirPat::ImplicitVariant { args, .. } => args
             .iter()
             .any(|a| pat_has_mutating_ref_binder(cx, a.pattern)),
-        HirPat::Struct { fields, .. } => fields
-            .iter()
-            .any(|f| f.pattern.is_some_and(|p| pat_has_mutating_ref_binder(cx, p))),
+        HirPat::Struct { fields, .. } => fields.iter().any(|f| {
+            f.pattern
+                .is_some_and(|p| pat_has_mutating_ref_binder(cx, p))
+        }),
         HirPat::Or { alternatives, .. } => alternatives
             .iter()
             .any(|&p| pat_has_mutating_ref_binder(cx, p)),

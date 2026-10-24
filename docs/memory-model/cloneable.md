@@ -291,7 +291,7 @@ struct Handle: Cloneable {
 **Concern**: Forgetting to implement `clone()` for a type with `deinit` could lead to double-free.
 
 **Resolved**: A type with `deinit` cannot use default (bitwise) copy. The
-compiler rejects a plain Copyable type that declares `deinit` with E504
+compiler rejects a plain Copyable type that declares `deinit` with E507
 (`copyable_with_deinit`); it must be `: not Copyable` or `: Cloneable`. For
 Cloneable types, getting `clone()` right (duplicate, don't share) is still
 the author's responsibility.

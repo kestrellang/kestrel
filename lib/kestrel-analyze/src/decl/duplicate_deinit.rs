@@ -56,7 +56,11 @@ impl DeclCheck for DuplicateDeinitAnalyzer {
             return vec![];
         }
 
-        let kind = if cx.kind == NodeKind::Enum { "enum" } else { "struct" };
+        let kind = if cx.kind == NodeKind::Enum {
+            "enum"
+        } else {
+            "struct"
+        };
         let struct_name = util::entity_name(cx.query, cx.entity);
         let first_span = util::entity_span(cx.query, deinits[0]);
         let dup_span = util::entity_span(cx.query, deinits[1]);
