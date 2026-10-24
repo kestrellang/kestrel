@@ -564,7 +564,7 @@ fn collect_bound_locals_expr(
     }
 }
 
-fn collect_pat_bindings(
+pub(crate) fn collect_pat_bindings(
     hir: &kestrel_hir::body::HirBody,
     pat_id: HirPatId,
     out: &mut HashSet<LocalId>,

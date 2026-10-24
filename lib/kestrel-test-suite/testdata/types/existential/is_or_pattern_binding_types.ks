@@ -1,10 +1,10 @@
 // test: diagnostics
 // stdlib: true
 //
-// `c is Circle or c is Square` binds `c` at two different types (E154).
-// Today no or-pattern check compares binding types (`.A(v) or .B(v)` with
-// different payload types is accepted at 80297742), so this is a new rule
-// the design adds. Without a binding it is fine (design §8b).
+// `c is Circle or c is Square` binds `c` at two different types, which the
+// general or-pattern rule rejects (see
+// patterns/pattern_types/or_pattern_binding_type_mismatch.ks). Without a
+// binding it is fine (design §8b).
 
 module Test
 

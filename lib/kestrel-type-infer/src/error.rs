@@ -362,7 +362,13 @@ impl InferError {
 
         match self {
             Self::TypeMismatch { reason, .. } => {
-                let mut r = detailed("type mismatch".into());
+                let headline = match reason {
+                    Reason::OrPatternBinding { name, .. } => {
+                        format!("variable '{name}' has different types in or-pattern alternatives")
+                    },
+                    _ => "type mismatch".into(),
+                };
+                let mut r = detailed(headline);
                 reason.explain(&mut r);
                 r
             },
@@ -712,6 +718,15 @@ impl Reason {
             Reason::FirstArm(s) => (s, "expected because the first branch has this type"),
             Reason::Element(s) => (s, "expected because the first element has this type"),
             Reason::Assign(s) => (s, "expected because of the type of this target"),
+            Reason::OrPatternBinding { name, first } => {
+                if !first.is_synthetic() {
+                    r.secondary.push((
+                        first.clone(),
+                        format!("'{name}' has this type in the first alternative"),
+                    ));
+                }
+                return;
+            },
         };
         if !span.is_synthetic() {
             r.secondary.push((span.clone(), text.into()));

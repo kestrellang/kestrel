@@ -4,10 +4,12 @@
 //! statement binding, and local variable, then emits constraints
 //! capturing the type relationships between them.
 
+use crate::collections::{HashMap, HashSet};
 use kestrel_ast_builder::{Callable, InitEffect, Name, NodeKind, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_hir::Builtin;
 use kestrel_hir::body::*;
+use kestrel_hir::res::LocalId;
 use kestrel_hir::ty::HirTy;
 use kestrel_hir_lower::{LowerCallableReturnType, LowerCallableTypes, LowerTypeAnnotation};
 use kestrel_name_res::ResolveBuiltin;
@@ -133,7 +135,13 @@ fn check_expr(
 
 /// Check a leaf against `expected`: push into a nested introduction form,
 /// or synthesize and coerce (the one place `FromValue` promotion may fire).
-fn check_leaf(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, expected: TyVar, reason: Reason) {
+fn check_leaf(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    id: HirExprId,
+    expected: TyVar,
+    reason: Reason,
+) {
     let (tv, pushed) = check_expr(ctx, hir, id, expected, reason.clone());
     if !pushed {
         mark_synth_pending(ctx, hir, id, tv);
@@ -149,13 +157,24 @@ fn mark_synth_pending(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId, tv: 
         hir.exprs[id],
         HirExpr::Call { .. } | HirExpr::MethodCall { .. } | HirExpr::ProtocolCall { .. }
     );
-    if computed && matches!(ctx.slot(ctx.resolve(tv)), TySlot::Unresolved { literal: None }) {
+    if computed
+        && matches!(
+            ctx.slot(ctx.resolve(tv)),
+            TySlot::Unresolved { literal: None }
+        )
+    {
         ctx.synth_pending_exprs.insert(id);
     }
 }
 
 /// `check` for a block: its statements, then its tail as a leaf.
-fn check_block(ctx: &mut InferCtx<'_>, hir: &HirBody, block: &HirBlock, expected: TyVar, reason: Reason) {
+fn check_block(
+    ctx: &mut InferCtx<'_>,
+    hir: &HirBody,
+    block: &HirBlock,
+    expected: TyVar,
+    reason: Reason,
+) {
     for &stmt_id in &block.stmts {
         gen_stmt(ctx, hir, stmt_id);
     }
@@ -194,7 +213,10 @@ fn expectation_known(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
 /// A ref expectation (`-> &T`) keeps the synth path: ref decay and the
 /// return-position borrow rules live in `solve_coerce` / `EqualDecayed`.
 fn expected_is_ref(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
-    matches!(ctx.slot(ctx.resolve(tv)), TySlot::Resolved(TyKind::Ref { .. }))
+    matches!(
+        ctx.slot(ctx.resolve(tv)),
+        TySlot::Resolved(TyKind::Ref { .. })
+    )
 }
 
 // ===== Expression generation =====
@@ -1353,9 +1375,36 @@ fn gen_pat(
             gen_struct_pat(ctx, hir, *entity, fields, scrutinee_tv, span, source);
         },
 
-        HirPat::Or { alternatives, .. } => {
+        HirPat::Or { alternatives, span } => {
+            // hir-lower makes every alternative reuse the first one's local
+            // per name, so a later alternative's binding would overwrite the
+            // local's type. Require it to agree with the first instead;
+            // otherwise `.A(v) or .B(v)` silently reads one payload as the
+            // other's type.
+            let mut first_types: HashMap<LocalId, TyVar> = HashMap::default();
             for &alt in alternatives {
                 gen_pat(ctx, hir, alt, scrutinee_tv, source);
+                let mut bound = HashSet::default();
+                crate::captures::collect_pat_bindings(hir, alt, &mut bound);
+                for local in bound {
+                    let Some(&tv) = ctx.local_types.get(&local) else {
+                        continue;
+                    };
+                    let Some(&first) = first_types.get(&local) else {
+                        first_types.insert(local, tv);
+                        continue;
+                    };
+                    if first == tv {
+                        continue;
+                    }
+                    let decl = &hir.locals[local];
+                    let reason = Reason::OrPatternBinding {
+                        name: decl.name.clone(),
+                        first: decl.span.clone(),
+                    };
+                    ctx.equal_because(first, tv, span.clone(), reason);
+                    ctx.local_types.insert(local, first);
+                }
             }
         },
 
@@ -1927,7 +1976,10 @@ fn require_known_receiver(ctx: &mut InferCtx<'_>, recv: TyVar, member: &str, spa
     if !matches!(ctx.slot(open), TySlot::Unresolved { literal: None }) {
         return;
     }
-    kestrel_debug::ktrace!("e106", "receiver of '{member}' unknown at its use: {open:?}");
+    kestrel_debug::ktrace!(
+        "e106",
+        "receiver of '{member}' unknown at its use: {open:?}"
+    );
     ctx.report_error(InferError::TypeMustBeKnown {
         member: member.to_string(),
         span: span.clone(),
@@ -2066,7 +2118,6 @@ fn peel_ref_var(ctx: &InferCtx<'_>, tv: TyVar) -> TyVar {
         _ => ctx.resolve(tv),
     }
 }
-
 
 /// Default every open literal `recv` is built from, walking back through
 /// the pending constraints that produce it. Returns true on progress.

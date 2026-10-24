@@ -85,7 +85,8 @@ M1 and M2 don't depend on it.
 - [ ] `is_struct_pattern_without_is.ks`: `Rect { width, .. }` on
       `any Shape` is the existing struct-pattern type mismatch.
 - [ ] `is_or_pattern_binding_types.ks`: `c is Circle or c is Square` is
-      E154 (new: no or-pattern binding-type check exists today);
+      the or-pattern binding-type mismatch (landed in M1, regression test
+      `patterns/pattern_types/or_pattern_binding_type_mismatch.ks`);
       `is Circle or is Square` is accepted.
 - [ ] `is_match_not_exhaustive.ks`: a match on `any Shape` without `_`
       is the existing non-exhaustive error, and a repeated `is Circle` arm
@@ -250,7 +251,7 @@ Files: `lib/kestrel-ast/src/ast_type.rs`, `lib/kestrel-ast-builder/src/ast_type.
       in `lower_pat_node`. `var` → E153.
 - [ ] **Diagnostic codes.** Allocate E144 and E404 per
       `lib/kestrel-analyze/AGENTS.md` (registry, `docs/error-codes.md`).
-      Reserve E145–E154 and E402–E403 together, so later phases don't
+      Reserve E145–E153 and E402–E403 together, so later phases don't
       collide with other agents.
 - [ ] **Update the two bare-protocol tests to `any P` (approved):**
       - `declarations/extensions/extension_conformance_on_generic_type.ks`

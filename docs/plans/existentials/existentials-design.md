@@ -460,10 +460,12 @@ if shape is not Square { ... }
 - **Where they work.** These patterns work in `match`, `if let`,
   `guard let` and `while let`.
 - **`or`-patterns.** `c is Circle or c is Square` binds `c` at two
-  different types and is rejected (E154). There is no such check today:
-  `.A(v) or .B(v)` with different payload types is accepted at `80297742`.
-  E154 is therefore a new general or-pattern rule, not only an existential
-  one. `is Circle or is Square` is fine.
+  different types and is rejected by the general or-pattern rule: each
+  name must have the same type in every alternative. That rule was missing
+  at `80297742` (`.A(v) or .B(v)` with different payload types compiled
+  and segfaulted). It now lands with M1 as an E109 type mismatch whose
+  headline is `variable 'c' has different types in or-pattern
+  alternatives`. `is Circle or is Square` is fine.
 - **Exhaustiveness.** The set of payload types is open, so a match on an
   existential is never exhaustive without `_`.
   - `kestrel-pattern-matching` treats each `is T` as one constructor of an
@@ -559,7 +561,7 @@ free). They need to be confirmed there before use.
 | E151 | Associated-type binding unsatisfied on conversion | `cannot convert 'Range[Int64]' to 'any Iterator[Item = String]': its 'Item' is 'Int64'` |
 | E152 | `is` on a non-existential left operand | `'is' needs an existential on the left: 'Circle' is known at compile time` (variant: `'T' is a generic parameter`) |
 | E153 | `var` binding in an `is` pattern | `an 'is' pattern binds a borrow of the payload, so it cannot be 'var'` |
-| E154 | A binding has different types across or-pattern alternatives | `variable 'c' has different types in or-pattern alternatives` |
+| E109 (existing) | A binding has different types across or-pattern alternatives | `variable 'c' has different types in or-pattern alternatives` (a `Reason::OrPatternBinding` on the ordinary type mismatch) |
 | E402 | `B` in `any[B] P` is not a valid box | `'Array' cannot box an existential: its type parameter is not declared 'not Sized'` (variants: `it does not conform to 'ExistentialBox'`, `field 'items' stores 'T' by value`) |
 | E403 | Unsized type parameter used by value | `'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field` |
 | E404 | `any` box argument applied | `the box in 'any[...]' is written without type arguments: 'any[RcBox] Shape'` |
