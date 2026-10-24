@@ -246,6 +246,11 @@ Deinitializers clean up resources when a struct goes out of scope. This follows 
 
 ### Deinit Block
 
+Only non-Copyable types can have a `deinit`. A Copyable type is copied
+bitwise on every use, so its `deinit` would run once per copy (double-close,
+double-free). Declare the type `: not Copyable` (move-only) or `: Cloneable`
+(explicit copies); a plain Copyable type with `deinit` is error E504.
+
 ```kestrel
 struct File: not Copyable {
     var fd: Int
