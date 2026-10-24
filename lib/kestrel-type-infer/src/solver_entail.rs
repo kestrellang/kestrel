@@ -66,17 +66,14 @@ impl<'a, 'i> SolverLayer<'a, 'i> {
                 mutating: *mutating,
             },
             TyKind::Error => ETy::Poison,
-            TyKind::SelfType { entity } => self.fe.abstract_of(kestrel_hir::ty::HirTy::SelfType(
-                *entity,
-                kestrel_span::Span::synthetic(0),
-            )),
+            TyKind::SelfType { entity } => self
+                .fe
+                .abstract_of(kestrel_hir::ty::HirTy::SelfType(*entity, kestrel_span::Span::synthetic(0))),
             // Functions, opaques and unreduced aliases: nothing for the
             // kernel to evaluate; the layer decides them structurally.
-            TyKind::Function { .. } | TyKind::Opaque { .. } | TyKind::TypeAlias { .. } => {
-                self.fe.abstract_of(kestrel_hir::ty::HirTy::Error(
-                    kestrel_span::Span::synthetic(0),
-                ))
-            },
+            TyKind::Function { .. } | TyKind::Opaque { .. } | TyKind::TypeAlias { .. } => self
+                .fe
+                .abstract_of(kestrel_hir::ty::HirTy::Error(kestrel_span::Span::synthetic(0))),
         }
     }
 }
@@ -108,10 +105,7 @@ pub(crate) fn extension_applicability(ctx: &InferCtx<'_>, extension: Entity, rec
     let open = recv.has_var();
     let target = layer.fe.extension_target(extension);
     let clauses = layer.fe.extension_clauses(extension);
-    settle_abstract(
-        kestrel_entail::extension_applies(&layer, &target, &clauses, &recv),
-        open,
-    )
+    settle_abstract(kestrel_entail::extension_applies(&layer, &target, &clauses, &recv), open)
 }
 
 /// Does `ty` satisfy `protocol`, conditional conformances included?
@@ -133,11 +127,7 @@ pub(crate) fn conformance(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Tr
 /// known by solving further: it is an abstract position the caller's own
 /// declared-conformance check already vouched for.
 fn settle_abstract(verdict: Tri, open: bool) -> Tri {
-    if verdict == Tri::Unknown && !open {
-        Tri::Holds
-    } else {
-        verdict
-    }
+    if verdict == Tri::Unknown && !open { Tri::Holds } else { verdict }
 }
 
 /// [`conformance`] for an already-resolved receiver kind.
@@ -145,10 +135,7 @@ pub(crate) fn kind_conformance(ctx: &InferCtx<'_>, recv: &TyKind, protocol: Enti
     let layer = SolverLayer::new(ctx);
     let ety = layer.kind_ety(recv);
     let open = ety.has_var();
-    settle_abstract(
-        kestrel_entail::entails(&layer, &Goal::Conforms { ty: ety, protocol }),
-        open,
-    )
+    settle_abstract(kestrel_entail::entails(&layer, &Goal::Conforms { ty: ety, protocol }), open)
 }
 
 /// Does the type still mention an open var (so an Unknown verdict is
@@ -229,9 +216,7 @@ fn collect_plain_nominals(ctx: &InferCtx<'_>, ty: &ETy, out: &mut Vec<Entity>) {
                 collect_plain_nominals(ctx, a, out);
             }
         },
-        ETy::Tuple(elems) => elems
-            .iter()
-            .for_each(|e| collect_plain_nominals(ctx, e, out)),
+        ETy::Tuple(elems) => elems.iter().for_each(|e| collect_plain_nominals(ctx, e, out)),
         ETy::Ref { inner, .. } => collect_plain_nominals(ctx, inner, out),
         _ => {},
     }

@@ -351,6 +351,7 @@ pub struct InferCtx<'a> {
     /// wins. Keyed structurally, not by TyVar, because the duplicate sites
     /// form independent TyVar trees for the same concrete type.
     pub(crate) reported_typearg_conformance: HashSet<(String, Entity)>,
+
 }
 
 /// Info about a promotion inserted at a Coerce site.

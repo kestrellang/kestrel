@@ -1127,15 +1127,13 @@ fn solve_applicable(
                 span,
             })
         },
-        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
-            SolveResult::Deferred(Constraint::Applicable {
-                receiver,
-                source,
-                name,
-                is_call,
-                span,
-            })
-        },
+        kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => SolveResult::Deferred(Constraint::Applicable {
+            receiver,
+            source,
+            name,
+            is_call,
+            span,
+        }),
     }
 }
 
@@ -1151,9 +1149,7 @@ fn applicability(
         ApplicableSource::Extension(ext) => {
             crate::solver_entail::extension_applicability(ctx, ext, recv)
         },
-        ApplicableSource::Protocol(proto) => {
-            crate::solver_entail::kind_conformance(ctx, recv, proto)
-        },
+        ApplicableSource::Protocol(proto) => crate::solver_entail::kind_conformance(ctx, recv, proto),
     }
 }
 
@@ -4337,11 +4333,8 @@ fn solve_member(
             // candidate may turn out not to apply (bidi §5.1 step 6).
             let winner_unknown = top.iter().any(|(_, ext)| {
                 ext.is_some_and(|e| {
-                    applicability(
-                        ctx,
-                        crate::constraint::ApplicableSource::Extension(e),
-                        &recv_kind,
-                    ) == kestrel_entail::Tri::Unknown
+                    applicability(ctx, crate::constraint::ApplicableSource::Extension(e), &recv_kind)
+                        == kestrel_entail::Tri::Unknown
                 })
             });
             if winner_unknown && crate::solver_entail::has_open_var(ctx, receiver) {
@@ -4437,15 +4430,13 @@ fn solve_member(
                     span,
                 });
             },
-            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => {
-                ctx.constraints.push(Constraint::Applicable {
-                    receiver,
-                    source,
-                    name: name.to_string(),
-                    is_call,
-                    span: span.clone(),
-                })
-            },
+            kestrel_entail::Tri::Fails | kestrel_entail::Tri::Unknown => ctx.constraints.push(Constraint::Applicable {
+                receiver,
+                source,
+                name: name.to_string(),
+                is_call,
+                span: span.clone(),
+            }),
         }
     }
 
@@ -5247,10 +5238,8 @@ pub(crate) fn apply_operator_literal_adoption(ctx: &mut InferCtx<'_>) -> bool {
     let mut progress = false;
     for (recv, arg) in pairs {
         // An earlier pair may already have pinned this receiver.
-        if matches!(
-            ctx.slot(ctx.resolve(recv)),
-            TySlot::Unresolved { literal: Some(_) }
-        ) && crate::unify::unify(ctx, recv, arg).is_ok()
+        if matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: Some(_) })
+            && crate::unify::unify(ctx, recv, arg).is_ok()
         {
             kestrel_debug::ktrace!("rule-l", "literal receiver adopts the right operand's type");
             progress = true;
@@ -5585,10 +5574,7 @@ pub(crate) fn apply_context_literals(ctx: &mut InferCtx<'_>) -> bool {
     }
     let mut progress = false;
     for (recv, entity) in picks {
-        if matches!(
-            ctx.slot(ctx.resolve(recv)),
-            TySlot::Unresolved { literal: Some(_) }
-        ) {
+        if matches!(ctx.slot(ctx.resolve(recv)), TySlot::Unresolved { literal: Some(_) }) {
             let ty = ctx.named(entity, Vec::new());
             progress |= unify::unify(ctx, recv, ty).is_ok();
         }
@@ -5613,11 +5599,7 @@ pub(crate) fn apply_literal_defaults_rest(ctx: &mut InferCtx<'_>, relax_level: u
 /// Give the open literal var `resolved` its `Default<Kind>LiteralType`.
 /// The single place a literal takes its default. Returns false when the
 /// builtin is absent (`// stdlib: false`), leaving the literal open.
-pub(crate) fn default_literal_var(
-    ctx: &mut InferCtx<'_>,
-    resolved: TyVar,
-    literal: LiteralKind,
-) -> bool {
+pub(crate) fn default_literal_var(ctx: &mut InferCtx<'_>, resolved: TyVar, literal: LiteralKind) -> bool {
     let feature = match literal {
         LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
         LiteralKind::Float => Builtin::DefaultFloatLiteralType,
@@ -5646,11 +5628,7 @@ pub(crate) fn default_literal_var(
     true
 }
 
-pub(crate) fn apply_literal_defaults_from(
-    ctx: &mut InferCtx<'_>,
-    relax_level: u8,
-    start: usize,
-) -> bool {
+pub(crate) fn apply_literal_defaults_from(ctx: &mut InferCtx<'_>, relax_level: u8, start: usize) -> bool {
     let mut progress = false;
 
     // Compute the set of literal TyVars that are "blocked" at this relax
