@@ -244,9 +244,9 @@ expected type `B[rawany P]`:
 - **Recording.** The checker records the rule on the expression, like
   `PromotionInfo`, and MIR lowering emits it.
 - **The box is part of the type.** `any[OwnedBox] P` and `any P` are
-  unrelated types. To move a value into a different box, get the concrete
-  value out first (with `as?`), or box the existential itself through
-  `any P: P` (§6). The second option gives a box inside a box.
+  unrelated types, and neither converts to the other (E147), not even by
+  boxing the existential through `any P: P`. To move a value into a
+  different box, get the concrete value out first (with `as?`) and box that.
 
 ### 5. Function tables
 

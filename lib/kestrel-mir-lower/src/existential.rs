@@ -139,7 +139,8 @@ pub(crate) fn template_for(ctx: &mut LowerCtx, boxed: Entity, bounds: &[Entity])
     }
     let names: Vec<String> = bounds.iter().map(|&b| ctx.register_name(b)).collect();
     let entity = ctx.next_synthetic_entity();
-    let name = format!("__vtable.{}", names.join("+"));
+    // The box is part of the name: tables are per (box, payload, bounds).
+    let name = format!("__vtable.{}.{}", ctx.register_name(boxed), names.join("+"));
     add_template(ctx, entity, name, entries);
     ctx.existentials.composition_templates.insert(key, entity);
     entity
@@ -166,7 +167,11 @@ fn protocol_template(ctx: &mut LowerCtx, boxed: Entity, protocol: Entity) -> Ent
             requirement,
         )));
     }
-    let name = format!("__vtable.{}", ctx.register_name(protocol));
+    let name = format!(
+        "__vtable.{}.{}",
+        ctx.register_name(boxed),
+        ctx.register_name(protocol)
+    );
     add_template(ctx, entity, name, entries);
     entity
 }

@@ -150,3 +150,18 @@ re-implement the gating fold in a pass; tuple folds inline the canonical rule
 only to keep their native `Clone` payload. Any deliberate divergence must
 carry a `TODO(copy-drift #n)` comment at its classifier arm — never converge
 or introduce one silently.
+
+## Fat pointers: read fatness from value types, not op payloads (`mono/fat.rs`)
+
+A pointer to an unsized type (a raw existential, or a struct with an unsized
+tail) is two words; `MonoModule::is_fat` decides it. `Op::PtrCast(T)` and
+`Op::PtrBitcast(T)` carry the **pointee** `T` (`lang.cast_ptr[_, T]`), not the
+pointer type, and codegen ignores it. So any pass that cares whether a cast
+crosses thin ↔ fat must ask `is_fat` of the **arg's and result's value
+types**. Reading the op's `T` instead silently skipped the thin→fat pairing
+for `RawPointer.cast[RcBoxStorage[rawany P]]()` and left a garbage table word.
+
+Existential tables are interned per `(template, payload)` and named from the
+template, which includes the **box**: two boxes over the same `(payload, P)`
+are two tables, and their symbols must differ (Cranelift rejects duplicates;
+LLVM silently renames them).

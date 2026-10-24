@@ -331,9 +331,9 @@ As built:
   nothing. Mutation through `any[CowBox] P` waits for M4
   (`CowBox: MutableIndirection` is sized-only until a payload can be
   cloned through its table).
-- **Open:** whether an existential converts implicitly into a different
-  box via `any P: P` (`nested_existential_exec`) or that is E147
-  (`any_box_mismatch`). The two tests disagree; E147 is what's built.
+- **Decided (after M5):** an existential never converts into a different
+  box, not even through `any P: P`; it is E147 (`any_box_mismatch`). To
+  re-box, unbox first with `as?` (`nested_existential_exec` shows it).
 
 ### Phases 9–11: runtime (M4) — done
 
@@ -451,8 +451,10 @@ typing, borrows and exhaustiveness are the ordinary match machinery:
   the `write-kestrel` skill.
 - **Not done:** `OwnedBox: Cloneable` at an unsized payload (clone through
   the table, design §3) — `OwnedBox`'s `Cloneable` is still `T: Sized`.
-  `is any Q` / `as? any Q` stay out of scope. Open: `nested_existential_exec`
-  (see M3).
+  `is any Q` / `as? any Q` stay out of scope.
+- **Follow-up:** table symbols now include the box
+  (`__vtable.{Box}.{P}`): one payload in two boxes is two tables, and the
+  shared name was a duplicate-symbol error on Cranelift.
 
 ## Verification
 

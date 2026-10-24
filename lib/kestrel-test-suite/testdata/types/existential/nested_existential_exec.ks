@@ -2,8 +2,9 @@
 // stdlib: true
 // expect-exit: 0
 //
-// Boxing an existential into a different box goes through `any P: P`, giving
-// a box inside a box (design §4, edge cases).
+// Existentials in different boxes never convert (E147, any_box_mismatch.ks):
+// to move a payload into another box, unbox it first with `as?`, then box
+// the concrete value (design §4).
 
 module Test
 
@@ -27,7 +28,10 @@ extend Square: Shape {
 @main
 func main() -> Int64 {
     let inner: any Shape = Circle(r: 2);
-    let outer: any[OwnedBox] Shape = inner;
-    if outer.area() != 12 { return 1 }
+    guard let .Some(c) = inner as? Circle else { return 1 }
+    let circle: Circle = c;
+    let outer: any[OwnedBox] Shape = circle;
+    if outer.area() != 12 { return 2 }
+    if inner.area() != 12 { return 3 }
     0
 }
