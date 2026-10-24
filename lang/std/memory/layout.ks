@@ -2,7 +2,8 @@
 
 module std.memory
 
-import std.core.(Equatable, Bool, fatalError)
+import std.core.(Equatable, Bool, fatalError, Sized, Static)
+import std.memory.(Pointer)
 import std.numeric.(Int64)
 import std.result.(Optional)
 
@@ -43,8 +44,18 @@ public struct Layout: Equatable {
 
     /// Layout for a single value of `T` — uses the compiler-known
     /// `sizeof` and `alignof` for the type.
-    public static func of[T]() -> Layout where T: not Copyable {
+    public static func of[T]() -> Layout where T: not Copyable, T: not Static {
         Layout(size: Int64(intLiteral: lang.sizeof[T]()), alignment: Int64(intLiteral: lang.alignof[T]()))
+    }
+
+    /// Layout of the value at `pointer` — the one way to measure a payload
+    /// that may be unsized (a raw existential, whose size and alignment
+    /// live in its function table). For a sized `T` this is `of[T]()`.
+    public static func ofValue[T](at pointer: Pointer[T]) -> Layout where T: not Copyable, T: not Sized, T: not Static {
+        Layout(
+            size: Int64(intLiteral: lang.sizeof_val(pointer.raw)),
+            alignment: Int64(intLiteral: lang.alignof_val(pointer.raw))
+        )
     }
 
     /// Layout for `count` contiguous `T` values. Traps if `count` is negative

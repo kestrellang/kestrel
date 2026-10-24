@@ -2764,6 +2764,21 @@ fn emit_copyable_wellformedness(
     }
 }
 
+/// Is `entity[args]` an `any[B] P` whose `B` cannot box an existential?
+/// E402 (`existential_box` analyzer) reports that once; the box's own
+/// Copyable/Static wellformedness bounds against `rawany P` would only be
+/// cascades of it.
+fn is_invalid_existential_box(ctx: &InferCtx<'_>, entity: Entity, args: &[HirTy]) -> bool {
+    matches!(args, [HirTy::RawExistential { .. }])
+        && ctx
+            .query_ctx
+            .query(kestrel_semantics::ExistentialBoxDefect {
+                entity,
+                root: ctx.root,
+            })
+            .is_some()
+}
+
 /// Convert an HirTy (already resolved during HIR lowering) to a TyVar.
 pub fn lower_hir_ty(ctx: &mut InferCtx<'_>, ty: &HirTy) -> TyVar {
     lower_hir_ty_with_subs(ctx, ty, &[])
@@ -3061,7 +3076,9 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+            if !is_invalid_existential_box(ctx, *entity, args) {
+                emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+            }
             ctx.struct_ty(*entity, arg_tvs)
         },
         HirTy::Enum { entity, args, span } => {
@@ -3069,7 +3086,9 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .iter()
                 .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
                 .collect();
-            emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+            if !is_invalid_existential_box(ctx, *entity, args) {
+                emit_copyable_wellformedness(ctx, *entity, &arg_tvs, span);
+            }
             ctx.enum_ty(*entity, arg_tvs)
         },
         HirTy::Protocol { entity, args, .. } => {

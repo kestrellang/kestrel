@@ -1313,10 +1313,14 @@ pub(crate) fn try_intrinsic(
         type_args = bctx.resolve_type_args(callee_expr);
     }
     match name.as_str() {
-        "sizeof" | "alignof" => {
+        // `*_val` measure the pointee at runtime. A sized pointee folds to the
+        // static answer; an unsized one reads its function table (existentials
+        // plan Phase 9 — until then an unsized MIR type is the error type and
+        // never reaches codegen).
+        "sizeof" | "alignof" | "sizeof_val" | "alignof_val" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
-            let op = if name == "sizeof" {
+            let op = if name.starts_with("sizeof") {
                 Op::SizeOf(ty_arg)
             } else {
                 Op::AlignOf(ty_arg)

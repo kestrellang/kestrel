@@ -10,12 +10,15 @@
 
 module std.core
 
+import std.memory.(Pointer)
+
 /// Opt-in transparent member access. `wrapper.foo` resolves through to
 /// `Target.foo` via `pointeeRef()` when the wrapper has no `foo` of its own.
 @builtin(.Indirection)
 public protocol Indirection {
-    /// The pointee type that member access forwards to.
-    type Target
+    /// The pointee type that member access forwards to. May be unsized: an
+    /// existential box's `Target` is the raw existential it holds.
+    type Target: not Sized
 
     /// A shared reference to the pointee. Member READS peel through this.
     func pointeeRef() -> &Target
@@ -33,4 +36,22 @@ public protocol MutableIndirection: Indirection {
     /// A mutating reference to the pointee. Member WRITES / RMW / mutating
     /// methods peel through this.
     mutating func pointeeMutRef() -> &mutating Target
+}
+
+/// A box that can give up its payload: the single owner moves the payload
+/// out and the box frees its storage. Consuming requirements called through
+/// an existential, and `consuming x as? T`, go through this
+/// (docs/plans/existentials/existentials-design.md §3). Shared boxes
+/// (`RcBox`, `CowBox`) cannot conform — other handles may still see the
+/// payload.
+@builtin(.ConsumingIndirection)
+public protocol ConsumingIndirection: MutableIndirection {
+    /// Ends the box. `body` gets the payload's address and must move the
+    /// payload out of it (or destroy it in place). The box then frees its
+    /// storage without running the payload's deinit.
+    ///
+    /// A closure rather than a returned value because the payload's size may
+    /// only be known at runtime; keeping "move out, then free" in one call
+    /// means no caller can free the storage twice or forget to.
+    consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R
 }

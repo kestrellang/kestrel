@@ -2,7 +2,7 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable, Copyable, fatalError, Indirection, MutableIndirection)
+import std.core.(Bool, Cloneable, Copyable, fatalError, Indirection, MutableIndirection, Sized, Static)
 import std.numeric.(Int64)
 import std.result.(Optional)
 import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator, SharedBox)
@@ -12,7 +12,9 @@ import std.memory.(Layout, Pointer, RawPointer, Allocator, SystemAllocator, Shar
 // `where T: not Copyable` is a RELAXATION, not a requirement: the payload may
 // be non-Copyable (an escaping closure's environment struct, a resource
 // handle), and Copyable payloads still work. The block itself is never copied.
-struct RcBoxStorage[T]: not Copyable where T: not Copyable {
+// `T: not Sized`: the payload may be a raw existential — it is the block's
+// last field, an unsized tail.
+struct RcBoxStorage[T]: not Copyable where T: not Copyable, T: not Sized, T: not Static {
     var refCount: Int64  // TODO: Should be atomic
     var value: T
 }
@@ -61,8 +63,14 @@ struct RcBoxStorage[T]: not Copyable where T: not Copyable {
 ///   because a boxed closure environment owns its captures. The two
 ///   operations that copy the payload back out — `getValue()` and
 ///   `deepClone()` — are therefore only available when `T: Copyable`.
+///
+/// `T: not Sized`: an `RcBox` can hold a raw existential — `any P` is
+/// `RcBox[<raw any P>]` by default. Members that move a `T` say
+/// `where T: Sized`; everything else works on any payload. `T: not Static`
+/// for the same reason: a raw existential is only `Static` when its
+/// protocol is, so `RcBox[T]` is `Static` exactly when `T` is.
 @builtin(.SharedBox)
-public struct RcBox[T]: Cloneable where T: not Copyable {
+public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not Static {
     // `fileprivate` (not `private`) so the same-file extensions can reach it:
     // the conditional `getValue`/`deepClone` (a conditional member can't sit in
     // the struct body) and `extend RcBox: SharedBox`, which compares storage
@@ -76,7 +84,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable {
     /// # Errors
     ///
     /// Panics with `"RcBox allocation failed"` on allocation failure.
-    public init(consuming value: T) {
+    public init(consuming value: T) where T: Sized {
         let layout: Layout = Layout.of[RcBoxStorage[T]]();
         var allocator: SystemAllocator = SystemAllocator();
         let result: RawPointer? = allocator.allocate(layout);
@@ -94,21 +102,21 @@ public struct RcBox[T]: Cloneable where T: not Copyable {
         self.ptr = inner;
     }
 
-    /// Mutates the wrapped value in place, passing it to `body` as a
-    /// `mutating` argument. No clone or write-back — `body` mutates the
-    /// heap value directly. Safe only when this is the unique owner
-    /// (`isUnique() == true`); COW types check that first (see `CowBox.modify`).
-    public func modify[R](body: (mutating T) -> R) -> R {
-        self.valuePtr().withMut(body)
-    }
-
     /// Returns a pointer to the wrapped value on the heap. The pointer
     /// is valid as long as the RcBox (and its storage) is alive. Use
     /// this to read individual fields without creating a full `T` clone
     /// whose deinit would free owned resources prematurely.
     public func valuePtr() -> Pointer[T] {
-        let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
-        self.ptr.asRaw().offset(by: valueOffset).cast[T]()
+        self.ptr.asRaw().offset(by: self.payloadOffset()).cast[T]()
+    }
+
+    // Byte offset of `value` inside the storage block `[refCount: Int64,
+    // value: T]`: the refcount rounded up to the payload's alignment. That is
+    // exactly the block's own alignment (max(8, align T)), which
+    // `alignof_val` reads at runtime, so it is right for an over-aligned or
+    // unsized payload too.
+    fileprivate func payloadOffset() -> Int64 {
+        Int64(intLiteral: lang.alignof_val(self.ptr.raw))
     }
 
     /// Overwrites the wrapped value in place. Safe only when this is the
@@ -116,7 +124,7 @@ public struct RcBox[T]: Cloneable where T: not Copyable {
     /// new value, defeating COW. The COW types check `isUnique` before
     /// calling this and `deepClone` otherwise.
     /// Takes `value` by consuming — the caller's copy is dead after this.
-    public func setValue(consuming value: T) {
+    public func setValue(consuming value: T) where T: Sized {
         // Drop the heap occupant before overwriting. Callers always pass a
         // freshly cloned/constructed `value` (read()/getValue() clone; grow()
         // builds a new storage), so the slot's prior value owns a DIFFERENT
@@ -130,13 +138,15 @@ public struct RcBox[T]: Cloneable where T: not Copyable {
     /// Returns `true` when no other clone is sharing storage. The litmus
     /// test for "safe to mutate in place" in COW collections.
     public func isUnique() -> Bool {
-        self.ptr.with { (storage) in storage.refCount == 1 }
+        self.refCount() == 1
     }
 
     /// Current strong reference count. Mostly useful for tests and
     /// diagnostics; production COW logic should branch on `isUnique`.
     public func refCount() -> Int64 {
-        self.ptr.with { (storage) in storage.refCount }
+        // The refcount is the block's first field; read it directly, so
+        // this works whatever (and however sized) the payload is.
+        self.ptr.asRaw().cast[Int64]().read()
     }
 
     /// Bumps the refcount and returns a second `RcBox` pointing at the
@@ -158,10 +168,9 @@ public struct RcBox[T]: Cloneable where T: not Copyable {
 
         if newCount == 0 {
             // Drop the value field in-place at the heap address, then free the block.
-            // RcBoxStorage layout: [refCount: Int64, value: T]
-            let valueOffset = Int64(intLiteral: lang.sizeof[Int64]());
-            self.ptr.asRaw().offset(by: valueOffset).cast[T]().dropInPlace();
-            let layout = Layout.of[RcBoxStorage[T]]();
+            // Measured from the block itself so an unsized payload works too.
+            let layout = Layout.ofValue(at: self.ptr);
+            self.valuePtr().dropInPlace();
             var allocator = SystemAllocator();
             allocator.deallocate(self.ptr.asRaw(), layout)
         } else {
@@ -172,6 +181,18 @@ public struct RcBox[T]: Cloneable where T: not Copyable {
     /// Decrements the refcount; deallocates storage when it reaches zero.
     deinit {
         self.release()
+    }
+}
+
+// In-place mutation through a closure that takes the payload `mutating`:
+// the closure's parameter is a `T` by value, so it needs a sized payload.
+extend RcBox[T] where T: Sized {
+    /// Mutates the wrapped value in place, passing it to `body` as a
+    /// `mutating` argument. No clone or write-back — `body` mutates the
+    /// heap value directly. Safe only when this is the unique owner
+    /// (`isUnique() == true`); COW types check that first (see `CowBox.modify`).
+    public func modify[R](body: (mutating T) -> R) -> R {
+        self.valuePtr().withMut(body)
     }
 }
 

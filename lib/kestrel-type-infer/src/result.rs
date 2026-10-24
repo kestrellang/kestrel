@@ -615,7 +615,9 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
                 .unwrap_or_else(|| format!("{:?}", protocol));
             // Static failures get a "because" detail — deep in generic
             // instantiation chains the bare `T !: Static` is miserable.
-            if let Some(why) = describe_static_failure(ctx, *ty, *protocol) {
+            if let Some(why) = describe_static_failure(ctx, *ty, *protocol)
+                .or_else(|| describe_sized_failure(ctx, *ty, *protocol))
+            {
                 return format!("{} !: {} ({})", ty_name, proto_name, why);
             }
             // A ref TYPE ARGUMENT conforms to exactly what `extend &T: P`
@@ -807,6 +809,28 @@ pub(crate) fn describe_error(ctx: &InferCtx<'_>, err: &InferError) -> String {
             crate::error::describe_fn_kind(*expected),
             crate::error::describe_fn_kind(*actual)
         ),
+    }
+}
+
+/// "Because" detail for a failed `Sized` bound (existentials).
+fn describe_sized_failure(ctx: &InferCtx<'_>, ty: TyVar, protocol: Entity) -> Option<String> {
+    if !crate::solver::is_sized_builtin(ctx, protocol) {
+        return None;
+    }
+    let TySlot::Resolved(kind) = ctx.slot(ctx.resolve(ty)) else {
+        return None;
+    };
+    match kind {
+        TyKind::Param { .. } => Some(
+            "the type parameter is relaxed with 'not Sized'; use it behind a pointer, or in an \
+             extension 'where T: Sized'"
+                .into(),
+        ),
+        TyKind::RawExistential { .. } => {
+            Some("a raw existential has no compile-time size; it only lives in a box".into())
+        },
+        TyKind::Struct { .. } => Some("its last stored field is unsized".into()),
+        _ => None,
     }
 }
 

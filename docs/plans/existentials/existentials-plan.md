@@ -217,101 +217,64 @@ milestones. `patterns/` 277 / 277. Unit tests of every changed crate pass,
 except `kestrel-lsp`'s integration tests, which need a debug
 `kestrel-lsp` binary this sandbox doesn't build.
 
-### Phase 4: `Sized` and `not Sized`
+### Phases 4–5: `Sized`, box protocols, box analyzers (M2) — done
 
-Files: `lib/kestrel-type-infer/src/where_clauses.rs`,
-`lib/kestrel-semantics/src/lib.rs`, `lib/kestrel-copy-fold/src/lib.rs`,
-`lib/kestrel-type-infer/src/ty.rs`
+Landed on `feature/existentials`. As built, and where it differs from the
+original plan:
 
-- [x] **Raw existential type.** `TyKind::RawExistential { bounds, bindings }`
-      in `type-infer/src/ty.rs`, lowered from `HirTy::RawExistential`.
-      Unification is structural on the canonical bound list. *(Done in M1.)*
-- [ ] **Builtin slots** `Sized` (marker protocol, `implicit_conformance:
-      true`), `ExistentialBox`, `ConsumingIndirection` (deferred from
-      Phase 3).
-- [ ] **Sizedness query.** `TypeParamSizeRequirement` (or a
-      `Sized`/`MaybeUnsized` field next to `TypeParamCopyRequirement`,
-      `semantics/lib.rs:269`), driven by `where T: not Sized`. **One
-      source of truth:** add a single negative-bound walker that returns
-      both, rather than a second walker of the same where-clauses.
-- [ ] **Implicit bound.** `inject_implicit_copyable_bounds`
-      (`where_clauses.rs:296`) also injects `T: Sized` unless opted out.
-      Rename it to `inject_implicit_bounds` to match.
-- [ ] **`type_satisfies(…, Sized)`.** False for `RawExistential` and for
-      an unsized-tail struct instantiated at an unsized argument; true for
-      everything else.
-- [ ] **Members needing `Sized`.** On a `not Sized` declaration, a member
-      whose signature uses `T` by value carries an implicit `T: Sized`
-      requirement. It is checked like a conditional extension member, so
-      `UniqueBox.takeValue()` is simply unavailable at `T = rawany P`.
-- [ ] **Associated types.** Associated types are implicitly `Sized`
-      unless declared `type X: not Sized`; that opt-out is parsed and
-      stored next to the type-parameter one. Requirements that use an
-      associated type by value get the implicit `Sized` requirement.
-      Declare `type Target: not Sized` on `Indirection` here, and check
-      that `try_indirection_peel` (`solver.rs:4035`) still resolves
-      `Target` on every existing conformer.
-- [ ] **Unsized references in type-infer.** The ref-decay rule (`&T`
-      used as `T`) never applies when `T` is unsized; reject it with a
-      type error instead.
-- [ ] **Remove the wrong arms.** Delete the `Protocol`-is-`Copyable` arms
-      (`solver.rs:2805`, `resolve.rs:2541`, `semantics/lib.rs:612`) and
-      the `Static` arm (`staticness.rs:368`).
-      - `RawExistential` is never `Copyable`.
-      - It is `Cloneable` iff a bound refines `Cloneable` (§1).
-      - It is `Static` iff a bound refines `Static` (§10).
+- **Builtins.** `Sized` (`lang/std/core/sized.ks`, marker,
+  `implicit_conformance`), `ExistentialBox` (`std.memory`, in
+  `sharedbox.ks`), `ConsumingIndirection` (`indirection.ks`, labelled
+  `consumePointee(body:)`). `SharedBox: ExistentialBox, Cloneable,
+  MutableIndirection`; its `init` requirement moved into `ExistentialBox`.
+- **One walker.** `kestrel_semantics::param_bound_contexts` walks a type
+  parameter's where-clause scopes; the copy, static and size requirements
+  all use it.
+- **Sizedness** (`kestrel-semantics/src/sizedness.rs`).
+  `TypeParamSizeRequirement`: `not Sized` relaxes; a positive `T: Sized`
+  or a *bitwise-copy* bound (`Copyable` and refinements, **except** the
+  `Cloneable` family, whose copies run `clone()`) wins. Intrinsic params
+  may be unsized. `NominalSizedness` handles unsized-tail structs.
+  `inject_implicit_sized_bounds` sits next to the Copyable injection
+  (kept as its own function, not merged/renamed). Solver, resolver and
+  entailment layers answer `Sized` from the same helpers; `Copyable`
+  requires `Sized`.
+- **Members needing `Sized`** are explicit, not implicit: by-value members
+  of `not Sized` types say `where T: Sized`, and generic methods that
+  can't constrain the outer `T` (E437) moved into
+  `extend X[T] where T: Sized`. E403 enforces it.
+- **Associated types.** `type X: not Sized` parses (`opt_conformance_list`
+  in `type_alias_decl`); `Indirection.Target` is `not Sized`.
+- **Stdlib.** `Pointer`, `RcBox`/`RcBoxStorage`, `CowBox` are
+  `not Sized` and **`not Static`**: `rawany P` is only `Static` when `P`
+  is (design §10), so a box that required `Static` payloads could not
+  hold `any Shape`. They are now `Static` exactly when `T` is.
+  `Layout.of`, `Layout.ofValue` and `RawPointer.cast`/`Pointer.cast`
+  relax `Static` too. `CowBox: ExistentialBox` added. RcBox's payload
+  offset is `lang.alignof_val` (new intrinsics `sizeof_val` /
+  `alignof_val`, folded to the static values in MIR until Phase 9).
+- **E402** (`decl/existential_box.rs`, rules in
+  `kestrel_semantics::ExistentialBoxDefect`): one param declared
+  `not Sized`, conforms to `ExistentialBox`, no stored field holding `T`
+  by value (no tail exemption — a box is a fixed-size handle). Checks
+  signatures (DeclCheck) and `let` annotations (BodyCheck, borrows E402).
+  An invalid box's Copyable/Static formation bounds on `rawany P` are
+  skipped (`generate.rs::is_invalid_existential_box`): E402 is the root
+  cause.
+- **E403** (`decl/unsized_param.rs`): a `not Sized` param by value in a
+  signature or non-tail field. Intrinsics are exempt.
+- **Moved to M3:** rejecting ref decay on unsized `T` (no `&rawany P` can
+  reach a decay site until the existential member peel), and deleting the
+  `Protocol`-is-`Copyable`/`Static` arms (dead now that a bare protocol is
+  E144; removed with the M3 conformance work).
+- **Open: `UniqueBox`.** It is a compiler-internal handle with no `deinit`
+  (dropping it must not free), so it cannot own an existential payload
+  and is not yet a valid box. Awaiting a decision.
 
-### Phase 5: Box protocols, stdlib changes, and box analyzers
-
-Files: `lang/std/core/indirection.ks`, `lang/std/memory/{sharedbox,rcbox,cowbox,uniquebox,pointer}.ks`,
-`lib/kestrel-analyze/src/decl/existential_box.rs` (new),
-`lib/kestrel-analyze/src/decl/unsized_param.rs` (new),
-`lib/kestrel-analyze/src/decl/mod.rs`
-
-- [ ] **Protocols.**
-      - `ExistentialBox: Indirection { init(consuming value: Target) }`
-        in `std.memory`, with `@builtin(.ExistentialBox)`.
-      - `ConsumingIndirection` in `std.core/indirection.ks`, with
-        `@builtin(.ConsumingIndirection)`. Exact shape in §3.
-- [ ] **`SharedBox` refines it.** `SharedBox: ExistentialBox, Cloneable, MutableIndirection`.
-      Its `init` requirement moves into `ExistentialBox`. Check that the
-      escaping-closure box binding (`closure_box.rs:121`, which matches
-      members by requirement shape) still resolves `init`.
-- [ ] **`not Sized` on the boxes.** Add it to `Pointer`, `RcBox` and
-      `RcBoxStorage`, `CowBox`, and `UniqueBox` and `UniqueBoxStorage`.
-- [ ] **Fix payload offsets.** Replace the fixed
-      `valueOffset = sizeof(Int64)` (`rcbox.ks:110`, and the same in
-      `uniquebox.ks`) with an offset computed from the payload's alignment.
-      - Sized `T`: `Layout.of[T]().align`.
-      - Unsized `T`: a new `lang.alignOfVal(ptr)`, lowered in Phase 9.
-- [ ] **`UniqueBox` conformances:** `Indirection`, `MutableIndirection`,
-      `ExistentialBox`, `ConsumingIndirection`, and
-      `extend UniqueBox[T]: Cloneable where T: Cloneable`.
-      - At a sized `T`, `clone` allocates and clones the value.
-      - At an unsized payload, `clone` allocates with `sizeOfVal`/`alignOfVal`
-        and copies through the table's `clone_into` entry. That path is
-        finished in Phase 10, once tables exist.
-      - `consumePointee` frees the block without running the payload's
-        deinit.
-      - `takeValue()` becomes `consumePointee { p in p.move() }`.
-      - Its `consuming`-closure clients (`closure_box.rs:141`) must be
-        unaffected.
-- [ ] **Box-validity analyzer** (`decl/existential_box.rs`, E402). This
-      runs at each `any[B] P` use site, but the per-declaration structural
-      check is a query keyed on `B`, so it runs once per box. It checks:
-      - exactly one type parameter, declared `not Sized`;
-      - `B` conforms to `ExistentialBox`;
-      - every stored field that mentions `T` is `Pointer[T]`,
-        `Pointer[S[T]]` where `S` is an unsized-tail struct ending in `T`,
-        or itself a valid box of `T`.
-- [ ] **Unsized-by-value analyzer** (`decl/unsized_param.rs`, E403).
-      Inside a `not Sized` declaration, `T` must not appear by value as a
-      local, parameter, return type, or non-tail field.
-- [ ] Register both in the analyzer list, with codes and
-      `docs/error-codes.md` entries.
-- [ ] **Triage:** `any_box_invalid`, `any_unsized_by_value`, and
-      `stdlib/memory` (no regressions in the boxes, the `escaping` closure
-      tests, or the `consuming` closure tests).
+Exit (at the M2 commit): `types/existential` 6/37 — the remaining 31 need
+M3+ (conversions, member lookup, dispatch, casts) or `UniqueBox`.
+`stdlib/` 299/299, `types/pointer` 45/45, `memory_model` 363/374 and
+closures 273/277 with every failure also failing on base `80297742`.
 
 ### Phase 6: Conversions at check leaves
 

@@ -203,7 +203,7 @@ Required stdlib changes:
       /// Ends the box. `body` gets the payload's address and must move the
       /// payload out of it (or destroy it in place). The box then frees its
       /// storage without running the payload's deinit.
-      consuming func consumePointee[R](_ body: (Pointer[Target]) -> R) -> R
+      consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R
   }
   ```
   - **Why a closure.** The box can't return the payload by value, because
@@ -633,7 +633,7 @@ lowering / parser); the rest arrive with their phases.
 | 14 | Bare `P` as a type | Error E144 |
 | 15 | Composition, `as?`, opening | All in this feature. Opening is limited to self-conformance; there is no dynamic-type generic instantiation |
 | 16 | Default box | `RcBox`: reference semantics, mutation always allowed |
-| 17 | `ConsumingIndirection` | `consuming func consumePointee[R](_ body: (Pointer[Target]) -> R) -> R` (§3). A consuming `as?` returns `Result[T, any[B] P]` |
+| 17 | `ConsumingIndirection` | `consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R` (§3). A consuming `as?` returns `Result[T, any[B] P]` |
 | 18 | `as?` syntax | Postfix operator |
 | 19 | Existing bare-protocol tests | Approved to update to `any P` once the parser accepts `any` (see [Current state](#current-state)) |
 | 20 | Type tests | `is` is a reserved keyword. The operator returns a boolean-literal-typed value (default `Bool`); `is not` negates; no narrowing; existential left operand only. Patterns: `is T`, `name is T`, `[name] is T { fields }`; `var` rejected; no struct-pattern sugar on existentials |

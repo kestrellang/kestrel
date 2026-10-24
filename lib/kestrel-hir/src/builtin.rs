@@ -294,6 +294,16 @@ pub enum Builtin {
     /// denotes the alias *target*, like the default literal types
     /// (docs/plans/existentials/existentials-design.md).
     DefaultBoxType,
+    /// A type whose size is known at compile time — every type except a raw
+    /// existential and a struct whose unsized tail is unsized. Structural,
+    /// like `Static`: never declared; every type parameter carries an
+    /// implicit `T: Sized`, relaxed with `where T: not Sized`.
+    Sized,
+    /// The contract a box type must meet to appear in `any[B] P`.
+    ExistentialBox,
+    /// A box that can give up its payload: consuming requirements and
+    /// `consuming x as? T` go through `consumePointee`.
+    ConsumingIndirection,
 }
 
 impl Builtin {
@@ -516,6 +526,9 @@ impl Builtin {
             // Default existential box — resolved through the index only, like
             // the boxes above.
             Self::DefaultBoxType => "DefaultBoxBinding",
+            Self::Sized => "Sized",
+            Self::ExistentialBox => "ExistentialBox",
+            Self::ConsumingIndirection => "ConsumingIndirection",
         }
     }
 
@@ -735,6 +748,9 @@ impl Builtin {
 
             // Existentials
             "DefaultBoxType" => Some(Self::DefaultBoxType),
+            "Sized" => Some(Self::Sized),
+            "ExistentialBox" => Some(Self::ExistentialBox),
+            "ConsumingIndirection" => Some(Self::ConsumingIndirection),
 
             _ => None,
         }
@@ -952,6 +968,15 @@ impl Builtin {
             // Indirection: non-marker protocol with a required `pointeeRef()`
             // method; explicit conformance (NOT implicit, unlike Copyable).
             Self::Indirection => BuiltinKind::protocol(),
+            // Structural like `Static`: computed, never declared.
+            Self::Sized => BuiltinKind::Protocol {
+                implicit_conformance: true,
+                must_be_marker: true,
+                tuple_conformance_propagation: false,
+                requires_fields_conform: false,
+                disallow_enum_conformance: false,
+            },
+            Self::ExistentialBox | Self::ConsumingIndirection => BuiltinKind::protocol(),
 
             // Shared box: the annotated symbol is the generic *struct* the
             // compiler instantiates (`RcBox`), not the `SharedBox` protocol

@@ -280,6 +280,30 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
 
 impl EntailLayer for FrontEndLayer<'_, '_> {
     fn supply(&self, ty: &ETy, protocol: Entity) -> Supply {
+        // Sized is structural, never declared. A relaxed (`not Sized`) param
+        // can still be Sized under an in-scope `where T: Sized`.
+        if self.builtin(Builtin::Sized) == Some(protocol) {
+            if let ETy::Param(p) = ty {
+                let owner = self.ctx.parent_of(*p).unwrap_or(*p);
+                let relaxed = self.ctx.query(kestrel_semantics::TypeParamSizeRequirement {
+                    param: *p,
+                    context: owner,
+                    root: self.root,
+                }) == kestrel_semantics::SizeRequirement::MayBeUnsized;
+                return Supply::Decided(if relaxed {
+                    self.param_supply(*p, protocol)
+                } else {
+                    Tri::Holds
+                });
+            }
+            if self.abstract_for_classifier(ty) {
+                return Supply::Decided(Tri::Holds);
+            }
+            let hir = self.ety_to_hir(ty);
+            return Supply::Decided(Tri::from_bool(kestrel_semantics::hir_type_is_sized(
+                self.ctx, &hir, self.root, self.root,
+            )));
+        }
         // Static is structural, never declared.
         if self.builtin(Builtin::Static) == Some(protocol) {
             if self.abstract_for_classifier(ty) {
@@ -303,7 +327,10 @@ impl EntailLayer for FrontEndLayer<'_, '_> {
             let ok = if cloneable {
                 sem == kestrel_semantics::CopySemantics::Cloneable
             } else {
+                // `Copyable` also needs a compile-time size (the solver's
+                // `type_conforms_copyable` twin).
                 sem != kestrel_semantics::CopySemantics::NotCopyable
+                    && kestrel_semantics::hir_type_is_sized(self.ctx, &hir, self.root, self.root)
             };
             return Supply::Decided(Tri::from_bool(ok));
         }

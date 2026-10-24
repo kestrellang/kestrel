@@ -38,7 +38,7 @@ extend ByValueBox[T]: Indirection {
     public func pointeeRef() -> &T { self.items }
 }
 extend ByValueBox[T]: ExistentialBox {
-    public init(consuming value: T) { self.items = value; }
+    public init(consuming value: T) where T: Sized { self.items = value; }
 }
 
 func a(x: any[Array] Shape) {} // ERROR: 'Array' cannot box an existential: its type parameter is not declared 'not Sized'

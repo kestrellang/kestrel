@@ -708,7 +708,8 @@ impl TypeResolver for WorldResolver<'_> {
             builtin: Builtin::Copyable,
             root: self.root,
         }) {
-            return self.copy_semantics_of(ty) != CopySemantics::NotCopyable;
+            return self.copy_semantics_of(ty) != CopySemantics::NotCopyable
+                && !matches!(ty, TyKind::RawExistential { .. });
         }
         if self.ctx.query(IsBuiltinProtocol {
             protocol,
@@ -716,6 +717,16 @@ impl TypeResolver for WorldResolver<'_> {
             root: self.root,
         }) {
             return self.copy_semantics_of(ty) == CopySemantics::Cloneable;
+        }
+        // Sized is structural too. Permissive like Static below: only a raw
+        // existential is rejected here; the precise per-instantiation answer
+        // (unsized tails, relaxed params) is the solver's `solver_ty_is_sized`.
+        if self.ctx.query(IsBuiltinProtocol {
+            protocol,
+            builtin: Builtin::Sized,
+            root: self.root,
+        }) {
+            return !matches!(ty, TyKind::RawExistential { .. });
         }
         // Static is likewise structural, never declared. DELIBERATELY
         // permissive (arg-independent — this resolver answer must never
@@ -2548,8 +2559,11 @@ impl WorldResolver<'_> {
                 }
             },
             TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
-            // Unsized: never bit-copied (existentials design §1).
-            TyKind::RawExistential { .. } => CopySemantics::NotCopyable,
+            TyKind::RawExistential { bounds, .. } => kestrel_semantics::raw_existential_copy_semantics(
+                self.ctx,
+                bounds.iter().map(|(protocol, _)| *protocol),
+                self.root,
+            ),
             // A closure value's copy class is its KIND's (plan D6) — the twin
             // of the `solver_copy_class` arm.
             TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),

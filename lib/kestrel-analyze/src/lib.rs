@@ -70,6 +70,9 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_decl_check(decl::protocol_method::ProtocolMethodAnalyzer);
     r.add_decl_check(decl::static_context::StaticContextAnalyzer);
     r.add_decl_check(decl::static_value_type::StaticValueTypeAnalyzer);
+    r.add_decl_check(decl::unsized_param::UnsizedParamAnalyzer);
+    r.add_decl_check(decl::existential_box::ExistentialBoxAnalyzer);
+    r.add_body_check(decl::existential_box::ExistentialBoxBodyAnalyzer);
     r.add_decl_check(decl::builtin_marker_protocol::BuiltinMarkerProtocolAnalyzer);
     r.add_decl_check(decl::duplicate_builtin::DuplicateBuiltinAnalyzer);
     r.add_decl_check(decl::conformance_rules::ConformanceRulesAnalyzer);

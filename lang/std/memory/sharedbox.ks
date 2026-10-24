@@ -9,7 +9,24 @@
 
 module std.memory
 
-import std.core.(Bool, Cloneable, MutableIndirection)
+import std.core.(Bool, Cloneable, Indirection, MutableIndirection)
+
+/// The contract a box type meets to hold an existential: `any[B] P` is
+/// `B[<raw existential>]` (docs/plans/existentials/existentials-design.md §3).
+///
+/// Beyond conforming, `B` must have exactly one type parameter, declared
+/// `not Sized`, and store it only behind a pointer, so the compiler can widen
+/// `B[T]` to `B[<raw existential>]` (E402 checks this).
+@builtin(.ExistentialBox)
+public protocol ExistentialBox: Indirection {
+    /// Takes ownership of `value`, moves it into the box's storage and
+    /// returns the first handle onto it. Only ever called at a sized
+    /// `Target`; boxing an existential converts the result afterwards.
+    ///
+    /// `value` is a single-name parameter, so call sites are positional:
+    /// `B(payload)`, never `B(value: payload)`.
+    init(consuming value: Target)
+}
 
 /// The contract for a shared-ownership container the compiler may use for
 /// implicit boxing: escaping closure environments, class storage, `any`
@@ -62,14 +79,7 @@ import std.core.(Bool, Cloneable, MutableIndirection)
 /// - The payload is destroyed exactly once, when the last handle goes away.
 /// - `sharedMutRef()` is the marked exception to value semantics; it is sound
 ///   while Kestrel is single-threaded.
-public protocol SharedBox: Cloneable, MutableIndirection {
-    /// Takes ownership of `value`, moves it into managed storage and returns
-    /// the first handle onto it.
-    ///
-    /// `value` is a single-name parameter, so call sites are positional:
-    /// `B(payload)`, never `B(value: payload)`.
-    init(consuming value: Target)
-
+public protocol SharedBox: ExistentialBox, Cloneable, MutableIndirection {
     /// Mutable access to the payload through a *shared*, non-`mutating`
     /// handle — the interior-mutability primitive. Every handle onto the same
     /// storage observes the write; nothing forks and uniqueness is unchanged.

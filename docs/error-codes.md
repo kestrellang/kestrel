@@ -174,6 +174,8 @@ func unwrap(opt: Int64?) -> Int64 {
 |---|---|---|
 | E400 | duplicate @builtin(.{feature}): already declared by '{name}' | Two declarations carry the same `@builtin` annotation. A lang item is identified by its annotation alone, so only the first (in declaration order) is used. |
 | E401 | @builtin(.{feature}) is reserved for the standard library | With a stdlib loaded, only declarations in `std` may claim a lang item; the annotation is ignored. `--no-std` programs declare their own. |
+| E402 | '{B}' cannot box an existential: {reason} | `any[B] P` names a box that cannot hold a raw existential. `B` needs exactly one type parameter declared `not Sized`, a conformance to `ExistentialBox`, and no stored field holding `T` by value. Reasons: `it must have exactly one type parameter`, `its type parameter is not declared 'not Sized'`, `it does not conform to 'ExistentialBox'`, `field '{f}' stores '{T}' by value`. |
+| E403 | '{T}' may be unsized here ('where {T}: not Sized'), so it can only be used behind a pointer or as the last stored field | A `not Sized` type parameter used by value in a signature or a non-tail field. Move by-value members into an extension `where T: Sized`. |
 | E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |

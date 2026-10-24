@@ -248,8 +248,9 @@ Current allocations:
   reserved anywhere. Take a new E4xx from those gaps.
   - E402–E404: existentials (docs/plans/existentials/). E404 (malformed
     `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
-    box) and E403 (unsized type parameter by value) arrive as analyzers in
-    the existentials M2. **Free E4xx gaps are now E405–E410 and E414.**
+    box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
+    and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
+    analyzers. **Free E4xx gaps are now E405–E410 and E414.**
   - E1xx E144–E155 are existentials too: E144, E150, E153–E155 are emitted
     by hir-lower today; E145–E149 and E151–E152 arrive with type checking
     (existentials M3/M5). Next free E1xx: **E156**.

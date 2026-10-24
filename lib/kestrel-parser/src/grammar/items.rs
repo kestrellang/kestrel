@@ -587,19 +587,9 @@ fn type_alias_decl(p: &mut Parser<'_>) {
     p.expect(K::Type);
     type_alias_target(p);
     opt_type_parameter_list(p);
-    if p.at(K::Colon) {
-        let b = p.start();
-        p.bump(K::Colon);
-        loop {
-            let item = p.start();
-            ty(p);
-            item.complete(p, K::ConformanceItem);
-            if !p.eat(K::Comma) {
-                break;
-            }
-        }
-        b.complete(p, K::ConformanceList);
-    }
+    // The shared list, so an associated type can relax an implicit bound
+    // (`type Target: not Sized`) like a type parameter or nominal can.
+    opt_conformance_list(p);
     opt_where_clause(p);
     if p.at(K::Equals) {
         p.bump(K::Equals);

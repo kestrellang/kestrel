@@ -3,7 +3,7 @@
 module std.memory
 
 import std.ffi.(FFISafe)
-import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError, Indirection, MutableIndirection)
+import std.core.(Equatable, Bool, Hashable, Hasher, ArrayMatchable, Range, ClosedRange, fatalError, Indirection, MutableIndirection, Sized)
 import std.numeric.(Int64, UInt64, UInt8)
 import std.memory.(ArraySlice)
 import std.result.(Optional)
@@ -69,7 +69,7 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
     /// The caller must ensure the address holds a valid `T` (correct size,
     /// alignment, and initialised contents) before reading through the
     /// returned pointer.
-    public func cast[T]() -> Pointer[T] where T: not Copyable {
+    public func cast[T]() -> Pointer[T] where T: not Copyable, T: not Sized, T: not Static {
         Pointer(raw: lang.cast_ptr[_, T](self.raw))
     }
 
@@ -136,7 +136,10 @@ public struct RawPointer: Equatable, FFISafe, Hashable {
 // `T: not Static` (references 2a): the pointee may be reference-bearing —
 // Pointer is the unsafe escape hatch, and Pointer[T] itself stores only a
 // raw address (no T), so it stays Static regardless of T.
-public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Static {
+// `T: not Sized` (existentials): the pointee may be a raw existential, whose
+// size is only known at runtime. Members that move a `T` or stride by its
+// size say `where T: Sized`.
+public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Static, T: not Sized {
     // `fileprivate`, not `private`: the conditional `pointee` accessor lives in
     // `extend Pointer[T] where T: Copyable` (a conditional member can't sit in
     // the struct body), and an extension can only reach file-scoped members.
@@ -166,7 +169,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// through a pointer captured from an immutable place is the C
     /// const-cast footgun: it compiles, and it is on the caller to know the
     /// storage is actually mutable.
-    public init(to value: T) {
+    public init(to value: T) where T: Sized {
         self._raw = lang.ptr_to(value)
     }
 
@@ -215,24 +218,8 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// take the pointee must not be read or dropped until the slot is
     /// re-initialised (e.g. via `write`). Taking the same slot twice without
     /// an intervening write double-owns the value and will double-free.
-    public func take() -> T {
+    public func take() -> T where T: Sized {
         lang.ptr_take(self._raw)
-    }
-
-    /// Borrows the pointee in place and passes it to `body`. The pointee
-    /// is never copied or cloned — `T.deinit` does not run. Use this
-    /// to extract fields from heap-allocated structs without triggering
-    /// resource cleanup on a temporary clone.
-    public func with[R](body: (T) -> R) -> R {
-        body(lang.ptr_read(self._raw))
-    }
-
-    /// Mutably borrows the pointee in place and passes it to `body` as a
-    /// `mutating` argument. The pointee is mutated directly on the heap —
-    /// never copied, cloned, or written back — so `T.deinit` does not run on
-    /// a temporary. This is the in-place primitive behind COW `modify`.
-    public func withMut[R](body: (mutating T) -> R) -> R {
-        body(lang.ptr_mut_borrow(self._raw))
     }
 
     /// Borrowed view of the pointee — no copy, no clone, no `T: Copyable`
@@ -280,7 +267,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     /// `deinit`. If the pointer was captured with `Pointer(to:)` from a
     /// `let` place, writing is the documented const-cast footgun — the
     /// compiler does not stop it.
-    public func write(consuming value: T) {
+    public func write(consuming value: T) where T: Sized {
         lang.ptr_write(self._raw, value)
     }
 
@@ -292,7 +279,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
 
     /// Strides the pointer by `n` *elements* (multiplied by `sizeof[T]`).
     /// Compare with `RawPointer.offset`, which strides by raw bytes.
-    public func offset(by n: Int64) -> Pointer[T] {
+    public func offset(by n: Int64) -> Pointer[T] where T: Sized {
         let byteOffset = n * Int64(intLiteral: lang.sizeof[T]());
         Pointer[T](raw: lang.ptr_offset[T](self._raw, byteOffset.raw))
     }
@@ -308,7 +295,7 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
     ///
     /// Same caveats as `RawPointer.cast` — the storage must be valid for
     /// `U` (size, alignment, contents) at the moment of the read/write.
-    public func cast[U]() -> Pointer[U] where U: not Copyable {
+    public func cast[U]() -> Pointer[U] where U: not Copyable, U: not Sized, U: not Static {
         Pointer(raw: lang.cast_ptr[_, U](lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
@@ -352,6 +339,26 @@ extend Pointer[T] where T: Copyable {
     public var pointee: T {
         get { lang.ptr_read(self._raw) }
         set { lang.ptr_write(self._raw, newValue) }
+    }
+}
+
+/// Closure-scoped access to a sized pointee. In an extension because a
+/// generic method's own `where` can't constrain the outer `T`.
+extend Pointer[T] where T: Sized {
+    /// Borrows the pointee in place and passes it to `body`. The pointee
+    /// is never copied or cloned — `T.deinit` does not run. Use this
+    /// to extract fields from heap-allocated structs without triggering
+    /// resource cleanup on a temporary clone.
+    public func with[R](body: (T) -> R) -> R {
+        body(lang.ptr_read(self._raw))
+    }
+
+    /// Mutably borrows the pointee in place and passes it to `body` as a
+    /// `mutating` argument. The pointee is mutated directly on the heap —
+    /// never copied, cloned, or written back — so `T.deinit` does not run on
+    /// a temporary. This is the in-place primitive behind COW `modify`.
+    public func withMut[R](body: (mutating T) -> R) -> R {
+        body(lang.ptr_mut_borrow(self._raw))
     }
 }
 

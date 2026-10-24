@@ -682,6 +682,11 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
     );
     seed_generic_fn(world, lang, "sizeof", &[], i64_ty.clone());
     seed_generic_fn(world, lang, "alignof", &[], i64_ty.clone());
+    // Size / alignment of the value at an address — the only way to measure
+    // an unsized pointee, whose layout lives in its function table
+    // (existentials). For a sized `T` they are `sizeof` / `alignof`.
+    seed_generic_fn(world, lang, "sizeof_val", &[("ptr", ptr_t.clone())], i64_ty.clone());
+    seed_generic_fn(world, lang, "alignof_val", &[("ptr", ptr_t.clone())], i64_ty.clone());
 
     // Pointer queries (generic — work on any ptr[T])
     seed_generic_fn(world, lang, "ptr_is_null", &[("ptr", ptr_t.clone())], i1_ty);

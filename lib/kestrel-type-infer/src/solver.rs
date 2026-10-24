@@ -2189,6 +2189,10 @@ fn solve_conforms(
         //   DoesNotConform (an unguarded permit would instantiate a pointee
         //   witness at `&U` — the witness_instantiation_collapse ICE class).
         TySlot::Resolved(TyKind::Ref { pointee, .. }) => {
+            // A reference is two words even to an unsized pointee.
+            if is_sized_builtin(ctx, protocol) {
+                return SolveResult::Solved;
+            }
             if is_static_builtin(ctx, protocol) {
                 if poison_ty_on_failure {
                     ctx.poison(ty);
@@ -2250,6 +2254,8 @@ fn solve_conforms(
             // conformance path below can't answer it.
             let conforms = if is_static_builtin(ctx, protocol) {
                 solver_ty_is_static(ctx, resolved, 0)
+            } else if is_sized_builtin(ctx, protocol) {
+                solver_ty_is_sized(ctx, resolved, 0)
             } else if let Some(want_cloneable) = copyable_builtin_kind(ctx, protocol) {
                 type_conforms_copyable(ctx, resolved, want_cloneable)
             } else {
@@ -2804,8 +2810,11 @@ pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> Co
                 CopySemantics::Copyable
             }
         },
-        // Unsized: never bit-copied — the twin of the semantics-crate arm.
-        TyKind::RawExistential { .. } => CopySemantics::NotCopyable,
+        TyKind::RawExistential { bounds, .. } => kestrel_semantics::raw_existential_copy_semantics(
+            ctx.query_ctx,
+            bounds.iter().map(|(protocol, _)| *protocol),
+            ctx.root,
+        ),
         // A closure value's copy class is fixed by its KIND (plan D6): normal
         // views bit-copy, `mutating`/`consuming` are move-only, `escaping`
         // shares its environment through the box's clone.
@@ -2826,10 +2835,90 @@ pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> Co
 /// conformance question — sole caller is `solve_conforms`. `want_cloneable`
 /// selects the Cloneable (`true`) vs Copyable (`false`) question.
 fn type_conforms_copyable(ctx: &InferCtx<'_>, tv: TyVar, want_cloneable: bool) -> bool {
+    // A `Copyable` bound promises an implicitly copyable *value*, which needs
+    // a compile-time size: a Cloneable raw existential is Cloneable but not
+    // Copyable (and `T: Copyable` implies `T: Sized`, see
+    // `TypeParamSizeRequirement`).
+    if !want_cloneable && !solver_ty_is_sized(ctx, tv, 0) {
+        return false;
+    }
     match solver_copy_class(ctx, tv, 0) {
         CopySemantics::NotCopyable => false,
         CopySemantics::Cloneable => true,
         CopySemantics::Copyable => !want_cloneable,
+    }
+}
+
+/// Is `protocol` the `Sized` builtin (existentials)?
+pub(crate) fn is_sized_builtin(ctx: &InferCtx<'_>, protocol: Entity) -> bool {
+    ctx.query_ctx.query(ResolveBuiltin {
+        builtin: Builtin::Sized,
+        root: ctx.root,
+    }) == Some(protocol)
+}
+
+/// `SizedLayer` over `TyVar` — the solver's face of the per-instantiation
+/// sizedness rule (`kestrel_semantics::instance_is_sized`).
+struct SolverSizedLayer<'a, 'i> {
+    ctx: &'a InferCtx<'i>,
+    depth: u32,
+}
+
+impl kestrel_semantics::SizedLayer for SolverSizedLayer<'_, '_> {
+    type Ty = TyVar;
+
+    fn nominal_sizedness(&self, entity: Entity) -> kestrel_semantics::Sizedness {
+        self.ctx.query_ctx.query(kestrel_semantics::NominalSizedness {
+            entity,
+            root: self.ctx.root,
+        })
+    }
+
+    fn member_is_sized(&self, &tv: &TyVar) -> bool {
+        solver_ty_is_sized(self.ctx, tv, self.depth + 1)
+    }
+}
+
+/// Is `tv` Sized (existentials design §2)? The twin of
+/// `kestrel_semantics::hir_type_is_sized`. A type parameter is judged from
+/// the body being inferred (`ctx.owner`), so a member of an
+/// `extend Box[T] where T: Sized` extension sees `T` as Sized. Unresolved
+/// never blocks.
+pub(crate) fn solver_ty_is_sized(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> bool {
+    if depth > 64 {
+        return true;
+    }
+    let resolved = ctx.resolve(tv);
+    let TySlot::Resolved(kind) = ctx.slot(resolved) else {
+        return true;
+    };
+    match kind.clone() {
+        TyKind::RawExistential { .. } => false,
+        TyKind::Struct { entity, args } => kestrel_semantics::instance_is_sized(
+            &SolverSizedLayer { ctx, depth },
+            entity,
+            &args,
+        ),
+        TyKind::Param { entity } => {
+            ctx.query_ctx.query(kestrel_semantics::TypeParamSizeRequirement {
+                param: entity,
+                context: ctx.owner,
+                root: ctx.root,
+            }) == kestrel_semantics::SizeRequirement::RequiresSized
+        },
+        TyKind::AssocProjection { assoc, .. } => {
+            !kestrel_semantics::assoc_may_be_unsized(ctx.query_ctx, assoc, ctx.root)
+        },
+        TyKind::Enum { .. }
+        | TyKind::Protocol { .. }
+        | TyKind::SelfType { .. }
+        | TyKind::TypeAlias { .. }
+        | TyKind::Tuple(_)
+        | TyKind::Function { .. }
+        | TyKind::Ref { .. }
+        | TyKind::Opaque { .. }
+        | TyKind::Never
+        | TyKind::Error => true,
     }
 }
 
@@ -2905,9 +2994,11 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
         TyKind::Tuple(elems) => elems
             .iter()
             .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
-        // Any conforming payload may sit inside — not provably Static (the
-        // twin of the semantics-crate arm, existentials design §10).
-        TyKind::RawExistential { .. } => false,
+        TyKind::RawExistential { bounds, .. } => kestrel_semantics::raw_existential_is_static(
+            ctx.query_ctx,
+            bounds.iter().map(|(protocol, _)| *protocol),
+            ctx.root,
+        ),
         // Function types are Static in 2a. TODO(static-2c): the capture-
         // derived Static bit on function types.
         // Protocol / opaque / alias / assoc-projection / Never / Error:
