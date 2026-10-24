@@ -399,7 +399,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             };
 
             ctx.call(callee_tv, arg_tvs, result_tv, id, span.clone());
-            resolve_call_now(ctx, callee_tv);
             finish_postponed(ctx, hir, postponed);
             result_tv
         },
@@ -489,7 +488,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                     true,
                     span.clone(),
                 );
-                resolve_member_now(ctx, recv_tv);
             }
             finish_postponed(ctx, hir, postponed);
             result_tv
@@ -549,7 +547,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 true,
                 span.clone(),
             );
-            resolve_member_now(ctx, recv_tv);
             result_tv
         },
 
@@ -589,7 +586,6 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                         false,
                         span.clone(),
                     );
-                    resolve_member_now(ctx, base_tv);
                 },
                 HirName::Missing => {
                     // Parser already reported "expected identifier after `.`".
@@ -637,13 +633,9 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if let Some(home) = home {
                 ctx.equal(result_tv, home, span.clone());
             }
-            // Implicit constraint: resolved against expected type
+            // Implicit constraint: decided here against the home just
+            // equated (or queued while the expected type is still open).
             ctx.implicit(result_tv, name_str, arg_tvs, result_tv, id, span.clone());
-            if home.is_some() {
-                let implicit = ctx.constraints.pop().expect("just pushed");
-                crate::solver::fixpoint(ctx);
-                crate::solver::solve_now(ctx, implicit);
-            }
             result_tv
         },
 
@@ -1965,34 +1957,6 @@ fn settle_scrutinee(ctx: &mut InferCtx<'_>, scrut: TyVar) {
     if open_literal(ctx, peel_ref_var(ctx, scrut)).is_none() && default_literal_roots(ctx, scrut) {
         settle_left(ctx);
     }
-}
-
-/// Resolve the member constraint just emitted (the last one queued) now,
-/// when its receiver's head is known — the walker looks the member up where
-/// it meets it instead of leaving it to the fixpoint (bidi P3a). A member
-/// whose receiver is still open stays queued.
-fn resolve_member_now(ctx: &mut InferCtx<'_>, recv: TyVar) {
-    if receiver_open(ctx, recv) {
-        return;
-    }
-    if !matches!(ctx.constraints.last(), Some(Constraint::Member { .. })) {
-        return;
-    }
-    let member = ctx.constraints.pop().expect("checked above");
-    crate::solver::solve_now(ctx, member);
-}
-
-/// [`resolve_member_now`] for the `Call` constraint just emitted, when the
-/// callee's head is known.
-fn resolve_call_now(ctx: &mut InferCtx<'_>, callee: TyVar) {
-    if receiver_open(ctx, callee) {
-        return;
-    }
-    if !matches!(ctx.constraints.last(), Some(Constraint::Call { .. })) {
-        return;
-    }
-    let call = ctx.constraints.pop().expect("checked above");
-    crate::solver::solve_now(ctx, call);
 }
 
 /// The P2 operator rule (bidi ruling D2; Rust's built-in binop rule): the

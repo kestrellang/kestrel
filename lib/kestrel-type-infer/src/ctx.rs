@@ -989,7 +989,7 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn borrow_pointee(&mut self, inner: TyVar, pointee: TyVar, span: Span) {
-        self.constraints.push(Constraint::BorrowPointee {
+        self.emit(Constraint::BorrowPointee {
             inner,
             pointee,
             span,
@@ -1009,7 +1009,7 @@ impl<'a> InferCtx<'a> {
         span: Span,
         reason: Reason,
     ) {
-        self.constraints.push(Constraint::EqualDecayed {
+        self.emit(Constraint::EqualDecayed {
             value,
             target,
             span,
@@ -1019,7 +1019,7 @@ impl<'a> InferCtx<'a> {
 
     /// Assignment into a local target — see `Constraint::AssignTarget`.
     pub fn assign_target(&mut self, value: TyVar, target: TyVar, expr: HirExprId, span: Span) {
-        self.constraints.push(Constraint::AssignTarget {
+        self.emit(Constraint::AssignTarget {
             value,
             target,
             expr,
@@ -1028,7 +1028,7 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn conforms(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints.push(Constraint::Conforms {
+        self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
@@ -1041,7 +1041,7 @@ impl<'a> InferCtx<'a> {
     /// formation wellformedness, alias bounds): a ref judged here is the
     /// ref ITSELF, never its pointee — see `ConformsOrigin`.
     pub fn conforms_typearg(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints.push(Constraint::Conforms {
+        self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
@@ -1055,7 +1055,7 @@ impl<'a> InferCtx<'a> {
     /// inside the desugared subtree absorb silently when the receiver type
     /// doesn't conform to the expected protocol.
     pub fn conforms_poisoning(&mut self, ty: TyVar, protocol: Entity, span: Span) {
-        self.constraints.push(Constraint::Conforms {
+        self.emit(Constraint::Conforms {
             ty,
             protocol,
             span,
@@ -1068,7 +1068,7 @@ impl<'a> InferCtx<'a> {
     /// [`AssocKey::Name`](crate::constraint::AssocKey). Anything holding the
     /// associated type's entity uses [`Self::associated_entity`].
     pub fn associated(&mut self, container: TyVar, name: &str, result: TyVar, span: Span) {
-        self.constraints.push(Constraint::Associated {
+        self.emit(Constraint::Associated {
             container,
             key: crate::constraint::AssocKey::Name(name.to_string()),
             result,
@@ -1096,7 +1096,7 @@ impl<'a> InferCtx<'a> {
         result: TyVar,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Associated {
+        self.emit(Constraint::Associated {
             container,
             key: crate::constraint::AssocKey::Entity(assoc),
             result,
@@ -1114,7 +1114,7 @@ impl<'a> InferCtx<'a> {
         is_call: bool,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Member {
+        self.emit(Constraint::Member {
             receiver,
             name: name.to_string(),
             args,
@@ -1140,7 +1140,7 @@ impl<'a> InferCtx<'a> {
         explicit_type_args: Vec<kestrel_hir::ty::HirTy>,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Member {
+        self.emit(Constraint::Member {
             receiver,
             name: name.to_string(),
             args,
@@ -1167,7 +1167,7 @@ impl<'a> InferCtx<'a> {
         explicit_type_args: Vec<kestrel_hir::ty::HirTy>,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Member {
+        self.emit(Constraint::Member {
             receiver,
             name: name.to_string(),
             args,
@@ -1188,7 +1188,7 @@ impl<'a> InferCtx<'a> {
         expr: HirExprId,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Call {
+        self.emit(Constraint::Call {
             callee,
             args,
             result,
@@ -1206,7 +1206,7 @@ impl<'a> InferCtx<'a> {
         expr: HirExprId,
         span: Span,
     ) {
-        self.constraints.push(Constraint::OverloadedCall {
+        self.emit(Constraint::OverloadedCall {
             candidates,
             type_args,
             args,
@@ -1219,7 +1219,7 @@ impl<'a> InferCtx<'a> {
     /// Emit a constraint that reduces a TypeAlias TyVar to its substituted
     /// definition (and emits bound obligations).
     pub fn reduce(&mut self, alias: TyVar, result: TyVar, span: Span) {
-        self.constraints.push(Constraint::Reduce {
+        self.emit(Constraint::Reduce {
             alias,
             result,
             span,
@@ -1235,7 +1235,7 @@ impl<'a> InferCtx<'a> {
         expr: HirExprId,
         span: Span,
     ) {
-        self.constraints.push(Constraint::Implicit {
+        self.emit(Constraint::Implicit {
             expected,
             name: name.to_string(),
             args,
@@ -1246,7 +1246,7 @@ impl<'a> InferCtx<'a> {
     }
 
     pub fn interpolation_link(&mut self, result_tv: TyVar, acc_tv: TyVar, span: Span) {
-        self.constraints.push(Constraint::InterpolationLink {
+        self.emit(Constraint::InterpolationLink {
             result_tv,
             acc_tv,
             span,
