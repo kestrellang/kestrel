@@ -14,7 +14,8 @@ use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
 use crate::attribute::attribute_list_parser;
 use crate::common::{
-    AttributeData, ConformanceListData, TypeDeclarationBodyItem, emit_attribute_list, emit_name,
+    AttributeData, ConformanceListData, TypeDeclarationBodyItem,
+    deinit_declaration_parser_internal, emit_attribute_list, emit_name,
     emit_type_declaration_body_item, emit_visibility, identifier, identifier_or_keyword,
     initializer_declaration_parser_internal, skip_trivia, token, visibility_parser_internal,
 };
@@ -110,6 +111,7 @@ impl EnumDeclaration {
                                 | SyntaxKind::FieldDeclaration
                                 | SyntaxKind::FunctionDeclaration
                                 | SyntaxKind::InitializerDeclaration
+                                | SyntaxKind::DeinitDeclaration
                                 | SyntaxKind::TypeAliasDeclaration
                         )
                     })
@@ -273,6 +275,7 @@ where
         type_alias_declaration_parser_internal().map(TypeDeclarationBodyItem::TypeAlias);
     let field_parser = field_declaration_parser_internal().map(TypeDeclarationBodyItem::Field);
     let case_parser = enum_case_parser().map(TypeDeclarationBodyItem::EnumCase);
+    let deinit_parser = deinit_declaration_parser_internal().map(TypeDeclarationBodyItem::Deinit);
 
     module_parser
         .or(import_parser)
@@ -282,6 +285,7 @@ where
         .or(type_alias_parser)
         .or(function_parser)
         .or(subscript_parser)
+        .or(deinit_parser)
         .or(field_parser)
         .boxed()
 }
@@ -532,6 +536,14 @@ mod tests {
         assert_eq!(decl.visibility(), None);
         assert!(!decl.is_indirect());
         assert_eq!(decl.syntax.kind(), SyntaxKind::EnumDeclaration);
+    }
+
+    #[test]
+    fn test_enum_with_deinit() {
+        let decl = parse("enum Handle: not Copyable { case open(Int) deinit { } }");
+        let children = decl.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[1].kind(), SyntaxKind::DeinitDeclaration);
     }
 
     #[test]
