@@ -174,6 +174,12 @@ diagnostic wordings, §14 risk 7), `ImplicitPat` on an unsettled scrutinee,
 `OverloadedCall` (20 in the stdlib), and the ref-decay / kind-flex /
 closure-flex / shape-projection passes that still fire (P4 table above).
 
+**Expectations pushed into every check leaf** (maintainer ruling
+2026-10-23, §14 risk 7 resolved by an approved annotation rewrite): the
+promotable-target gate is gone. Suite: 3861 ok, no verdict changed; 4 tests
+changed only in wording/position and were rewritten — see the commit.
+Ruling D3′ (2026-10-23): bare numeric literal receivers default (Rule R).
+
 **P0 — written, on branch `bidi-p0`** (base `arch/fixes` @ `3b05a25d`):
 
 | Part | What | Verified |
