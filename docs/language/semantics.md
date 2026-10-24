@@ -63,6 +63,35 @@ You can explicitly destroy a non-copyable value using the `deinit` statement.
 deinit file; // Explicit early drop
 ```
 
+### Copies may be dropped at their last use
+
+A value you declare is always dropped at the end of its scope. An **implicit
+copy** of a `Cloneable` value (`let b = a` for a `String`, `Array`, ...) may be
+dropped earlier, right after its last use. That keeps the original's storage
+unshared, so mutating it afterwards doesn't copy the whole buffer:
+
+```kestrel
+let snapshot = items;            // implicit copy
+println(snapshot.count);         // last use: the copy is dropped here
+items.append(x);                 // items is unshared again, so this is in place
+```
+
+`not Copyable` types are never implicitly copied, so guards, files and locks are
+unaffected. For a `Cloneable` type whose drop has a visible effect, such as a
+shared socket handle that closes the connection on its last drop, mark it
+`@observabledrop`. Copies of it (and of anything containing it, like
+`Array[TcpStream]`) then keep their end-of-scope drop:
+
+```kestrel
+@observabledrop
+public struct TcpStream: Readable, Writable, Cloneable { ... }
+```
+
+`kestrel build` warns (E507) when a `Cloneable` type's `deinit` reaches an
+external function other than memory allocation — printing, closing a file
+descriptor — and the type isn't marked. The check runs after generics are
+resolved, so it follows calls through generic and protocol code too.
+
 ## Function Parameter Modes
 
 Kestrel functions explicitly declare how they handle parameters using access modes:

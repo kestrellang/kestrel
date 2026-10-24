@@ -33,7 +33,7 @@ static DESCRIPTORS: &[DiagnosticDescriptor] = &[DiagnosticDescriptor {
 }];
 
 /// Attributes the compiler recognizes. Keep in sync with the consumers in
-/// `kestrel-mir-lower` (`@extern`, `@fileconstant`, `@main`), `kestrel-name-res`
+/// `kestrel-mir-lower` (`@extern`, `@fileconstant`, `@main`, `@observabledrop`), `kestrel-name-res`
 /// (`@builtin`), `kestrel-analyze/decl/extern_ffi_safe.rs` (`@extern`),
 /// `kestrel-analyze/compilation/entry_point.rs` (`@main`), and
 /// `kestrel-compiler-driver` / frontmatter (`@platform`). `@dummy` is a
@@ -45,6 +45,7 @@ const KNOWN_ATTRIBUTES: &[&str] = &[
     "extern",
     "fileconstant",
     "main",
+    "observabledrop",
     "platform",
 ];
 

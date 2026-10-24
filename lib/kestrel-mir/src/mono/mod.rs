@@ -55,6 +55,7 @@ pub fn monomorphize(
         statics,
         mut ty_arena,
         entity_names,
+        observable_drop,
     } = module;
 
     // Phase 1: Instantiation discovery
@@ -197,6 +198,7 @@ pub fn monomorphize(
     }
 
     mono_module.entity_names = entity_names;
+    mono_module.observable_drop = observable_drop;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
 

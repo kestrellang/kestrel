@@ -18,7 +18,7 @@ pub mod ty_query;
 pub mod value;
 pub mod verify;
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
@@ -69,6 +69,10 @@ pub struct MirModule {
     pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// Nominal types marked `@observabledrop`: dropping one has an observable
+    /// effect (closing a connection), so copy lifetime passes must not drop
+    /// copies of it — or of anything containing it — earlier than scope end.
+    pub observable_drop: IndexSet<Entity>,
 }
 
 impl MirModule {
@@ -83,6 +87,7 @@ impl MirModule {
             statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
+            observable_drop: IndexSet::new(),
         }
     }
 
