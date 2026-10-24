@@ -292,6 +292,16 @@ Files: `lib/kestrel-type-infer/src/where_clauses.rs`,
       whose signature uses `T` by value carries an implicit `T: Sized`
       requirement. It is checked like a conditional extension member, so
       `UniqueBox.takeValue()` is simply unavailable at `T = rawany P`.
+- [ ] **Associated types.** Associated types are implicitly `Sized`
+      unless declared `type X: not Sized`; that opt-out is parsed and
+      stored next to the type-parameter one. Requirements that use an
+      associated type by value get the implicit `Sized` requirement.
+      Declare `type Target: not Sized` on `Indirection` here, and check
+      that `try_indirection_peel` (`solver.rs:4035`) still resolves
+      `Target` on every existing conformer.
+- [ ] **Unsized references in type-infer.** The ref-decay rule (`&T`
+      used as `T`) never applies when `T` is unsized; reject it with a
+      type error instead.
 - [ ] **Remove the wrong arms.** Delete the `Protocol`-is-`Copyable` arms
       (`solver.rs:2805`, `resolve.rs:2541`, `semantics/lib.rs:612`) and
       the `Static` arm (`staticness.rs:368`).
@@ -325,7 +335,12 @@ Files: `lang/std/core/indirection.ks`, `lang/std/memory/{sharedbox,rcbox,cowbox,
       - The stdlib overaligned-payload regression tests should pass after
         this, independent of existentials.
 - [ ] **`UniqueBox` conformances:** `Indirection`, `MutableIndirection`,
-      `ExistentialBox` and `ConsumingIndirection`.
+      `ExistentialBox`, `ConsumingIndirection`, and
+      `extend UniqueBox[T]: Cloneable where T: Cloneable`.
+      - At a sized `T`, `clone` allocates and clones the value.
+      - At an unsized payload, `clone` allocates with `sizeOfVal`/`alignOfVal`
+        and copies through the table's `clone_into` entry. That path is
+        finished in Phase 10, once tables exist.
       - `consumePointee` frees the block without running the payload's
         deinit.
       - `takeValue()` becomes `consumePointee { p in p.move() }`.
@@ -457,6 +472,14 @@ Files: `lib/kestrel-mir/src/ty.rs`, `lib/kestrel-mir/src/passes/layout.rs`,
         as the single source of truth.
       - `Pointer[T]` and every box built on it become two words at an
         unsized `T` with no source change.
+      - `&X` and `&mutating X` at an unsized `X` are two words too, using
+        the same helper.
+- [ ] **Escape checker on two-word references.** It treats them like any
+      other reference: provenance flows through the data word, and the
+      table word carries none. Add a MIR test that borrows through
+      `pointeeRef()` on an existential box and then tries to let the
+      reference escape. It must be rejected the same way as for a sized
+      payload.
 - [ ] **Unsized-tail field offset.** The offset of the last field of an
       unsized-tail struct is `round_up(prefix_size, table.align)`,
       computed at runtime. All other field offsets are static.
@@ -466,7 +489,7 @@ Files: `lib/kestrel-mir/src/ty.rs`, `lib/kestrel-mir/src/passes/layout.rs`,
       pointer to call the table's drop slot. Lowered in `intrinsic.rs`
       (`:1316`, `:1417`). On a sized pointee they fold to the static values.
 - [ ] **Unsized function-table pointer.** `Pointer[RcBoxStorage[rawany P]]`
-      carries the table of the payload's `(T, P)`. The table pointer passes
+      carries the table of the `(RcBox, T, P)` table. The table pointer passes
       through the unsized-tail struct unchanged.
 
 ### Phase 10: Function tables, thunks, dynamic calls
@@ -476,7 +499,8 @@ Files: `lib/kestrel-mir/src/item/` (new `vtable.rs`), `lib/kestrel-mir/src/inst.
 plus `mod.rs`, `expand.rs`, `verify.rs`), `lib/kestrel-mir-lower/src/body/`
 
 - [ ] **New MIR items.**
-      - `VTableKey { concrete: TyId, existential: TyId }`
+      - `VTableKey { boxed: Entity, concrete: TyId, existential: TyId }`,
+        where `boxed` is the box `B`
       - `VTableDef { key, entries: Vec<VTableEntry> }`, with
         `VTableEntry = FuncAddr(InstanceId) | Size | Align | TypeDescriptor(TyId) | Parent(VTableKey) | Absent`
       - `Op::FuncAddr(InstanceId)`, `Op::VTableAddr(VTableKey)`
@@ -506,9 +530,10 @@ plus `mod.rs`, `expand.rs`, `verify.rs`), `lib/kestrel-mir-lower/src/body/`
       `resolve_witness_call` (`mono/witness.rs:397`). Thunks become mono
       roots.
 - [ ] **Consuming-requirement thunks** go through
-      `ConsumingIndirection.consumePointee`. The thunk receives the box by
-      value, so this one is synthesized per `(B, T, P)` rather than per
-      `(T, P)`. Note it in the `VTableKey` docs.
+      `ConsumingIndirection.consumePointee` on the key's box. The thunk
+      receives the box by value. Non-consuming thunks don't depend on `B`,
+      so they are interned per `(T, requirement)` and shared between the
+      tables of different boxes.
 - [ ] **Type descriptors.** One `TypeDescriptor` static per concrete type
       that appears in any table. Its address is the identity.
 - [ ] **Verify.** Post-mono checks in `mono/verify.rs`: no `VTableAddr`
@@ -624,7 +649,7 @@ Files: `lib/kestrel-type-infer/src/` (cast constraint),
 - **The `SharedBox` refactor touches escaping closures.** `closure_box.rs`
   finds members by requirement shape. Moving `init` into a parent protocol
   must keep that lookup working. Run the closure tests right after Phase 5.
-- **Consuming thunks are per box.** They break the "one table per
-  `(T, P)`" rule. If that complicates mono, the fallback is to make
-  consuming requirements non-dispatchable for now. That would be a change
-  to the design, so ask first.
+- **Two-word references.** The escape checker and the ref-decay rule
+  have only ever seen one-word references. Expect assumptions about
+  reference size in MIR lowering and both codegens; search for them before
+  Phase 9 rather than finding them by crash.

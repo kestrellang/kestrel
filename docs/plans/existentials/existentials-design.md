@@ -124,6 +124,25 @@ part of the language, not a compiler-internal list.
   `UniqueBox.takeValue() -> T` and `CowBox.read() -> T`. This works exactly
   like a member in a `where T: Copyable` extension: the implicit
   `Sized` requirement is recorded on that member.
+- **Associated types follow the same rule.** An associated type is
+  implicitly `Sized` unless declared `type X: not Sized`.
+  - `Indirection` declares `type Target: not Sized`, because
+    `RcBox[rawany P]`'s `Target` is the raw existential.
+  - A protocol requirement that takes or returns `Target` by value gets an
+    implicit `where Target: Sized`, by the members rule above. That covers
+    `ExistentialBox.init(consuming value: Target)`, for example.
+  - Requirements that only use `&Target`, such as `pointeeRef` and
+    `pointeeMutRef`, apply at any `Target`.
+- **References to unsized types.** `&X` and `&mutating X` with an unsized
+  `X` are two words (data, table), like `Pointer[X]`. They only appear
+  inside the compiler: in the result of `pointeeRef()` on an existential
+  box, and in thunks. Two existing rules handle them:
+  - **Ref decay** (`&T` used where `T` is expected becomes a copy of `T`)
+    never applies to an unsized `T`. If an expected type ever forces it,
+    that is a type error, not a copy. User code can't trigger this;
+    the rule guards against compiler bugs.
+  - **The escape checker** treats a two-word reference exactly like any
+    other reference. Provenance flows through it unchanged.
 
 ### 3. Boxes
 
@@ -152,7 +171,7 @@ How the stdlib boxes fit:
 |---|---|---|---|---|
 | `RcBox` (**default**) | Refcount bump (shares) | Yes, visible to every copy | No | Yes |
 | `CowBox` | Refcount bump | Yes, forks first when shared | No | No: `CowBox[T]` requires `T: Cloneable`, so `any[CowBox] P` needs `P: Cloneable` |
-| `UniqueBox` | Only if `P: Cloneable` (deep clone) | Yes | Yes | Yes |
+| `UniqueBox` | Only if `UniqueBox[rawany P]` is `Cloneable`, i.e. `P: Cloneable` (deep clone) | Yes | Yes | Yes |
 
 **Every row falls out of the box's own declaration.** Its `Cloneable` and
 `MutableIndirection` conformances and their `where` clauses, evaluated at
@@ -162,7 +181,14 @@ copy rules ("depends on the box").
 Required stdlib changes:
 
 - **`UniqueBox`**: add `Indirection`, `MutableIndirection`,
-  `ExistentialBox` and `ConsumingIndirection` conformances.
+  `ExistentialBox` and `ConsumingIndirection` conformances, plus
+  `extend UniqueBox[T]: Cloneable where T: Cloneable`.
+  - So `any[UniqueBox] P` is `Cloneable` exactly when `UniqueBox[rawany P]`
+    is. That holds when `rawany P: Cloneable`, i.e. `P: Cloneable` (§1).
+    There's no existential-specific rule.
+  - At a sized `T`, `clone` allocates and clones the value as usual.
+  - At an unsized payload, `clone` allocates using `sizeOfVal`/`alignOfVal`
+    and copies through the table's `clone_into` entry.
 - **`ConsumingIndirection`** (new, `std.core` next to `Indirection`). This is
   how a consuming requirement, or a consuming `as?`, gets the payload out of
   a box whose payload size is only known at runtime:
@@ -199,7 +225,7 @@ expected type `B[rawany P]`:
 | Found | Rule | Effect |
 |---|---|---|
 | `T` where `T: P`, `T` sized | **Box** | Call `B[T].init(consuming:)`, then unsize |
-| `B[T]` where `T: P` | **Unsize** | Widen `B`'s pointer fields to carry `(T, P)`'s table. No allocation. |
+| `B[T]` where `T: P` | **Unsize** | Widen `B`'s pointer fields to carry the `(B, T, P)` table. No allocation. |
 | `B[rawany Q]` where `Q` refines `P`, or `Q` is a composition containing `P` | **Upcast** | Swap the table pointer for the parent table it carries (§5). No allocation. |
 | `C[...]` with `C ≠ B` | **Error** | Boxes are never interconverted |
 
@@ -212,9 +238,21 @@ expected type `B[rawany P]`:
 
 ### 5. Function tables
 
-One table per `(concrete type T, protocol P, associated-type bindings)`.
-Associated-type bindings are determined by `T`, so the key is effectively
-`(T, P)`.
+One table per `(box B, concrete type T, protocol P)`. Associated-type
+bindings are determined by `T`, so they don't need to be in the key.
+
+- **Why the box is in the key.** Some entries depend on how the box is
+  implemented, not just on `T` and `P`. A consuming requirement's thunk
+  takes the box by value and frees it through that box's `consumePointee`.
+  Keying every table by `B` keeps one rule (every table belongs to exactly
+  one box) instead of mixing box-independent and box-specific entries.
+- **What stays independent of `B`.** The slot *layout* depends only on `P`
+  (`ExistentialLayout(P)`, below), so call sites never depend on `B` for
+  slot indices. Type descriptors are per `T`, so `as?` and `is` compare the
+  same identity whichever box holds the value.
+- **Cost.** The same `(T, P)` stored in two different boxes gets two
+  tables. Their non-consuming thunks are the same mono instances, so only
+  the table data is duplicated.
 
 **Layout.** The order is fixed by `P` alone, so call sites depend only on
 `P`'s declaration:
@@ -224,7 +262,7 @@ header:   drop_in_place(ptr)
           size, align
           type_descriptor        // identity for `as?`
           clone_into(src, dst)   // present iff P: Cloneable
-parents:  &table(T, P1) ... &table(T, Pn)   // in P's declared parent order
+parents:  &table(B, T, P1) ... &table(B, T, Pn)   // in P's declared parent order
 slots:    one thunk per dispatchable requirement, in declaration order
 ```
 
@@ -255,7 +293,7 @@ retain/release shims are built (`synthesize_env_shims`,
 calling-convention difference, such as a by-value `Copyable` self.
 
 **Composition.** `rawany P and Q` gets a table with an empty slot section
-and parents `(T, P)` and `(T, Q)`, in canonical (sorted) order. Its methods
+and parents `(B, T, P)` and `(B, T, Q)`, in canonical (sorted) order. Its methods
 dispatch through those parent tables. Upcasting to `any P` is just loading a
 parent pointer. Composition is therefore an anonymous protocol with parents
 `P` and `Q`.
@@ -267,7 +305,7 @@ symbol. Compilation is whole-program, so that address is unique per type.
 
 - **When tables are made.** During monomorphization, on demand. A table is
   created the first time an unsize, box or upcast is reached for a given
-  `(T, P)`. The key is interned like `InstantiationKey`
+  `(B, T, P)`. The key is interned like `InstantiationKey`
   (`kestrel-mir/src/mono/types.rs:11`). Compilation is whole-program: one
   `MirModule`, internal linkage everywhere
   (`codegen-llvm/src/context.rs:300`). So **no cross-module dedup, COMDAT or
@@ -286,7 +324,8 @@ symbol. Compilation is whole-program, so that address is unique per type.
   - `ExistentialLayout(P)` gives slot order, parents and dispatchability.
     It depends only on `P`'s requirement list, so editing a conformer never
     invalidates callers' slot indices.
-  - `VTableFor(T, P)` depends on `T`'s witnesses for `P`. Today it is
+  - `VTableFor(B, T, P)` depends on `T`'s witnesses for `P` and on `B`'s
+    `ConsumingIndirection` witness. Today it is
     recomputed with the module. When MIR becomes incremental it is the unit
     to cache, and its inputs are already narrow.
 
@@ -452,8 +491,8 @@ if shape is not Square { ... }
 - **Pattern matching.** `is` patterns (§8b) test and bind in `match`,
   `if let`, `guard let` and `while let`. `as?` composes with them.
 - **References.** `&any P` borrows the box, an ordinary reference to a
-  sized value. There is no user-visible `&rawany P`. The only pointer to a
-  raw existential is the internal one inside boxes and thunks.
+  sized value. There is no user-visible `&rawany P`. The two-word
+  `&rawany P` produced inside the compiler follows the rules in §2.
 - **Escaping closures.** Unchanged. They keep their 4-word thick layout
   (`func_thick_words`). They are not re-expressed as existentials.
 - **`static` / `Static`.** `rawany P` is `Static` iff every payload must
@@ -543,11 +582,14 @@ free). They need to be confirmed there before use.
   sized. `Array[rawany P]` can't be written.
 - **Recursive conformance**: `extend Circle: Shape` where a method returns
   `any Shape`. That is just a sized return type, with nothing special.
-- **Same `(T, P)` reached from many sites**: one table, via the mono map.
+- **Same `(B, T, P)` reached from many sites**: one table, via the mono map.
+- **Same `(T, P)` in two boxes** (`any Shape` and `any[UniqueBox] Shape`
+  both holding a `Circle`): two tables that share their non-consuming
+  thunks, with one type descriptor, so `is Circle` agrees across boxes.
 - **Upcast through a diamond** (`P: A, Q: A`, from `any P and Q` to
   `any A`): composition parents are visited in canonical order, and the
   first path wins. All paths are identical by construction, since there is
-  one table per `(T, A)`.
+  one table per `(B, T, A)`.
 - **Generic payload** (`Box[Int64]: Shape` and `Box[String]: Shape`): two
   separate tables, keyed by the concrete instantiation.
 - **`as?` to a protocol** (`x as? any Q`) is not in scope. Only concrete
@@ -570,7 +612,7 @@ free). They need to be confirmed there before use.
 | 8 | Parent tables | Each table carries pointers to its parents' tables. Upcasts load one |
 | 9, 10 | Mutation, move-only payloads | Decided by the box's own conformances and `where` clauses. No special rule |
 | 11 | User-defined boxes | Yes: `Sized` builtin plus `not Sized` opt-out plus the structural unsizable rule |
-| 12 | Table placement and incremental compilation | Mono-synthesized `VTableDef` keyed by `(T, P)`; layout query on `P` alone (§5) |
+| 12 | Table placement and incremental compilation | Mono-synthesized `VTableDef` keyed by `(B, T, P)`; layout query on `P` alone (§5) |
 | 13 | Member lookup | Protocol members first, box members second |
 | 14 | Bare `P` as a type | Error E144 |
 | 15 | Composition, `as?`, opening | All in this feature. Opening is limited to self-conformance; there is no dynamic-type generic instantiation |
@@ -579,3 +621,7 @@ free). They need to be confirmed there before use.
 | 18 | `as?` syntax | Postfix operator |
 | 19 | Existing bare-protocol tests | Approved to update to `any P` once the parser accepts `any` (see [Current state](#current-state)) |
 | 20 | Type tests | `is` is a reserved keyword. The operator returns a boolean-literal-typed value (default `Bool`); `is not` negates; no narrowing; existential left operand only. Patterns: `is T`, `name is T`, `[name] is T { fields }`; `var` rejected; no struct-pattern sugar on existentials |
+| 21 | Associated types and `Sized` | Implicitly `Sized` unless `type X: not Sized`; `Indirection.Target` is `not Sized`; by-value requirements get an implicit `where Target: Sized` (§2) |
+| 22 | References to unsized types | Two words; ref decay never applies to an unsized type; the escape checker treats them like any reference (§2) |
+| 23 | Cloning `any[UniqueBox] P` | Follows `UniqueBox[rawany P]: Cloneable`, from `extend UniqueBox[T]: Cloneable where T: Cloneable` (§3) |
+| 24 | Table key | `(B, T, P)`: some entries depend on the box's implementation; the slot layout still depends on `P` alone (§5) |
