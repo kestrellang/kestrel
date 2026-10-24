@@ -174,6 +174,19 @@ diagnostic wordings, §14 risk 7), `ImplicitPat` on an unsettled scrutinee,
 `OverloadedCall` (20 in the stdlib), and the ref-decay / kind-flex /
 closure-flex / shape-projection passes that still fire (P4 table above).
 
+**P4 — done to the load-bearing floor** (probe run on `abdf2e87`, full
+suite + stdlib, after pushing expectations everywhere): every pass that
+still fires is a rule the design keeps — literal defaults at body end
+(level 0: 48.1k; level 1, interpolation accumulators: 69) are D2's
+end-of-body step; Rule C 5.3k; Rule L at body end 572; closure-kind
+retrofit 73 (closure literals still synthesized, e.g. unannotated
+`let f = { … }`); operator shape projection 47 (generic-bound results Rule C
+cannot see); kind-flex adoption 24 (a bare function value passed where a
+closure kind is expected, §9 step 6); end-of-body ref decay 16; closure-flex
+arity 2 (§8 keeps "a parameterless closure adapts to any arity"). None is
+dead, so nothing further is deleted without first moving its rule into the
+walker.
+
 **Expectations pushed into every check leaf** (maintainer ruling
 2026-10-23, §14 risk 7 resolved by an approved annotation rewrite): the
 promotable-target gate is gone. Suite: 3861 ok, no verdict changed; 4 tests
