@@ -17,7 +17,7 @@ import std.num.Int64
 
 var drops: Int64 = 0;
 
-struct Tracked {
+struct Tracked: not Copyable {
     var id: Int64;
     deinit { drops = drops + 1; }
 }

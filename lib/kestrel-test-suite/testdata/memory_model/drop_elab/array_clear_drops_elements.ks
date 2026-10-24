@@ -16,8 +16,9 @@ import std.numeric.Int64
 
 public var drops: Int64 = 0;
 
-struct Res: Copyable {
+struct Res: Cloneable {
     var id: Int64
+    func clone() -> Res { Res(id: self.id) }
     deinit { drops = drops + 1; }
 }
 

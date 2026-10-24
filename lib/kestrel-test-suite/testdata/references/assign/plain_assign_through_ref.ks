@@ -11,7 +11,7 @@ module Test
 import std.memory.(Pointer, Layout, SystemAllocator)
 import std.numeric.(Int64)
 
-struct Tracked {
+struct Tracked: not Copyable {
     var tag: Int64
     var drops: Pointer[Int64]
     deinit { self.drops.write(self.drops.read() + 1); }

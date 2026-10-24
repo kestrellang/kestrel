@@ -13,7 +13,7 @@ module Test
 
 var DROPS: Int64 = 0;
 
-struct Res {
+struct Res: not Copyable {
     var id: Int64;
     deinit { DROPS = DROPS + 1; }
 }
