@@ -58,19 +58,18 @@ they need the operator rule below rather than a known receiver.
 
 ## Implementation status (2026-10-24)
 
-**Current: `bidi-p0-clean` @ `271ad94a` — 3877 ok / 11 failed** (full suite,
-release, 2026-10-24). P0–P4 are done; P5 is partial (see *P5* below). The 18 pinned non-bidi bugs taken
-on before merging to nightly: 7 fixed (static members through type params and
-projections ×4, view closure stored into an outer field, projected snapshot
-capture then consume, `deinit` while a ref is live — plus `Self.Item` static
-calls found along the way). The 11 left, all pinned "EXPECTED TO FAIL" and
-none caused by this work:
+**Current: `bidi-p0-clean` @ `4cbe3437` — 3884 ok / 9 failed** (full suite,
+release, 2026-10-24). P0–P4 are done; P5 is mostly done (see *P5* below). Of
+the 18 pinned non-bidi bugs taken on before merging to nightly, 9 are fixed
+(static members through type params and projections ×4, view closure stored
+into an outer field, projected snapshot capture then consume, `deinit` while
+a ref is live, view closure returned through a call result, view closure
+stored via a `mutating` method — the last two by
+[closure-fields.md](closure-fields.md)). The 9 left, all pinned:
 
 - 7 aliasing use-after-free (`memory_model/aliasing/*`): mutation while a ref
   or iterator is live. Accepted under may-alias (references stage 2: "no
   exclusivity backstop"); maintainer decision pending.
-- 2 view-closure escapes (through a call result, through a `mutating`
-  method): addressed by the proposal in [closure-fields.md](closure-fields.md).
 - 2 ref invalidations (`append`, reassignment while an element ref is live):
   ruled allowed (mutating while borrowed is permitted); test headers pending
   rewrite.
@@ -184,15 +183,18 @@ against a pushed expectation is looked up on it, or on its promotion target
 (`.Red` against `Color?` is a `Color`, then promoted), and resolved at once.
 Suite 3863 ok / 24 failed, unchanged.
 
-**P5 — partial** (`5461bdf6`). `solver::solve` is gone: the end of a body is
-`obligations::finish_body` — flush, an explicit ordered list of default rules
-(operator shape, Rule L, literal defaults strict, ref decay, literal defaults
-relaxed), type-param defaults, then the reports and cascade suppression.
-Rules L and C also run in the walker, so the end-of-body passes only catch
-operands that became known later. **Not done:** the flush is still the
-solver's fixpoint over every remaining constraint kind, not a queue of
-`Conforms`/`ProjEq`/`Equal` obligations; `solver.rs` is still ~6.4k lines.
-The shapes listed below still reach it.
+**P5 — mostly done** (`5461bdf6`, `13e9147b`, `4cbe3437`). `solver::solve`
+is gone: the end of a body is `obligations::finish_body`. Every constraint
+the walker emits goes through `InferCtx::emit` and is decided where it is
+emitted; the body's assumptions (where clauses) settle as one batch before
+the walk, constraints emitted inside the solver stay queued, and a
+decision's follow-ups settle before the walker moves on. What reaches the
+end of a body (probe, stdlib + one program): ~2.8k constraints waiting on
+a var that became known later (from ~19.3k), ~0.56k after the first flush:
+403 literal-pending `Conforms`, 74 operator `Member`s on open literals, 74
+`Associated`, 3 `.Case`, 2 interpolation links. **Not done:** those last
+three kinds are not yet obligations, so the flush is still the solver's
+general fixpoint, and `solver.rs` (~6.4k lines) keeps every rule.
 
 **P5 — what remains (written before `5461bdf6`).** After P3/P4 the end of a body still
 runs `solve()`: the fixpoint over what is left, literal defaulting (levels
