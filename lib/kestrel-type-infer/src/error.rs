@@ -654,6 +654,21 @@ impl InferError {
         }
     }
 
+    /// The types this error talks about (for cascade suppression).
+    pub fn mentioned_types(&self) -> Vec<TyVar> {
+        match self {
+            Self::TypeMismatch { expected, got, .. } => vec![*expected, *got],
+            Self::DoesNotConform { ty, .. } => vec![*ty],
+            Self::NoMember { receiver, .. }
+            | Self::MemberNotVisible { receiver, .. }
+            | Self::MemberIsStatic { receiver, .. } => vec![*receiver],
+            Self::AmbiguousMember { receiver, .. } => receiver.iter().copied().collect(),
+            Self::NoAssociatedType { container, .. } => vec![*container],
+            Self::ImplicitMemberNotFound { expected, .. } => vec![*expected],
+            _ => Vec::new(),
+        }
+    }
+
     pub fn span(&self) -> &Span {
         match self {
             Self::TypeMismatch { span, .. }

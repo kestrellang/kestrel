@@ -100,6 +100,13 @@ pub struct InferCtx<'a> {
     /// Parallel to `errors`.
     pub(crate) error_details: Vec<String>,
 
+    /// Parallel to `errors`: did the error mention an already-failed
+    /// (`Error`) type when it was reported? Taken at report time, because
+    /// the solver poisons an error's own types right after reporting it.
+    /// `obligations::finish_body` drops these cascades (bidi §10) when the
+    /// body has a root-cause error.
+    pub(crate) error_is_cascade: Vec<bool>,
+
     /// HirExprIds that have had a Coerce-derived error reported. Used to
     /// suppress duplicate errors on subsequent args of the same call (e.g.
     /// `Point(x: "a", y: "b")` — emit once, not per field).
@@ -395,6 +402,7 @@ impl<'a> InferCtx<'a> {
             constraints: Vec::new(),
             errors: Vec::new(),
             error_details: Vec::new(),
+            error_is_cascade: Vec::new(),
             errored_coerce_exprs: HashSet::default(),
             scrutinee_exprs: HashSet::default(),
             assign_target_exprs: HashSet::default(),
@@ -831,8 +839,10 @@ impl<'a> InferCtx<'a> {
     /// referenced TyVars to `TyKind::Error`.
     pub fn report_error(&mut self, err: InferError) -> TyVar {
         let detail = crate::result::describe_error(self, &err);
+        let cascade = err.mentioned_types().into_iter().any(|tv| self.contains_error(tv));
         self.errors.push(err);
         self.error_details.push(detail);
+        self.error_is_cascade.push(cascade);
         let idx = self.types.len() as u32;
         self.types.push(TySlot::Resolved(TyKind::Error));
         TyVar(idx)
@@ -874,6 +884,35 @@ impl<'a> InferCtx<'a> {
 
     /// Overwrite `tv`'s resolved root with `TyKind::Error` so downstream
     /// constraints referencing it absorb silently (cascade suppression).
+    /// Does `tv` mention `Error` anywhere (an already-failed type)?
+    pub(crate) fn contains_error(&self, tv: TyVar) -> bool {
+        self.contains_error_at(tv, 0)
+    }
+
+    fn contains_error_at(&self, tv: TyVar, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        let TySlot::Resolved(kind) = self.slot(self.resolve(tv)) else {
+            return false;
+        };
+        let children: Vec<TyVar> = match kind {
+            TyKind::Error => return true,
+            TyKind::Struct { args, .. }
+            | TyKind::Enum { args, .. }
+            | TyKind::Protocol { args, .. }
+            | TyKind::TypeAlias { args, .. } => args.clone(),
+            TyKind::Tuple(elems) => elems.clone(),
+            TyKind::Function { params, ret, .. } => {
+                params.iter().copied().chain(std::iter::once(*ret)).collect()
+            },
+            TyKind::Ref { pointee, .. } => vec![*pointee],
+            TyKind::AssocProjection { base, .. } => vec![*base],
+            _ => Vec::new(),
+        };
+        children.into_iter().any(|c| self.contains_error_at(c, depth + 1))
+    }
+
     pub fn poison(&mut self, tv: TyVar) {
         let root = self.resolve(tv);
         self.types[root.0 as usize] = TySlot::Resolved(TyKind::Error);

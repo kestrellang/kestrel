@@ -71,6 +71,30 @@ pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     // Refs are second-class: legal only as an expression's top-level type.
     solver::validate_ref_placement(ctx, hir);
     solver::report_unresolved_slots(ctx, hir);
+    drop_cascades(ctx);
+}
+
+/// bidi §10: an error about an already-failed type is a cascade of an
+/// earlier error — drop it, but only when the body reported a root cause.
+/// A body whose every error is a cascade keeps them all: some type was
+/// marked failed without its own report, and dropping them would let a
+/// wrong program compile.
+fn drop_cascades(ctx: &mut InferCtx<'_>) {
+    if !ctx.error_is_cascade.iter().any(|&c| !c) {
+        return;
+    }
+    let keep: Vec<bool> = ctx.error_is_cascade.iter().map(|&c| !c).collect();
+    let mut i = 0;
+    ctx.errors.retain(|_| {
+        i += 1;
+        keep[i - 1]
+    });
+    let mut i = 0;
+    ctx.error_details.retain(|_| {
+        i += 1;
+        keep[i - 1]
+    });
+    ctx.error_is_cascade.retain(|&c| !c);
 }
 
 /// Apply [`DEFAULT_RULES`] until none makes progress.
