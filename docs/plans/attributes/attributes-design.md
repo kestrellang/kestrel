@@ -23,8 +23,8 @@ conformances on top of it. The work has three parts:
    values, never raw strings. This replaces today's arrangement, in which the
    attribute list, the argument parsing and the validation are spread over six
    crates.
-2. **Built-in attributes.** `@inline` (the #111 design, adopted unchanged) and
-   `@deprecated`, plus the existing `@main`, `@extern`, `@builtin`,
+2. **Built-in attributes.** `@inline` (the #111 design, adopted unchanged),
+   `@deprecated`, and the layout attributes `@align(N)` and `@layout(.C / .Packed)`, plus the existing `@main`, `@extern`, `@builtin`,
    `@fileconstant` and `@platform`, re-expressed through the registry.
 3. **Derives.** `@derive(Equatable, Hashable)` on a struct or enum gives it a
    compiler-built conformance. In 0.18 the compiler decides what can be
@@ -254,6 +254,8 @@ pub enum ParsedAttr {
     FileConstant { path: String },
     Platform(Vec<Os>),
     Inline(InlineMode),
+    Align(u32),
+    Layout(LayoutKind),            // .C or .Packed
     Deprecated(Deprecation),
     Derive(Vec<DeriveTarget>),    // unresolved paths + spans (§C2)
     Default,                       // `@default` on an enum case (§C5)
@@ -292,7 +294,7 @@ it needs exists.
 | `Build` | `@platform` | `kestrel-ast-builder` while building, from the syntax node, using the same schema and parser as `AttrsOf` |
 | `NameRes` | `@builtin`, `@derive`, `@default` | `kestrel-name-res` (builtin map, derive targets, derived extensions) |
 | `Semantic` | `@main`, `@deprecated` | `kestrel-analyze`, `kestrel-type-infer` |
-| `Lowering` | `@extern`, `@fileconstant`, `@inline` | `kestrel-mir-lower`, then MIR, mono and codegen |
+| `Lowering` | `@extern`, `@fileconstant`, `@inline`, `@align`, `@layout` | `kestrel-mir-lower`, then MIR, mono and codegen |
 
 **How attributes get past HIR.** HIR holds bodies. Declarations stay in the
 ECS, and HIR never carried attributes. Issue #32's "propagated through
@@ -321,6 +323,7 @@ AST/HIR/MIR" is met like this:
 |---|---|
 | `@inline` + `@extern` | An extern has no body to inline |
 | `@main` + `@extern` | The entry point must be a Kestrel function |
+| `@layout(.Packed)` + `@align` | §B5 |
 | `@derive(P)` + a declared `P` conformance on the same type | Two conformances (§C7) |
 
 ### A8. Tooling
@@ -419,6 +422,99 @@ everywhere else (`.Some`, `.Less`). **John decides:** keep `.linux` (no churn)
 or rename to `.Linux` and `.Darwin`. If renamed, accept both for one release
 with a warning on the old spelling. Recommendation: rename, because `.linux`
 is the only lowercase case in the language.
+
+### B4. `@align(N)`
+
+```kestrel
+@align(16)
+struct Vec4 { var x: Float32; var y: Float32; var z: Float32; var w: Float32 }
+```
+
+- **Meaning.** The type's alignment becomes `max(N, natural alignment)`. Its
+  size is rounded up to a multiple of that alignment, so arrays of it stay
+  aligned. It never lowers alignment; `@layout(.Packed)` does that (§B5).
+- **Argument.** One positional integer, a power of two from 1 to 4096 (E909).
+  The upper bound matches what `posix_memalign` and the stack can provide
+  without a special path.
+- **Targets.** Structs and enums. Fields and module values are not targets in
+  0.18. C's per-field `alignas` can be expressed by wrapping the field in an
+  aligned struct.
+- **Heap.** `SystemAllocator.allocate` already honours over-aligned layouts
+  (`posix_memalign`, `lang/std/memory/allocator.ks:64`). `Layout.of[T]()`
+  reports the new alignment, so collections need no change.
+- **Stack.** Codegen gives over-aligned locals an explicitly aligned slot, in
+  both backends.
+- **Existentials.** This is the first way a type can be aligned above 8
+  bytes. The existentials design notes that `RcBox`'s fixed
+  `valueOffset = sizeof(Int64)` becomes a bug once that happens (its §3, and
+  the same pattern in `uniquebox.ks:94`). Those offsets must be
+  computed from the payload's alignment **before** `@align` ships. M3b
+  depends on that fix.
+
+### B5. `@layout(...)`
+
+```kestrel
+@layout(.C)
+struct Timespec { var sec: Int64; var nsec: Int64 }
+
+@layout(.Packed)
+struct WireHeader { var tag: UInt8; var length: UInt32 }   // size 5, align 1
+```
+
+| Argument | Struct layout | Enum layout |
+|---|---|---|
+| none (the default) | Unspecified (see below); today declaration order with natural alignment | Today's tagged union (`abi.md`, "Enums") |
+| `.C` | Exactly C's rules: declaration order, natural alignment, tail padding (`abi.md`, "Structs and Tuples") | Payload-less enums only: a C `int` (`Int32`) whose values are the case indices. A payload is E910 |
+| `.Packed` | Declaration order, every field at alignment 1, no padding. The type's alignment is 1 | Not allowed (E910) |
+
+**Default layout is unspecified.** Today the default *is* declaration order,
+the same as `.C`. Leaving the default unspecified lets a later release
+reorder fields to save padding without breaking anyone. `.C` is how code
+promises a layout to the outside world. **John decides** (D-Q12): call the
+default unspecified (recommended, and `abi.md` is reworded to say so), or
+promise declaration order forever and make `.C` a documented synonym.
+
+**`FFISafe` and `.C`.** A struct that declares `FFISafe` (`lang/std/ffi/ffi.ks`)
+crosses the C boundary, so its layout must be C's. **John decides** (D-Q11):
+`FFISafe` implies `@layout(.C)` (recommended: nothing to write twice, and no
+existing code changes), or `FFISafe` requires an explicit `@layout(.C)`.
+`@layout(.C)` alone does not make a type `FFISafe`; its fields must still be
+`FFISafe`.
+
+**Packed fields cannot be borrowed.** A packed field may sit at a misaligned
+address, and a reference to it would be unsound. Kestrel borrows implicitly
+(a plain parameter borrows), so the rule is stated on places, not on `&`:
+
+- Every field of a packed struct must be `Copyable` (E911). A read of a
+  packed field copies it into an aligned temporary, and that copy is what any
+  borrow sees.
+- A write is a whole-field assignment: `h.length = 7` is fine.
+- Anything that needs the field's own address is E912: `&h.length`,
+  `&mutating h.length`, a `mutating` method call on `h.length`, passing
+  `h.length` to a `mutating` parameter, or a `ref` accessor that projects it.
+- Borrowing the whole packed struct is fine. It is aligned to 1, and every
+  access through the borrow follows the same rules.
+
+**Combinations:**
+
+| Combination | Result |
+|---|---|
+| `@layout(.C)` + `@align(N)` | Allowed: C layout, then raised alignment (C's `alignas` on a struct) |
+| `@layout(.Packed)` + `@align(N)` | Conflict E906. A packed-then-aligned layout (Rust's `packed(N)`) can come later if a use appears |
+| `@layout` on a generic struct | Allowed. The rules apply to each instantiation |
+| `@layout(.Packed)` containing a `not Sized` tail | E910 |
+| `@derive` on a packed struct | Allowed. Derived shims read fields by copying, which every packed field allows (E911) |
+
+**Lowering.** `@align` and `@layout` become one MIR value,
+`LayoutAttrs { kind, min_align }`, on the struct or enum definition. Layout is
+computed in more than one place today: `kestrel-mir/src/passes/layout.rs:130`
+and the `StructLayout` construction in both codegens
+(`kestrel-codegen-cranelift/src/ty.rs:118`, `inst.rs:1089`;
+`kestrel-codegen-llvm/src/inst.rs:1230`). M3b routes every one of them through
+a single `StructLayout::for_type(attrs)` constructor, so the attributes are
+read in one place and the backends cannot disagree. LLVM gets a packed struct
+type (`<{ ... }>`) for `.Packed` and explicit alignment on loads, stores and
+allocas for `@align`.
 
 ## Part C: Derives
 
@@ -770,9 +866,9 @@ Checked by one `DeriveSite` analyzer, in this order:
 | **Name res** | Resolve `@derive` paths; `ConformingProtocols` sees derived extensions with no change; `EntityBuiltin` reads `AttrsOf`; `DeriveKindOf(P)` from the derive builtins |
 | **Type infer** | None for derives (calls resolve through the conformance); `DeprecationOf` is used by the use-site walk |
 | **Analyzers** | `AttributeValidation` (replaces `unknown_attribute.rs`); `DeprecatedUse` (body and declaration halves); `DeriveSite` (§C7); conformance completeness skips derived extensions; existing `@main`/`@extern`/`@builtin` analyzers read `AttrsOf` |
-| **MIR lower** | `FunctionDef::inline`; consumers switch to typed accessors |
+| **MIR lower** | `FunctionDef::inline`; `LayoutAttrs` on struct and enum definitions; consumers switch to typed accessors |
 | **MIR passes / mono** | `synthesize_derive_shims` next to `synthesize_clone_shims` (§C4); copy `inline` to mono instances |
-| **Codegen** | LLVM: `alwaysinline` / `inlinehint` / `noinline`. Cranelift: none |
+| **Codegen** | LLVM: `alwaysinline` / `inlinehint` / `noinline`. Both: one `StructLayout::for_type` for all layout computation; aligned stack slots; LLVM packed struct types |
 | **Stdlib** | `@builtin(.EquatableProtocol)` etc. on the four protocols that lack one; `InlineMode`, `CallingConvention`, `Platform` documentation enums |
 | **LSP / doc** | Attribute completion and hover from the registry; deprecated tag and quick fix; derived conformances on type pages |
 
@@ -785,6 +881,7 @@ Each milestone ships green and is useful on its own.
 | M1 | Registry, typed values, `AttrsOf`, `AttributeValidation`; migrate the six existing attributes; per-arg spans. No behaviour change beyond the new errors | #32 |
 | M2 | Attributes on `extend` and `deinit`; variadic `@platform` | #32 |
 | M3 | `@inline` → MIR → LLVM | #111, #34 |
+| M3b | `@align`, `@layout`, the single layout constructor; requires the existentials alignment-correct payload offsets first | #34 |
 | M4 | `@deprecated` and both use-site walks; LSP deprecated tag | #34 |
 | M5 | `@derive` desugaring, derived bounds, `DeriveSite` checks, derive builtins, `synthesize_derive_shims` for `Equatable`, `Hashable`, `Comparable` | #33 |
 | M6 | `Formattable`, `Defaultable` + `@default` | #33 |
@@ -811,6 +908,10 @@ E950–E999 cover derives.
 | E906 | Conflicting attributes | `'@inline' cannot be combined with '@extern': an extern function has no body to inline` |
 | E907 | Too many positional arguments | `'@inline' takes at most one argument` |
 | E908 | Use of a deprecated item (**warning**) | `'legacyParse' is deprecated since 0.18: unsafe on empty input; use 'parse' instead` |
+| E909 | Bad `@align` value | `'@align(12)' must be a power of two between 1 and 4096` |
+| E910 | `@layout` not valid for this type | `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload` (variants: `'@layout(.Packed)' cannot be applied to an enum`, `... to a type with an unsized tail`) |
+| E911 | Non-`Copyable` field in a packed struct | `field 'name' of packed struct 'Header' has type 'String', which is not Copyable; packed fields are copied on every read` |
+| E912 | Address of a packed field needed | `cannot borrow 'h.length' in place: 'WireHeader' is packed, so the field may be misaligned; copy it first: 'var n = h.length'` |
 | E950 | `@derive` argument is not a protocol | `'Point' in '@derive' is not a protocol` (variant: `cannot find protocol 'Equtable'`) |
 | E951 | Protocol is not derivable | `'Iterator' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable` (variant for `Copyable`/`Cloneable`, §C1) |
 | E952 | Field does not conform | `cannot derive 'Hashable' for 'Point': field 'tag' has type 'Tag', which is not 'Hashable'` (enum: `payload 'radius' of case 'Circle'`; generic note: `derived bound: 'T: Hashable'`) |
@@ -867,6 +968,8 @@ attributes. Recommendation: make it an error and keep the code.
 | D-Q7 | Diagnostic band | New E900–E999 band for attributes and derives |
 | D-Q8 | Unknown attribute severity | Error |
 | D-Q9 | `@platform` case spelling | Rename to `.Linux`/`.Darwin`, accepting the old spelling with a warning for one release |
+| D-Q11 | `FFISafe` and `@layout(.C)` | `FFISafe` implies `@layout(.C)` (§B5) |
+| D-Q12 | Default struct layout | Unspecified, so fields may be reordered later; `@layout(.C)` pins declaration order (§B5) |
 | D-Q10 | `@deprecated` labels | `since:` and `replacement:` (Swift says `renamed:`; Rust has only `since`/`note`). `replacement:` reads as "what to use", which also covers non-rename migrations |
 
 ### Resolved
