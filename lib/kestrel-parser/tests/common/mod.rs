@@ -31,8 +31,7 @@ pub fn parse_ok(source: &str) -> SyntaxNode {
         .filter(|e| e.kind() == SyntaxKind::Error)
         .count();
     assert_eq!(
-        errors,
-        0,
+        errors, 0,
         "valid source produced Error elements:\n{:#?}",
         result.tree()
     );
