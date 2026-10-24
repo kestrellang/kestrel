@@ -576,7 +576,7 @@ lowering / parser); the rest arrive with their phases.
 | E403 | Unsized type parameter used by value | `'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field` |
 | E404 | `any` box argument applied, or not a type name | `the box in 'any[...]' is written without type arguments: 'any[RcBox] Shape'` (variant: `the box in 'any[...]' must name a box type`) |
 | E154 | An `any` bound that is not a protocol | `'Int64' in an 'any' bound is not a protocol` |
-| E155 | `as?`, `is` or an `is` pattern before M5 | `'as?' downcasts are not supported yet` (and `'is' type tests`, `'is' patterns`). Removed when M5 lands. |
+| E155 | *(retired)* `as?`, `is` or an `is` pattern before M5 | Was `'as?' downcasts are not supported yet`; removed when M5 landed. |
 | E810 | `Name = Type` outside an `any` bound | `associated-type binding 'Item = ...' is only allowed in an 'any' bound` |
 
 ## Edge cases

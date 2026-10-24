@@ -95,12 +95,13 @@ the type checker, and the code is assigned in one place,
 | E145 | '{member}' cannot be called on '{any P}': {reason} | A protocol requirement that can't go through an existential's function table: `it is a static requirement`, `it is generic`, `it uses 'Self' as a parameter or return type`, or `it mentions associated type '{A}', which '{any P}' leaves unbound`. Emitted by type inference. |
 | E146 | '{any P}' does not conform to '{P}': {why} | An existential passed where `T: P` is needed, but `any P: P` doesn't hold: a requirement can't be called through the table, or the box lacks the access a requirement needs. Emitted by type inference. |
 | E147 | cannot convert '{from}' to '{to}': existentials in different boxes are different types | `any[A] P` and `any[B] P` are unrelated types; boxes are never converted into each other. Emitted by type inference. |
-| E148 | cannot call {consuming/mutating} method '{m}' on '{any P}': {reason} | The existential's box doesn't grant the access the call needs: `consuming` needs `ConsumingIndirection` (shared boxes can't give up their payload), `mutating` needs `MutableIndirection`. Suggests `any[OwnedBox] P`. Emitted by type inference. |
+| E148 | cannot call {consuming/mutating} method '{m}' on '{any P}': {reason} / cannot consume the payload of '{any P}': {reason} | The existential's box doesn't grant the access the call needs: `consuming` (and `consuming x as? T`) needs `ConsumingIndirection` (shared boxes can't give up their payload), `mutating` needs `MutableIndirection`. Suggests `any[OwnedBox] P`. Calls: type inference; `consuming as?`: the `type_test` analyzer. |
+| E149 *(warning)* | cast from '{any P}' to '{T}' always fails: '{T}' does not conform to '{P}' | `x as? T`, `x is T` or an `is T` pattern whose target can't conform to every bound, so it never matches. |
 | E150 | '{protocol}' has no associated type named '{name}' | An `any P[Name = T]` bound pins an associated type the protocol (and its parents) doesn't declare. |
 | E151 | cannot convert '{T}' to '{any P[A = X]}': its '{A}' is '{Y}' | A value converted to an existential that pins an associated type the value's own type binds differently. Emitted by type inference. |
+| E152 | 'is' needs an existential on the left: '{T}' {is known at compile time / is a generic parameter} | `x is T` (and `as?`, `is` patterns) only test an existential's payload. A concrete type's answer is static; a generic parameter is rejected for now. |
 | E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
 | E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
-| E155 | '{form}' are not supported yet | `as?`, `is` and `is` patterns parse but have no semantics yet (existentials M5, docs/plans/existentials/). |
 
 ### Example — E109 (type mismatch)
 

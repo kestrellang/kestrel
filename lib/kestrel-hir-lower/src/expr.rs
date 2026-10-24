@@ -313,19 +313,8 @@ impl LowerCtx<'_> {
             },
             SyntaxKind::ExprClosure => self.lower_closure(node, &span),
             SyntaxKind::ExprMatch => self.lower_match(node, &span),
-            SyntaxKind::ExprCast | SyntaxKind::ExprTypeTest => {
-                // Lower the operand so its own names still resolve and report.
-                if let Some(operand) = first_expr(node) {
-                    self.lower_expr(&operand);
-                }
-                let what = if node.kind() == SyntaxKind::ExprCast {
-                    "'as?' downcasts"
-                } else {
-                    "'is' type tests"
-                };
-                self.emit_existential_not_supported(what, &span);
-                self.alloc_expr(HirExpr::Error { span })
-            },
+            SyntaxKind::ExprCast => self.desugar_cast(node, &span),
+            SyntaxKind::ExprTypeTest => self.desugar_type_test(node, &span),
             _ => self.alloc_expr(HirExpr::Error { span }),
         }
     }
@@ -2101,18 +2090,4 @@ fn literal_text(node: &SyntaxNode) -> String {
         .unwrap_or_default()
 }
 
-impl LowerCtx<'_> {
-    /// E155: `as?`, `is` and `is` patterns parse but have no semantics yet
-    /// (existentials plan M5). Reported, never silently dropped.
-    pub(crate) fn emit_existential_not_supported(&self, what: &str, span: &Span) {
-        self.ctx.accumulate(
-            kestrel_reporting::Diagnostic::error()
-                .with_code("E155")
-                .with_message(format!("{what} are not supported yet"))
-                .with_labels(vec![kestrel_reporting::Label::primary(
-                    span.file_id,
-                    span.range(),
-                )]),
-        );
-    }
-}
+impl LowerCtx<'_> {}

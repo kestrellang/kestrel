@@ -65,6 +65,9 @@ pub enum PathElement {
     /// `offset` is 1-based: 1 = last, 2 = second-to-last, etc.
     /// MIR lowers as `matchGet(matchLength() - offset)`.
     IndexFromEnd(usize),
+    /// The payload of an existential box, viewed as the given type (an
+    /// `is T` pattern proved it is one). Borrowed in place, never moved.
+    Payload(ResolvedTy),
     /// Rest slice of an array pattern (the `..name` binding).
     /// MIR lowers as `matchSlice(prefix_len, matchLength() - suffix_len)`.
     RestSlice {
@@ -157,7 +160,7 @@ fn compile_matrix(
 
     // Base: zero-width matrix = first row wins
     if matrix.is_unit() {
-        return compile_leaf(hir, query, &matrix.rows, arm_pat_ids);
+        return compile_leaf(hir, query, root, &matrix.rows, arm_pat_ids);
     }
 
     // Select best column (most distinct constructors)
@@ -215,6 +218,7 @@ fn compile_matrix(
 fn compile_leaf(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     rows: &[PatternRow],
     arm_pat_ids: &[HirPatId],
 ) -> DecisionTree {
@@ -229,7 +233,15 @@ fn compile_leaf(
         .get(row.arm_index)
         .map(|&pat_id| {
             let mut bindings = Vec::new();
-            collect_bindings(hir, query, pat_id, &vec![], &row.matched, &mut bindings);
+            collect_bindings(
+                hir,
+                query,
+                root,
+                pat_id,
+                &vec![],
+                &row.matched,
+                &mut bindings,
+            );
             bindings
         })
         .unwrap_or_default();
@@ -244,7 +256,7 @@ fn compile_leaf(
         let failure = if remaining.is_empty() {
             DecisionTree::Failure
         } else {
-            compile_leaf(hir, query, &remaining, arm_pat_ids)
+            compile_leaf(hir, query, root, &remaining, arm_pat_ids)
         };
 
         DecisionTree::Guard {
@@ -336,6 +348,9 @@ fn build_specialized_paths(
             Constructor::Struct { .. } => {
                 field_path.push(PathElement::Index(i));
             },
+            Constructor::TypeTest(target) => {
+                field_path.push(PathElement::Payload(target.clone()));
+            },
             _ => {}, // Literals have no sub-fields
         }
         new_paths.push(field_path);
@@ -365,6 +380,7 @@ fn build_default_paths(col_paths: &[AccessPath], col: usize) -> Vec<AccessPath> 
 fn collect_bindings(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     pat_id: HirPatId,
     path: &AccessPath,
     matched: &[Constructor],
@@ -397,7 +413,7 @@ fn collect_bindings(
                 ty: ResolvedTy::Error,
                 path: path.clone(),
             });
-            collect_bindings(hir, query, *subpattern, path, matched, bindings);
+            collect_bindings(hir, query, root, *subpattern, path, matched, bindings);
         },
 
         HirPat::Tuple { prefix, suffix, .. } => {
@@ -405,14 +421,14 @@ fn collect_bindings(
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                collect_bindings(hir, query, root, elem, &elem_path, matched, bindings);
             }
             // Suffix elements: actual indices depend on tuple arity (set during flattening)
             // For now, use placeholder indices — codegen will resolve from the decision tree
             for (j, &elem) in suffix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(prefix.len() + j));
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                collect_bindings(hir, query, root, elem, &elem_path, matched, bindings);
             }
         },
 
@@ -429,7 +445,7 @@ fn collect_bindings(
                 let mut arg_path = path.clone();
                 arg_path.push(PathElement::Downcast(case_name.clone()));
                 arg_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, arg.pattern, &arg_path, matched, bindings);
+                collect_bindings(hir, query, root, arg.pattern, &arg_path, matched, bindings);
             }
         },
 
@@ -443,7 +459,7 @@ fn collect_bindings(
             for (i, &elem) in prefix.iter().enumerate() {
                 let mut elem_path = path.clone();
                 elem_path.push(PathElement::Index(i));
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                collect_bindings(hir, query, root, elem, &elem_path, matched, bindings);
             }
             // Suffix: when a rest is present, suffix elements are positioned
             // from the end (runtime `len - offset`); without a rest the
@@ -457,7 +473,7 @@ fn collect_bindings(
                 } else {
                     elem_path.push(PathElement::Index(prefix.len() + j));
                 }
-                collect_bindings(hir, query, elem, &elem_path, matched, bindings);
+                collect_bindings(hir, query, root, elem, &elem_path, matched, bindings);
             }
             // Named rest binding → Slice[T] extracted via matchSlice.
             if let Some(Some(local)) = rest {
@@ -485,7 +501,7 @@ fn collect_bindings(
                     field_path.push(PathElement::Field(
                         field.field_name.as_str_or_empty().to_string(),
                     ));
-                    collect_bindings(hir, query, pat, &field_path, matched, bindings);
+                    collect_bindings(hir, query, root, pat, &field_path, matched, bindings);
                 }
             }
         },
@@ -503,11 +519,35 @@ fn collect_bindings(
             let chosen = alternatives
                 .iter()
                 .copied()
-                .find(|&alt| or_alternative_matches(hir, query, alt, matched))
+                .find(|&alt| or_alternative_matches(hir, query, root, alt, matched))
                 .or_else(|| alternatives.first().copied());
             if let Some(alt) = chosen {
-                collect_bindings(hir, query, alt, path, matched, bindings);
+                collect_bindings(hir, query, root, alt, path, matched, bindings);
             }
+        },
+
+        // `c is T { .. }`: `c` borrows the payload; `sub` reads into it.
+        HirPat::TypeTest {
+            binding,
+            target,
+            sub,
+            ..
+        } => {
+            let target = kestrel_type_infer::compare::resolve_hir_type(query, root, target);
+            let mut payload_path = path.clone();
+            payload_path.push(PathElement::Payload(target));
+            if let Some(local) = binding {
+                let local_data = &hir.locals[*local];
+                bindings.push(Binding {
+                    local_id: *local,
+                    name: local_data.name.clone(),
+                    is_mutable: false,
+                    by_ref: Some(false),
+                    ty: ResolvedTy::Error,
+                    path: payload_path.clone(),
+                });
+            }
+            collect_bindings(hir, query, root, *sub, &payload_path, matched, bindings);
         },
 
         HirPat::Wildcard { .. }
@@ -526,6 +566,7 @@ fn collect_bindings(
 fn or_alternative_matches(
     hir: &HirBody,
     query: &QueryContext<'_>,
+    root: Entity,
     alt: HirPatId,
     matched: &[Constructor],
 ) -> bool {
@@ -555,7 +596,13 @@ fn or_alternative_matches(
                 (Constructor::True, true) | (Constructor::False, false)
             )
         }),
-        HirPat::At { subpattern, .. } => or_alternative_matches(hir, query, *subpattern, matched),
+        HirPat::At { subpattern, .. } => {
+            or_alternative_matches(hir, query, root, *subpattern, matched)
+        },
+        HirPat::TypeTest { target, .. } => {
+            let target = kestrel_type_infer::compare::resolve_hir_type(query, root, target);
+            matched.contains(&Constructor::TypeTest(target))
+        },
         _ => false,
     }
 }

@@ -407,3 +407,198 @@ impl OssaBodyCtx<'_, '_> {
         self.emit_destroy_value(body);
     }
 }
+
+// ===== Type tests and downcasts (existentials design §8, §8b) =====
+
+impl OssaBodyCtx<'_, '_> {
+    /// The box's payload as a raw existential view (`Indirection.pointeeRef`),
+    /// or `None` when `box_ty` is not a box over a raw existential.
+    fn emit_existential_view(&mut self, boxed: ValueId, box_ty: TyId) -> Option<(ValueId, TyId)> {
+        let MirTy::Named { type_args, .. } = self.ctx.module.ty_arena.get(box_ty) else {
+            return None;
+        };
+        let raw = *type_args.first()?;
+        if !matches!(
+            self.ctx.module.ty_arena.get(raw),
+            MirTy::RawExistential { .. }
+        ) {
+            return None;
+        }
+        let protocol = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::Indirection,
+            root: self.ctx.root,
+        })?;
+        let requirement = self.protocol_requirement(protocol, "pointeeRef")?;
+        self.ctx.register_name(protocol);
+        let method = self.ctx.witness_method_key(requirement);
+        let view = self.emit_call_returning(
+            Callee::Witness {
+                protocol,
+                method,
+                self_type: box_ty,
+                method_type_args: Vec::new(),
+            },
+            vec![CallArg {
+                value: boxed,
+                convention: ParamConvention::Borrow,
+            }],
+            raw,
+        );
+        Some((view, raw))
+    }
+
+    /// End a view from [`Self::emit_existential_view`] once only its words
+    /// were read.
+    fn end_existential_view(&mut self, view: ValueId) {
+        if self.ref_results.contains(&view) && !self.ref_binding_vals.contains_key(&view) {
+            self.emit_end_borrow(view);
+        }
+    }
+
+    /// `protocol`'s requirement named `name`.
+    fn protocol_requirement(&self, protocol: Entity, name: &str) -> Option<Entity> {
+        self.ctx
+            .world
+            .children_of(protocol)
+            .iter()
+            .copied()
+            .find(|&c| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(c)
+                    .map(|n| n.0.as_str())
+                    == Some(name)
+            })
+    }
+
+    /// Bool: is the payload of `boxed` a `target`? Payloads are told apart by
+    /// their table: tables are interned per (shape, payload), so the box's
+    /// table is `target`'s exactly when the payload is a `target`. A target
+    /// that can't conform to the bounds (E149) is a constant miss.
+    pub(crate) fn emit_payload_is(
+        &mut self,
+        boxed: ValueId,
+        box_ty: TyId,
+        target: &kestrel_type_infer::result::ResolvedTy,
+    ) -> ValueId {
+        let bool_ty = self.ctx.module.ty_arena.bool();
+        let boxed_entity = match self.ctx.module.ty_arena.get(box_ty) {
+            MirTy::Named { entity, .. } => Some(*entity),
+            _ => None,
+        };
+        let Some(((view, raw), boxed_entity)) =
+            self.emit_existential_view(boxed, box_ty).zip(boxed_entity)
+        else {
+            return self.emit_literal(kestrel_mir::immediate::Immediate::bool(false));
+        };
+        let bounds = bounds_of(self.ctx, raw);
+        if kestrel_type_infer::type_test_blocker(&self.ctx.query, target, &bounds, self.ctx.root)
+            .is_some()
+        {
+            self.end_existential_view(view);
+            return self.emit_literal(kestrel_mir::immediate::Immediate::bool(false));
+        }
+        let raw_ptr = self.raw_ptr_ty();
+        let table = self.emit_op1(Op::FatWord(1), view, raw_ptr);
+        self.end_existential_view(view);
+        let target = crate::ty::lower_resolved_ty(self.ctx, target);
+        let template = crate::existential::template_for(self.ctx, boxed_entity, &bounds);
+        let expected = self.emit_literal(kestrel_mir::immediate::Immediate::new(
+            kestrel_mir::immediate::ImmediateKind::VTable {
+                template,
+                payload: target,
+            },
+        ));
+        let i64_ty = self.ctx.module.ty_arena.i64();
+        let actual_addr = self.emit_op1(Op::PtrToAddress, table, i64_ty);
+        let expected_addr = self.emit_op1(Op::PtrToAddress, expected, i64_ty);
+        self.emit_destroy_value(table);
+        self.emit_destroy_value(expected);
+        self.emit_op2(
+            Op::Eq(kestrel_mir::IntBits::I64),
+            actual_addr,
+            expected_addr,
+            bool_ty,
+        )
+    }
+
+    /// The payload of `boxed`, known to be a `target`, borrowed in place.
+    pub(crate) fn emit_payload_view(
+        &mut self,
+        boxed: ValueId,
+        box_ty: TyId,
+        target: TyId,
+    ) -> ValueId {
+        let Some((view, _)) = self.emit_existential_view(boxed, box_ty) else {
+            return self.emit_literal(kestrel_mir::immediate::Immediate::unit());
+        };
+        let raw_ptr = self.raw_ptr_ty();
+        let data = self.emit_op1(Op::FatWord(0), view, raw_ptr);
+        self.end_existential_view(view);
+        let target_ptr = self.ctx.module.ty_arena.pointer(target);
+        let ptr = self.emit_op1(Op::PtrCast(target), data, target_ptr);
+        self.emit_begin_borrow_addr(ptr, target)
+    }
+
+    /// `TakePayload(x)`: consume the box `x`, whose payload a preceding `is`
+    /// test proved is a `T`, and return the payload. `consumePointee` frees the
+    /// box; its body moves the payload out (`__existential.take[T]`).
+    pub(crate) fn lower_take_payload(
+        &mut self,
+        expr_id: kestrel_hir::body::HirExprId,
+        operand: kestrel_hir::body::HirExprId,
+    ) -> ValueId {
+        let target = self.resolve_expr_type(expr_id);
+        let boxed = self.lower_expr_for_consuming(operand);
+        let box_ty = self.body.value(boxed).ty;
+        let raw = match self.ctx.module.ty_arena.get(box_ty) {
+            MirTy::Named { type_args, .. } => type_args.first().copied(),
+            _ => None,
+        };
+        let protocol = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ConsumingIndirection,
+            root: self.ctx.root,
+        });
+        let requirement = protocol.and_then(|p| self.protocol_requirement(p, "consumePointee"));
+        let (Some(raw), Some(protocol), Some(requirement)) = (raw, protocol, requirement) else {
+            return self.emit_literal(kestrel_mir::immediate::Immediate::unit());
+        };
+        self.ctx.register_name(protocol);
+        let method = self.ctx.witness_method_key(requirement);
+        let raw_ptr = self.ctx.module.ty_arena.pointer(raw);
+        let closure_ty = self.ctx.intern(MirTy::FuncThick {
+            kind: kestrel_mir::FnKind::Normal,
+            params: vec![(raw_ptr, ParamConvention::Consuming)],
+            ret: target,
+        });
+        let take = crate::existential::take_fn(self.ctx);
+        let body = self.emit_apply_partial(
+            Callee::direct_with_args(take, vec![raw, target], None),
+            vec![],
+            closure_ty,
+        );
+        let borrow_body = self.emit_begin_borrow(body);
+        let payload = self.emit_call_returning(
+            Callee::Witness {
+                protocol,
+                method,
+                self_type: box_ty,
+                method_type_args: vec![target],
+            },
+            vec![
+                CallArg {
+                    value: boxed,
+                    convention: ParamConvention::Consuming,
+                },
+                CallArg {
+                    value: borrow_body,
+                    convention: ParamConvention::Borrow,
+                },
+            ],
+            target,
+        );
+        self.emit_end_borrow(borrow_body);
+        self.emit_destroy_value(body);
+        payload
+    }
+}

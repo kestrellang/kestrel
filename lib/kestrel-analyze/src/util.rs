@@ -169,6 +169,7 @@ pub fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Closure { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span.clone(),
     }
 }
@@ -196,6 +197,7 @@ pub fn pat_span(hir: &HirBody, id: HirPatId) -> Span {
         | HirPat::Array { span, .. }
         | HirPat::Or { span, .. }
         | HirPat::At { span, .. }
+        | HirPat::TypeTest { span, .. }
         | HirPat::Error { span, .. } => span.clone(),
     }
 }

@@ -43,7 +43,7 @@ struct EnumArg {
 }
 
 /// One field of a struct pattern; `pat` is `None` for the `{ x }` shorthand.
-struct StructField {
+pub(crate) struct StructField {
     name: Option<SyntaxToken>,
     pat: Option<PatSrc>,
 }
@@ -92,25 +92,7 @@ impl LowerCtx<'_> {
         match node.kind() {
             SyntaxKind::WildcardPattern => self.alloc_pat(HirPat::Wildcard { span }),
 
-            SyntaxKind::IsPattern => {
-                // E153 is syntactic: an `is` binding borrows the payload.
-                if has_token(node, SyntaxKind::Var) {
-                    self.ctx.accumulate(
-                        kestrel_reporting::Diagnostic::error()
-                            .with_code("E153")
-                            .with_message(
-                                "an 'is' pattern binds a borrow of the payload, so it cannot be \
-                                 'var'",
-                            )
-                            .with_labels(vec![kestrel_reporting::Label::primary(
-                                span.file_id,
-                                span.range(),
-                            )]),
-                    );
-                }
-                self.emit_existential_not_supported("'is' patterns", &span);
-                self.alloc_pat(HirPat::Error { span })
-            },
+            SyntaxKind::IsPattern => self.lower_is_pattern(node, span),
 
             SyntaxKind::BindingPattern | SyntaxKind::RefBindingPattern => {
                 let by_ref = (node.kind() == SyntaxKind::RefBindingPattern)
@@ -233,17 +215,7 @@ impl LowerCtx<'_> {
 
             SyntaxKind::StructPattern => {
                 let name = token(node, SyntaxKind::Identifier).map(|t| t.text().to_string());
-                let fields: Vec<StructField> = node
-                    .children()
-                    .filter(|c| c.kind() == SyntaxKind::StructPatternField)
-                    .map(|field| StructField {
-                        name: token(&field, SyntaxKind::Identifier),
-                        pat: first_pat(&field).map(PatSrc::Node),
-                    })
-                    .collect();
-                let has_rest = node
-                    .children()
-                    .any(|c| c.kind() == SyntaxKind::StructPatternRest);
+                let (fields, has_rest) = self.struct_pattern_members(node);
                 self.lower_struct_pat(name, &fields, has_rest, &span, force_mut)
             },
 
@@ -511,9 +483,49 @@ impl LowerCtx<'_> {
     }
 
     /// Lower a struct pattern. Resolve the struct name to an entity.
+    /// The `{ field: pat, .. }` members of a struct (or `is`) pattern node.
+    pub(crate) fn struct_pattern_members(&self, node: &SyntaxNode) -> (Vec<StructField>, bool) {
+        let fields = node
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::StructPatternField)
+            .map(|field| StructField {
+                name: token(&field, SyntaxKind::Identifier),
+                pat: first_pat(&field).map(PatSrc::Node),
+            })
+            .collect();
+        let has_rest = node
+            .children()
+            .any(|c| c.kind() == SyntaxKind::StructPatternRest);
+        (fields, has_rest)
+    }
+
     fn lower_struct_pat(
         &mut self,
         name: Option<String>,
+        fields: &[StructField],
+        has_rest: bool,
+        span: &Span,
+        force_mut: bool,
+    ) -> HirPatId {
+        // A struct name the parser could not find resolves to nothing.
+        let entity = name.and_then(|name| {
+            match self.ctx.query(ResolveTypePath {
+                segments: vec![name],
+                context: self.owner,
+                root: self.root,
+            }) {
+                TypeResolution::Found(entity) => Some(entity),
+                _ => None,
+            }
+        });
+        self.lower_struct_pat_fields(entity, fields, has_rest, span, force_mut)
+    }
+
+    /// A struct pattern on `entity` (`None`: unresolved, an error pattern
+    /// whose field patterns still lower).
+    pub(crate) fn lower_struct_pat_fields(
+        &mut self,
+        entity: Option<kestrel_hecs::Entity>,
         fields: &[StructField],
         has_rest: bool,
         span: &Span,
@@ -547,18 +559,13 @@ impl LowerCtx<'_> {
             })
             .collect();
 
-        // A struct name the parser could not find resolves to nothing.
-        let Some(name) = name else {
-            return self.alloc_pat(HirPat::Error { span: span.clone() });
-        };
-        let result = self.ctx.query(ResolveTypePath {
-            segments: vec![name.clone()],
-            context: self.owner,
-            root: self.root,
-        });
-
-        match result {
-            TypeResolution::Found(entity) => {
+        match entity {
+            Some(entity) => {
+                let name = self
+                    .ctx
+                    .get::<kestrel_ast_builder::Name>(entity)
+                    .map(|n| n.0.clone())
+                    .unwrap_or_default();
                 // Validate pattern fields against struct's actual fields
                 // Only stored instance fields are bindable: a pattern destructures
                 // storage, and this set must match the layout roster used to
@@ -636,7 +643,7 @@ impl LowerCtx<'_> {
                     span: span.clone(),
                 })
             },
-            _ => self.alloc_pat(HirPat::Error { span: span.clone() }),
+            None => self.alloc_pat(HirPat::Error { span: span.clone() }),
         }
     }
 

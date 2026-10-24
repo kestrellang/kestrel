@@ -143,7 +143,7 @@ and keeps it regardless of the binding.
 |---|---|---|---|
 | `escaping` closure (**shipped**) | synthesized environment struct | reference — aliases share state | `init`, `clone`, drop, `sharedMutRef` |
 | class (future) | synthesized storage struct | reference | the above + `isIdentical` for `===` |
-| `any P` (future) | the concrete `T`, when not inline | value facade over shared storage | `init`, `clone`, drop, `pointeeRef` |
+| `any P` (**shipped**, 0.17) | the concrete `T` | reference — copies share the payload | `init`, `clone`, drop, `pointeeRef` |
 | `indirect enum` (future) | the recursive payload | **value** — copy-on-write | via the CoW layer: `clone` on copy, `isUnique` + fork on mutation |
 
 ### Escaping closures
@@ -174,17 +174,15 @@ that through aggregates unchanged.
 
 ### `any P` existentials
 
-Payloads too large for inline storage (or non-Copyable) are boxed. The
-existential carries the protocol witness table plus a type-erased handle.
-Erasure is the interesting part: the compiler must call `clone`/drop/project
-on `Box[T]` without knowing `T`, so monomorphization synthesizes a small
-per-`T` shim table (clone fn, drop fn, project fn) carried alongside the
-witness table — the same machinery existentials already need for their
-payload operations. No protocol change; purely an implementation concern.
-
-`any` stays value-semantic from the user's point of view: mutation of a
-boxed existential must fork (via the CoW layer) rather than write through
-`sharedMutRef`.
+`any P` is `DefaultBox[rawany P]`, and `DefaultBox` is `RcBox`: the
+existential *is* a shared box over an unsized payload, so copies share it
+(reference semantics; `any[CowBox] P` gives value semantics). The payload's
+drop, size, alignment and clone travel in the function table carried by the
+box's pointer, so `clone`/drop/`pointeeRef` on `RcBox[rawany P]` are the
+ordinary box operations. A box only needs `ExistentialBox` (this protocol's
+`init(consuming:)` + `Indirection`) to hold an existential; `SharedBox`
+refines it. See [`docs/plans/existentials/existentials-design.md`](../plans/existentials/existentials-design.md)
+§3 and the user guide [`docs/language/existentials.md`](../language/existentials.md).
 
 ### `indirect enum`
 

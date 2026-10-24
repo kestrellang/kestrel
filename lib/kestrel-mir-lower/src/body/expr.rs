@@ -348,6 +348,8 @@ impl OssaBodyCtx<'_, '_> {
                 inner, mutating, ..
             } => self.lower_borrow_init(*inner, *mutating),
 
+            HirExpr::TakePayload { expr, .. } => self.lower_take_payload(expr_id, *expr),
+
             HirExpr::Local(hir_local, _) => {
                 if self.is_var_local(hir_local) {
                     let raw_addr = self.map_local(*hir_local);

@@ -12,6 +12,7 @@
 
 mod ctx;
 mod desugar;
+mod existential;
 mod expr;
 pub mod format_spec;
 pub mod literal;

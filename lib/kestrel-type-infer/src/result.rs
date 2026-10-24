@@ -74,6 +74,10 @@ pub struct TypedBody {
     /// becomes the existential `to` by the recorded rule. MIR lowering emits
     /// them from here and never re-derives one (existentials design §4).
     pub existential_conversions: HashMap<HirExprId, ExistentialConversion>,
+
+    /// Every `is T` pattern, with the type of the value it tests (an
+    /// existential box when well-typed; analyzers report E152 otherwise).
+    pub type_tests: HashMap<kestrel_hir::body::HirPatId, ResolvedTy>,
 }
 
 /// How a value becomes an existential (existentials design §4).
@@ -137,6 +141,7 @@ impl Hash for TypedBody {
             indirection_peels,
             kind_coercions,
             existential_conversions,
+            type_tests,
         } = self;
         hash_sorted(expr_types, state);
         hash_sorted(local_types, state);
@@ -150,6 +155,7 @@ impl Hash for TypedBody {
         hash_sorted(indirection_peels, state);
         hash_sorted(kind_coercions, state);
         hash_sorted(existential_conversions, state);
+        hash_sorted(type_tests, state);
     }
 }
 
@@ -437,6 +443,11 @@ pub fn build_result(ctx: &InferCtx<'_>) -> TypedBody {
                     },
                 )
             })
+            .collect(),
+        type_tests: ctx
+            .type_tests
+            .iter()
+            .map(|(&pat, &tv)| (pat, resolve_to_concrete(ctx, tv)))
             .collect(),
     }
 }
@@ -978,6 +989,7 @@ mod tests {
             indirection_peels: HashMap::default(),
             kind_coercions: HashMap::default(),
             existential_conversions: HashMap::default(),
+            type_tests: HashMap::default(),
         }
     }
 

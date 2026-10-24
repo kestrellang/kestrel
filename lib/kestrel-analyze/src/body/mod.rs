@@ -33,6 +33,9 @@ pub mod for_loop_pattern;
 pub mod match_pattern;
 pub mod refutable_pattern;
 
+// `is` patterns, `is`, `as?` (E148, E149, E152)
+pub mod type_test;
+
 // Literal/lexing checks (E700-E799)
 pub mod string_escape;
 

@@ -1131,6 +1131,7 @@ mod tests {
             None,
             None,
             &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1173,6 +1174,7 @@ mod tests {
             None,
             None,
             &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1242,6 +1244,7 @@ mod tests {
             None,
             None,
             &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1308,6 +1311,7 @@ mod tests {
             None,
             None,
             &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1350,6 +1354,7 @@ mod tests {
             None,
             None,
             &IndexMap::new(),
+            None,
         )
         .unwrap();
 
@@ -1438,6 +1443,7 @@ mod tests {
             None,
             None,
             &IndexMap::new(),
+            None,
         )
         .unwrap();
 

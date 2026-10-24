@@ -57,6 +57,13 @@ struct NormalizeState {
     assoc_stack: Vec<Entity>,
 }
 
+/// A fully written type (an `is T` target) as a `ResolvedTy`, aliases and
+/// projections reduced. Same reduction as [`compare_hir_types`].
+pub fn resolve_hir_type(qctx: &QueryContext<'_>, root: Entity, ty: &HirTy) -> ResolvedTy {
+    let env = TypeCompareEnv::default();
+    normalize_hir_type(qctx, root, ty, &env, &mut NormalizeState::default())
+}
+
 pub fn compare_hir_types(
     qctx: &QueryContext<'_>,
     root: Entity,

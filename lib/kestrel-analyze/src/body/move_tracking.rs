@@ -454,6 +454,12 @@ fn analyze_expr(
             state = analyze_expr(mcx, *inner, state, false, diags);
         },
 
+        // `consuming x as? T`'s hit arm consumes the box.
+        HirExpr::TakePayload { expr, .. } => {
+            state = analyze_expr(mcx, *expr, state, false, diags);
+            record_operand_move(mcx, &mut state, diags, *expr, FreezeReason::Move);
+        },
+
         // ===== Assignment =====
         HirExpr::Assign { target, value, .. } => {
             state = analyze_expr(mcx, *value, state, false, diags);
@@ -1260,9 +1266,9 @@ fn collect_expr_bound_locals(hir: &HirBody, id: HirExprId, out: &mut HashSet<Loc
         HirExpr::Loop { body, .. } | HirExpr::Block { body, .. } => {
             collect_block_bound_locals(hir, body, out)
         },
-        HirExpr::Sugar { inner, .. } | HirExpr::Borrow { inner, .. } => {
-            collect_expr_bound_locals(hir, *inner, out)
-        },
+        HirExpr::Sugar { inner, .. }
+        | HirExpr::Borrow { inner, .. }
+        | HirExpr::TakePayload { expr: inner, .. } => collect_expr_bound_locals(hir, *inner, out),
         HirExpr::Field { base, .. } | HirExpr::TupleIndex { base, .. } => {
             collect_expr_bound_locals(hir, *base, out)
         },
@@ -1338,6 +1344,10 @@ fn collect_pattern_bindings(hir: &HirBody, pat: HirPatId, out: &mut HashSet<Loca
         } => {
             out.insert(*binding);
             collect_pattern_bindings(hir, *subpattern, out);
+        },
+        HirPat::TypeTest { binding, sub, .. } => {
+            out.extend(*binding);
+            collect_pattern_bindings(hir, *sub, out);
         },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &p in prefix.iter().chain(suffix) {

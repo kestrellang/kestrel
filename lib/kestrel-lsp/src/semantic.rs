@@ -76,6 +76,7 @@ pub fn hir_expr_span(expr: &HirExpr) -> Span {
         HirExpr::TypeRef { span, .. } => span.clone(),
         HirExpr::OverloadSet { span, .. } => span.clone(),
         HirExpr::Borrow { span, .. } => span.clone(),
+        HirExpr::TakePayload { span, .. } => span.clone(),
         HirExpr::Field { span, .. } => span.clone(),
         HirExpr::TupleIndex { span, .. } => span.clone(),
         HirExpr::ImplicitMember { span, .. } => span.clone(),
@@ -319,6 +320,7 @@ pub fn hir_pat_span(pat: &HirPat) -> Span {
         | HirPat::Array { span, .. }
         | HirPat::Or { span, .. }
         | HirPat::At { span, .. }
+        | HirPat::TypeTest { span, .. }
         | HirPat::Error { span } => span.clone(),
     }
 }

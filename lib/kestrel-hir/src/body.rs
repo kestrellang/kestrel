@@ -92,6 +92,8 @@ pub enum MatchSource {
     ParamDestructure,
     /// Desugared from `try expr` (Continue/Break matching on ControlFlow).
     TryOp,
+    /// Desugared from `x is T` or `x as? T`: one `is T` arm and `_`.
+    TypeTest,
 }
 
 impl MatchSource {
@@ -123,6 +125,15 @@ pub enum SugarKind {
     /// `"hello \(name)!"` — `inner` is the Block containing the
     /// DefaultStringInterpolation init/append/build sequence.
     StringInterpolation,
+    /// `x is T` / `x is not T` — `inner` is `match x { is T => true, _ =>
+    /// false }` (arms swapped for `is not`).
+    TypeTest,
+    /// `x as? T` — `inner` is the Block `{ let $cast: Optional[&T] = match x
+    /// { &$hit is T => .Some($hit), _ => .None }; $cast }`.
+    Cast,
+    /// `consuming x as? T` — `inner` is the Block `{ let $boxed = x; if
+    /// $boxed is T { .Ok(TakePayload($boxed)) } else { .Err($boxed) } }`.
+    ConsumingCast,
 }
 
 /// A nested code block (if/loop/match arm bodies, desugared blocks).
@@ -349,6 +360,14 @@ pub enum HirExpr {
     Error {
         span: Span,
     },
+    /// Consume an existential box whose payload is known to be `target`
+    /// (a preceding `is` test proved it) and return the payload by value.
+    /// Only produced by the `consuming x as? T` desugaring.
+    TakePayload {
+        expr: HirExprId,
+        target: crate::ty::HirTy,
+        span: Span,
+    },
 
     /// Transparent wrapper marking that `inner` was synthesized from
     /// desugaring a user-language construct identified by `kind`.
@@ -458,6 +477,15 @@ pub enum HirPat {
     At {
         binding: LocalId,
         subpattern: HirPatId,
+        span: Span,
+    },
+    /// `[c] is T [{ .. }]`: the scrutinee is an existential whose payload is
+    /// a `target`. `binding` (`c`) borrows the payload as `&T`; `sub` (a
+    /// struct pattern, or `_`) matches the payload in place.
+    TypeTest {
+        binding: Option<LocalId>,
+        target: crate::ty::HirTy,
+        sub: HirPatId,
         span: Span,
     },
     /// Error recovery

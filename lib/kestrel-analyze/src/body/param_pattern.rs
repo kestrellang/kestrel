@@ -264,6 +264,7 @@ fn hir_pat_span(pat: &HirPat) -> &kestrel_span::Span {
         | HirPat::Array { span, .. }
         | HirPat::Or { span, .. }
         | HirPat::At { span, .. }
+        | HirPat::TypeTest { span, .. }
         | HirPat::Error { span } => span,
     }
 }

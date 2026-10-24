@@ -87,6 +87,10 @@ pub enum Constructor {
         suffix_len: usize,
         has_rest: bool,
     },
+    /// `is T` on an existential: the payload is a `T`. One field, the
+    /// payload viewed as `T`. Existentials have an open set of payload types,
+    /// so like integer literals these never cover the type.
+    TypeTest(ResolvedTy),
     /// Marker for types with infinite constructors
     NonExhaustive,
     /// Placeholder for missing constructors in witness generation
@@ -103,6 +107,7 @@ impl Constructor {
             Constructor::IntLiteral(_) | Constructor::IntRange { .. } => 0,
             Constructor::CharLiteral(_) | Constructor::CharRange { .. } => 0,
             Constructor::StringLiteral(_) => 0,
+            Constructor::TypeTest(_) => 1,
             Constructor::Unit => 0,
             Constructor::Wildcard => 0,
             Constructor::Array {
@@ -153,6 +158,7 @@ impl Constructor {
 
             // String
             (Constructor::StringLiteral(s1), Constructor::StringLiteral(s2)) => s1 == s2,
+            (Constructor::TypeTest(t1), Constructor::TypeTest(t2)) => t1 == t2,
 
             // Array length compatibility
             (
@@ -194,6 +200,7 @@ impl Constructor {
     ) -> Vec<ResolvedTy> {
         match (self, parent_ty) {
             (Constructor::Tuple { .. }, ResolvedTy::Tuple(elems)) => elems.clone(),
+            (Constructor::TypeTest(target), _) => vec![target.clone()],
 
             (
                 Constructor::Variant { entity, arity },
@@ -334,6 +341,7 @@ impl Constructor {
                 }
             },
             Constructor::StringLiteral(s) => format!("\"{}\"", s),
+            Constructor::TypeTest(t) => format!("is {}", type_test_name(query, t)),
             Constructor::Unit => "()".into(),
             Constructor::Wildcard | Constructor::NonExhaustive | Constructor::Missing => "_".into(),
             Constructor::Array {
@@ -390,6 +398,9 @@ impl Constructor {
                 }
             },
             Constructor::StringLiteral(s) => Witness::string(s),
+            Constructor::TypeTest(t) => {
+                Witness::Literal(format!("is {}", type_test_name(query, t)))
+            },
             Constructor::Unit => Witness::tuple(vec![]),
             Constructor::Array {
                 prefix_len,
@@ -400,6 +411,14 @@ impl Constructor {
                 Witness::any()
             },
         }
+    }
+}
+
+/// The target of an `is` constructor, for messages.
+fn type_test_name(query: &QueryContext<'_>, ty: &ResolvedTy) -> String {
+    match ty {
+        ResolvedTy::Named { entity, .. } => entity_name(query, *entity),
+        _ => "_".into(),
     }
 }
 
@@ -446,6 +465,14 @@ impl TypeShape {
                 } else {
                     TypeShape::Tuple(elems.len())
                 }
+            },
+
+            // An existential box (`B[rawany P]`): its payload type is open,
+            // so only `_` covers it, whatever the box's own shape.
+            ResolvedTy::Named { args, .. }
+                if matches!(args.first(), Some(ResolvedTy::RawExistential { .. })) =>
+            {
+                TypeShape::Infinite
             },
 
             ResolvedTy::Named { entity, .. } => {

@@ -141,7 +141,8 @@ impl BodyCheck for ExhaustivenessAnalyzer {
                 MatchSource::ForLoop
                 | MatchSource::LetDestructure
                 | MatchSource::ParamDestructure
-                | MatchSource::TryOp => {},
+                | MatchSource::TryOp
+                | MatchSource::TypeTest => {},
             }
         }
 
@@ -361,5 +362,6 @@ fn pat_has_error(hir: &HirBody, pat: HirPatId) -> bool {
             .any(|f| f.pattern.is_some_and(|p| pat_has_error(hir, p))),
         HirPat::Or { alternatives, .. } => alternatives.iter().any(|&p| pat_has_error(hir, p)),
         HirPat::At { subpattern, .. } => pat_has_error(hir, *subpattern),
+        HirPat::TypeTest { sub, .. } => pat_has_error(hir, *sub),
     }
 }

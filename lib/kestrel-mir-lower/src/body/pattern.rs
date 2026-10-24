@@ -101,6 +101,9 @@ impl OssaBodyCtx<'_, '_> {
             match &hir.pats[id] {
                 HirPat::Binding { by_ref, .. } => *by_ref,
                 HirPat::At { subpattern, .. } => walk(hir, *subpattern),
+                // A type test reads the scrutinee in place (its binding is a
+                // borrow of the payload), so it always takes place mode.
+                HirPat::TypeTest { sub, .. } => walk(hir, *sub).max(Some(false)),
                 HirPat::Tuple { prefix, suffix, .. } => prefix
                     .iter()
                     .chain(suffix)
@@ -498,7 +501,7 @@ impl OssaBodyCtx<'_, '_> {
                     return;
                 }
 
-                // String literal chain
+                // String literal chain: one `Matchable.matches` test per case.
                 if cases
                     .iter()
                     .any(|(c, _)| matches!(c, Constructor::StringLiteral(_)))
@@ -515,78 +518,44 @@ impl OssaBodyCtx<'_, '_> {
                         self.apply_access_path(scrutinee, scrutinee_ty, path).0
                     };
                     let test_mir_ty = lower_resolved_ty(self.ctx, ty);
-                    let mut current_scrutinee = scrutinee;
-                    // Snapshot before the chain so each iteration starts clean.
-                    let chain_snapshot = self.snapshot_scope();
-                    let chain_live: Vec<ValueId> =
-                        self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
-                    let chain_descs: Vec<(TyId, Ownership)> = chain_live
-                        .iter()
-                        .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
-                        .collect();
-                    for (ctor, subtree) in cases.iter() {
+                    let chain = TestChain {
+                        cases,
+                        default: default.as_deref(),
+                        scrutinee,
+                        scrutinee_ty,
+                        place,
+                        failure: "match failure: non-exhaustive string patterns",
+                    };
+                    self.emit_test_chain(chain, arms, exits, &mut |this, ctor, _| {
                         let Constructor::StringLiteral(lit) = ctor else {
-                            continue;
+                            return None;
                         };
-                        let cmp = self.emit_string_match_test(test_val, test_mir_ty, lit);
-                        // Use the chain-level live set (not the inflated post-test set)
-                        // so intermediates from emit_string_match_test are destroyed
-                        // in each arm rather than forwarded and accumulated.
-                        let str_live: Vec<ValueId> =
-                            self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
-                        let str_descs: Vec<(TyId, Ownership)> = str_live
-                            .iter()
-                            .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
-                            .collect();
-                        let (hit_block, hit_params) = self.new_block_with_params(&str_descs);
-                        let (miss_block, miss_params) = self.new_block_with_params(&chain_descs);
-                        self.emit_branch(
-                            cmp,
-                            hit_block,
-                            str_live.clone(),
-                            miss_block,
-                            chain_live.clone(),
-                        );
+                        Some(this.emit_string_match_test(test_val, test_mir_ty, lit))
+                    });
+                    return;
+                }
 
-                        self.switch_to(hit_block);
-                        self.rebind_scope_values(&str_live, &hit_params);
-                        // Destroy test intermediates — they're only needed
-                        // for the branch condition, not the arm body.
-                        let chain_set: std::collections::HashSet<ValueId> =
-                            chain_live.iter().copied().collect();
-                        for (old, new) in str_live.iter().zip(hit_params.iter()) {
-                            if !chain_set.contains(old) {
-                                self.emit_destroy_value(*new);
-                            }
-                        }
-                        let rebound = rebound_value(current_scrutinee, &str_live, &hit_params);
-                        self.emit_decision_tree_threaded(
-                            subtree,
-                            rebound,
-                            scrutinee_ty,
-                            place,
-                            arms,
-                            exits,
-                        );
-
-                        self.restore_scope(&chain_snapshot);
-                        self.switch_to(miss_block);
-                        self.rebind_scope_values(&chain_live, &miss_params);
-                        current_scrutinee =
-                            rebound_value(current_scrutinee, &chain_live, &miss_params);
-                    }
-                    if let Some(def_tree) = default {
-                        self.emit_decision_tree_threaded(
-                            def_tree,
-                            current_scrutinee,
-                            scrutinee_ty,
-                            place,
-                            arms,
-                            exits,
-                        );
-                    } else {
-                        self.emit_panic("match failure: non-exhaustive string patterns");
-                    }
+                // `is T` chain: one table comparison per case (existentials
+                // design §8b). The payload set is open, so there is always a
+                // default.
+                if cases
+                    .iter()
+                    .any(|(c, _)| matches!(c, Constructor::TypeTest(_)))
+                {
+                    let chain = TestChain {
+                        cases,
+                        default: default.as_deref(),
+                        scrutinee,
+                        scrutinee_ty,
+                        place,
+                        failure: "match failure: non-exhaustive type tests",
+                    };
+                    self.emit_test_chain(chain, arms, exits, &mut |this, ctor, current| {
+                        let Constructor::TypeTest(target) = ctor else {
+                            return None;
+                        };
+                        Some(this.emit_type_test_at(current, scrutinee_ty, place, path, target))
+                    });
                     return;
                 }
 
@@ -1132,7 +1101,7 @@ impl OssaBodyCtx<'_, '_> {
                             FieldIdx::new(*i),
                         )
                     } else {
-                        self.resolve_tuple_element(current_ty, *i)
+                        self.index_component_ty(current_ty, *i)
                     };
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return false;
@@ -1145,6 +1114,8 @@ impl OssaBodyCtx<'_, '_> {
                     current_ty = field_ty;
                 },
                 // Array suffix/rest patterns aren't aggregate destructures.
+                // The payload is borrowed from the box in place: never moved.
+                PathElement::Payload(_) => return false,
                 PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
             }
         }
@@ -1187,13 +1158,15 @@ impl OssaBodyCtx<'_, '_> {
                             FieldIdx::new(*i),
                         )
                     } else {
-                        self.resolve_tuple_element(current_ty, *i)
+                        self.index_component_ty(current_ty, *i)
                     };
                     if matches!(self.ctx.module.ty_arena.get(field_ty), MirTy::Ref { .. }) {
                         return true;
                     }
                     current_ty = field_ty;
                 },
+                // The payload view is a borrow, like a ref slot.
+                PathElement::Payload(_) => return true,
                 PathElement::IndexFromEnd(_) | PathElement::RestSlice { .. } => return false,
             }
         }
@@ -1481,6 +1454,12 @@ impl OssaBodyCtx<'_, '_> {
                         let raw = self.emit_literal(Immediate::i64(*i as i128));
                         current = self.emit_array_match_get(current, current_ty, raw);
                         current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
+                    } else if matches!(self.aggregate_kind(current_ty), AggKind::Struct) {
+                        // A struct pattern's fields are positional in the
+                        // decision tree (`Constructor::Struct` children).
+                        let field_ty = self.index_component_ty(current_ty, *i);
+                        current = self.emit_struct_extract(current, FieldIdx::new(*i), field_ty);
+                        current_ty = self.ctx.module.ty_arena.peel_ref(field_ty);
                     } else {
                         let elem_ty = self.resolve_tuple_element(current_ty, *i);
                         current = self.emit_tuple_extract(current, *i as u32, elem_ty);
@@ -1502,6 +1481,12 @@ impl OssaBodyCtx<'_, '_> {
                     current = self.emit_array_match_get(current, current_ty, raw);
                     current_ty = self.ctx.module.ty_arena.peel_ref(elem_ty);
                 },
+                // `is T`: the box's payload, viewed in place as a `T`.
+                PathElement::Payload(target) => {
+                    let target = lower_resolved_ty(self.ctx, target);
+                    current = self.emit_payload_view(current, current_ty, target);
+                    current_ty = target;
+                },
                 // `..rest` binding: `matchSlice(prefix, matchLength() - suffix)`.
                 PathElement::RestSlice {
                     prefix_len,
@@ -1514,6 +1499,112 @@ impl OssaBodyCtx<'_, '_> {
             }
         }
         (current, current_ty)
+    }
+
+    /// A sequential test chain (string literals, `is T`): per case, `test`
+    /// computes a Bool from the (rebound) scrutinee; a hit runs the case's
+    /// subtree, a miss falls through to the next case, and the last miss runs
+    /// the default. Test intermediates are destroyed on the hit edge.
+    fn emit_test_chain(
+        &mut self,
+        chain: TestChain<'_>,
+        arms: &[HirMatchArm],
+        exits: &mut Vec<super::ArmExit>,
+        test: &mut dyn FnMut(&mut Self, &Constructor, ValueId) -> Option<ValueId>,
+    ) {
+        let TestChain {
+            cases,
+            default,
+            scrutinee,
+            scrutinee_ty,
+            place,
+            failure,
+        } = chain;
+        let mut current_scrutinee = scrutinee;
+        for (ctor, subtree) in cases.iter() {
+            // Each test starts from the previous miss block, whose live values
+            // were rebound to its params: snapshot and read them afresh, so the
+            // miss edge forwards (and the hit edge keeps) the current values.
+            let chain_snapshot = self.snapshot_scope();
+            let chain_live: Vec<ValueId> =
+                self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
+            let chain_descs: Vec<(TyId, Ownership)> = chain_live
+                .iter()
+                .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                .collect();
+            let Some(cmp) = test(self, ctor, current_scrutinee) else {
+                continue;
+            };
+            // Use the chain-level live set (not the inflated post-test set)
+            // so test intermediates are destroyed in each arm rather than
+            // forwarded and accumulated.
+            let test_live: Vec<ValueId> =
+                self.all_live_tracked().iter().map(|&(v, _, _)| v).collect();
+            let test_descs: Vec<(TyId, Ownership)> = test_live
+                .iter()
+                .map(|&v| (self.body.value(v).ty, self.body.value(v).ownership))
+                .collect();
+            let (hit_block, hit_params) = self.new_block_with_params(&test_descs);
+            let (miss_block, miss_params) = self.new_block_with_params(&chain_descs);
+            self.emit_branch(
+                cmp,
+                hit_block,
+                test_live.clone(),
+                miss_block,
+                chain_live.clone(),
+            );
+
+            self.switch_to(hit_block);
+            self.rebind_scope_values(&test_live, &hit_params);
+            // Destroy test intermediates — they're only needed for the branch
+            // condition, not the arm body.
+            let chain_set: std::collections::HashSet<ValueId> =
+                chain_live.iter().copied().collect();
+            for (old, new) in test_live.iter().zip(hit_params.iter()) {
+                if !chain_set.contains(old) {
+                    self.emit_destroy_value(*new);
+                }
+            }
+            let rebound = rebound_value(current_scrutinee, &test_live, &hit_params);
+            self.emit_decision_tree_threaded(subtree, rebound, scrutinee_ty, place, arms, exits);
+
+            self.restore_scope(&chain_snapshot);
+            self.switch_to(miss_block);
+            self.rebind_scope_values(&chain_live, &miss_params);
+            current_scrutinee = rebound_value(current_scrutinee, &chain_live, &miss_params);
+        }
+        match default {
+            Some(def_tree) => self.emit_decision_tree_threaded(
+                def_tree,
+                current_scrutinee,
+                scrutinee_ty,
+                place,
+                arms,
+                exits,
+            ),
+            None => self.emit_panic(failure),
+        }
+    }
+
+    /// Bool: is the payload of the existential box at `path` a `target`?
+    /// Reads through an intra-block view in place mode.
+    fn emit_type_test_at(
+        &mut self,
+        scrutinee: ValueId,
+        scrutinee_ty: TyId,
+        place: bool,
+        path: &[PathElement],
+        target: &ResolvedTy,
+    ) -> ValueId {
+        if !place {
+            let (boxed, box_ty) = self.apply_access_path(scrutinee, scrutinee_ty, path);
+            return self.emit_payload_is(boxed, box_ty, target);
+        }
+        let view = self.emit_begin_borrow_addr(scrutinee, scrutinee_ty);
+        let (boxed, box_ty) = self.apply_access_path(view, scrutinee_ty, path);
+        let hit = self.emit_payload_is(boxed, box_ty, target);
+        self.emit_end_borrow(view);
+        hit
     }
 
     /// Emit a `Matchable.matches(other:)` call for string matching.
@@ -1973,6 +2064,15 @@ impl OssaBodyCtx<'_, '_> {
     }
 
     /// Resolve a tuple element index to its type.
+    /// The type of positional component `index` of a tuple or struct (a
+    /// struct pattern's decision-tree children are positional).
+    fn index_component_ty(&mut self, ty: TyId, index: usize) -> TyId {
+        if matches!(self.aggregate_kind(ty), AggKind::Struct) {
+            return self.struct_field_tys(ty).get(index).copied().unwrap_or(ty);
+        }
+        self.resolve_tuple_element(ty, index)
+    }
+
     fn resolve_tuple_element(&self, tuple_ty: TyId, index: usize) -> TyId {
         match self.ctx.module.ty_arena.get(tuple_ty) {
             MirTy::Tuple(elements) => elements.get(index).copied().unwrap_or(tuple_ty),
@@ -2128,6 +2228,18 @@ fn constructor_to_switch_case(bctx: &mut OssaBodyCtx, ctor: &Constructor) -> Swi
         | Constructor::Unit
         | Constructor::NonExhaustive
         | Constructor::Missing
-        | Constructor::StringLiteral(_) => SwitchCase::Wildcard,
+        | Constructor::StringLiteral(_)
+        | Constructor::TypeTest(_) => SwitchCase::Wildcard,
     }
+}
+
+/// The shared shape of a sequential test chain (`emit_test_chain`).
+struct TestChain<'a> {
+    cases: &'a [(Constructor, DecisionTree)],
+    default: Option<&'a DecisionTree>,
+    scrutinee: ValueId,
+    scrutinee_ty: TyId,
+    place: bool,
+    /// Panic message when no case matches and there is no default.
+    failure: &'static str,
 }

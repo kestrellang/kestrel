@@ -34,6 +34,7 @@ pub enum AnalyzerId {
     Exhaustiveness,
     StringEscape,
     IntegerLiteralRange,
+    TypeTest,
 
     // Decl checks
     FunctionBody,
@@ -105,6 +106,7 @@ impl AnalyzerId {
             AnalyzerId::Exhaustiveness => "exhaustiveness",
             AnalyzerId::StringEscape => "string_escape",
             AnalyzerId::IntegerLiteralRange => "integer_literal_range",
+            AnalyzerId::TypeTest => "type_test",
             AnalyzerId::FunctionBody => "function_body",
             AnalyzerId::ProtocolMethod => "protocol_method",
             AnalyzerId::StaticContext => "static_context",

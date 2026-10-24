@@ -251,10 +251,11 @@ Current allocations:
     box, `decl/existential_box.rs`, rules in `kestrel_semantics::ExistentialBoxDefect`)
     and E403 (unsized type parameter by value, `decl/unsized_param.rs`) are
     analyzers. **Free E4xx gaps are now E405–E410 and E414.**
-  - E1xx E144–E155 are existentials too: E144, E150, E153–E155 are emitted
-    by hir-lower; E145–E148 and E151 by type inference (`InferError`
-    variants, `kestrel-type-infer/src/existential.rs`); E149 and E152 arrive
-    with `as?`/`is` (existentials M5). Next free E1xx: **E156**.
+  - E1xx E144–E155 are existentials too: E144, E150, E153 and E154 are
+    emitted by hir-lower; E145–E148 and E151 by type inference (`InferError`
+    variants, `kestrel-type-infer/src/existential.rs`); E149, E152 and the
+    `consuming as?` E148 by `body/type_test.rs`. E155 (the pre-M5 stub) is
+    retired — don't reuse it. Next free E1xx: **E156**.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a
     where-clause equality (`Item.Out = X`) is declared by two or more of the

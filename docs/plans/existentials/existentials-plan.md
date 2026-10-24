@@ -405,70 +405,54 @@ new call kind:
       the base): the base tree is not rustfmt-clean, and a whole-crate
       `cargo fmt` rewrites files other agents are editing.
 
-### Phase 13: `as?`
+### Phases 13–14: downcasts, `is`, docs (M5) — done
 
-Files: `lib/kestrel-type-infer/src/` (cast constraint),
-`lib/kestrel-analyze/src/body/` (E149), `lib/kestrel-mir-lower/src/body/expr.rs`
+As built. The `is` pattern is the one primitive; the expression forms are
+hir-lower desugarings onto it (`kestrel-hir-lower/src/existential.rs`), so
+typing, borrows and exhaustiveness are the ordinary match machinery:
 
-- [ ] **HIR variants** (deferred from Phase 3): `HirExpr::Cast { expr,
-      target, consuming }`, `HirExpr::TypeTest { expr, target, negated }`,
-      `HirPat::TypeTest { binding, target, fields }`, replacing the E155
-      stub in `hir-lower` (`expr.rs`, `pat.rs`). Remove E155 from
-      `docs/error-codes.md`.
-- [ ] **Typing.**
-      - `x as? T` with `x: B[RawExistential]` and a concrete, sized `T`
-        has type `Optional[&T]`.
-      - `consuming x as? T` has type `Result[T, B[RawExistential]]` and
-        requires `B: ConsumingIndirection` (E148 otherwise).
-      - `as?` on a non-existential is a type error (reuse the existing
-        mismatch message).
-      - `as?` to an existential target is rejected; it is out of scope
-        (design edge cases).
-- [ ] **`is` operator typing.** The result is a fresh literal slot
-      (`fresh_literal`) with a new `LiteralKind::Bool` origin, or the
-      existing boolean-literal kind if there is one. It goes through
-      `default_literal_var` like `true`. The left operand must be
-      `B[RawExistential]`, otherwise E152 (concrete or generic).
-- [ ] **`is` pattern typing.** The binding is `&T`. Fields check against
-      `T`'s struct pattern rules. The scrutinee must be an existential
-      (E152).
-- [ ] **Exhaustiveness** (`lib/kestrel-pattern-matching`). A
-      `TypeTest(TyId)` constructor over an open domain, modelled on
-      integer literals in `usefulness.rs`, so the non-exhaustive and
-      unreachable diagnostics come for free.
-- [ ] **E149 warning.** When `T` can't conform to every bound, warn in a
-      body analyzer. One check covers `as?`, the `is` operator and `is`
-      patterns.
-- [ ] **Lowering.**
-      - Load the table's type-descriptor slot and compare it with
-        `T`'s descriptor address.
-      - **Hit:** a reference to the payload re-typed as `&T`.
-      - **Consuming hit:** `consumePointee { p in p.cast[T]().move() }`.
-      - **Miss:** `.None` / `.Err(x)`.
-      - **`is` operator:** the same comparison as an `lang.i1`, passed to
-        the chosen type's `init(boolLiteral:)`. `is not` inverts it.
-      - **`is` patterns:** a decision-tree branch on the comparison; on a
-        hit, bind `&T` and continue with the field sub-patterns.
-      - One helper emits the descriptor comparison for all three.
-- [ ] **Triage:** the downcast and `is_*` execution tests, and the
-      `any_cast_*` and `is_*` diagnostics, pass. This is the **M5 exit**, together with Phase 14.
-
-### Phase 14: Documentation
-
-- [ ] **`docs/language/existentials.md`** (user-facing): `any P`,
-      `any[B] P`, choosing a box, dispatchability, `as?`, `is`, the RcBox
-      aliasing gotcha.
-- [ ] **`docs/language/pattern-matching.md`:** an `is` patterns section.
-- [ ] **Cross-references.** Update `docs/language/opaque-types.md`'s
-      comparison paragraph, and point `docs/design/shared-box.md`'s `any P`
-      section (`:146`, `:175-188`) at the design doc.
-- [ ] **Crate architecture docs.** `docs/architecture.md` in
-      `kestrel-mir` (new items, mono table synthesis), `kestrel-type-infer`
-      (`RawExistential`, conversions, peel order), and the codegen crates.
-- [ ] **`write-kestrel` skill:** `any` syntax and the
-      "boxes are part of the type" gotcha.
-- [ ] **Tracking.** `ROADMAP.md` (move existentials to 0.18, matching the
-      milestone), `docs/plans/index.md` status, issue #29.
+- **HIR.** `HirPat::TypeTest { binding, target, sub }` (`c is T { .. }`;
+  `binding` borrows the payload, `sub` is a struct pattern or `_`) and
+  `HirExpr::TakePayload { expr, target }`. `x is T` → `match x { is T =>
+  true, _ => false }` (swapped for `is not`), so it types exactly like `true`.
+  `x as? T` → a match ascribed `Optional[&T]`. `consuming x as? T` →
+  `{ let $boxed = x; let $result: T throws _ = if $boxed is T {
+  .Ok(TakePayload($boxed)) } else { .Err($boxed) }; $result }`. The
+  annotations are built as `AstType`s and lowered like user sugar. E155 is
+  retired.
+- **Typing** (`generate.rs`): the sub-pattern is typed at `T`, the binding
+  at `&T`; the scrutinee's type is recorded in `TypedBody::type_tests`.
+- **Diagnostics** (`kestrel-analyze/src/body/type_test.rs`): E152 (not an
+  existential, or a generic parameter), E149 warning (via
+  `kestrel_type_infer::type_test_blocker`, shared with MIR), and E148 for a
+  `consuming as?` on a box that isn't `ConsumingIndirection`.
+- **Exhaustiveness** (`kestrel-pattern-matching`): `Constructor::TypeTest`
+  over an open domain (`TypeShape::Infinite` for a box over a raw
+  existential) and `PathElement::Payload`.
+- **Lowering** (`kestrel-mir-lower`): the type identity is the **table
+  pointer** — tables are interned per (shape, payload), so the box's table
+  equals the table literal at `T` exactly when the payload is a `T`; no
+  separate type descriptor. An unmatchable target (E149) folds to `false`.
+  An `is` switch is a sequential test chain shared with string literals
+  (`emit_test_chain`); type tests always lower in place mode, so they never
+  move the scrutinee. `TakePayload` calls `consumePointee` with the
+  synthetic `__existential.take[S, T]`.
+- **Fixed on the way:** the test chain carried the pre-chain live set into
+  later tests (a later miss forwarded the stale scrutinee; a later hit
+  destroyed the rebound one). Struct patterns with a literal field
+  (`Rect { w: 0, .. }`) lowered the positional field as a tuple extract and
+  failed codegen — new test `patterns/pattern_types/struct_pattern_with_literal_exec.ks`.
+- **Test corrections:** `is_operator_exec.ks` used `!` on `Bool` (Kestrel's
+  logical negation is `not`) and a trailing closure for `filter` (which
+  needs `where:`).
+- **Docs:** `docs/language/existentials.md`, the type-test section of
+  `pattern-matching.md`, cross-references in `opaque-types.md` and
+  `design/shared-box.md`, `error-codes.md`, the crate architecture docs, and
+  the `write-kestrel` skill.
+- **Not done:** `OwnedBox: Cloneable` at an unsized payload (clone through
+  the table, design §3) — `OwnedBox`'s `Cloneable` is still `T: Sized`.
+  `is any Q` / `as? any Q` stay out of scope. Open: `nested_existential_exec`
+  (see M3).
 
 ## Verification
 

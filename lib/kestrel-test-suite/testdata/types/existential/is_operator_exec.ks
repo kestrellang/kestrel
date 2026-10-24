@@ -31,10 +31,10 @@ func main() -> Int64 {
     if circles != 2 { return 1 }
     if shapes(1) is not Square { return 2 }
     if shapes(0) is Circle and shapes(1) is Circle { return 3 }
-    if !(shapes(0) is Square or shapes(2) is Circle) { return 4 }
-    let squares = shapes.filter { it is Square };
+    if not (shapes(0) is Square or shapes(2) is Circle) { return 4 }
+    let squares = shapes.filter(where: { (s) in s is Square });
     if squares.count != 1 { return 5 }
     let b = shapes(0) is Circle;
-    if !b { return 6 }
+    if not b { return 6 }
     0
 }

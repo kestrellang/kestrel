@@ -60,6 +60,53 @@ pub fn type_satisfies(ctx: &QueryContext<'_>, ty: &HirTy, protocol: Entity, root
     kestrel_entail::entails(&layer, &goal) != Tri::Fails
 }
 
+/// [`type_satisfies`] for a resolved type. Concrete nominals and tuples are
+/// reproduced faithfully (so a real violation can be disproven); abstract
+/// positions collapse to `Infer`, which `type_satisfies` permits — its
+/// conservative "reject only on a provable concrete violation" contract.
+pub fn resolved_satisfies(
+    ctx: &QueryContext<'_>,
+    ty: &crate::result::ResolvedTy,
+    protocol: Entity,
+    root: Entity,
+) -> bool {
+    type_satisfies(ctx, &resolved_ty_to_hir(ty), protocol, root)
+}
+
+/// A `ResolvedTy` as a `HirTy` for [`type_satisfies`]. Spans are irrelevant
+/// to the check. `Struct` vs `Enum` doesn't matter: `nominal_satisfies` keys
+/// off the entity's own `NodeKind`.
+fn resolved_ty_to_hir(ty: &crate::result::ResolvedTy) -> HirTy {
+    use crate::result::ResolvedTy;
+    let sp = kestrel_span::Span::new(0, 0..0);
+    match ty {
+        ResolvedTy::Named { entity, args } => HirTy::Struct {
+            entity: *entity,
+            args: args.iter().map(resolved_ty_to_hir).collect(),
+            span: sp,
+        },
+        ResolvedTy::Tuple(elems) => {
+            HirTy::Tuple(elems.iter().map(resolved_ty_to_hir).collect(), sp)
+        },
+        _ => HirTy::Infer(sp),
+    }
+}
+
+/// The first of an existential's `bounds` that `target` cannot conform to:
+/// `x is T` / `x as? T` can then never succeed (E149, and MIR folds the test
+/// to `false`). `None` when every bound may hold.
+pub fn type_test_blocker(
+    ctx: &QueryContext<'_>,
+    target: &crate::result::ResolvedTy,
+    bounds: &[Entity],
+    root: Entity,
+) -> Option<Entity> {
+    bounds
+        .iter()
+        .copied()
+        .find(|&p| !resolved_satisfies(ctx, target, p, root))
+}
+
 /// Do `extension`'s target pattern and `where` clauses hold for the receiver
 /// type `recv`? The substitution maps the *extension's own* target args (e.g.
 /// `[T, E]` in `extend Result[T,E]`) against `recv`'s args — not the target

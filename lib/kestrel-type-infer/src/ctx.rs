@@ -284,6 +284,10 @@ pub struct InferCtx<'a> {
     /// single source MIR lowering reads them from (existentials design §4).
     pub(crate) existential_conversions: HashMap<HirExprId, crate::existential::PendingConversion>,
 
+    /// `is T` patterns, keyed by pattern, with the scrutinee's TyVar there.
+    /// Surfaced on `TypedBody.type_tests`.
+    pub(crate) type_tests: HashMap<kestrel_hir::body::HirPatId, TyVar>,
+
     /// HirExprIds of closure-*literal* expressions, recorded during constraint
     /// generation. `solve_call` uses this to gate the no-annotation `MutBorrow`
     /// convention upgrade to literals only — a named function value's
@@ -441,6 +445,7 @@ impl<'a> InferCtx<'a> {
             kind_flex: HashSet::default(),
             kind_coercions: HashMap::default(),
             existential_conversions: HashMap::default(),
+            type_tests: HashMap::default(),
             closure_literal_exprs: HashSet::default(),
             never_fallback_targets: HashSet::default(),
             expectation: None,

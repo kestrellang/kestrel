@@ -37,6 +37,7 @@ use crate::items::function_sig::{param_convention, receiver_convention};
 pub struct ExistentialState {
     drop_thunk: Option<Entity>,
     discard_fn: Option<Entity>,
+    take_fn: Option<Entity>,
     thunks: HashMap<Entity, Entity>,
     protocol_templates: HashMap<(Entity, Entity), Entity>,
     composition_templates: HashMap<(Entity, Vec<Entity>), Entity>,
@@ -349,6 +350,65 @@ pub(crate) fn discard_fn(ctx: &mut LowerCtx) -> Entity {
     ctx.module.register_name(entity, "__existential.discard");
     ctx.module.add_function(func);
     ctx.existentials.discard_fn = Some(entity);
+    entity
+}
+
+/// `fn take[S, T](p: Pointer[S]) -> T`: move a `T` out of the payload at
+/// `p` (an `is T` test proved the payload's type). The body handed to
+/// `consumePointee` by `consuming x as? T`.
+pub(crate) fn take_fn(ctx: &mut LowerCtx) -> Entity {
+    if let Some(e) = ctx.existentials.take_fn {
+        return e;
+    }
+    let entity = ctx.next_synthetic_entity();
+    let source = ctx.next_synthetic_entity();
+    let target = ctx.next_synthetic_entity();
+    ctx.module.register_name(source, "Payload");
+    ctx.module.register_name(target, "Target");
+    let source_ty = ctx.module.ty_arena.intern(MirTy::TypeParam(source));
+    let target_ty = ctx.module.ty_arena.intern(MirTy::TypeParam(target));
+    let source_ptr = ctx.module.ty_arena.pointer(source_ty);
+    let target_ptr = ctx.module.ty_arena.pointer(target_ty);
+    let mut body = OssaBody::new();
+    let p = body.alloc_value(ValueDef::owned(source_ptr).with_root(RootProvenance::Param(0)));
+    body.param_count = 1;
+    let cast = body.alloc_value(ValueDef::owned(target_ptr));
+    let value = body.alloc_value(ValueDef::owned(target_ty));
+    let entry = body.alloc_block();
+    body.entry = entry;
+    let block = body.block_mut(entry);
+    block.insts = vec![
+        Instruction::new(InstKind::Op1 {
+            result: cast,
+            op: Op::PtrCast(target_ty),
+            arg: p,
+        }),
+        Instruction::new(InstKind::Take {
+            result: value,
+            address: cast,
+            ty: target_ty,
+            independent: true,
+        }),
+        Instruction::new(InstKind::DestroyValue { operand: cast }),
+        Instruction::new(InstKind::DestroyValue { operand: p }),
+    ];
+    block.terminator = Terminator::new(TerminatorKind::Return(value));
+    let mut func = FunctionDef::new(entity, "__existential.take", target_ty);
+    func.type_params = vec![
+        TypeParamDef::new(source, "Payload"),
+        TypeParamDef::new(target, "Target"),
+    ];
+    func.kind = FunctionKind::Free;
+    func.params.push(ParamDef::new(
+        "p",
+        p,
+        source_ptr,
+        ParamConvention::Consuming,
+    ));
+    func.body = Some(body);
+    ctx.module.register_name(entity, "__existential.take");
+    ctx.module.add_function(func);
+    ctx.existentials.take_fn = Some(entity);
     entity
 }
 

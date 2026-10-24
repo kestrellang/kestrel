@@ -581,6 +581,10 @@ pub(crate) fn collect_pat_bindings(
             out.insert(*binding);
             collect_pat_bindings(hir, *subpattern, out);
         },
+        HirPat::TypeTest { binding, sub, .. } => {
+            out.extend(*binding);
+            collect_pat_bindings(hir, *sub, out);
+        },
         HirPat::Tuple { prefix, suffix, .. } => {
             for &p in prefix.iter().chain(suffix) {
                 collect_pat_bindings(hir, p, out);

@@ -1064,6 +1064,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
 
         HirExpr::Error { span } => ctx.report_error(InferError::FromHir { span: span.clone() }),
 
+        // `consuming x as? T`'s hit arm: the box is consumed and its payload,
+        // a `T`, comes out (the analyzer checks the box can give it up).
+        HirExpr::TakePayload { expr, target, .. } => {
+            gen_expr(ctx, hir, *expr);
+            lower_hir_ty(ctx, target)
+        },
+
         // Sugar wrapper: kind-aware primary-constraint emission for cascade
         // suppression. The relevant inner ProtocolCall expr_id is recorded in
         // `poison_protocol_call_recv_on_failure` BEFORE recursing, so when
@@ -1152,6 +1159,8 @@ fn mark_sugar_primary(
             };
             ctx.poison_protocol_call_recv_on_failure.insert(*scrutinee);
         },
+        // No protocol call to poison: the type-test match carries the errors.
+        SugarKind::TypeTest | SugarKind::Cast | SugarKind::ConsumingCast => {},
         SugarKind::CompoundAssign => {
             // inner is the addAssign ProtocolCall (or HirExpr::Error if the
             // AST place check rejected the LHS at desugar time).
@@ -1421,6 +1430,24 @@ fn gen_pat(
             // Bind the whole matched value to the local, then constrain via subpattern
             ctx.local_types.insert(*binding, scrutinee_tv);
             gen_pat(ctx, hir, *subpattern, scrutinee_tv, source);
+        },
+
+        // `[c] is T [{ .. }]`: the payload is a `T`, matched in place; `c`
+        // borrows it. Whether the scrutinee is an existential at all is the
+        // analyzer's call (E152), from `type_tests`.
+        HirPat::TypeTest {
+            binding,
+            target,
+            sub,
+            ..
+        } => {
+            ctx.type_tests.insert(pat_id, scrutinee_tv);
+            let payload = lower_hir_ty(ctx, target);
+            if let Some(local) = binding {
+                let view = ctx.ref_ty(payload, false);
+                ctx.local_types.insert(*local, view);
+            }
+            gen_pat(ctx, hir, *sub, payload, source);
         },
 
         HirPat::Array {
@@ -3437,6 +3464,7 @@ fn expr_span(hir: &HirBody, id: HirExprId) -> Span {
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span.clone(),
     }
 }

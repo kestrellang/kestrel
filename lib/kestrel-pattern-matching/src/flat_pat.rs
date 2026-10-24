@@ -388,6 +388,16 @@ pub fn flatten(
         // At-pattern: the binding is irrelevant to the matrix algorithm,
         // only the subpattern determines constructor structure
         HirPat::At { subpattern, .. } => flatten(hir, query, root, *subpattern, scrutinee_ty),
+
+        // `is T { .. }`: one field, the payload as a `T`.
+        HirPat::TypeTest { target, sub, .. } => {
+            let target = kestrel_type_infer::compare::resolve_hir_type(query, root, target);
+            let child = flatten(hir, query, root, *sub, &target);
+            FlatPat::Ctor {
+                ctor: Constructor::TypeTest(target),
+                children: vec![child],
+            }
+        },
     }
 }
 

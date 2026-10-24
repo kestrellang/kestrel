@@ -320,6 +320,7 @@ fn expr_span(expr: &HirExpr) -> &Span {
         | HirExpr::Assign { span, .. }
         | HirExpr::Block { span, .. }
         | HirExpr::Error { span }
+        | HirExpr::TakePayload { span, .. }
         | HirExpr::Sugar { span, .. } => span,
     }
 }
