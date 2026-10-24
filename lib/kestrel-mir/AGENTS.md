@@ -139,6 +139,14 @@ copies of a `var` (`borrow_copies`). Invariants every change here must keep:
   is that type's managed storage and doesn't count; a view has no deinit.
   Writes through raw pointers created elsewhere are *not* tracked — that is
   `unsafe` code's responsibility.
+- **Safe aliases ARE tracked; never key a storage check on one `ValueId`.** A
+  slot has many names: the struct it is a field of, every `field_addr` taken
+  from it (each a fresh value — `self.x` read and `self.x = ..` write use
+  different ones), and every block param the address is threaded through.
+  Use `copy_lifetime::storage_names` and treat a write to *any* name as a
+  write to the slot. Also refuse while a `&mutating` binding (an open
+  `begin_mut_borrow_addr`) of the slot is live — it writes through its own
+  name. Both were real bugs (`binding_store_through`, `LinesIterator.next`).
 - **Rewrites that delete instructions rescan** (one rewrite per scan) instead of
   batching index-based edits; batched sites in one block hold stale indices.
 - `owned_params` variants are keyed by (original function, sorted owned

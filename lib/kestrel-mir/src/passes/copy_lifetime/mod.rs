@@ -33,7 +33,10 @@ mod type_facts;
 
 use kestrel_debug::ktrace;
 
+use rustc_hash::FxHashSet;
+
 use crate::ValueId;
+use crate::body::OssaBody;
 use crate::inst::InstKind;
 use crate::mono::types::MonoModule;
 use crate::terminator::TerminatorKind;
@@ -104,4 +107,39 @@ fn reads_only(kind: &InstKind) -> bool {
             | InstKind::EnumPayload { .. }
             | InstKind::Discriminant { .. }
     )
+}
+
+/// Every name of the storage object `slot` lives in: `slot` itself, the base
+/// it was projected from (`field_addr`), every field address projected from
+/// any of those, and every block param they are threaded through (both
+/// directions). A write through *any* of these may change what `slot` holds —
+/// e.g. `let start = self.byteIndex` reads one `field_addr self`, while
+/// `self.byteIndex = ..` writes through a different `field_addr self`.
+/// Deliberately conservative: writes to sibling fields count too.
+fn storage_names(body: &OssaBody, slot: ValueId) -> FxHashSet<ValueId> {
+    let mut aliases = FxHashSet::from_iter([slot]);
+    loop {
+        let before = aliases.len();
+        for block in &body.blocks {
+            for inst in &block.insts {
+                if let InstKind::FieldAddr { result, base, .. } = inst.kind
+                    && (aliases.contains(&result) || aliases.contains(&base))
+                {
+                    aliases.insert(result);
+                    aliases.insert(base);
+                }
+            }
+            for (target, args) in block.terminator.kind.successor_args() {
+                for (a, p) in args.iter().zip(&body.blocks[target.index()].params) {
+                    if aliases.contains(a) || aliases.contains(&p.value) {
+                        aliases.insert(*a);
+                        aliases.insert(p.value);
+                    }
+                }
+            }
+        }
+        if aliases.len() == before {
+            return aliases;
+        }
+    }
 }

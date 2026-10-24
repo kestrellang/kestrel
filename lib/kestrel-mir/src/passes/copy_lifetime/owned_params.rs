@@ -241,15 +241,25 @@ fn match_site(
         return None;
     }
 
+    // Every other name of the slot's storage (the struct it is a field of,
+    // sibling fields, threaded copies of the address). While the value is
+    // moved out, nothing may reach that storage — not even the callee via
+    // another argument (`p.a = f(p.a, p)`).
+    let names = if is_slot {
+        super::storage_names(body, src)
+    } else {
+        FxHashSet::from_iter([src])
+    };
     let mut end_i = None;
     for (i, inst) in insts.iter().enumerate().skip(borrow_i + 1) {
         let ops = inst.kind.operands();
-        if !ops.contains(&src) && !ops.contains(&b) {
+        if !ops.iter().any(|o| names.contains(o)) && !ops.contains(&b) {
             continue;
         }
         if i == ci {
-            // The borrow is passed exactly once, and `src` itself not at all.
-            if ops.iter().filter(|o| **o == b).count() != 1 || ops.contains(&src) {
+            // The borrow is passed exactly once, and the storage not at all.
+            if ops.iter().filter(|o| **o == b).count() != 1 || ops.iter().any(|o| names.contains(o))
+            {
                 return None;
             }
             continue;

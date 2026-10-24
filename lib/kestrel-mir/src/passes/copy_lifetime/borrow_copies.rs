@@ -154,7 +154,12 @@ fn check(
     // Nothing writes the slot (under any threaded name) while a member is
     // alive: from its definition (block start for params) to its destroy, or
     // to the block end when it is forwarded.
-    let aliases = slot_aliases(body, slot);
+    let aliases = super::storage_names(body, slot);
+    // A `&mutating` binding (or any mutable borrow) of the slot that is still
+    // open can write it through its own name while the copy would be alive.
+    if mut_borrow_open(body, bi, ci, &aliases) {
+        return None;
+    }
     for &(b, v) in &members {
         let insts = &body.blocks[b].insts;
         let start = if v == y { ci + 1 } else { 0 };
@@ -166,9 +171,11 @@ fn check(
             i.kind.operands().iter().any(|o| aliases.contains(o))
                 && !matches!(
                     i.kind,
+                    // Reads, and projecting a field address (its own uses are checked).
                     InstKind::BeginBorrowAddr { .. }
                         | InstKind::CopyAddr { .. }
                         | InstKind::Load { .. }
+                        | InstKind::FieldAddr { .. }
                 )
         });
         if writes {
@@ -251,24 +258,28 @@ fn member_uses(
     Some(forwards)
 }
 
-/// `slot` plus every block param it is threaded into, transitively.
-fn slot_aliases(body: &OssaBody, slot: ValueId) -> FxHashSet<ValueId> {
-    let mut aliases = FxHashSet::from_iter([slot]);
-    loop {
-        let before = aliases.len();
-        for block in &body.blocks {
-            for (target, args) in block.terminator.kind.successor_args() {
-                for (a, p) in args.iter().zip(&body.blocks[target.index()].params) {
-                    if aliases.contains(a) {
-                        aliases.insert(p.value);
-                    }
-                }
-            }
-        }
-        if aliases.len() == before {
-            return aliases;
-        }
-    }
+/// Some mutable borrow of the slot may be live at `ci` in block `bi`: one
+/// begun earlier in the block and not yet ended, or one threaded in from
+/// another block (a `@guaranteed` param borrowing any slot alias). Safe
+/// `&mutating` references alias the slot, so the copy must stay a copy.
+fn mut_borrow_open(body: &OssaBody, bi: usize, ci: usize, aliases: &FxHashSet<ValueId>) -> bool {
+    let insts = &body.blocks[bi].insts[..ci];
+    let open_here = insts.iter().any(|inst| match inst.kind {
+        InstKind::BeginMutBorrowAddr { result, address, .. } if aliases.contains(&address) => {
+            !insts.iter().any(|e| {
+                matches!(e.kind, InstKind::EndBorrow { operand } | InstKind::EndMutBorrow { operand } if operand == result)
+            })
+        },
+        _ => false,
+    });
+    let threaded_in = body.blocks.iter().flat_map(|b| &b.params).any(|p| {
+        p.ownership == Ownership::Guaranteed
+            && body
+                .value(p.value)
+                .borrow_source
+                .is_some_and(|src| aliases.contains(&src))
+    });
+    open_here || threaded_in
 }
 
 fn apply(body: &mut OssaBody, plan: &Plan) {
