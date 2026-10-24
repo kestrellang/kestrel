@@ -352,8 +352,9 @@ extend TcpStream {
 ///
 /// # Memory Model
 ///
-/// Owns its fd; closed on drop.
-public struct TcpListener {
+/// Owns its fd; closed on drop. `not Copyable`: a copy would close the
+/// same fd twice. Move it, or borrow it to call `accept()`.
+public struct TcpListener: not Copyable {
     var fd: Int32
 
     /// @name From Fd
