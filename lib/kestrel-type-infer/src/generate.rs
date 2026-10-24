@@ -2182,6 +2182,11 @@ fn collect_literal_roots(ctx: &InferCtx<'_>, tv: TyVar, depth: u32, out: &mut Ve
             Constraint::TupleIndex { tuple, result, .. } if produced_by(result) => {
                 inputs.push(*tuple)
             },
+            // A borrow's pointee comes from the borrowed expression
+            // (`let e = &xs(at: 0)`).
+            Constraint::BorrowPointee { inner, pointee, .. } if produced_by(pointee) => {
+                inputs.push(*inner)
+            },
             // A pattern binder comes from its scrutinee.
             Constraint::ImplicitPat {
                 scrutinee, arg_tys, ..
