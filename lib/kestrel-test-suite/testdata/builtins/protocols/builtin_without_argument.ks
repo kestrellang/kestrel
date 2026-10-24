@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@builtin
+@builtin // ERROR: '@builtin' needs a builtin name: '@builtin(.Copyable)'
 protocol Foo {}

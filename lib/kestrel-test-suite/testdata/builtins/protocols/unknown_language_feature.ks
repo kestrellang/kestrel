@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@builtin(.UnknownFeature)
+@builtin(.UnknownFeature) // ERROR: unknown builtin '.UnknownFeature'
 protocol Foo {}

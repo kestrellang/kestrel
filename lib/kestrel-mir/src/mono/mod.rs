@@ -252,6 +252,7 @@ pub fn monomorphize(
             extern_info: body_result.extern_info.clone(),
             is_main: body_result.is_main,
             ret_borrow,
+            inline: body_result.inline,
         });
     }
 
@@ -411,6 +412,7 @@ struct MonoBodyResult {
     ret: TyId,
     extern_info: Option<crate::item::function::ExternInfo>,
     is_main: bool,
+    inline: Option<crate::item::function::InlineMode>,
 }
 
 fn monomorphize_body(
@@ -451,6 +453,7 @@ fn monomorphize_body(
 
     let extern_info = func.extern_info.clone();
     let is_main = func.is_main;
+    let inline = func.inline;
 
     let Some(body) = &func.body else {
         return MonoBodyResult {
@@ -459,6 +462,7 @@ fn monomorphize_body(
             ret,
             extern_info,
             is_main,
+            inline,
         };
     };
 
@@ -537,6 +541,7 @@ fn monomorphize_body(
         ret,
         extern_info,
         is_main,
+        inline,
     }
 }
 
@@ -1455,6 +1460,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(func);
         module.register_name(entity(1), "main");
@@ -1539,6 +1545,7 @@ mod tests {
                 extern_info: None,
                 is_main: true,
                 provides_protocol_default: false,
+                inline: None,
             });
             module.register_name(entity(1), "main");
 
@@ -1602,6 +1609,7 @@ mod tests {
             extern_info: None,
             is_main: true,
             provides_protocol_default: false,
+            inline: None,
         });
         module.register_name(entity(1), "main");
 
@@ -1654,6 +1662,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() calls identity[Int64]
@@ -1693,6 +1702,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         module.add_function(main_fn);
@@ -1758,6 +1768,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             }
         };
 
@@ -1799,6 +1810,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(maker);
 
@@ -1823,6 +1835,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         });
 
         let mono = monomorphize(module, &TargetConfig::host_64()).unwrap();
@@ -1891,6 +1904,7 @@ mod tests {
                 extern_info: None,
                 is_main: false,
                 provides_protocol_default: false,
+                inline: None,
             });
         }
 
@@ -1923,6 +1937,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         });
         module.register_name(protocol_entity, "ClosureLifecycle");
 
@@ -1967,6 +1982,7 @@ mod tests {
             }),
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
         module.add_function(func);
         module.register_name(entity(1), "malloc");

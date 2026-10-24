@@ -5,10 +5,12 @@
 //! (struct/enum/protocol/extension) push their member items onto the stack.
 
 use kestrel_hecs::{Entity, World};
+use kestrel_syntax_tree::SyntaxNode;
 use kestrel_syntax_tree::ast::{self, AstNode, HasAttributes};
-use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-use crate::components::{FileSyntax, Os, TargetConfig};
+use crate::attrs::{self, ParsedAttr};
+use crate::builders::helpers::extract_attribute;
+use crate::components::{FileSyntax, TargetConfig};
 
 use crate::builders::{
     enum_decl, extension, field, function, import, module, protocol, struct_decl, subscript,
@@ -127,52 +129,35 @@ fn item_attributes(item: &ast::Item) -> Vec<ast::Attribute> {
         I::InitializerDeclaration(n) => n.attributes().collect(),
         I::SubscriptDeclaration(n) => n.attributes().collect(),
         I::EnumCaseDeclaration(n) => n.attributes().collect(),
-        I::ModuleDeclaration(_)
-        | I::ImportDeclaration(_)
-        | I::ExtensionDeclaration(_)
-        | I::DeinitDeclaration(_) => Vec::new(),
+        I::ExtensionDeclaration(n) => n.attributes().collect(),
+        I::DeinitDeclaration(n) => n.attributes().collect(),
+        I::ModuleDeclaration(_) | I::ImportDeclaration(_) => Vec::new(),
     }
 }
 
 /// Whether a target-conditional attribute (`@platform`, …) excludes the
 /// item: excluded if ANY conditional attribute doesn't match the target.
+///
+/// Runs before entities exist, so it parses the syntax node with the same
+/// registry schema and parser `AttrsOf` uses. A malformed `@platform` (bad
+/// arguments, or written twice) never excludes: the declaration is kept so
+/// `AttrsOf` can report it.
 fn is_excluded_by_target(item: &ast::Item, target: Option<&TargetConfig>) -> bool {
-    let Some(target) = target else {
-        return false;
-    };
-    item_attributes(item).iter().any(|attr| {
-        // Future: "arch" => is_excluded_by_arch(...)
-        attr.identifier_token()
-            .is_some_and(|name| name.text() == "platform")
-            && is_excluded_by_platform(attr, target)
-    })
-}
-
-/// Whether `@platform(.os)` excludes the declaration for `target`.
-fn is_excluded_by_platform(attr: &ast::Attribute, target: &TargetConfig) -> bool {
-    let Some(target_os) = target.os else {
+    let Some(target_os) = target.and_then(|t| t.os) else {
         return false; // no OS target set — don't filter
     };
-    // `@platform` with no args — let validation report
-    let Some(arg) = attr
-        .attribute_args()
-        .and_then(|a| a.attribute_args().next())
-    else {
+    let attrs: Vec<_> = item_attributes(item)
+        .iter()
+        .filter_map(|a| extract_attribute(a, 0))
+        .collect();
+    // Future: an `@arch` attribute gets the same treatment.
+    let platforms: Vec<_> = attrs.iter().filter(|a| a.name == "platform").collect();
+    let [only] = platforms[..] else {
         return false;
     };
-    // The implicit member `.os` of the first argument.
-    let Some(os) = arg
-        .syntax()
-        .children_with_tokens()
-        .filter_map(|c| c.into_token())
-        .skip_while(|t| t.kind() != SyntaxKind::Dot)
-        .find(|t| t.kind() == SyntaxKind::Identifier)
-    else {
-        return false; // no implicit member — don't exclude
-    };
-    match Os::from_name(os.text()) {
-        Some(declared) => declared != target_os,
-        None => false, // unknown platform — let validation report
+    match attrs::parse::parse_standalone(only) {
+        Some(ParsedAttr::Platform(oses)) => !oses.contains(&target_os),
+        _ => false,
     }
 }
 

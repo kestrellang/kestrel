@@ -3,10 +3,11 @@
 //! Lowers function entities into MIR FunctionDefs with params and return types.
 //! Function bodies are lowered in a separate phase.
 
-use kestrel_ast_builder::{Attributes, Callable, Intrinsic, NodeKind, Static, TypeParams};
+use kestrel_ast_builder::attrs::{Abi, InlineMode as AttrInline, attrs_of};
+use kestrel_ast_builder::{Callable, Intrinsic, NodeKind, Static, TypeParams};
 use kestrel_hecs::Entity;
 use kestrel_mir::item::function::{
-    CallingConvention, ExternInfo, FunctionDef, FunctionKind, ParamDef, WhereClause,
+    CallingConvention, ExternInfo, FunctionDef, FunctionKind, InlineMode, ParamDef, WhereClause,
     WhereConstraint,
 };
 use kestrel_mir::{ParamConvention, TyId, TypeParamDef, ValueId};
@@ -57,6 +58,21 @@ fn is_protocol_extension_member(ctx: &LowerCtx, entity: Entity) -> bool {
         .is_some_and(|target| ctx.world.get::<NodeKind>(target) == Some(&NodeKind::Protocol))
 }
 
+/// The function's `@inline` mode. An accessor (`set`, `ref`) takes the
+/// attribute of the property or subscript it belongs to, so every accessor of
+/// an `@inline` computed property is marked.
+fn inline_mode(ctx: &LowerCtx, entity: Entity) -> Option<InlineMode> {
+    let owner = match ctx.world.get::<NodeKind>(entity) {
+        Some(NodeKind::Setter | NodeKind::RefAccessor) => ctx.world.parent_of(entity)?,
+        _ => entity,
+    };
+    attrs_of(&ctx.query, owner).inline().map(|mode| match mode {
+        AttrInline::Hint => InlineMode::Hint,
+        AttrInline::Always => InlineMode::Always,
+        AttrInline::Never => InlineMode::Never,
+    })
+}
+
 /// Lower a function entity into a MIR FunctionDef (signature only, no body).
 pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     let name = ctx.register_name(entity);
@@ -68,17 +84,13 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
 
     collect_inherited_type_params(ctx, entity, &mut def);
 
-    let is_extern = ctx
-        .world
-        .get::<Attributes>(entity)
-        .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "extern"));
+    let attrs = attrs_of(&ctx.query, entity);
+    let is_extern = attrs.is_extern();
 
     // `@main` marks the program entry point. Set early so both the intrinsic
     // early-return path and the normal path carry it. Replaces discover-by-name.
-    def.is_main = ctx
-        .world
-        .get::<Attributes>(entity)
-        .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "main"));
+    def.is_main = attrs.is_main();
+    def.inline = inline_mode(ctx, entity);
 
     // Function's own type params
     if let Some(type_params) = ctx.world.get::<TypeParams>(entity) {
@@ -132,24 +144,17 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
     }
 
     // @extern
-    if is_extern && let Some(attrs) = ctx.world.get::<Attributes>(entity) {
-        for attr in &attrs.0 {
-            if attr.name == "extern" {
-                let symbol_name = attr
-                    .args
-                    .iter()
-                    .find(|a| a.label.as_deref() == Some("mangleName"))
-                    .map(|a| a.value.trim_matches('"').to_string())
-                    .unwrap_or_else(|| {
-                        def.name.rsplit('.').next().unwrap_or(&def.name).to_string()
-                    });
-                def.extern_info = Some(ExternInfo {
-                    calling_convention: CallingConvention::C,
-                    symbol_name,
-                });
-                break;
-            }
-        }
+    if let Some((abi, mangle_name)) = attrs.extern_info() {
+        let symbol_name = mangle_name.map_or_else(
+            || def.name.rsplit('.').next().unwrap_or(&def.name).to_string(),
+            str::to_string,
+        );
+        def.extern_info = Some(ExternInfo {
+            calling_convention: match abi {
+                Abi::C => CallingConvention::C,
+            },
+            symbol_name,
+        });
     }
 
     // Intrinsic functions have no body

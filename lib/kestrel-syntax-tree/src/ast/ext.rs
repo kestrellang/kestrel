@@ -78,7 +78,7 @@ impl_trait!(HasName: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
 impl_trait!(HasVisibility: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
     FunctionDeclaration, FieldDeclaration, TypeAliasDeclaration, InitializerDeclaration,
     SubscriptDeclaration, EnumCaseDeclaration);
-impl_trait!(HasAttributes: StructDeclaration, EnumDeclaration, ProtocolDeclaration,
+impl_trait!(HasAttributes: StructDeclaration, EnumDeclaration, ProtocolDeclaration, ExtensionDeclaration, DeinitDeclaration,
     FunctionDeclaration, FieldDeclaration, TypeAliasDeclaration, InitializerDeclaration,
     SubscriptDeclaration, EnumCaseDeclaration);
 impl_trait!(HasGenerics: StructDeclaration, EnumDeclaration, ProtocolDeclaration,

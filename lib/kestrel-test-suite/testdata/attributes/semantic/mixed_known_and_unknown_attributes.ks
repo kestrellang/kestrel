@@ -3,5 +3,5 @@
 
 module Test
 @dummy
-@unknown // WARN: unknown attribute
+@unknown // ERROR: unknown attribute
 struct Foo {}

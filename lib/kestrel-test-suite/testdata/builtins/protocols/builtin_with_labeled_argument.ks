@@ -2,5 +2,5 @@
 // stdlib: false
 
 module Test
-@builtin(feature: .Copyable)
+@builtin(feature: .Copyable) // ERROR: '@builtin' has no argument 'feature'
 protocol Foo {}

@@ -814,6 +814,7 @@ version = "0.17.0"
 dependencies = [
  "kestrel-ast",
  "kestrel-hecs",
+ "kestrel-hir",
  "kestrel-lexer",
  "kestrel-parser",
  "kestrel-span",

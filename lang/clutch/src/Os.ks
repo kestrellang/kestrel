@@ -11,11 +11,11 @@ module clutch.os
 // RAW FFI BINDINGS (macOS)
 // ============================================================================
 
-@platform(.darwin)
+@platform(.Darwin)
 @extern(.C, mangleName: "_NSGetArgc")
 func nsGetArgc() -> lang.ptr[lang.i32]
 
-@platform(.darwin)
+@platform(.Darwin)
 @extern(.C, mangleName: "_NSGetArgv")
 func nsGetArgv() -> lang.ptr[lang.ptr[lang.ptr[lang.i8]]]
 
@@ -36,7 +36,7 @@ func nsGetArgv() -> lang.ptr[lang.ptr[lang.ptr[lang.i8]]]
 /// let args = getArgv();
 /// args;  // ["--verbose", "input.txt"]
 /// ```
-@platform(.darwin)
+@platform(.Darwin)
 public func getArgv() -> Array[String] {
     var result = [];
 
@@ -71,7 +71,7 @@ public func getArgv() -> Array[String] {
 /// let args = getArgv();
 /// args;  // ["--verbose", "input.txt"]
 /// ```
-@platform(.linux)
+@platform(.Linux)
 public func getArgv() -> Array[String] {
     var result = [];
 

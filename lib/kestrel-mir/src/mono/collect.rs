@@ -1118,6 +1118,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
@@ -1161,6 +1162,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
@@ -1201,6 +1203,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() calls generic_fn[Int64]
@@ -1231,6 +1234,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
@@ -1282,6 +1286,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let thunk = FunctionDef {
@@ -1298,6 +1303,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
@@ -1341,6 +1347,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let result = collect_all(
@@ -1396,6 +1403,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         // main() has a witness call
@@ -1427,6 +1435,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             provides_protocol_default: false,
+            inline: None,
         };
 
         let mut names = IndexMap::new();

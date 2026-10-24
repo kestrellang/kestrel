@@ -101,6 +101,8 @@ pub struct MonoFunction {
     /// `item::function::ret_convention`; codegen reads the bit, never
     /// re-matches the type.
     pub ret_borrow: bool,
+    /// `@inline`, copied from the generic definition to every instance.
+    pub inline: Option<crate::item::function::InlineMode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -285,6 +287,7 @@ mod tests {
             extern_info: None,
             is_main: false,
             ret_borrow: false,
+            inline: None,
         };
         let id = module.add_function(func);
         assert_eq!(id.index(), 0);

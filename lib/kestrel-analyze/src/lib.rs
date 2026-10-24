@@ -112,7 +112,7 @@ pub fn default_analyzers() -> AnalyzerRegistry {
     r.add_compilation_check(
         compilation::type_annotation_resolution::TypeAnnotationResolutionAnalyzer,
     );
-    r.add_compilation_check(compilation::unknown_attribute::UnknownAttributeAnalyzer);
+    r.add_compilation_check(compilation::attribute_validation::AttributeValidationAnalyzer);
     r.add_compilation_check(compilation::entry_point::EntryPointAnalyzer);
 
     r

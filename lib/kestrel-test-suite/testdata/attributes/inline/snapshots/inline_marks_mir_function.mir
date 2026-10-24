@@ -1,0 +1,23 @@
+; function: Test.always [inline(always)]
+bb0:
+    %v0 = literal ()  // @owned ()
+    return %v0
+
+
+; function: Test.never [inline(never)]
+bb0:
+    %v0 = literal ()  // @owned ()
+    return %v0
+
+
+; function: Test.hint [inline]
+bb0:
+    %v0 = literal ()  // @owned ()
+    return %v0
+
+
+; function: Test.plain
+bb0:
+    %v0 = literal ()  // @owned ()
+    return %v0
+

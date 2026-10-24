@@ -18,6 +18,7 @@ use inkwell::values::{FunctionValue, GlobalValue};
 
 use kestrel_codegen::TargetConfig;
 use kestrel_hecs::Entity;
+use kestrel_mir::item::function::InlineMode;
 use kestrel_mir::mono::{MonoFunction, MonoModule};
 use kestrel_mir::{FloatBits, ImmediateKind, IntBits};
 
@@ -348,7 +349,23 @@ impl<'ctx> CodegenCtx<'ctx> {
             (sig, Linkage::Internal, format!("{}.mono{}", func.name, idx))
         };
 
-        Ok(self.llmod.add_function(&name, fn_type, Some(linkage)))
+        let fn_value = self.llmod.add_function(&name, fn_type, Some(linkage));
+        if let Some(mode) = func.inline {
+            self.add_inline_attribute(fn_value, mode);
+        }
+        Ok(fn_value)
+    }
+
+    /// `@inline` → `inlinehint` / `alwaysinline` / `noinline`.
+    fn add_inline_attribute(&self, fn_value: FunctionValue<'ctx>, mode: InlineMode) {
+        let name = match mode {
+            InlineMode::Hint => "inlinehint",
+            InlineMode::Always => "alwaysinline",
+            InlineMode::Never => "noinline",
+        };
+        let kind = inkwell::attributes::Attribute::get_named_enum_kind_id(name);
+        let attr = self.cx.create_enum_attribute(kind, 0);
+        fn_value.add_attribute(inkwell::attributes::AttributeLoc::Function, attr);
     }
 
     fn define_all_functions(&mut self) -> Result<(), CodegenError> {

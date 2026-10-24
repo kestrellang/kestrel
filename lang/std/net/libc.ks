@@ -33,11 +33,11 @@ public func SOCK_STREAM() -> Int32 { 1 }
 public func IPPROTO_TCP() -> Int32 { 6 }
 
 // errno access
-@platform(.darwin)
+@platform(.Darwin)
 @extern(.C, mangleName: "__error")
 func __errno_ptr() -> Pointer[Int32]
 
-@platform(.linux)
+@platform(.Linux)
 @extern(.C, mangleName: "__errno_location")
 func __errno_ptr() -> Pointer[Int32]
 
@@ -50,11 +50,11 @@ func __errno_ptr() -> Pointer[Int32]
 /// Numeric value differs across platforms — `0xFFFF` on darwin, `1`
 /// on linux — so always go through this accessor instead of
 /// hard-coding.
-@platform(.darwin)
+@platform(.Darwin)
 public func SOL_SOCKET() -> Int32 { 0xFFFF }
 
 /// Linux-specific definition of `SOL_SOCKET` (`1`).
-@platform(.linux)
+@platform(.Linux)
 public func SOL_SOCKET() -> Int32 { 1 }
 
 /// `SO_REUSEADDR` — allow rebinding to an address still in `TIME_WAIT`.
@@ -63,11 +63,11 @@ public func SOL_SOCKET() -> Int32 { 1 }
 /// to let a server bind to a recently-used port without waiting for
 /// the kernel's grace period. Numeric value differs across
 /// platforms.
-@platform(.darwin)
+@platform(.Darwin)
 public func SO_REUSEADDR() -> Int32 { 0x0004 }
 
 /// Linux-specific definition of `SO_REUSEADDR` (`2`).
-@platform(.linux)
+@platform(.Linux)
 public func SO_REUSEADDR() -> Int32 { 2 }
 
 /// `TCP_NODELAY` — disable Nagle's algorithm on a TCP socket.
