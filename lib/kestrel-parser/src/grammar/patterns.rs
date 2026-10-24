@@ -15,6 +15,7 @@
 //!          | '[' elems ']'                         // ArrayPattern
 //!          | '&' 'mutating'? Identifier            // RefBindingPattern
 //!          | 'var'? Identifier ('@' pat)?          // BindingPattern / AtPattern
+//!          | ('var'? Identifier)? 'is' Ty ('{' fields '}')?   // IsPattern
 //!          | '(' pat,* ')'                         // TuplePattern
 //! ```
 //!
@@ -24,6 +25,7 @@
 
 use kestrel_syntax_tree::SyntaxKind as K;
 
+use super::types::cast_target_ty;
 use crate::core::Parser;
 
 /// A pattern with its `Pattern` wrapper.
@@ -53,6 +55,7 @@ pub(super) fn at_pattern_start(p: &Parser<'_>) -> bool {
         K::Ampersand,
         K::Var,
         K::LParen,
+        K::Is,
     ])
 }
 
@@ -136,6 +139,10 @@ fn base(p: &mut Parser<'_>) -> Option<crate::core::CompletedMarker> {
             p.expect(K::Identifier);
             K::RefBindingPattern
         },
+        Some(K::Is) => {
+            is_tail(p);
+            K::IsPattern
+        },
         Some(K::Var | K::Identifier) => binding(p),
         Some(K::LParen) => {
             tuple_pattern(p, pat);
@@ -154,6 +161,10 @@ fn base(p: &mut Parser<'_>) -> Option<crate::core::CompletedMarker> {
 fn binding(p: &mut Parser<'_>) -> K {
     p.eat(K::Var);
     p.expect(K::Identifier);
+    if p.at(K::Is) {
+        is_tail(p);
+        return K::IsPattern;
+    }
     if p.eat(K::At) {
         pat(p);
         return K::AtPattern;
@@ -189,9 +200,23 @@ fn enum_pattern(p: &mut Parser<'_>) {
     });
 }
 
+/// `is T` optionally followed by `{ fields }`: the tail of an `IsPattern`.
+fn is_tail(p: &mut Parser<'_>) {
+    p.bump(K::Is);
+    cast_target_ty(p);
+    if p.at(K::LBrace) {
+        struct_pattern_fields(p, pat);
+    }
+}
+
 /// `Name { field, field: pat, .. }`, with `sub` parsing nested patterns.
 fn struct_pattern(p: &mut Parser<'_>, sub: fn(&mut Parser<'_>)) {
     p.bump(K::Identifier);
+    struct_pattern_fields(p, sub);
+}
+
+/// `{ field, field: pat, .. }` — shared by struct and `is` patterns.
+fn struct_pattern_fields(p: &mut Parser<'_>, sub: fn(&mut Parser<'_>)) {
     super::delimited(p, K::LBrace, K::RBrace, true, |p| {
         if p.at(K::DotDot) {
             let r = p.start();

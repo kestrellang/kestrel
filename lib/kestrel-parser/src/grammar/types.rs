@@ -4,6 +4,7 @@
 //! Ty        = '&' 'mutating'? Ty                      // TyRef / TyMutRef
 //!           | base ('?' | '??' | 'throws' Ty)*        // TyOptional / TyResult
 //! base      = 'some' bound ('and' bound)* ('and' 'not' bound)?   // TySome
+//!           | 'any' ('[' Ty ']')? bound ('and' bound)*           // TyAny; `any` is contextual
 //!           | '!'                                     // TyNever
 //!           | '_'                                     // TyInferred
 //!           | kind '(' elems ')' '->' Ty              // TyFunction with kind
@@ -11,6 +12,7 @@
 //!           | '[' Ty (':' Ty)? ']'                    // TyArray / TyDictionary
 //!           | Path TypeArgumentList?                  // TyPath
 //! kind      = 'mutating' | 'consuming' | 'escaping'   // `escaping` is contextual
+//! typeArg   = Ty | ident '=' Ty                       // TypeArgBinding: `Item = Int64`
 //! elem      = 'mutating'? Ty                          // per-param convention
 //! ```
 //!
@@ -22,6 +24,7 @@ use kestrel_syntax_tree::SyntaxKind as K;
 
 use super::{delimited, matching_close};
 use crate::core::{CompletedMarker, Parser};
+use crate::syntax_error::{SyntaxError, codes};
 
 /// Whether the token at absolute index `idx` touches its predecessor.
 pub(super) fn adjacent(p: &Parser<'_>, idx: usize) -> bool {
@@ -96,6 +99,12 @@ fn wrap(
     c.precede(p).complete(p, K::Ty)
 }
 
+/// The type after `is` / `as?`: a base type with no `?` / `??` / `throws`
+/// suffix, so `x as? T ?? d` keeps `??` as the coalescing operator.
+pub(super) fn cast_target_ty(p: &mut Parser<'_>) -> Option<CompletedMarker> {
+    base_ty(p)
+}
+
 fn base_ty(p: &mut Parser<'_>) -> Option<CompletedMarker> {
     match p.current() {
         Some(K::Some) => Some(some_type(p)),
@@ -103,6 +112,7 @@ fn base_ty(p: &mut Parser<'_>) -> Option<CompletedMarker> {
         Some(K::Underscore) => Some(leaf(p, K::TyInferred, K::Underscore)),
         Some(K::Mutating | K::Consuming) if at_kinded_fn(p) => Some(kinded_fn(p)),
         Some(K::Identifier) if p.nth_text(0) == "escaping" && at_kinded_fn(p) => Some(kinded_fn(p)),
+        Some(K::Identifier) if at_any_type(p) => Some(any_type(p)),
         Some(K::LParen) => paren_type(p),
         Some(K::LBracket) => Some(array_or_dict(p)),
         Some(K::Identifier) => Some(path_type(p)),
@@ -250,11 +260,16 @@ fn array_or_dict(p: &mut Parser<'_>) -> CompletedMarker {
 
 /// `Ty > TyPath > Path TypeArgumentList?`.
 fn path_type(p: &mut Parser<'_>) -> CompletedMarker {
+    path_type_in(p, false)
+}
+
+/// [`path_type`]; `allow_bindings` is true only for an `any` bound.
+fn path_type_in(p: &mut Parser<'_>, allow_bindings: bool) -> CompletedMarker {
     let m = p.start();
     let tp = p.start();
     type_path(p);
     if p.at(K::LBracket) {
-        type_argument_list(p);
+        type_argument_list_in(p, allow_bindings);
     }
     tp.complete(p, K::TyPath);
     m.complete(p, K::Ty)
@@ -282,8 +297,34 @@ fn type_path(p: &mut Parser<'_>) {
 
 /// `TypeArgumentList` of full types: `[Int, [String: T]]`.
 pub(super) fn type_argument_list(p: &mut Parser<'_>) {
+    type_argument_list_in(p, false);
+}
+
+/// [`type_argument_list`]. In an `any` bound an element may also be an
+/// associated-type binding `Item = Int64`; elsewhere one is parsed (so the
+/// tree stays whole) and reported as E810.
+fn type_argument_list_in(p: &mut Parser<'_>, allow_bindings: bool) {
     let m = p.start();
     delimited(p, K::LBracket, K::RBracket, true, |p| {
+        if p.at(K::Identifier) && p.nth_at(1, K::Equals) {
+            if !allow_bindings {
+                let range = p.error_range();
+                p.push_error(SyntaxError::new(
+                    codes::MISPLACED_ASSOC_BINDING,
+                    format!(
+                        "associated-type binding '{} = ...' is only allowed in an 'any' bound",
+                        p.nth_text(0)
+                    ),
+                    range,
+                ));
+            }
+            let b = p.start();
+            p.bump(K::Identifier);
+            p.bump(K::Equals);
+            let ok = ty(p).is_some();
+            b.complete(p, K::TypeArgBinding);
+            return ok;
+        }
         if !at_type_start(p) {
             p.error_expected_what("type");
             return false;
@@ -291,6 +332,39 @@ pub(super) fn type_argument_list(p: &mut Parser<'_>) {
         ty(p).is_some()
     });
     m.complete(p, K::TypeArgumentList);
+}
+
+/// Contextual `any` at the cursor: `any` followed by a bound, or by a
+/// bracketed box and then a bound. Anything else (`any(where:)`, a type
+/// named `any`) is an ordinary identifier.
+fn at_any_type(p: &Parser<'_>) -> bool {
+    if p.nth_text(0) != "any" {
+        return false;
+    }
+    if p.nth_at(1, K::Identifier) {
+        return true;
+    }
+    if !p.nth_at(1, K::LBracket) {
+        return false;
+    }
+    let open = p.token_pos() + 1;
+    matching_close(p, open).is_some_and(|close| p.kind_at(close + 1) == Some(K::Identifier))
+}
+
+/// `any P and Q` or `any[Box] P and Q`.
+fn any_type(p: &mut Parser<'_>) -> CompletedMarker {
+    let m = p.start();
+    let a = p.start();
+    p.bump(K::Identifier);
+    if p.at(K::LBracket) {
+        type_argument_list(p);
+    }
+    any_bound(p);
+    while p.eat(K::And) {
+        any_bound(p);
+    }
+    a.complete(p, K::TyAny);
+    m.complete(p, K::Ty)
 }
 
 /// `some P and Q and not Copyable`.
@@ -321,6 +395,15 @@ fn some_bound(p: &mut Parser<'_>) {
         return;
     }
     path_type(p);
+}
+
+/// A protocol bound of `any`, which may pin associated types.
+fn any_bound(p: &mut Parser<'_>) {
+    if !p.at(K::Identifier) {
+        p.error_expected_what("protocol");
+        return;
+    }
+    path_type_in(p, true);
 }
 
 /// Speculatively parse `[types]` after an expression path segment. Returns

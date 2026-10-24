@@ -1,6 +1,6 @@
 //! Rendering type syntax back to source.
 
-use crate::ast_type::AstType;
+use crate::ast_type::{AnyBound, AstType};
 
 /// Render an `AstType` as the Kestrel syntax that produced it.
 ///
@@ -59,11 +59,36 @@ pub fn format_type(ty: &AstType) -> String {
                 None => format!("some {}", b.join(" and ")),
             }
         },
+        AstType::Any { box_ty, bounds, .. } => {
+            let b: Vec<_> = bounds.iter().map(format_any_bound).collect();
+            match box_ty {
+                Some(bx) => format!("any[{}] {}", format_type(bx), b.join(" and ")),
+                None => format!("any {}", b.join(" and ")),
+            }
+        },
         AstType::Ref {
             inner, mutating, ..
         } => {
             let kw = if *mutating { "&mutating " } else { "&" };
             format!("{kw}{}", format_type(inner))
         },
+    }
+}
+
+/// `P` or `P[A = X, B = Y]`. The protocol's own type arguments, if any,
+/// come first: `P[Int64, A = X]`.
+fn format_any_bound(bound: &AnyBound) -> String {
+    let base = format_type(&bound.protocol);
+    if bound.bindings.is_empty() {
+        return base;
+    }
+    let pins: Vec<_> = bound
+        .bindings
+        .iter()
+        .map(|b| format!("{} = {}", b.name, format_type(&b.ty)))
+        .collect();
+    match base.strip_suffix(']') {
+        Some(open) => format!("{open}, {}]", pins.join(", ")),
+        None => format!("{base}[{}]", pins.join(", ")),
     }
 }

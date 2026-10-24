@@ -134,6 +134,7 @@ pub fn ast_contains_ref(ty: &kestrel_ast::AstType) -> bool {
         AstType::Dictionary(k, v, _) => ast_contains_ref(k) || ast_contains_ref(v),
         AstType::Result { ok, err, .. } => ast_contains_ref(ok) || ast_contains_ref(err),
         AstType::Some { bounds, .. } => bounds.iter().any(ast_contains_ref),
+        AstType::Any { .. } => ty.any_children().into_iter().any(ast_contains_ref),
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => false,
     }
 }

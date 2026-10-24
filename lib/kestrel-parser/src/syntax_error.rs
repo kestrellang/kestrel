@@ -27,6 +27,8 @@ pub mod codes {
     pub const EXPECTED_PATTERN: &str = "E808";
     /// A name (identifier) was required.
     pub const EXPECTED_NAME: &str = "E809";
+    /// An associated-type binding (`Item = Int64`) outside an `any` bound.
+    pub const MISPLACED_ASSOC_BINDING: &str = "E810";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

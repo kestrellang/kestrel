@@ -1887,6 +1887,8 @@ impl CopyLayer for MoveCopyLayer<'_, '_> {
             // binding a `mutating`/`consuming` closure to a second name is a
             // MOVE, and an `escaping` one clones (shares) its environment.
             ResolvedTy::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),
+            // Unsized: never bit-copied (existentials design §1).
+            ResolvedTy::RawExistential { .. } => CopySemantics::NotCopyable,
             // Assoc projections are Copyable-by-default (matches
             // `hir_type_copy_semantics`); never/error are recovery — all
             // Copyable. Explicit so a future ResolvedTy variant forces a

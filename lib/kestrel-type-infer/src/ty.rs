@@ -83,6 +83,14 @@ pub enum TyKind {
     /// Unifies with anything.
     Never,
 
+    /// The raw existential `any P and Q` (the payload of a box): bounds in
+    /// canonical order, with their type args, and the associated types the
+    /// existential pins (`Item = Int64`). Unsized; never `Copyable`.
+    RawExistential {
+        bounds: Vec<(Entity, Vec<TyVar>)>,
+        bindings: Vec<(Entity, TyVar)>,
+    },
+
     /// Opaque return type: `some P`. Callers see only the protocol bounds;
     /// the concrete type is hidden. Created at call sites for functions with
     /// opaque return types. Never created inside the defining body.

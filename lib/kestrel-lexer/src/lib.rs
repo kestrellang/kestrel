@@ -311,6 +311,14 @@ pub enum Token {
     #[token("as")]
     As,
 
+    /// `as?` — existential downcast.
+    #[token("as?")]
+    AsQuestion,
+
+    /// `is` — existential type test (operator and pattern).
+    #[token("is")]
+    Is,
+
     #[token("break")]
     Break,
 

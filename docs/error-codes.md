@@ -26,7 +26,7 @@ the type checker, and the code is assigned in one place,
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
 - [E624–E625 — Closure kinds](#e624e625--closure-kinds)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
-- [E800–E809 — Syntax](#e800e809--syntax)
+- [E800–E810 — Syntax](#e800e810--syntax)
 
 ---
 
@@ -88,9 +88,14 @@ the type checker, and the code is assigned in one place,
 | E138 | 'Self' is not valid in this scope | `Self` in a type position outside any type scope. |
 | E139 | '{name}' is not a type | A type annotation names a value or module. |
 | E140 | negative bound on an opaque type must be 'Copyable' | `some P and not Q` only supports `not Copyable`. |
-| E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) is missing; is the standard library imported? |
+| E141 | {name} is not defined | A type operator's lang item (`Optional`, `Result`, …) or the default existential box (`DefaultBox`, for plain `any P`) is missing; is the standard library imported? |
 | E142 *(warning)* | implicit parameter 'it' shadows the 'it' of an enclosing closure | A closure written without a parameter list uses `it` inside another such closure; the inner `it` is the inner closure's own parameter. Name one of the parameters to make the intent explicit. |
 | E143 *(warning)* | implicit parameter 'it' shadows the outer binding 'it' | A closure's implicit `it` hides an outer `let it` or parameter named `it`; the closure uses its own parameter, never the outer binding. |
+| E144 | protocol '{name}' cannot be used as a type; write 'any {name}' for a boxed existential or 'some {name}' for an opaque type | A protocol names a type only through `any` (a boxed existential) or `some` (an opaque type). Bounds (`T: P`, `some P`, `any P`) and `extend P` are unaffected. |
+| E150 | '{protocol}' has no associated type named '{name}' | An `any P[Name = T]` bound pins an associated type the protocol (and its parents) doesn't declare. |
+| E153 | an 'is' pattern binds a borrow of the payload, so it cannot be 'var' | `var c is Circle`: the binding refers to the payload in place. |
+| E154 | '{type}' in an 'any' bound is not a protocol | Every bound of `any` must be a protocol. |
+| E155 | '{form}' are not supported yet | `as?`, `is` and `is` patterns parse but have no semantics yet (existentials M5, docs/plans/existentials/). |
 
 ### Example — E109 (type mismatch)
 
@@ -169,6 +174,7 @@ func unwrap(opt: Int64?) -> Int64 {
 |---|---|---|
 | E400 | duplicate @builtin(.{feature}): already declared by '{name}' | Two declarations carry the same `@builtin` annotation. A lang item is identified by its annotation alone, so only the first (in declaration order) is used. |
 | E401 | @builtin(.{feature}) is reserved for the standard library | With a stdlib loaded, only declarations in `std` may claim a lang item; the annotation is ignored. `--no-std` programs declare their own. |
+| E404 | the box in 'any[...]' is written without type arguments: '{suggestion}' / must name a box type | `any[B] P` takes the box unapplied (`any[RcBox] P`, not `any[RcBox[T]] P`), and it must be a type name. Emitted by HIR lowering. |
 | E411 | duplicate method '{name}': defined on both the type and an extension | An extension redefines a method the type already declares. |
 | E412 | duplicate method '{name}' in extensions of '{type}' | Two extensions of the same type instantiation define the same method. |
 | E413 | computed properties must use 'var' | A computed property (with `get`/`set`) can't be declared `let`. |
@@ -535,7 +541,7 @@ func eachOk(mutating action: mutating (Int64) -> ()) { }   // ok
 | E709 | empty character literal | `''` — a character literal needs one codepoint. |
 | E710 | character literal may only contain one codepoint | `'ab'` — use a string for more than one codepoint. |
 
-## E800–E809 — Syntax
+## E800–E810 — Syntax
 
 Emitted by the parser (`kestrel-parser`, `syntax_error.rs`). Every syntax
 error carries one of these codes; the message names what was expected and
@@ -554,3 +560,4 @@ is reported on the token *before* the gap, where it belongs.
 | E807 | expected type, found {token} | A type was required (after `:`, `->`, in `[...]` type arguments). |
 | E808 | expected pattern, found {token} | A pattern was required (after `let`, `case`-style match arms, parameters). |
 | E809 | expected a name, found {token} | A declaration's name is missing; a keyword in name position (`func case()`) is reported here. |
+| E810 | associated-type binding '{name} = ...' is only allowed in an 'any' bound | `Item = Int64` inside `[...]` pins an associated type of an existential (`any Iterator[Item = Int64]`); anywhere else it has no meaning. |

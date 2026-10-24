@@ -8,7 +8,9 @@ use kestrel_span::Span;
 use kestrel_syntax_tree::ast::{self, AstNode};
 use kestrel_syntax_tree::{SyntaxKind, SyntaxNode};
 
-pub use kestrel_ast::{AstType, FnTypeKind, ParamConvention, PathSegment};
+pub use kestrel_ast::{
+    AnyBound, AssocTypeBinding, AstType, FnTypeKind, ParamConvention, PathSegment,
+};
 
 /// Lower a `Ty` view.
 pub fn lower_type(ty: &ast::Ty, file_id: usize) -> Option<AstType> {
@@ -100,9 +102,56 @@ fn lower_kind(kind: &ast::TyKind, file_id: usize) -> Option<AstType> {
                 span,
             }
         },
+        K::TyAny(a) => lower_any_type(a, span, file_id)?,
         // Grouping parens are transparent: the type keeps the inner span.
         K::TyParen(p) => return lower_opt_type(p.ty(), file_id),
     })
+}
+
+/// `any[Box] P[A = X] and Q`. The bounds are the direct `Ty` children; the
+/// box is the single type in the `[...]` after `any`. Each bound's pinned
+/// associated types come from its own type-argument list.
+fn lower_any_type(a: &ast::TyAny, span: Span, file_id: usize) -> Option<AstType> {
+    let box_ty = a
+        .type_argument_list()
+        .and_then(|args| args.types().next())
+        .and_then(|t| lower_type(&t, file_id))
+        .map(Box::new);
+    let bounds: Vec<AnyBound> = a
+        .types()
+        .filter_map(|t| {
+            let protocol = lower_type(&t, file_id)?;
+            let bindings = assoc_bindings(&t, file_id);
+            Some(AnyBound { protocol, bindings })
+        })
+        .collect();
+    if bounds.is_empty() {
+        return None;
+    }
+    Some(AstType::Any {
+        box_ty,
+        bounds,
+        span,
+    })
+}
+
+/// The `Name = Type` entries of a bound's type-argument list.
+fn assoc_bindings(bound: &ast::Ty, file_id: usize) -> Vec<AssocTypeBinding> {
+    let Some(ast::TyKind::TyPath(path)) = bound.ty_kind() else {
+        return vec![];
+    };
+    let Some(args) = path.type_argument_list() else {
+        return vec![];
+    };
+    args.type_arg_bindings()
+        .filter_map(|b| {
+            Some(AssocTypeBinding {
+                name: b.identifier_token()?.text().to_string(),
+                ty: lower_opt_type(b.ty(), file_id)?,
+                span: node_span(b.syntax(), file_id),
+            })
+        })
+        .collect()
 }
 
 /// `kind? (mutating? T, …) -> R`. A `mutating` inside the list marks the

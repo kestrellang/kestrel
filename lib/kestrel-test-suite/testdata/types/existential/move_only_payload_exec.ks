@@ -10,7 +10,7 @@ module Test
 import std.numeric.(Int64)
 
 protocol Counter {
-    func get() -> Int64
+    func value() -> Int64
     mutating func increment()
 }
 
@@ -18,7 +18,7 @@ struct Handle: not Copyable {
     var n: Int64;
 }
 extend Handle: Counter {
-    public func get() -> Int64 { self.n }
+    public func value() -> Int64 { self.n }
     public mutating func increment() { self.n = self.n + 1; }
 }
 
@@ -27,6 +27,6 @@ func main() -> Int64 {
     var h: any Counter = Handle(n: 1);
     h.increment();
     h.increment();
-    if h.get() != 3 { return 1 }
+    if h.value() != 3 { return 1 }
     0
 }

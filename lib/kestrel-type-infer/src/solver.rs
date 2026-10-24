@@ -388,6 +388,12 @@ fn contains_unresolved_type_args(ctx: &InferCtx<'_>, tv: TyVar) -> bool {
                     .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
                     || origin_args.iter().any(|&a| walk(ctx, a, seen))
             },
+            TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) => {
+                bounds
+                    .iter()
+                    .any(|(_, args)| args.iter().any(|&a| walk(ctx, a, seen)))
+                    || bindings.iter().any(|&(_, t)| walk(ctx, t, seen))
+            },
             TySlot::Resolved(
                 TyKind::Param { .. } | TyKind::SelfType { .. } | TyKind::Never | TyKind::Error,
             ) => false,
@@ -2798,6 +2804,8 @@ pub(crate) fn solver_copy_class(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> Co
                 CopySemantics::Copyable
             }
         },
+        // Unsized: never bit-copied — the twin of the semantics-crate arm.
+        TyKind::RawExistential { .. } => CopySemantics::NotCopyable,
         // A closure value's copy class is fixed by its KIND (plan D6): normal
         // views bit-copy, `mutating`/`consuming` are move-only, `escaping`
         // shares its environment through the box's clone.
@@ -2897,6 +2905,9 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
         TyKind::Tuple(elems) => elems
             .iter()
             .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
+        // Any conforming payload may sit inside — not provably Static (the
+        // twin of the semantics-crate arm, existentials design §10).
+        TyKind::RawExistential { .. } => false,
         // Function types are Static in 2a. TODO(static-2c): the capture-
         // derived Static bit on function types.
         // Protocol / opaque / alias / assoc-projection / Never / Error:
@@ -5787,6 +5798,19 @@ pub fn kind_to_tyvar_sub(
             // generic instantiation.
             ctx.function_conv(*fn_kind, param_tvs, conventions.clone(), ret_tv)
         },
+        TyKind::RawExistential { bounds, bindings } => {
+            let mut sub =
+                |tv: TyVar| kind_to_tyvar_sub(ctx, &resolve_kind(ctx, tv), self_entity, recv_tv);
+            let bounds: Vec<(Entity, Vec<TyVar>)> = bounds
+                .iter()
+                .map(|(proto, args)| (*proto, args.iter().map(|&a| sub(a)).collect()))
+                .collect();
+            let bindings: Vec<(Entity, TyVar)> = bindings
+                .iter()
+                .map(|&(assoc, tv)| (assoc, sub(tv)))
+                .collect();
+            ctx.raw_existential_ty(bounds, bindings)
+        },
         TyKind::Opaque {
             origin,
             bounds,
@@ -6369,6 +6393,32 @@ fn lower_hir_ty_sub(
                 .collect();
             let ret_tv = lower_hir_ty_sub(ctx, ret, self_entity, recv_tv, subs);
             ctx.function_conv(*kind, param_tvs, param_conventions.clone(), ret_tv)
+        },
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            let bounds = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => Some((
+                        *entity,
+                        args.iter()
+                            .map(|a| lower_hir_ty_sub(ctx, a, self_entity, recv_tv, subs))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            let bindings = bindings
+                .iter()
+                .map(|b| {
+                    (
+                        b.assoc,
+                        lower_hir_ty_sub(ctx, &b.ty, self_entity, recv_tv, subs),
+                    )
+                })
+                .collect();
+            ctx.raw_existential_ty(bounds, bindings)
         },
         // Opaque types at call sites: create a fresh TyVar for now.
         // Full `TyKind::Opaque` creation requires the callee entity (origin),

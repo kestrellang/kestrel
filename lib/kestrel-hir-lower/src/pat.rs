@@ -92,6 +92,26 @@ impl LowerCtx<'_> {
         match node.kind() {
             SyntaxKind::WildcardPattern => self.alloc_pat(HirPat::Wildcard { span }),
 
+            SyntaxKind::IsPattern => {
+                // E153 is syntactic: an `is` binding borrows the payload.
+                if has_token(node, SyntaxKind::Var) {
+                    self.ctx.accumulate(
+                        kestrel_reporting::Diagnostic::error()
+                            .with_code("E153")
+                            .with_message(
+                                "an 'is' pattern binds a borrow of the payload, so it cannot be \
+                                 'var'",
+                            )
+                            .with_labels(vec![kestrel_reporting::Label::primary(
+                                span.file_id,
+                                span.range(),
+                            )]),
+                    );
+                }
+                self.emit_existential_not_supported("'is' patterns", &span);
+                self.alloc_pat(HirPat::Error { span })
+            },
+
             SyntaxKind::BindingPattern | SyntaxKind::RefBindingPattern => {
                 let by_ref = (node.kind() == SyntaxKind::RefBindingPattern)
                     .then(|| has_token(node, SyntaxKind::Mutating));

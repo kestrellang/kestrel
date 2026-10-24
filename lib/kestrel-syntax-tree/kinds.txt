@@ -272,3 +272,10 @@ token   InterpEnd 'interp_end'           # `)` closing a hole
 token   FormatSpec 'format_spec'         # format spec text after a hole's `:`
 token   StringEnd 'string_end'           # `"` or `"""` closing an interpolated string
 node    TyParen                          # (T) - grouping parentheses around a type
+token   Is 'is'
+token   AsQuestion 'as?'
+node    TyAny                            # any P / any[B] P - boxed existential (`any` is contextual)
+node    ExprCast                         # x as? T / consuming x as? T - existential downcast
+node    ExprTypeTest                     # x is T / x is not T - existential type test
+node    IsPattern                        # is T / name is T / name is T { fields } - type-test pattern
+node    TypeArgBinding                   # Item = Int64 inside a type argument list (existential bounds)

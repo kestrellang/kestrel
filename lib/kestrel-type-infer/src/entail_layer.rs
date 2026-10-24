@@ -77,7 +77,8 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
             HirTy::Function { .. }
             | HirTy::AliasUse { .. }
             | HirTy::SelfType(..)
-            | HirTy::Opaque { .. } => self.abstract_of(ty.clone()),
+            | HirTy::Opaque { .. }
+            | HirTy::RawExistential { .. } => self.abstract_of(ty.clone()),
         }
     }
 

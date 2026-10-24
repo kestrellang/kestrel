@@ -2548,6 +2548,8 @@ impl WorldResolver<'_> {
                 }
             },
             TyKind::AssocProjection { .. } => CopySemantics::NotCopyable,
+            // Unsized: never bit-copied (existentials design §1).
+            TyKind::RawExistential { .. } => CopySemantics::NotCopyable,
             // A closure value's copy class is its KIND's (plan D6) — the twin
             // of the `solver_copy_class` arm.
             TyKind::Function { kind, .. } => kestrel_copy_fold::fn_kind_semantics(*kind),

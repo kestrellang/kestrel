@@ -12,7 +12,7 @@ import std.core.(Cloneable)
 import std.memory.(CowBox)
 
 protocol Counter: Cloneable {
-    func get() -> Int64
+    func value() -> Int64
     mutating func increment()
 }
 
@@ -21,7 +21,7 @@ struct Tally: Cloneable {
     public func clone() -> Tally { Tally(n: self.n) }
 }
 extend Tally: Counter {
-    public func get() -> Int64 { self.n }
+    public func value() -> Int64 { self.n }
     public mutating func increment() { self.n = self.n + 1; }
 }
 
@@ -30,7 +30,7 @@ func main() -> Int64 {
     var a: any[CowBox] Counter = Tally(n: 0);
     var b = a;
     b.increment();
-    if a.get() != 0 { return 1 }
-    if b.get() != 1 { return 2 }
+    if a.value() != 0 { return 1 }
+    if b.value() != 1 { return 2 }
     0
 }

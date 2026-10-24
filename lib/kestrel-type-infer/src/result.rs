@@ -171,6 +171,12 @@ pub enum ResolvedTy {
         conventions: Vec<kestrel_ast::ParamConvention>,
         ret: Box<ResolvedTy>,
     },
+    /// The raw existential `any P and Q` — a box's payload type. Bounds in
+    /// canonical order with their type args; `bindings` pins associated types.
+    RawExistential {
+        bounds: Vec<(Entity, Vec<ResolvedTy>)>,
+        bindings: Vec<(Entity, ResolvedTy)>,
+    },
     /// Opaque return type from a call to a function with `some P` return.
     /// Preserved through inference output so MIR lowering can resolve it
     /// to the concrete type by querying InferBody on the origin.
@@ -294,6 +300,23 @@ fn kind_to_resolved(ctx: &InferCtx<'_>, kind: &TyKind) -> ResolvedTy {
             pointee: Box::new(resolve_to_concrete(ctx, *pointee)),
             mutating: *mutating,
         },
+        TyKind::RawExistential { bounds, bindings } => ResolvedTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .map(|(e, args)| {
+                    (
+                        *e,
+                        args.iter()
+                            .map(|&tv| resolve_to_concrete(ctx, tv))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|&(assoc, tv)| (assoc, resolve_to_concrete(ctx, tv)))
+                .collect(),
+        },
         TyKind::Never => ResolvedTy::Never,
         TyKind::Error => ResolvedTy::Error,
     }
@@ -403,6 +426,9 @@ fn literal_kind_name(lit: LiteralKind) -> &'static str {
 
 /// Describe a TyKind as a short type name string.
 fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
+    if let Some(existential) = describe_existential(ctx, kind) {
+        return existential;
+    }
     match kind {
         TyKind::Struct { entity, args }
         | TyKind::Enum { entity, args }
@@ -493,6 +519,12 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
                 format!("some {}{suffix}", bound_names.join(" and "))
             }
         },
+        TyKind::RawExistential { bounds, bindings } => {
+            format!(
+                "rawany {}",
+                describe_existential_bounds(ctx, bounds, bindings)
+            )
+        },
         TyKind::Never => "Never".into(),
         // The `Error` absorber is an internal placeholder, not a type the
         // user wrote: print it like an open var. It can't be suppressed
@@ -500,6 +532,64 @@ fn describe_tykind(ctx: &InferCtx<'_>, kind: &TyKind) -> String {
         // an error mentioning it may be the only one (bidi design §10, P0c).
         TyKind::Error => "_".into(),
     }
+}
+
+/// A box over a raw existential prints the way it is written: `any P` for
+/// the default box, `any[B] P` otherwise.
+fn describe_existential(ctx: &InferCtx<'_>, kind: &TyKind) -> Option<String> {
+    let TyKind::Struct { entity, args } = kind else {
+        return None;
+    };
+    let [payload] = args.as_slice() else {
+        return None;
+    };
+    let TySlot::Resolved(TyKind::RawExistential { bounds, bindings }) =
+        &ctx.types[ctx.resolve(*payload).0 as usize]
+    else {
+        return None;
+    };
+    let bounds = describe_existential_bounds(ctx, bounds, bindings);
+    if ctx.resolver.builtin(kestrel_hir::Builtin::DefaultBoxType) == Some(*entity) {
+        return Some(format!("any {bounds}"));
+    }
+    let name = ctx
+        .query_ctx
+        .get::<kestrel_ast_builder::Name>(*entity)
+        .map_or_else(|| "?".to_string(), |n| n.0.clone());
+    Some(format!("any[{name}] {bounds}"))
+}
+
+/// `P and Q[Item = Int64]`: each bound, with the associated types it pins.
+fn describe_existential_bounds(
+    ctx: &InferCtx<'_>,
+    bounds: &[(Entity, Vec<TyVar>)],
+    bindings: &[(Entity, TyVar)],
+) -> String {
+    let name_of = |e: Entity| {
+        ctx.query_ctx
+            .get::<kestrel_ast_builder::Name>(e)
+            .map_or_else(|| format!("{e:?}"), |n| n.0.clone())
+    };
+    let parts: Vec<String> = bounds
+        .iter()
+        .map(|(protocol, args)| {
+            let mut inner: Vec<String> = args.iter().map(|&tv| describe_tyvar(ctx, tv)).collect();
+            inner.extend(
+                bindings
+                    .iter()
+                    .filter(|(assoc, _)| ctx.query_ctx.parent_of(*assoc) == Some(*protocol))
+                    .map(|&(assoc, tv)| {
+                        format!("{} = {}", name_of(assoc), describe_tyvar(ctx, tv))
+                    }),
+            );
+            if inner.is_empty() {
+                name_of(*protocol)
+            } else {
+                format!("{}[{}]", name_of(*protocol), inner.join(", "))
+            }
+        })
+        .collect();
+    parts.join(" and ")
 }
 
 /// Build a human-readable error description with resolved types.

@@ -109,6 +109,26 @@ fn normalize_hir_type(
         },
         // Opaque types don't have a single entity; treat as Error for now
         HirTy::Opaque { .. } => ResolvedTy::Error,
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => ResolvedTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => Some((
+                        *entity,
+                        args.iter()
+                            .map(|a| normalize_hir_type(qctx, root, a, env, state))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|b| (b.assoc, normalize_hir_type(qctx, root, &b.ty, env, state)))
+                .collect(),
+        },
         HirTy::AliasUse { entity, args, .. } => {
             if let Some(sub) = state.param_subs.get(entity) {
                 return sub.clone();
@@ -270,6 +290,12 @@ fn contains_error(ty: &ResolvedTy) -> bool {
                 .iter()
                 .any(|(_, args)| args.iter().any(contains_error))
                 || origin_args.iter().any(contains_error)
+        },
+        ResolvedTy::RawExistential { bounds, bindings } => {
+            bounds
+                .iter()
+                .any(|(_, args)| args.iter().any(contains_error))
+                || bindings.iter().any(|(_, t)| contains_error(t))
         },
         ResolvedTy::Param { .. } | ResolvedTy::SelfType { .. } | ResolvedTy::Never => false,
     }

@@ -49,7 +49,7 @@ whether it is joined to the next), markers (`start`/`complete`/`precede`/
 from the source. See `lib/kestrel-parser/docs/architecture.md` for the
 statement-vs-value rules, condition mode, and recovery points.
 
-Syntax errors carry codes E800–E809 (`docs/error-codes.md`). Errors are
+Syntax errors carry codes E800–E810 (`docs/error-codes.md`). Errors are
 anchored on the offending token, or for a missing closer on the token before
 the gap, and sorted by position.
 
@@ -137,7 +137,7 @@ keeps only type syntax, operator enums and escape decoding).
 
 ## Diagnostics
 
-Every front-end diagnostic has a code: E800–E809 from the parser, the HIR
+Every front-end diagnostic has a code: E800–E810 from the parser, the HIR
 lowering codes (E010–E011, E122–E141, E213, E317–E321, E708–E710, plus E438 /
 E476 shared with the analyzers), and the analyzers' own. See
 `docs/error-codes.md`.

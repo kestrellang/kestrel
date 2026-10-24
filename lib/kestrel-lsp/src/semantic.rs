@@ -131,6 +131,14 @@ fn collect_hir_ty_entities(ty: &HirTy, out: &mut Vec<(Entity, Span)>) {
             collect_hir_ty_entities(ret, out);
         },
         HirTy::Opaque { bounds, .. } => bounds.iter().for_each(|b| collect_hir_ty_entities(b, out)),
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            bounds.iter().for_each(|b| collect_hir_ty_entities(b, out));
+            bindings
+                .iter()
+                .for_each(|b| collect_hir_ty_entities(&b.ty, out));
+        },
         HirTy::Ref { inner, .. } => collect_hir_ty_entities(inner, out),
         HirTy::Never(_) | HirTy::Infer(_) | HirTy::Error(_) => {},
     }

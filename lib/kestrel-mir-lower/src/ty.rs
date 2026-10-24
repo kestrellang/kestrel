@@ -168,6 +168,9 @@ pub fn lower_type(ctx: &mut LowerCtx, ty: &HirTy) -> TyId {
         HirTy::AliasUse { .. } => ctx.module.ty_arena.error(),
         HirTy::AssocProjection { base, assoc, .. } => lower_assoc_projection(ctx, base, *assoc),
         HirTy::Opaque { .. } => ctx.module.ty_arena.error(),
+        // No MIR representation until existentials reach codegen (M4,
+        // existentials plan Phase 9); `MirTy::RawExistential` replaces this.
+        HirTy::RawExistential { .. } => ctx.module.ty_arena.error(),
         HirTy::Never(_) => ctx.module.ty_arena.never(),
         HirTy::Infer(_) => ctx.module.ty_arena.error(),
         HirTy::Error(_) => ctx.module.ty_arena.error(),
@@ -332,6 +335,8 @@ pub fn lower_resolved_ty_preserving(ctx: &mut LowerCtx, ty: &ResolvedTy) -> TyId
             let substituted = substitute_resolved_ty(&concrete, &type_params, origin_args);
             lower_resolved_ty_preserving(ctx, &substituted)
         },
+        // See the `HirTy::RawExistential` arm: no MIR form until M4.
+        ResolvedTy::RawExistential { .. } => ctx.module.ty_arena.error(),
         ResolvedTy::Never => ctx.module.ty_arena.never(),
         ResolvedTy::Error => ctx.module.ty_arena.error(),
     }
@@ -615,6 +620,24 @@ fn substitute_resolved_ty(
                 .collect(),
             index: *index,
             not_copyable: *not_copyable,
+        },
+        ResolvedTy::RawExistential { bounds, bindings } => ResolvedTy::RawExistential {
+            bounds: bounds
+                .iter()
+                .map(|(protocol, bound_args)| {
+                    (
+                        *protocol,
+                        bound_args
+                            .iter()
+                            .map(|a| substitute_resolved_ty(a, type_params, args))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            bindings: bindings
+                .iter()
+                .map(|(assoc, t)| (*assoc, substitute_resolved_ty(t, type_params, args)))
+                .collect(),
         },
         // Leaves: no nested types to walk into.
         ResolvedTy::SelfType { .. } | ResolvedTy::Never | ResolvedTy::Error => ty.clone(),

@@ -287,6 +287,13 @@ pub enum Builtin {
     /// payload, which double-frees the capture slots a one-shot body already
     /// moved out (docs/plans/closure-kinds/closure-kinds-plan.md D5).
     UniqueBox,
+
+    // ===== Existentials =====
+    /// The box `any P` desugars to: `any P` is `DefaultBox[<raw any P>]`.
+    /// `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`
+    /// denotes the alias *target*, like the default literal types
+    /// (docs/plans/existentials/existentials-design.md).
+    DefaultBoxType,
 }
 
 impl Builtin {
@@ -505,6 +512,10 @@ impl Builtin {
             // must go through the attribute index so the binding stays
             // swappable, and the sentinel must not name any source type.
             Self::UniqueBox => "UniqueBoxBinding",
+
+            // Default existential box — resolved through the index only, like
+            // the boxes above.
+            Self::DefaultBoxType => "DefaultBoxBinding",
         }
     }
 
@@ -722,6 +733,9 @@ impl Builtin {
             // Unique-ownership box (one-shot closure environments)
             "UniqueBox" => Some(Self::UniqueBox),
 
+            // Existentials
+            "DefaultBoxType" => Some(Self::DefaultBoxType),
+
             _ => None,
         }
     }
@@ -743,6 +757,7 @@ impl Builtin {
                 | Self::DefaultNullLiteralType
                 | Self::DefaultArrayLiteralType
                 | Self::DefaultDictionaryLiteralType
+                | Self::DefaultBoxType
         )
     }
 
@@ -799,7 +814,8 @@ impl Builtin {
             | Self::DefaultCharLiteralType
             | Self::DefaultNullLiteralType
             | Self::DefaultArrayLiteralType
-            | Self::DefaultDictionaryLiteralType => BuiltinKind::TypeAlias,
+            | Self::DefaultDictionaryLiteralType
+            | Self::DefaultBoxType => BuiltinKind::TypeAlias,
 
             // FFI
             Self::FFISafe => BuiltinKind::Protocol {

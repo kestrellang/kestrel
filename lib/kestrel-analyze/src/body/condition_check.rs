@@ -190,6 +190,7 @@ fn describe_type(cx: &BodyContext<'_>, ty: &ResolvedTy) -> String {
         ResolvedTy::SelfType { .. } => "Self".into(),
         ResolvedTy::Function { .. } => "function type".into(),
         ResolvedTy::AssocProjection { .. } => "associated type".into(),
+        ResolvedTy::RawExistential { .. } => "existential payload".into(),
         ResolvedTy::Opaque { bounds, .. } => {
             if bounds.is_empty() {
                 "opaque type".into()

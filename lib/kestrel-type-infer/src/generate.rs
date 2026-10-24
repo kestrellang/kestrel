@@ -3079,6 +3079,27 @@ pub(crate) fn lower_hir_ty_with_subs(
                 .collect();
             ctx.protocol_ty(*entity, arg_tvs)
         },
+        HirTy::RawExistential {
+            bounds, bindings, ..
+        } => {
+            let bounds = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    HirTy::Protocol { entity, args, .. } => Some((
+                        *entity,
+                        args.iter()
+                            .map(|a| lower_hir_ty_with_subs(ctx, a, subs))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            let bindings = bindings
+                .iter()
+                .map(|b| (b.assoc, lower_hir_ty_with_subs(ctx, &b.ty, subs)))
+                .collect();
+            ctx.raw_existential_ty(bounds, bindings)
+        },
         // Opaque types: in `lower_hir_ty_with_subs`, HirTy::Opaque is only
         // reached for the defining body's own return type annotation, which
         // `create_return_type` intercepts. If we get here, fall through to a
@@ -3352,6 +3373,7 @@ pub(crate) fn hir_ty_span(ty: &HirTy) -> Span {
         | HirTy::Param(_, span)
         | HirTy::SelfType(_, span)
         | HirTy::Opaque { span, .. }
+        | HirTy::RawExistential { span, .. }
         | HirTy::Never(span)
         | HirTy::Infer(span)
         | HirTy::Error(span)

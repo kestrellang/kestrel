@@ -177,7 +177,7 @@ IDs follow the pattern `E<NNN>`:
 - **E700–E799**: Literals and lexing (escape sequences, malformed literals)
 - **E800–E899**: Syntax — parser diagnostics. Not analyzer descriptors:
   `kestrel-parser/src/syntax_error.rs` is the only place they are assigned,
-  and they reach codespan via `with_code`. E800–E809 allocated (2026-10).
+  and they reach codespan via `with_code`. E800–E809 allocated (2026-10); E810 (misplaced associated-type binding) added with existentials.
 
 Current allocations:
 - E001: `missing_return` (exhaustive_return.rs)
@@ -246,6 +246,13 @@ Current allocations:
   `body/access_mode.rs`). The only free E4xx codes are the gaps
   **E402–E410 and E414** (E400 and E401 taken 2026-10). As of 2026-09-23 they are not emitted, documented or
   reserved anywhere. Take a new E4xx from those gaps.
+  - E402–E404: existentials (docs/plans/existentials/). E404 (malformed
+    `any[...]` box) is emitted by `kestrel-hir-lower/src/ty.rs`; E402 (invalid
+    box) and E403 (unsized type parameter by value) arrive as analyzers in
+    the existentials M2. **Free E4xx gaps are now E405–E410 and E414.**
+  - E1xx E144–E155 are existentials too: E144, E150, E153–E155 are emitted
+    by hir-lower today; E145–E149 and E151–E152 arrive with type checking
+    (existentials M3/M5). Next free E1xx: **E156**.
   - E479: `ambiguous_where_clause_associated_type` (decl/generics.rs) — G29,
     `6ef0782c`. It is reported at the clause when the associated type in a
     where-clause equality (`Item.Out = X`) is declared by two or more of the

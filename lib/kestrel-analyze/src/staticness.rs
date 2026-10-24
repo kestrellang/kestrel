@@ -47,6 +47,8 @@ impl StaticLayer for ResolvedStaticLayer<'_, '_> {
                 }) == StaticRequirement::RequiresStatic
             },
             ResolvedTy::Tuple(elems) => elems.iter().all(|e| self.member_is_static(e)),
+            // Not provably Static — mirrors the HIR layer (existentials §10).
+            ResolvedTy::RawExistential { .. } => false,
             // Function types are Static in 2a (TODO(static-2c): capture-
             // derived bit); assoc projections / opaque / never / error are
             // the conservative never-block leaves, mirroring the HIR layer.

@@ -242,3 +242,10 @@ extend RcBox[T]: SharedBox {
         self.ptr.address == other.ptr.address
     }
 }
+
+/// The box `any P` is written in: `any P` is `DefaultBox[<raw existential>]`,
+/// so copies of an `any P` share one payload (reference semantics). Rebinding
+/// this alias changes every default existential at once; write `any[B] P` to
+/// pick a box at one site (docs/plans/existentials/existentials-design.md).
+@builtin(.DefaultBoxType)
+public type DefaultBox[T] = RcBox[T]

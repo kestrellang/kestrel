@@ -79,8 +79,14 @@ TyAny = 'any' TypeArgumentList? Ty ('and' Ty)*
 - `TypeArgumentList` holds exactly one argument: the box, as an
   **unapplied** generic type (`UniqueBox`, not `UniqueBox[T]`).
 - The bounds after it are protocol references, optionally with
-  associated-type bindings (`Iterator[Item = Int64]`), using the same syntax
-  as `some P[Assoc = X]`.
+  associated-type bindings (`Iterator[Item = Int64]`). A binding is a
+  `TypeArgBinding` node inside the bound's type-argument list; anywhere other
+  than an `any` bound it is the parse error E810. (`some P[A = X]` does not
+  exist; this syntax is new.)
+- `any` is a **contextual** keyword, recognized only in type position and
+  only when a bound (or a bracketed box and then a bound) follows. The stdlib
+  and tests use `any(where:)` as a method name, which stays legal. `is` is
+  reserved.
 
 A bare protocol in type position (`let s: Shape`) is an error. It is neither
 an existential nor an opaque type.
@@ -531,7 +537,7 @@ What the compiler does today on `80297742`:
 
 | Stage | Change |
 |-------|--------|
-| **Lexer** | `any` and `is` keyword tokens (append to `kinds.txt`; regenerate) |
+| **Lexer** | `is` keyword and `as?` tokens (append to `kinds.txt`; regenerate). `any` is contextual: no token |
 | **Parser / CST** | `TyAny` node; `types.rs` `at_type_start` + `base_ty` arm next to `some_type`; `as?` postfix and `is` / `is not` (comparison level, non-associative) in the expression grammar; `IsPat` node (`name? is Ty StructPatFields?`) in the pattern grammar |
 | **Decls (ECS)** | `AstType::Any { box_ty, bounds, span }`. `@builtin(.DefaultBoxType)` alias slot plus `Sized`, `ExistentialBox` and `ConsumingIndirection` builtins in `kestrel-hir/src/builtin.rs`; `DefaultBoxType` added to `denotes_alias_target` |
 | **Name res** | Resolve the box argument as an unapplied generic type |
@@ -545,9 +551,9 @@ What the compiler does today on `80297742`:
 
 ## Error cases
 
-The codes are proposed, from the free ranges listed in
-`lib/kestrel-analyze/AGENTS.md` (next free E1xx is E144; E402-E410 are
-free). They need to be confirmed there before use.
+Allocated in `lib/kestrel-analyze/AGENTS.md`: E144–E155 and E402–E404.
+E144, E150, E153, E154, E155, E404 and E810 are emitted by M1 (HIR
+lowering / parser); the rest arrive with their phases.
 
 | Code | Condition | Diagnostic |
 |------|-----------|-----------|
@@ -564,7 +570,10 @@ free). They need to be confirmed there before use.
 | E109 (existing) | A binding has different types across or-pattern alternatives | `variable 'c' has different types in or-pattern alternatives` (a `Reason::OrPatternBinding` on the ordinary type mismatch) |
 | E402 | `B` in `any[B] P` is not a valid box | `'Array' cannot box an existential: its type parameter is not declared 'not Sized'` (variants: `it does not conform to 'ExistentialBox'`, `field 'items' stores 'T' by value`) |
 | E403 | Unsized type parameter used by value | `'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field` |
-| E404 | `any` box argument applied | `the box in 'any[...]' is written without type arguments: 'any[RcBox] Shape'` |
+| E404 | `any` box argument applied, or not a type name | `the box in 'any[...]' is written without type arguments: 'any[RcBox] Shape'` (variant: `the box in 'any[...]' must name a box type`) |
+| E154 | An `any` bound that is not a protocol | `'Int64' in an 'any' bound is not a protocol` |
+| E155 | `as?`, `is` or an `is` pattern before M5 | `'as?' downcasts are not supported yet` (and `'is' type tests`, `'is' patterns`). Removed when M5 lands. |
+| E810 | `Name = Type` outside an `any` bound | `associated-type binding 'Item = ...' is only allowed in an 'any' bound` |
 
 ## Edge cases
 

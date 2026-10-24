@@ -82,8 +82,9 @@ fn walk_entity(
         // nothing forces lowering for unused decls (e.g. a field of a
         // struct no body touches). Force the (memoized) lowering query —
         // only when a ref is actually present, so no other annotation
-        // gains a new lowering trigger.
-        if crate::util::ast_contains_ref(&ann.0) {
+        // gains a new lowering trigger. A bare protocol in a value position
+        // (E144, also reported by HIR lowering) is gated the same way.
+        if crate::util::ast_contains_ref(&ann.0) || names_bare_protocol(cx, &ann.0, entity) {
             let _ = cx.query.query(kestrel_hir_lower::LowerTypeAnnotation {
                 entity,
                 root: cx.root,
@@ -93,6 +94,42 @@ fn walk_entity(
 
     for &child in cx.query.children_of(entity) {
         walk_entity(cx, child, in_protocol || is_protocol, diags);
+    }
+}
+
+/// Does `ty` name a protocol in a value position — anywhere except a
+/// `some` / `any` bound or an `any` box? Such an annotation is E144, which
+/// HIR lowering reports; this only decides whether to force that lowering.
+fn names_bare_protocol(cx: &CompilationContext<'_>, ty: &AstType, context: Entity) -> bool {
+    let recurse = |t: &AstType| names_bare_protocol(cx, t, context);
+    match ty {
+        AstType::Named { segments, .. } => {
+            let resolution = cx.query.query(ResolveTypePath {
+                segments: segments.iter().map(|s| s.name.clone()).collect(),
+                context,
+                root: cx.root,
+            });
+            let is_protocol = matches!(resolution, TypeResolution::Found(e)
+                if cx.query.get::<NodeKind>(e) == Some(&NodeKind::Protocol));
+            is_protocol || segments.iter().flat_map(|s| &s.type_args).any(recurse)
+        },
+        AstType::Tuple(types, _) => types.iter().any(recurse),
+        AstType::Function {
+            params,
+            return_type,
+            ..
+        } => params.iter().any(recurse) || recurse(return_type),
+        AstType::Array(inner, _) | AstType::Optional(inner, _) | AstType::Ref { inner, .. } => {
+            recurse(inner)
+        },
+        AstType::Dictionary(key, value, _) => recurse(key) || recurse(value),
+        AstType::Result { ok, err, .. } => recurse(ok) || recurse(err),
+        // Pinned associated types are value positions; bounds and the box are not.
+        AstType::Any { bounds, .. } => bounds
+            .iter()
+            .flat_map(|b| &b.bindings)
+            .any(|b| recurse(&b.ty)),
+        AstType::Some { .. } | AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => false,
     }
 }
 
@@ -170,6 +207,12 @@ fn check_ast_type(
         AstType::Some { bounds, .. } => {
             for b in bounds {
                 check_ast_type(cx, b, context, diags);
+            }
+        },
+        // Existentials — the box, bounds and pinned associated types
+        AstType::Any { .. } => {
+            for t in ast_ty.any_children() {
+                check_ast_type(cx, t, context, diags);
             }
         },
         // Reference types — recurse into the pointee

@@ -546,6 +546,20 @@ impl<'a> InferCtx<'a> {
         TyVar(idx)
     }
 
+    /// Allocate a TyVar bound to a raw existential (`any`'s box payload).
+    pub fn raw_existential_ty(
+        &mut self,
+        bounds: Vec<(Entity, Vec<TyVar>)>,
+        bindings: Vec<(Entity, TyVar)>,
+    ) -> TyVar {
+        let idx = self.types.len() as u32;
+        self.types.push(TySlot::Resolved(TyKind::RawExistential {
+            bounds,
+            bindings,
+        }));
+        TyVar(idx)
+    }
+
     /// Allocate a TyVar bound to a reference type (`&T` / `&mutating T`).
     pub fn ref_ty(&mut self, pointee: TyVar, mutating: bool) -> TyVar {
         let idx = self.types.len() as u32;

@@ -209,6 +209,7 @@ pub(super) static RULES: &[(K, R)] = &[
             K::TyOptional,
             K::TyResult,
             K::TySome,
+            K::TyAny,
             K::TyRef,
             K::TyMutRef,
             K::TyParen,
@@ -437,6 +438,8 @@ pub(super) static RULES: &[(K, R)] = &[
             K::ExprTry,
             K::ExprClosure,
             K::ExprMatch,
+            K::ExprCast,
+            K::ExprTypeTest,
         ]),
     ),
     (
@@ -565,6 +568,7 @@ pub(super) static RULES: &[(K, R)] = &[
             K::AtPattern,
             K::RestPattern,
             K::OrPattern,
+            K::IsPattern,
         ]),
     ),
     (
@@ -598,8 +602,11 @@ pub(super) static RULES: &[(K, R)] = &[
         R::Seq(&[
             R::Kind(K::LBracket),
             R::Opt(&R::Seq(&[
-                R::Kind(K::Ty),
-                R::Rep(&R::Seq(&[R::Kind(K::Comma), R::Kind(K::Ty)])),
+                R::Alt(&[R::Kind(K::Ty), R::Kind(K::TypeArgBinding)]),
+                R::Rep(&R::Seq(&[
+                    R::Kind(K::Comma),
+                    R::Alt(&[R::Kind(K::Ty), R::Kind(K::TypeArgBinding)]),
+                ])),
                 R::Opt(&R::Kind(K::Comma)),
             ])),
             R::Kind(K::RBracket),
@@ -633,6 +640,10 @@ pub(super) static RULES: &[(K, R)] = &[
         ]),
     ),
     (K::PathElement, R::Kind(K::Identifier)),
+    (
+        K::TypeArgBinding,
+        R::Seq(&[R::Kind(K::Identifier), R::Kind(K::Equals), R::Kind(K::Ty)]),
+    ),
     (
         K::TyPath,
         R::Seq(&[R::Kind(K::Path), R::Opt(&R::Kind(K::TypeArgumentList))]),
@@ -702,6 +713,15 @@ pub(super) static RULES: &[(K, R)] = &[
             R::Kind(K::Ty),
             R::Rep(&R::Seq(&[R::Kind(K::And), R::Kind(K::Ty)])),
             R::Opt(&R::Seq(&[R::Kind(K::And), R::Kind(K::NegativeConformance)])),
+        ]),
+    ),
+    (
+        K::TyAny,
+        R::Seq(&[
+            R::Kind(K::Identifier),
+            R::Opt(&R::Kind(K::TypeArgumentList)),
+            R::Kind(K::Ty),
+            R::Rep(&R::Seq(&[R::Kind(K::And), R::Kind(K::Ty)])),
         ]),
     ),
     (K::TyRef, R::Seq(&[R::Kind(K::Ampersand), R::Kind(K::Ty)])),
@@ -1099,6 +1119,24 @@ pub(super) static RULES: &[(K, R)] = &[
         ]),
     ),
     (
+        K::ExprCast,
+        R::Seq(&[
+            R::Opt(&R::Kind(K::Consuming)),
+            R::Kind(K::Expression),
+            R::Kind(K::AsQuestion),
+            R::Kind(K::Ty),
+        ]),
+    ),
+    (
+        K::ExprTypeTest,
+        R::Seq(&[
+            R::Kind(K::Expression),
+            R::Kind(K::Is),
+            R::Opt(&R::Kind(K::Not)),
+            R::Kind(K::Ty),
+        ]),
+    ),
+    (
         K::StringInterpolation,
         R::Seq(&[
             R::Kind(K::InterpStart),
@@ -1280,6 +1318,7 @@ pub(super) static RULES: &[(K, R)] = &[
                 K::AtPattern,
                 K::RestPattern,
                 K::OrPattern,
+                K::IsPattern,
             ]),
         ]),
     ),
@@ -1335,6 +1374,7 @@ pub(super) static RULES: &[(K, R)] = &[
                 K::AtPattern,
                 K::RestPattern,
                 K::OrPattern,
+                K::IsPattern,
             ]),
         ]),
     ),
@@ -1357,6 +1397,7 @@ pub(super) static RULES: &[(K, R)] = &[
                 K::AtPattern,
                 K::RestPattern,
                 K::OrPattern,
+                K::IsPattern,
             ]),
             R::Kind(K::Or),
             R::Any(&[
@@ -1374,6 +1415,7 @@ pub(super) static RULES: &[(K, R)] = &[
                 K::AtPattern,
                 K::RestPattern,
                 K::OrPattern,
+                K::IsPattern,
             ]),
             R::Rep(&R::Seq(&[
                 R::Kind(K::Or),
@@ -1392,7 +1434,29 @@ pub(super) static RULES: &[(K, R)] = &[
                     K::AtPattern,
                     K::RestPattern,
                     K::OrPattern,
+                    K::IsPattern,
                 ]),
+            ])),
+        ]),
+    ),
+    (
+        K::IsPattern,
+        R::Seq(&[
+            R::Opt(&R::Kind(K::Var)),
+            R::Opt(&R::Kind(K::Identifier)),
+            R::Kind(K::Is),
+            R::Kind(K::Ty),
+            R::Opt(&R::Seq(&[
+                R::Kind(K::LBrace),
+                R::Opt(&R::Seq(&[
+                    R::Any(&[K::StructPatternField, K::StructPatternRest]),
+                    R::Rep(&R::Seq(&[
+                        R::Kind(K::Comma),
+                        R::Any(&[K::StructPatternField, K::StructPatternRest]),
+                    ])),
+                    R::Opt(&R::Kind(K::Comma)),
+                ])),
+                R::Kind(K::RBrace),
             ])),
         ]),
     ),
@@ -1413,6 +1477,7 @@ pub(super) static RULES: &[(K, R)] = &[
             K::AtPattern,
             K::RestPattern,
             K::OrPattern,
+            K::IsPattern,
         ]),
     ),
     (
@@ -1437,6 +1502,7 @@ pub(super) static RULES: &[(K, R)] = &[
                         K::AtPattern,
                         K::RestPattern,
                         K::OrPattern,
+                        K::IsPattern,
                     ]),
                 ])),
             ]),
@@ -1455,6 +1521,7 @@ pub(super) static RULES: &[(K, R)] = &[
                 K::AtPattern,
                 K::RestPattern,
                 K::OrPattern,
+                K::IsPattern,
             ]),
         ]),
     ),
@@ -1479,6 +1546,7 @@ pub(super) static RULES: &[(K, R)] = &[
                     K::AtPattern,
                     K::RestPattern,
                     K::OrPattern,
+                    K::IsPattern,
                 ]),
             ])),
         ]),
@@ -1501,6 +1569,7 @@ pub(super) static RULES: &[(K, R)] = &[
             K::AtPattern,
             K::RestPattern,
             K::OrPattern,
+            K::IsPattern,
         ]),
     ),
     (

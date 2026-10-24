@@ -71,9 +71,12 @@ impl<'a, 'i> SolverLayer<'a, 'i> {
                 .abstract_of(kestrel_hir::ty::HirTy::SelfType(*entity, kestrel_span::Span::synthetic(0))),
             // Functions, opaques and unreduced aliases: nothing for the
             // kernel to evaluate; the layer decides them structurally.
-            TyKind::Function { .. } | TyKind::Opaque { .. } | TyKind::TypeAlias { .. } => self
-                .fe
-                .abstract_of(kestrel_hir::ty::HirTy::Error(kestrel_span::Span::synthetic(0))),
+            TyKind::Function { .. }
+            | TyKind::Opaque { .. }
+            | TyKind::RawExistential { .. }
+            | TyKind::TypeAlias { .. } => self.fe.abstract_of(kestrel_hir::ty::HirTy::Error(
+                kestrel_span::Span::synthetic(0),
+            )),
         }
     }
 }

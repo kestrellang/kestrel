@@ -16,6 +16,19 @@ pub fn format_ty(world: &World, ty: &ResolvedTy) -> String {
 
 fn write_ty(world: &World, ty: &ResolvedTy, out: &mut String) {
     match ty {
+        // A box over a raw existential reads as the `any` it was written as.
+        ResolvedTy::Named { entity, args }
+            if matches!(args.as_slice(), [ResolvedTy::RawExistential { .. }]) =>
+        {
+            out.push_str("any[");
+            out.push_str(&entity_path(world, *entity));
+            out.push_str("] ");
+            write_existential_bounds(world, &args[0], out);
+        },
+        ResolvedTy::RawExistential { .. } => {
+            out.push_str("rawany ");
+            write_existential_bounds(world, ty, out);
+        },
         ResolvedTy::Named { entity, args } => {
             out.push_str(&entity_path(world, *entity));
             if !args.is_empty() {
@@ -119,5 +132,44 @@ fn entity_path(world: &World, entity: Entity) -> String {
         format!("?{:?}", entity)
     } else {
         parts.join(".")
+    }
+}
+
+/// `P and Q[A = X]` for a raw existential.
+fn write_existential_bounds(world: &World, ty: &ResolvedTy, out: &mut String) {
+    let ResolvedTy::RawExistential { bounds, bindings } = ty else {
+        return;
+    };
+    for (i, (proto, args)) in bounds.iter().enumerate() {
+        if i > 0 {
+            out.push_str(" and ");
+        }
+        out.push_str(&name_of(world, *proto).unwrap_or_else(|| "?".into()));
+        let pins: Vec<&(Entity, ResolvedTy)> = bindings
+            .iter()
+            .filter(|(assoc, _)| world.parent_of(*assoc) == Some(*proto))
+            .collect();
+        if args.is_empty() && pins.is_empty() {
+            continue;
+        }
+        out.push('[');
+        let mut first = true;
+        for a in args {
+            if !first {
+                out.push_str(", ");
+            }
+            first = false;
+            write_ty(world, a, out);
+        }
+        for (assoc, t) in pins {
+            if !first {
+                out.push_str(", ");
+            }
+            first = false;
+            out.push_str(&name_of(world, *assoc).unwrap_or_else(|| "?".into()));
+            out.push_str(" = ");
+            write_ty(world, t, out);
+        }
+        out.push(']');
     }
 }

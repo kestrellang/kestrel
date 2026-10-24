@@ -365,6 +365,11 @@ impl StaticLayer for HirStaticWalk<'_, '_> {
             HirTy::Function { .. } => true,
             // Conservative never-block leaves, mirroring the copy layer:
             // refs cannot reach these positions in 2a (revisit in 2b).
+            // A raw existential can hold any conforming payload, including a
+            // non-Static one, so it is not provably Static. Refinement by a
+            // `Static`-refining bound arrives with existential conformance
+            // checking (existentials design §10, M3).
+            HirTy::RawExistential { .. } => false,
             HirTy::Protocol { .. }
             | HirTy::Opaque { .. }
             | HirTy::AssocProjection { .. }

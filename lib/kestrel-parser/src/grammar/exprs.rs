@@ -2,8 +2,9 @@
 //!
 //! ```text
 //! expr      = binary (('=' | op'=') expr)?            // ExprAssignment / ExprCompoundAssignment
-//! binary    = operand (binop operand)*                // ExprBinary, left-folded
+//! binary    = operand (binop operand | 'is' 'not'? Ty | 'as?' Ty)*  // ExprBinary / ExprTypeTest / ExprCast
 //! operand   = 'try' postfix                           // ExprTry
+//!           | 'consuming' postfix 'as?' Ty            // ExprCast (consuming downcast)
 //!           | unop+ postfix                           // ExprUnary
 //!           | postfix
 //! postfix   = stmt_like tight*                        // if/while/loop/for/match/return/throw
@@ -27,7 +28,7 @@ use kestrel_syntax_tree::SyntaxKind as K;
 
 use super::blocks::{self, BlockFlavor};
 use super::patterns::{at_param_pattern_start, param_pattern, pattern};
-use super::types::{try_type_argument_list, ty};
+use super::types::{cast_target_ty, try_type_argument_list, ty};
 use super::{delimited, is_label_keyword, matching_close};
 use crate::core::{CompletedMarker, Marker, Parser};
 use crate::syntax_error::{SyntaxError, codes};
@@ -65,6 +66,7 @@ pub(super) fn at_expr_start(p: &Parser<'_>) -> bool {
         K::Return,
         K::Throw,
         K::Try,
+        K::Consuming,
         K::Minus,
         K::Plus,
         K::Bang,
@@ -126,11 +128,15 @@ fn is_compound_assign(kind: Option<K>) -> bool {
 /// | 10 | `or` |
 /// | 15 | `??` (right-assoc) |
 /// | 20 | `and` |
-/// | 30 | `==` `!=` `<` `>` `<=` `>=` (left-assoc: `a < b < c` is `(a < b) < c`) |
+/// | 30 | `==` `!=` `<` `>` `<=` `>=` `is` (left-assoc: `a < b < c` is `(a < b) < c`) |
 /// | 40 | `..=` `..<` |
 /// | 50 | `+` `-` `\|` `^` |
 /// | 60 | `*` `/` `%` `&` |
 /// | 70 | `<<` `>>` |
+/// | 80 | `as?` (binds tighter than every binary operator) |
+///
+/// `is` and `as?` take a type, not an expression, on the right, so they
+/// are folded by [`type_operator`] rather than listed here.
 pub(crate) fn binary_binding_power(kind: K) -> Option<(u8, u8)> {
     let prec = match kind {
         K::Or => 10,
@@ -197,9 +203,37 @@ fn binary(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
     binary_bp(p, cond, 0)
 }
 
+/// Binding power of `is` / `as?`, which take a type on the right.
+const IS_BP: u8 = 30;
+const AS_BP: u8 = 80;
+
+/// Fold `lhs is [not] T` or `lhs as? T` if one is at the cursor and binds
+/// at least as tightly as `min_bp`.
+fn type_operator(p: &mut Parser<'_>, lhs: ExprInfo, min_bp: u8) -> Option<ExprInfo> {
+    match p.current() {
+        Some(K::AsQuestion) if AS_BP >= min_bp => Some(wrap(p, lhs.cm, K::ExprCast, |p| {
+            p.bump(K::AsQuestion);
+            cast_target_ty(p);
+        })),
+        Some(K::Is) if IS_BP >= min_bp => Some(wrap(p, lhs.cm, K::ExprTypeTest, |p| {
+            p.bump(K::Is);
+            p.eat(K::Not);
+            cast_target_ty(p);
+        })),
+        _ => None,
+    }
+}
+
 fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
     let mut lhs = operand(p, cond)?;
-    while let Some((left, right)) = p.current().and_then(binary_binding_power) {
+    loop {
+        if let Some(folded) = type_operator(p, lhs, min_bp) {
+            lhs = folded;
+            continue;
+        }
+        let Some((left, right)) = p.current().and_then(binary_binding_power) else {
+            break;
+        };
         if left < min_bp {
             break;
         }
@@ -213,6 +247,18 @@ fn binary_bp(p: &mut Parser<'_>, cond: bool, min_bp: u8) -> Option<ExprInfo> {
 }
 
 fn operand(p: &mut Parser<'_>, cond: bool) -> Option<ExprInfo> {
+    if p.at(K::Consuming) {
+        // `consuming` is only an expression prefix directly before `as?`.
+        let m = start2(p);
+        p.bump(K::Consuming);
+        postfix(p, cond);
+        if p.eat(K::AsQuestion) {
+            cast_target_ty(p);
+        } else {
+            p.error_expected_what("'as?' after 'consuming'");
+        }
+        return Some(finish2(p, m, K::ExprCast));
+    }
     if p.at(K::Try) {
         let m = start2(p);
         p.bump(K::Try);

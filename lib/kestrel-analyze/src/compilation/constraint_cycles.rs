@@ -231,6 +231,11 @@ fn collect_param_refs(
                 collect_param_refs(cx, b, context, param_set, out);
             }
         },
+        AstType::Any { .. } => {
+            for t in ty.any_children() {
+                collect_param_refs(cx, t, context, param_set, out);
+            }
+        },
         AstType::Ref { inner, .. } => {
             collect_param_refs(cx, inner, context, param_set, out);
         },

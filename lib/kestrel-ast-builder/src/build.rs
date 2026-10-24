@@ -1049,6 +1049,7 @@ mod tests {
                 let b: Vec<_> = bounds.iter().map(type_name).collect();
                 format!("some {}", b.join(" + "))
             },
+            AstType::Any { .. } => kestrel_ast::pretty::format_type(ty),
             AstType::Ref {
                 inner, mutating, ..
             } => {

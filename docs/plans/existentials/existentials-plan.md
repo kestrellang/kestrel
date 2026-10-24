@@ -148,119 +148,74 @@ snapshot):
 - [ ] Run `/triage` with pattern `types/existential` and record the
       baseline.
 
-### Phase 1: Lexer and CST
+### Phases 1–3: front end (M1) — done
 
-Files: `lib/kestrel-lexer/src/lib.rs`, `lib/kestrel-syntax-tree/kinds.txt`,
-`lib/kestrel-syntax-tree/kestrel.ungram`
+Landed on `feature/existentials`. Where it differs from the original plan,
+the change and its reason:
 
-- [ ] **`any` and `is` keywords.** Add `#[token("any")] Any` and
-      `#[token("is")] Is` next to `Some` (`lexer/src/lib.rs:232`).
-      - `is` is reserved (decided).
-      - First list every stdlib, example and test identifier named `is` or
-        `any`, then rename them in the same commit, before the tokens
-        land.
-- [ ] **CST kinds.** Append to `kinds.txt` (it is append-only):
-      - `token Any 'any'`
-      - `node TyAny`
-      - `node CastExpr`
-      - `token AsQuestion 'as?'`, or reuse `As` plus `Question`, whichever
-        the lexer can produce without breaking `?` and `??`.
-      - `token Is 'is'`, `node TypeTestExpr`, `node IsPat`.
-- [ ] **Grammar.** `kestrel.ungram`:
-      - `TyAny = 'any' TypeArgumentList? Ty ('and' Ty)*`
-      - `CastExpr = 'consuming'? Expr 'as?' Ty`
-      - `TypeTestExpr = Expr 'is' 'not'? Ty`
-      - `IsPat = Name? 'is' Ty ('{' (StructPatternMember (',' StructPatternMember)* ','?)? '}')?`,
-        reusing `StructPattern`'s member list (`kestrel.ungram:595`). It
-        takes a full `Ty` rather than `'ident'`, so `is Box[Int64] { .. }`
-        works.
-- [ ] **Regenerate:**
-      `UPDATE_GENERATED=1 cargo test -p kestrel-syntax-tree --test sourcegen`.
+- **Lexer / CST.** `is` (reserved) and `as?` are tokens. **`any` is
+  contextual**, not a token: the stdlib and several tests call
+  `any(where:)`, so reserving it would have broken them. The parser
+  recognizes it in type position only when a bound, or `[` box `]` and then
+  a bound, follows (`types.rs::at_any_type`). New nodes: `TyAny`,
+  `ExprCast`, `ExprTypeTest`, `IsPattern`, and `TypeArgBinding`
+  (`Item = Int64`).
+- **Associated-type bindings are new syntax.** `some P[A = X]` never
+  existed, so `TypeArgumentList` gained `TypeArgBinding`. It is only legal
+  in an `any` bound; elsewhere it is the new parse error **E810**.
+- **Parser.** `as?` binds at 80 (tighter than every binary operator), `is`
+  at comparison level (30), both folded by `exprs.rs::type_operator`. The
+  cast target takes no `?` / `??` / `throws` suffix (`cast_target_ty`), so
+  `x as? T ?? d` is `(x as? T) ?? d`. `consuming` is an operand prefix only
+  before `as?`. `is` patterns reuse the struct-pattern field list. Tests:
+  `lib/kestrel-parser/tests/existentials.rs`, which also checks every
+  `types/existential/` program parses cleanly.
+- **AST.** `AstType::Any { box_ty, bounds: Vec<AnyBound>, span }`;
+  `AnyBound { protocol, bindings }`; `AstType::any_children()` is the one
+  walker the analyzers share. `kestrel_ast::pretty` renders it.
+- **Builtins.** Only `DefaultBoxType` landed (alias kind, alias target),
+  bound by `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`
+  in `rcbox.ks`. `Sized`, `ExistentialBox` and `ConsumingIndirection`
+  arrive in M2 with the protocols they name.
+- **HIR.** `HirTy::RawExistential { bounds, bindings: Vec<HirAssocBinding>,
+  span }`; `any[B] P` lowers to `Struct { B, [RawExistential] }` in
+  `hir-lower/src/ty.rs::lower_any_type`, bounds sorted by entity. E404 for
+  an applied or non-name box, E141 when there is no default box, E154 for
+  a non-protocol bound, **E150 for an unknown binding (moved up from M3:
+  the binding is resolved here).**
+- **E144** comes from `reject_bare_protocol` on value positions. Bound-like
+  positions lower through `lower_bound_type` instead: `some` / `any` bounds,
+  `extend P` targets (used throughout the stdlib), and the `P` of a qualified
+  `P.Item` (a unit test caught this one). Unused declarations are reached
+  by `type_annotation_resolution`, which forces the lowering when an
+  annotation names a protocol in a value position — the same gate it
+  already used for reference types.
+- **`as?`, `is`, `is` patterns** lower to `HirExpr::Error` / `HirPat::Error`
+  with **E155 "… are not supported yet"** (plus E153 for `var c is T`). The
+  `HirExpr::Cast` / `HirExpr::TypeTest` / `HirPat::TypeTest` variants move to
+  Phase 13, where they get semantics; adding them now would have meant a
+  stub arm in every crate that matches on HIR.
+- **Pulled forward from Phase 4** so the workspace builds:
+  `TyKind::RawExistential`, `ResolvedTy::RawExistential`, structural
+  unification, and arms in every consumer. Copy class is NotCopyable and
+  Static is false everywhere (one answer per layer: semantics, solver,
+  analyze). MIR maps it to the error type until Phase 9. Diagnostics print
+  `any P` / `any[B] P`.
+- **Or-pattern binding types** (folded into M1): each later alternative
+  unifies with the first; a conflict is E109 with `Reason::OrPatternBinding`.
+  Regression test: `patterns/pattern_types/or_pattern_binding_type_mismatch.ks`.
+- **Not done: the two old bare-protocol tests.** Both are `stdlib: false`,
+  but plain `any P` needs the stdlib's default box, and in the second one
+  `any Slice[T]` would make the body ill-typed (`isEqual(to: Self)` is not
+  dispatchable). They now fail with E144 — the correct behaviour — pending
+  a decision on how to rewrite them.
 
-### Phase 2: Parser
-
-Files: `lib/kestrel-parser/src/grammar/types.rs`,
-`lib/kestrel-parser/src/grammar/exprs.rs`
-
-- [ ] **Type start.** `at_type_start` (`types.rs:31`) includes `K::Any`.
-- [ ] **Type dispatch.** `base_ty` (`types.rs:99`): `Some(K::Any) => any_type(p)`,
-      modelled on `some_type` / `some_bound` (`types.rs:297-326`).
-      - Parse an optional `[` *single type path* `]` as the box.
-      - Then bounds joined by `and`, reusing `some_bound` so
-        `Iterator[Item = Int64]` parses the same as under `some`.
-- [ ] **`as?`.** Add it in `postfix` (`exprs.rs:284`) as a postfix
-      operator that takes a type operand.
-      - It binds tighter than binary operators and looser than calls, so
-        `shapes(0) as? Circle` parses as `(shapes(0)) as? Circle`.
-      - Add a binding-power entry next to `K::QuestionQuestion`
-        (`exprs.rs:137`) so `x as? T ?? d` groups as `(x as? T) ?? d`.
-- [ ] **Consuming cast.** A `consuming` prefix, accepted only immediately
-      before a `CastExpr`. There is no general `consuming <expr>` form
-      today, so nothing else may parse.
-- [ ] **`is` operator.** A binary operator at comparison precedence,
-      grouping like the other comparisons. The right operand is parsed as a type, not an
-      expression. `is not` is one operator.
-- [ ] **`is` patterns** in the pattern grammar (`grammar/patterns.rs`):
-      an optional binding name, then `is`, a type, and optional struct
-      fields. `var` before it parses, so the error comes from HIR
-      lowering as E153 rather than a vague parse error.
-- [ ] **Errors.** A parser error for `any` with no bound. Applied boxes
-      (`any[RcBox[T]] P`) parse fine; E404 is raised in HIR lowering.
-
-### Phase 3: AST, builtins, HIR desugaring, E144 / E404
-
-Files: `lib/kestrel-ast/src/ast_type.rs`, `lib/kestrel-ast-builder/src/ast_type.rs`,
-`lib/kestrel-hir/src/builtin.rs`, `lib/kestrel-hir/src/ty.rs`,
-`lib/kestrel-hir-lower/src/ty.rs`, `lib/kestrel-hir-lower/src/expr.rs`,
-`lang/std/memory/*.ks`
-
-- [ ] **AST.** `AstType::Any { box_ty: Option<AstPath>, bounds, span }`,
-      next to `AstType::Some` (`ast_type.rs:141`), built in the
-      ast-builder (`ast_type.rs:~97`).
-- [ ] **New builtin slots** (`builtin.rs`): `DefaultBoxType` (alias kind,
-      plus an arm in `denotes_alias_target` at `:735`), `Sized` (marker
-      protocol, `implicit_conformance: true`), `ExistentialBox`, and
-      `ConsumingIndirection`.
-      - Add `name()`, `from_attribute_name()` and `kind()` arms for each.
-      - The inert-annotation unit test (`:985+`) must stay green.
-- [ ] **Stdlib default binding.** In `lang/std/memory/rcbox.ks`:
-      `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]`.
-      - It must be generic, like `DefaultArrayLiteralType`.
-      - The protocols arrive in Phase 4. The alias only needs `RcBox`.
-- [ ] **HIR type.** `HirTy::RawExistential { bounds: Vec<(Entity, Vec<HirTy>, Vec<(Name, HirTy)>)>, span }`
-      in `kestrel-hir/src/ty.rs`, holding each protocol, its arguments,
-      and its associated-type bindings.
-- [ ] **HIR lowering of `any`** (`hir-lower/src/ty.rs`, next to the
-      `Opaque` arm at `:175-214`):
-      - Resolve the box path. Omitted means `ResolveBuiltin(DefaultBoxType)`.
-      - Lower to `HirTy::Struct { entity: box, args: [RawExistential] }`.
-      - Canonicalise the bound order (sort by entity) here, so
-        `any P and Q` and `any Q and P` are the same type everywhere after.
-      - Box path has type arguments → E404.
-- [ ] **E144: bare protocol in a value position.** In HIR type lowering,
-      when `HirTy::Protocol` would be produced for a value-position type:
-      a local, a parameter, a return type, a field, or a generic argument.
-      - Bound positions (`T: P`, `where`, `some P`, the bounds of `any`)
-        are unchanged.
-      - Emit E144 and lower to the error type, so the rest of the body
-        doesn't cascade.
-- [ ] **`as?` expression.** `HirExpr::Cast { expr, target: HirTy, consuming: bool }`
-      in `lower_expr_node`, recorded in the `BodySourceMap`.
-- [ ] **`is` expression.** `HirExpr::TypeTest { expr, target, negated }`.
-- [ ] **`is` pattern.** `HirPat::TypeTest { binding: Option<Binding>, target, fields }`
-      in `lower_pat_node`. `var` → E153.
-- [ ] **Diagnostic codes.** Allocate E144 and E404 per
-      `lib/kestrel-analyze/AGENTS.md` (registry, `docs/error-codes.md`).
-      Reserve E145–E153 and E402–E403 together, so later phases don't
-      collide with other agents.
-- [ ] **Update the two bare-protocol tests to `any P` (approved):**
-      - `declarations/extensions/extension_conformance_on_generic_type.ks`
-      - `declarations/extensions/protocol_extension_satisfies_conformance_via_transitive_protocol.ks`
-
-      Then confirm they fail the same way the other existential tests do,
-      until M4.
-- [ ] **Triage:** `types/existential/any_bare_protocol` and
-      `any_box_applied` pass; `declarations/extensions` is no worse.
+**M1 result** (`cargo test --release -p kestrel-test-suite --test
+file_tests -- types/existential`): 3 / 37 pass — `any_bare_protocol_type_rejected`,
+`any_box_applied_rejected`, `any_assoc_unknown`. The rest need later
+milestones. `patterns/` 277 / 277. Unit tests of every changed crate pass,
+except `kestrel-lsp`'s integration tests, which need a debug
+`kestrel-lsp` binary this sandbox doesn't build.
 
 ### Phase 4: `Sized` and `not Sized`
 
@@ -268,9 +223,12 @@ Files: `lib/kestrel-type-infer/src/where_clauses.rs`,
 `lib/kestrel-semantics/src/lib.rs`, `lib/kestrel-copy-fold/src/lib.rs`,
 `lib/kestrel-type-infer/src/ty.rs`
 
-- [ ] **Raw existential type.** `TyKind::RawExistential { bounds, bindings }`
+- [x] **Raw existential type.** `TyKind::RawExistential { bounds, bindings }`
       in `type-infer/src/ty.rs`, lowered from `HirTy::RawExistential`.
-      Unification is structural on the canonical bound list.
+      Unification is structural on the canonical bound list. *(Done in M1.)*
+- [ ] **Builtin slots** `Sized` (marker protocol, `implicit_conformance:
+      true`), `ExistentialBox`, `ConsumingIndirection` (deferred from
+      Phase 3).
 - [ ] **Sizedness query.** `TypeParamSizeRequirement` (or a
       `Sized`/`MaybeUnsized` field next to `TypeParamCopyRequirement`,
       `semantics/lib.rs:269`), driven by `where T: not Sized`. **One
@@ -560,13 +518,21 @@ Files: `lib/kestrel-codegen-cranelift/src/{ty,inst,context}.rs`,
       - escaping and consuming closures (box protocol changes);
       - `stdlib/memory`;
       - anything that relied on a bare protocol type.
-- [ ] `cargo fmt` and `cargo clippy` clean on every changed crate.
+- [ ] `cargo fmt` and `cargo clippy` clean on every changed crate. Format
+      only the hunks you changed (`rustfmt --check` per file, compared with
+      the base): the base tree is not rustfmt-clean, and a whole-crate
+      `cargo fmt` rewrites files other agents are editing.
 
 ### Phase 13: `as?`
 
 Files: `lib/kestrel-type-infer/src/` (cast constraint),
 `lib/kestrel-analyze/src/body/` (E149), `lib/kestrel-mir-lower/src/body/expr.rs`
 
+- [ ] **HIR variants** (deferred from Phase 3): `HirExpr::Cast { expr,
+      target, consuming }`, `HirExpr::TypeTest { expr, target, negated }`,
+      `HirPat::TypeTest { binding, target, fields }`, replacing the E155
+      stub in `hir-lower` (`expr.rs`, `pat.rs`). Remove E155 from
+      `docs/error-codes.md`.
 - [ ] **Typing.**
       - `x as? T` with `x: B[RawExistential]` and a concrete, sized `T`
         has type `Optional[&T]`.

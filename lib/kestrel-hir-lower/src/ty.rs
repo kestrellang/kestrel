@@ -7,15 +7,17 @@
 //! used both during body lowering (via LowerCtx) and by type inference
 //! for declaration-level types (Callable params, TypeAnnotation, etc.).
 
-use kestrel_ast::AstType;
+use kestrel_ast::{AnyBound, AssocTypeBinding, AstType, PathSegment};
 use kestrel_ast_builder::{
-    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, MutatingAccessor, NodeKind, Settable,
-    TypeAnnotation, TypeParams,
+    Callable, Computed, DeclSpan, ExtensionTarget, Gettable, MutatingAccessor, Name, NodeKind,
+    Settable, TypeAnnotation, TypeParams,
 };
 use kestrel_hecs::{Entity, QueryContext, QueryFn};
 use kestrel_hir::Builtin;
-use kestrel_hir::ty::HirTy;
-use kestrel_name_res::{ExtensionTargetEntity, ResolveBuiltin, ResolveTypePath, TypeResolution};
+use kestrel_hir::ty::{HirAssocBinding, HirTy};
+use kestrel_name_res::{
+    ExtensionTargetEntity, ProtocolAssociatedTypes, ResolveBuiltin, ResolveTypePath, TypeResolution,
+};
 use kestrel_reporting::{Diagnostic, Label};
 use kestrel_span::Span;
 
@@ -29,7 +31,67 @@ use crate::ctx::LowerCtx;
 /// and declaration-level type queries (LowerTypeAnnotation, LowerCallableTypes).
 pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &AstType) -> HirTy {
     match ty {
+        // A value position: a protocol here is an error (E144), not a type.
         AstType::Named { segments, span } => {
+            let ty = lower_named_type(ctx, owner, root, segments, span);
+            reject_bare_protocol(ctx, ty, segments)
+        },
+        AstType::Any {
+            box_ty,
+            bounds,
+            span,
+        } => lower_any_type(ctx, owner, root, box_ty.as_deref(), bounds, span),
+        other => lower_structural_type(ctx, owner, root, other),
+    }
+}
+
+/// A protocol bound (`some P`, `any P`, an `extend P` target, the `P` of a
+/// qualified `P.Item`): lowered like
+/// a named type, but a protocol is exactly what is wanted, so there is no
+/// E144.
+fn lower_bound_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &AstType) -> HirTy {
+    match ty {
+        AstType::Named { segments, span } => lower_named_type(ctx, owner, root, segments, span),
+        other => lower_ast_type(ctx, owner, root, other),
+    }
+}
+
+/// E144: a protocol is not a type. It names a boxed existential only with
+/// `any`, or an opaque type with `some`.
+fn reject_bare_protocol(ctx: &QueryContext<'_>, ty: HirTy, segments: &[PathSegment]) -> HirTy {
+    let HirTy::Protocol { span, .. } = &ty else {
+        return ty;
+    };
+    let name = segments
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect::<Vec<_>>()
+        .join(".");
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E144")
+            .with_message(format!(
+                "protocol '{name}' cannot be used as a type; write 'any {name}' for a boxed \
+                 existential or 'some {name}' for an opaque type"
+            ))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()).with_message("a protocol, not a type"),
+            ]),
+    );
+    HirTy::Error(span.clone())
+}
+
+/// Resolve a type path to its `HirTy`, reporting an unknown or non-type
+/// name. Shared by value positions and protocol bounds.
+fn lower_named_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    segments: &[PathSegment],
+    span: &Span,
+) -> HirTy {
+    {
+        {
             let seg_names: Vec<String> = segments.iter().map(|s| s.name.clone()).collect();
             let result = ctx.query(ResolveTypePath {
                 segments: seg_names,
@@ -99,7 +161,20 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
                     HirTy::Error(span.clone())
                 },
             }
-        },
+        }
+    }
+}
+
+/// Every type form other than paths and `any`: tuples, functions, sugar,
+/// `some`, references.
+fn lower_structural_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    ty: &AstType,
+) -> HirTy {
+    match ty {
+        AstType::Named { .. } | AstType::Any { .. } => lower_ast_type(ctx, owner, root, ty),
 
         AstType::Tuple(types, span) => {
             let lowered: Vec<HirTy> = types
@@ -179,7 +254,7 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
         } => {
             let hir_bounds: Vec<HirTy> = bounds
                 .iter()
-                .map(|b| lower_ast_type(ctx, owner, root, b))
+                .map(|b| lower_bound_type(ctx, owner, root, b))
                 .collect();
             // The only legal negative bound is `Copyable` (same rule as the
             // E424 conformance-list check). Recovery keeps the flag set so a
@@ -227,6 +302,205 @@ pub fn lower_ast_type(ctx: &QueryContext<'_>, owner: Entity, root: Entity, ty: &
             span: span.clone(),
         },
     }
+}
+
+/// `any[B] P and Q` → `B[RawExistential { P, Q }]`; plain `any` uses the
+/// `@builtin(.DefaultBoxType)` box. Nothing after HIR lowering knows `any`
+/// was written: an existential is an ordinary box instantiation.
+fn lower_any_type(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    box_ty: Option<&AstType>,
+    bounds: &[AnyBound],
+    span: &Span,
+) -> HirTy {
+    let Some(box_entity) = resolve_existential_box(ctx, owner, root, box_ty, bounds, span) else {
+        return HirTy::Error(span.clone());
+    };
+    let mut lowered: Vec<(Entity, HirTy, Vec<HirAssocBinding>)> = Vec::new();
+    for bound in bounds {
+        let ty = lower_bound_type(ctx, owner, root, &bound.protocol);
+        let HirTy::Protocol { entity, .. } = &ty else {
+            if !matches!(ty, HirTy::Error(_)) {
+                report_non_protocol_any_bound(ctx, &bound.protocol);
+            }
+            return HirTy::Error(span.clone());
+        };
+        let protocol = *entity;
+        let Some(bindings) = lower_assoc_bindings(ctx, owner, root, protocol, &bound.bindings)
+        else {
+            return HirTy::Error(span.clone());
+        };
+        lowered.push((protocol, ty, bindings));
+    }
+    // Canonical order: `any P and Q` is the same type as `any Q and P`.
+    lowered.sort_by_key(|(entity, ..)| entity.index());
+    let mut bindings: Vec<HirAssocBinding> = Vec::new();
+    let mut hir_bounds = Vec::with_capacity(lowered.len());
+    for (_, ty, pins) in lowered {
+        hir_bounds.push(ty);
+        bindings.extend(pins);
+    }
+    bindings.sort_by_key(|b| b.assoc.index());
+    let raw = HirTy::RawExistential {
+        bounds: hir_bounds,
+        bindings,
+        span: span.clone(),
+    };
+    HirTy::Struct {
+        entity: box_entity,
+        args: vec![raw],
+        span: span.clone(),
+    }
+}
+
+/// The box entity of `any[B] P` (or the default box). `B` is written
+/// unapplied, so it resolves as a path, not through type lowering (which
+/// would demand its type arguments). E404 for a malformed box argument.
+fn resolve_existential_box(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    box_ty: Option<&AstType>,
+    bounds: &[AnyBound],
+    span: &Span,
+) -> Option<Entity> {
+    let Some(box_ty) = box_ty else {
+        let found = ctx.query(ResolveBuiltin {
+            builtin: Builtin::DefaultBoxType,
+            root,
+        });
+        if found.is_none() {
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E141")
+                    .with_message("DefaultBox is not defined")
+                    .with_labels(vec![Label::primary(span.file_id, span.range())])
+                    .with_notes(vec![
+                        "'any P' needs the standard library's default box; is the standard \
+                         library imported? Or name a box: 'any[B] P'"
+                            .to_string(),
+                    ]),
+            );
+        }
+        return found;
+    };
+    let AstType::Named {
+        segments,
+        span: box_span,
+    } = box_ty
+    else {
+        report_bad_box(
+            ctx,
+            ast_type_span(box_ty),
+            "the box in 'any[...]' must name a box type",
+        );
+        return None;
+    };
+    if segments.iter().any(|s| !s.type_args.is_empty()) {
+        let bare = AstType::Named {
+            segments: segments
+                .iter()
+                .map(|s| PathSegment {
+                    type_args: Vec::new(),
+                    ..s.clone()
+                })
+                .collect(),
+            span: box_span.clone(),
+        };
+        let suggestion = kestrel_ast::pretty::format_type(&AstType::Any {
+            box_ty: Some(Box::new(bare)),
+            bounds: bounds.to_vec(),
+            span: span.clone(),
+        });
+        report_bad_box(
+            ctx,
+            box_span.clone(),
+            &format!("the box in 'any[...]' is written without type arguments: '{suggestion}'"),
+        );
+        return None;
+    }
+    let names = segments.iter().map(|s| s.name.clone()).collect();
+    match ctx.query(ResolveTypePath {
+        segments: names,
+        context: owner,
+        root,
+    }) {
+        TypeResolution::Found(entity) => Some(entity),
+        // Let the ordinary path lowering report the unknown or non-type name.
+        _ => {
+            lower_named_type(ctx, owner, root, segments, box_span);
+            None
+        },
+    }
+}
+
+fn report_bad_box(ctx: &QueryContext<'_>, span: Span, message: &str) {
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E404")
+            .with_message(message.to_string())
+            .with_labels(vec![Label::primary(span.file_id, span.range())]),
+    );
+}
+
+/// E154: an `any` bound must be a protocol.
+fn report_non_protocol_any_bound(ctx: &QueryContext<'_>, bound: &AstType) {
+    let span = ast_type_span(bound);
+    let name = kestrel_ast::pretty::format_type(bound);
+    ctx.accumulate(
+        Diagnostic::error()
+            .with_code("E154")
+            .with_message(format!("'{name}' in an 'any' bound is not a protocol"))
+            .with_labels(vec![
+                Label::primary(span.file_id, span.range()).with_message("expected a protocol"),
+            ]),
+    );
+}
+
+/// Resolve `Item = Int64` pins against the protocol's associated types
+/// (its own and inherited). E150 for a name that isn't one; `None` then.
+fn lower_assoc_bindings(
+    ctx: &QueryContext<'_>,
+    owner: Entity,
+    root: Entity,
+    protocol: Entity,
+    pins: &[AssocTypeBinding],
+) -> Option<Vec<HirAssocBinding>> {
+    if pins.is_empty() {
+        return Some(Vec::new());
+    }
+    let assoc_types = ctx.query(ProtocolAssociatedTypes { protocol, root });
+    let mut out = Vec::with_capacity(pins.len());
+    let mut ok = true;
+    for pin in pins {
+        let assoc = assoc_types
+            .iter()
+            .map(|m| m.entity)
+            .find(|&e| ctx.get::<Name>(e).is_some_and(|n| n.0 == pin.name));
+        let Some(assoc) = assoc else {
+            let protocol_name = ctx
+                .get::<Name>(protocol)
+                .map_or_else(|| "protocol".to_string(), |n| n.0.clone());
+            ctx.accumulate(
+                Diagnostic::error()
+                    .with_code("E150")
+                    .with_message(format!(
+                        "'{protocol_name}' has no associated type named '{}'",
+                        pin.name
+                    ))
+                    .with_labels(vec![Label::primary(pin.span.file_id, pin.span.range())]),
+            );
+            ok = false;
+            continue;
+        };
+        out.push(HirAssocBinding {
+            assoc,
+            ty: lower_ast_type(ctx, owner, root, &pin.ty),
+        });
+    }
+    ok.then_some(out)
 }
 
 /// Build a HirTy for a resolved entity, dispatching on NodeKind.
@@ -421,7 +695,9 @@ fn build_assoc_projection_base(
             segments: prefix_segments.to_vec(),
             span: prefix_span,
         };
-        lower_ast_type(ctx, owner, root, &prefix)
+        // The prefix may name the protocol itself (`Iterator.Item`), which
+        // is a bound-like use, not a value type — no E144.
+        lower_bound_type(ctx, owner, root, &prefix)
     } else {
         // Bare `Item` inside the protocol — base is Self.
         lower_self_hir_ty(ctx, owner, root, span).unwrap_or_else(|| HirTy::Error(span.clone()))
@@ -459,7 +735,9 @@ fn lower_self_hir_ty(
                 // type parameters are visible.
                 let target = ctx.get::<ExtensionTarget>(entity)?;
                 let target_ast = target.0.clone();
-                let mut ty = lower_ast_type(ctx, entity, root, &target_ast);
+                // A protocol target (`extend Iterator`) names the protocol
+                // itself, so it lowers like a bound, without E144.
+                let mut ty = lower_bound_type(ctx, entity, root, &target_ast);
                 // Override the span so diagnostics point at the `Self` use site
                 // rather than the extension header.
                 override_span(&mut ty, span);
@@ -524,6 +802,7 @@ fn override_span(ty: &mut HirTy, span: &Span) {
         | HirTy::Infer(s)
         | HirTy::Never(s)
         | HirTy::Opaque { span: s, .. }
+        | HirTy::RawExistential { span: s, .. }
         | HirTy::Ref { span: s, .. } => *s = span.clone(),
     }
 }
@@ -720,6 +999,26 @@ pub fn reject_ref_types(
                 .map(|b| reject_ref_types(ctx, b, RefPosition::Other, RefPolicy::Strict))
                 .collect(),
             not_copyable,
+            span,
+        },
+        // Protocol bounds and pinned associated types are Strict, like
+        // protocol type args.
+        HirTy::RawExistential {
+            bounds,
+            bindings,
+            span,
+        } => HirTy::RawExistential {
+            bounds: bounds
+                .into_iter()
+                .map(|b| reject_ref_types(ctx, b, RefPosition::Other, RefPolicy::Strict))
+                .collect(),
+            bindings: bindings
+                .into_iter()
+                .map(|b| HirAssocBinding {
+                    assoc: b.assoc,
+                    ty: reject_ref_types(ctx, b.ty, RefPosition::GenericArg, RefPolicy::Strict),
+                })
+                .collect(),
             span,
         },
         leaf @ (HirTy::Param(..)
@@ -1376,6 +1675,7 @@ fn ast_type_span(ty: &AstType) -> Span {
         | AstType::Never(span)
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
+        | AstType::Any { span, .. }
         | AstType::Ref { span, .. } => span.clone(),
     }
 }

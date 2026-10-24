@@ -610,6 +610,9 @@ impl CopyLayer for HirCopyLayer<'_, '_> {
             HirTy::SelfType(entity, _) => self.base_semantics(*entity),
             HirTy::AliasUse { entity, .. } => self.base_semantics(*entity),
             HirTy::Protocol { .. } => CopySemantics::Copyable,
+            // Unsized: it can never be bit-copied. `Cloneable` when a bound
+            // refines `Cloneable` arrives with M2 (existentials design §1).
+            HirTy::RawExistential { .. } => CopySemantics::NotCopyable,
             // `some P and not Copyable` may hide a move-only underlier; the
             // plain form guarantees a duplicable one (post-solve check).
             HirTy::Opaque { not_copyable, .. } => {
@@ -830,6 +833,7 @@ fn ast_type_span(ast_ty: &AstType) -> Span {
         | AstType::Never(span)
         | AstType::Inferred(span)
         | AstType::Some { span, .. }
+        | AstType::Any { span, .. }
         | AstType::Ref { span, .. } => span.clone(),
     }
 }
@@ -851,6 +855,7 @@ fn ast_type_name(ast_ty: &AstType) -> String {
         AstType::Never(_) => "Never".into(),
         AstType::Inferred(_) => "_".into(),
         AstType::Some { .. } => "some".into(),
+        AstType::Any { .. } => "any".into(),
         AstType::Ref { .. } => "reference".into(),
     }
 }
