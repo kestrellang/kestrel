@@ -48,6 +48,12 @@ impl OssaBodyCtx<'_, '_> {
         call_args.extend(args.into_iter().skip(1));
         let result = self.emit_call_returning(Callee::Thin(thunk), call_args, result_ty);
         self.emit_destroy_value(thunk);
+        // The receiver view (a `pointeeRef`/`pointeeMutRef` result) was used
+        // only for its words: end it now, as a direct call ends a borrowed
+        // ref argument, so it can't reach a control-flow merge (E497).
+        if self.ref_results.contains(&recv) && !self.ref_binding_vals.contains_key(&recv) {
+            self.emit_end_borrow(recv);
+        }
         Some(result)
     }
 
@@ -243,7 +249,13 @@ impl OssaBodyCtx<'_, '_> {
                     }
                     def.fields
                         .iter()
-                        .map(|f| kestrel_mir::substitute::substitute(&mut this.ctx.module.ty_arena, f.ty, &subst))
+                        .map(|f| {
+                            kestrel_mir::substitute::substitute(
+                                &mut this.ctx.module.ty_arena,
+                                f.ty,
+                                &subst,
+                            )
+                        })
                         .collect()
                 };
                 let from_fields = field_tys(self, &from_args);
@@ -269,5 +281,129 @@ impl OssaBodyCtx<'_, '_> {
         let pair_ty = self.ctx.module.ty_arena.tuple(vec![raw_ptr, raw_ptr]);
         let pair = self.emit_tuple(pair_ty, vec![data, table]);
         self.emit_op1(Op::FatPtr(ty), pair, ty)
+    }
+}
+
+// ===== Consuming requirements (existentials design §3) =====
+
+impl OssaBodyCtx<'_, '_> {
+    /// The receiver of a `consuming` requirement called on an existential:
+    /// the box is taken by value and viewed through `pointeeRef`; the
+    /// consuming thunk then moves the payload out of the view. Returns the
+    /// view argument and `(box, borrow)` for
+    /// [`Self::emit_release_consumed_box`]. `None` for any other call.
+    pub(crate) fn existential_consuming_receiver(
+        &mut self,
+        receiver_expr: kestrel_hir::body::HirExprId,
+        peels: &[kestrel_type_infer::result::IndirectionPeel],
+        conv: ParamConvention,
+    ) -> Option<(CallArg, (ValueId, ValueId))> {
+        let [peel] = peels else {
+            return None;
+        };
+        if conv != ParamConvention::Consuming {
+            return None;
+        }
+        let target = crate::ty::lower_resolved_ty(self.ctx, &peel.target);
+        if !matches!(
+            self.ctx.module.ty_arena.get(target),
+            MirTy::RawExistential { .. }
+        ) {
+            return None;
+        }
+        let box_val = self.lower_expr_for_consuming(receiver_expr);
+        let box_ty = self.body.value(box_val).ty;
+        let borrow = self.emit_begin_borrow(box_val);
+        self.ctx.register_name(peel.read_method);
+        let type_args = self.prepend_receiver_type_args(box_ty, vec![]);
+        let view = self.emit_call_returning(
+            Callee::direct_with_args(peel.read_method, type_args, None),
+            vec![CallArg {
+                value: borrow,
+                convention: ParamConvention::Borrow,
+            }],
+            target,
+        );
+        Some((
+            CallArg {
+                value: view,
+                convention: ParamConvention::Consuming,
+            },
+            (box_val, borrow),
+        ))
+    }
+
+    /// After a consuming requirement moved the payload out of `box_val`:
+    /// end the box's box with `consumePointee` and a closure that does
+    /// nothing (the payload is already gone), which frees the storage without
+    /// running the payload's deinit.
+    pub(crate) fn emit_release_consumed_box(&mut self, box_val: ValueId, borrow: ValueId) {
+        self.emit_end_borrow(borrow);
+        let box_ty = self.body.value(box_val).ty;
+        let Some(raw) = (match self.ctx.module.ty_arena.get(box_ty) {
+            MirTy::Named { type_args, .. } => type_args.first().copied(),
+            _ => None,
+        }) else {
+            return;
+        };
+        let Some(protocol) = self.ctx.query.query(kestrel_name_res::ResolveBuiltin {
+            builtin: kestrel_hir::Builtin::ConsumingIndirection,
+            root: self.ctx.root,
+        }) else {
+            return;
+        };
+        let Some(requirement) = self
+            .ctx
+            .world
+            .children_of(protocol)
+            .iter()
+            .copied()
+            .find(|&c| {
+                self.ctx
+                    .world
+                    .get::<kestrel_ast_builder::Name>(c)
+                    .map(|n| n.0.as_str())
+                    == Some("consumePointee")
+            })
+        else {
+            return;
+        };
+        self.ctx.register_name(protocol);
+        let key = self.ctx.witness_method_key(requirement);
+        let raw_ptr = self.ctx.module.ty_arena.pointer(raw);
+        let unit = self.ctx.module.ty_arena.unit();
+        let closure_ty = self.ctx.intern(MirTy::FuncThick {
+            kind: kestrel_mir::FnKind::Normal,
+            params: vec![(raw_ptr, ParamConvention::Consuming)],
+            ret: unit,
+        });
+        let discard = crate::existential::discard_fn(self.ctx);
+        let body = self.emit_apply_partial(
+            Callee::direct_with_args(discard, vec![raw], None),
+            vec![],
+            closure_ty,
+        );
+        let borrow_body = self.emit_begin_borrow(body);
+        self.emit_call_returning(
+            Callee::Witness {
+                protocol,
+                method: key,
+                self_type: box_ty,
+                method_type_args: vec![unit],
+            },
+            vec![
+                CallArg {
+                    value: box_val,
+                    convention: ParamConvention::Consuming,
+                },
+                CallArg {
+                    value: borrow_body,
+                    convention: ParamConvention::Borrow,
+                },
+            ],
+            unit,
+        );
+        self.emit_end_borrow(borrow_body);
+        self.emit_destroy_value(body);
     }
 }

@@ -72,6 +72,7 @@ pub fn collect_all(
     copyable_protocol: Option<Entity>,
     cloneable_protocol: Option<Entity>,
     vtable_templates: &IndexMap<Entity, crate::item::VTableTemplate>,
+    clone_thunk: Option<Entity>,
 ) -> Result<CollectionResult, Vec<MonoError>> {
     let mut ctx = CollectionContext::new(
         functions,
@@ -85,6 +86,7 @@ pub fn collect_all(
     ctx.copyable_protocol = copyable_protocol;
     ctx.cloneable_protocol = cloneable_protocol;
     ctx.vtable_templates = Some(vtable_templates);
+    ctx.clone_thunk = clone_thunk;
     ctx.collect();
 
     if ctx.errors.is_empty() {
@@ -117,6 +119,8 @@ struct CollectionContext<'a> {
     vtable_templates: Option<&'a IndexMap<Entity, crate::item::VTableTemplate>>,
     /// Tables already scanned, by (template, payload).
     seen_vtables: IndexSet<(Entity, TyId)>,
+    /// `MirModule::existential_clone_thunk`.
+    clone_thunk: Option<Entity>,
 }
 
 impl<'a> CollectionContext<'a> {
@@ -145,6 +149,7 @@ impl<'a> CollectionContext<'a> {
             cloneable_protocol: None,
             vtable_templates: None,
             seen_vtables: IndexSet::new(),
+            clone_thunk: None,
         }
     }
 
@@ -290,6 +295,14 @@ impl<'a> CollectionContext<'a> {
                         let concrete_ty =
                             substitute_and_resolve(self.arena, self.witnesses, operand_ty, &subst);
                         self.discover_clone_shim(concrete_ty, parent_self);
+                    },
+                    InstKind::Op2 {
+                        op: crate::Op::CloneIntoVal(ty),
+                        ..
+                    } => {
+                        let concrete_ty =
+                            substitute_and_resolve(self.arena, self.witnesses, *ty, &subst);
+                        self.discover_clone_into(concrete_ty);
                     },
                     _ => {},
                 }
@@ -521,6 +534,30 @@ impl<'a> CollectionContext<'a> {
                 crate::item::VTableEntry::Table(sub) => self.scan_vtable(sub, payload),
                 _ => {},
             }
+        }
+    }
+
+    /// A sized `Op::CloneIntoVal` calls the clone thunk at the type (mono
+    /// `fat::legalize`); an unsized one goes through the payload's table,
+    /// whose clone word the table literal already instantiated.
+    fn discover_clone_into(&mut self, ty: TyId) {
+        let Some(thunk) = self.clone_thunk else {
+            return;
+        };
+        if has_type_param(self.arena, ty) {
+            return;
+        }
+        let mut tails = super::GenericTails {
+            arena: self.arena,
+            structs: self.structs,
+            witnesses: self.witnesses,
+        };
+        if crate::ty::is_unsized(&mut tails, ty) {
+            return;
+        }
+        let key = InstantiationKey::new(thunk, vec![ty], None);
+        if self.seen.insert(key.clone()) {
+            self.queue.push_back(key);
         }
     }
 

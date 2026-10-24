@@ -174,7 +174,9 @@ fn mangle_type(
             let bindings = bindings.clone();
             out.push('Z');
             for (protocol, args) in &bounds {
-                let name = entity_names.get(protocol).map_or("<unknown>", |s| s.as_str());
+                let name = entity_names
+                    .get(protocol)
+                    .map_or("<unknown>", |s| s.as_str());
                 mangle_path(name, out);
                 if !args.is_empty() {
                     out.push('I');

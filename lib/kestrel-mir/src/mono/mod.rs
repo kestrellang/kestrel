@@ -66,6 +66,7 @@ pub fn monomorphize(
         boolean_conditional_protocol: _,
         bool_struct: _,
         vtable_templates,
+        existential_clone_thunk,
     } = module;
 
     // Phase 1: Instantiation discovery
@@ -83,6 +84,7 @@ pub fn monomorphize(
         copyable_protocol,
         cloneable_protocol,
         &vtable_templates,
+        existential_clone_thunk,
     )?;
 
     // Phase 2: Body monomorphization
@@ -265,7 +267,7 @@ pub fn monomorphize(
 
     // Two-word (data, table) pointers: rewrite the ops that meet one now
     // that every type is concrete.
-    fat::legalize(&mut mono_module);
+    fat::legalize(&mut mono_module, &func_id_map, existential_clone_thunk);
 
     Ok(mono_module)
 }
@@ -886,13 +888,27 @@ fn resolve_types_and_layouts(
 
                         // An unsized last field is the struct's unsized
                         // tail: lay out the prefix only.
-                        if i == last && crate::ty::is_unsized(&mut GenericTails { arena, structs, witnesses }, concrete_ty) {
+                        if i == last
+                            && crate::ty::is_unsized(
+                                &mut GenericTails {
+                                    arena,
+                                    structs,
+                                    witnesses,
+                                },
+                                concrete_ty,
+                            )
+                        {
                             layout.unsized_tail = true;
                             continue;
                         }
-                        if let Some((size, align)) =
-                            mono_size_and_align(arena, structs, witnesses, concrete_ty, target, &layout_cache)
-                        {
+                        if let Some((size, align)) = mono_size_and_align(
+                            arena,
+                            structs,
+                            witnesses,
+                            concrete_ty,
+                            target,
+                            &layout_cache,
+                        ) {
                             layout.append_field(StructLayout::scalar(size, align));
                         } else {
                             all_resolved = false;
@@ -1323,7 +1339,14 @@ fn mono_size_and_align(
 ) -> Option<(u64, u64)> {
     // (data, table): a pointer to an unsized type, or a borrowed
     // raw-existential value.
-    if crate::ty::is_fat(&mut GenericTails { arena, structs, witnesses }, ty) {
+    if crate::ty::is_fat(
+        &mut GenericTails {
+            arena,
+            structs,
+            witnesses,
+        },
+        ty,
+    ) {
         return Some((target.pointer_width * 2, target.pointer_width));
     }
     if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
@@ -1370,7 +1393,12 @@ impl crate::ty::TailLookup for GenericTails<'_> {
         let sdef = self.structs.get(&entity)?;
         let field = sdef.fields.last()?;
         let subst = build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), args);
-        Some(collect::substitute_and_resolve(self.arena, self.witnesses, field.ty, &subst))
+        Some(collect::substitute_and_resolve(
+            self.arena,
+            self.witnesses,
+            field.ty,
+            &subst,
+        ))
     }
 }
 
@@ -1385,10 +1413,10 @@ mod tests {
     use crate::item::function::{FunctionDef, FunctionKind, ParamDef};
     use crate::item::protocol::ProtocolDef;
     use crate::item::witness::{WitnessDef, WitnessMethodBinding};
+    use crate::op::Op;
     use crate::terminator::{Terminator, TerminatorKind};
     use crate::ty::ParamConvention;
     use crate::value::ValueDef;
-    use crate::op::Op;
     use crate::{BlockId, ValueId, WitnessMethodKey};
 
     fn entity(id: u32) -> Entity {

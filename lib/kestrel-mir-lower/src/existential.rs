@@ -36,6 +36,7 @@ use crate::items::function_sig::{param_convention, receiver_convention};
 #[derive(Default)]
 pub struct ExistentialState {
     drop_thunk: Option<Entity>,
+    discard_fn: Option<Entity>,
     thunks: HashMap<Entity, Entity>,
     protocol_templates: HashMap<(Entity, Entity), Entity>,
     composition_templates: HashMap<(Entity, Vec<Entity>), Entity>,
@@ -131,7 +132,7 @@ pub(crate) fn template_for(ctx: &mut LowerCtx, boxed: Entity, bounds: &[Entity])
     if let Some(&t) = ctx.existentials.composition_templates.get(&key) {
         return t;
     }
-    let mut entries = header(ctx);
+    let mut entries = header(ctx, bounds);
     for &b in bounds {
         entries.push(VTableEntry::Table(protocol_template(ctx, boxed, b)));
     }
@@ -153,12 +154,16 @@ fn protocol_template(ctx: &mut LowerCtx, boxed: Entity, protocol: Entity) -> Ent
     ctx.existentials
         .protocol_templates
         .insert((boxed, protocol), entity);
-    let mut entries = header(ctx);
+    let mut entries = header(ctx, &[protocol]);
     for a in ancestors(ctx, protocol) {
         entries.push(VTableEntry::Table(protocol_template(ctx, boxed, a)));
     }
     for requirement in slots(ctx, protocol) {
-        entries.push(VTableEntry::Func(requirement_thunk(ctx, protocol, requirement)));
+        entries.push(VTableEntry::Func(requirement_thunk(
+            ctx,
+            protocol,
+            requirement,
+        )));
     }
     let name = format!("__vtable.{}", ctx.register_name(protocol));
     add_template(ctx, entity, name, entries);
@@ -177,15 +182,98 @@ fn add_template(ctx: &mut LowerCtx, entity: Entity, name: String, entries: Vec<V
     );
 }
 
-/// The four header words every table starts with.
-fn header(ctx: &mut LowerCtx) -> Vec<VTableEntry> {
+/// The four header words every table starts with. The clone word is filled
+/// only when the bounds refine `Cloneable`, so every payload has a clone.
+fn header(ctx: &mut LowerCtx, bounds: &[Entity]) -> Vec<VTableEntry> {
+    let cloneable = ctx.module.cloneable_protocol.is_some_and(|c| {
+        kestrel_semantics::bound_closure(&ctx.query, bounds, ctx.root).contains(&c)
+    });
+    let clone = match cloneable.then(|| clone_thunk(ctx)).flatten() {
+        Some(thunk) => VTableEntry::Func(thunk),
+        None => VTableEntry::Null,
+    };
     vec![
         VTableEntry::Func(drop_thunk(ctx)),
         VTableEntry::Size,
         VTableEntry::Align,
-        // Clone thunk: existentials plan Phase 10 (CowBox / OwnedBox clone).
-        VTableEntry::Null,
+        clone,
     ]
+}
+
+/// `fn clone[S](src: Pointer[i8], dst: Pointer[i8])`: write a clone of the
+/// payload at `src` into the uninitialized `dst`, through `S: Cloneable`.
+/// `None` without a stdlib (no `Cloneable`).
+pub(crate) fn clone_thunk(ctx: &mut LowerCtx) -> Option<Entity> {
+    if let Some(e) = ctx.module.existential_clone_thunk {
+        return Some(e);
+    }
+    let cloneable = ctx.module.cloneable_protocol?;
+    let requirement = ctx
+        .world
+        .children_of(cloneable)
+        .iter()
+        .copied()
+        .find(|&c| {
+            ctx.world
+                .get::<kestrel_ast_builder::Name>(c)
+                .map(|n| n.0.as_str())
+                == Some("clone")
+        })?;
+    ctx.register_name(cloneable);
+    let key = ctx.witness_method_key(requirement);
+    let entity = ctx.next_synthetic_entity();
+    let param = ctx.next_synthetic_entity();
+    ctx.module.register_name(param, "Payload");
+    let payload = ctx.module.ty_arena.intern(MirTy::TypeParam(param));
+    let payload_ptr = ctx.module.ty_arena.pointer(payload);
+    let unit = ctx.module.ty_arena.unit();
+    let mut b = ThunkBuilder::new(ctx);
+    let src = b.data_param();
+    let dst = b.param(b.data_ty, ParamConvention::Consuming);
+    let src_ptr = b.op1(Op::PtrCast(payload_ptr), src, payload_ptr);
+    let view = b.body.alloc_value(ValueDef::guaranteed(payload, src_ptr));
+    b.insts.push(Instruction::new(InstKind::BeginBorrowAddr {
+        result: view,
+        address: src_ptr,
+        ty: payload,
+    }));
+    let copy = b.body.alloc_value(ValueDef::owned(payload));
+    b.insts.push(Instruction::new(InstKind::Call {
+        result: Some(copy),
+        callee: Callee::Witness {
+            protocol: cloneable,
+            method: key,
+            self_type: payload,
+            method_type_args: Vec::new(),
+        },
+        args: vec![CallArg {
+            value: view,
+            convention: ParamConvention::Borrow,
+        }],
+    }));
+    b.insts
+        .push(Instruction::new(InstKind::EndBorrow { operand: view }));
+    let dst_ptr = b.op1(Op::PtrCast(payload_ptr), dst, payload_ptr);
+    b.insts.push(Instruction::new(InstKind::StoreInit {
+        address: dst_ptr,
+        value: copy,
+    }));
+    for v in [src_ptr, dst_ptr, src, dst] {
+        b.insts
+            .push(Instruction::new(InstKind::DestroyValue { operand: v }));
+    }
+    let ret = b.literal(Immediate::unit(), unit);
+    let data_ty = b.data_ty;
+    b.extra_params.push(ParamDef::new(
+        "dst",
+        dst,
+        data_ty,
+        ParamConvention::Consuming,
+    ));
+    let tps = vec![TypeParamDef::new(param, "Payload")];
+    b.finish(ctx, entity, "__existential.clone", tps, unit, ret);
+    ctx.module.existential_clone_thunk = Some(entity);
+    Some(entity)
 }
 
 /// `fn drop[S](data: Pointer[i8])`: drop the payload in place.
@@ -207,11 +295,60 @@ fn drop_thunk(ctx: &mut LowerCtx) -> Entity {
         address: ptr,
         ty: payload,
     }));
-    b.insts.push(Instruction::new(InstKind::DestroyValue { operand: ptr }));
-    b.insts.push(Instruction::new(InstKind::DestroyValue { operand: data }));
+    b.insts
+        .push(Instruction::new(InstKind::DestroyValue { operand: ptr }));
+    b.insts
+        .push(Instruction::new(InstKind::DestroyValue { operand: data }));
     let ret = b.literal(Immediate::unit(), unit);
-    b.finish(ctx, entity, "__existential.drop", vec![TypeParamDef::new(param, "Payload")], unit, ret);
+    b.finish(
+        ctx,
+        entity,
+        "__existential.drop",
+        vec![TypeParamDef::new(param, "Payload")],
+        unit,
+        ret,
+    );
     ctx.existentials.drop_thunk = Some(entity);
+    entity
+}
+
+/// `fn discard[S](p: Pointer[S])`: ignore the pointer. The body handed to
+/// `consumePointee` once a consuming requirement already moved the payload
+/// out.
+pub(crate) fn discard_fn(ctx: &mut LowerCtx) -> Entity {
+    if let Some(e) = ctx.existentials.discard_fn {
+        return e;
+    }
+    let entity = ctx.next_synthetic_entity();
+    let param = ctx.next_synthetic_entity();
+    ctx.module.register_name(param, "Payload");
+    let payload = ctx.module.ty_arena.intern(MirTy::TypeParam(param));
+    let ptr_ty = ctx.module.ty_arena.pointer(payload);
+    let unit = ctx.module.ty_arena.unit();
+    let mut body = OssaBody::new();
+    let p = body.alloc_value(ValueDef::owned(ptr_ty).with_root(RootProvenance::Param(0)));
+    body.param_count = 1;
+    let ret = body.alloc_value(ValueDef::owned(unit));
+    let entry = body.alloc_block();
+    body.entry = entry;
+    let block = body.block_mut(entry);
+    block.insts = vec![
+        Instruction::new(InstKind::DestroyValue { operand: p }),
+        Instruction::new(InstKind::Literal {
+            result: ret,
+            value: Immediate::unit(),
+        }),
+    ];
+    block.terminator = Terminator::new(TerminatorKind::Return(ret));
+    let mut func = FunctionDef::new(entity, "__existential.discard", unit);
+    func.type_params = vec![TypeParamDef::new(param, "Payload")];
+    func.kind = FunctionKind::Free;
+    func.params
+        .push(ParamDef::new("p", p, ptr_ty, ParamConvention::Consuming));
+    func.body = Some(body);
+    ctx.module.register_name(entity, "__existential.discard");
+    ctx.module.add_function(func);
+    ctx.existentials.discard_fn = Some(entity);
     entity
 }
 
@@ -254,10 +391,21 @@ fn requirement_thunk(ctx: &mut LowerCtx, protocol: Entity, requirement: Entity) 
         }
     }
     let ptr = b.op1(Op::PtrCast(self_ptr), data, self_ptr);
-    // The receiver the witness expects: a borrow of the payload, or the
-    // payload's address for `mutating`.
+    // The receiver the witness expects: a borrow of the payload, its address
+    // for `mutating`, or the payload itself moved out for `consuming` (the
+    // call site then frees the box through `consumePointee`).
     let (recv, borrowed) = match receiver {
         ParamConvention::MutBorrow => (ptr, None),
+        ParamConvention::Consuming => {
+            let v = b.body.alloc_value(ValueDef::owned(self_ty));
+            b.insts.push(Instruction::new(InstKind::Take {
+                result: v,
+                address: ptr,
+                ty: self_ty,
+                independent: true,
+            }));
+            (v, None)
+        },
         _ => {
             let r = b.body.alloc_value(ValueDef::guaranteed(self_ty, ptr));
             b.insts.push(Instruction::new(InstKind::BeginBorrowAddr {
@@ -288,10 +436,13 @@ fn requirement_thunk(ctx: &mut LowerCtx, protocol: Entity, requirement: Entity) 
         args,
     }));
     if let Some(r) = borrowed {
-        b.insts.push(Instruction::new(InstKind::EndBorrow { operand: r }));
+        b.insts
+            .push(Instruction::new(InstKind::EndBorrow { operand: r }));
     }
-    b.insts.push(Instruction::new(InstKind::DestroyValue { operand: ptr }));
-    b.insts.push(Instruction::new(InstKind::DestroyValue { operand: data }));
+    b.insts
+        .push(Instruction::new(InstKind::DestroyValue { operand: ptr }));
+    b.insts
+        .push(Instruction::new(InstKind::DestroyValue { operand: data }));
     let mut params_extra: Vec<ParamDef> = forwarded
         .into_iter()
         .map(|(n, ty, conv, v, label)| ParamDef::with_label(&n, v, ty, conv, label))
@@ -326,9 +477,9 @@ impl ThunkBuilder {
     }
 
     fn data_param(&mut self) -> ValueId {
-        let v = self.body.alloc_value(
-            ValueDef::owned(self.data_ty).with_root(RootProvenance::Param(0)),
-        );
+        let v = self
+            .body
+            .alloc_value(ValueDef::owned(self.data_ty).with_root(RootProvenance::Param(0)));
         self.body.param_count = 1;
         self.data = Some(v);
         v
@@ -412,10 +563,11 @@ pub(crate) fn lower_self_conformance_witnesses(ctx: &mut LowerCtx) {
             .filter(|ty| !done.contains(ty))
             .filter_map(|ty| match ctx.module.ty_arena.get(ty) {
                 MirTy::Named { entity, type_args } => match type_args.as_slice() {
-                    [raw] if matches!(
-                        ctx.module.ty_arena.get(*raw),
-                        MirTy::RawExistential { .. }
-                    ) =>
+                    [raw]
+                        if matches!(
+                            ctx.module.ty_arena.get(*raw),
+                            MirTy::RawExistential { .. }
+                        ) =>
                     {
                         Some((ty, *entity, *raw))
                     },
@@ -473,7 +625,9 @@ fn box_witnesses(ctx: &mut LowerCtx, box_ty: TyId, boxed: Entity, raw: TyId) {
                 .collect();
             witness
                 .methods
-                .push(kestrel_mir::item::WitnessMethodBinding::new(key, func, type_args));
+                .push(kestrel_mir::item::WitnessMethodBinding::new(
+                    key, func, type_args,
+                ));
         }
         // Protocol extension defaults bind directly, with the box as `Self`
         // — as for any conformer.
@@ -481,7 +635,10 @@ fn box_witnesses(ctx: &mut LowerCtx, box_ty: TyId, boxed: Entity, raw: TyId) {
             protocol,
             root: ctx.root,
         });
-        for m in members.iter().filter(|m| m.extension.is_some() && m.declaring_protocol == protocol) {
+        for m in members
+            .iter()
+            .filter(|m| m.extension.is_some() && m.declaring_protocol == protocol)
+        {
             ctx.register_name(m.entity);
             let key = ctx.witness_method_key(m.entity);
             let type_args: Vec<TyId> = params
@@ -490,7 +647,9 @@ fn box_witnesses(ctx: &mut LowerCtx, box_ty: TyId, boxed: Entity, raw: TyId) {
                 .collect();
             witness
                 .methods
-                .push(kestrel_mir::item::WitnessMethodBinding::new(key, m.entity, type_args));
+                .push(kestrel_mir::item::WitnessMethodBinding::new(
+                    key, m.entity, type_args,
+                ));
         }
         kestrel_debug::ktrace!(
             "vtable",
@@ -598,9 +757,15 @@ fn forwarder(
     func.kind = FunctionKind::Free;
     func.type_params = type_params
         .iter()
-        .map(|&p| TypeParamDef::new(p, ctx.module.entity_names.get(&p).cloned().unwrap_or_default()))
+        .map(|&p| {
+            TypeParamDef::new(
+                p,
+                ctx.module.entity_names.get(&p).cloned().unwrap_or_default(),
+            )
+        })
         .collect();
-    func.params.push(ParamDef::new("self", ValueId::new(0), box_ty, receiver));
+    func.params
+        .push(ParamDef::new("self", ValueId::new(0), box_ty, receiver));
     let mut convs = vec![receiver];
     for (i, p) in callable.params.iter().enumerate() {
         let conv = param_convention(p, false);

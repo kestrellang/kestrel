@@ -196,6 +196,11 @@ pub enum Op {
     /// `lang.ptr_with_meta(addr, from)`: `addr`'s address with `from`'s table
     /// (or just `addr` when the result is thin). Result type `ty`.
     PtrWithMeta(TyId),
+    /// `lang.clone_val_into(src, dst)`: clone `*src` (a `ty`) into the
+    /// uninitialized `*dst`. Legalized at mono: the table's clone word for an
+    /// unsized `ty`, else the clone thunk at `ty`
+    /// (`MirModule::existential_clone_thunk`).
+    CloneIntoVal(TyId),
 
     StrPtr,
     StrLen,
@@ -244,6 +249,7 @@ macro_rules! op_ty_variants {
             SizeOfVal,
             AlignOfVal,
             PtrWithMeta,
+            CloneIntoVal,
         }
     };
 }

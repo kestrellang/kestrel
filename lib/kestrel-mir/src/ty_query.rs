@@ -149,10 +149,13 @@ pub fn copy_behavior_in(
         // as @guaranteed pointee values), so copy/drop on it is vacuous — a
         // pointer-scalar bit-copy keeps any defensive path harmless.
         | MirTy::Ref { .. }
-        // A raw existential value is a borrowed (data, table) view of a
-        // payload, never an owner: copied like a ref.
-        | MirTy::RawExistential { .. }
         | MirTy::Error => CopyBehavior::Bitwise,
+
+        // A raw existential is an unsized payload of unknown type: never
+        // copyable. (Its values are borrowed (data, table) views, which are
+        // never copied.) This keeps `Box[any P]` off conditional `Copyable`
+        // and `Cloneable` impls gated on the payload.
+        MirTy::RawExistential { .. } => CopyBehavior::None,
 
         // The closure kind, not the environment payload's fold, decides the
         // closure value's copy class (docs/design/closures.md §"Copy and

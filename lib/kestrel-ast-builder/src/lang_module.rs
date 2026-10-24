@@ -685,8 +685,20 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
     // Size / alignment of the value at an address — the only way to measure
     // an unsized pointee, whose layout lives in its function table
     // (existentials). For a sized `T` they are `sizeof` / `alignof`.
-    seed_generic_fn(world, lang, "sizeof_val", &[("ptr", ptr_t.clone())], i64_ty.clone());
-    seed_generic_fn(world, lang, "alignof_val", &[("ptr", ptr_t.clone())], i64_ty.clone());
+    seed_generic_fn(
+        world,
+        lang,
+        "sizeof_val",
+        &[("ptr", ptr_t.clone())],
+        i64_ty.clone(),
+    );
+    seed_generic_fn(
+        world,
+        lang,
+        "alignof_val",
+        &[("ptr", ptr_t.clone())],
+        i64_ty.clone(),
+    );
     // `addr`'s address with `from`'s table: how a pointer computed through
     // raw address arithmetic gets back an unsized pointee's table
     // (`RcBox.valuePtr`). For a sized `T` it is just `addr`.
@@ -695,8 +707,22 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
         lang,
         "ptr_with_meta",
         &["T", "U"],
-        &[("addr", ptr_of(param_ty("T"))), ("from", ptr_of(param_ty("U")))],
+        &[
+            ("addr", ptr_of(param_ty("T"))),
+            ("from", ptr_of(param_ty("U"))),
+        ],
         ptr_of(param_ty("T")),
+    );
+
+    // Clone `*src` into the uninitialized `*dst`. An unsized pointee clones
+    // through its function table (existentials); a sized one through its
+    // `Cloneable` witness. Only for `T: Cloneable` payloads.
+    seed_generic_fn(
+        world,
+        lang,
+        "clone_val_into",
+        &[("src", ptr_t.clone()), ("dst", ptr_t.clone())],
+        unit_ty(),
     );
 
     // Pointer queries (generic — work on any ptr[T])

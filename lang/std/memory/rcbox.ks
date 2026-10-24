@@ -96,9 +96,9 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
         }
     }
 
-    // Private init used by clone(): adopts an existing storage block
-    // (which has already been refcount-bumped) without allocating.
-    private init(inner inner: Pointer[RcBoxStorage[T]]) {
+    // Used by clone() and forkStorage(): adopts an existing storage block
+    // (already refcount-bumped, or fresh with count 1) without allocating.
+    fileprivate init(inner inner: Pointer[RcBoxStorage[T]]) {
         self.ptr = inner;
     }
 
@@ -216,6 +216,25 @@ extend RcBox[T] where T: Copyable {
     /// copy so the caller can mutate without affecting other clones.
     public func deepClone() -> RcBox[T] {
         RcBox(self.valuePtr().pointee)
+    }
+}
+
+// Copy-on-write's fork: fresh storage holding a clone of the payload, with
+// refcount 1. Works for an unsized payload (`any P` with `P: Cloneable`): the
+// block is measured from this one and the payload clones through its
+// function table (`lang.clone_val_into`).
+extend RcBox[T] where T: Cloneable {
+    public func forkStorage() -> RcBox[T] {
+        let layout = Layout.ofValue(at: self.ptr);
+        var allocator = SystemAllocator();
+        let result: RawPointer? = allocator.allocate(layout);
+        if let .Some(raw) = result {
+            raw.cast[Int64]().write(1);
+            let fresh: RcBox[T] = RcBox(inner: raw.cast[RcBoxStorage[T]]().withMetadata(of: self.ptr));
+            lang.clone_val_into(self.valuePtr().raw, fresh.valuePtr().raw);
+            return fresh
+        }
+        fatalError("RcBox allocation failed")
     }
 }
 

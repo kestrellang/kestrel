@@ -11,7 +11,9 @@
 //! - `PtrWithMeta` pairs one pointer's data word with another's table;
 //! - `SizeOfVal` / `AlignOfVal` fold to the static answer for a sized pointee
 //!   and read the table (plus a struct's sized prefix) for an unsized one;
-//! - `destroy_addr` of an unsized pointee calls the table's drop thunk.
+//! - `destroy_addr` of an unsized pointee calls the table's drop thunk;
+//! - `CloneIntoVal` calls the table's clone word for an unsized pointee and
+//!   the clone thunk at the type for a sized one.
 //!
 //! A cast between two fat pointers, `PtrRead`, and `begin_borrow_addr` of an
 //! unsized pointee need nothing: a fat value and a fat pointer share one
@@ -21,18 +23,31 @@ use crate::callee::Callee;
 use crate::immediate::{Immediate, ImmediateKind};
 use crate::inst::{CallArg, InstKind, Instruction};
 use crate::item::Layout;
-use crate::item::vtable::{VTABLE_ALIGN, VTABLE_DROP, VTABLE_SIZE};
-use crate::mono::MonoModule;
+use std::collections::HashMap;
+
+use kestrel_hecs::Entity;
+
+use crate::item::vtable::{VTABLE_ALIGN, VTABLE_CLONE, VTABLE_DROP, VTABLE_SIZE};
+use crate::mono::{InstantiationKey, MonoModule};
 use crate::ty::MirTy;
 use crate::value::ValueDef;
-use crate::{IntBits, Op, ParamConvention, Signedness, TyId, ValueId};
+use crate::{IntBits, MonoFuncId, Op, ParamConvention, Signedness, TyId, ValueId};
 
-pub fn legalize(module: &mut MonoModule) {
+pub fn legalize(
+    module: &mut MonoModule,
+    func_ids: &HashMap<InstantiationKey, MonoFuncId>,
+    clone_thunk: Option<Entity>,
+) {
     for i in 0..module.functions.len() {
         let Some(mut body) = module.functions[i].body.take() else {
             continue;
         };
-        let mut cx = Legalize { module, body: &mut body };
+        let mut cx = Legalize {
+            module,
+            body: &mut body,
+            func_ids,
+            clone_thunk,
+        };
         cx.run();
         module.functions[i].body = Some(body);
     }
@@ -41,6 +56,8 @@ pub fn legalize(module: &mut MonoModule) {
 struct Legalize<'a> {
     module: &'a mut MonoModule,
     body: &'a mut crate::body::OssaBody,
+    func_ids: &'a HashMap<InstantiationKey, MonoFuncId>,
+    clone_thunk: Option<Entity>,
 }
 
 impl Legalize<'_> {
@@ -136,13 +153,20 @@ impl Legalize<'_> {
         match inst.kind {
             InstKind::Op1 {
                 result,
-                op: op @ (Op::PtrCast(to) | Op::PtrBitcast(to)),
+                op: op @ (Op::PtrCast(_) | Op::PtrBitcast(_)),
                 arg,
             } => {
+                // The op's type is the pointee (`cast_ptr[_, T]`); fatness is
+                // a property of the pointer types on either side.
+                let to = self.ty_of(result);
                 let (from_fat, to_fat) = (self.fat(self.ty_of(arg)), self.fat(to));
                 if from_fat && !to_fat {
                     let data = self.data(out, arg);
-                    out.push(Instruction::new(InstKind::Op1 { result, op, arg: data }));
+                    out.push(Instruction::new(InstKind::Op1 {
+                        result,
+                        op,
+                        arg: data,
+                    }));
                 } else if !from_fat && to_fat {
                     let raw = self.raw_ptr();
                     let null = self.value(raw);
@@ -162,7 +186,11 @@ impl Legalize<'_> {
                 arg,
             } => {
                 let data = self.data(out, arg);
-                out.push(Instruction::new(InstKind::Op1 { result, op, arg: data }));
+                out.push(Instruction::new(InstKind::Op1 {
+                    result,
+                    op,
+                    arg: data,
+                }));
             },
             InstKind::Op1 {
                 result,
@@ -192,6 +220,18 @@ impl Legalize<'_> {
                     }));
                 }
             },
+            InstKind::Op2 {
+                result,
+                op: Op::CloneIntoVal(ty),
+                lhs,
+                rhs,
+            } => {
+                self.clone_into(out, ty, lhs, rhs);
+                out.push(Instruction::new(InstKind::Literal {
+                    result,
+                    value: Immediate::unit(),
+                }));
+            },
             InstKind::DestroyAddr { address, ty } if self.fat(self.ty_of(address)) => {
                 // Drop the payload through its table.
                 let raw = self.raw_ptr();
@@ -220,6 +260,59 @@ impl Legalize<'_> {
         }
     }
 
+    /// Clone `*src` (a `ty`) into `*dst`: through the table's clone word
+    /// when `src` is fat, else the clone thunk instantiated at `ty`.
+    fn clone_into(&mut self, out: &mut Vec<Instruction>, ty: TyId, src: ValueId, dst: ValueId) {
+        let raw = self.raw_ptr();
+        let unit = self.module.ty_arena.unit();
+        let fat = self.fat(self.ty_of(src));
+        let (src_data, dst_data) = if fat {
+            (
+                self.op1(out, Op::FatWord(0), src, raw),
+                self.op1(out, Op::FatWord(0), dst, raw),
+            )
+        } else {
+            (
+                self.op1(out, Op::PtrCast(raw), src, raw),
+                self.op1(out, Op::PtrCast(raw), dst, raw),
+            )
+        };
+        let callee = if fat {
+            let table = self.op1(out, Op::FatWord(1), src, raw);
+            let fn_ty = self.module.ty_arena.intern(MirTy::FuncThin {
+                params: vec![
+                    (raw, ParamConvention::Consuming),
+                    (raw, ParamConvention::Consuming),
+                ],
+                ret: unit,
+            });
+            Callee::Thin(self.op1(out, Op::FatWord(VTABLE_CLONE), table, fn_ty))
+        } else {
+            let id = self
+                .clone_thunk
+                .and_then(|t| self.func_ids.get(&InstantiationKey::new(t, vec![ty], None)));
+            let Some(&id) = id else {
+                kestrel_debug::ktrace!("vtable", "no clone thunk for {:?}", ty);
+                return;
+            };
+            Callee::Resolved(id)
+        };
+        out.push(Instruction::new(InstKind::Call {
+            result: None,
+            callee,
+            args: vec![
+                CallArg {
+                    value: src_data,
+                    convention: ParamConvention::Consuming,
+                },
+                CallArg {
+                    value: dst_data,
+                    convention: ParamConvention::Consuming,
+                },
+            ],
+        }));
+    }
+
     /// `SizeOfVal` / `AlignOfVal` of `ty` at `ptr`, into `result`.
     fn size_or_align(
         &mut self,
@@ -230,8 +323,16 @@ impl Legalize<'_> {
         size: bool,
     ) {
         if !self.fat(self.ty_of(ptr)) {
-            let op = if size { Op::SizeOf(ty) } else { Op::AlignOf(ty) };
-            out.push(Instruction::new(InstKind::Op1 { result, op, arg: ptr }));
+            let op = if size {
+                Op::SizeOf(ty)
+            } else {
+                Op::AlignOf(ty)
+            };
+            out.push(Instruction::new(InstKind::Op1 {
+                result,
+                op,
+                arg: ptr,
+            }));
             return;
         }
         let raw = self.raw_ptr();
@@ -268,7 +369,12 @@ impl Legalize<'_> {
         let tsize = self.op1(out, Op::WordInt(VTABLE_SIZE), table, i64_ty);
         let p = self.int(out, psize as i128);
         let offset = self.round_up(out, p, ta_m1);
-        let end = self.op2(out, Op::Add(IntBits::I64, Signedness::Signed), offset, tsize);
+        let end = self.op2(
+            out,
+            Op::Add(IntBits::I64, Signedness::Signed),
+            offset,
+            tsize,
+        );
         let sum = self.op2(out, Op::Add(IntBits::I64, Signedness::Signed), end, mask);
         let not = self.op1(out, Op::Not(IntBits::I64), mask, i64_ty);
         out.push(Instruction::new(InstKind::Op2 {
@@ -284,7 +390,13 @@ impl Legalize<'_> {
         let MirTy::Named { entity, type_args } = self.module.ty_arena.get(ty).clone() else {
             return None;
         };
-        match &self.module.structs.get(&(entity, type_args))?.type_info.layout {
+        match &self
+            .module
+            .structs
+            .get(&(entity, type_args))?
+            .type_info
+            .layout
+        {
             Some(Layout::Struct(l)) if l.unsized_tail => Some((l.size, l.align)),
             _ => None,
         }

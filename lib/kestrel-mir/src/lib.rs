@@ -116,6 +116,9 @@ pub struct MirModule {
     /// Existential function-table shapes, generic over the payload
     /// (`item::vtable`). Instantiated by mono at each `ImmediateKind::VTable`.
     pub vtable_templates: IndexMap<Entity, crate::item::VTableTemplate>,
+    /// `fn __existential.clone[S](src, dst)`: clones a sized payload. A
+    /// table's clone word and a sized `Op::CloneIntoVal` both call it.
+    pub existential_clone_thunk: Option<Entity>,
 }
 
 impl MirModule {
@@ -135,6 +138,7 @@ impl MirModule {
             boolean_conditional_protocol: None,
             bool_struct: None,
             vtable_templates: IndexMap::new(),
+            existential_clone_thunk: None,
         }
     }
 

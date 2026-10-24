@@ -117,10 +117,9 @@ extend CowBox[T] where T: Sized {
 // `pointeeMutRef()`, which runs the COW barrier first — so `cow.field = v`
 // forks a shared box exactly like `cow.modify { … }` does.
 //
-// Reads work for any payload. The write barrier forks by cloning the payload
-// into fresh storage, which needs its size, so `MutableIndirection` is
-// sized-only until existential payloads can be cloned through their function
-// table (existentials plan Phase 10).
+// The write barrier forks by cloning the payload into fresh storage
+// (`RcBox.forkStorage`), which works for an unsized payload too: an
+// existential's table carries its size and clone.
 extend CowBox[T]: Indirection {
     type Target = T
     public func pointeeRef() -> &T { self.valuePtr().value }
@@ -129,10 +128,10 @@ extend CowBox[T]: Indirection {
 // `any[CowBox] P`: the struct's `init(consuming:)` is the witness.
 extend CowBox[T]: ExistentialBox {}
 
-extend CowBox[T]: MutableIndirection where T: Cloneable, T: Sized {
+extend CowBox[T]: MutableIndirection where T: Cloneable {
     public mutating func pointeeMutRef() -> &mutating T {
         if self.inner.isUnique() == false {
-            self.inner = RcBox(self.inner.getValue().clone())
+            self.inner = self.inner.forkStorage()
         }
         self.valuePtr().mutatingValue
     }

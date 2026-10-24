@@ -1327,6 +1327,15 @@ pub(crate) fn try_intrinsic(
             };
             return Some(bctx.emit_op1(op, ptr, result_ty));
         },
+        // Mono picks the table's clone word or the clone thunk at `T`.
+        "clone_val_into" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            crate::existential::clone_thunk(bctx.ctx)?;
+            let src = bctx.lower_expr(args.first()?.value);
+            let dst = bctx.lower_expr(args.get(1)?.value);
+            return Some(bctx.emit_op2(Op::CloneIntoVal(ty_arg), src, dst, result_ty));
+        },
         "ptr_with_meta" => {
             let result_ty = bctx.resolve_expr_type(expr_id);
             let addr = bctx.lower_expr(args.first()?.value);

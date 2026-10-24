@@ -190,6 +190,7 @@ impl OssaBodyCtx<'_, '_> {
         // Writebacks pushed by THIS call's arg prep (accessor-place receiver,
         // `x(i).mutate()`) drain right after the call — watermark-scoped.
         let wb_mark = self.pending_writebacks.len();
+        let mut consumed_box: Option<(ValueId, ValueId)> = None;
         let mut call_args = if is_static {
             self.lower_call_args_bound(args, resolved, &conventions, 0, &method_type_args)
         } else {
@@ -203,7 +204,16 @@ impl OssaBodyCtx<'_, '_> {
             // == MutBorrow) peels through the mutating accessor. `receiver_ty`
             // is retargeted to the pointee so the callee's type args resolve
             // against the pointee, not the wrapper.
-            let receiver_arg = if let Some(peels) = self.indirection_peels_of(expr_id) {
+            let receiver_arg = if let Some(peels) = self.indirection_peels_of(expr_id)
+                && let Some((arg, held)) =
+                    self.existential_consuming_receiver(receiver_expr, &peels, recv_conv)
+            {
+                // A consuming requirement on an existential: keep the owned
+                // box so the payload can be given up after the call.
+                receiver_ty = lower_resolved_ty(self.ctx, &peels[0].target);
+                consumed_box = Some(held);
+                arg
+            } else if let Some(peels) = self.indirection_peels_of(expr_id) {
                 let mutating = recv_conv == ParamConvention::MutBorrow;
                 let view = self.lower_indirection_chain(receiver_expr, &peels, mutating);
                 receiver_ty = lower_resolved_ty(self.ctx, &peels.last().unwrap().target);
@@ -257,6 +267,9 @@ impl OssaBodyCtx<'_, '_> {
             && let Some(result) =
                 self.emit_dynamic_call(resolved, receiver_ty, call_args.clone(), result_ty)
         {
+            if let Some((box_val, borrow)) = consumed_box {
+                self.emit_release_consumed_box(box_val, borrow);
+            }
             self.drain_writebacks(wb_mark);
             return result;
         }

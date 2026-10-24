@@ -167,10 +167,9 @@ pub fn match_pattern(
                             .zip(a2)
                             .all(|(&p, &c)| match_pattern(arena, p, c, bindings))
                 })
-                && p1
-                    .iter()
-                    .zip(&p2)
-                    .all(|((a1, t1), (a2, t2))| a1 == a2 && match_pattern(arena, *t1, *t2, bindings))
+                && p1.iter().zip(&p2).all(|((a1, t1), (a2, t2))| {
+                    a1 == a2 && match_pattern(arena, *t1, *t2, bindings)
+                })
         },
 
         // Refs match exactly by mutability — `extend &T: P` witnesses carry

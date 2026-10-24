@@ -335,113 +335,63 @@ As built:
   box via `any P: P` (`nested_existential_exec`) or that is E147
   (`any_box_mismatch`). The two tests disagree; E147 is what's built.
 
-### Phase 9: MIR types, fat pointers, unsized layout
+### Phases 9–11: runtime (M4) — done
 
-Files: `lib/kestrel-mir/src/ty.rs`, `lib/kestrel-mir/src/passes/layout.rs`,
-`lib/kestrel-mir-lower/src/ty.rs`, `lib/kestrel-mir-lower/src/body/call/intrinsic.rs`,
-`lib/kestrel-ast-builder/src/lang_module.rs`
+As built. The plan's `VTableKey`/`VTableDef`/`Callee::Dynamic` items became
+templates plus ordinary loads and thin calls, so mono and codegen gained no
+new call kind:
 
-- [ ] **MIR type.** `MirTy::RawExistential { bounds: Vec<(Entity, Vec<TyId>)>, bindings }`.
-      Lower it from `HirTy::RawExistential` and `ResolvedTy`
-      (`mir-lower/src/ty.rs:130`, `result.rs:227`). Remove the
-      `HirTy::Protocol` → `Named` path; E144 already guarantees it can't
-      be reached in a value position.
-- [ ] **Two-word pointers.** `lang.ptr[X]` where `X` is unsized
-      (`RawExistential`, or an unsized-tail struct at an unsized argument)
-      is two words: (data, table).
-      - The layout pass (`passes/layout.rs:121`, `:154-171`) and
-        `mono_size_and_align` both use one helper, `pointee_is_unsized(ty)`,
-        as the single source of truth.
-      - `Pointer[T]` and every box built on it become two words at an
-        unsized `T` with no source change.
-      - `&X` and `&mutating X` at an unsized `X` are two words too, using
-        the same helper.
-- [ ] **Escape checker on two-word references.** It treats them like any
-      other reference: provenance flows through the data word, and the
-      table word carries none. Add a MIR test that borrows through
-      `pointeeRef()` on an existential box and then tries to let the
-      reference escape. It must be rejected the same way as for a sized
-      payload.
-- [ ] **Unsized-tail field offset.** The offset of the last field of an
-      unsized-tail struct is `round_up(prefix_size, table.align)`,
-      computed at runtime. All other field offsets are static.
-- [ ] **Intrinsics.** New entries in `lang_module.rs` next to
-      `sizeof`/`alignof` (`:683-684`): `lang.sizeOfVal(ptr)`,
-      `lang.alignOfVal(ptr)`. Extend `lang.drop_in_place` on a two-word
-      pointer to call the table's drop slot. Lowered in `intrinsic.rs`
-      (`:1316`, `:1417`). On a sized pointee they fold to the static values.
-- [ ] **Unsized function-table pointer.** `Pointer[RcBoxStorage[rawany P]]`
-      carries the `(RcBox, T, P)` table. The table pointer passes
-      through the unsized-tail struct unchanged.
-
-### Phase 10: Function tables, thunks, dynamic calls
-
-Files: `lib/kestrel-mir/src/item/` (new `vtable.rs`), `lib/kestrel-mir/src/inst.rs`,
-`lib/kestrel-mir/src/callee.rs`, `lib/kestrel-mir/src/mono/` (new `vtable.rs`,
-plus `mod.rs`, `expand.rs`, `verify.rs`), `lib/kestrel-mir-lower/src/body/`
-
-- [ ] **New MIR items.**
-      - `VTableKey { boxed: Entity, concrete: TyId, existential: TyId }`,
-        where `boxed` is the box `B`
-      - `VTableDef { key, entries: Vec<VTableEntry> }`, with
-        `VTableEntry = FuncAddr(InstanceId) | Size | Align | TypeDescriptor(TyId) | Parent(VTableKey) | Absent`
-      - `Op::FuncAddr(InstanceId)`, `Op::VTableAddr(VTableKey)`
-      - `Callee::Dynamic { table: Value, slot: u32 }`
-- [ ] **Lower conversions** (`mir-lower/src/body/`, from
-      `existential_conversions`):
-      - **Box:** call `B[T].init(consuming:)`, then unsize.
-      - **Unsize:** rebuild `B`'s pointer fields as two-word pointers with
-        `Op::VTableAddr`.
-      - **Upcast:** load the parent table pointer at the composition or
-        parent index from `ExistentialLayout`.
-- [ ] **Lower requirement calls** on a peeled raw existential to
-      `Callee::Dynamic`, with the slot index from `ExistentialLayout`.
-      The receiver is the data word.
-- [ ] **Mono table synthesis** (`mono/vtable.rs`). On the first
-      `VTableAddr(key)` reached with a concrete `T`:
-      - Intern the key in a single map on the mono state.
-      - Build the header (drop shim from `drop_shim.rs`, size/align from
-        layout, the type descriptor, a clone shim when the existential is
-        `Cloneable`).
-      - Build the parent keys, recursively and on demand.
-      - Build one thunk per slot.
-- [ ] **Thunks.** Each thunk is an ordinary MIR function synthesized like
-      `synthesize_env_shims` (`closure_box.rs:~467`). It re-types the data
-      word as `Pointer[T]`, adapts `self` to `T`'s witness convention, and
-      calls the witness, which it resolves through the existing
-      `resolve_witness_call` (`mono/witness.rs:397`). Thunks become mono
-      roots.
-- [ ] **Consuming-requirement thunks** go through
-      `ConsumingIndirection.consumePointee` on the key's box. The thunk
-      receives the box by value. Non-consuming thunks don't depend on `B`,
-      so they are interned per `(T, requirement)` and shared between the
-      tables of different boxes.
-- [ ] **Type descriptors.** One `TypeDescriptor` static per concrete type
-      that appears in any table. Its address is the identity.
-- [ ] **Verify.** Post-mono checks in `mono/verify.rs`: no `VTableAddr`
-      with a non-concrete key, and no `Callee::Dynamic` slot out of range.
-- [ ] **Tracing.** Add `ktrace!("vtable", …)` at table creation and slot
-      resolution, and add `vtable` to the category list in `CLAUDE.md`.
-
-### Phase 11: Codegen (Cranelift and LLVM)
-
-Files: `lib/kestrel-codegen-cranelift/src/{ty,inst,context}.rs`,
-`lib/kestrel-codegen-llvm/src/{ty,inst,context}.rs`
-
-- [ ] **Value types.** Two-word pointer values in `ty.rs`, the same
-      handling as the existing multi-word closure values
-      (`func_thick_words`).
-- [ ] **Tables.** Each `VTableDef` becomes a read-only global with
-      function relocations. Internal linkage, matching mono functions
-      (`codegen-llvm/src/context.rs:300`, `codegen-cranelift/src/context.rs:309`).
-- [ ] **Instructions.**
-      - `Op::FuncAddr` and `Op::VTableAddr` become symbol addresses.
-      - `Callee::Dynamic` becomes a load of slot `n`, then an indirect call.
-      - `Op::TypeDescriptor` statics are 1-byte globals, so they are
-        guaranteed distinct.
-- [ ] **Triage:** all `types/existential/*_exec.ks` except the downcast
-      tests pass on both backends, along with the MIR snapshots. This is
-      the **M4 exit**.
+- **MIR type.** `MirTy::RawExistential { bounds, bindings }`, lowered from
+  `HirTy`/`ResolvedTy`. A raw existential value is a borrowed view: copy is
+  `None`, never dropped.
+- **Fat values.** One rule, `ty::is_unsized` / `ty::is_fat` over a
+  `TailLookup`: a pointer or reference to an unsized type, or a borrowed
+  raw existential, is two words (data, table). Generic layout uses
+  `GenericTails`; post-mono `MonoModule::is_fat` uses `MonoTails`. Codegen
+  treats a fat value as a 16-byte aggregate. A struct with an unsized last
+  field (`RcBoxStorage[rawany P]`) gets `StructLayout::unsized_tail` and a
+  prefix-only layout.
+- **Tables** (`kestrel-mir/src/item/vtable.rs`). Header: drop thunk (also
+  the type's identity for `as?`), size, align, clone (filled only when the
+  bounds refine `Cloneable`). A single-protocol table then holds one table
+  pointer per declared ancestor (canonical entity order), then its own
+  dispatchable requirements in `ExistentialLayout` order. A composition
+  table holds the header and one table pointer per bound. Templates are
+  built in mir-lower, generic over the payload; a `VTable { template,
+  payload }` literal is instantiated by mono collection (`scan_vtable`),
+  interned per `(template, payload)` (`mono/vtable.rs`), and emitted as a
+  read-only global with relocations by both backends.
+- **Thunks** (`kestrel-mir-lower/src/existential.rs`): one per requirement,
+  generic over the protocol entity as `Self`. Borrow / `mutating` receivers
+  view the payload in place; a `consuming` receiver takes it. Drop and clone
+  thunks are generic over a synthetic `Payload`.
+- **Conversions** (`body/existential.rs`), from `existential_conversions`:
+  Box (`ExistentialBox.init` into a slot), Unsize (rebuild the box's
+  pointer as `(data, table literal)`), Upcast (replace the table via the
+  ancestor / bound words). Upcast to a composition is not supported.
+- **Dynamic calls** (`emit_dynamic_call`): load the table, hop through
+  ancestor / bound words, load the slot, `Callee::Thin`. A `consuming`
+  requirement takes the box by value, views it through `pointeeRef`, and
+  frees it afterwards with `consumePointee` and a no-op body.
+- **Fat legalization** (`mono/fat.rs`, end of mono): pointer casts and
+  queries on fat pointers, `sizeof_val` / `alignof_val` (table, plus the
+  prefix for an unsized-tail struct), `ptr_with_meta`, `destroy_addr` of an
+  unsized pointee (table drop), and `clone_val_into` (table clone, or the
+  clone thunk at a sized type).
+- **Self-conformance witnesses.** For each `B[rawany P]` in the module,
+  each protocol in the bounds' closure without a blocker gets a witness
+  whose requirements peel the box and call through the table; extension
+  defaults bind directly.
+- **Stdlib.** `lang.sizeof_val`, `lang.alignof_val`, `lang.ptr_with_meta`,
+  `lang.clone_val_into`; `Pointer.withMetadata(of:)`; `RcBox.valuePtr`
+  carries the table; `RcBox.forkStorage()` clones any payload into fresh
+  storage, so `CowBox: MutableIndirection` no longer needs `T: Sized`.
+- **Tests:** every `types/existential/*_exec.ks` except the downcast / `is`
+  tests and `nested_existential_exec` (open question in M3) passes on
+  Cranelift and LLVM.
+- **Not done:** MIR snapshot tests for table layout; post-mono table
+  verification; type descriptors as separate statics (the drop-thunk
+  address is the identity instead).
 
 ### Phase 12: Full regression pass
 

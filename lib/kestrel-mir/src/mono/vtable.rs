@@ -92,7 +92,12 @@ impl<'a> VTableInterner<'a> {
                 VTableEntry::Null => MonoVTableEntry::Null,
             })
             .collect();
-        kestrel_debug::ktrace!("vtable", "table #{} {}", id.index(), self.tables[id.index()].name);
+        kestrel_debug::ktrace!(
+            "vtable",
+            "table #{} {}",
+            id.index(),
+            self.tables[id.index()].name
+        );
         self.tables[id.index()].entries = resolved;
         id
     }
