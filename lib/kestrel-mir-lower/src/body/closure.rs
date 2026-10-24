@@ -797,8 +797,14 @@ impl OssaBodyCtx<'_, '_> {
             CaptureSlot::Whole(root) => self.materialize_whole(*root, cap_ty),
             CaptureSlot::Place(cp) => {
                 // By-value projection of a Copyable field — copy the field,
-                // never the receiver.
-                let v = self.lower_place_value_parent(cp.repr);
+                // never the receiver. Through the shared place resolver, so a
+                // var-rooted field is a `FieldAddr` copy that borrows nothing:
+                // a hand-rolled extract left the root borrowed until scope
+                // exit, so consuming the root later (`eat(r)`) was an ICE.
+                let v = match self.lower_place(cp.repr, super::place::FieldViews::Forbid) {
+                    Some(place) => self.read_place(&place),
+                    None => self.lower_place_value_parent(cp.repr),
+                };
                 if self.body.value(v).ownership == kestrel_mir::value::Ownership::Guaranteed {
                     self.emit_copy_value(v)
                 } else {
