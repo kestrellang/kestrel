@@ -16,8 +16,41 @@ import std.iter.(Iterator, Iterable)
 import std.text.(String)
 import std.collections.(Slice)
 
-// ArrayIterator[T] removed — Array.iter() now returns ArraySliceIterator[T]
-// (same (ptr, remaining) layout; single iterator type for all Slice conformers).
+/// Forward iterator over an `Array[T]`: an `ArraySliceIterator[T]` cursor plus
+/// a share of the array's storage.
+///
+/// The share keeps the buffer alive and marks it shared, so the iterator sees
+/// the array's value at the moment `iter()` was called (value semantics, as in
+/// Swift): appending to or reassigning the array while iterating copies or
+/// drops the array's own buffer, never the one being read, and an iterator
+/// returned from a function outlives the array it came from.
+///
+/// # Representation
+///
+/// A `CowBox` share (one refcount) and the `(ptr, remaining)` cursor.
+public struct ArrayIterator[T]: Iterator, Cloneable {
+    type Item = T
+
+    private var storage: CowBox[ArrayStorage[T]]
+    private var cursor: ArraySliceIterator[T]
+
+    /// @name From Storage
+    /// Holds `storage` for the cursor's lifetime.
+    fileprivate init(storage storage: CowBox[ArrayStorage[T]], cursor cursor: ArraySliceIterator[T]) {
+        self.storage = storage;
+        self.cursor = cursor;
+    }
+
+    /// Yields the next element, or `.None` at the end.
+    public mutating func next() -> Optional[T] {
+        self.cursor.next()
+    }
+
+    /// An independent cursor at the same position, holding its own share.
+    public func clone() -> ArrayIterator[T] {
+        ArrayIterator(storage: self.storage.clone(), cursor: self.cursor)
+    }
+}
 
 // ChunksIterator and WindowsIterator live in views.ks (alongside
 // ChunksView / WindowsView).
@@ -222,7 +255,7 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     /// `Iterable` element type — the element produced by `iter().next()`.
     type Item = T
     /// `Iterable` iterator type — the concrete iterator returned by `iter()`.
-    type TargetIterator = ArraySliceIterator[T]
+    type TargetIterator = ArrayIterator[T]
     /// Pattern-matching element type — used by `ArrayMatchable` for
     /// `[a, b, ..rest]` patterns.
     type Element = T
@@ -1328,9 +1361,14 @@ public struct Array[T]: Slice[T], Iterable, ExpressibleByArrayLiteral, _Expressi
     // ITERATION
     // ========================================================================
 
-    /// Returns a forward iterator over the array's elements.
-    public func iter() -> ArraySliceIterator[T] {
-        ArraySliceIterator(ptr: self.ptr(), remaining: self.len())
+    /// Returns a forward iterator over the array's elements, as they are now:
+    /// the iterator shares the storage, so later mutation of the array copies
+    /// first and the iteration is unaffected.
+    public func iter() -> ArrayIterator[T] {
+        ArrayIterator(
+            storage: self.storage.clone(),
+            cursor: ArraySliceIterator(ptr: self.ptr(), remaining: self.len()),
+        )
     }
 
     /// Returns an iterator yielding SHARED REFERENCES (`&T`) to the

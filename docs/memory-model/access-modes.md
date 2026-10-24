@@ -39,6 +39,8 @@ print(p.x);  // OK: p is still valid
 
 The callee cannot modify the borrowed value, and the caller retains full ownership. Borrowing never copies or clones, regardless of the type's copy class — it is always free to pass a `String` or a non-Copyable resource by borrow.
 
+**One exception: overlap with a `mutating` argument.** When a borrowed argument reads the same variable as a `mutating` argument of the same call — `xs.append(contentsOf: xs)`, `addInto(p, p)`, `g(arr, arr(at: 0))` — the borrowed argument is the value *at the call*: it is passed as a copy taken just before the call (for copy-on-write storage such as `Array`, a refcount bump; the write through the `mutating` side then copies its buffer). Without it, writes through one argument would show through, or free storage under, the other. A `not Copyable` value cannot be copied and keeps the alias.
+
 ## Mutating
 
 Use `mutating` for write access. The caller must pass a mutable **place** — a `var` binding, or a mutable projection of one:

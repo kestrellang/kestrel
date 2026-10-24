@@ -278,6 +278,29 @@ pub fn copy_is_mono_dependent(
     ty: TyId,
     where_clause: Option<&WhereClause>,
 ) -> bool {
+    let gating = |entity: Entity| {
+        module
+            .structs
+            .get(&entity)
+            .map(|s| s.conditionally_copyable.clone())
+            .or_else(|| module.enums.get(&entity).map(|e| e.conditionally_copyable.clone()))
+    };
+    copy_is_mono_dependent_by(arena, module, ty, where_clause, &gating)
+}
+
+/// [`copy_is_mono_dependent`] with the gating positions of a nominal supplied
+/// by the caller. Body lowering passes the front-end query
+/// (`ConditionalCopyableParams`): a body can lower before its container's
+/// `StructDef`/`EnumDef` exists in the module, and reading the module there
+/// answered "not mono-dependent" by lowering order (`Optional.take` copied a
+/// non-Copyable payload).
+pub fn copy_is_mono_dependent_by(
+    arena: &TyArena,
+    module: &MirModule,
+    ty: TyId,
+    where_clause: Option<&WhereClause>,
+    gating_of: &dyn Fn(Entity) -> Option<Vec<usize>>,
+) -> bool {
     match arena.get(ty) {
         MirTy::TypeParam(entity) => {
             let entity = *entity;
@@ -301,31 +324,21 @@ pub fn copy_is_mono_dependent(
         MirTy::AssociatedProjection { .. } => true,
         MirTy::Tuple(elems) => {
             let elems = elems.clone();
-            elems
-                .iter()
-                .any(|&e| copy_is_mono_dependent(arena, module, e, where_clause))
+            elems.iter().any(|&e| {
+                copy_is_mono_dependent_by(arena, module, e, where_clause, gating_of)
+            })
         },
         MirTy::Named { entity, type_args } => {
             let entity = *entity;
             let type_args = type_args.clone();
-            let gating = module
-                .structs
-                .get(&entity)
-                .map(|s| s.conditionally_copyable.clone())
-                .or_else(|| {
-                    module
-                        .enums
-                        .get(&entity)
-                        .map(|e| e.conditionally_copyable.clone())
-                });
-            let Some(gating) = gating else {
+            let Some(gating) = gating_of(entity) else {
                 return false;
             };
             // Only gating positions affect the container's copyability.
             gating.iter().any(|&pos| {
-                type_args
-                    .get(pos)
-                    .is_some_and(|&arg| copy_is_mono_dependent(arena, module, arg, where_clause))
+                type_args.get(pos).is_some_and(|&arg| {
+                    copy_is_mono_dependent_by(arena, module, arg, where_clause, gating_of)
+                })
             })
         },
         _ => false,

@@ -11,9 +11,8 @@
 // copies the element and is safe.
 //
 // Expected: `b` is the element's value at the call.
-// EXPECTED TO FAIL until a `mutating` argument may not overlap another argument
-// of the same call. If the fix is static rejection, this becomes a
-// diagnostics test.
+// Fixed: the borrowed argument is copied at the call when it overlaps a
+// `mutating` argument (docs/memory-model/access-modes.md).
 
 module Test
 

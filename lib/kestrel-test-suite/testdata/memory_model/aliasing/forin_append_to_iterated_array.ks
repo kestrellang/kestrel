@@ -12,7 +12,8 @@
 //
 // Expected semantics (Swift's `IndexingIterator`): the iterator sees the
 // array's value at the start of the loop — exactly 1, 2, 3.
-// EXPECTED TO FAIL until array iterators keep their storage alive.
+// Fixed: `ArrayIterator` holds a share of the storage, so the array's own
+// mutation copies (or drops) its buffer, never the one being iterated.
 
 module Test
 

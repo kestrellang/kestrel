@@ -43,6 +43,9 @@ pub struct MonoModule {
     pub statics: IndexMap<Entity, crate::item::static_def::StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// Duplications of a `not Copyable` instantiation found by
+    /// `expand_destroy_copy`; `verify_mono` reports each one as an error.
+    pub instantiation_findings: Vec<crate::mono::expand::InstantiationFinding>,
 }
 
 impl MonoModule {
@@ -54,6 +57,7 @@ impl MonoModule {
             statics: IndexMap::new(),
             ty_arena,
             entity_names: IndexMap::new(),
+            instantiation_findings: Vec::new(),
         }
     }
 

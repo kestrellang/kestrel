@@ -12,10 +12,8 @@
 // visible either way.
 //
 // Expected: `src` is `p`'s value at the call, so `p` becomes (2, 11).
-// EXPECTED TO FAIL until a `mutating` argument may not alias another argument
-// of the same call. If the decision is static rejection, this becomes a
-// diagnostics test; if aliasing stays legal, delete it and say so in
-// access-modes.md.
+// Fixed: the borrowed argument is copied at the call when it overlaps a
+// `mutating` argument (docs/memory-model/access-modes.md).
 
 module Test
 

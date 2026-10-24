@@ -326,6 +326,10 @@ pub(crate) struct OssaBodyCtx<'a, 'w> {
     /// Remaining use count per SSA local — decremented on each lower_expr.
     /// When the count hits zero, the local is moved instead of copied.
     local_use_counts: HashMap<HirLocalId, usize>,
+    /// Like `local_use_counts`, but a whole-local assignment target
+    /// (`self = .None`) is a write, not a read — the move-or-copy decision
+    /// in `is_single_use` asks about reads only.
+    local_read_counts: HashMap<HirLocalId, usize>,
     /// Place-based closure capture plan for this body, keyed by closure
     /// `HirExprId`. Computed once (post-inference) and consumed by
     /// `lower_closure_expr`. Arc-shared with the query memo cache.
@@ -473,6 +477,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             temp_counter: 0,
             current_span: None,
             local_use_counts: HashMap::new(),
+            local_read_counts: HashMap::new(),
             init_field_flags: Vec::new(),
             field_inits: Vec::new(),
             value_forwarding: HashMap::new(),
@@ -506,6 +511,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     pub fn lower_body(&mut self) {
         // Build use counts for SSA locals — enables move-on-last-use.
         self.local_use_counts = self.count_local_uses();
+        self.local_read_counts = self.count_local_reads();
 
         let locals: Vec<_> = self
             .hir
@@ -933,10 +939,25 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         counts
     }
 
-    /// Returns true if this SSA local is referenced exactly once in the HIR,
-    /// meaning this reference is the only use and the value can be moved.
+    /// `count_local_uses` minus whole-local assignment targets.
+    fn count_local_reads(&self) -> HashMap<HirLocalId, usize> {
+        let mut counts = self.count_local_uses();
+        for (_, expr) in self.hir.exprs.iter() {
+            if let HirExpr::Assign { target, .. } = expr
+                && let HirExpr::Local(id, _) = &self.hir.exprs[*target]
+                && let Some(n) = counts.get_mut(id)
+            {
+                *n -= 1;
+            }
+        }
+        counts
+    }
+
+    /// Returns true if this local is READ exactly once in the HIR, so that
+    /// read can move the value out. Writes (`self = .None` in
+    /// `Optional.take`) do not count: they reinitialize the slot.
     fn is_single_use(&self, hir_id: HirLocalId) -> bool {
-        self.local_use_counts.get(&hir_id).copied().unwrap_or(0) == 1
+        self.local_read_counts.get(&hir_id).copied().unwrap_or(0) == 1
     }
 
     /// Total HIR read count for a local (0 if never read). Seeds a ref
@@ -1015,11 +1036,20 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .functions
             .get(&self.func_entity)
             .and_then(|f| f.where_clause.as_ref());
-        kestrel_mir::ty_query::copy_is_mono_dependent(
+        // Gating positions come from the front-end query, not the module:
+        // the container's def may not be lowered yet (see
+        // `copy_is_mono_dependent_by`).
+        let query = &self.ctx.query;
+        let root = self.ctx.root;
+        let gating = |entity: kestrel_hecs::Entity| {
+            Some(query.query(kestrel_semantics::ConditionalCopyableParams { entity, root }))
+        };
+        kestrel_mir::ty_query::copy_is_mono_dependent_by(
             &self.ctx.module.ty_arena,
             &self.ctx.module,
             ty,
             wc,
+            &gating,
         )
     }
 
@@ -2849,6 +2879,62 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.stamp_root(address, new_root);
     }
 
+    /// Value semantics for a borrowed argument that overlaps a `mutating`
+    /// argument of the same call (`xs.append(contentsOf: xs)`, `f(p, p)`,
+    /// `g(arr, arr(at: 0))`): the borrowed one is the value AT the call, as in
+    /// Swift. Without this the callee's writes through the `mutating` side
+    /// show through the borrow, or free the storage it reads. The overlap is
+    /// decided on storage roots (borrow-source chain, then the address
+    /// anchor), and the borrowed argument is replaced by a borrow of a copy
+    /// taken now — for COW storage a refcount bump, so the write that follows
+    /// copies instead. Types whose copy is unknowable before mono (a bare
+    /// type parameter) or impossible (`not Copyable`) keep the alias.
+    fn snapshot_overlapping_borrows(&mut self, args: &mut [CallArg]) {
+        let mut_roots: Vec<ValueId> = args
+            .iter()
+            .filter(|a| a.convention == ParamConvention::MutBorrow)
+            .filter_map(|a| self.storage_root(a.value))
+            .collect();
+        if mut_roots.is_empty() {
+            return;
+        }
+        for a in args.iter_mut() {
+            if a.convention != ParamConvention::Borrow
+                || self.body.value(a.value).ownership != Ownership::Guaranteed
+            {
+                continue;
+            }
+            let Some(root) = self.storage_root(a.value) else {
+                continue;
+            };
+            let ty = self.body.value(a.value).ty;
+            if !mut_roots.contains(&root)
+                || self.is_non_copyable(ty)
+                || self.copy_behavior_is_mono_dependent(ty)
+            {
+                continue;
+            }
+            let snapshot = self.emit_copy_value(a.value);
+            a.value = self.emit_begin_borrow(snapshot);
+        }
+    }
+
+    /// The storage a borrowed value reads: follow the borrow-source chain to
+    /// its origin, then a field address to the slot it projects from.
+    fn storage_root(&self, v: ValueId) -> Option<ValueId> {
+        let mut cur = v;
+        for _ in 0..64 {
+            match self.body.value(cur).borrow_source {
+                Some(src) if src != cur => cur = src,
+                _ => break,
+            }
+        }
+        if cur == v {
+            return None;
+        }
+        Some(self.addr_anchors.get(&cur).copied().unwrap_or(cur))
+    }
+
     /// A callee may store any view-closure-carrying argument into a
     /// `mutating` argument whose type can hold one (`func set(_ slot:
     /// mutating () -> (), f: () -> ()) { slot = f }`), so that argument's
@@ -3071,6 +3157,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         for a in args.iter_mut() {
             a.value = self.resolve_value(a.value);
         }
+        self.snapshot_overlapping_borrows(&mut args);
         let callee = match callee {
             Callee::Thin(v) => Callee::Thin(self.resolve_value(v)),
             Callee::Thick(v) => Callee::Thick(self.resolve_value(v)),

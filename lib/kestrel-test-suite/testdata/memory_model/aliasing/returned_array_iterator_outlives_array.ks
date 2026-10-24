@@ -2,23 +2,17 @@
 // stdlib: true
 // expect-exit: 0
 
-// Returning `a.iter()` for a local array `a`. `ArraySliceIterator` holds a
-// `Pointer` into `a`'s storage with no retain, and `Pointer` is `Static`, so
-// the escape checker (E494) never sees the iterator as carrying a view of `a`.
-// `a` is dropped at return and the caller iterates freed storage. Found in the
-// 2026-10 architecture review at 9767d2dc: segfault (exit 139), valgrind
-// invalid read in `ArraySliceIterator.next`.
-//
-// Expected semantics: the iterator keeps the storage alive and yields both
-// elements. (If the fix is instead to reject the return with E494, this
-// becomes a diagnostics test.)
-// EXPECTED TO FAIL until array iterators keep their storage alive.
+// Returning `a.iter()` for a local array `a`. `Array.iter()` returns an
+// `ArrayIterator`, which holds a share of the array's storage, so the buffer
+// outlives `a` and the caller iterates both elements. (Found in the 2026-10
+// architecture review at 9767d2dc, when the iterator held only a raw pointer:
+// segfault.)
 
 module Test
 
-import std.memory.ArraySliceIterator
+import std.collections.ArrayIterator
 
-func make() -> ArraySliceIterator[String] {
+func make() -> ArrayIterator[String] {
     let a = [
         "first heap-allocated string, long enough to avoid inline storage",
         "second heap-allocated string, long enough to avoid inline storage",

@@ -8,14 +8,14 @@ Top-level dispatch anchors:
 - HIR lowering switch: `lib/kestrel-hir-lower/src/expr.rs` (`LowerCtx::lower_expr` →
   `lower_expr_node`)
 - Inference gen switch: `lib/kestrel-type-infer/src/generate.rs:60` (`gen_expr`)
-- Constraint dispatch: `lib/kestrel-type-infer/src/solver.rs:583` (`try_solve`)
+- Constraint dispatch: `lib/kestrel-type-infer/src/solver/:583` (`try_solve`)
 - MIR lowering switch: `lib/kestrel-mir-lower/src/body_lower.rs:445` (`lower_expr`)
 
 Solver functions (cite these when tracing a constraint):
 `solve_equal` 817, `solve_coerce` 955, `solve_conforms` 1076, `solve_associated` 1099,
 `solve_call` 1251, `solve_overloaded_call` 1379, `solve_member` 1702,
 `solve_implicit` 2182, `solve_implicit_pat` 2293, `solve_tuple_rest_pat` 2401,
-`solve_reduce` 716 (all in `solver.rs`).
+`solve_reduce` 716 (all in `solver/`).
 
 ---
 

@@ -91,6 +91,7 @@ pub fn expand_destroy_copy(
         .collect();
 
     for fi in 0..module.functions.len() {
+        let first_finding = findings.len();
         let source = module.functions[fi].source;
         // Per-instantiation drop-recursion guard: skip ONLY a DestroyValue of
         // this shim's exact monomorphic self type, reconstructed as
@@ -115,9 +116,13 @@ pub fn expand_destroy_copy(
             &erased,
             &mut findings,
         );
+        for f in &mut findings[first_finding..] {
+            f.func_idx = fi;
+        }
     }
 
     report_instantiation_findings(&findings);
+    module.instantiation_findings = findings.clone();
     findings
 }
 
@@ -172,6 +177,7 @@ fn report_instantiation_findings(findings: &[InstantiationFinding]) {
 /// reporting nothing (it cannot see instantiations).
 #[derive(Debug, Clone)]
 pub struct InstantiationFinding {
+    pub func_idx: usize,
     pub func_name: String,
     pub block: usize,
     pub inst: usize,
@@ -1208,6 +1214,7 @@ fn expand_function(
                         // see `InstantiationFinding` for the measurement.
                         {
                             findings.push(InstantiationFinding {
+                                func_idx: usize::MAX, // set by the caller loop
                                 func_name: func.name.clone(),
                                 block: block_idx,
                                 inst: inst_idx,

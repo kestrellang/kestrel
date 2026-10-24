@@ -46,6 +46,20 @@ pub fn verify_mono(module: &MonoModule) -> MonoVerifyResult {
         verify_function(module, fi, func, &mut errors);
     }
 
+    // A generic body that copies a value whose instantiation is `not Copyable`
+    // (expansion found it and could only bit-copy it): two owners of one
+    // value, a double free at runtime. Never silent.
+    for f in &module.instantiation_findings {
+        errors.push(MonoVerifyError {
+            user_facing: false,
+            func_idx: f.func_idx,
+            block: Some(BlockId::new(f.block)),
+            inst: Some(f.inst),
+            message: f.message.clone(),
+            span: f.span.clone(),
+        });
+    }
+
     // Check all structs have layouts
     for s in module.structs.values() {
         if s.type_info.layout.is_none() {

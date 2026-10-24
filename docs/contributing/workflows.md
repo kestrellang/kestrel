@@ -19,7 +19,7 @@ A "feature" here means new syntax or a new semantic construct that spans several
 | 7. Name resolution | `lib/kestrel-name-res/src/` |
 | 8. HIR shape | `lib/kestrel-hir/src/body.rs` |
 | 9. HIR lowering | `lib/kestrel-hir-lower/src/` |
-| 10. Inference | `lib/kestrel-type-infer/src/constraint.rs`, `solver.rs`, `generate.rs` |
+| 10. Inference | `lib/kestrel-type-infer/src/constraint.rs`, `solver/`, `generate.rs` |
 | 11. Analyzers | `lib/kestrel-analyze/src/body|decl|compilation/` |
 | 12. MIR lowering | `lib/kestrel-mir-lower/src/` |
 | 13. Codegen | `lib/kestrel-codegen-cranelift/src/` |
@@ -141,7 +141,7 @@ Type-inference constraints live in `lib/kestrel-type-infer/src/constraint.rs`.
 
 1. Add the variant with the minimum data it needs, and a doc comment explaining the rule ("`a = b` — structural type equality", "`ty : Protocol` — protocol conformance", etc.).
 2. Decide whether the variant is **eager** (solves on first visit) or **deferred** (requires concrete input, re-checked each solver round). Document this in the variant's doc comment.
-3. Add a `try_solve_*` function in `lib/kestrel-type-infer/src/solver.rs` and wire it into the solver loop.
+3. Add a `try_solve_*` function in `lib/kestrel-type-infer/src/solver/` and wire it into the solver loop.
 4. Generate the constraint where the language construct is lowered — typically in `generate.rs`.
 5. Add focused tests under `testdata/inference/`.
 

@@ -5,9 +5,9 @@ module std.collections
 import std.core.(Bool, Cloneable, Comparable, fatalError)
 import std.numeric.(Int64)
 import std.result.(Optional)
-import std.memory.(ArraySliceIterator)
+
 import std.iter.(Iterator, Iterable)
-import std.collections.(Array)
+import std.collections.(Array, ArrayIterator)
 
 /// Binary min-heap backed by `Array[T]`.
 ///
@@ -47,7 +47,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// `Iterable` element type.
     type Item = T
     /// `Iterable` iterator type — reuses the backing array's iterator.
-    type TargetIterator = ArraySliceIterator[T]
+    type TargetIterator = ArrayIterator[T]
 
     private var data: Array[T]
 
@@ -260,7 +260,7 @@ public struct Heap[T]: Iterable, Cloneable where T: Comparable {
     /// var iter = h.iter();
     /// // yields elements in heap-array order, not 1, 3, 5
     /// ```
-    public func iter() -> ArraySliceIterator[T] {
+    public func iter() -> ArrayIterator[T] {
         self.data.iter()
     }
 

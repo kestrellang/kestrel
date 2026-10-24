@@ -48,7 +48,7 @@ If a variant entry is missing or a new variant is added:
    (`lib/kestrel-hir/src/body.rs`) to confirm the scope.
 2. Trace the variant through HIR-lower (`syntax.rs` for multi-child syntax decisions,
    `expr.rs` / `stmt.rs` / `pat.rs` / `desugar.rs`), inference
-   (`generate.rs` / `solver.rs`), and MIR-lower (`body_lower.rs`).
+   (`generate.rs` / `solver/`), and MIR-lower (`body_lower.rs`).
 3. Add the entry with the same shape as existing ones — cite `file:line`, include a
    match-arm excerpt for branching variants, note gotchas. TODO markers are allowed
    when a variant can't be fully traced; never skip silently.
@@ -86,11 +86,11 @@ single variant:
 - Inference gen_expr: `lib/kestrel-type-infer/src/generate.rs:60`
 - Inference gen_stmt: `lib/kestrel-type-infer/src/generate.rs:551`
 - Inference gen_pat: `lib/kestrel-type-infer/src/generate.rs:607`
-- Constraint dispatch: `lib/kestrel-type-infer/src/solver.rs:583` (`try_solve`)
+- Constraint dispatch: `lib/kestrel-type-infer/src/solver/:583` (`try_solve`)
 - MIR lower_expr: `lib/kestrel-mir-lower/src/body_lower.rs:445`
 - MIR lower_stmt: `lib/kestrel-mir-lower/src/body_lower.rs:419`
 
-Solver per-constraint fns (all in `solver.rs`): `solve_equal` 817, `solve_coerce` 955,
+Solver per-constraint fns (all in `solver/`): `solve_equal` 817, `solve_coerce` 955,
 `solve_conforms` 1076, `solve_associated` 1099, `solve_call` 1251,
 `solve_overloaded_call` 1379, `solve_member` 1702, `solve_implicit` 2182,
 `solve_implicit_pat` 2293, `solve_tuple_rest_pat` 2401, `solve_reduce` 716.

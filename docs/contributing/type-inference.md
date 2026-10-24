@@ -27,7 +27,7 @@ Downstream code (analyzers, MIR lowering) reads these fields; it does not re-run
 | `src/constraint.rs` | `Constraint` enum. |
 | `src/error.rs` | `InferError` enum. |
 | `src/generate.rs` | HIR walker that emits constraints. |
-| `src/solver.rs` | The fixpoint loop and per-constraint solve routines. |
+| `src/solver/` | The fixpoint loop and per-constraint solve routines. |
 | `src/unify.rs` | Unification. |
 | `src/resolve.rs` | `TypeResolver` / `WorldResolver` — name resolution for types during inference. |
 | `src/where_clauses.rs` | `WhereClausesOf` query — resolves entity-scoped where clauses. |
@@ -83,7 +83,7 @@ Constraints are generated in `generate.rs` while walking the HIR body. For each 
 ## The solver
 
 ```rust
-// src/solver.rs
+// src/solver/
 pub fn solve(ctx: &mut InferCtx<'_>, hir: &HirBody) {
     fixpoint(ctx);                       // Phase 1: main solving
     apply_literal_defaults(ctx);         // Phase 2: literals default to Int64 / Float64 / String / …
@@ -192,7 +192,7 @@ let result = ctx.report_error(InferError::TypeMismatch { … });
 
 1. Add it to `Constraint` in `constraint.rs` with a doc comment: what rule, eager or deferred, why.
 2. Generate it where the HIR construct it represents is walked, in `generate.rs`.
-3. Add a `try_solve_*` function in `solver.rs`. Return `Solved` / `Deferred` / `Errored`.
+3. Add a `try_solve_*` function in `solver/`. Return `Solved` / `Deferred` / `Errored`.
 4. Wire it into the fixpoint dispatch (the big match in `fixpoint`).
 5. If the constraint can fail, add the corresponding `InferError` variant (see below — **five** files).
 6. Write focused tests under `lib/kestrel-test-suite/testdata/inference/`.

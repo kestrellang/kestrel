@@ -6,7 +6,7 @@ import std.core.(Equatable, Comparable, Ordering, Hashable, Hasher, Bool, Contro
 import std.text.(String, StringBuilder, Formatter, FormatOptions, Formattable)
 import std.result.(Result)
 import std.numeric.(Int64, UInt8)
-import std.memory.(ArraySlice, Pointer)
+import std.memory.(ArraySlice, Pointer, swap)
 import std.iter.(Iterator)
 
 /// A type-safe stand-in for nullable references — either `Some(value)` or
@@ -458,8 +458,11 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// opt.take();   // None;     opt is still None
     /// ```
     public mutating func take() -> Optional[T] {
-        let result = self;
-        self = .None;
+        // A move, not `let result = self`: copying `self` duplicates a
+        // non-Copyable payload (an iterator owning storage) and the
+        // assignment below would then free what `result` still holds.
+        var result: Optional[T] = .None;
+        swap(self, result);
         result
     }
 
@@ -475,9 +478,10 @@ public enum Optional[T]: not Copyable where T: not Static {
     /// var none: Int64? = null;
     /// none.replace(1);   // None;    none is now Some(1)
     /// ```
-    public mutating func replace(value: T) -> Optional[T] {
-        let old = self;
-        self = .Some(value);
+    public mutating func replace(consuming value: T) -> Optional[T] {
+        // A move, for the same reason as `take`.
+        var old: Optional[T] = .Some(value);
+        swap(self, old);
         old
     }
 
