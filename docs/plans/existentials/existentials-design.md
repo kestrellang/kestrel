@@ -49,7 +49,7 @@ let shapes: Array[any Shape] = [Circle(radius: 1.0), Square(side: 2.0)];
 for s in shapes { print(s.area()) }
 
 // An explicit box.
-let owned: any[UniqueBox] Shape = Circle(radius: 3.0);   // one owner, move-only
+let owned: any[OwnedBox] Shape = Circle(radius: 3.0);   // one owner, move-only
 let valued: any[CowBox] Shape = Square(side: 1.0);       // value semantics (needs Shape: Cloneable)
 
 // Associated types pinned.
@@ -77,7 +77,7 @@ TyAny = 'any' TypeArgumentList? Ty ('and' Ty)*
 ```
 
 - `TypeArgumentList` holds exactly one argument: the box, as an
-  **unapplied** generic type (`UniqueBox`, not `UniqueBox[T]`).
+  **unapplied** generic type (`OwnedBox`, not `OwnedBox[T]`).
 - The bounds after it are protocol references, optionally with
   associated-type bindings (`Iterator[Item = Int64]`). A binding is a
   `TypeArgBinding` node inside the bound's type-argument list; anywhere other
@@ -114,9 +114,8 @@ part of the language, not a compiler-internal list.
   `Copyable` and `Static`.
   - Every concrete type is `Sized` except `rawany P` and structs whose
     **last stored field** is an unsized type parameter.
-  - Those are "unsized-tail" structs. `RcBoxStorage[T]` and
-    `UniqueBoxStorage[T]` are already shaped this way: a header, then
-    `value: T`.
+  - Those are "unsized-tail" structs. `RcBoxStorage[T]` is already shaped
+    this way: a header, then `value: T`.
 - **Implicit bound.** Every type parameter gets an implicit `T: Sized`. It is
   injected in the same place as the implicit `Copyable` bound
   (`inject_implicit_copyable_bounds`, `kestrel-type-infer/src/where_clauses.rs:296`).
@@ -127,7 +126,7 @@ part of the language, not a compiler-internal list.
   parameter, return type, or non-tail field.
 - **Members needing `Sized`.** On a `not Sized` declaration, a member whose
   signature uses `T` by value is unavailable at unsized `T`. Examples are
-  `UniqueBox.takeValue() -> T` and `CowBox.read() -> T`. This works exactly
+  `OwnedBox.takeValue() -> T` and `CowBox.read() -> T`. This works exactly
   like a member in a `where T: Copyable` extension: the implicit
   `Sized` requirement is recorded on that member.
 - **Associated types follow the same rule.** An associated type is
@@ -177,7 +176,7 @@ How the stdlib boxes fit:
 |---|---|---|---|---|
 | `RcBox` (**default**) | Refcount bump (shares) | Yes, visible to every copy | No | Yes |
 | `CowBox` | Refcount bump | Yes, forks first when shared | No | No: `CowBox[T]` requires `T: Cloneable`, so `any[CowBox] P` needs `P: Cloneable` |
-| `UniqueBox` | Only if `UniqueBox[rawany P]` is `Cloneable`, i.e. `P: Cloneable` (deep clone) | Yes | Yes | Yes |
+| `OwnedBox` | Only if `OwnedBox[rawany P]` is `Cloneable`, i.e. `P: Cloneable` (deep clone) | Yes | Yes | Yes |
 
 **Every row falls out of the box's own declaration.** Its `Cloneable` and
 `MutableIndirection` conformances and their `where` clauses, evaluated at
@@ -186,10 +185,15 @@ copy rules ("depends on the box").
 
 Required stdlib changes:
 
-- **`UniqueBox`**: add `Indirection`, `MutableIndirection`,
-  `ExistentialBox` and `ConsumingIndirection` conformances, plus
-  `extend UniqueBox[T]: Cloneable where T: Cloneable`.
-  - So `any[UniqueBox] P` is `Cloneable` exactly when `UniqueBox[rawany P]`
+- **`OwnedBox`** (new, `std.memory`): the unique, owning box. It frees its
+  payload on `deinit` and conforms to `MutableIndirection`,
+  `ExistentialBox` and `ConsumingIndirection`, plus
+  `extend OwnedBox[T]: Cloneable where T: Cloneable`.
+  - Why not `UniqueBox`: that is the compiler-internal handle for
+    `consuming` closures. It has no `deinit` on purpose (dropping the handle
+    must not free the block), so it can't own an existential's payload. It
+    stays closure-only.
+  - So `any[OwnedBox] P` is `Cloneable` exactly when `OwnedBox[rawany P]`
     is. That holds when `rawany P: Cloneable`, i.e. `P: Cloneable` (§1).
     There's no existential-specific rule.
   - At a sized `T`, `clone` allocates and clones the value as usual.
@@ -204,21 +208,21 @@ Required stdlib changes:
       /// payload out of it (or destroy it in place). The box then frees its
       /// storage without running the payload's deinit.
       consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R
+          where R: not Copyable, R: not Static
   }
   ```
   - **Why a closure.** The box can't return the payload by value, because
     its type is unsized. Only the thunk, which knows the concrete `T`, can
     move it out. The closure keeps "move out, then free" in one call, so no
     caller can free the storage twice or forget to free it.
-  - **Fits what exists.** `UniqueBox.takeValue()` becomes
-    `consumePointee { p in p.move() }` at a sized `T`.
+  - **Fits what exists.** `OwnedBox.takeValue()` is
+    `consumePointee { (p) in p.take() }` at a sized `T`.
   - **Shared boxes don't conform.** `RcBox` and `CowBox` can't give up a
     payload that other copies still see, so consuming requirements need
-    `any[UniqueBox] P`.
-- **`RcBox`, `CowBox`, `UniqueBox`, `Pointer`**: add `T: not Sized`.
+    `any[OwnedBox] P`.
+- **`RcBox`, `CowBox`, `OwnedBox`, `Pointer`**: add `T: not Sized`.
   - `RcBox`'s hand-computed `valueOffset = sizeof(Int64)` (`rcbox.ks:110`)
     becomes a layout computation that honours the payload's alignment.
-  - `UniqueBox`'s equivalent changes the same way.
   - No Kestrel type can be aligned above 8 bytes today (there is no
     `@align` and no 128-bit integer), so the fixed offset is not a live
     bug yet. It becomes one the moment the alignment is only known at
@@ -239,7 +243,7 @@ expected type `B[rawany P]`:
 
 - **Recording.** The checker records the rule on the expression, like
   `PromotionInfo`, and MIR lowering emits it.
-- **The box is part of the type.** `any[UniqueBox] P` and `any P` are
+- **The box is part of the type.** `any[OwnedBox] P` and `any P` are
   unrelated types. To move a value into a different box, get the concrete
   value out first (with `as?`), or box the existential itself through
   `any P: P` (§6). The second option gives a box inside a box.
@@ -367,7 +371,7 @@ For example:
 | `any Equatable` | No | `==` takes `Self` |
 | `any Counter` with a `mutating` requirement | Yes | `RcBox` allows mutation (shared by every copy) |
 | `any Closeable` with a `consuming func close()` | No | `RcBox` is not `ConsumingIndirection` |
-| `any[UniqueBox] Closeable` | Yes | `UniqueBox` is `ConsumingIndirection` |
+| `any[OwnedBox] Closeable` | Yes | `OwnedBox` is `ConsumingIndirection` |
 
 The diagnostic names the requirement that blocks it.
 
@@ -547,7 +551,7 @@ What the compiler does today on `80297742`:
 | **Analyzers** | Box validity (§3: one `not Sized` param, unsizable fields, `ExistentialBox`); unsized-by-value uses inside `not Sized` declarations; bare protocol type; non-conforming `as?` warning |
 | **MIR** | `MirTy::RawExistential`; fat `lang.ptr` to an unsized pointee (2 words); unsized-tail layout with dynamic field offset; `sizeOfVal`/`alignOfVal`/`drop_in_place` on fat pointers via the table; `VTableDef`, `Op::FuncAddr`, `Op::VTableAddr`, `Callee::Dynamic`; thunk and table synthesis in mono |
 | **Codegen** | Cranelift + LLVM: read-only table globals with function relocations, fat-pointer values, indirect calls |
-| **Stdlib** | `ExistentialBox`, `ConsumingIndirection`; `SharedBox` refines `ExistentialBox`; `not Sized` on `Pointer`/`RcBox`/`CowBox`/`UniqueBox`; `UniqueBox` conformances; alignment-correct payload offsets; `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]` |
+| **Stdlib** | `ExistentialBox`, `ConsumingIndirection`; `SharedBox` refines `ExistentialBox`; `not Sized` on `Pointer`/`RcBox`/`CowBox`/`OwnedBox`; `OwnedBox` conformances; alignment-correct payload offsets; `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]` |
 
 ## Error cases
 
@@ -560,8 +564,8 @@ lowering / parser); the rest arrive with their phases.
 | E144 | Bare protocol as a type | `protocol 'Shape' cannot be used as a type; write 'any Shape' for a boxed existential or 'some Shape' for an opaque type` |
 | E145 | Non-dispatchable requirement called on an existential | `'zero' cannot be called on 'any Shape': it is a static requirement` (variants: `it is generic`, `it uses 'Self' as a parameter or return type`, `it mentions associated type 'Item', which 'any Iterator' leaves unbound`) |
 | E146 | Existential passed where `T: P` is needed but self-conformance fails | `'any Equatable' does not conform to 'Equatable': requirement '==' cannot be called through an existential` |
-| E147 | Conversion between boxes | `cannot convert 'any[UniqueBox] Shape' to 'any Shape': existentials in different boxes are different types` |
-| E148 | Box lacks the access a call needs | `cannot call consuming method 'close' on 'any Closeable': 'RcBox' shares its payload, so it cannot give it up; use 'any[UniqueBox] Closeable'` (variant: `'CowBox' ...` / a box without `MutableIndirection` for mutating calls) |
+| E147 | Conversion between boxes | `cannot convert 'any[OwnedBox] Shape' to 'any Shape': existentials in different boxes are different types` |
+| E148 | Box lacks the access a call needs | `cannot call consuming method 'close' on 'any Closeable': 'RcBox' shares its payload, so it cannot give it up; use 'any[OwnedBox] Closeable'` (variant: `'CowBox' ...` / a box without `MutableIndirection` for mutating calls) |
 | E149 | `as?` target doesn't conform (warning) | `cast from 'any Shape' to 'Int64' always fails: 'Int64' does not conform to 'Shape'` |
 | E150 | Associated-type binding unknown | `'Iterator' has no associated type named 'Itm'` |
 | E151 | Associated-type binding unsatisfied on conversion | `cannot convert 'Range[Int64]' to 'any Iterator[Item = String]': its 'Item' is 'Int64'` |
@@ -590,7 +594,7 @@ lowering / parser); the rest arrive with their phases.
 - **Move-only payload in the default box** (`File` in `any Closeable`):
   - It boxes fine, because `RcBox` accepts non-Copyable payloads.
   - Reads and mutating calls work.
-  - Consuming `close()` fails with E148. The fix is `any[UniqueBox] Closeable`.
+  - Consuming `close()` fails with E148. The fix is `any[OwnedBox] Closeable`.
 - **Nested existential** (`any[RcBox] Shape` boxed from an `any Shape`):
   legal through self-conformance. The result is two allocations and double
   dispatch. That is intended, since §4 forbids silent re-boxing.
@@ -599,7 +603,7 @@ lowering / parser); the rest arrive with their phases.
 - **Recursive conformance**: `extend Circle: Shape` where a method returns
   `any Shape`. That is just a sized return type, with nothing special.
 - **Same `(B, T, P)` reached from many sites**: one table, via the mono map.
-- **Same `(T, P)` in two boxes** (`any Shape` and `any[UniqueBox] Shape`
+- **Same `(T, P)` in two boxes** (`any Shape` and `any[OwnedBox] Shape`
   both holding a `Circle`): two tables that share their non-consuming
   thunks, with one type descriptor, so `is Circle` agrees across boxes.
 - **Upcast through a diamond** (`P: A, Q: A`, from `any P and Q` to
@@ -611,7 +615,7 @@ lowering / parser); the rest arrive with their phases.
 - **`as?` to a protocol** (`x as? any Q`) is not in scope. Only concrete
   targets are supported. It needs conformance tables at runtime.
 - **Over-aligned payloads**: payload offsets are computed from the table's
-  `align`, which removes the fixed-offset assumption in `RcBox`/`UniqueBox`.
+  `align`, which removes the fixed-offset assumption in `RcBox`.
   Not testable until a type can be aligned above 8 bytes.
 
 ## Open questions (resolved)
@@ -633,11 +637,11 @@ lowering / parser); the rest arrive with their phases.
 | 14 | Bare `P` as a type | Error E144 |
 | 15 | Composition, `as?`, opening | All in this feature. Opening is limited to self-conformance; there is no dynamic-type generic instantiation |
 | 16 | Default box | `RcBox`: reference semantics, mutation always allowed |
-| 17 | `ConsumingIndirection` | `consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R` (§3). A consuming `as?` returns `Result[T, any[B] P]` |
+| 17 | `ConsumingIndirection` | `consuming func consumePointee[R](body: (Pointer[Target]) -> R) -> R where R: not Copyable, R: not Static` (§3). A consuming `as?` returns `Result[T, any[B] P]` |
 | 18 | `as?` syntax | Postfix operator |
 | 19 | Existing bare-protocol tests | Approved to update to `any P` once the parser accepts `any` (see [Current state](#current-state)) |
 | 20 | Type tests | `is` is a reserved keyword. The operator returns a boolean-literal-typed value (default `Bool`); `is not` negates; no narrowing; existential left operand only. Patterns: `is T`, `name is T`, `[name] is T { fields }`; `var` rejected; no struct-pattern sugar on existentials |
 | 21 | Associated types and `Sized` | Implicitly `Sized` unless `type X: not Sized`; `Indirection.Target` is `not Sized`; by-value requirements get an implicit `where Target: Sized` (§2) |
 | 22 | References to unsized types | Two words; ref decay never applies to an unsized type; the escape checker treats them like any reference (§2) |
-| 23 | Cloning `any[UniqueBox] P` | Follows `UniqueBox[rawany P]: Cloneable`, from `extend UniqueBox[T]: Cloneable where T: Cloneable` (§3) |
+| 23 | Cloning `any[OwnedBox] P` | Follows `OwnedBox[rawany P]: Cloneable`, from `extend OwnedBox[T]: Cloneable where T: Cloneable` (§3) |
 | 24 | Table key | `(B, T, P)`: some entries depend on the box's implementation; the slot layout still depends on `P` alone (§5) |

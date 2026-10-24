@@ -77,6 +77,8 @@ pub fn monomorphize(
         &witnesses,
         &mut ty_arena,
         &entity_names,
+        copyable_protocol,
+        cloneable_protocol,
     )?;
 
     // Phase 2: Body monomorphization

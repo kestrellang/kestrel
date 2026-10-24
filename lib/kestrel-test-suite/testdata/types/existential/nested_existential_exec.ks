@@ -8,7 +8,7 @@
 module Test
 
 import std.numeric.(Int64)
-import std.memory.(UniqueBox)
+import std.memory.(OwnedBox)
 
 protocol Shape {
     func area() -> Int64
@@ -27,7 +27,7 @@ extend Square: Shape {
 @main
 func main() -> Int64 {
     let inner: any Shape = Circle(r: 2);
-    let outer: any[UniqueBox] Shape = inner;
+    let outer: any[OwnedBox] Shape = inner;
     if outer.area() != 12 { return 1 }
     0
 }

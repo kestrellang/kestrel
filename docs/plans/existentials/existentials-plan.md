@@ -63,7 +63,7 @@ M1 and M2 don't depend on it.
       `ExistentialBox`; a box with a field `var items: T`.
 - [ ] `any_unsized_by_value.ks`: E403, `T: not Sized` used as a local,
       parameter, return type, and non-tail field.
-- [ ] `any_box_mismatch.ks`: E147, `any[UniqueBox] P` passed where
+- [ ] `any_box_mismatch.ks`: E147, `any[OwnedBox] P` passed where
       `any P` is expected, and the reverse.
 - [ ] `any_nondispatchable_calls.ks`: E145, all four variants: static,
       generic, `Self` parameter (`any Equatable` `==`), and unbound
@@ -112,7 +112,7 @@ snapshot):
 - [ ] `cowbox_value_semantics_exec.ks`: the same with `any[CowBox]`
       (`P: Cloneable`); copies stay independent.
 - [ ] `unique_box_consuming_exec.ks`: consuming requirement through
-      `any[UniqueBox] P`, payload deinit counted exactly once.
+      `any[OwnedBox] P`, payload deinit counted exactly once.
 - [ ] `payload_deinit_exec.ks`: dropping the last `any P` runs the
       payload's `deinit` once; with RcBox, not while another copy lives.
 - [ ] `move_only_payload_exec.ks`: a non-Copyable payload in the default
@@ -130,11 +130,11 @@ snapshot):
       `any P` calls the payload's method, not `RcBox.isUnique()`.
 - [ ] `generic_payload_exec.ks`: `Box[Int64]: Shape` and
       `Box[String]: Shape` in one array (two tables).
-- [ ] `nested_existential_exec.ks`: `any[UniqueBox] Shape` built from an
+- [ ] `nested_existential_exec.ks`: `any[OwnedBox] Shape` built from an
       `any Shape` through self-conformance.
 - [ ] `downcast_exec.ks`: `as?` hit and miss; `if let` / `guard let`.
 - [ ] `consuming_downcast_exec.ks`: `consuming x as? T` on
-      `any[UniqueBox] P`. A hit moves the value out; a miss returns `.Err`
+      `any[OwnedBox] P`. A hit moves the value out; a miss returns `.Err`
       with the existential intact (call a method on it afterward).
 - [ ] `empty_protocol_exec.ks`: `any Marker` plus `as?`.
 - [ ] `is_operator_exec.ks`: `is` and `is not` in `if`, in `filter`,
@@ -267,12 +267,22 @@ original plan:
   reach a decay site until the existential member peel), and deleting the
   `Protocol`-is-`Copyable`/`Static` arms (dead now that a bare protocol is
   E144; removed with the M3 conformance work).
-- **Open: `UniqueBox`.** It is a compiler-internal handle with no `deinit`
-  (dropping it must not free), so it cannot own an existential payload
-  and is not yet a valid box. Awaiting a decision.
+- **`OwnedBox`** (new, `lang/std/memory/ownedbox.ks`) replaces `UniqueBox`
+  as the unique existential box. `UniqueBox` is the compiler-internal
+  `consuming`-closure handle with no `deinit`, so it can't own a payload;
+  it is unchanged. The existential tests use `any[OwnedBox] P`.
+  `consumePointee[R]` relaxes `R: not Copyable, not Static` so it can hand
+  back a move-only payload.
+- **Mono fix.** The instantiation collector queued a type's `clone` impl
+  on every `copy_value`, even at instances that aren't Cloneable
+  (`OwnedBox[File]`). It now asks the shared copy classifier first
+  (`ty_query::CopyEnv` / `copy_behavior_in`).
+- **Known bug, test added:** a field write on `consuming self` lands on a
+  copy (`memory_model/deinit/consuming_self_field_assign_seen_by_deinit.ks`).
+  `OwnedBox.consumePointee` works around it with `var me = self`.
 
 Exit (at the M2 commit): `types/existential` 6/37 — the remaining 31 need
-M3+ (conversions, member lookup, dispatch, casts) or `UniqueBox`.
+M3+ (conversions, member lookup, dispatch, casts).
 `stdlib/` 299/299, `types/pointer` 45/45, `memory_model` 363/374 and
 closures 273/277 with every failure also failing on base `80297742`.
 

@@ -5,6 +5,10 @@ use kestrel_hecs::Entity;
 
 use crate::item::function::{WhereClause, WhereConstraint};
 use crate::ty::{MirTy, TyArena};
+use indexmap::IndexMap;
+
+use crate::item::enum_def::EnumDef;
+use crate::item::struct_def::StructDef;
 use crate::{CopyBehavior, DropBehavior, MirModule, TyId};
 
 /// Projection to the shared tri-state. `Clone` payloads are heterogeneous
@@ -29,8 +33,30 @@ impl CopySem for CopyBehavior {
 /// threading for `TypeParam` bounds.
 struct MirCopyLayer<'a> {
     arena: &'a TyArena,
-    module: &'a MirModule,
+    env: &'a CopyEnv<'a>,
     where_clause: Option<&'a WhereClause>,
+}
+
+/// What the pre-mono copy classifier reads: the nominal defs and the two
+/// builtin protocol ids. Split from `MirModule` so mono's collector, which
+/// holds the module's parts separately (the arena is borrowed mutably), asks
+/// the same classifier instead of keeping its own.
+pub struct CopyEnv<'a> {
+    pub structs: &'a IndexMap<Entity, StructDef>,
+    pub enums: &'a IndexMap<Entity, EnumDef>,
+    pub cloneable_protocol: Option<Entity>,
+    pub copyable_protocol: Option<Entity>,
+}
+
+impl<'a> CopyEnv<'a> {
+    pub fn of(module: &'a MirModule) -> Self {
+        CopyEnv {
+            structs: &module.structs,
+            enums: &module.enums,
+            cloneable_protocol: module.cloneable_protocol,
+            copyable_protocol: module.copyable_protocol,
+        }
+    }
 }
 
 impl CopyLayer for MirCopyLayer<'_> {
@@ -38,12 +64,12 @@ impl CopyLayer for MirCopyLayer<'_> {
     type Sem = CopyBehavior;
 
     fn base_semantics(&self, entity: Entity) -> CopyBehavior {
-        self.module
+        self.env
             .structs
             .get(&entity)
             .map(|s| s.type_info.copy.clone())
             .or_else(|| {
-                self.module
+                self.env
                     .enums
                     .get(&entity)
                     .map(|e| e.type_info.copy.clone())
@@ -54,12 +80,12 @@ impl CopyLayer for MirCopyLayer<'_> {
 
     fn gating_positions(&self, entity: Entity) -> Cow<'_, [usize]> {
         Cow::Borrowed(
-            self.module
+            self.env
                 .structs
                 .get(&entity)
                 .map(|s| s.conditionally_copyable.as_slice())
                 .or_else(|| {
-                    self.module
+                    self.env
                         .enums
                         .get(&entity)
                         .map(|e| e.conditionally_copyable.as_slice())
@@ -70,7 +96,7 @@ impl CopyLayer for MirCopyLayer<'_> {
 
     fn member_semantics(&self, &ty: &TyId) -> CopyBehavior {
         // Re-enters the public classifier (where_clause threading included).
-        copy_behavior(self.arena, self.module, ty, self.where_clause)
+        copy_behavior_in(self.arena, self.env, ty, self.where_clause)
     }
 
     fn sem_from_class(&self, entity: Entity, class: CopySemantics) -> CopyBehavior {
@@ -93,6 +119,16 @@ impl CopyLayer for MirCopyLayer<'_> {
 pub fn copy_behavior(
     arena: &TyArena,
     module: &MirModule,
+    ty: TyId,
+    where_clause: Option<&WhereClause>,
+) -> CopyBehavior {
+    copy_behavior_in(arena, &CopyEnv::of(module), ty, where_clause)
+}
+
+/// [`copy_behavior`] over a [`CopyEnv`].
+pub fn copy_behavior_in(
+    arena: &TyArena,
+    env: &CopyEnv<'_>,
     ty: TyId,
     where_clause: Option<&WhereClause>,
 ) -> CopyBehavior {
@@ -132,7 +168,7 @@ pub fn copy_behavior(
         //   all — handing one around is a move — so it is `None`, NOT `Clone`.
         MirTy::FuncThick { kind, .. } => match kind {
             crate::ty::FnKind::Consuming => CopyBehavior::None,
-            crate::ty::FnKind::Escaping => match find_cloneable_protocol(module) {
+            crate::ty::FnKind::Escaping => match env.cloneable_protocol {
                 Some(p) => CopyBehavior::Clone(p),
                 // No stdlib (`Cloneable` absent): nothing can clone anyway, so
                 // the POD reading is the only self-consistent answer.
@@ -150,7 +186,7 @@ pub fn copy_behavior(
             let elems = elems.clone();
             let mut first_clone = None;
             for &elem in &elems {
-                match copy_behavior(arena, module, elem, where_clause) {
+                match copy_behavior_in(arena, env, elem, where_clause) {
                     CopyBehavior::None => return CopyBehavior::None,
                     b @ CopyBehavior::Clone(_) if first_clone.is_none() => first_clone = Some(b),
                     _ => {},
@@ -165,7 +201,7 @@ pub fn copy_behavior(
             instance_semantics(
                 &MirCopyLayer {
                     arena,
-                    module,
+                    env,
                     where_clause,
                 },
                 entity,
@@ -196,10 +232,10 @@ pub fn copy_behavior(
                             protocol,
                             ..
                         } if *type_param == entity => {
-                            if is_cloneable_protocol(module, *protocol) {
+                            if env.cloneable_protocol == Some(*protocol) {
                                 return CopyBehavior::Clone(*protocol);
                             }
-                            if is_copyable_protocol(module, *protocol) {
+                            if env.copyable_protocol == Some(*protocol) {
                                 return CopyBehavior::Bitwise;
                             }
                         },
@@ -207,7 +243,7 @@ pub fn copy_behavior(
                             type_param,
                             protocol,
                         } if *type_param == entity => {
-                            if is_copyable_protocol(module, *protocol) {
+                            if env.copyable_protocol == Some(*protocol) {
                                 // Defer: a positive bound later in the list
                                 // overrides this relaxation (positive wins).
                                 not_copyable = true;

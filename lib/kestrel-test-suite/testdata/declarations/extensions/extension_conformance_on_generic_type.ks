@@ -7,7 +7,8 @@ protocol Printable { func print() }
 extend Container[lang.i64]: Printable {
     func print() { }
 }
-func usePrintable(p: Printable) { p.print(); }
+// A bare protocol is not a value type (E144); take the conformer generically.
+func usePrintable[P](p: P) where P: Printable { p.print(); }
 func main() {
     let c = Container(value: 42);
     usePrintable(c);

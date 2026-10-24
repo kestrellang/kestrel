@@ -7,7 +7,7 @@
 module Test
 
 import std.numeric.(Int64)
-import std.memory.(UniqueBox)
+import std.memory.(OwnedBox)
 
 protocol Shape {
     func area() -> Int64
@@ -24,11 +24,11 @@ extend Square: Shape {
 }
 
 func takesDefault(s: any Shape) -> Int64 { s.area() }
-func takesUnique(s: any[UniqueBox] Shape) -> Int64 { s.area() }
+func takesUnique(s: any[OwnedBox] Shape) -> Int64 { s.area() }
 
 func test() {
-    let u: any[UniqueBox] Shape = Circle(r: 1);
-    takesDefault(u); // ERROR: cannot convert 'any[UniqueBox] Shape' to 'any Shape': existentials in different boxes are different types
+    let u: any[OwnedBox] Shape = Circle(r: 1);
+    takesDefault(u); // ERROR: cannot convert 'any[OwnedBox] Shape' to 'any Shape': existentials in different boxes are different types
     let d: any Shape = Circle(r: 1);
-    takesUnique(d); // ERROR: cannot convert 'any Shape' to 'any[UniqueBox] Shape': existentials in different boxes are different types
+    takesUnique(d); // ERROR: cannot convert 'any Shape' to 'any[OwnedBox] Shape': existentials in different boxes are different types
 }

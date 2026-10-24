@@ -69,6 +69,8 @@ pub fn collect_all(
     witnesses: &[WitnessDef],
     arena: &mut TyArena,
     entity_names: &IndexMap<Entity, String>,
+    copyable_protocol: Option<Entity>,
+    cloneable_protocol: Option<Entity>,
 ) -> Result<CollectionResult, Vec<MonoError>> {
     let mut ctx = CollectionContext::new(
         functions,
@@ -79,6 +81,8 @@ pub fn collect_all(
         arena,
         entity_names,
     );
+    ctx.copyable_protocol = copyable_protocol;
+    ctx.cloneable_protocol = cloneable_protocol;
     ctx.collect();
 
     if ctx.errors.is_empty() {
@@ -103,6 +107,10 @@ struct CollectionContext<'a> {
     seen: IndexSet<InstantiationKey>,
     witness_cache: WitnessCache,
     errors: Vec<MonoError>,
+    /// For [`crate::ty_query::CopyEnv`]: whether a concrete instance is
+    /// actually Clone before its clone impl is instantiated.
+    copyable_protocol: Option<Entity>,
+    cloneable_protocol: Option<Entity>,
 }
 
 impl<'a> CollectionContext<'a> {
@@ -127,6 +135,8 @@ impl<'a> CollectionContext<'a> {
             seen: IndexSet::new(),
             witness_cache: WitnessCache::new(),
             errors: Vec::new(),
+            copyable_protocol: None,
+            cloneable_protocol: None,
         }
     }
 
@@ -476,6 +486,21 @@ impl<'a> CollectionContext<'a> {
 
     /// The function that clones `nominal`, as decided once by the clone-shim
     /// pass. A struct or enum, never both — one lookup, no fallback chain.
+    /// Is the concrete type `ty` duplicated by a clone (or bit-copy), rather
+    /// than move-only? Same classifier as the rest of MIR.
+    fn instance_may_clone(&self, ty: TyId) -> bool {
+        let env = crate::ty_query::CopyEnv {
+            structs: self.structs,
+            enums: self.enums,
+            cloneable_protocol: self.cloneable_protocol,
+            copyable_protocol: self.copyable_protocol,
+        };
+        !matches!(
+            crate::ty_query::copy_behavior_in(self.arena, &env, ty, None),
+            crate::CopyBehavior::None
+        )
+    }
+
     fn clone_impl_of(&self, nominal: Entity) -> Option<Entity> {
         self.type_info_of(nominal).and_then(|ti| ti.clone_impl)
     }
@@ -525,6 +550,14 @@ impl<'a> CollectionContext<'a> {
             MirTy::Named { entity, type_args } => {
                 let entity = *entity;
                 let type_args = type_args.clone();
+                // A conditionally Cloneable type (`extend X[T]: Cloneable
+                // where T: Cloneable`) has a clone impl that is only valid at
+                // instances meeting the bound. Instantiating it elsewhere
+                // (`X[File]`) fails post-mono verification, so ask the shared
+                // per-instance classifier first.
+                if !self.instance_may_clone(ty) {
+                    return;
+                }
                 if let Some(func) = self.clone_impl_of(entity) {
                     let key = InstantiationKey::new(func, type_args, parent_self);
                     if self.seen.insert(key.clone()) {
@@ -1020,6 +1053,8 @@ mod tests {
             &[],
             &mut arena,
             &IndexMap::new(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -1059,6 +1094,8 @@ mod tests {
             &[],
             &mut arena,
             &IndexMap::new(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -1125,6 +1162,8 @@ mod tests {
             &[],
             &mut arena,
             &IndexMap::new(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -1188,6 +1227,8 @@ mod tests {
             &[],
             &mut arena,
             &IndexMap::new(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -1227,6 +1268,8 @@ mod tests {
             &[],
             &mut arena,
             &IndexMap::new(),
+            None,
+            None,
         )
         .unwrap();
 
@@ -1312,6 +1355,8 @@ mod tests {
             &[witness],
             &mut arena,
             &names,
+            None,
+            None,
         )
         .unwrap();
 

@@ -24,7 +24,7 @@ extend File: Closeable {
 
 func test() {
     let a: any Closeable = File(fd: 3);
-    let x = a.close(); // ERROR: cannot call consuming method 'close' on 'any Closeable': 'RcBox' shares its payload, so it cannot give it up; use 'any[UniqueBox] Closeable'
+    let x = a.close(); // ERROR: cannot call consuming method 'close' on 'any Closeable': 'RcBox' shares its payload, so it cannot give it up; use 'any[OwnedBox] Closeable'
     let b: any[CowBox] Closeable = File(fd: 4);
-    let y = b.close(); // ERROR: cannot call consuming method 'close' on 'any[CowBox] Closeable': 'CowBox' shares its payload, so it cannot give it up; use 'any[UniqueBox] Closeable'
+    let y = b.close(); // ERROR: cannot call consuming method 'close' on 'any[CowBox] Closeable': 'CowBox' shares its payload, so it cannot give it up; use 'any[OwnedBox] Closeable'
 }

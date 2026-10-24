@@ -2,13 +2,13 @@
 // stdlib: true
 // expect-exit: 0
 //
-// A consuming requirement through `any[UniqueBox] P` moves the payload out;
+// A consuming requirement through `any[OwnedBox] P` moves the payload out;
 // its deinit runs exactly once (design §3, ConsumingIndirection).
 
 module Test
 
 import std.numeric.(Int64)
-import std.memory.(UniqueBox)
+import std.memory.(OwnedBox)
 
 var drops: Int64 = 0;
 
@@ -25,7 +25,7 @@ extend File: Closeable {
 }
 
 func run() -> Int64 {
-    let f: any[UniqueBox] Closeable = File(fd: 7);
+    let f: any[OwnedBox] Closeable = File(fd: 7);
     let fd = f.close();
     if fd != 7 { return 1 }
     if drops != 1 { return 2 }

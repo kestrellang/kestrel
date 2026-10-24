@@ -24,5 +24,5 @@ extend Square: Shape {
 
 func test() {
     let s: any Shape = Circle(r: 1);
-    let c = consuming s as? Circle; // ERROR: cannot consume the payload of 'any Shape': 'RcBox' shares its payload, so it cannot give it up; use 'any[UniqueBox] Shape'
+    let c = consuming s as? Circle; // ERROR: cannot consume the payload of 'any Shape': 'RcBox' shares its payload, so it cannot give it up; use 'any[OwnedBox] Shape'
 }
