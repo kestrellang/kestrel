@@ -28,7 +28,7 @@ The design has two layers:
 
 `DefaultBox` is a builtin type alias, chosen the same way
 `IntegerLiteralType` picks `Int64` for integer literals. Its default binding
-is `CowBox`. Because both forms are sugar, nothing after HIR lowering knows
+is `RcBox`, so `any P` has reference semantics: copies share one payload. Because both forms are sugar, nothing after HIR lowering knows
 that `any` was written. An existential is an ordinary generic instantiation
 of a box over an unsized payload.
 
@@ -44,13 +44,13 @@ protocol Shape {
     func name() -> String
 }
 
-// Default box (CowBox): cheap to copy, value semantics.
+// Default box (RcBox): copies share one payload.
 let shapes: Array[any Shape] = [Circle(radius: 1.0), Square(side: 2.0)];
 for s in shapes { print(s.area()) }
 
 // An explicit box.
 let owned: any[UniqueBox] Shape = Circle(radius: 3.0);   // one owner, move-only
-let shared: any[RcBox] Shape = Square(side: 1.0);        // reference semantics
+let valued: any[CowBox] Shape = Square(side: 1.0);       // value semantics (needs Shape: Cloneable)
 
 // Associated types pinned.
 func sum(xs: any Iterator[Item = Int64]) -> Int64 { ... }
@@ -142,8 +142,8 @@ How the stdlib boxes fit:
 
 | Box | Copying `any[B] P` | Mutating through it | Consuming through it | Payload may be move-only |
 |---|---|---|---|---|
-| `CowBox` (**default**) | Refcount bump | Only if `P: Cloneable` (forks when shared) | No | Yes (after relaxing, below) |
-| `RcBox` | Refcount bump (shares) | Yes, visible to every copy | No | Yes |
+| `RcBox` (**default**) | Refcount bump (shares) | Yes, visible to every copy | No | Yes |
+| `CowBox` | Refcount bump | Yes, forks first when shared | No | No: `CowBox[T]` requires `T: Cloneable`, so `any[CowBox] P` needs `P: Cloneable` |
 | `UniqueBox` | Only if `P: Cloneable` (deep clone) | Yes | Yes | Yes |
 
 **Every row falls out of the box's own declaration.** Its `Cloneable` and
@@ -153,21 +153,28 @@ copy rules ("depends on the box").
 
 Required stdlib changes:
 
-- **`CowBox`**: relax `struct CowBox[T]: Cloneable where T: Cloneable` to
-  `where T: not Copyable, T: not Sized`. Keep `T: Cloneable` on the
-  `MutableIndirection` extension. Copying a `CowBox` only bumps a refcount and
-  never needed `T: Cloneable`.
-- **`UniqueBox`**: add `Indirection`, `MutableIndirection` and
-  `ExistentialBox` conformances. Consuming requirements need a way to move
-  the payload out and free the block without dropping it, which is what
-  `takeValue` already does at a sized `T`. That is exposed to the thunks
-  (§5) through a `ConsumingIndirection` refinement:
+- **`UniqueBox`**: add `Indirection`, `MutableIndirection`,
+  `ExistentialBox` and `ConsumingIndirection` conformances.
+- **`ConsumingIndirection`** (new, `std.core` next to `Indirection`). This is
+  how a consuming requirement, or a consuming `as?`, gets the payload out of
+  a box whose payload size is only known at runtime:
   ```kestrel
   public protocol ConsumingIndirection: MutableIndirection {
-      consuming func releaseStorage(after body: (consuming Pointer[Target]) -> ())
+      /// Ends the box. `body` gets the payload's address and must move the
+      /// payload out of it (or destroy it in place). The box then frees its
+      /// storage without running the payload's deinit.
+      consuming func consumePointee[R](_ body: (Pointer[Target]) -> R) -> R
   }
   ```
-  The exact shape is decided in the plan.
+  - **Why a closure.** The box can't return the payload by value, because
+    its type is unsized. Only the thunk, which knows the concrete `T`, can
+    move it out. The closure keeps "move out, then free" in one call, so no
+    caller can free the storage twice or forget to free it.
+  - **Fits what exists.** `UniqueBox.takeValue()` becomes
+    `consumePointee { p in p.move() }` at a sized `T`.
+  - **Shared boxes don't conform.** `RcBox` and `CowBox` can't give up a
+    payload that other copies still see, so consuming requirements need
+    `any[UniqueBox] P`.
 - **`RcBox`, `CowBox`, `UniqueBox`, `Pointer`**: add `T: not Sized`.
   - `RcBox`'s hand-computed `valueOffset = sizeof(Int64)` (`rcbox.ks:110`)
     becomes a layout computation that honours the payload's alignment.
@@ -303,8 +310,9 @@ For example:
 | Existential | Conforms to its protocol? | Why |
 |---|---|---|
 | `any Equatable` | No | `==` takes `Self` |
-| `any Counter` with a `mutating` requirement, where `Counter` is not `Cloneable` | No, with `CowBox` | `CowBox` only allows mutation when the payload is `Cloneable` |
-| `any[UniqueBox] Counter` | Yes | `UniqueBox` allows mutation |
+| `any Counter` with a `mutating` requirement | Yes | `RcBox` allows mutation (shared by every copy) |
+| `any Closeable` with a `consuming func close()` | No | `RcBox` is not `ConsumingIndirection` |
+| `any[UniqueBox] Closeable` | Yes | `UniqueBox` is `ConsumingIndirection` |
 
 The diagnostic names the requirement that blocks it.
 
@@ -317,7 +325,7 @@ The diagnostic names the requirement that blocks it.
   and the box's own members second.
   - This is an eager peel, like `&T` today, scoped to receivers whose
     `Target` is a raw existential.
-  - So `CowBox.read()`/`isUnique()` can never hide a protocol requirement
+  - So `RcBox.isUnique()` or `CowBox.read()` can never hide a protocol requirement
     of the same name.
   - The box's own API stays reachable when no protocol member has that
     name.
@@ -331,10 +339,12 @@ The diagnostic names the requirement that blocks it.
 - **Result.** It returns `Optional[&T]`, borrowing the payload in place.
   This works the same in every box. With the existing ref-decay rule, `let c
   = x as? Circle` copies out when `Circle: Copyable`.
-- **Consuming downcast.** `consuming x as? T` returns `Optional[T]` and
-  frees the box. It is only allowed when `B: ConsumingIndirection`. On a
-  miss, the existential comes back in the `Err` arm. Exact result type to be
-  settled in the plan.
+- **Consuming downcast.** `consuming x as? T` returns `Result[T, any[B] P]`.
+  It is only allowed when `B: ConsumingIndirection`.
+  - It checks the type descriptor first, through `pointeeRef`, without
+    consuming anything.
+  - On a hit: `.Ok(x.consumePointee { p in p.cast[T]().move() })`.
+  - On a miss: `.Err(x)`, giving the existential back untouched.
 - **Non-conforming target.** `as? T` where `T` cannot conform to `P` is a
   warning: the cast always fails.
 - `as?` is new syntax. The `as` token exists (`kestrel-lexer/src/lib.rs:311`)
@@ -391,8 +401,8 @@ What the compiler does today on `80297742`:
   - `declarations/extensions/extension_conformance_on_generic_type.ks:10`
   - `declarations/extensions/protocol_extension_satisfies_conformance_via_transitive_protocol.ks:10,23`
 
-  Under this design both become invalid Kestrel. Updating them to `any P`
-  needs explicit approval (CLAUDE.md test rule).
+  Under this design both become invalid Kestrel. They are updated to
+  `any P` in the same change that lands E144 (approved).
 
 ## Pipeline impact
 
@@ -407,7 +417,7 @@ What the compiler does today on `80297742`:
 | **Analyzers** | Box validity (§3: one `not Sized` param, unsizable fields, `ExistentialBox`); unsized-by-value uses inside `not Sized` declarations; bare protocol type; non-conforming `as?` warning |
 | **MIR** | `MirTy::RawExistential`; fat `lang.ptr` to an unsized pointee (2 words); unsized-tail layout with dynamic field offset; `sizeOfVal`/`alignOfVal`/`drop_in_place` on fat pointers via the table; `VTableDef`, `Op::FuncAddr`, `Op::VTableAddr`, `Callee::Dynamic`; thunk and table synthesis in mono |
 | **Codegen** | Cranelift + LLVM: read-only table globals with function relocations, fat-pointer values, indirect calls |
-| **Stdlib** | `ExistentialBox`, `ConsumingIndirection`; `SharedBox` refines `ExistentialBox`; `not Sized` on `Pointer`/`RcBox`/`CowBox`/`UniqueBox`; relax `CowBox`; `UniqueBox` conformances; alignment-correct payload offsets; `@builtin(.DefaultBoxType) public type DefaultBox[T] = CowBox[T]` |
+| **Stdlib** | `ExistentialBox`, `ConsumingIndirection`; `SharedBox` refines `ExistentialBox`; `not Sized` on `Pointer`/`RcBox`/`CowBox`/`UniqueBox`; `UniqueBox` conformances; alignment-correct payload offsets; `@builtin(.DefaultBoxType) public type DefaultBox[T] = RcBox[T]` |
 
 ## Error cases
 
@@ -421,7 +431,7 @@ free). They need to be confirmed there before use.
 | E145 | Non-dispatchable requirement called on an existential | `'zero' cannot be called on 'any Shape': it is a static requirement` (variants: `it is generic`, `it uses 'Self' as a parameter or return type`, `it mentions associated type 'Item', which 'any Iterator' leaves unbound`) |
 | E146 | Existential passed where `T: P` is needed but self-conformance fails | `'any Equatable' does not conform to 'Equatable': requirement '==' cannot be called through an existential` |
 | E147 | Conversion between boxes | `cannot convert 'any[UniqueBox] Shape' to 'any Shape': existentials in different boxes are different types` |
-| E148 | Box lacks the access a call needs | `cannot call mutating method 'grow' on 'any Shape': 'CowBox' allows mutation only when 'Shape' refines 'Cloneable'` |
+| E148 | Box lacks the access a call needs | `cannot call consuming method 'close' on 'any Closeable': 'RcBox' shares its payload, so it cannot give it up; use 'any[UniqueBox] Closeable'` (variant: `'CowBox' ...` / a box without `MutableIndirection` for mutating calls) |
 | E149 | `as?` target doesn't conform (warning) | `cast from 'any Shape' to 'Int64' always fails: 'Int64' does not conform to 'Shape'` |
 | E150 | Associated-type binding unknown | `'Iterator' has no associated type named 'Itm'` |
 | E151 | Associated-type binding unsatisfied on conversion | `cannot convert 'Range[Int64]' to 'any Iterator[Item = String]': its 'Item' is 'Int64'` |
@@ -435,12 +445,15 @@ free). They need to be confirmed there before use.
   is useful with `as?`.
 - **Protocol with only extension methods**: there are no slots, and
   everything works through self-conformance.
+- **Aliasing through the default box**: `let a: any Counter = ...; let b
+  = a; b.increment()` changes what `a` sees. This is the intended
+  consequence of `RcBox` as the default. `any[CowBox] P` gives value
+  semantics when `P: Cloneable`.
 - **Copyable payload in a `CowBox`**: fine. The clone slot is a bitwise
-  copy if `P: Cloneable`.
+  copy.
 - **Move-only payload in the default box** (`File` in `any Closeable`):
-  - It boxes fine, because `CowBox` accepts non-Copyable payloads after the
-    relaxation.
-  - Reads work.
+  - It boxes fine, because `RcBox` accepts non-Copyable payloads.
+  - Reads and mutating calls work.
   - Consuming `close()` fails with E148. The fix is `any[UniqueBox] Closeable`.
 - **Nested existential** (`any[RcBox] Shape` boxed from an `any Shape`):
   legal through self-conformance. The result is two allocations and double
@@ -480,16 +493,7 @@ free). They need to be confirmed there before use.
 | 13 | Member lookup | Protocol members first, box members second |
 | 14 | Bare `P` as a type | Error E144 |
 | 15 | Composition, `as?`, opening | All in this feature. Opening is limited to self-conformance; there is no dynamic-type generic instantiation |
-
-## Open questions (still open)
-
-1. **Default binding.** This doc binds `DefaultBox` to `CowBox`, which
-   gives value semantics and cheap copies, and mutation only when
-   `P: Cloneable`. The other candidate is `RcBox`, which has reference
-   semantics and always allows mutation. Confirm `CowBox`.
-2. **`ConsumingIndirection` shape**, plus the result type of a consuming
-   `as?` on a miss.
-3. **`as?` syntax.** Confirm a postfix `as?` operator rather than a method
-   such as `x.cast(to: Circle)`.
-4. **Approval** to update the two existing tests that use a bare protocol
-   type (see [Current state](#current-state)).
+| 16 | Default box | `RcBox`: reference semantics, mutation always allowed |
+| 17 | `ConsumingIndirection` | `consuming func consumePointee[R](_ body: (Pointer[Target]) -> R) -> R` (§3). A consuming `as?` returns `Result[T, any[B] P]` |
+| 18 | `as?` syntax | Postfix operator |
+| 19 | Existing bare-protocol tests | Approved to update to `any P` once the parser accepts `any` (see [Current state](#current-state)) |
