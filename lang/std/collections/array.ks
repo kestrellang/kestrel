@@ -53,7 +53,6 @@ import std.collections.(Slice)
 /// Owns the heap buffer. Deallocation happens in `deinit`. Used as a value
 /// inside `RcBox`, which provides the reference counting that makes COW
 /// possible.
-@memoryonlydrop
 struct ArrayStorage[T]: Cloneable {
     /// Heap pointer to the element buffer; null when `cap == 0`.
     var ptr: Pointer[T]

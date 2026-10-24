@@ -69,10 +69,10 @@ pub struct MirModule {
     pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
-    /// Nominal types marked `@memoryonlydrop`: their `deinit` only releases
-    /// memory, so running it earlier is unobservable. Read by the copy
-    /// lifetime passes; the marked type's type arguments must qualify too.
-    pub memory_only_drop: IndexSet<Entity>,
+    /// Nominal types marked `@observabledrop`: dropping one has an observable
+    /// effect (closing a connection), so copy lifetime passes must not drop
+    /// copies of it — or of anything containing it — earlier than scope end.
+    pub observable_drop: IndexSet<Entity>,
 }
 
 impl MirModule {
@@ -87,7 +87,7 @@ impl MirModule {
             statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
-            memory_only_drop: IndexSet::new(),
+            observable_drop: IndexSet::new(),
         }
     }
 

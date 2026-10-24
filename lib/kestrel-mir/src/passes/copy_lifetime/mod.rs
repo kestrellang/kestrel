@@ -16,10 +16,11 @@
 //! 3. [`borrow_copies`] — copy → borrow. A copy of a `var` that is only read,
 //!    while nothing writes the `var`, is replaced by a longer borrow.
 //!
-//! All three only touch types whose drop is unobservable — see
-//! [`memory_only::TypeFacts`] and the `@memoryonlydrop` stdlib marker — and
-//! never shorten a copy that a raw pointer (or a struct holding one, like a
-//! string view) was derived from. Writes through raw pointers created
+//! Only (2) moves a drop, so only it checks [`TypeFacts::observable`]: copies
+//! of a type marked `@observabledrop`, or containing one, keep their scope-end
+//! drop. (1) hands the value over and (3) removes the copy entirely, so no
+//! drop moves. (2) and (3) never touch a copy that a raw pointer (or a struct
+//! holding one, like a string view) was derived from. Writes through raw pointers created
 //! elsewhere are not tracked: that is `unsafe` territory by design.
 //!
 //! Runs on the monomorphized module after `copy_propagation`, before
@@ -27,8 +28,8 @@
 
 mod borrow_copies;
 mod drop_at_last_use;
-mod memory_only;
 mod owned_params;
+mod type_facts;
 
 use kestrel_debug::ktrace;
 
@@ -37,7 +38,7 @@ use crate::inst::InstKind;
 use crate::mono::types::MonoModule;
 use crate::terminator::TerminatorKind;
 
-pub use memory_only::TypeFacts;
+pub use type_facts::TypeFacts;
 
 /// Run all three copy lifetime passes.
 pub fn run(mono: &mut MonoModule) {
@@ -55,13 +56,25 @@ pub fn run(mono: &mut MonoModule) {
 fn successor_args_mut(kind: &mut TerminatorKind) -> Vec<(usize, &mut Vec<ValueId>)> {
     match kind {
         TerminatorKind::Jump { target, args } => vec![(target.index(), args)],
-        TerminatorKind::Branch { then_block, then_args, else_block, else_args, .. } => {
-            vec![(then_block.index(), then_args), (else_block.index(), else_args)]
+        TerminatorKind::Branch {
+            then_block,
+            then_args,
+            else_block,
+            else_args,
+            ..
+        } => {
+            vec![
+                (then_block.index(), then_args),
+                (else_block.index(), else_args),
+            ]
         },
-        TerminatorKind::Switch { cases, .. } => {
-            cases.iter_mut().map(|arm| (arm.target.index(), &mut arm.args)).collect()
+        TerminatorKind::Switch { cases, .. } => cases
+            .iter_mut()
+            .map(|arm| (arm.target.index(), &mut arm.args))
+            .collect(),
+        TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => {
+            Vec::new()
         },
-        TerminatorKind::Return(_) | TerminatorKind::Panic(_) | TerminatorKind::Unreachable => Vec::new(),
     }
 }
 

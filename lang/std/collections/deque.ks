@@ -18,7 +18,6 @@ import std.iter.(Iterator, Iterable)
 /// bumps a reference count; mutations call `CowBox.write()` first to
 /// perform the copy-on-write barrier. The `clone()` method linearizes
 /// the ring buffer into a fresh contiguous allocation.
-@memoryonlydrop
 struct DequeStorage[T]: Cloneable {
     /// Heap pointer to the element buffer; null when `cap == 0`.
     var ptr: Pointer[T]

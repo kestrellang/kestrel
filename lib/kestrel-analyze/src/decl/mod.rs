@@ -19,6 +19,7 @@ pub mod field;
 pub mod function_body;
 pub mod generics;
 pub mod indirect_enum;
+pub mod observable_drop;
 pub mod parent_protocol_conformance;
 pub mod protocol_field_conformance;
 pub mod protocol_method;

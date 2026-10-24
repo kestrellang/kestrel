@@ -83,7 +83,6 @@ func _bytesCompare(a a: Pointer[UInt8], b b: Pointer[UInt8], n n: Int64) -> Orde
 /// # Representation
 ///
 /// `(ptr: Pointer[UInt8], len: Int64, cap: Int64)`.
-@memoryonlydrop
 struct StringStorage: Cloneable {
     var ptr: Pointer[UInt8]
     var len: Int64

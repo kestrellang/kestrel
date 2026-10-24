@@ -42,8 +42,10 @@ pub(super) fn run(mono: &mut MonoModule) -> usize {
     for fi in 0..original_count {
         // One site at a time: a rewrite deletes instructions, so sites found
         // in the same scan could overlap and hold stale indices.
-        while let Some(site) =
-            mono.functions[fi].body.as_ref().and_then(|b| find_site(b, &consumable, &variants))
+        while let Some(site) = mono.functions[fi]
+            .body
+            .as_ref()
+            .and_then(|b| find_site(b, &consumable, &variants))
         {
             let vid = variants.get_or_make(mono, site.origin, &site.owned);
             let body = mono.functions[fi].body.as_mut().expect("site has a body");
@@ -93,10 +95,13 @@ fn consumable_params(mono: &MonoModule) -> FxHashSet<(usize, usize)> {
         let Some(body) = &func.body else { continue };
         let entry = body.entry.index();
         // A jump back into the entry block would run the copy more than once.
-        let reenters = body
-            .blocks
-            .iter()
-            .any(|b| b.terminator.kind.successors().iter().any(|s| s.index() == entry));
+        let reenters = body.blocks.iter().any(|b| {
+            b.terminator
+                .kind
+                .successors()
+                .iter()
+                .any(|s| s.index() == entry)
+        });
         if reenters {
             continue;
         }
@@ -160,10 +165,19 @@ struct Site {
 
 /// The first rewritable call site in `body`. A rewritten call targets a
 /// `Consuming` variant, so it never matches again and the scan terminates.
-fn find_site(body: &OssaBody, consumable: &FxHashSet<(usize, usize)>, variants: &Variants) -> Option<Site> {
+fn find_site(
+    body: &OssaBody,
+    consumable: &FxHashSet<(usize, usize)>,
+    variants: &Variants,
+) -> Option<Site> {
     for (bi, block) in body.blocks.iter().enumerate() {
         for (ci, inst) in block.insts.iter().enumerate() {
-            let InstKind::Call { result, callee: Callee::Resolved(fid), args } = &inst.kind else {
+            let InstKind::Call {
+                result,
+                callee: Callee::Resolved(fid),
+                args,
+            } = &inst.kind
+            else {
                 continue;
             };
             for (k, a) in args.iter().enumerate() {
@@ -199,10 +213,14 @@ fn match_site(
 ) -> Option<Site> {
     let block = &body.blocks[bi];
     let insts = &block.insts;
-    let borrow_i = (0..ci).rev().find(|&i| insts[i].kind.results().contains(&b))?;
+    let borrow_i = (0..ci)
+        .rev()
+        .find(|&i| insts[i].kind.results().contains(&b))?;
     let (src, is_slot) = match insts[borrow_i].kind {
         InstKind::BeginBorrowAddr { address, .. } => (address, true),
-        InstKind::BeginBorrow { operand, .. } if body.value(operand).ownership == Ownership::Owned => {
+        InstKind::BeginBorrow { operand, .. }
+            if body.value(operand).ownership == Ownership::Owned =>
+        {
             (operand, false)
         },
         _ => return None,
@@ -215,7 +233,11 @@ fn match_site(
         return None;
     }
     // A borrow of `src` threaded into another block would outlive the move.
-    if body.blocks.iter().any(|blk| blk.params.iter().any(|p| body.value(p.value).borrow_source == Some(src))) {
+    if body.blocks.iter().any(|blk| {
+        blk.params
+            .iter()
+            .any(|p| body.value(p.value).borrow_source == Some(src))
+    }) {
         return None;
     }
 
@@ -238,14 +260,29 @@ fn match_site(
                 continue;
             },
             _ if end_i.is_none() => return None,
-            InstKind::StoreAssign { address, value } if is_slot && address == src && Some(value) == result => {
+            InstKind::StoreAssign { address, value }
+                if is_slot && address == src && Some(value) == result =>
+            {
                 LastUse::Overwritten { store_i: i }
             },
-            InstKind::DestroyAddr { address, .. } if is_slot && address == src => LastUse::SlotDropped { destroy_i: i },
-            InstKind::DestroyValue { operand } if !is_slot && operand == src => LastUse::ValueDropped { destroy_i: i },
+            InstKind::DestroyAddr { address, .. } if is_slot && address == src => {
+                LastUse::SlotDropped { destroy_i: i }
+            },
+            InstKind::DestroyValue { operand } if !is_slot && operand == src => {
+                LastUse::ValueDropped { destroy_i: i }
+            },
             _ => return None,
         };
-        return Some(Site { block: bi, borrow_i, call_i: ci, end_i: end_i?, arg, last, origin, owned });
+        return Some(Site {
+            block: bi,
+            borrow_i,
+            call_i: ci,
+            end_i: end_i?,
+            arg,
+            last,
+            origin,
+            owned,
+        });
     }
     None
 }
@@ -253,12 +290,16 @@ fn match_site(
 /// Some borrow of `src` begun before `before` has not ended by then.
 fn has_open_borrow(insts: &[crate::inst::Instruction], before: usize, src: ValueId) -> bool {
     insts[..before].iter().any(|inst| match &inst.kind {
-        InstKind::BeginBorrowAddr { result, address, .. } | InstKind::BeginMutBorrowAddr { result, address, .. }
-            if *address == src =>
+        InstKind::BeginBorrowAddr {
+            result, address, ..
+        }
+        | InstKind::BeginMutBorrowAddr {
+            result, address, ..
+        } if *address == src => !ended(&insts[..before], *result),
+        InstKind::BeginBorrow { result, operand }
+        | InstKind::BeginMutBorrow { result, operand }
+            if *operand == src =>
         {
-            !ended(&insts[..before], *result)
-        },
-        InstKind::BeginBorrow { result, operand } | InstKind::BeginMutBorrow { result, operand } if *operand == src => {
             !ended(&insts[..before], *result)
         },
         _ => false,
@@ -301,8 +342,17 @@ fn rewrite_site(body: &mut OssaBody, site: &Site, vid: MonoFuncId) {
     let insts = &mut body.blocks[site.block].insts;
     // The value handed to the callee: moved out of the slot, or the owned value itself.
     let moved = match insts[site.borrow_i].kind {
-        InstKind::BeginBorrowAddr { result, address, ty } => {
-            insts[site.borrow_i].kind = InstKind::Take { result, address, ty, independent: true };
+        InstKind::BeginBorrowAddr {
+            result,
+            address,
+            ty,
+        } => {
+            insts[site.borrow_i].kind = InstKind::Take {
+                result,
+                address,
+                ty,
+                independent: true,
+            };
             body.values[result.index()].ownership = Ownership::Owned;
             body.values[result.index()].borrow_source = None;
             result
@@ -326,7 +376,9 @@ fn rewrite_site(body: &mut OssaBody, site: &Site, vid: MonoFuncId) {
             }
         },
         // The callee now owns the value: the caller's drop goes away.
-        LastUse::SlotDropped { destroy_i } | LastUse::ValueDropped { destroy_i } => delete.push(destroy_i),
+        LastUse::SlotDropped { destroy_i } | LastUse::ValueDropped { destroy_i } => {
+            delete.push(destroy_i)
+        },
     }
     if matches!(insts[site.borrow_i].kind, InstKind::BeginBorrow { .. }) {
         delete.push(site.borrow_i);

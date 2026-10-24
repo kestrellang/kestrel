@@ -61,7 +61,13 @@ struct Plan {
 fn find_plan(mono: &MonoModule, facts: &mut TypeFacts, body: &OssaBody) -> Option<Plan> {
     for (bi, block) in body.blocks.iter().enumerate() {
         for (ci, inst) in block.insts.iter().enumerate() {
-            let InstKind::CopyValue { result: y, operand: x } = inst.kind else { continue };
+            let InstKind::CopyValue {
+                result: y,
+                operand: x,
+            } = inst.kind
+            else {
+                continue;
+            };
             if let Some(plan) = check(mono, facts, body, bi, ci, x, y) {
                 return Some(plan);
             }
@@ -83,7 +89,9 @@ fn check(
     // `x` must be a slot borrow begun earlier in this block whose only other
     // use is its end_borrow after the copy.
     let slot = insts[..ci].iter().find_map(|i| match i.kind {
-        InstKind::BeginBorrowAddr { result, address, .. } if result == x => Some(address),
+        InstKind::BeginBorrowAddr {
+            result, address, ..
+        } if result == x => Some(address),
         _ => None,
     })?;
     let mut end_i = None;
@@ -92,7 +100,9 @@ fn check(
             continue;
         }
         match inst.kind {
-            InstKind::EndBorrow { operand } if operand == x && j > ci && end_i.is_none() => end_i = Some(j),
+            InstKind::EndBorrow { operand } if operand == x && j > ci && end_i.is_none() => {
+                end_i = Some(j)
+            },
             InstKind::BeginBorrowAddr { result, .. } if result == x => {},
             _ => return None,
         }
@@ -124,7 +134,10 @@ fn check(
     for (b, block) in body.blocks.iter().enumerate() {
         let in_family = |v: &ValueId| seen.contains(v);
         let foreign_use = block.insts.iter().any(|i| {
-            i.kind.operands().iter().any(|o| in_family(o) && !members.contains(&(b, *o)))
+            i.kind
+                .operands()
+                .iter()
+                .any(|o| in_family(o) && !members.contains(&(b, *o)))
         });
         if foreign_use {
             return None;
@@ -151,14 +164,26 @@ fn check(
             .unwrap_or(insts.len());
         let writes = insts[start.min(end)..end].iter().any(|i| {
             i.kind.operands().iter().any(|o| aliases.contains(o))
-                && !matches!(i.kind, InstKind::BeginBorrowAddr { .. } | InstKind::CopyAddr { .. } | InstKind::Load { .. })
+                && !matches!(
+                    i.kind,
+                    InstKind::BeginBorrowAddr { .. }
+                        | InstKind::CopyAddr { .. }
+                        | InstKind::Load { .. }
+                )
         });
         if writes {
             return None;
         }
     }
     let params = members.into_iter().filter(|(_, v)| *v != y).collect();
-    Some(Plan { block: bi, copy_i: ci, end_i, x, y, params })
+    Some(Plan {
+        block: bi,
+        copy_i: ci,
+        end_i,
+        x,
+        y,
+        params,
+    })
 }
 
 /// Check how family member `v` is used in its block from `start` on. Returns
@@ -210,7 +235,10 @@ fn member_uses(
     for (target, args) in term.successor_args() {
         for (k, a) in args.iter().enumerate() {
             if *a == v {
-                forwards.push((target.index(), body.blocks[target.index()].params.get(k)?.value));
+                forwards.push((
+                    target.index(),
+                    body.blocks[target.index()].params.get(k)?.value,
+                ));
             } else if derived.contains(a) {
                 return None; // a derived borrow escapes the block
             }
@@ -244,12 +272,21 @@ fn slot_aliases(body: &OssaBody, slot: ValueId) -> FxHashSet<ValueId> {
 }
 
 fn apply(body: &mut OssaBody, plan: &Plan) {
-    let Plan { block, copy_i, end_i, x, y, ref params } = *plan;
+    let Plan {
+        block,
+        copy_i,
+        end_i,
+        x,
+        y,
+        ref params,
+    } = *plan;
     // In the copy's block: reads of `y` read `x`; its destroy ends `x`'s borrow;
     // forwarding `y` forwards `x`.
     for inst in body.blocks[block].insts.iter_mut() {
         match &mut inst.kind {
-            InstKind::DestroyValue { operand } if *operand == y => inst.kind = InstKind::EndBorrow { operand: x },
+            InstKind::DestroyValue { operand } if *operand == y => {
+                inst.kind = InstKind::EndBorrow { operand: x }
+            },
             kind => replace_read_operand(kind, y, x),
         }
     }

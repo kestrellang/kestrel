@@ -116,7 +116,7 @@ only to keep their native `Clone` payload. Any deliberate divergence must
 carry a `TODO(copy-drift #n)` comment at its classifier arm — never converge
 or introduce one silently.
 
-## Copy lifetimes: only copies move, and only memory-only drops (`passes/copy_lifetime/`)
+## Copy lifetimes: only copies move, never past an observable drop (`passes/copy_lifetime/`)
 
 `copy_lifetime` stops implicit copies from keeping COW storage shared (a copy
 alive across a mutation of its original makes `append` deep-copy the buffer).
@@ -127,20 +127,20 @@ copies of a `var` (`borrow_copies`). Invariants every change here must keep:
 - **Originals never change drop position.** Only values produced by an
   implicit `CopyValue` are shortened or removed. Explicit `.clone()` calls are
   ordinary calls and are never touched. RAII guards, files and locks keep
-  their scope-end drops.
-- **Early drops need a memory-only type** (`TypeFacts::memory_only`): every
-  reachable `deinit` belongs to a type marked `@memoryonlydrop`, and a marked
-  type's type arguments qualify too (`RcBox[File]` frees a `File`). Copyable
-  types have no deinit by language rule. Mark a stdlib type `@memoryonlydrop`
-  only if its deinit does nothing but release memory (and drop its contents) —
-  never for types owning fds, sockets, locks or other external resources.
+  their scope-end drops (and are `not Copyable`, so never copied anyway).
+- **Early drops skip observable types** (`TypeFacts::observable`): a type
+  marked `@observabledrop`, or containing one through fields, payloads, type
+  arguments or pointer pointees (`RcBox[TcpStream]`). Mark a `Cloneable` type
+  `@observabledrop` when its drop does something visible (closes an fd,
+  deletes a file); analyzer E507 warns when that looks likely. Design:
+  `docs/plans/observable_drop/observable_drop-design.md`.
 - **Never shorten a copy a raw pointer or view was derived from**
-  (`TypeFacts::holds_raw_pointer`): a struct holding an unmanaged `Pointer`
-  (e.g. a string view) could dangle. Writes through raw pointers created
-  elsewhere are *not* tracked — that is `unsafe` code's responsibility.
+  (`TypeFacts::holds_raw_pointer`). A pointer stored in a type with a `deinit`
+  is that type's managed storage and doesn't count; a view has no deinit.
+  Writes through raw pointers created elsewhere are *not* tracked — that is
+  `unsafe` code's responsibility.
 - **Rewrites that delete instructions rescan** (one rewrite per scan) instead of
   batching index-based edits; batched sites in one block hold stale indices.
 - `owned_params` variants are keyed by (original function, sorted owned
   params) so one call can move several args; a call to a variant can be
   specialized further.
-

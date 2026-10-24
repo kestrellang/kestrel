@@ -10,7 +10,7 @@
 //! param is only deleted when EVERY incoming argument is itself being removed
 //! (a planned copy or another dead-carry param), so nothing leaks.
 //!
-//! Only memory-only types qualify (see [`TypeFacts::memory_only`]), and a copy
+//! Copies of observable types never qualify (see [`TypeFacts::observable`]), and a copy
 //! that a raw pointer or view was derived from keeps its scope-end drop.
 
 use kestrel_debug::ktrace;
@@ -31,7 +31,11 @@ pub(super) fn run(mono: &mut MonoModule, facts: &mut TypeFacts) -> usize {
         let Some(body) = &mut func.body else { continue };
         let n = shorten_in_function(mono, body, facts);
         if n > 0 {
-            ktrace!("copy-lifetime", "{}: {n} copies dropped at last use", func.name);
+            ktrace!(
+                "copy-lifetime",
+                "{}: {n} copies dropped at last use",
+                func.name
+            );
         }
         total += n;
     }
@@ -57,20 +61,18 @@ enum ParamUse {
     Other,
 }
 
-fn shorten_in_function(
-    mono: &MonoModule,
-    body: &mut OssaBody,
-    facts: &mut TypeFacts,
-) -> usize {
+fn shorten_in_function(mono: &MonoModule, body: &mut OssaBody, facts: &mut TypeFacts) -> usize {
     let entry = body.entry.index();
 
     // 1. Candidate copies, analysed within their defining block.
     let mut plans: FxHashMap<ValueId, CopyPlan> = FxHashMap::default();
     for bi in 0..body.blocks.len() {
         for (ci, inst) in body.blocks[bi].insts.iter().enumerate() {
-            let InstKind::CopyValue { result: y, .. } = inst.kind else { continue };
+            let InstKind::CopyValue { result: y, .. } = inst.kind else {
+                continue;
+            };
             if body.value(y).ownership != Ownership::Owned
-                || !facts.memory_only(mono, body.value(y).ty)
+                || facts.observable(mono, body.value(y).ty)
             {
                 continue;
             }
@@ -91,7 +93,7 @@ fn shorten_in_function(
             continue;
         }
         for (k, p) in block.params.iter().enumerate() {
-            if p.ownership == Ownership::Owned && facts.memory_only(mono, p.ty) {
+            if p.ownership == Ownership::Owned && !facts.observable(mono, p.ty) {
                 param_uses.insert(p.value, Vec::new());
                 param_slot.insert(p.value, (bi, k));
             }
@@ -102,9 +104,16 @@ fn shorten_in_function(
     for (bi, block) in body.blocks.iter().enumerate() {
         for (ii, inst) in block.insts.iter().enumerate() {
             for op in inst.kind.operands() {
-                let Some(uses) = param_uses.get_mut(&op) else { continue };
-                let is_destroy = matches!(inst.kind, InstKind::DestroyValue { operand } if operand == op);
-                uses.push(if is_destroy { ParamUse::Destroy(bi, ii) } else { ParamUse::Other });
+                let Some(uses) = param_uses.get_mut(&op) else {
+                    continue;
+                };
+                let is_destroy =
+                    matches!(inst.kind, InstKind::DestroyValue { operand } if operand == op);
+                uses.push(if is_destroy {
+                    ParamUse::Destroy(bi, ii)
+                } else {
+                    ParamUse::Other
+                });
             }
         }
         let term = &block.terminator.kind;
@@ -226,7 +235,10 @@ fn apply(
                     new_insts.push(inst);
                 }
                 for &v in ins.get(&i).into_iter().flatten() {
-                    new_insts.push(Instruction { kind: InstKind::DestroyValue { operand: v }, span: span.clone() });
+                    new_insts.push(Instruction {
+                        kind: InstKind::DestroyValue { operand: v },
+                        span: span.clone(),
+                    });
                 }
             }
             body.blocks[bi].insts = new_insts;
@@ -283,7 +295,9 @@ fn scan_copy(
         }
         // Anything after the destroy that still touches the family is unsafe.
         // Other instructions may take derived borrows (call args), but not `y` by value.
-        if destroy.is_some() || (!super::reads_only(&inst.kind) && inst.kind.operands().contains(&y)) {
+        if destroy.is_some()
+            || (!super::reads_only(&inst.kind) && inst.kind.operands().contains(&y))
+        {
             return None;
         }
         last_use = j;
@@ -318,5 +332,11 @@ fn scan_copy(
     if destroy.is_some() == !forwards.is_empty() {
         return None; // must leave the block exactly one way
     }
-    Some(CopyPlan { block: bi, value: y, last_use, destroy, forwards })
+    Some(CopyPlan {
+        block: bi,
+        value: y,
+        last_use,
+        destroy,
+        forwards,
+    })
 }
