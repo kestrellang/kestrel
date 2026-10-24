@@ -34,3 +34,11 @@
       installed in the cloud container — fall back to `kestrel build` + run,
       report as unverified by the harness)
 - [ ] Benchmarks unchanged (`temp/perceus/long/`)
+
+## Revision — E507 moved post-monomorphization
+The analyzer version (Phase 2) could not follow generic/protocol calls, so a
+deinit that only prints was missed. Replaced by
+`kestrel_mir::passes::copy_lifetime::unmarked_observable_drops`, reported via
+`Compiler::mono_warnings` (printed by `kestrel build`). The lint tests became
+execution tests; the harness checks `// WARN:` in execution tests (and
+`// warnings: checked` asserts none).

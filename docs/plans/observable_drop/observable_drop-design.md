@@ -53,7 +53,8 @@ type's lifetimes alone. Lowercase single word, matching `@fileconstant`.
 | Stage | Change |
 |-------|--------|
 | Lexer / Parser / AST | None — attributes are generic. |
-| Analyzers | `observabledrop` in `KNOWN_ATTRIBUTES`; new DeclCheck `observable_drop` (E507). |
+| Analyzers | `observabledrop` in `KNOWN_ATTRIBUTES`. (E507 is *not* an analyzer — see below.) |
+| Post-mono | E507 lint `copy_lifetime::unmarked_observable_drops`, reported by `kestrel-compiler` (`Compiler::mono_warnings`, printed by `kestrel build`). |
 | MIR lowering | `record_memory_only_drop` → `record_observable_drop`; `MirModule::memory_only_drop` → `observable_drop`. |
 | Mono | Carries `observable_drop` across (rename). |
 | copy_lifetime | `TypeFacts::memory_only` → `TypeFacts::observable` (inverted, walks pointees); callers flip. |
@@ -63,21 +64,29 @@ type's lifetimes alone. Lowercase single word, matching `@fileconstant`.
 
 | Condition | Diagnostic |
 |-----------|-----------|
-| `Cloneable` struct/enum, not `@observabledrop`, whose `deinit` (transitively, through Kestrel calls) reaches an `@extern` function other than the C allocator and `mem*` functions | **E507** warning: "`Cloneable` type `{T}` has a `deinit` that calls `{f}`; mark it `@observabledrop` so its copies are not dropped early" — label on the type name ("copies of this type may be dropped before the end of their scope"), note naming the extern reached. `{f}` is the function the deinit calls directly on the path to the extern (`close`, not `libc_close`). |
+| `Cloneable` struct/enum, not `@observabledrop`, whose `deinit` (transitively, through Kestrel calls) reaches an `@extern` function other than the C allocator and `mem*` functions | **E507** warning: "`Cloneable` type `{T}` has a `deinit` that calls `{f}`; mark it `@observabledrop` so its copies are not dropped early" — label on the type name ("copies of this type may be dropped before the end of their scope"), note naming the extern reached. `{f}` is the first source-level function on the call path from the deinit (`println`, `closeFd`). |
 
 ## Edge cases
 
-- **Unresolvable calls** (protocol calls, closures, function values) in a
-  `deinit`: the lint ignores them. It is a helper, not a safety gate; false
-  alarms would teach people to ignore it. Known consequence: a `deinit` that
-  only prints is not flagged (`println` dispatches through `Formattable` /
-  writer protocol calls before reaching `write`).
+- **Where the lint runs:** after monomorphization, where every call —
+  generic and protocol calls included — is resolved to a concrete function, so
+  the walk is exact: a `deinit` that only prints is caught through
+  `println → writeLine[W] → W.write` (`W = Stdout`). The first version was an
+  analyzer and could not see through those calls. Trade-off: E507 appears at
+  `kestrel build` time only, not in the editor, and only for types the program
+  instantiates. Calls through function values are still skipped.
+- **Crash paths:** functions returning `!` (`fatalError`) are not followed —
+  an allocation that can abort with a message would otherwise flag every
+  deinit that builds a string.
+- **Tests:** E507 is checked by *execution* tests: a `// WARN:` annotation (or
+  the `// warnings: checked` header, to assert none) makes the harness match
+  the build's post-mono warnings two ways.
 - **Memory:** the C allocator and `mem*` externs (`malloc`, `calloc`, `realloc`, `free`, `memcpy`, `memmove`, `memset`, `memcmp`) are allowed; any other extern
   counts as observable.
 - **Recursion / cycles** in the call walk: visited set.
-- **Generic deinits** (`RcBox[T]` dropping its `T`): implicit drops are not
-  calls in HIR, so the lint does not see them. Contents are handled by the
-  type-level propagation, not the lint.
+- **Generic deinits** (`RcBox[T]` dropping its `T`): contents are handled by
+  the type-level propagation (a type containing an observable type needs no
+  mark of its own), not by the lint.
 - **Copyable types with a `deinit`** (the bug class `TcpListener` hit): out of
   scope; tracked as a separate task.
 - **`@observabledrop` on `not Copyable` types:** allowed, no effect, no warning.

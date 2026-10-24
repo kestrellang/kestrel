@@ -132,7 +132,7 @@ copies of a `var` (`borrow_copies`). Invariants every change here must keep:
   marked `@observabledrop`, or containing one through fields, payloads, type
   arguments or pointer pointees (`RcBox[TcpStream]`). Mark a `Cloneable` type
   `@observabledrop` when its drop does something visible (closes an fd,
-  deletes a file); analyzer E507 warns when that looks likely. Design:
+  deletes a file); E507 (post-mono, `observable_lint.rs`) warns when that looks likely. Design:
   `docs/plans/observable_drop/observable_drop-design.md`.
 - **Never shorten a copy a raw pointer or view was derived from**
   (`TypeFacts::holds_raw_pointer`). A pointer stored in a type with a `deinit`

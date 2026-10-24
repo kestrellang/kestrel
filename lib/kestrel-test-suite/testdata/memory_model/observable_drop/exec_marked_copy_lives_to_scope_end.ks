@@ -1,5 +1,6 @@
 // test: execution
 // stdlib: true
+// warnings: checked
 // expect-stdout: read 1\nwork\nend 1\ndrop 1\ndrop 1\n
 
 // A copy of an `@observabledrop` type keeps its scope-end drop: it is dropped

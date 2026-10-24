@@ -87,10 +87,10 @@ shared socket handle that closes the connection on its last drop, mark it
 public struct TcpStream: Readable, Writable, Cloneable { ... }
 ```
 
-The compiler warns (E507) when a `Cloneable` type's `deinit` calls an external
-function other than memory allocation and it isn't marked. The check only
-follows calls it can resolve statically, so a `deinit` that only prints (through
-protocol calls) is not flagged.
+`kestrel build` warns (E507) when a `Cloneable` type's `deinit` reaches an
+external function other than memory allocation — printing, closing a file
+descriptor — and the type isn't marked. The check runs after generics are
+resolved, so it follows calls through generic and protocol code too.
 
 ## Function Parameter Modes
 

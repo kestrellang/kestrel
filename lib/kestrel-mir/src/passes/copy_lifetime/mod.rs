@@ -28,6 +28,7 @@
 
 mod borrow_copies;
 mod drop_at_last_use;
+mod observable_lint;
 mod owned_params;
 mod type_facts;
 
@@ -41,6 +42,7 @@ use crate::inst::InstKind;
 use crate::mono::types::MonoModule;
 use crate::terminator::TerminatorKind;
 
+pub use observable_lint::{ObservableDropFinding, unmarked_observable_drops};
 pub use type_facts::TypeFacts;
 
 /// Run all three copy lifetime passes.

@@ -8,7 +8,7 @@
 // "drop 1" prints before "read 1".
 module Test
 
-struct Noisy: Cloneable {
+struct Noisy: Cloneable { // WARN: `Cloneable` type `Noisy` has a `deinit` that calls `println`
     var id: Int64
     func clone() -> Noisy { Noisy(id: self.id) }
     deinit { println("drop \(self.id)"); }

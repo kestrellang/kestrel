@@ -1,13 +1,21 @@
-// test: diagnostics
+// test: execution
 // stdlib: true
-
-module Test
-
-import std.ffi.(RawPointer, free)
+// backends: cranelift,llvm
+// warnings: checked
 
 // Releasing memory is not observable: no warning.
+module Test
+
+import std.ffi.(RawPointer, malloc, free)
+
 struct Block: Cloneable {
     var ptr: RawPointer
-    func clone() -> Block { Block(ptr: self.ptr) }
+    func clone() -> Block { Block(ptr: malloc(8)) }
     deinit { free(self.ptr); }
+}
+
+@main
+func main() -> lang.i64 {
+    let b = Block(ptr: malloc(8));
+    0
 }

@@ -274,6 +274,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
         },
     };
     driver.emit_diagnostics().ok();
+    emit_mono_warnings(&compiler);
     result.map_err(|e| {
         eprintln!("error: {}", e);
         ExitCode::FAILURE
@@ -703,6 +704,18 @@ fn cli_emittable_analyze_diags(
         })
         .filter(|d| d.descriptor_id != "E100")
         .collect()
+}
+
+/// Emit warnings found after monomorphization (E507) to stderr. They are not
+/// in the query-accumulated stream `emit_diagnostics` prints.
+fn emit_mono_warnings(compiler: &Compiler) {
+    let warnings = compiler.mono_warnings();
+    if warnings.is_empty() {
+        return;
+    }
+    let files =
+        kestrel_compiler::diagnostic::WorldFiles::from_world(compiler.world(), compiler.files());
+    kestrel_reporting::emit_all(&files, &warnings).ok();
 }
 
 /// Emit analyzer diagnostics (E-codes) as codespan-style diagnostics to stderr.
