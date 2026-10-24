@@ -611,11 +611,25 @@ fn compile_op1(
             slot
         },
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
+        // Same layout as the (data, table) tuple it views.
+        Op::FatPtr(_) => arg,
+        // Legalized at mono (`mono::fat`) when the pointee is unsized, so
+        // only the static case reaches codegen.
+        Op::SizeOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.size() as i64)
+        },
+        Op::AlignOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            builder.ins().iconst(ptr_ty, repr.align() as i64)
+        },
         Op::RefToPtr => arg,
         // Project word `i` out of a closure value. A `FuncThick` is always
         // addressed (TypeRepr::Aggregate), so `arg` is the base address and the
         // word is a plain pointer-sized load at `i * ptr_size`.
-        Op::ClosureWord(i) => {
+        // A fat (data, table) value is addressed like a closure value; a
+        // table word is the same load. Cranelift pointers are integers.
+        Op::ClosureWord(i) | Op::FatWord(i) | Op::WordInt(i) => {
             let off = (i as u64 * fc.ctx.ptr_size) as i32;
             builder
                 .ins()

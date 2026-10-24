@@ -29,6 +29,8 @@ pub struct CodegenCtx<'m> {
     pub func_ids: Vec<Option<FuncId>>,
     pub string_data: HashMap<String, cranelift_module::DataId>,
     pub static_data: HashMap<Entity, cranelift_module::DataId>,
+    /// Existential function tables, indexed like `MonoModule::vtables`.
+    pub vtable_data: Vec<cranelift_module::DataId>,
     pub func_builder_ctx: FunctionBuilderContext,
     pub clif_outputs: Vec<(String, String)>,
 }
@@ -80,6 +82,7 @@ impl<'m> CodegenCtx<'m> {
             func_ids: vec![None; module.functions.len()],
             string_data: HashMap::new(),
             static_data: HashMap::new(),
+            vtable_data: Vec::new(),
             func_builder_ctx: FunctionBuilderContext::new(),
             clif_outputs: Vec::new(),
         })
@@ -88,6 +91,7 @@ impl<'m> CodegenCtx<'m> {
     pub fn compile_all(&mut self) -> Result<(), CodegenError> {
         self.define_all_statics()?;
         self.declare_all_functions()?;
+        self.define_all_vtables()?;
         self.define_all_functions()?;
         Ok(())
     }
@@ -109,6 +113,69 @@ impl<'m> CodegenCtx<'m> {
         // The entry point is the `@main`-marked function (propagated from
         // FunctionDef.is_main through monomorphization). Independent of name.
         func.is_main
+    }
+
+    // -- Existential function tables --
+
+    /// Each `MonoVTable` as a read-only array of pointer-sized words with
+    /// relocations (`kestrel_mir::item::vtable` has the layout). All are
+    /// declared before any is defined: tables point at one another.
+    fn define_all_vtables(&mut self) -> Result<(), CodegenError> {
+        let err = |e: cranelift_module::ModuleError| CodegenError::DataSection(format!("{e}"));
+        for table in &self.module.vtables {
+            let id = self
+                .cl_module
+                .declare_data(&table.name, Linkage::Local, false, false)
+                .map_err(err)?;
+            self.vtable_data.push(id);
+        }
+        let word = self.ptr_size as usize;
+        for (i, table) in self.module.vtables.iter().enumerate() {
+            let mut bytes = vec![0u8; word * table.entries.len().max(1)];
+            let mut desc = DataDescription::new();
+            let mut relocs = Vec::new();
+            for (slot, entry) in table.entries.iter().enumerate() {
+                let at = slot * word;
+                let int = match entry {
+                    kestrel_mir::mono::MonoVTableEntry::Size(ty) => {
+                        Some(self.tc.repr(*ty, &self.module.ty_arena, self.module).size())
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Align(ty) => {
+                        Some(self.tc.repr(*ty, &self.module.ty_arena, self.module).align())
+                    },
+                    other => {
+                        relocs.push((at, other.clone()));
+                        None
+                    },
+                };
+                if let Some(v) = int {
+                    bytes[at..at + word].copy_from_slice(&v.to_le_bytes()[..word]);
+                }
+            }
+            desc.define(bytes.into_boxed_slice());
+            for (at, entry) in relocs {
+                match entry {
+                    kestrel_mir::mono::MonoVTableEntry::Func(f) => {
+                        let Some(fid) = self.func_ids[f.index()] else {
+                            continue;
+                        };
+                        let fref = self.cl_module.declare_func_in_data(fid, &mut desc);
+                        desc.write_function_addr(at as u32, fref);
+                    },
+                    kestrel_mir::mono::MonoVTableEntry::Table(t) => {
+                        let gv = self
+                            .cl_module
+                            .declare_data_in_data(self.vtable_data[t.index()], &mut desc);
+                        desc.write_data_addr(at as u32, gv, 0);
+                    },
+                    _ => {},
+                }
+            }
+            self.cl_module
+                .define_data(self.vtable_data[i], &desc)
+                .map_err(err)?;
+        }
+        Ok(())
     }
 
     // -- Statics --

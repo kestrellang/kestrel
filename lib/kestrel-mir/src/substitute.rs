@@ -85,6 +85,22 @@ pub fn substitute(arena: &mut TyArena, ty: TyId, subst: &SubstMap) -> TyId {
             }
         },
 
+        MirTy::RawExistential { bounds, bindings } => {
+            let sub_bounds: Vec<(kestrel_hecs::Entity, Vec<TyId>)> = bounds
+                .iter()
+                .map(|(p, args)| (*p, args.iter().map(|&a| substitute(arena, a, subst)).collect()))
+                .collect();
+            let sub_bindings: Vec<(kestrel_hecs::Entity, TyId)> = bindings
+                .iter()
+                .map(|&(a, t)| (a, substitute(arena, t, subst)))
+                .collect();
+            if sub_bounds != bounds || sub_bindings != bindings {
+                arena.raw_existential(sub_bounds, sub_bindings)
+            } else {
+                ty
+            }
+        },
+
         MirTy::Tuple(elems) => {
             let sub_elems: Vec<_> = elems.iter().map(|&e| substitute(arena, e, subst)).collect();
             if sub_elems != elems {

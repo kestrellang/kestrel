@@ -5,6 +5,11 @@ pub struct StructLayout {
     pub size: u64,
     pub align: u64,
     pub field_offsets: Vec<u64>,
+    /// The last field is unsized (`RcBoxStorage[rawany P]`): `size`/`align`
+    /// cover the sized prefix only, `field_offsets` has no entry for the
+    /// tail, and the tail's offset is computed at runtime from the
+    /// payload's alignment (existentials plan Phase 9).
+    pub unsized_tail: bool,
 }
 
 impl StructLayout {
@@ -13,6 +18,7 @@ impl StructLayout {
             size: 0,
             align: 1,
             field_offsets: Vec::new(),
+            unsized_tail: false,
         }
     }
 
@@ -21,6 +27,7 @@ impl StructLayout {
             size,
             align,
             field_offsets: Vec::new(),
+            unsized_tail: false,
         }
     }
 

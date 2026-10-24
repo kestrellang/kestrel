@@ -23,6 +23,15 @@ pub enum ImmediateKind {
         self_type: Option<TyId>,
     },
     MonoFunctionRef(MonoFuncId),
+    /// The address of an existential function table: `template`
+    /// (`MirModule::vtable_templates`) instantiated at `payload`. Mono
+    /// rewrites it to [`ImmediateKind::MonoVTable`].
+    VTable {
+        template: Entity,
+        payload: TyId,
+    },
+    /// A resolved table (`MonoModule::vtables`).
+    MonoVTable(crate::MonoVTableId),
     NullPtr(TyId),
     SizeOf(TyId),
     AlignOf(TyId),
@@ -126,7 +135,10 @@ impl Immediate {
             },
             ImmediateKind::BoolLiteral(_) => arena.bool(),
             ImmediateKind::StringLiteral(_) => arena.str_ty(),
-            ImmediateKind::StringPointer(_) => {
+            // A table's address is a raw byte pointer.
+            ImmediateKind::StringPointer(_)
+            | ImmediateKind::VTable { .. }
+            | ImmediateKind::MonoVTable(_) => {
                 let i8 = arena.i8();
                 arena.pointer(i8)
             },

@@ -299,6 +299,18 @@ public struct Pointer[T]: Equatable, Hashable where T: not Copyable, T: not Stat
         Pointer(raw: lang.cast_ptr[_, U](lang.cast_ptr[_, lang.i8](self._raw)))
     }
 
+    /// This address, carrying `other`'s pointee metadata.
+    ///
+    /// A pointer to an unsized pointee (a raw existential) is two words: the
+    /// address and the payload's function table. Address arithmetic through
+    /// `asRaw()` keeps only the first; this puts the table back. For a sized
+    /// `T` it returns `self` unchanged.
+    public func withMetadata[U](of other: Pointer[U]) -> Pointer[T]
+        where U: not Copyable, U: not Sized, U: not Static
+    {
+        Pointer(raw: lang.ptr_with_meta[T, U](self._raw, other._raw))
+    }
+
     /// Address-based equality.
     public func isEqual(to other: Pointer[T]) -> Bool {
         self.address == other.address

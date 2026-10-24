@@ -22,7 +22,7 @@ use indexmap::IndexMap;
 use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
-pub use id::{BlockId, FieldIdx, MonoFuncId, TyId, ValueId, VariantIdx};
+pub use id::{BlockId, FieldIdx, MonoFuncId, MonoVTableId, TyId, ValueId, VariantIdx};
 pub use immediate::{Immediate, ImmediateKind};
 pub use item::WitnessMethodKey;
 pub use item::{CopyBehavior, DropBehavior, Layout, TargetConfig, TypeInfo, TypeParamDef};
@@ -113,6 +113,9 @@ pub struct MirModule {
     /// stdlib — implicit conditions then branch raw, as they always did.
     pub boolean_conditional_protocol: Option<Entity>,
     pub bool_struct: Option<Entity>,
+    /// Existential function-table shapes, generic over the payload
+    /// (`item::vtable`). Instantiated by mono at each `ImmediateKind::VTable`.
+    pub vtable_templates: IndexMap<Entity, crate::item::VTableTemplate>,
 }
 
 impl MirModule {
@@ -131,6 +134,7 @@ impl MirModule {
             cloneable_protocol: None,
             boolean_conditional_protocol: None,
             bool_struct: None,
+            vtable_templates: IndexMap::new(),
         }
     }
 

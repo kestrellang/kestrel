@@ -687,6 +687,17 @@ fn seed_pointer_ops(world: &mut World, lang: Entity) {
     // (existentials). For a sized `T` they are `sizeof` / `alignof`.
     seed_generic_fn(world, lang, "sizeof_val", &[("ptr", ptr_t.clone())], i64_ty.clone());
     seed_generic_fn(world, lang, "alignof_val", &[("ptr", ptr_t.clone())], i64_ty.clone());
+    // `addr`'s address with `from`'s table: how a pointer computed through
+    // raw address arithmetic gets back an unsized pointee's table
+    // (`RcBox.valuePtr`). For a sized `T` it is just `addr`.
+    seed_generic_fn_multi(
+        world,
+        lang,
+        "ptr_with_meta",
+        &["T", "U"],
+        &[("addr", ptr_of(param_ty("T"))), ("from", ptr_of(param_ty("U")))],
+        ptr_of(param_ty("T")),
+    );
 
     // Pointer queries (generic — work on any ptr[T])
     seed_generic_fn(world, lang, "ptr_is_null", &[("ptr", ptr_t.clone())], i1_ty);

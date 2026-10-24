@@ -71,6 +71,7 @@ pub fn collect_all(
     entity_names: &IndexMap<Entity, String>,
     copyable_protocol: Option<Entity>,
     cloneable_protocol: Option<Entity>,
+    vtable_templates: &IndexMap<Entity, crate::item::VTableTemplate>,
 ) -> Result<CollectionResult, Vec<MonoError>> {
     let mut ctx = CollectionContext::new(
         functions,
@@ -83,6 +84,7 @@ pub fn collect_all(
     );
     ctx.copyable_protocol = copyable_protocol;
     ctx.cloneable_protocol = cloneable_protocol;
+    ctx.vtable_templates = Some(vtable_templates);
     ctx.collect();
 
     if ctx.errors.is_empty() {
@@ -111,6 +113,10 @@ struct CollectionContext<'a> {
     /// actually Clone before its clone impl is instantiated.
     copyable_protocol: Option<Entity>,
     cloneable_protocol: Option<Entity>,
+    /// Table shapes; a table literal instantiates its entries' functions.
+    vtable_templates: Option<&'a IndexMap<Entity, crate::item::VTableTemplate>>,
+    /// Tables already scanned, by (template, payload).
+    seen_vtables: IndexSet<(Entity, TyId)>,
 }
 
 impl<'a> CollectionContext<'a> {
@@ -137,6 +143,8 @@ impl<'a> CollectionContext<'a> {
             errors: Vec::new(),
             copyable_protocol: None,
             cloneable_protocol: None,
+            vtable_templates: None,
+            seen_vtables: IndexSet::new(),
         }
     }
 
@@ -445,6 +453,11 @@ impl<'a> CollectionContext<'a> {
     /// Scan an ImmediateKind for FunctionRef — discovers function references
     /// used as values (closures, first-class function pointers).
     fn scan_immediate(&mut self, imm: &ImmediateKind, subst: &SubstMap, parent_self: Option<TyId>) {
+        if let ImmediateKind::VTable { template, payload } = imm {
+            let payload = substitute_and_resolve(self.arena, self.witnesses, *payload, subst);
+            self.scan_vtable(*template, payload);
+            return;
+        }
         if let ImmediateKind::FunctionRef {
             func,
             type_args,
@@ -486,6 +499,31 @@ impl<'a> CollectionContext<'a> {
 
     /// The function that clones `nominal`, as decided once by the clone-shim
     /// pass. A struct or enum, never both — one lookup, no fallback chain.
+    /// A table at a concrete payload: instantiate every function entry at the
+    /// payload, and every sub-table (ancestors, composition bounds) the same
+    /// way. Tables are roots, like function refs.
+    fn scan_vtable(&mut self, template: Entity, payload: TyId) {
+        if !self.seen_vtables.insert((template, payload)) {
+            return;
+        }
+        let Some(tpl) = self.vtable_templates.and_then(|t| t.get(&template)) else {
+            return;
+        };
+        kestrel_debug::ktrace!("vtable", "collect {} at {:?}", tpl.name, payload);
+        for entry in tpl.entries.clone() {
+            match entry {
+                crate::item::VTableEntry::Func(func) => {
+                    let key = InstantiationKey::new(func, vec![payload], None);
+                    if self.seen.insert(key.clone()) {
+                        self.queue.push_back(key);
+                    }
+                },
+                crate::item::VTableEntry::Table(sub) => self.scan_vtable(sub, payload),
+                _ => {},
+            }
+        }
+    }
+
     /// Is the concrete type `ty` duplicated by a clone (or bit-copy), rather
     /// than move-only? Same classifier as the rest of MIR.
     fn instance_may_clone(&self, ty: TyId) -> bool {
@@ -1055,6 +1093,7 @@ mod tests {
             &IndexMap::new(),
             None,
             None,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -1096,6 +1135,7 @@ mod tests {
             &IndexMap::new(),
             None,
             None,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -1164,6 +1204,7 @@ mod tests {
             &IndexMap::new(),
             None,
             None,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -1229,6 +1270,7 @@ mod tests {
             &IndexMap::new(),
             None,
             None,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -1270,6 +1312,7 @@ mod tests {
             &IndexMap::new(),
             None,
             None,
+            &IndexMap::new(),
         )
         .unwrap();
 
@@ -1357,6 +1400,7 @@ mod tests {
             &names,
             None,
             None,
+            &IndexMap::new(),
         )
         .unwrap();
 

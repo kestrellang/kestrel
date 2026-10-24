@@ -2,6 +2,7 @@ pub mod call;
 pub mod closure;
 pub mod closure_box;
 pub mod control;
+mod existential;
 pub mod expr;
 pub mod literal;
 pub mod pattern;
@@ -3520,7 +3521,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn lower_expr_for_borrow(&mut self, expr_id: HirExprId) -> ValueId {
-        if self.has_kind_coercion(expr_id) {
+        if self.has_value_conversion(expr_id) {
             return self.lower_expr(expr_id);
         }
         // Local/captured places resolve through the place resolver: var
@@ -3546,7 +3547,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     /// and consumes it from scope (no bitwise copy_value). Var locals
     /// and complex expressions fall back to lower_expr.
     pub fn lower_expr_for_consuming(&mut self, expr_id: HirExprId) -> ValueId {
-        if self.has_kind_coercion(expr_id) {
+        if self.has_value_conversion(expr_id) {
             return self.lower_expr(expr_id);
         }
         let expr = self.hir.exprs[expr_id].clone();
@@ -3688,10 +3689,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         expr_id: HirExprId,
         convention: ParamConvention,
     ) -> CallArg {
-        // Cross-kind replay is a value conversion. Force it through lower_expr
-        // before the place-oriented Borrow/MutBorrow/Consuming fast paths can
-        // return the source-kind local directly.
-        if self.has_kind_coercion(expr_id) {
+        // Cross-kind replay and existential conversions are value
+        // conversions. Force them through lower_expr before the place-oriented
+        // Borrow/MutBorrow/Consuming fast paths can return the source local
+        // directly.
+        if self.has_value_conversion(expr_id) {
             let value = self.lower_expr(expr_id);
             return self.prepare_call_arg(value, convention);
         }

@@ -3,6 +3,7 @@ pub mod function;
 pub mod protocol;
 pub mod static_def;
 pub mod struct_def;
+pub mod vtable;
 pub mod witness;
 
 use kestrel_hecs::Entity;
@@ -18,6 +19,7 @@ pub use function::{
 pub use protocol::{AssociatedTypeDef, ProtocolDef, ProtocolMethodDef};
 pub use static_def::{FileConstantData, StaticDef};
 pub use struct_def::{FieldDef, StructDef};
+pub use vtable::{VTableEntry, VTableTemplate};
 pub use witness::{WitnessDef, WitnessMethodBinding, WitnessMethodKey};
 
 #[derive(Debug, Clone, PartialEq)]

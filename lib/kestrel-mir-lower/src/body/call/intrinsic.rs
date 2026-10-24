@@ -1313,11 +1313,27 @@ pub(crate) fn try_intrinsic(
         type_args = bctx.resolve_type_args(callee_expr);
     }
     match name.as_str() {
-        // `*_val` measure the pointee at runtime. A sized pointee folds to the
-        // static answer; an unsized one reads its function table (existentials
-        // plan Phase 9 — until then an unsized MIR type is the error type and
-        // never reaches codegen).
-        "sizeof" | "alignof" | "sizeof_val" | "alignof_val" => {
+        // `*_val` measure the pointee at runtime: mono folds a sized pointee
+        // to the static answer and reads an unsized one's function table
+        // (`kestrel_mir::mono::fat`).
+        "sizeof_val" | "alignof_val" => {
+            let ty_arg = *type_args.first()?;
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let ptr = bctx.lower_expr(args.first()?.value);
+            let op = if name == "sizeof_val" {
+                Op::SizeOfVal(ty_arg)
+            } else {
+                Op::AlignOfVal(ty_arg)
+            };
+            return Some(bctx.emit_op1(op, ptr, result_ty));
+        },
+        "ptr_with_meta" => {
+            let result_ty = bctx.resolve_expr_type(expr_id);
+            let addr = bctx.lower_expr(args.first()?.value);
+            let from = bctx.lower_expr(args.get(1)?.value);
+            return Some(bctx.emit_op2(Op::PtrWithMeta(result_ty), addr, from, result_ty));
+        },
+        "sizeof" | "alignof" => {
             let ty_arg = *type_args.first()?;
             let result_ty = bctx.resolve_expr_type(expr_id);
             let op = if name.starts_with("sizeof") {

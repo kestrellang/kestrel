@@ -144,6 +144,35 @@ pub fn match_pattern(
         // Structural recursion on wrapper types
         (MirTy::Pointer(a), MirTy::Pointer(b)) => match_pattern(arena, a, b, bindings),
 
+        // A raw existential: the same bounds in canonical order, args and
+        // pinned associated types matched structurally (an `any P: P`
+        // witness's pattern may carry the enclosing generic's params).
+        (
+            MirTy::RawExistential {
+                bounds: b1,
+                bindings: p1,
+            },
+            MirTy::RawExistential {
+                bounds: b2,
+                bindings: p2,
+            },
+        ) => {
+            b1.len() == b2.len()
+                && p1.len() == p2.len()
+                && b1.iter().zip(&b2).all(|((e1, a1), (e2, a2))| {
+                    e1 == e2
+                        && a1.len() == a2.len()
+                        && a1
+                            .iter()
+                            .zip(a2)
+                            .all(|(&p, &c)| match_pattern(arena, p, c, bindings))
+                })
+                && p1
+                    .iter()
+                    .zip(&p2)
+                    .all(|((a1, t1), (a2, t2))| a1 == a2 && match_pattern(arena, *t1, *t2, bindings))
+        },
+
         // Refs match exactly by mutability — `extend &T: P` witnesses carry
         // `Ref{TypeParam}` implementing types; a `&mutating` self never
         // matches a `&` pattern (no subsumption — each mutability conforms

@@ -2,15 +2,17 @@ pub mod audit;
 pub mod collect;
 mod entail;
 pub mod expand;
+pub mod fat;
 pub mod mangle;
 pub mod types;
 pub mod verify;
+mod vtable;
 pub mod witness;
 
 pub use collect::CollectionResult;
 pub use types::{
     InstantiationKey, MonoEnum, MonoEnumCase, MonoField, MonoFunction, MonoModule, MonoParam,
-    MonoStruct, MonoTypeKey,
+    MonoStruct, MonoTypeKey, MonoVTable, MonoVTableEntry,
 };
 pub use verify::{MonoVerifyError, MonoVerifyResult};
 pub use witness::MonoError;
@@ -63,6 +65,7 @@ pub fn monomorphize(
         // `Callee::Witness` is resolved by the ordinary witness machinery.
         boolean_conditional_protocol: _,
         bool_struct: _,
+        vtable_templates,
     } = module;
 
     // Phase 1: Instantiation discovery
@@ -79,6 +82,7 @@ pub fn monomorphize(
         &entity_names,
         copyable_protocol,
         cloneable_protocol,
+        &vtable_templates,
     )?;
 
     // Phase 2: Body monomorphization
@@ -107,6 +111,18 @@ pub fn monomorphize(
     for body_result in mono_bodies.iter_mut() {
         rewrite_callees(body_result, &func_id_map, &functions);
     }
+
+    // Phase 3b: existential function tables — intern each table literal.
+    let vtables = {
+        let mut interner =
+            vtable::VTableInterner::new(&vtable_templates, &func_id_map, &ty_arena, &entity_names);
+        for body_result in mono_bodies.iter_mut() {
+            if let Some(body) = &mut body_result.body {
+                interner.rewrite_body(body);
+            }
+        }
+        interner.tables
+    };
 
     // Phase 4: Type and layout resolution
     let (mono_structs, mono_enums) = resolve_types_and_layouts(
@@ -238,6 +254,7 @@ pub fn monomorphize(
     }
 
     mono_module.entity_names = entity_names;
+    mono_module.vtables = vtables;
     mono_module.structs = mono_structs;
     mono_module.enums = mono_enums;
 
@@ -245,6 +262,10 @@ pub fn monomorphize(
     for s in statics.values() {
         mono_module.statics.insert(s.entity, s.clone());
     }
+
+    // Two-word (data, table) pointers: rewrite the ops that meet one now
+    // that every type is concrete.
+    fat::legalize(&mut mono_module);
 
     Ok(mono_module)
 }
@@ -609,7 +630,10 @@ fn substitute_immediate(
         collect::substitute_and_resolve(arena, witnesses, ty, subst)
     };
     match kind {
-        ImmediateKind::SizeOf(ty) | ImmediateKind::AlignOf(ty) | ImmediateKind::NullPtr(ty) => {
+        ImmediateKind::SizeOf(ty)
+        | ImmediateKind::AlignOf(ty)
+        | ImmediateKind::NullPtr(ty)
+        | ImmediateKind::VTable { payload: ty, .. } => {
             *ty = resolve(arena, *ty);
         },
         ImmediateKind::FunctionRef {
@@ -847,7 +871,8 @@ fn resolve_types_and_layouts(
                     let mut all_resolved = true;
                     let mut fields = Vec::new();
 
-                    for field in &sdef.fields {
+                    let last = sdef.fields.len().saturating_sub(1);
+                    for (i, field) in sdef.fields.iter().enumerate() {
                         let concrete_ty =
                             collect::substitute_and_resolve(arena, witnesses, field.ty, &subst);
                         fields.push(MonoField::new(&field.name, concrete_ty));
@@ -859,8 +884,14 @@ fn resolve_types_and_layouts(
                             enums,
                         );
 
+                        // An unsized last field is the struct's unsized
+                        // tail: lay out the prefix only.
+                        if i == last && crate::ty::is_unsized(&mut GenericTails { arena, structs, witnesses }, concrete_ty) {
+                            layout.unsized_tail = true;
+                            continue;
+                        }
                         if let Some((size, align)) =
-                            mono_size_and_align(arena, concrete_ty, target, &layout_cache)
+                            mono_size_and_align(arena, structs, witnesses, concrete_ty, target, &layout_cache)
                         {
                             layout.append_field(StructLayout::scalar(size, align));
                         } else {
@@ -870,7 +901,9 @@ fn resolve_types_and_layouts(
                     }
 
                     if all_resolved {
-                        layout.pad_to_align();
+                        if !layout.unsized_tail {
+                            layout.pad_to_align();
+                        }
                         layout_cache.insert(cache_key, (layout.size, layout.align));
                         let mut ms = MonoStruct::new(*entity, type_args.clone());
                         ms.fields = fields;
@@ -903,9 +936,14 @@ fn resolve_types_and_layouts(
                                 structs,
                                 enums,
                             );
-                            if let Some((size, align)) =
-                                mono_size_and_align(arena, concrete_ty, target, &layout_cache)
-                            {
+                            if let Some((size, align)) = mono_size_and_align(
+                                arena,
+                                structs,
+                                witnesses,
+                                concrete_ty,
+                                target,
+                                &layout_cache,
+                            ) {
                                 case_layout.append_field(StructLayout::scalar(size, align));
                             } else {
                                 all_resolved = false;
@@ -1276,11 +1314,18 @@ use crate::passes::layout::{build_enum_layout, primitive_size_and_align};
 
 /// Compute size and alignment for a concrete type, looking up mono layouts.
 fn mono_size_and_align(
-    arena: &TyArena,
+    arena: &mut TyArena,
+    structs: &IndexMap<Entity, StructDef>,
+    witnesses: &[WitnessDef],
     ty: TyId,
     target: &TargetConfig,
     layout_cache: &HashMap<(Entity, Vec<TyId>), (u64, u64)>,
 ) -> Option<(u64, u64)> {
+    // (data, table): a pointer to an unsized type, or a borrowed
+    // raw-existential value.
+    if crate::ty::is_fat(&mut GenericTails { arena, structs, witnesses }, ty) {
+        return Some((target.pointer_width * 2, target.pointer_width));
+    }
     if let Some(sa) = primitive_size_and_align(arena.get(ty), target) {
         return Some(sa);
     }
@@ -1292,7 +1337,8 @@ fn mono_size_and_align(
             }
             let mut layout = StructLayout::new();
             for elem in &elems {
-                let (size, align) = mono_size_and_align(arena, *elem, target, layout_cache)?;
+                let (size, align) =
+                    mono_size_and_align(arena, structs, witnesses, *elem, target, layout_cache)?;
                 layout.append_field(StructLayout::scalar(size, align));
             }
             layout.pad_to_align();
@@ -1305,6 +1351,26 @@ fn mono_size_and_align(
         },
 
         _ => None,
+    }
+}
+
+/// [`crate::ty::TailLookup`] over the generic struct defs, substituting
+/// (and interning) the last field at the asked instance.
+struct GenericTails<'a> {
+    arena: &'a mut TyArena,
+    structs: &'a IndexMap<Entity, StructDef>,
+    witnesses: &'a [WitnessDef],
+}
+
+impl crate::ty::TailLookup for GenericTails<'_> {
+    fn arena(&self) -> &TyArena {
+        self.arena
+    }
+    fn last_field(&mut self, entity: Entity, args: &[TyId]) -> Option<TyId> {
+        let sdef = self.structs.get(&entity)?;
+        let field = sdef.fields.last()?;
+        let subst = build_type_subst(sdef.type_params.iter().map(|tp| tp.entity), args);
+        Some(collect::substitute_and_resolve(self.arena, self.witnesses, field.ty, &subst))
     }
 }
 

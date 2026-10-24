@@ -202,6 +202,30 @@ fn fmt_ty(ty: TyId, arena: &TyArena, module: &dyn NameResolver) -> String {
             format!("{prefix}{}", fmt_ty(*pointee, arena, module))
         },
 
+        MirTy::RawExistential { bounds, bindings } => {
+            let bounds: Vec<String> = bounds
+                .iter()
+                .map(|(p, args)| {
+                    let name = module.resolve_name(*p).to_string();
+                    if args.is_empty() {
+                        name
+                    } else {
+                        let args: Vec<_> = args.iter().map(|t| fmt_ty(*t, arena, module)).collect();
+                        format!("{name}[{}]", args.join(", "))
+                    }
+                })
+                .collect();
+            let pins: Vec<String> = bindings
+                .iter()
+                .map(|(a, t)| format!("{} = {}", module.resolve_name(*a), fmt_ty(*t, arena, module)))
+                .collect();
+            if pins.is_empty() {
+                format!("rawany {}", bounds.join(" and "))
+            } else {
+                format!("rawany {}[{}]", bounds.join(" and "), pins.join(", "))
+            }
+        },
+
         MirTy::Tuple(elems) => {
             if elems.is_empty() {
                 "()".into()
@@ -896,6 +920,12 @@ fn fmt_immediate(
             format!("string_ptr \"{}\"", s.escape_default())
         },
         ImmediateKind::Unit => "()".into(),
+        ImmediateKind::VTable { template, payload } => format!(
+            "vtable {}[{}]",
+            module.resolve_name(*template),
+            fmt_ty(*payload, arena, module)
+        ),
+        ImmediateKind::MonoVTable(id) => format!("vtable #{}", id.index()),
         ImmediateKind::FunctionRef {
             func,
             type_args,

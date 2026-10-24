@@ -47,7 +47,7 @@ impl OssaBodyCtx<'_, '_> {
     /// netted zero on the shared `RcBox`, so dropping the "clone" over-released
     /// the storage. Moving the local balances the books (no copy, no drop).
     pub fn lower_expr_for_return(&mut self, expr_id: HirExprId) -> ValueId {
-        if self.has_kind_coercion(expr_id) {
+        if self.has_value_conversion(expr_id) {
             return self.lower_expr(expr_id);
         }
         let local = match &self.hir.exprs[expr_id] {
@@ -202,6 +202,11 @@ impl OssaBodyCtx<'_, '_> {
         let Some(typed) = self.typed.as_ref() else {
             return value;
         };
+        // An existential conversion at this check leaf (never alongside a
+        // promotion: an existential target isn't `FromValue`).
+        if let Some(conv) = typed.existential_conversions.get(&expr_id).cloned() {
+            return self.apply_existential_conversion(&conv, value);
+        }
         let Some(promotion) = typed.promotions.get(&expr_id).cloned() else {
             return value;
         };
@@ -219,6 +224,18 @@ impl OssaBodyCtx<'_, '_> {
         // Consume the value so ownership transfers into the wrapped enum.
         let arg = self.prepare_call_arg(value, ParamConvention::Consuming);
         self.emit_call_returning(callee, vec![arg], target_ty)
+    }
+
+    /// Does this expression's value change representation at its use (a
+    /// cross-kind closure coercion, or an existential conversion)? Such an
+    /// expression must go through `lower_expr`: the place-oriented fast paths
+    /// would hand back the unconverted source.
+    pub(crate) fn has_value_conversion(&self, expr_id: HirExprId) -> bool {
+        self.has_kind_coercion(expr_id)
+            || self
+                .typed
+                .as_ref()
+                .is_some_and(|typed| typed.existential_conversions.contains_key(&expr_id))
     }
 
     pub(crate) fn has_kind_coercion(&self, expr_id: HirExprId) -> bool {

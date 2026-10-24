@@ -107,7 +107,9 @@ public struct RcBox[T]: Cloneable where T: not Copyable, T: not Sized, T: not St
     /// this to read individual fields without creating a full `T` clone
     /// whose deinit would free owned resources prematurely.
     public func valuePtr() -> Pointer[T] {
-        self.ptr.asRaw().offset(by: self.payloadOffset()).cast[T]()
+        // The payload's table rides on `self.ptr` (existentials): an
+        // unsized `T` is reached by (address, table).
+        self.ptr.asRaw().offset(by: self.payloadOffset()).cast[T]().withMetadata(of: self.ptr)
     }
 
     // Byte offset of `value` inside the storage block `[refCount: Int64,

@@ -724,11 +724,29 @@ fn compile_op1<'ctx>(
         // are identities.
         Op::RefToImmut => arg,
         Op::PtrCast(_) | Op::PtrBitcast(_) => arg,
+        // Same layout as the (data, table) tuple it views.
+        Op::FatPtr(_) => arg,
+        // Legalized at mono (`mono::fat`) when the pointee is unsized, so
+        // only the static case reaches codegen.
+        Op::SizeOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            mem::usize_const(cx, ptr_size, repr.size() as i64).into()
+        },
+        Op::AlignOfVal(ty) => {
+            let repr = fc.ctx.tc.repr(ty, &fc.ctx.module.ty_arena, fc.ctx.module);
+            mem::usize_const(cx, ptr_size, repr.align() as i64).into()
+        },
         Op::RefToPtr => arg,
         // Project word `i` out of a closure value. A `FuncThick` is always
         // addressed (TypeRepr::Aggregate), so `arg` is the base address; the
         // offset MUST be a GEP (never int arithmetic) or provenance is lost.
-        Op::ClosureWord(i) => {
+        // A table's size/align word: a pointer-sized integer.
+        Op::WordInt(i) => {
+            let base = mem::field_gep(cx, builder, arg.into_pointer_value(), i as u64 * ptr_size);
+            mem::load_from_repr(cx, builder, ptr_size, TypeRepr::Scalar(ScalarTy::I64), base)
+        },
+        // A fat (data, table) value is addressed like a closure value.
+        Op::ClosureWord(i) | Op::FatWord(i) => {
             let base = mem::field_gep(cx, builder, arg.into_pointer_value(), i as u64 * ptr_size);
             mem::load_from_repr(
                 cx,

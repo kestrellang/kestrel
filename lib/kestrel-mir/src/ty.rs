@@ -131,6 +131,16 @@ pub enum MirTy {
         mutating: bool,
     },
 
+    /// The raw existential `rawany P and Q` (existentials design §1): some
+    /// type conforming to every bound, with the pinned associated types.
+    /// Unsized — it never has a layout of its own. A value of this type
+    /// (a borrowed payload) and a pointer to it are both two words, (data,
+    /// table): see [`TyArena::is_fat_pointee`].
+    RawExistential {
+        bounds: Vec<(Entity, Vec<TyId>)>,
+        bindings: Vec<(Entity, TyId)>,
+    },
+
     Error,
 }
 
@@ -138,6 +148,39 @@ pub enum MirTy {
 pub struct TyArena {
     types: Vec<MirTy>,
     intern_map: HashMap<MirTy, TyId>,
+}
+
+/// Where [`is_unsized`] finds a struct instance's last stored field (its
+/// type args applied). Pre-mono/mono layout substitutes and interns, so it
+/// needs the arena mutably; codegen reads finished mono instances.
+pub trait TailLookup {
+    fn arena(&self) -> &TyArena;
+    fn last_field(&mut self, entity: Entity, args: &[TyId]) -> Option<TyId>;
+}
+
+/// Is `ty` unsized: a raw existential, or a struct whose last stored field
+/// is unsized (an unsized tail, like `RcBoxStorage[rawany P]`)? THE rule for
+/// every MIR layer (existentials plan Phase 9). Structural — it never needs
+/// a layout — so a pointer's width is known even inside recursive types.
+pub fn is_unsized(lookup: &mut dyn TailLookup, ty: TyId) -> bool {
+    match lookup.arena().get(ty).clone() {
+        MirTy::RawExistential { .. } => true,
+        MirTy::Named { entity, type_args } => lookup
+            .last_field(entity, &type_args)
+            .is_some_and(|tail| is_unsized(lookup, tail)),
+        _ => false,
+    }
+}
+
+/// Is a value of type `ty` two words, (data, table)? A pointer or reference
+/// to an unsized type, and a (borrowed) raw-existential value itself — which
+/// is represented by its address plus table, like `&dyn` in Rust.
+pub fn is_fat(lookup: &mut dyn TailLookup, ty: TyId) -> bool {
+    match lookup.arena().get(ty).clone() {
+        MirTy::Pointer(p) | MirTy::Ref { pointee: p, .. } => is_unsized(lookup, p),
+        MirTy::RawExistential { .. } => true,
+        _ => false,
+    }
 }
 
 /// Machine words in a `FuncThick` value of `kind` — the SINGLE source of the
@@ -226,6 +269,14 @@ impl TyArena {
     pub fn ref_ty(&mut self, pointee: TyId, mutating: bool) -> TyId {
         self.intern(MirTy::Ref { pointee, mutating })
     }
+    pub fn raw_existential(
+        &mut self,
+        bounds: Vec<(Entity, Vec<TyId>)>,
+        bindings: Vec<(Entity, TyId)>,
+    ) -> TyId {
+        self.intern(MirTy::RawExistential { bounds, bindings })
+    }
+
     /// The pointee of a `Ref`, or the type itself — signature consumers use
     /// this to recover the value type a ref-typed return registers as.
     pub fn peel_ref(&self, id: TyId) -> TyId {

@@ -21,6 +21,8 @@ pub struct LowerCtx<'w> {
     /// `escaping` closure values (see `body/closure_box.rs`). Synthesized on
     /// first use so a module with no escaping closures gains nothing.
     pub escaping_nop_shim: Option<Entity>,
+    /// Existential thunks and table templates built so far.
+    pub existentials: crate::existential::ExistentialState,
 }
 
 impl<'w> LowerCtx<'w> {
@@ -56,6 +58,7 @@ impl<'w> LowerCtx<'w> {
             closure_counter: 0,
             synthetic_counter: 0,
             escaping_nop_shim: None,
+            existentials: Default::default(),
         }
     }
 

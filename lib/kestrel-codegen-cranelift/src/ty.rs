@@ -79,6 +79,14 @@ impl TypeCache {
         let ptr_ty = self.ptr_ty;
         let ptr_size = self.ptr_size;
 
+        // A pointer/ref to an unsized type, or a borrowed raw-existential
+        // value: (data, table), two words (existentials plan Phase 9).
+        if module.is_fat(ty) {
+            return TypeRepr::Aggregate {
+                size: ptr_size * 2,
+                align: ptr_size,
+            };
+        }
         match arena.get(ty) {
             MirTy::I8 | MirTy::Bool => TypeRepr::Scalar(ir::types::I8),
             MirTy::I16 => TypeRepr::Scalar(ir::types::I16),
@@ -95,6 +103,12 @@ impl TypeCache {
             },
 
             MirTy::Never => TypeRepr::Zst,
+
+            // Always fat (handled above); kept for exhaustiveness.
+            MirTy::RawExistential { .. } => TypeRepr::Aggregate {
+                size: ptr_size * 2,
+                align: ptr_size,
+            },
 
             MirTy::Tuple(elems) => {
                 let elems = elems.clone();

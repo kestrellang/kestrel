@@ -149,6 +149,9 @@ pub fn copy_behavior_in(
         // as @guaranteed pointee values), so copy/drop on it is vacuous — a
         // pointer-scalar bit-copy keeps any defensive path harmless.
         | MirTy::Ref { .. }
+        // A raw existential value is a borrowed (data, table) view of a
+        // payload, never an owner: copied like a ref.
+        | MirTy::RawExistential { .. }
         | MirTy::Error => CopyBehavior::Bitwise,
 
         // The closure kind, not the environment payload's fold, decides the
@@ -384,6 +387,7 @@ pub fn needs_drop(arena: &TyArena, module: &MirModule, ty: TyId) -> bool {
         | MirTy::FuncThin { .. }
         // Ref: a borrow view (signature or stage-2b payload/field slot) —
         // never owns its pointee, never drops.
+        | MirTy::RawExistential { .. }
         | MirTy::Ref { .. }
         | MirTy::Error => false,
 

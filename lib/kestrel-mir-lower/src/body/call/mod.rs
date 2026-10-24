@@ -247,6 +247,20 @@ impl OssaBodyCtx<'_, '_> {
             call_args = new_args;
         }
 
+        // A requirement on a raw existential receiver: dispatch through its
+        // function table.
+        if protocol_method.is_some()
+            && matches!(
+                self.ctx.module.ty_arena.get(receiver_ty),
+                MirTy::RawExistential { .. }
+            )
+            && let Some(result) =
+                self.emit_dynamic_call(resolved, receiver_ty, call_args.clone(), result_ty)
+        {
+            self.drain_writebacks(wb_mark);
+            return result;
+        }
+
         // Build callee with the (possibly updated) receiver_ty
         let callee = if let Some(protocol) = protocol_method {
             Callee::Witness {

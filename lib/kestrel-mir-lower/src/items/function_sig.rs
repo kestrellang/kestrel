@@ -22,6 +22,21 @@ pub(crate) fn receiver_convention(kind: &kestrel_ast_builder::ReceiverKind) -> P
     }
 }
 
+/// The convention of a declared (non-receiver) parameter. `extern`
+/// functions take everything by value.
+pub(crate) fn param_convention(
+    param: &kestrel_ast_builder::AstParam,
+    is_extern: bool,
+) -> ParamConvention {
+    if is_extern || param.is_consuming {
+        ParamConvention::Consuming
+    } else if param.is_mut {
+        ParamConvention::MutBorrow
+    } else {
+        ParamConvention::Borrow
+    }
+}
+
 /// True when `entity` is a member of an extension whose target is a protocol
 /// (`extend SomeProtocol { ... }`) — a protocol default whose body may use
 /// `Self` even when its signature doesn't, so witness resolution must propagate
@@ -104,13 +119,7 @@ pub fn lower_function_sig(ctx: &mut LowerCtx, entity: Entity) {
                 .and_then(|t| *t)
                 .unwrap_or_else(|| ctx.module.ty_arena.error());
             let value_id = ValueId::new(def.params.len());
-            let convention = if is_extern || ast_param.is_consuming {
-                ParamConvention::Consuming
-            } else if ast_param.is_mut {
-                ParamConvention::MutBorrow
-            } else {
-                ParamConvention::Borrow
-            };
+            let convention = param_convention(ast_param, is_extern);
             let param = ParamDef::with_label(
                 &ast_param.name,
                 value_id,
