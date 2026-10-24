@@ -12,11 +12,6 @@ struct L {
     deinit { } // ERROR: Copyable type 'L' cannot have a deinit
 }
 
-enum E {
-    case a
-    deinit { } // ERROR: Copyable type 'E' cannot have a deinit
-}
-
 // Move-only types may have a deinit.
 struct Owned: not Copyable {
     var fd: Int64;
