@@ -76,10 +76,15 @@ Deviations: (1) *closed 2026-10-24*: a type-param goal the param's own
 declaration cannot prove is decided against the asking body's Γ (the
 resolver's param bounds: declaring item + body owner chain) — a definite
 Holds/Fails in the solver (`declarations/extensions/extension_bound_on_type_param_decided_from_body_assumptions.ks`);
-the analyzer, which has no body, still treats that Unknown as permit; (2) mono keeps its MIR pattern matcher and AST-lowered bounds (the
-resolved `WhereClausesOf` drops `not P` bounds) and its own specificity rule;
-(3) analyze's `entailment.rs` is kept as the Γ oracle the kernel's param
-supply consults.
+the analyzer, which has no body, still treats that Unknown as permit; (2) *closed 2026-10-24*: `not P` bounds are kept (`WhereClause::NotBound`,
+decided by the kernel as `NotConforms`); mono's `WhereConstraint`s are
+lowered from the front end's `ExplicitWhereClauses` (the AST re-resolution
+in `function_sig.rs` is deleted; the implicit Copyable/Static bounds are
+deliberately not lowered — mono has no witnesses for them); the specificity
+rule is the kernel's `more_specific_rule`. Mono keeps its own structural
+matcher, because it returns the MIR substitutions mono needs — a different
+job from entailment; (3) analyze's `entailment.rs` is the Γ oracle the
+kernel's param supply consults (it now also entails `NotBound`).
 
 **P2 — done.** Rule L (`1fb8442b`): `apply_operator_literal_adoption` in the
 relax loop (and in the eager settle); the N3 pinned test passes. D2′

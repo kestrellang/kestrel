@@ -2637,6 +2637,9 @@ fn emit_where_clause_constraints_with_subs(
     });
     for clause in where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,

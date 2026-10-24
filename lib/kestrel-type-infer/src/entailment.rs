@@ -52,6 +52,11 @@ pub fn constraint_entailed_by(
         // same subject, and an RHS that is the same type as written
         // (`HirTy::same_type`, span-insensitive). No rewriting, no
         // transitivity — deliberately the narrowest sound answer (G25 step 4).
+        // A negative bound is entailed only by the same negative bound.
+        WhereClause::NotBound { subject, protocol } => context.iter().any(|c| {
+            matches!(c, WhereClause::NotBound { subject: s, protocol: p }
+                if s == subject && p == protocol)
+        }),
         WhereClause::Equality { subject, rhs } => context.iter().any(|c| {
             matches!(c, WhereClause::Equality { subject: s, rhs: r }
                 if s == subject && r.same_type(rhs))

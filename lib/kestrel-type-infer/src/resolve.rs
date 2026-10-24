@@ -262,6 +262,9 @@ pub enum WhereClause {
     /// name string (D7's deferred fold, G25 step 3). `WhereClausesOf` produces
     /// exactly two shapes, read through [`WhereSubject::equality_lhs`].
     Equality { subject: WhereSubject, rhs: HirTy },
+    /// `T: not P` — a negative bound. Decided by the entailment kernel
+    /// (`Goal::NotConforms`) and lowered to MIR's `NotImplements`.
+    NotBound { subject: WhereSubject, protocol: Entity },
 }
 
 /// The source name of an associated-type entity. The `Associated` constraint

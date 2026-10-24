@@ -162,6 +162,10 @@ impl<'q, 'c> FrontEndLayer<'q, 'c> {
                 WhereClause::Equality { subject, rhs } => {
                     Goal::Equal(self.subject_ety(subject, target), self.hir_to_ety(rhs))
                 },
+                WhereClause::NotBound { subject, protocol } => Goal::NotConforms {
+                    ty: self.subject_ety(subject, target),
+                    protocol: *protocol,
+                },
             })
             .collect()
     }

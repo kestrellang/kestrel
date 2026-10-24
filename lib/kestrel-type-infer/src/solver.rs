@@ -3651,6 +3651,9 @@ fn emit_resolved_call(
     let where_clauses = qctx.query(crate::where_clauses::WhereClausesOf { entity, root });
     for clause in where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,
@@ -4593,6 +4596,9 @@ fn solve_member(
     let self_entity = resolution.self_type;
     for clause in &resolution.where_clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,
@@ -5942,6 +5948,9 @@ fn emit_type_alias_where_clauses(
     });
     for clause in clauses {
         match clause {
+            // `T: not P` emits nothing here: negative bounds gate member
+            // applicability (the kernel) and copy semantics, not body solving.
+            crate::resolve::WhereClause::NotBound { .. } => {},
             crate::resolve::WhereClause::Bound {
                 subject,
                 protocol,
