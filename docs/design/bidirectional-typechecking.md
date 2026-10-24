@@ -59,7 +59,7 @@ they need the operator rule below rather than a known receiver.
 ## Implementation status (2026-10-24)
 
 **Current: `bidi-p0-clean` @ `271ad94a` — 3877 ok / 11 failed** (full suite,
-release, 2026-10-24). P0–P5 are complete. The 18 pinned non-bidi bugs taken
+release, 2026-10-24). P0–P4 are done; P5 is partial (see *P5* below). The 18 pinned non-bidi bugs taken
 on before merging to nightly: 7 fixed (static members through type params and
 projections ×4, view closure stored into an outer field, projected snapshot
 capture then consume, `deinit` while a ref is live — plus `Self.Item` static
@@ -184,7 +184,17 @@ against a pushed expectation is looked up on it, or on its promotion target
 (`.Red` against `Color?` is a `Color`, then promoted), and resolved at once.
 Suite 3863 ok / 24 failed, unchanged.
 
-**P5 — not started; what it needs.** After P3/P4 the end of a body still
+**P5 — partial** (`5461bdf6`). `solver::solve` is gone: the end of a body is
+`obligations::finish_body` — flush, an explicit ordered list of default rules
+(operator shape, Rule L, literal defaults strict, ref decay, literal defaults
+relaxed), type-param defaults, then the reports and cascade suppression.
+Rules L and C also run in the walker, so the end-of-body passes only catch
+operands that became known later. **Not done:** the flush is still the
+solver's fixpoint over every remaining constraint kind, not a queue of
+`Conforms`/`ProjEq`/`Equal` obligations; `solver.rs` is still ~6.4k lines.
+The shapes listed below still reach it.
+
+**P5 — what remains (written before `5461bdf6`).** After P3/P4 the end of a body still
 runs `solve()`: the fixpoint over what is left, literal defaulting (levels
 0–1), type-parameter defaults, never-fallback, and the reports. In the
 design that end-of-body step remains (D2 keeps numeric literals
