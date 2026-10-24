@@ -161,6 +161,15 @@ pub struct InferCtx<'a> {
     /// Nesting depth of string-interpolation desugarings being generated;
     /// their accumulator calls are exempt from the known-receiver rule.
     pub(crate) interpolation_depth: u32,
+    /// Nesting depth of `solver::try_solve`. Constraints the walker emits
+    /// (depth 0) are decided on the spot (bidi P5); constraints the solver
+    /// emits while deciding another one — an overload candidate's parameter
+    /// equalities, say — stay queued, since that decision may still back out.
+    pub(crate) solving_depth: u32,
+    /// Off while the body's assumptions Γ (params, where clauses) are being
+    /// set up: those constraints are interdependent and settle as one batch.
+    /// On once the walker starts (bidi P5).
+    pub(crate) eager: bool,
 
     /// HirExprIds of `HirExpr::ProtocolCall` nodes that sit inside a
     /// `HirExpr::Sugar` wrapper (the desugaring's primary call). When the
@@ -412,6 +421,8 @@ impl<'a> InferCtx<'a> {
             synth_pending_exprs: HashSet::default(),
             synth_gate: true,
             interpolation_depth: 0,
+            solving_depth: 0,
+            eager: false,
             poison_protocol_call_recv_on_failure: HashSet::default(),
             protocol_dispatch_members: HashSet::default(),
             operator_members: HashMap::default(),
@@ -839,6 +850,7 @@ impl<'a> InferCtx<'a> {
     /// referenced TyVars to `TyKind::Error`.
     pub fn report_error(&mut self, err: InferError) -> TyVar {
         let detail = crate::result::describe_error(self, &err);
+        kestrel_debug::ktrace!("infer-err", "{detail:?} in {:?}", self.query_ctx.get::<kestrel_ast_builder::Name>(self.owner).map(|n| n.0.clone()));
         let cascade = err.mentioned_types().into_iter().any(|tv| self.contains_error(tv));
         self.errors.push(err);
         self.error_details.push(detail);
@@ -933,14 +945,25 @@ impl<'a> InferCtx<'a> {
 
     // ===== Constraint emission =====
 
+    /// Bidi P5: a constraint the walker emits is decided where it is emitted;
+    /// only one still blocked on an open var reaches the end-of-body flush.
+    /// Inside the solver, or while Γ is set up, it is queued (see
+    /// `solving_depth`, `eager`).
+    fn emit(&mut self, c: Constraint) {
+        if self.eager && self.solving_depth == 0 {
+            crate::solver::solve_now(self, c);
+        } else {
+            self.constraints.push(c);
+        }
+    }
+
     pub fn equal(&mut self, a: TyVar, b: TyVar, span: Span) {
         self.equal_because(a, b, span, Reason::Unspecified);
     }
 
     /// `equal` with the user-facing cause of the expectation on `a`.
     pub fn equal_because(&mut self, a: TyVar, b: TyVar, span: Span, reason: Reason) {
-        self.constraints
-            .push(Constraint::Equal { a, b, span, reason });
+        self.emit(Constraint::Equal { a, b, span, reason });
     }
 
     pub fn coerce(&mut self, from: TyVar, to: TyVar, expr: HirExprId, span: Span) {
@@ -956,7 +979,7 @@ impl<'a> InferCtx<'a> {
         span: Span,
         reason: Reason,
     ) {
-        self.constraints.push(Constraint::Coerce {
+        self.emit(Constraint::Coerce {
             from,
             to,
             expr,

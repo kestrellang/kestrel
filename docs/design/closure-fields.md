@@ -1,6 +1,7 @@
 # Closure Fields Must Own Their Captures
 
-Status: **proposal, for review** (2026-10-24). Extends [closures.md](closures.md).
+Status: **implemented** (2026-10-24). Extends [closures.md](closures.md).
+Decisions: new code E626; no opt-out; holes 2 and 3 fixed in the same change.
 
 ## Problem
 
@@ -90,31 +91,16 @@ closures pay for an owned environment.
   review (most should take `escaping`; tests that pin the old frame-bound
   behavior change to expect the new error).
 
-## Holes this does not close
+## Related holes, closed in the same change
 
-These need decisions before the escape check is sound for closures:
-
-1. **Call results.** `register(f: { k })` returning a struct that holds `f`.
-   Under rule 1 the field must be `escaping`, so the literal snapshots `k`
-   and nothing dangles. Closed by rule 1, provided the parameter's type
-   converts only at the literal (a view-closure *variable* passed to an
-   `escaping` parameter is already an E624 kind mismatch).
-2. **Tuples.** A tuple element may be a view closure, and a `mutating`
-   tuple parameter can store into it: `t.0 = f`. Proposal: tuples follow
-   the same rule as Static (a tuple with a view-closure element is
-   non-`Static`), and a `mutating` parameter whose type contains a view
-   closure gets the existing scope-depth check (E507) against the caller's
-   argument. Needs confirming.
-3. **`mutating` closure-typed parameters.** `func set(_ slot: mutating () -> (), f: () -> ()) { slot = f }`
-   writes a view into the caller's variable. The analyzer's call-argument
-   outlives check (`check_call_arg_outlives`, E507) already treats `mutating`
-   arguments as destinations; returning the caller's variable afterwards
-   needs the same taint. Needs a test.
-
-## Open questions
-
-1. New error code for rule 1, or extend E624 (closure kind mismatch)?
-2. Allow a view-closure field in a struct that is itself declared
-   `not Static` (an explicit "this struct is a frame view")? Default: no,
-   keep the rule simple.
-3. Should holes 2 and 3 be part of this change, or follow it?
+1. **Call results.** `register(f: { k })` returning a struct that holds `f`:
+   the field must be `escaping` (rule 1), so the literal snapshots `k`.
+2. **`mutating` closure / tuple arguments.** `func put(mutating slot: () -> (), f: () -> ()) { slot = f }`
+   and `t.0 = f` through a `mutating` tuple parameter. MIR lowering
+   (`taint_mutating_destinations`) joins the taint of every
+   view-closure-carrying argument into the slot of each `mutating` argument
+   whose type can hold one, the same join a direct store does. After rules
+   1 and 2 only bare closures and tuples can be such a destination, so
+   structs never pick up spurious taint. Returning the variable afterwards
+   is E494; calling it locally is fine
+   (`view_closure_stored_via_mutating_param_then_returned_rejected.ks`).

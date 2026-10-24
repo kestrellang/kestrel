@@ -101,6 +101,11 @@ impl QueryFn for InferBody {
         // Create return type TyVar from TypeAnnotation component
         let return_ty = create_return_type(&mut infer_ctx, query_ctx, self.entity);
 
+        // Settle the assumptions as one batch, then check the body against
+        // them, deciding each constraint where it is emitted (bidi P5).
+        solver::fixpoint(&mut infer_ctx);
+        infer_ctx.eager = true;
+
         // Generate constraints from HIR
         generate::generate(&mut infer_ctx, &hir, &param_types, return_ty);
 
@@ -516,10 +521,12 @@ fn emit_method_type_equality_constraint(
 
     let subs = method_where_clause_subs(ctx, type_params, parent_type_params);
     let rhs_tv = generate::lower_hir_ty_with_subs(ctx, rhs, &subs);
-    ctx.equal(assoc_result, rhs_tv, span.clone());
-
-    // Memo key = the clause's own entity (G29), never a by-name re-lookup.
+    // Register the assumption before anything can consult it: the equality
+    // below is decided on the spot (bidi P5), and the `Associated` lookup
+    // must then find `I.Item = T` in Γ. Memo key = the clause's own entity
+    // (G29), never a by-name re-lookup.
     ctx.push_assoc_sub(Some(subject_tv), assoc, rhs_tv);
+    ctx.equal(assoc_result, rhs_tv, span.clone());
 }
 
 /// Emit a `param = RHS` clause: redirect the param's TyVar slot straight to

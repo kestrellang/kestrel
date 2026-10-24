@@ -425,12 +425,26 @@ pub(crate) fn fixpoint(ctx: &mut InferCtx<'_>) {
 /// Solve one constraint right away (the checker resolving a member as it
 /// walks, bidi §2.3): solved, re-queued if it still waits, or reported.
 pub(crate) fn solve_now(ctx: &mut InferCtx<'_>, constraint: Constraint) {
-    match try_solve(ctx, constraint) {
+    let start = ctx.constraints.len();
+    let result = try_solve(ctx, constraint);
+    // Follow-ups the decision queued (a member's declared type, a call's
+    // parameter equalities). From the walker they are settled before it
+    // moves on, so the next constraint sees what this one implied (bidi P5);
+    // each is tried once and one still waiting stays queued.
+    let followups = if ctx.solving_depth == 0 {
+        ctx.constraints.split_off(start)
+    } else {
+        Vec::new()
+    };
+    match result {
         SolveResult::Solved => {},
         SolveResult::Deferred(c) => ctx.constraints.push(c),
         SolveResult::Error(err) => {
             ctx.report_error(err);
         },
+    }
+    for c in followups {
+        solve_now(ctx, c);
     }
 }
 
@@ -811,6 +825,15 @@ fn carry_reason(r: SolveResult, reason: &Reason) -> SolveResult {
 
 /// Dispatch a constraint to the appropriate solver.
 fn try_solve(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
+    ctx.solving_depth += 1;
+    kestrel_debug::ktrace!("p5-solve", "d={} {:?}", ctx.solving_depth, c);
+    let r = try_solve_inner(ctx, c);
+    kestrel_debug::ktrace!("p5-solve", "  -> {}", match &r { SolveResult::Solved => "solved", SolveResult::Deferred(_) => "deferred", SolveResult::Error(_) => "ERROR" });
+    ctx.solving_depth -= 1;
+    r
+}
+
+fn try_solve_inner(ctx: &mut InferCtx<'_>, c: Constraint) -> SolveResult {
     match c {
         Constraint::Equal { a, b, span, reason } => {
             let r = carry_reason(solve_equal(ctx, a, b, span), &reason);
@@ -2782,14 +2805,13 @@ pub(crate) fn solver_ty_is_static(ctx: &InferCtx<'_>, tv: TyVar, depth: u32) -> 
         TyKind::Tuple(elems) => elems
             .iter()
             .all(|&e| solver_ty_is_static(ctx, e, depth + 1)),
-        // Function types are Static in 2a. TODO(static-2c): the capture-
-        // derived Static bit on function types.
+        // A view-kind closure is not Static (references 2c); owning kinds are.
+        TyKind::Function { kind, .. } => !kind.is_view(),
         // Protocol / opaque / alias / assoc-projection / Never / Error:
         // conservative never-block leaves — refs can't reach them in 2a.
         TyKind::Error
         | TyKind::Protocol { .. }
         | TyKind::Opaque { .. }
-        | TyKind::Function { .. }
         | TyKind::Never
         | TyKind::TypeAlias { .. }
         | TyKind::AssocProjection { .. } => true,
@@ -2953,7 +2975,12 @@ fn solve_associated(
                     if let Some(tv) =
                         ctx.assoc_sub("solver:solve_associated", Some(container), *entity)
                     {
-                        if ctx.resolve(tv) == resolved_result {
+                        // Only an OPEN shared var is the no-op; one the
+                        // where clause already bound (`I.Item = T` decided
+                        // on the spot) is the answer itself.
+                        if ctx.resolve(tv) == resolved_result
+                            && matches!(ctx.slot(resolved_result), TySlot::Unresolved { .. })
+                        {
                             // Self-referential: the where_clause_assoc_subs TyVar is the same
                             // as our result. Create an AssocProjection to preserve the base
                             // type for MIR lowering (needed for correct monomorphization

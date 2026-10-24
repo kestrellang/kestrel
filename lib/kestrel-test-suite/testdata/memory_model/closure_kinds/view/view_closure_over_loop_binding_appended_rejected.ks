@@ -16,13 +16,16 @@
 // it rather than storing it, and the callee frame is strictly deeper. Only a
 // slot typed by something else (here `Array[T].append(consuming element: T)`,
 // a generic `T`) is a container the value comes to rest in.
+//
+// Since view closures are not `Static` (docs/design/closure-fields.md), the
+// array of them is also rejected at its construction (E107).
 module Test
 
 import std.numeric.Int64
 import std.collections.Array
 
 func test() -> Int64 {
-    var fns = Array[() -> Int64]();
+    var fns = Array[() -> Int64](); // ERROR(E107)
     for i in 1..=3 {
         fns.append({ i * 10 });   // ERROR(E507)
     }

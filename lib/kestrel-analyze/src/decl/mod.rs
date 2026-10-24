@@ -30,6 +30,7 @@ pub mod recursive_enum;
 pub mod ref_return;
 pub mod static_context;
 pub mod static_value_type;
+pub mod closure_field;
 pub mod subscript;
 pub mod type_alias_validation;
 pub mod visibility;

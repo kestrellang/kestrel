@@ -8,7 +8,7 @@ struct Wrapper[T] {
 }
 
 enum MaybeProvider[T] {
-    case Provider(make: () -> Wrapper[T])
+    case Provider(make: escaping () -> Wrapper[T])
     case Empty
 }
 

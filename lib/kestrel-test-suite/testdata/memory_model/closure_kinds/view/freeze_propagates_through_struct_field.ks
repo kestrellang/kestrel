@@ -5,7 +5,9 @@
 // provenance propagates through aggregate construction, so a struct holding a
 // view-kind closure field keeps the captured place frozen for the struct's
 // lexical extent. The closure literal itself is only a temporary here — the
-// freeze must survive into `h`, giving E507 on the consuming call.
+// freeze must survive into `h`, giving E507 on the consuming call. The
+// view-closure field is itself E626 now (docs/design/closure-fields.md); the
+// freeze still propagates for the struct the analyzer builds anyway.
 module Test
 
 struct Res: not Copyable {
@@ -13,7 +15,7 @@ struct Res: not Copyable {
 }
 
 struct Holder {
-    let f: () -> lang.i64
+    let f: () -> lang.i64 // ERROR(E626)
 }
 
 func sink(consuming r: Res) {}

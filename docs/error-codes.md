@@ -24,7 +24,7 @@ the type checker, and the code is assigned in one place,
 - [E600–E614, E623 — Closures, externs & declaration shape](#e600e614-e623--closures-externs--declaration-shape)
 - [E615–E618 — Entry point](#e615e618--entry-point)
 - [E619–E622 — Place accessors](#e619e622--place-accessors)
-- [E624–E625 — Closure kinds](#e624e625--closure-kinds)
+- [E624–E626 — Closure kinds](#e624e626--closure-kinds)
 - [E700–E710 — String & character literals, escapes, format specs](#e700e710--string--character-literals-escapes-format-specs)
 - [E800–E809 — Syntax](#e800e809--syntax)
 
@@ -478,7 +478,7 @@ computed members.
 | E621 | \`ref\` accessors are not allowed in protocols or protocol extensions | Declare `ref` accessors on concrete types only. |
 | E622 | this member has a write provider but no read provider | A `set`/`mutating ref` without a `get` or `ref`; add a read provider. |
 
-## E624–E625 — Closure kinds
+## E624–E626 — Closure kinds
 
 A function type may name a closure *kind* — `mutating (T) -> U`,
 `consuming (T) -> U`, `escaping (T) -> U`; an unmarked type is the *normal*
@@ -490,6 +490,7 @@ called — see [memory-model/closures.md](memory-model/closures.md).
 | E624 | closure kind mismatch: expected {expected}, found {actual} | The closure value's kind does not pass where the expected kind is required. Only `normal → mutating`, `escaping → normal`, `escaping → consuming`, and the same-kind diagonal are accepted. |
 | E624 | an owning closure cannot capture '{name}': it carries a reference | An `escaping` / `consuming` literal snapshots its captures into an environment that may outlive the frame, so it cannot capture a ref binding or any other non-`Static` value. Copy the referenced value into a `let` first and capture that. |
 | E625 | a '{kind}' closure parameter must have the '{kind}' access mode | A `mutating`-kind parameter must be declared `mutating`, and a `consuming`-kind parameter `consuming` — the kind dictates the access the callee needs to call it. |
+| E626 | stored {field / enum case} '{name}' cannot hold a '{kind}' closure | A stored field or enum payload (directly, in a tuple, or through a type alias) cannot have a normal or `mutating` function type: a view closure keeps views into the frame that created it, and a stored one could leave that frame through a `mutating` method. Write `escaping` or `consuming` so the closure owns its captures. Generic storage (`[() -> ()]`) is rejected by the `Static` bound instead (E107): view closures are not `Static`. See [design/closure-fields.md](design/closure-fields.md). |
 
 ### Example — E624 (passing table)
 

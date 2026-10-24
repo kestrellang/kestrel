@@ -47,11 +47,11 @@ impl StaticLayer for ResolvedStaticLayer<'_, '_> {
                 }) == StaticRequirement::RequiresStatic
             },
             ResolvedTy::Tuple(elems) => elems.iter().all(|e| self.member_is_static(e)),
-            // Function types are Static in 2a (TODO(static-2c): capture-
-            // derived bit); assoc projections / opaque / never / error are
-            // the conservative never-block leaves, mirroring the HIR layer.
-            ResolvedTy::Function { .. }
-            | ResolvedTy::AssocProjection { .. }
+            // A view-kind closure is not Static (references 2c); owning
+            // kinds are. Assoc projections / opaque / never / error are the
+            // conservative never-block leaves, mirroring the HIR layer.
+            ResolvedTy::Function { kind, .. } => !kind.is_view(),
+            ResolvedTy::AssocProjection { .. }
             | ResolvedTy::Opaque { .. }
             | ResolvedTy::Never
             | ResolvedTy::Error => true,

@@ -2849,6 +2849,40 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
         self.stamp_root(address, new_root);
     }
 
+    /// A callee may store any view-closure-carrying argument into a
+    /// `mutating` argument whose type can hold one (`func set(_ slot:
+    /// mutating () -> (), f: () -> ()) { slot = f }`), so that argument's
+    /// slot joins their taint, exactly as a direct store would. Only bare
+    /// closures and tuples reach here: stored fields cannot hold a view
+    /// closure (E626) and generic storage requires `Static`
+    /// (docs/design/closure-fields.md).
+    fn taint_mutating_destinations(&mut self, args: &[CallArg]) {
+        let carries_view = |this: &Self, v: ValueId| {
+            this.ctx
+                .module
+                .escape_carry(this.body.value(v).ty)
+                .view_closure
+        };
+        let sources: Vec<ValueId> = args
+            .iter()
+            .filter(|a| a.convention != ParamConvention::MutBorrow && carries_view(self, a.value))
+            .map(|a| a.value)
+            .collect();
+        if sources.is_empty() {
+            return;
+        }
+        let slots: Vec<ValueId> = args
+            .iter()
+            .filter(|a| a.convention == ParamConvention::MutBorrow && carries_view(self, a.value))
+            .filter_map(|a| self.body.value(a.value).borrow_source)
+            .collect();
+        for slot in slots {
+            for &src in &sources {
+                self.taint_slot_from_store(slot, src);
+            }
+        }
+    }
+
     /// The load half of the G1 closure: a load/take from a tainted slot
     /// carries the slot's root. Not gated on `contains_ref` — the slot only
     /// carries a non-self root when `taint_slot_from_store` stamped one
@@ -3232,6 +3266,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
             .filter(|a| a.convention == ParamConvention::Consuming)
             .map(|a| a.value)
             .collect();
+        self.taint_mutating_destinations(&args);
         self.push_inst(InstKind::Call {
             result,
             callee,

@@ -359,10 +359,11 @@ impl StaticLayer for HirStaticWalk<'_, '_> {
             HirTy::SelfType(entity, _) | HirTy::AliasUse { entity, .. } => {
                 !matches!(self.nominal_staticness(*entity), Staticness::NotStatic)
             },
-            // Function types are Static in 2a — the capture-derived Static
-            // bit on function types lands with ref-capturing closures.
-            // TODO(static-2c): thread the fn-type Static bit here.
-            HirTy::Function { .. } => true,
+            // A view-kind closure (normal / `mutating`) holds views into its
+            // defining frame, so it is not Static, exactly like a ref; owning
+            // kinds snapshot their captures (references 2c,
+            // docs/design/closure-fields.md).
+            HirTy::Function { kind, .. } => !kind.is_view(),
             // Conservative never-block leaves, mirroring the copy layer:
             // refs cannot reach these positions in 2a (revisit in 2b).
             HirTy::Protocol { .. }
