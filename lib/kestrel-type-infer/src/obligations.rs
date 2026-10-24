@@ -47,7 +47,18 @@ const DEFAULT_RULES: &[(&str, DefaultRule)] = &[
 
 /// Finish inference for a body: flush, default, report.
 pub fn finish_body(ctx: &mut InferCtx<'_>, hir: &HirBody) {
+    // P5 audit: which constraint kinds the walker left for the flush.
+    for c in ctx.constraints.iter().filter(|_| kestrel_debug::is_enabled("p5")) {
+        let kind = format!("{c:?}");
+        let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
+        kestrel_debug::ktrace!("p5", "{kind}");
+    }
     fixpoint(ctx);
+    for c in ctx.constraints.iter().filter(|_| kestrel_debug::is_enabled("p5")) {
+        let kind = format!("{c:?}");
+        let kind = kind.split([' ', '{', '(']).next().unwrap_or("");
+        kestrel_debug::ktrace!("p5", "after-flush {kind}");
+    }
     apply_defaults(ctx);
 
     // Every call/member that could type a check-mode leaf has fired, so a
