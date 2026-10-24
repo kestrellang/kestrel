@@ -27,13 +27,12 @@ conformances on top of it. The work has three parts:
    `@deprecated`, plus the existing `@main`, `@extern`, `@builtin`,
    `@fileconstant` and `@platform`, re-expressed through the registry.
 3. **Derives.** `@derive(Equatable, Hashable)` on a struct or enum gives it a
-   compiler-built conformance. **What can be derived is defined in Kestrel,
-   not in the compiler.** A protocol becomes derivable when its module
-   provides a *derivation*: a protocol extension marked `@derivation`, written
-   against a small structural API (`Derive.each`, `Derive.all`, ...). The
-   stdlib uses this mechanism for `Equatable`, `Hashable`, `Comparable`,
-   `Formattable` and `Defaultable`. A user protocol can be made derivable the
-   same way.
+   compiler-built conformance. In 0.18 the compiler decides what can be
+   derived: `Equatable`, `Hashable`, `Comparable`, `Formattable` and
+   `Defaultable`, each with a built-in deriver. Letting a protocol's own
+   module define its derive in code waits for 2.0 metaprogramming. Everything
+   about `@derive` except where the witnesses come from is designed to stay
+   the same through that change (§C6).
 
 ```kestrel
 @derive(Equatable, Hashable, Comparable, Formattable)
@@ -122,7 +121,7 @@ accepted and silently compiled as C. Argument errors have no span to point at.
 The attribute grammar itself stays. Three changes:
 
 1. **Attributes on `extend`.** `ExtensionDeclaration = AttributeList? 'extend' ...`.
-   `@derive` (§C2), `@derivation` (§C4), `@platform` and `@deprecated` all
+   `@derive` (§C2), `@platform` and `@deprecated` all
    need it. The parser's headless-keyword rule (`items.rs:141`) allows an
    attribute head (but not a visibility head) before `extend`.
 2. **Attributes on `deinit`.** `DeinitDeclaration = AttributeList? 'deinit' FunctionBody`.
@@ -257,8 +256,7 @@ pub enum ParsedAttr {
     Inline(InlineMode),
     Deprecated(Deprecation),
     Derive(Vec<DeriveTarget>),    // unresolved paths + spans (§C2)
-    Derivation,
-    Default,                       // `@default` on an enum case (§C6)
+    Default,                       // `@default` on an enum case (§C5)
     Dummy,
 }
 ```
@@ -292,7 +290,7 @@ it needs exists.
 | Phase | Attributes | Read by |
 |---|---|---|
 | `Build` | `@platform` | `kestrel-ast-builder` while building, from the syntax node, using the same schema and parser as `AttrsOf` |
-| `NameRes` | `@builtin`, `@derive`, `@derivation`, `@default` | `kestrel-name-res` (builtin map, derive targets, derived extensions) |
+| `NameRes` | `@builtin`, `@derive`, `@default` | `kestrel-name-res` (builtin map, derive targets, derived extensions) |
 | `Semantic` | `@main`, `@deprecated` | `kestrel-analyze`, `kestrel-type-infer` |
 | `Lowering` | `@extern`, `@fileconstant`, `@inline` | `kestrel-mir-lower`, then MIR, mono and codegen |
 
@@ -324,7 +322,6 @@ AST/HIR/MIR" is met like this:
 | `@inline` + `@extern` | An extern has no body to inline |
 | `@main` + `@extern` | The entry point must be a Kestrel function |
 | `@derive(P)` + a declared `P` conformance on the same type | Two conformances (§C7) |
-| `@derivation` + any target other than a protocol extension | §C4 |
 
 ### A8. Tooling
 
@@ -473,7 +470,7 @@ struct Point { var x: Int64; var y: Int64 }
   Anything that is not a protocol is E950.
 - **Targets:** structs, enums, and extensions of a struct or enum (§C3).
 - **Not allowed** on protocols, type aliases, or an extension whose type is
-  declared in another package. A derivation reads stored fields, and another
+  declared in another package. A deriver reads stored fields, and another
   package's fields are not part of its API. That case is E954.
 
 **What it means.** `@derive(P)` on a type declaration is sugar for an
@@ -494,8 +491,8 @@ extension:
 - **Rebuilt with its type.** The extension comes from the same syntax node,
   so it is rebuilt exactly when the type is. No new incremental input.
 - **No synthesized members.** The extension's body is empty. Its witnesses
-  come from P's derivation (§C4), exactly as a requirement with a default
-  is witnessed by a protocol extension today.
+  are the deriver's MIR shims (§C4), registered the way the clone shim's
+  are today.
 
 ### C3. Conditional derives on generic types
 
@@ -539,293 +536,185 @@ about something else (overlap rules, or `Copyable` on user generics?). If
 0.20 changes how a `where`-gated conformance is represented, derives follow
 it, because they use that representation and do not copy it.
 
-### C4. Defining what can be derived: `@derivation`
+### C4. Built-in derivers
 
-This is the general mechanism. **A protocol `P` is derivable iff its module
-contains exactly one protocol extension of `P` marked `@derivation`.** That
-extension implements `P`'s requirements generically over `Self`, using the
-structural API `Derive` (§C5) to visit the fields of whatever type is
-deriving.
+**What can be derived is decided by the compiler in 0.18.** Five protocols
+are derivable, each with a deriver written in Rust. Code-defined derivations
+come with 2.0 metaprogramming (§C6). The `@derive` surface, its desugaring,
+the derived bounds, the site checks and the diagnostics are all designed so
+that the later move changes only where the witnesses come from.
+
+```rust
+/// The derivable protocols. One variant per deriver; adding a derivable
+/// protocol before 2.0 is a new variant plus its generator.
+pub enum DeriveKind { Equatable, Hashable, Comparable, Formattable, Defaultable }
+```
+
+**Which protocol is which.** Each kind is tied to its protocol by a
+`Builtin`, never by name. `Formattable` already has `@builtin(.FormattableProtocol)`
+(`format.ks:376`). M5 adds `EquatableProtocol`, `HashableProtocol`,
+`ComparableProtocol` and `DefaultableProtocol` to `kestrel-hir/src/builtin.rs`
+and marks the four stdlib protocols. A protocol is derivable iff it is the
+target of one of those builtins. A user protocol named `Equatable` is not.
+
+**How a deriver produces witnesses.** The generated witnesses are MIR shims,
+the way `synthesize_clone_shims` (`kestrel-mir/src/passes/clone_shim.rs:33`)
+already builds and registers `__clone$T` for inferred `Cloneable` types:
+
+- **One pass, `synthesize_derive_shims`, next to the clone pass.** For each
+  derived extension, the pass generates one MIR function per requirement of
+  `P`, named like `__derive$Equatable$Point`, from the type's MIR field list
+  or variant list. It registers the shim as the conformance's witness.
+- **Generic types.** The shim is generic over the type's parameters, and
+  `where` holds `T: P` from the derived extension. A call on a field of type
+  `T` is an ordinary witness call that mono resolves per instantiation, as it
+  does for any generic body. `Box[String]` and `Box[Int64]` get their own
+  instances, and `Box[NotEquatable]` never gets one.
+- **Signatures come from the protocol.** The shim's signature is the
+  requirement's signature with `Self` substituted, read from the requirement
+  entity. The deriver writes only the body, so the requirement's signature
+  is still declared once, in the stdlib.
+- **Type inference needs no bodies.** A call such as `a.isEqual(to: b)` on a
+  `Point` resolves through the conformance to the protocol requirement, as
+  `x.clone()` does today on a type whose `Cloneable` is inferred. Type
+  inference only needs the conformance and the requirement's signature.
+  The conformance-completeness analyzer skips extensions marked `DerivedFrom`
+  or `@derive`, because their deriver supplies every requirement.
+- **Nothing can fail in MIR.** The `DeriveSite` analyzer (§C7) has already
+  proved every field conforms under the derived bounds. A shim can only call
+  witnesses that exist, so there is no MIR-level diagnostic to design.
+- **Fields are borrowed.** Shims read fields through borrows and never copy
+  one, so every deriver works on `not Copyable` types.
+
+**Why MIR shims and not generated source.** Generating Kestrel syntax (or
+HIR) for each derived type and type-checking it would need member entities
+spawned after name resolution, because the builder can't know which protocol
+a path names. The clone shim already solves "a compiler-written witness for
+every type that has a conformance", so derivers reuse that path. It is also
+the cheapest piece to delete: in 2.0 the pass goes, and nothing upstream of
+MIR changes (§C6).
+
+### C5. What each deriver generates
+
+The semantics below are what the shims implement. They are written as Kestrel
+for readability. A struct is treated as an enum with one case.
+
+**Equatable.** Same case, then every field equal, in declaration order,
+stopping at the first difference.
 
 ```kestrel
-// lang/std/core/protocols.ks
-@derivation
-extend Equatable {
-    public func isEqual(to other: Self) -> Bool {
-        // Same case (always true for a struct), then every field equal.
-        Derive.all(self, other) { (_, a, b) in a.isEqual(to: b) } ?? false
+// @derive(Equatable) enum Shape { case Circle(radius: Float64); case Rect(width: Float64, height: Float64) }
+func isEqual(to other: Shape) -> Bool {
+    match self {
+        .Circle(a0) => match other { .Circle(b0) => a0.isEqual(to: b0), _ => false },
+        .Rect(a0, a1) => match other {
+            .Rect(b0, b1) => a0.isEqual(to: b0) and a1.isEqual(to: b1),
+            _ => false,
+        },
     }
 }
 ```
 
-**How it is checked:**
-
-- **Once, at the protocol.** The extension is type-checked like any protocol
-  extension. `Self` is the abstract conformer and `Self: P` holds. A bug in a
-  derivation is an error in the protocol's module, not at every `@derive`
-  site.
-- **How it witnesses.** Its members witness `P`'s requirements **only for
-  derived conformances**, meaning extensions carrying `DerivedFrom` or
-  `@derive`. For every other conformer they are invisible. They are not
-  defaults, and they never appear in member lookup on a concrete type.
-- **Witness order for a derived conformance:** the derivation's member first,
-  then an ordinary protocol-extension default. A member the type wrote by hand
-  is a conflict (E953): the user asked for a derived conformance and then
-  wrote part of it.
-- **Every requirement must be covered.** Each requirement must have a member
-  in the derivation or an ordinary default. A gap is E955, reported at the
-  `@derivation` extension.
-
-**Constraints on derivations:**
-
-| Rule | Why |
-|---|---|
-| In the same module as `P` | Coherence: one derivation per protocol, and it cannot be replaced from outside |
-| At most one per protocol | Same |
-| `Derive.*` is only allowed inside a `@derivation` extension | It needs a concrete `Self` at mono time, which only derived conformances guarantee (§C5) |
-| May not be applied to a protocol with a `Self` associated-type requirement the derivation cannot bind | The derivation can only bind associated types to types computable from `Self` (as `extend P { type X = ... }` already does) |
-
-**Why this design, not compiler-built derivers.** Rust's built-in derives
-(before proc macros) and Swift's synthesized conformances are compiler code,
-one per protocol. That would be faster to ship, but:
-
-- every new derivable protocol would need a compiler change;
-- users could never make their own protocols derivable;
-- 2.0 metaprogramming would have to replace it rather than extend it.
-
-A derivation is ordinary Kestrel. It is type-checked once and documented like
-any extension, and it reads as the specification of what deriving means. The
-only compiler-specific parts are the `Derive` forms. They are a deliberately
-small subset of the 2.0 roadmap's "compile-time reflection (inspecting types,
-fields...)": structural folds only. They do no name lookup, no code
-generation and no type construction. **John decides** (D-Q4): this mechanism
-(recommended), or compiler-built derivers for the five stdlib protocols with
-`@derivation` deferred to 2.0. The `@derive` surface and semantics in
-§C1–§C3 are the same either way.
-
-### C5. The `Derive` structural API
-
-`Derive` is a stdlib namespace (`std.core.Derive`, an uninhabited enum of
-`@builtin` static members). Its members are only callable inside a
-`@derivation` extension (E956 elsewhere).
-
-**The model.** Every deriving type is seen as a list of cases, each with a
-list of fields:
-
-- a **struct** is one case, whose fields are its stored fields in declaration
-  order;
-- an **enum** has its cases in declaration order, and each case's fields are
-  its payload.
-
-Fields removed by `@platform` are not there. Computed properties and statics
-are not fields.
-
-```kestrel
-/// Static facts about one field, built by the compiler as constants.
-public struct FieldInfo {
-    public let index: Int64     // position within its case, from 0
-    public let label: String    // field name or payload label; "" if unlabeled
-}
-```
-
-**Constant queries:**
-
-| Member | Value |
-|---|---|
-| `Derive.typeName: String` | The type's name, without module or type arguments (`"Box"`) |
-| `Derive.isEnum: Bool` | Whether `Self` is an enum |
-| `Derive.caseIndex(of: Self) -> Int64` | The value's case, in declaration order. Always `0` for a struct |
-| `Derive.caseName(of: Self) -> String` | The case name. `typeName` for a struct |
-| `Derive.fieldCount(of: Self) -> Int64` | Number of fields in the value's case |
-
-**Folds.** Each fold takes a block that is called once per field, in order.
-
-| Form | Block | Result | Stops early |
-|---|---|---|---|
-| `Derive.each(x) { (info, v) in ... }` | `-> ()` | `()` | no |
-| `Derive.all(x) { (info, v) in ... }` | `-> Bool` | `Bool` | on the first `false` |
-| `Derive.first(x, unless: r) { (info, v) in ... }` | `-> R` | the first result `!= r`, else `r` (`R: Equatable`) | yes |
-| `Derive.fold(x, from: a) { (info, acc, v) in ... }` | `-> A` | final `acc` | no |
-| two-value forms `each(x, y)`, `all(x, y)`, `first(x, y, unless:)`, `fold(x, y, from:)` | `(info, a, b)` | `Optional` of the one-value result. **`.None` when `x` and `y` are in different cases** | as above |
-| `Derive.build(case: k) { (info) in ... }` | `-> Field` | a new `Self` | — |
-
-- **Why two-value forms return `Optional`.** For an enum, "are these in the
-  same case?" must be answered before fields can be paired. Returning
-  `Optional` makes the derivation decide what different cases mean, in the
-  type: `?? false` for `Equatable`, compare `caseIndex` for `Comparable`. No
-  derivation can forget it, and nothing traps. For a struct the result is
-  always `.Some`, and the optimizer removes the wrap.
-- **`build` constructs.**
-  - It initializes each field from the field's **declared initializer** if
-    it has one (`var retries: Int64 = 3`). Otherwise it calls the block.
-  - `case:` picks the enum case. It is omitted for a struct, and must be a
-    case index known at compile time: an integer literal or
-    `Derive.caseMarked("default")` (§C6). A non-constant `case:` is E956.
-
-**How a block is typed.** This is the one new type-checking rule. A fold
-block is checked **once**, as if it were a nested generic function:
-
-```kestrel
-func block[Field](info: FieldInfo, v: Field) -> R
-    where Field: P, Field: not Copyable, Field: not Static
-```
-
-- **`P` is the derivation's protocol.** So a block can call `P`'s members on a
-  field and nothing else. That is also exactly the bound the field check
-  (§C3, E952) enforces at each `@derive` site.
-- **`not Copyable`, `not Static`.** Fields may be move-only or hold
-  references, so the block cannot copy a field. It can only borrow `v`, by the
-  ordinary parameter convention. This is why derives work unchanged on
-  `not Copyable` types.
-- **`Field` is nameable inside the block.** A `build` block returns `Field`
-  (`Field()` for `Defaultable`).
-- **Captures.** The block is a view-kind closure (`docs/design/closures.md`).
-  It may read and mutate enclosing locals and parameters, such as the
-  `hasher` being written into. It cannot escape.
-- **Generic callees.** `Derive.*` members have no expressible Kestrel
-  signature, so the solver special-cases calls to them by `Builtin` id. It
-  types the block as above and checks the result type against the form.
-
-**How it lowers:**
-
-- **Generic MIR.** The block lowers to a view closure whose body is generic
-  over one more type parameter, `Field`, after the enclosing ones. Each
-  `Derive.*` call lowers to a `MirIntrinsic::Derive { form, block, operands }`.
-- **Mono.** When a derivation member is instantiated at a concrete `Self`
-  (derived conformances guarantee it always is), mono expands the intrinsic
-  using `Self`'s MIR layout:
-  - **Struct:** one call to `block[F_i]` per field `i`, passing a borrow of
-    `self.field_i` and a constant `FieldInfo`. `all` and `first` branch out
-    after each call.
-  - **Enum:** a `switch` on the discriminant (two discriminants for the
-    two-value forms). Each arm binds its payload by borrow and expands as for
-    a struct. Mismatched-case arms produce `.None`.
-  - `caseIndex` and the other queries lower to a discriminant read or a
-    constant.
-- **No new runtime machinery.** The expansion uses calls, switches and
-  borrows, all of which exist. It never fails, because §C3 has already proved
-  every `F_i: P`.
-- **Incremental.** A derivation depends only on `P`'s module. A derived
-  conformance depends on the type's field list, which is already a
-  declaration input. The expansion happens in mono, which is whole-program
-  today (see existentials §5, "Where tables live").
-
-### C6. The stdlib derivations
-
-**Equatable**, shown in §C4. Two values are equal iff they are in the same
-case and every field is equal. Fields are compared in order, stopping at the
-first difference.
-
-**Hashable.** Feeds the case index (enums only), then each field in order.
-
-```kestrel
-@derivation
-extend Hashable {
-    public func hash[H](mutating into hasher: H) where H: Hasher {
-        if Derive.isEnum { Derive.caseIndex(of: self).hash(into: hasher) }
-        Derive.each(self) { (_, v) in v.hash(into: hasher) }
-    }
-}
-```
+**Hashable.** For an enum, the case index (as `Int64`) first, then each field
+in order. A struct hashes only its fields.
 
 - **Why hash the case index.** It keeps `.A(1)` and `.B(1)` apart.
-- **Why only for enums.** Structs skip it, so a one-field struct hashes the
-  same as its field. That is harmless, and matches what a hand-written
-  conformance would usually do.
+- **Why only for enums.** A one-field struct then hashes the same as its
+  field. That is harmless, and matches what a hand-written conformance would
+  usually do.
 - **Payload-less enums** hash the index only.
 
-**Comparable.** Orders by case index (declaration order) first, then fields
-lexicographically.
+**Comparable.** Case index (declaration order) first, then fields
+lexicographically: the first field whose `compare` isn't `.Equal` decides.
 
-```kestrel
-@derivation
-extend Comparable {
-    public func compare(other: Self) -> Ordering {
-        Derive.first(self, other, unless: .Equal) { (_, a, b) in a.compare(other: b) }
-            ?? Derive.caseIndex(of: self).compare(other: Derive.caseIndex(of: other))
-    }
-}
-```
+- **Declaration order is the order.** Reordering cases is a breaking change
+  for a type that derives `Comparable`. The derive docs say so, and so do the
+  E952 notes for enums.
 
-**Declaration order is the order.** Reordering cases is a breaking change for
-a type that derives `Comparable`. The derive docs say so, and so do the E952
-notes for enums.
+**Formattable.** `Version(major: 1, minor: 2, patch: 0)`. An enum value prints
+its case: `Circle(radius: 1.0)`. A payload-less case prints its name. An
+unlabeled payload prints positionally: `Some(3)`.
 
-**Formattable.** `Version(major: 1, minor: 2, patch: 0)`.
-`Shape.Circle(radius: 1.0)` prints as `Circle(radius: 1.0)`. A payload-less
-case prints its name. An unlabeled payload prints positionally:
-`Some(3)`.
-
-```kestrel
-@derivation
-extend Formattable {
-    public func format(mutating into writer: some Formatter, options: FormatOptions = FormatOptions.default()) {
-        writer.write(Derive.caseName(of: self))
-        if Derive.fieldCount(of: self) == 0 { return }
-        writer.write("(")
-        var fieldOptions = options;
-        fieldOptions.debug = true
-        Derive.each(self) { (info, v) in
-            if info.index > 0 { writer.write(", ") }
-            if info.label != "" { writer.write(info.label); writer.write(": ") }
-            v.format(into: writer, options: fieldOptions)
-        }
-        writer.write(")")
-    }
-}
-```
-
-- **Fields are formatted with `debug: true`**, so a `String` field prints
-  quoted: `User(name: "Ada")`, not `User(name: Ada)`.
-- **`Formattable` is also what string interpolation uses.** So a derived
-  conformance gives a debug-style rendering for `"\(user)"` too.
+- **Fields are formatted with `debug: true`.** So a `String` field prints
+  quoted: `User(name: "Ada")`.
+- **Width and padding** from the caller's `FormatOptions` apply to the whole
+  value, not to each field.
+- **Interpolation uses it too.** `Formattable` is what string interpolation
+  uses, so a derived conformance gives a debug-style rendering for
+  `"\(user)"`.
 - **John decides** (D-Q5): derive `Formattable` with this format
-  (recommended), or wait for a separate debug-format protocol. Recommendation:
-  derive it now. A type that wants a user-facing rendering writes it by hand,
-  and that case is not what deriving is for.
+  (recommended), or wait for a separate debug-format protocol. A type that
+  wants a user-facing rendering writes it by hand; that isn't what deriving
+  is for.
 
-**Defaultable.** Each field takes its declared initializer, or `Field()`.
+**Defaultable.** Each field takes its declared initializer
+(`var retries: Int64 = 3`), or else `Field()`.
 
-```kestrel
-@derivation
-extend Defaultable {
-    public init() {
-        self = Derive.build(case: Derive.caseMarked("default")) { (_) in Field() }
-    }
-}
-```
-
-- **Field check.** A field with a declared initializer is exempt from the
-  E952 check for `Defaultable`. `build` never calls the block for it, so it
-  does not need to be `Defaultable` itself. In general, a field reached
-  *only* through `build` and having an initializer is exempt.
-- **Enums.** An enum derives `Defaultable` only with exactly one case marked
-  `@default` (E957 otherwise).
-  - That case's payload fields follow the same rule as struct fields.
-  - `Derive.caseMarked("default")` is the compile-time index of that case.
-    For a struct it is `0`.
-  - `@default` is a built-in attribute: target `EnumCase`, no arguments.
-- **`self =` in `init`.** If assigning `self` inside an initializer is not
-  supported yet, `Derive.build` is accepted as the initializer's only
-  statement and lowered to per-field initialization. That is a lowering
-  detail, not a surface change.
+- **Field check.** A field with a declared initializer is exempt from the E952
+  check for `Defaultable`.
+- **Enums.** An enum derives `Defaultable` only when exactly one case is
+  marked `@default` (E957 otherwise). That case's payload fields follow the
+  struct rule.
+- **`@default`** is a built-in attribute: target `EnumCase`, no arguments.
 - **John decides** (D-Q6): derive `Defaultable` for structs and `@default`
   enums (recommended), or structs only.
 
-**Derivations not in 0.18:**
+**Not derivable in 0.18:**
 
-- `Cloneable` stays the MIR clone shim. A `Derive.map` form could express it
-  later and retire the shim, but the shim's interaction with drop
-  elaboration is not worth disturbing in this release.
+- `Cloneable` stays inferred, through the existing clone shim (§C1).
 - `Matchable`, `Iterator` and other protocols whose meaning is not
   structural are never derivable.
+
+### C6. The path to code-defined derives (2.0)
+
+The 2.0 roadmap's metaprogramming ("procedural macros (extending `@derive`
+from 0.18), compile-time reflection") is where a protocol's own module defines
+how it is derived. 0.18 keeps that path open by fixing everything except the
+witness source.
+
+**Kept unchanged when derives move into code:**
+
+- `@derive(P)` syntax, targets, and its desugaring to a derived
+  `extend S: P where ...` (§C2)
+- derived bounds, and `@derive` on a hand-written extension (§C3)
+- the `DeriveSite` checks and E950–E958 (§C7); only E951's wording changes,
+  from "is not one of the derivable protocols" to "has no derivation"
+- the semantics of the five stdlib derives (§C5), which their code
+  replacements must reproduce; the 0.18 execution tests are the specification
+
+**Changed in 2.0:**
+
+- `DeriveKind`, the `*Protocol` derive builtins and `synthesize_derive_shims`
+  are deleted.
+- Each protocol's module supplies its derivation in Kestrel. One shape
+  considered for this design is a protocol extension marked `@derivation`,
+  written against a small structural fold API and checked once. For example:
+
+  ```kestrel
+  @derivation
+  extend Equatable {
+      public func isEqual(to other: Self) -> Bool {
+          Derive.all(self, other) { (_, a, b) in a.isEqual(to: b) } ?? false
+      }
+  }
+  ```
+
+  Whether that or a general macro is the 2.0 mechanism belongs to the 2.0
+  design, not this one.
+
+**Not done in 0.18, to keep the path clean:**
+
+- no user-definable derives of any kind, even for user protocols;
+- no stdlib-side annotation beyond the `Builtin` markers, so 2.0 has no
+  half-finished mechanism to remove.
 
 ### C7. Rules at the `@derive` site
 
 Checked by one `DeriveSite` analyzer, in this order:
 
 1. **Resolve.** Every argument resolves to a protocol (E950). That protocol
-   has a `@derivation` (E951; `Copyable`/`Cloneable` get the C1 wording).
+   is one of the derivable protocols in §C4 (E951; `Copyable`/`Cloneable`
+   get the C1 wording).
 2. **No duplicate conformance.** The type does not also declare `P` in its
    conformance list or in another extension (E953 with the "already declares"
    wording). Deriving `P` twice in one list is the generic duplicate-argument
@@ -836,21 +725,20 @@ Checked by one `DeriveSite` analyzer, in this order:
    'Equatable'; add 'Equatable' to '@derive'". Parents are **not** derived
    implicitly, so the list states exactly what the type promises, as in Rust.
 4. **Fields.** Every field conforms to `P` under the derived bounds (E952),
-   with the `build` exemption from §C6.
+   with the `Defaultable` exemption for fields with initializers (§C5).
 5. **No hand-written witnesses.** No member written on the type itself, in
    any of its extensions, witnesses a requirement of a derived `P` (E953).
 6. **Sized.** The type has no unsized tail (`where T: not Sized` as its last
-   field, from the existentials design §2). Otherwise it is E954. Fold blocks
-   take `Field` by borrowed value, which an unsized field cannot provide.
-   Lifting this needs `Field: not Sized` in the block, and that can follow
-   when a real use appears.
+   field, from the existentials design §2). Otherwise it is E954. A shim
+   for an unsized tail would need the field's size and witnesses from the
+   runtime table. That can follow when a real use appears.
 
 ### C8. Interactions
 
 - **Copyable inference.** A derived conformance is an ordinary conformance. It
   never changes the copy classification, and the classification never changes
-  what is derived. A `not Copyable` type derives everything in §C6, because
-  every fold borrows.
+  what is derived. A `not Copyable` type derives everything in §C5, because
+  the shims only borrow fields.
 - **Conditional `Copyable` containers.** `enum Box[T]: not Copyable` plus
   `extend Box[T]: Copyable where T: Copyable` is unaffected.
   `@derive(Equatable)` adds a second, independent `where`-gated extension.
@@ -861,17 +749,16 @@ Checked by one `DeriveSite` analyzer, in this order:
   when deriving. Case indices are counted after filtering.
 - **`@deprecated`.** Derived code never warns. A deprecated field is still
   compared, hashed and formatted.
-- **Visibility.** `Derive` folds read private fields. That is the point of
-  deriving. Only the derivation sees them, through borrowed `Field` values.
-  The derivation cannot name them.
+- **Visibility.** Derived shims read private fields. That is the point of
+  deriving, and only compiler-generated code does it.
 - **Indirect enums.** Not shipped. When they are, an `indirect` payload is
-  visited through its box's `Indirection`, so the block still sees the
+  visited through its box's `Indirection`, so the deriver still sees the
   payload type.
 - **Recursive types.** `@derive(Equatable) enum List { case Nil; case Cons(Int64, Box[List]) }`
   requires `Box[List]: Equatable`. That holds through the box's own
   conditional conformance, which in turn needs `List: Equatable`. This is
   the derived conformance itself. The conformance solver must accept this
-  cycle as it would for a hand-written conformance. M6 adds an execution test
+  cycle as it would for a hand-written conformance. M5 adds an execution test
   for it, since this design has not verified that it does today.
 
 ## Pipeline impact
@@ -880,13 +767,13 @@ Checked by one `DeriveSite` analyzer, in this order:
 |---|---|
 | **Syntax / parser** | `AttributeList?` on `ExtensionDeclaration` and `DeinitDeclaration`; allow an attribute head before `extend`/`deinit` (`items.rs:141`) |
 | **AST builder** | `attrs/` module: registry, `AttrTarget`, `AttrValue`, argument parser (shared by `@platform` filtering), per-arg spans; `AttrsOf` query; spawn derived extension entities with `DerivedFrom` and derived bounds |
-| **Name res** | Resolve `@derive` paths; `ConformingProtocols` sees derived extensions with no change; `EntityBuiltin` reads `AttrsOf`; `DerivationOf(P)` query (the unique `@derivation` extension) |
-| **Type infer** | Witness resolution for derived conformances prefers the derivation's members; typing of `Derive.*` calls and fold blocks (the implicit `Field` generic); `DeprecationOf` is used by the use-site walk |
-| **Analyzers** | `AttributeValidation` (replaces `unknown_attribute.rs`); `DeprecatedUse` (body and declaration halves); `DeriveSite` (§C7); `DerivationDecl` (§C4 rules, E955/E956); existing `@main`/`@extern`/`@builtin` analyzers read `AttrsOf` |
-| **MIR lower** | `FunctionDef::inline`; fold blocks as view closures generic over `Field`; `MirIntrinsic::Derive`; consumers switch to typed accessors |
-| **Mono** | Expand `MirIntrinsic::Derive` at concrete `Self` (§C5); copy `inline` to instances |
+| **Name res** | Resolve `@derive` paths; `ConformingProtocols` sees derived extensions with no change; `EntityBuiltin` reads `AttrsOf`; `DeriveKindOf(P)` from the derive builtins |
+| **Type infer** | None for derives (calls resolve through the conformance); `DeprecationOf` is used by the use-site walk |
+| **Analyzers** | `AttributeValidation` (replaces `unknown_attribute.rs`); `DeprecatedUse` (body and declaration halves); `DeriveSite` (§C7); conformance completeness skips derived extensions; existing `@main`/`@extern`/`@builtin` analyzers read `AttrsOf` |
+| **MIR lower** | `FunctionDef::inline`; consumers switch to typed accessors |
+| **MIR passes / mono** | `synthesize_derive_shims` next to `synthesize_clone_shims` (§C4); copy `inline` to mono instances |
 | **Codegen** | LLVM: `alwaysinline` / `inlinehint` / `noinline`. Cranelift: none |
-| **Stdlib** | `Derive`, `FieldInfo`; `@derivation` extensions for `Equatable`, `Hashable`, `Comparable`, `Formattable`, `Defaultable`; `InlineMode`, `CallingConvention`, `Platform` documentation enums |
+| **Stdlib** | `@builtin(.EquatableProtocol)` etc. on the four protocols that lack one; `InlineMode`, `CallingConvention`, `Platform` documentation enums |
 | **LSP / doc** | Attribute completion and hover from the registry; deprecated tag and quick fix; derived conformances on type pages |
 
 ## Milestones
@@ -899,13 +786,10 @@ Each milestone ships green and is useful on its own.
 | M2 | Attributes on `extend` and `deinit`; variadic `@platform` | #32 |
 | M3 | `@inline` → MIR → LLVM | #111, #34 |
 | M4 | `@deprecated` and both use-site walks; LSP deprecated tag | #34 |
-| M5 | `@derive` desugaring, derived bounds, `DeriveSite` checks; compiler-side stub derivations for `Equatable`/`Hashable` to validate the desugaring before M6 | #33 |
-| M6 | `@derivation`, `Derive` API, fold-block typing, mono expansion; stdlib derivations for `Equatable`, `Hashable`, `Comparable`; remove M5's stubs | #33 |
-| M7 | `Formattable`, `Defaultable` + `@default` | #33 |
+| M5 | `@derive` desugaring, derived bounds, `DeriveSite` checks, derive builtins, `synthesize_derive_shims` for `Equatable`, `Hashable`, `Comparable` | #33 |
+| M6 | `Formattable`, `Defaultable` + `@default` | #33 |
 
-M6 is the largest and riskiest piece: the fold-block typing and the mono
-expansion. If 0.18 runs short, M7 moves to 0.19. M6 has no smaller useful
-form, which is the cost of D-Q4's recommendation.
+M5 is the largest piece. If 0.18 runs short, M6 moves to 0.19.
 
 ## Error cases
 
@@ -928,12 +812,10 @@ E950–E999 cover derives.
 | E907 | Too many positional arguments | `'@inline' takes at most one argument` |
 | E908 | Use of a deprecated item (**warning**) | `'legacyParse' is deprecated since 0.18: unsafe on empty input; use 'parse' instead` |
 | E950 | `@derive` argument is not a protocol | `'Point' in '@derive' is not a protocol` (variant: `cannot find protocol 'Equtable'`) |
-| E951 | Protocol is not derivable | `'Iterator' cannot be derived: it has no '@derivation'` (variant for `Copyable`/`Cloneable`, §C1) |
+| E951 | Protocol is not derivable | `'Iterator' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable` (variant for `Copyable`/`Cloneable`, §C1) |
 | E952 | Field does not conform | `cannot derive 'Hashable' for 'Point': field 'tag' has type 'Tag', which is not 'Hashable'` (enum: `payload 'radius' of case 'Circle'`; generic note: `derived bound: 'T: Hashable'`) |
 | E953 | Hand-written witness or duplicate conformance | `'Point' derives 'Equatable' but also implements 'isEqual(to:)'; remove one` (variant: `'Point' already declares 'Equatable'`) |
 | E954 | `@derive` on an unsupported declaration | `'@derive' on an extension needs a type declared in this package` (variants: protocol, type alias, unsized tail) |
-| E955 | Derivation doesn't cover a requirement | `the derivation of 'Hashable' does not implement 'hash(into:)'` |
-| E956 | `Derive` misuse | `'Derive.each' can only be used in a '@derivation' extension` (variants: `'case:' must be a constant case index`, `a second '@derivation' for 'Equatable'`, `'@derivation' must be in the module that declares 'Equatable'`) |
 | E957 | Enum `Defaultable` without exactly one `@default` case | `cannot derive 'Defaultable' for 'Mode': mark exactly one case '@default'` |
 | E958 | Missing parent conformance | `deriving 'Hashable' requires 'Point' to be 'Equatable'; add 'Equatable' to '@derive'` |
 
@@ -950,7 +832,7 @@ attributes. Recommendation: make it an error and keep the code.
   - Comparable: by index.
   - Formattable: the name.
   - Defaultable: the struct, or the `@default` case.
-- **Single-field struct.** It hashes like its field (§C6); this is intended.
+- **Single-field struct.** It hashes like its field (§C5); this is intended.
 - **Generic phantom parameter.** No bound (§C3).
 - **Floating-point fields.** Derived `Equatable` uses `Float64`'s own
   `isEqual`, so `NaN != NaN` carries through. Derived `Hashable` on a
@@ -962,16 +844,13 @@ attributes. Recommendation: make it an error and keep the code.
 - **`@deprecated` on an extension that adds a conformance.** It deprecates the
   extension's members, not the conformance. A conformance has no use site to
   warn at; generic code using `T: P` never names `S`.
-- **Same field type in many derived types.** The block instance
-  `block[Int64]` is shared, through ordinary mono dedup.
-- **Derivation calling a requirement on `self`.** It is legal, and it is the
-  user's recursion to avoid, as in any extension.
-- **`Derive.caseIndex` on a struct in a derivation that also serves enums.**
-  It is always `0`, so derivations need no struct/enum split.
+- **Same field type in many derived types.** Each derived type gets its own
+  shim, and the field witnesses they call are shared through ordinary mono
+  dedup.
 - **`@inline` on a computed property with both `get` and `set`.** Both
   accessors are marked.
 - **`@platform` on a derived type's field.** It is filtered before the field
-  check and expansion, so one source can derive on two platforms with
+  check and shim generation, so one source can derive on two platforms with
   different field sets.
 
 ## Open questions
@@ -983,7 +862,6 @@ attributes. Recommendation: make it an error and keep the code.
 | D-Q1 | Implicit or explicit derives? | Explicit `@derive` for `Equatable`/`Hashable`/`Comparable`/`Formattable`/`Defaultable`; `Copyable`/`Cloneable` stay inferred (§C1) |
 | D-Q2 | `@derive(Cloneable)` / `@derive(Copyable)` | Reject with an explanation (E951); the roadmap's listing predates the copy fold |
 | D-Q3 | Does 0.20's conditional conformance change anything derives rely on? | No: derives desugar to the `where`-gated extensions the stdlib already uses (§C3). Please confirm what 0.20 adds |
-| D-Q4 | How derivable protocols are defined | `@derivation` extensions in Kestrel with the `Derive` fold API (§C4–C5). Fallback: compiler-built derivers, same `@derive` surface |
 | D-Q5 | Derive `Formattable`? Format? | Yes: `Name(label: value, ...)`, fields with `debug: true` |
 | D-Q6 | Derive `Defaultable`? | Yes: structs (declared initializers win) and enums with one `@default` case |
 | D-Q7 | Diagnostic band | New E900–E999 band for attributes and derives |
@@ -1007,9 +885,10 @@ attributes. Recommendation: make it an error and keep the code.
 | 10 | Where deprecation warns | Every resolved use outside a deprecated context; never in generated code; implementing a deprecated requirement doesn't warn (§B2) |
 | 11 | What `@derive` is | Sugar for a derived `extend S: P where ...`, spawned by the builder; no synthesized members (§C2) |
 | 12 | Conditional derives | Bounds on type parameters that appear in field types; an explicit `@derive` extension for anything else (§C3) |
-| 13 | Enum case order for `Comparable` | Declaration order, after `@platform` filtering (§C6) |
-| 14 | Hashing enums | Case index, then payload fields in order; structs skip the index (§C6) |
+| 13 | Enum case order for `Comparable` | Declaration order, after `@platform` filtering (§C5) |
+| 14 | Hashing enums | Case index, then payload fields in order; structs skip the index (§C5) |
 | 15 | Parent protocols | Must hold; never derived implicitly (§C7) |
 | 16 | Hand-written member plus `@derive` | Error E953 (§C7) |
-| 17 | Derives on `not Copyable` types | Supported; folds only borrow (§C5, §C8) |
+| 17 | Derives on `not Copyable` types | Supported; shims only borrow (§C4, §C8) |
 | 18 | Unsized-tail types | Cannot derive in 0.18 (§C7) |
+| 19 | How derivable protocols are defined (was D-Q4) | Built-in derivers in the compiler for 0.18, chosen by John; code-defined derivations wait for 2.0 metaprogramming, with `@derive` designed to stay the same (§C4, §C6) |
