@@ -56,7 +56,25 @@ they need the operator rule below rather than a known receiver.
 - **N4 is not fixed by the checker**; see the overflow ruling.
 - D3's E106 now also fires for numeric literal receivers (0 sites measured).
 
-## Implementation status (2026-10-20)
+## Implementation status (2026-10-24)
+
+**Current: `bidi-p0-clean` @ `271ad94a` — 3877 ok / 11 failed** (full suite,
+release, 2026-10-24). P0–P5 are complete. The 18 pinned non-bidi bugs taken
+on before merging to nightly: 7 fixed (static members through type params and
+projections ×4, view closure stored into an outer field, projected snapshot
+capture then consume, `deinit` while a ref is live — plus `Self.Item` static
+calls found along the way). The 11 left, all pinned "EXPECTED TO FAIL" and
+none caused by this work:
+
+- 7 aliasing use-after-free (`memory_model/aliasing/*`): mutation while a ref
+  or iterator is live. Accepted under may-alias (references stage 2: "no
+  exclusivity backstop"); maintainer decision pending.
+- 2 view-closure escapes (through a call result, through a `mutating`
+  method): addressed by the proposal in [closure-fields.md](closure-fields.md).
+- 2 ref invalidations (`append`, reassignment while an element ref is live):
+  ruled allowed (mutating while borrowed is permitted); test headers pending
+  rewrite.
+
 
 All phases are developed on branch `bidi-p0-clean`. Suites are run with
 `cargo test --release -p kestrel-test-suite` (triage is not installed in the
