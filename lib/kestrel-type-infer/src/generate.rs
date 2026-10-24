@@ -530,6 +530,7 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
             if *from_operator {
                 ctx.operator_members.insert(id, *protocol);
                 unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
+                type_literal_operator(ctx, *protocol, method, recv_tv, &arg_tvs, expect.as_ref());
             }
             // Resolve method on the protocol
             ctx.member(
@@ -2042,6 +2043,41 @@ fn implicit_case_home(ctx: &InferCtx<'_>, expected: TyVar, name: &str) -> Option
         return None;
     };
     args.iter().copied().find(|&a| declares(a))
+}
+
+/// Type an operator's open literal receiver where the walker meets it
+/// (bidi §4): Rule L from a known right operand (`100 + small`), else
+/// Rule C from the pushed expected result (`let y: Int8 = 100 + 27`). What
+/// neither decides waits for the end-of-body passes and defaulting.
+fn type_literal_operator(
+    ctx: &mut InferCtx<'_>,
+    protocol: Entity,
+    method: &HirName,
+    recv: TyVar,
+    args: &[CallArg],
+    expect: Option<&(TyVar, Reason)>,
+) {
+    let Some(lit) = open_literal(ctx, recv) else {
+        return;
+    };
+    if let [arg] = args
+        && crate::solver::rule_l_applies(ctx, recv, arg.ty, protocol)
+    {
+        let _ = unify::unify(ctx, recv, arg.ty);
+        return;
+    }
+    let (Some((expected, _)), Some(name)) = (expect, method.as_str()) else {
+        return;
+    };
+    if !expectation_known(ctx, *expected) {
+        return;
+    }
+    let result = ctx.fresh();
+    let _ = unify::unify(ctx, result, *expected);
+    if let Some(entity) = crate::solver_entail::rule_c_pick(ctx, lit, result, name, args) {
+        let ty = ctx.named(entity, Vec::new());
+        let _ = unify::unify(ctx, recv, ty);
+    }
 }
 
 /// Run the solver over everything generated so far, Rule L included.

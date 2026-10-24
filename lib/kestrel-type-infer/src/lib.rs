@@ -18,6 +18,7 @@ pub mod ctx;
 pub mod entailment;
 mod entail_layer;
 mod solver_entail;
+pub mod obligations;
 pub mod error;
 pub mod generate;
 pub mod resolve;
@@ -104,7 +105,7 @@ impl QueryFn for InferBody {
         generate::generate(&mut infer_ctx, &hir, &param_types, return_ty);
 
         // Solve
-        solver::solve(&mut infer_ctx, &hir);
+        obligations::finish_body(&mut infer_ctx, &hir);
 
         // Detect circular opaque returns: if the concrete type behind `some P`
         // is itself another opaque, the body never grounded to a real type.
