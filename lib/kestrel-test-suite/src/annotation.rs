@@ -150,6 +150,17 @@ pub fn parse_test_config(source: &str) -> TestConfig {
             "skip" => {
                 config.skip = Some(value.to_string());
             },
+            // `// host: darwin` — run only on that host OS (platform-gated
+            // tests whose outcome depends on `@platform` matching the host).
+            // Uses the compiler's own `Os` so both agree on "the host".
+            "host" => {
+                use kestrel_ast_builder::components::Os;
+                match Os::from_name(value.trim()) {
+                    Some(os) if os == Os::host() => {},
+                    Some(_) => config.skip = Some(format!("host-only test ({value})")),
+                    None => config.skip = Some(format!("unknown host '{value}'")),
+                }
+            },
             "expect-exit" => {
                 config.expect_exit = i32::from_str(value).ok();
             },
