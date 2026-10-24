@@ -214,7 +214,7 @@ fn build(globals: &Globals, args: BuildArgs) -> Result<(), ExitCode> {
     // Flush diagnostics before codegen — better to fail fast on type errors
     // than to surface a confusing MIR-lowering cascade downstream.
     driver.emit_diagnostics().ok();
-    emit_analyze_errors(&compiler, &analyze_summary);
+    emit_analyze_diags(&compiler, &analyze_summary, false);
     if has_errors(&compiler) || analyze_summary.errors > 0 {
         return Err(ExitCode::FAILURE);
     }
@@ -320,7 +320,7 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     let driver = CompilerDriver::new(&compiler);
     driver.infer_all();
     // `dump` is not producing a binary — don't require a `@main`.
-    driver.analyze_all(false);
+    let analyze_summary = driver.analyze_all(false);
 
     match args.kind {
         DumpKind::Mir => {
@@ -362,7 +362,14 @@ fn dump(globals: &Globals, args: DumpArgs) -> Result<(), ExitCode> {
     }
 
     driver.emit_diagnostics().ok();
-    if has_errors(&compiler) {
+    // Analyzer diagnostics (E500, ...) are not in the codespan stream above;
+    // `dump diagnostics` shows warnings too, other kinds only errors.
+    emit_analyze_diags(
+        &compiler,
+        &analyze_summary,
+        matches!(args.kind, DumpKind::Diagnostics),
+    );
+    if has_errors(&compiler) || analyze_summary.errors > 0 {
         Err(ExitCode::FAILURE)
     } else {
         Ok(())
@@ -680,23 +687,34 @@ fn has_errors(compiler: &Compiler) -> bool {
 /// The codespan stream is the canonical renderer for inference errors;
 /// `kestrel dump diagnostics` and the lib test harness (which skips analyzer
 /// E100 for exactly this reason) both rely on it.
-fn cli_emittable_analyze_errors(
+///
+/// `include_warnings` adds analyzer warnings: `kestrel dump diagnostics`
+/// promises every diagnostic, while `build` keeps its output to errors.
+fn cli_emittable_analyze_diags(
     summary: &kestrel_compiler_driver::AnalyzeSummary,
+    include_warnings: bool,
 ) -> Vec<&kestrel_analyze::AnalyzeDiagnostic> {
+    use kestrel_analyze::Severity;
     summary
         .diagnostics
         .iter()
-        .filter(|d| d.severity == kestrel_analyze::Severity::Error)
+        .filter(|d| {
+            d.severity == Severity::Error || (include_warnings && d.severity == Severity::Warning)
+        })
         .filter(|d| d.descriptor_id != "E100")
         .collect()
 }
 
-/// Emit analyzer diagnostics (E-codes) as codespan-style errors to stderr.
-fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::AnalyzeSummary) {
+/// Emit analyzer diagnostics (E-codes) as codespan-style diagnostics to stderr.
+fn emit_analyze_diags(
+    compiler: &Compiler,
+    summary: &kestrel_compiler_driver::AnalyzeSummary,
+    include_warnings: bool,
+) {
     use codespan_reporting::diagnostic::{Diagnostic, Label};
     use kestrel_compiler::diagnostic::WorldFiles;
 
-    let error_diags = cli_emittable_analyze_errors(summary);
+    let error_diags = cli_emittable_analyze_diags(summary, include_warnings);
 
     if error_diags.is_empty() {
         return;
@@ -718,8 +736,11 @@ fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::A
                     label.with_message(&l.message)
                 })
                 .collect();
-            Diagnostic::error()
-                .with_message(format!("{} [{}]", d.message, d.descriptor_id))
+            let diag = match d.severity {
+                kestrel_analyze::Severity::Error => Diagnostic::error(),
+                _ => Diagnostic::warning(),
+            };
+            diag.with_message(format!("{} [{}]", d.message, d.descriptor_id))
                 .with_labels(labels)
                 .with_notes(d.notes.clone())
         })
@@ -730,7 +751,7 @@ fn emit_analyze_errors(compiler: &Compiler, summary: &kestrel_compiler_driver::A
 
 #[cfg(test)]
 mod tests {
-    use super::cli_emittable_analyze_errors;
+    use super::cli_emittable_analyze_diags;
     use kestrel_analyze::{AnalyzeDiagnostic, Severity};
     use kestrel_compiler_driver::AnalyzeSummary;
 
@@ -751,14 +772,37 @@ mod tests {
     fn cli_skips_e100_keeps_other_errors() {
         let summary = AnalyzeSummary {
             diagnostics: vec![
-                diag("E100", Severity::Error),  // inference error — already in codespan stream
-                diag("E412", Severity::Error),  // genuine analyzer error — must emit
+                diag("E100", Severity::Error), // inference error — already in codespan stream
+                diag("E412", Severity::Error), // genuine analyzer error — must emit
                 diag("E316", Severity::Warning), // warning — emitted elsewhere, not here
             ],
             ..Default::default()
         };
-        let emitted = cli_emittable_analyze_errors(&summary);
+        let emitted = cli_emittable_analyze_diags(&summary, false);
         let ids: Vec<&str> = emitted.iter().map(|d| d.descriptor_id).collect();
-        assert_eq!(ids, vec!["E412"], "only the non-E100 error should be CLI-emitted");
+        assert_eq!(
+            ids,
+            vec!["E412"],
+            "only the non-E100 error should be CLI-emitted"
+        );
+    }
+
+    #[test]
+    fn dump_diagnostics_also_emits_warnings() {
+        let summary = AnalyzeSummary {
+            diagnostics: vec![
+                diag("E100", Severity::Error),
+                diag("E412", Severity::Error),
+                diag("E316", Severity::Warning),
+            ],
+            ..Default::default()
+        };
+        let emitted = cli_emittable_analyze_diags(&summary, true);
+        let ids: Vec<&str> = emitted.iter().map(|d| d.descriptor_id).collect();
+        assert_eq!(
+            ids,
+            vec!["E412", "E316"],
+            "E100 stays skipped; warnings are included"
+        );
     }
 }
