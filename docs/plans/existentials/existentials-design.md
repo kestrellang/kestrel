@@ -60,6 +60,14 @@ let x: any Shape and Printable = Circle(radius: 1.0);
 
 // Downcast.
 if let c = shapes(0) as? Circle { print(c.radius) }
+
+// Type tests.
+if shapes(0) is Circle { count += 1 }
+match shapes(1) {
+    c is Circle => print(c.radius),
+    is Rect { width, .. } => print(width),
+    _ => print("other"),
+}
 ```
 
 Grammar (`kestrel.ungram`, next to `TySome`):
@@ -350,6 +358,77 @@ The diagnostic names the requirement that blocks it.
 - `as?` is new syntax. The `as` token exists (`kestrel-lexer/src/lib.rs:311`)
   but has no cast meaning yet.
 
+### 8b. `is`: type-test operator and patterns
+
+`is` is a **reserved keyword**. It has an expression form and a pattern
+form. Both use the same runtime check as `as?`: compare the type descriptor
+in the table with `T`'s.
+
+#### The operator
+
+```kestrel
+if shape is Circle { count += 1 }
+let circles = shapes.filter { it is Circle }
+if shape is not Square { ... }
+```
+
+- **Result type.** It is typed exactly like a boolean literal.
+  - `x is T` starts as an open slot that must conform to
+    `ExpressibleByBoolLiteral`.
+  - The context decides the type; otherwise it falls back to
+    `@builtin(.DefaultBooleanLiteralType)` (`BooleanLiteralType = Bool`,
+    `literals.ks:161`), through the same path literals use
+    (`default_literal_var`, `solver.rs:5602`).
+  - So `x is T` type-checks wherever `true` does and gets the same type.
+    `let f: Flag = x is Circle` works for any `Flag: ExpressibleByBoolLiteral`.
+- **Lowering.** The descriptor comparison yields a primitive `lang.i1`,
+  which is passed to the chosen type's `init(boolLiteral:)`. That is free
+  for `Bool`.
+- **`x is not T`** is the negated form. `not` is already a keyword.
+- **No narrowing.** `if x is Circle { ... }` does not change `x`'s type
+  inside the branch, because Kestrel has no flow-sensitive typing. Use the
+  pattern form `if let c is Circle = x` to get a name with the narrowed type.
+- **Precedence.** Comparison level, non-associative:
+  - `a is Circle == b` is a parse error;
+  - `x is Circle and y is Square` is fine.
+- **Left operand** must be an existential (`B[rawany P]`). A statically
+  known type is an error (E152), since the answer is already known. A
+  generic `T` is also rejected for now: answering per monomorphized
+  instantiation would make generic code depend on `T`'s identity.
+- **Right operand** must be a concrete, fully applied, sized type
+  (`Box[Int64]`, not `Box`).
+  - If it can't conform to every bound, that's the E149 "always fails"
+    warning.
+  - `is any Q` is out of scope, as with `as?`.
+- **Consistency gap.** `Equatable.isEqual(to:)` returns `Bool` directly
+  (`protocols.ks:36`), so `==` is fixed to `std.Bool` while `is` isn't.
+  That belongs to the comparison protocols and is not changed here.
+
+#### Patterns
+
+| Pattern | Meaning |
+|---|---|
+| `is Circle` | Type test, no binding |
+| `c is Circle` | Test, bind `c: &Circle` (a borrow, like `as?`; decays to a copy when `Copyable`) |
+| `is Rect { width, .. }` | Test, then destructure as a struct pattern |
+| `r is Rect { width, .. }` | Test, bind, destructure |
+| `var c is Circle` | **Error E153**: an `is` binding borrows the payload |
+| `Rect { width, .. }` on an existential | **Not** a type test, so the existing struct-pattern type mismatch. Type tests always say `is` |
+| `x @ is Circle` | Legal; `x` binds the whole existential (`@` is unchanged) |
+
+- **Where they work.** These patterns work in `match`, `if let`,
+  `guard let` and `while let`.
+- **`or`-patterns.** `c is Circle or c is Square` is rejected by the
+  existing rule that a binding must have the same type in every
+  alternative. `is Circle or is Square` is fine.
+- **Exhaustiveness.** The set of payload types is open, so a match on an
+  existential is never exhaustive without `_`.
+  - `kestrel-pattern-matching` treats each `is T` as one constructor of an
+    infinite domain, the way integer literals work.
+  - A repeated `is T` gets the existing unreachable-arm warning.
+- **Bindings always borrow.** Moving the payload out still goes through
+  `consuming x as? T`.
+
 ### 9. Associated types
 
 - **Binding.** `any Iterator[Item = Int64]` binds `Item` in the raw type
@@ -370,9 +449,8 @@ The diagnostic names the requirement that blocks it.
   rejects it.
 - **`some P`.** A function returning `some P` may return an `any P` (via
   self-conformance), but not the other way around.
-- **Pattern matching.** `as?` composes with `if let` / `guard let`.
-  Matching directly on an existential's concrete type (`case let c as
-  Circle`) is not in scope. It can come later on top of `as?`.
+- **Pattern matching.** `is` patterns (§8b) test and bind in `match`,
+  `if let`, `guard let` and `while let`. `as?` composes with them.
 - **References.** `&any P` borrows the box, an ordinary reference to a
   sized value. There is no user-visible `&rawany P`. The only pointer to a
   raw existential is the internal one inside boxes and thunks.
@@ -408,12 +486,13 @@ What the compiler does today on `80297742`:
 
 | Stage | Change |
 |-------|--------|
-| **Lexer** | `any` keyword token (append to `kinds.txt`; regenerate) |
-| **Parser / CST** | `TyAny` node; `types.rs` `at_type_start` + `base_ty` arm next to `some_type`; `as?` postfix in the expression grammar |
+| **Lexer** | `any` and `is` keyword tokens (append to `kinds.txt`; regenerate) |
+| **Parser / CST** | `TyAny` node; `types.rs` `at_type_start` + `base_ty` arm next to `some_type`; `as?` postfix and `is` / `is not` (comparison level, non-associative) in the expression grammar; `IsPat` node (`name? is Ty StructPatFields?`) in the pattern grammar |
 | **Decls (ECS)** | `AstType::Any { box_ty, bounds, span }`. `@builtin(.DefaultBoxType)` alias slot plus `Sized`, `ExistentialBox` and `ConsumingIndirection` builtins in `kestrel-hir/src/builtin.rs`; `DefaultBoxType` added to `denotes_alias_target` |
 | **Name res** | Resolve the box argument as an unapplied generic type |
-| **HIR** | Desugar `any[B] P` → `HirTy::Struct{B, [HirTy::RawExistential{bounds, bindings}]}`, with `B = ResolveBuiltin(DefaultBoxType)` when omitted. A bare `HirTy::Protocol` in value position is an error. New `HirExpr::Cast { expr, ty, consuming }` for `as?` |
-| **Type infer** | `TyKind::RawExistential`; `Sized` implicit bound plus the `not Sized` opt-out; box/unsize/upcast rules at check leaves, recorded per expression; synthesized `rawany P: P` and `B[rawany P]: P` in conformance queries; existential-first member peel; dispatchability errors. Remove the `Protocol`-is-`Copyable`/`Static` arms |
+| **HIR** | Desugar `any[B] P` → `HirTy::Struct{B, [HirTy::RawExistential{bounds, bindings}]}`, with `B = ResolveBuiltin(DefaultBoxType)` when omitted. A bare `HirTy::Protocol` in value position is an error. New `HirExpr::Cast { expr, ty, consuming }` for `as?`, `HirExpr::TypeTest { expr, ty, negated }` for `is`, and `HirPat::TypeTest { binding, ty, fields }` |
+| **Type infer** | `TyKind::RawExistential`; `Sized` implicit bound plus the `not Sized` opt-out; box/unsize/upcast rules at check leaves, recorded per expression; synthesized `rawany P: P` and `B[rawany P]: P` in conformance queries; existential-first member peel; dispatchability errors; `is` typed as a boolean-literal slot; `is` patterns narrow their binding to `&T`. Remove the `Protocol`-is-`Copyable`/`Static` arms |
+| **Pattern matching** | `TypeTest(T)` constructor over an open domain (exhaustiveness, unreachable arms) |
 | **Analyzers** | Box validity (§3: one `not Sized` param, unsizable fields, `ExistentialBox`); unsized-by-value uses inside `not Sized` declarations; bare protocol type; non-conforming `as?` warning |
 | **MIR** | `MirTy::RawExistential`; fat `lang.ptr` to an unsized pointee (2 words); unsized-tail layout with dynamic field offset; `sizeOfVal`/`alignOfVal`/`drop_in_place` on fat pointers via the table; `VTableDef`, `Op::FuncAddr`, `Op::VTableAddr`, `Callee::Dynamic`; thunk and table synthesis in mono |
 | **Codegen** | Cranelift + LLVM: read-only table globals with function relocations, fat-pointer values, indirect calls |
@@ -435,6 +514,8 @@ free). They need to be confirmed there before use.
 | E149 | `as?` target doesn't conform (warning) | `cast from 'any Shape' to 'Int64' always fails: 'Int64' does not conform to 'Shape'` |
 | E150 | Associated-type binding unknown | `'Iterator' has no associated type named 'Itm'` |
 | E151 | Associated-type binding unsatisfied on conversion | `cannot convert 'Range[Int64]' to 'any Iterator[Item = String]': its 'Item' is 'Int64'` |
+| E152 | `is` on a non-existential left operand | `'is' needs an existential on the left: 'Circle' is known at compile time` (variant: `'T' is a generic parameter`) |
+| E153 | `var` binding in an `is` pattern | `an 'is' pattern binds a borrow of the payload, so it cannot be 'var'` |
 | E402 | `B` in `any[B] P` is not a valid box | `'Array' cannot box an existential: its type parameter is not declared 'not Sized'` (variants: `it does not conform to 'ExistentialBox'`, `field 'items' stores 'T' by value`) |
 | E403 | Unsized type parameter used by value | `'T' may be unsized here ('where T: not Sized'), so it can only be used behind a pointer or as the last stored field` |
 | E404 | `any` box argument applied | `the box in 'any[...]' is written without type arguments: 'any[RcBox] Shape'` |
@@ -497,3 +578,4 @@ free). They need to be confirmed there before use.
 | 17 | `ConsumingIndirection` | `consuming func consumePointee[R](_ body: (Pointer[Target]) -> R) -> R` (§3). A consuming `as?` returns `Result[T, any[B] P]` |
 | 18 | `as?` syntax | Postfix operator |
 | 19 | Existing bare-protocol tests | Approved to update to `any P` once the parser accepts `any` (see [Current state](#current-state)) |
+| 20 | Type tests | `is` is a reserved keyword. The operator returns a boolean-literal-typed value (default `Bool`); `is not` negates; no narrowing; existential left operand only. Patterns: `is T`, `name is T`, `[name] is T { fields }`; `var` rejected; no struct-pattern sugar on existentials |

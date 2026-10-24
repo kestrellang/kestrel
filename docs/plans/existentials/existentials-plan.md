@@ -14,7 +14,7 @@ on its own targeted tests and leaves the suite no worse than before.
 | **M2: `Sized` and boxes** | 4–5 | `Sized` / `not Sized`, the box protocols and stdlib changes, box validity (E402, E403) |
 | **M3: Type checking** | 6–8 | Conversions, member lookup, dispatchability, self-conformance, associated types, composition, all diagnostics |
 | **M4: Runtime** | 9–12 | Fat pointers, unsized-tail layout, function tables, thunks, dynamic calls, on both backends. Execution tests pass |
-| **M5: Downcasts and docs** | 13–14 | `as?`, consuming `as?`, user docs |
+| **M5: Downcasts and docs** | 13–14 | `as?`, consuming `as?`, the `is` operator and `is` patterns, user docs |
 
 **Dependency on bidirectional checking.** The conversions (§4) live at
 the check leaves of the bidirectional checker, which is being reworked on
@@ -79,6 +79,20 @@ M1 and M2 don't depend on it.
 - [ ] `any_assoc_mismatch.ks`: E151.
 - [ ] `any_consuming_cast_shared_box.ks`: consuming `as?` on `any P`
       (RcBox) is E148.
+- [ ] `is_non_existential_lhs.ks`: E152, with a concrete left operand
+      and with a generic `T`.
+- [ ] `is_var_binding_rejected.ks`: E153.
+- [ ] `is_struct_pattern_without_is.ks`: `Rect { width, .. }` on
+      `any Shape` is the existing struct-pattern type mismatch.
+- [ ] `is_or_pattern_binding_types.ks`: `c is Circle or c is Square` is
+      the existing or-pattern binding-type error; `is Circle or is Square`
+      is accepted.
+- [ ] `is_match_not_exhaustive.ks`: a match on `any Shape` without `_`
+      is the existing non-exhaustive error, and a repeated `is Circle` arm
+      warns as unreachable.
+- [ ] `is_chained_parse_error.ks`: `a is Circle == b` is a parse error.
+- [ ] `is_always_fails.ks`: E149 `// WARNING:` on the operator and on a
+      pattern.
 
 **MIR snapshots:**
 
@@ -124,6 +138,13 @@ M1 and M2 don't depend on it.
       `any[UniqueBox] P`. A hit moves the value out; a miss returns `.Err`
       with the existential intact (call a method on it afterward).
 - [ ] `empty_protocol_exec.ks`: `any Marker` plus `as?`.
+- [ ] `is_operator_exec.ks`: `is` and `is not` in `if`, in `filter`,
+      and combined with `and`/`or`.
+- [ ] `is_custom_bool_exec.ks`: `let f: Flag = x is Circle` with a local
+      `Flag: ExpressibleByBoolLiteral, BooleanConditional`.
+- [ ] `is_patterns_exec.ks`: `is T`, `c is T`, `is T { .. }` and
+      `r is T { .. }` in `match`, `if let`, `guard let` and `while let`;
+      `x @ is T` binds the whole existential.
 
 **Stdlib regression** (`stdlib/memory/`, independent of existentials):
 
@@ -138,19 +159,27 @@ M1 and M2 don't depend on it.
 Files: `lib/kestrel-lexer/src/lib.rs`, `lib/kestrel-syntax-tree/kinds.txt`,
 `lib/kestrel-syntax-tree/kestrel.ungram`
 
-- [ ] **`any` keyword.** Add `#[token("any")] Any` next to `Some`
-      (`lexer/src/lib.rs:232`). Check that no stdlib or test identifier is
-      named `any`. If any are, list them before deciding between a
-      contextual and a reserved keyword.
+- [ ] **`any` and `is` keywords.** Add `#[token("any")] Any` and
+      `#[token("is")] Is` next to `Some` (`lexer/src/lib.rs:232`).
+      - `is` is reserved (decided).
+      - First list every stdlib, example and test identifier named `is` or
+        `any`, then rename them in the same commit, before the tokens
+        land.
 - [ ] **CST kinds.** Append to `kinds.txt` (it is append-only):
       - `token Any 'any'`
       - `node TyAny`
       - `node CastExpr`
       - `token AsQuestion 'as?'`, or reuse `As` plus `Question`, whichever
         the lexer can produce without breaking `?` and `??`.
+      - `token Is 'is'`, `node TypeTestExpr`, `node IsPat`.
 - [ ] **Grammar.** `kestrel.ungram`:
       - `TyAny = 'any' TypeArgumentList? Ty ('and' Ty)*`
       - `CastExpr = 'consuming'? Expr 'as?' Ty`
+      - `TypeTestExpr = Expr 'is' 'not'? Ty`
+      - `IsPat = Name? 'is' Ty ('{' (StructPatternMember (',' StructPatternMember)* ','?)? '}')?`,
+        reusing `StructPattern`'s member list (`kestrel.ungram:595`). It
+        takes a full `Ty` rather than `'ident'`, so `is Box[Int64] { .. }`
+        works.
 - [ ] **Regenerate:**
       `UPDATE_GENERATED=1 cargo test -p kestrel-syntax-tree --test sourcegen`.
 
@@ -174,6 +203,13 @@ Files: `lib/kestrel-parser/src/grammar/types.rs`,
 - [ ] **Consuming cast.** A `consuming` prefix, accepted only immediately
       before a `CastExpr`. There is no general `consuming <expr>` form
       today, so nothing else may parse.
+- [ ] **`is` operator.** A binary operator at comparison precedence,
+      non-associative. The right operand is parsed as a type, not an
+      expression. `is not` is one operator.
+- [ ] **`is` patterns** in the pattern grammar (`grammar/patterns.rs`):
+      an optional binding name, then `is`, a type, and optional struct
+      fields. `var` before it parses, so the error comes from HIR
+      lowering as E153 rather than a vague parse error.
 - [ ] **Errors.** A parser error for `any` with no bound. Applied boxes
       (`any[RcBox[T]] P`) parse fine; E404 is raised in HIR lowering.
 
@@ -216,9 +252,12 @@ Files: `lib/kestrel-ast/src/ast_type.rs`, `lib/kestrel-ast-builder/src/ast_type.
         doesn't cascade.
 - [ ] **`as?` expression.** `HirExpr::Cast { expr, target: HirTy, consuming: bool }`
       in `lower_expr_node`, recorded in the `BodySourceMap`.
+- [ ] **`is` expression.** `HirExpr::TypeTest { expr, target, negated }`.
+- [ ] **`is` pattern.** `HirPat::TypeTest { binding: Option<Binding>, target, fields }`
+      in `lower_pat_node`. `var` → E153.
 - [ ] **Diagnostic codes.** Allocate E144 and E404 per
       `lib/kestrel-analyze/AGENTS.md` (registry, `docs/error-codes.md`).
-      Reserve E145–E151 and E402–E403 together, so later phases don't
+      Reserve E145–E153 and E402–E403 together, so later phases don't
       collide with other agents.
 - [ ] **Update the two bare-protocol tests to `any P` (approved):**
       - `declarations/extensions/extension_conformance_on_generic_type.ks`
@@ -520,22 +559,41 @@ Files: `lib/kestrel-type-infer/src/` (cast constraint),
         mismatch message).
       - `as?` to an existential target is rejected; it is out of scope
         (design edge cases).
+- [ ] **`is` operator typing.** The result is a fresh literal slot
+      (`fresh_literal`) with a new `LiteralKind::Bool` origin, or the
+      existing boolean-literal kind if there is one. It goes through
+      `default_literal_var` like `true`. The left operand must be
+      `B[RawExistential]`, otherwise E152 (concrete or generic).
+- [ ] **`is` pattern typing.** The binding is `&T`. Fields check against
+      `T`'s struct pattern rules. The scrutinee must be an existential
+      (E152).
+- [ ] **Exhaustiveness** (`lib/kestrel-pattern-matching`). A
+      `TypeTest(TyId)` constructor over an open domain, modelled on
+      integer literals in `usefulness.rs`, so the non-exhaustive and
+      unreachable diagnostics come for free.
 - [ ] **E149 warning.** When `T` can't conform to every bound, warn in a
-      body analyzer.
+      body analyzer. One check covers `as?`, the `is` operator and `is`
+      patterns.
 - [ ] **Lowering.**
       - Load the table's type-descriptor slot and compare it with
         `T`'s descriptor address.
       - **Hit:** a reference to the payload re-typed as `&T`.
       - **Consuming hit:** `consumePointee { p in p.cast[T]().move() }`.
       - **Miss:** `.None` / `.Err(x)`.
-- [ ] **Triage:** the downcast execution tests and `any_cast_*`
-      diagnostics pass. This is the **M5 exit**, together with Phase 14.
+      - **`is` operator:** the same comparison as an `lang.i1`, passed to
+        the chosen type's `init(boolLiteral:)`. `is not` inverts it.
+      - **`is` patterns:** a decision-tree branch on the comparison; on a
+        hit, bind `&T` and continue with the field sub-patterns.
+      - One helper emits the descriptor comparison for all three.
+- [ ] **Triage:** the downcast and `is_*` execution tests, and the
+      `any_cast_*` and `is_*` diagnostics, pass. This is the **M5 exit**, together with Phase 14.
 
 ### Phase 14: Documentation
 
 - [ ] **`docs/language/existentials.md`** (user-facing): `any P`,
-      `any[B] P`, choosing a box, dispatchability, `as?`, the RcBox
+      `any[B] P`, choosing a box, dispatchability, `as?`, `is`, the RcBox
       aliasing gotcha.
+- [ ] **`docs/language/pattern-matching.md`:** an `is` patterns section.
 - [ ] **Cross-references.** Update `docs/language/opaque-types.md`'s
       comparison paragraph, and point `docs/design/shared-box.md`'s `any P`
       section (`:146`, `:175-188`) at the design doc.
