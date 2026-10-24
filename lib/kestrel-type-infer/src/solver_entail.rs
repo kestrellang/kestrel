@@ -80,7 +80,18 @@ impl<'a, 'i> SolverLayer<'a, 'i> {
 
 impl EntailLayer for SolverLayer<'_, '_> {
     fn supply(&self, ty: &ETy, protocol: Entity) -> Supply {
-        self.fe.supply(ty, protocol)
+        let supply = self.fe.supply(ty, protocol);
+        // A type param the front-end layer could not prove from its own
+        // declaration is decided against the asking body's assumptions Γ
+        // (bidi §7.2: "Param(p) holds iff Γ entails it"): the resolver's
+        // param bounds walk the param's declaring item AND the body owner's
+        // chain of where clauses (`func m() where U: Show` inside
+        // `extend W[U]`). A definite answer — never "unknown → permit".
+        if let (Supply::Decided(Tri::Unknown), ETy::Param(p)) = (&supply, ty) {
+            let param = TyKind::Param { entity: *p };
+            return Supply::Decided(Tri::from_bool(self.ctx.resolver.conforms_to(&param, protocol)));
+        }
+        supply
     }
 
     fn assoc_binding(&self, base: &ETy, assoc: Entity) -> Option<ETy> {

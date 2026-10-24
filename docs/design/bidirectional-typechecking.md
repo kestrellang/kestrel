@@ -72,10 +72,11 @@ in `solver.rs` are deleted. An open var is `Unknown` and is kept as an
 `Applicable` / `Conforms` obligation (N1); equality clauses are evaluated (N2)
 and lowered into MIR `WhereConstraint::Equal` from `WhereClausesOf`.
 Suite: N1 + N2 pinned tests fixed, no other verdict changed.
-Deviations: (1) an abstract param with no declared bound is `Unknown`, not
-`Fails`, and the solver settles an abstract-only `Unknown` to the declared
-answer (`conforms_to` already vouched) — the asking site's Γ is not threaded
-yet; (2) mono keeps its MIR pattern matcher and AST-lowered bounds (the
+Deviations: (1) *closed 2026-10-24*: a type-param goal the param's own
+declaration cannot prove is decided against the asking body's Γ (the
+resolver's param bounds: declaring item + body owner chain) — a definite
+Holds/Fails in the solver (`declarations/extensions/extension_bound_on_type_param_decided_from_body_assumptions.ks`);
+the analyzer, which has no body, still treats that Unknown as permit; (2) mono keeps its MIR pattern matcher and AST-lowered bounds (the
 resolved `WhereClausesOf` drops `not P` bounds) and its own specificity rule;
 (3) analyze's `entailment.rs` is kept as the Γ oracle the kernel's param
 supply consults.
