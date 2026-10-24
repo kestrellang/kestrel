@@ -24,7 +24,8 @@ conformances on top of it. The work has three parts:
    attribute list, the argument parsing and the validation are spread over six
    crates.
 2. **Built-in attributes.** `@inline` (the #111 design, adopted unchanged),
-   `@deprecated`, and the layout attributes `@align(N)` and `@layout(.C / .Packed)`, plus the existing `@main`, `@extern`, `@builtin`,
+   `@deprecated`, `@unavailable`, `@doc(.Hidden)`, `@nonExhaustive`, and the
+   layout attributes `@align(N)` and `@layout(.C / .Packed)`, plus the existing `@main`, `@extern`, `@builtin`,
    `@fileconstant` and `@platform`, re-expressed through the registry.
 3. **Derives.** `@derive(Equatable, Hashable)` on a struct or enum gives it a
    compiler-built conformance. In 0.18 the compiler decides what can be
@@ -257,6 +258,9 @@ pub enum ParsedAttr {
     Align(u32),
     Layout(LayoutKind),            // .C or .Packed
     Deprecated(Deprecation),
+    Unavailable(Unavailability),
+    Doc(DocMode),                  // .Hidden
+    NonExhaustive,
     Derive(Vec<DeriveTarget>),    // unresolved paths + spans (§C2)
     Default,                       // `@default` on an enum case (§C5)
     Dummy,
@@ -293,7 +297,7 @@ it needs exists.
 |---|---|---|
 | `Build` | `@platform` | `kestrel-ast-builder` while building, from the syntax node, using the same schema and parser as `AttrsOf` |
 | `NameRes` | `@builtin`, `@derive`, `@default` | `kestrel-name-res` (builtin map, derive targets, derived extensions) |
-| `Semantic` | `@main`, `@deprecated` | `kestrel-analyze`, `kestrel-type-infer` |
+| `Semantic` | `@main`, `@deprecated`, `@unavailable`, `@doc`, `@nonExhaustive` | `kestrel-analyze`, `kestrel-type-infer` |
 | `Lowering` | `@extern`, `@fileconstant`, `@inline`, `@align`, `@layout` | `kestrel-mir-lower`, then MIR, mono and codegen |
 
 **How attributes get past HIR.** HIR holds bodies. Declarations stay in the
@@ -323,6 +327,7 @@ AST/HIR/MIR" is met like this:
 |---|---|
 | `@inline` + `@extern` | An extern has no body to inline |
 | `@main` + `@extern` | The entry point must be a Kestrel function |
+| `@unavailable` + `@deprecated` | §B6 |
 | `@layout(.Packed)` + `@align` | §B5 |
 | `@derive(P)` + a declared `P` conformance on the same type | Two conformances (§C7) |
 
@@ -516,6 +521,101 @@ read in one place and the backends cannot disagree. LLVM gets a packed struct
 type (`<{ ... }>`) for `.Packed` and explicit alignment on loads, stores and
 allocas for `@align`.
 
+### B6. `@unavailable`
+
+```kestrel
+@unavailable("needs 'mutating get' (0.20); use 'modify(key:)' instead", replacement: "modify")
+public subscript(key: K, inserting default: V) -> V { ... }
+```
+
+- **Meaning.** Using the declaration is an **error** (E913). This is for APIs
+  that were removed, or that are declared but can't work yet. The
+  `Dictionary.subscript(key:inserting:)` that 0.13 removed (`ROADMAP.md`,
+  0.20) is the motivating case: with `@unavailable` it can stay declared and
+  tell callers what to do instead.
+- **Arguments.** An optional positional message and `replacement:`, the same
+  as `@deprecated` (§B2). There is no `since:`.
+- **Same machinery as `@deprecated`.** The targets, what counts as a use, and
+  the use-site walks are all §B2's. The two attributes share one query,
+  `UseRestrictionOf(entity) -> Option<Restriction>`, where `Restriction` is
+  `Deprecated(..)` or `Unavailable(..)`. Only the severity and the wording
+  differ.
+- **No exemptions inside unavailable code.** A use inside a declaration that
+  is itself unavailable is still an error. Unavailable code can't run, so it
+  has nothing to migrate.
+- **Bodies.** An unavailable function still needs a body if its kind needs
+  one. The body is type-checked but never lowered, and E623 still applies.
+- **Requirements.** An unavailable protocol requirement needs no witness. A
+  conformance that provides one gets no diagnostic.
+- **Conflicts.** `@unavailable` + `@deprecated` on one declaration is E906.
+  `@unavailable` + `@main` is E906.
+
+### B7. `@doc(.Hidden)`
+
+- **Meaning.** A public declaration is left out of generated documentation
+  and editor completion. It stays fully usable, and hover and go-to-definition
+  still work on it. It exists for things the stdlib must make `public`
+  because the compiler or other stdlib modules reach them, but that users
+  shouldn't call. The literal and builtin hook types are examples.
+- **Argument.** One case, `.Hidden`, required. `@doc` takes a case so later
+  doc controls fit the same attribute without a new name, for example `.Inline`
+  (show an extension's members on the extended type's page).
+- **Targets.** Every named declaration, plus `extend` (hides every member it
+  declares).
+- **Consumers.**
+  - `kestrel-doc` skips the entity, next to its existing visibility filter
+    (`is_public_top_level`, `kestrel-doc/src/lib.rs:540`).
+  - LSP completion skips it in `member_completion` and `scope_completion`
+    (`kestrel-lsp/src/handlers/completion.rs:103,428`), unless the name
+    typed so far is already an exact prefix match of 3+ characters, so a user
+    who knows the name still gets it.
+- **Not a visibility level.** It changes no lookup and no access check, so it
+  can't hide anything a program depends on. A hidden type in a public
+  signature still appears in that signature's docs, as plain text without a
+  link.
+
+### B8. `@nonExhaustive`
+
+```kestrel
+@nonExhaustive
+public enum HttpMethod { case Get; case Post; case Put; case Delete }
+
+// In another module:
+match method {
+    .Get => ...,
+    .Post => ...,
+    _ => ...,         // required: HttpMethod may gain cases
+}
+```
+
+- **Meaning.** A `match` on the enum **outside its declaring module** must
+  have a catch-all arm. Without one it is E305 (`non_exhaustive_match`), with
+  the note "'HttpMethod' is '@nonExhaustive'; add a '_' arm, since cases may
+  be added". The module is where Kestrel's visibility stops (`internal`, see
+  `docs/language/modules.md`), so it is also where "you can see every case"
+  stops.
+- **Inside its module,** matches are exhaustive as today: the module itself
+  owns the case list.
+- **Why.** Adding a case to a public enum otherwise breaks every downstream
+  `match`. With `@nonExhaustive` the library author can grow the enum without
+  a breaking release.
+- **Where it plugs in.** `kestrel-pattern-matching` treats the enum's
+  constructor set as open when the match's module differs from the enum's
+  module, the same way it treats integer literals and `is T` patterns. A
+  `_` arm, a binding arm or an `@`-binding of the whole value counts as the
+  catch-all.
+- **A `_` arm that covers every listed case** is not reported as
+  unreachable (E306) outside the module, because future cases reach it.
+- **Targets.** Public enums only. On a non-public enum it is E910, worded as
+  "has no effect: 'Mode' is not visible outside its module". On a struct it is
+  E900; struct fields are already hidden behind visibility.
+- **Interactions.**
+  - Derives are unaffected. Derived `Comparable` still orders by declaration
+    order, so new cases should be added at the end; the derive docs say so.
+  - `@layout(.C)` enums can be `@nonExhaustive`. C code reading the value
+    should expect unknown integers anyway.
+  - Construction is unaffected. `.Get` works everywhere it did.
+
 ## Part C: Derives
 
 ### C1. Explicit, not implicit
@@ -566,8 +666,8 @@ struct Point { var x: Int64; var y: Int64 }
   Anything that is not a protocol is E950.
 - **Targets:** structs, enums, and extensions of a struct or enum (§C3).
 - **Not allowed** on protocols, type aliases, or an extension whose type is
-  declared in another package. A deriver reads stored fields, and another
-  package's fields are not part of its API. That case is E954.
+  declared in another module. A deriver reads stored fields, and another
+  module's fields are not part of its API. That case is E954.
 
 **What it means.** `@derive(P)` on a type declaration is sugar for an
 extension:
@@ -882,7 +982,8 @@ Each milestone ships green and is useful on its own.
 | M2 | Attributes on `extend` and `deinit`; variadic `@platform` | #32 |
 | M3 | `@inline` → MIR → LLVM | #111, #34 |
 | M3b | `@align`, `@layout`, the single layout constructor; requires the existentials alignment-correct payload offsets first | #34 |
-| M4 | `@deprecated` and both use-site walks; LSP deprecated tag | #34 |
+| M4 | `@deprecated`, `@unavailable` and the shared use-site walks; LSP deprecated tag | #34 |
+| M4b | `@doc(.Hidden)` (kestrel-doc, LSP), `@nonExhaustive` (pattern matching) | #34 |
 | M5 | `@derive` desugaring, derived bounds, `DeriveSite` checks, derive builtins, `synthesize_derive_shims` for `Equatable`, `Hashable`, `Comparable` | #33 |
 | M6 | `Formattable`, `Defaultable` + `@default` | #33 |
 
@@ -909,14 +1010,16 @@ E950–E999 cover derives.
 | E907 | Too many positional arguments | `'@inline' takes at most one argument` |
 | E908 | Use of a deprecated item (**warning**) | `'legacyParse' is deprecated since 0.18: unsafe on empty input; use 'parse' instead` |
 | E909 | Bad `@align` value | `'@align(12)' must be a power of two between 1 and 4096` |
-| E910 | `@layout` not valid for this type | `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload` (variants: `'@layout(.Packed)' cannot be applied to an enum`, `... to a type with an unsized tail`) |
+| E910 | Attribute not valid for this type | `'@layout(.C)' on an enum needs every case to be payload-less; 'Shape.Circle' has a payload` (variants: `'@layout(.Packed)' cannot be applied to an enum`, `... to a type with an unsized tail`, `'@nonExhaustive' has no effect: 'Mode' is not visible outside its module`) |
 | E911 | Non-`Copyable` field in a packed struct | `field 'name' of packed struct 'Header' has type 'String', which is not Copyable; packed fields are copied on every read` |
 | E912 | Address of a packed field needed | `cannot borrow 'h.length' in place: 'WireHeader' is packed, so the field may be misaligned; copy it first: 'var n = h.length'` |
+| E913 | Use of an unavailable item | `'subscript(key:inserting:)' is unavailable: needs 'mutating get' (0.20); use 'modify' instead` |
+| E305 (existing) | Match on a `@nonExhaustive` enum outside its module without a catch-all | the existing `non_exhaustive_match` message, plus the note `'HttpMethod' is '@nonExhaustive'; add a '_' arm, since cases may be added` |
 | E950 | `@derive` argument is not a protocol | `'Point' in '@derive' is not a protocol` (variant: `cannot find protocol 'Equtable'`) |
 | E951 | Protocol is not derivable | `'Iterator' cannot be derived; the derivable protocols are Equatable, Hashable, Comparable, Formattable and Defaultable` (variant for `Copyable`/`Cloneable`, §C1) |
 | E952 | Field does not conform | `cannot derive 'Hashable' for 'Point': field 'tag' has type 'Tag', which is not 'Hashable'` (enum: `payload 'radius' of case 'Circle'`; generic note: `derived bound: 'T: Hashable'`) |
 | E953 | Hand-written witness or duplicate conformance | `'Point' derives 'Equatable' but also implements 'isEqual(to:)'; remove one` (variant: `'Point' already declares 'Equatable'`) |
-| E954 | `@derive` on an unsupported declaration | `'@derive' on an extension needs a type declared in this package` (variants: protocol, type alias, unsized tail) |
+| E954 | `@derive` on an unsupported declaration | `'@derive' on an extension needs a type declared in this module` (variants: protocol, type alias, unsized tail) |
 | E957 | Enum `Defaultable` without exactly one `@default` case | `cannot derive 'Defaultable' for 'Mode': mark exactly one case '@default'` |
 | E958 | Missing parent conformance | `deriving 'Hashable' requires 'Point' to be 'Equatable'; add 'Equatable' to '@derive'` |
 
@@ -995,3 +1098,4 @@ attributes. Recommendation: make it an error and keep the code.
 | 17 | Derives on `not Copyable` types | Supported; shims only borrow (§C4, §C8) |
 | 18 | Unsized-tail types | Cannot derive in 0.18 (§C7) |
 | 19 | How derivable protocols are defined (was D-Q4) | Built-in derivers in the compiler for 0.18, chosen by John; code-defined derivations wait for 2.0 metaprogramming, with `@derive` designed to stay the same (§C4, §C6) |
+| 20 | More built-in attributes | `@unavailable`, `@doc(.Hidden)` and `@nonExhaustive` added (§B6–B8), chosen by John; `@cold`, `@mustUse` and `@allow` declined |
