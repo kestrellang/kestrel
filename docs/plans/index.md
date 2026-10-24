@@ -12,6 +12,7 @@
 |---------|--------|-------|
 | [Array Literals](array-literals/) | Shipped | array-literals |
 | [Array Matchable](array-matchable/) | Shipped | array-matchable-design, array-matchable-plan |
+| [Attributes and Derives](attributes/) | Not shipped (design for 0.18) | attributes-design |
 | [Boolean Guard](boolean-guard.md) | Shipped | boolean-guard |
 | [Char Literals](char-literals/) | Shipped | char-literals-design, char-literals-plan |
 | [Closures](closures/) | Shipped | closure-plan, trailing-closures-plan, thunk-generation-plan |
