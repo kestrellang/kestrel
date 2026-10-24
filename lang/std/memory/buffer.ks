@@ -37,6 +37,7 @@ import std.ffi.(memcpy, memmove, memset)
 /// Marked `not Copyable` so an accidental `let b2 = b1` is rejected at
 /// compile time; use a higher-level COW wrapper (e.g. via `RcBox`) for
 /// shared semantics.
+@memoryonlydrop
 public struct Buffer[T, A]: not Copyable where A: Allocator {
     private var ptr: Pointer[T]
     private var cap: Int64

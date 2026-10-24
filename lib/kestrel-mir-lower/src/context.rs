@@ -39,6 +39,18 @@ impl<'w> LowerCtx<'w> {
         name
     }
 
+    /// Record a nominal type marked `@memoryonlydrop` (its deinit only frees
+    /// memory). Called from struct and enum lowering.
+    pub fn record_memory_only_drop(&mut self, entity: Entity) {
+        let marked = self
+            .world
+            .get::<kestrel_ast_builder::Attributes>(entity)
+            .is_some_and(|attrs| attrs.0.iter().any(|a| a.name == "memoryonlydrop"));
+        if marked {
+            self.module.memory_only_drop.insert(entity);
+        }
+    }
+
     /// Intern a MirTy into the arena, returning its TyId.
     pub fn intern(&mut self, ty: MirTy) -> TyId {
         self.module.ty_arena.intern(ty)

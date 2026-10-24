@@ -43,6 +43,8 @@ pub struct MonoModule {
     pub statics: IndexMap<Entity, crate::item::static_def::StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// Carried over from [`crate::MirModule::memory_only_drop`].
+    pub memory_only_drop: indexmap::IndexSet<Entity>,
 }
 
 impl MonoModule {
@@ -54,6 +56,7 @@ impl MonoModule {
             statics: IndexMap::new(),
             ty_arena,
             entity_names: IndexMap::new(),
+            memory_only_drop: indexmap::IndexSet::new(),
         }
     }
 

@@ -192,6 +192,7 @@ public struct DictionaryIterator[K, V]: Iterator {
 /// Owns the bucket buffer; `deinit` deallocates it. Used as the value
 /// inside an `RcBox`, providing the refcount that powers COW on the
 /// dictionary level.
+@memoryonlydrop
 struct DictionaryStorage[K, V, H]: Cloneable where K: Hashable, H: Hasher, H: Defaultable {
     /// Heap pointer to the bucket array; null when `cap == 0`.
     var buckets: Pointer[Bucket[K, V]]

@@ -18,7 +18,7 @@ pub mod ty_query;
 pub mod value;
 pub mod verify;
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use kestrel_hecs::Entity;
 
 pub use body::OssaBody;
@@ -69,6 +69,10 @@ pub struct MirModule {
     pub statics: IndexMap<Entity, StaticDef>,
     pub ty_arena: TyArena,
     pub entity_names: IndexMap<Entity, String>,
+    /// Nominal types marked `@memoryonlydrop`: their `deinit` only releases
+    /// memory, so running it earlier is unobservable. Read by the copy
+    /// lifetime passes; the marked type's type arguments must qualify too.
+    pub memory_only_drop: IndexSet<Entity>,
 }
 
 impl MirModule {
@@ -83,6 +87,7 @@ impl MirModule {
             statics: IndexMap::new(),
             ty_arena: TyArena::new(),
             entity_names: IndexMap::new(),
+            memory_only_drop: IndexSet::new(),
         }
     }
 

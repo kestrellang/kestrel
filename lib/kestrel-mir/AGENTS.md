@@ -29,8 +29,9 @@ stages, in order:
   `Layout` `Verify` — run by `run_pipeline_until` here.
 - post-mono (→ `mono::MonoModule`): `Mono` `CopyProp` `Expand` — orchestrated by
   `Compiler::monomorphize_mir_until` in **kestrel-compiler** (the post-mono
-  passes `eliminate_redundant_copies` + `mono::expand` + `verify_mono` live
-  there, not here).
+  passes `eliminate_redundant_copies` + `passes::copy_lifetime::run` +
+  `mono::expand` + `verify_mono` live there, not here). `copy_lifetime` runs
+  inside the `CopyProp` stage.
 
 `run_pipeline` is now a thin wrapper = `run_pipeline_until(.., Stage::Verify)`;
 keep it that way so codegen/`lower_to_mir` callers are unaffected.
@@ -114,3 +115,32 @@ re-implement the gating fold in a pass; tuple folds inline the canonical rule
 only to keep their native `Clone` payload. Any deliberate divergence must
 carry a `TODO(copy-drift #n)` comment at its classifier arm — never converge
 or introduce one silently.
+
+## Copy lifetimes: only copies move, and only memory-only drops (`passes/copy_lifetime/`)
+
+`copy_lifetime` stops implicit copies from keeping COW storage shared (a copy
+alive across a mutation of its original makes `append` deep-copy the buffer).
+Three sub-passes: copy → move at a call's last use (`owned_params`), drop each
+copy at its last read (`drop_at_last_use`), and copy → borrow for read-only
+copies of a `var` (`borrow_copies`). Invariants every change here must keep:
+
+- **Originals never change drop position.** Only values produced by an
+  implicit `CopyValue` are shortened or removed. Explicit `.clone()` calls are
+  ordinary calls and are never touched. RAII guards, files and locks keep
+  their scope-end drops.
+- **Early drops need a memory-only type** (`TypeFacts::memory_only`): every
+  reachable `deinit` belongs to a type marked `@memoryonlydrop`, and a marked
+  type's type arguments qualify too (`RcBox[File]` frees a `File`). Copyable
+  types have no deinit by language rule. Mark a stdlib type `@memoryonlydrop`
+  only if its deinit does nothing but release memory (and drop its contents) —
+  never for types owning fds, sockets, locks or other external resources.
+- **Never shorten a copy a raw pointer or view was derived from**
+  (`TypeFacts::holds_raw_pointer`): a struct holding an unmanaged `Pointer`
+  (e.g. a string view) could dangle. Writes through raw pointers created
+  elsewhere are *not* tracked — that is `unsafe` code's responsibility.
+- **Rewrites that delete instructions rescan** (one rewrite per scan) instead of
+  batching index-based edits; batched sites in one block hold stale indices.
+- `owned_params` variants are keyed by (original function, sorted owned
+  params) so one call can move several args; a call to a variant can be
+  specialized further.
+

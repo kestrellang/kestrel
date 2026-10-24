@@ -1,4 +1,5 @@
 pub mod clone_shim;
+pub mod copy_lifetime;
 pub mod copy_check;
 pub mod copy_propagation;
 pub mod drop_fix;

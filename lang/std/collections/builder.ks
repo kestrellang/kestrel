@@ -34,6 +34,7 @@ import std.iter.(Iterable)
 /// construction. `build()` donates the buffer to an `Array[T]` and
 /// leaves the builder empty. `deinit` frees the buffer if `build()`
 /// was never called.
+@memoryonlydrop
 public struct ArrayBuilder[T] {
     fileprivate var ptr: Pointer[T]
     fileprivate var len: Int64

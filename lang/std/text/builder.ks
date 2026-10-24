@@ -32,6 +32,7 @@ import std.text.(Char, encodeUtf8, String, StringSlice, StringStorage, Str, _tex
 /// Owns its buffer directly. `build()` donates the buffer to a
 /// `String`; the builder is left empty. `deinit` frees the buffer
 /// if `build()` was never called.
+@memoryonlydrop
 public struct StringBuilder: Cloneable {
     private var ptr: Pointer[UInt8]
     private var len: Int64
