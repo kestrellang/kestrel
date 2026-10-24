@@ -5272,66 +5272,71 @@ pub(crate) fn apply_operator_shape_projections(ctx: &mut InferCtx<'_>) -> bool {
 
     let mut progress = false;
     for (recv, res, name, args) in candidates {
-        // A previous projection in this batch may have pinned either side.
-        if !matches!(
-            ctx.slot(ctx.resolve(recv)),
-            TySlot::Unresolved { literal: Some(_) }
-        ) {
-            continue;
-        }
-        let lit = match ctx.slot(ctx.resolve(recv)) {
-            TySlot::Unresolved { literal: Some(l) } => *l,
-            _ => unreachable!(),
-        };
-        let feature = match lit {
-            LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
-            LiteralKind::Float => Builtin::DefaultFloatLiteralType,
-            _ => continue,
-        };
-        let Some(default_entity) = ctx.resolver.builtin(feature) else {
-            continue;
-        };
-        let default_kind = TyKind::Struct {
-            entity: default_entity,
-            args: vec![],
-        };
-        let Ok(resolution) = ctx.resolver.resolve_member(&default_kind, &name, &args) else {
-            continue;
-        };
-        // Project only the generic-wrapper shape: a nominal head other than
-        // the default type, whose args mention the default type. Anything
-        // else (Self-typed returns, params, aliases, fn types) declines —
-        // this stage must never guess where unanimity across the numeric
-        // family isn't structurally plausible.
-        if !projectable_wrapper_return(&resolution.return_type, default_entity) {
-            continue;
-        }
-        let res_was_unresolved = matches!(
-            ctx.slot(ctx.resolve(res)),
-            TySlot::Unresolved { literal: None }
-        );
-        let subs = [(default_entity, ctx.resolve(recv))];
-        let projected = lower_hir_ty_sub(ctx, &resolution.return_type, None, res, &subs);
-        let ok = unify::unify(ctx, res, projected).is_ok();
-        // Progress only when the projection ADDED information: the result
-        // gained its shape, or the receiver literal got pinned through an
-        // already-shaped result. A projection that merely re-unifies fresh
-        // vars (nothing downstream ever pins the element) must NOT count,
-        // or the relax loop re-fires it forever and never defaults.
-        let recv_pinned = !matches!(
-            ctx.slot(ctx.resolve(recv)),
-            TySlot::Unresolved { literal: Some(_) }
-        );
-        kestrel_debug::ktrace!(
-            "op-shape",
-            "project {name}: ret={:?} ok={ok} res_new={res_was_unresolved} recv_pinned={recv_pinned}",
-            resolution.return_type
-        );
-        if ok && (res_was_unresolved || recv_pinned) {
-            progress = true;
-        }
+        progress |= project_operator_shape(ctx, recv, res, &name, &args);
     }
     progress
+}
+
+/// The shape projection for one operator (see
+/// [`apply_operator_shape_projections`]): give `res` the default type's
+/// generic-wrapper return shape with the literal `recv` in the element
+/// position. Called by the walker at the operator (bidi P5) and by the
+/// end-of-body pass for operators it could not decide then. Returns true
+/// when it added information.
+pub(crate) fn project_operator_shape(
+    ctx: &mut InferCtx<'_>,
+    recv: TyVar,
+    res: TyVar,
+    name: &str,
+    args: &[CallArg],
+) -> bool {
+    let TySlot::Unresolved { literal: Some(lit) } = ctx.slot(ctx.resolve(recv)) else {
+        return false;
+    };
+    let feature = match lit {
+        LiteralKind::Integer => Builtin::DefaultIntegerLiteralType,
+        LiteralKind::Float => Builtin::DefaultFloatLiteralType,
+        _ => return false,
+    };
+    let Some(default_entity) = ctx.resolver.builtin(feature) else {
+        return false;
+    };
+    let default_kind = TyKind::Struct {
+        entity: default_entity,
+        args: vec![],
+    };
+    let Ok(resolution) = ctx.resolver.resolve_member(&default_kind, name, args) else {
+        return false;
+    };
+    // Project only the generic-wrapper shape: a nominal head other than the
+    // default type, whose args mention the default type. Anything else
+    // (Self-typed returns, params, aliases, fn types) declines — this stage
+    // must never guess where unanimity across the numeric family isn't
+    // structurally plausible.
+    if !projectable_wrapper_return(&resolution.return_type, default_entity) {
+        return false;
+    }
+    let res_was_unresolved = matches!(
+        ctx.slot(ctx.resolve(res)),
+        TySlot::Unresolved { literal: None }
+    );
+    let subs = [(default_entity, ctx.resolve(recv))];
+    let projected = lower_hir_ty_sub(ctx, &resolution.return_type, None, res, &subs);
+    let ok = unify::unify(ctx, res, projected).is_ok();
+    // Progress only when the projection ADDED information: the result gained
+    // its shape, or the receiver literal got pinned through an already-shaped
+    // result. A projection that merely re-unifies fresh vars must NOT count,
+    // or the end-of-body loop re-fires it forever and never defaults.
+    let recv_pinned = !matches!(
+        ctx.slot(ctx.resolve(recv)),
+        TySlot::Unresolved { literal: Some(_) }
+    );
+    kestrel_debug::ktrace!(
+        "op-shape",
+        "project {name}: ret={:?} ok={ok} res_new={res_was_unresolved} recv_pinned={recv_pinned}",
+        resolution.return_type
+    );
+    ok && (res_was_unresolved || recv_pinned)
 }
 
 /// Shared body of the context-driven pass in `apply_literal_defaults`: a

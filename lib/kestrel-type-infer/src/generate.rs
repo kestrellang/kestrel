@@ -532,6 +532,13 @@ fn gen_expr(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirExprId) -> TyVar {
                 unify_literal_operands(ctx, *protocol, recv_tv, &arg_tvs);
                 type_literal_operator(ctx, *protocol, method, recv_tv, &arg_tvs, expect.as_ref());
             }
+            // An operator over a still-open literal gets its result's shape
+            // now (`100..=200` → `ClosedRange[ℓ]`), so a later bound or
+            // annotation on the result can pin the literal (bidi P5: the
+            // walker, not the end of the body).
+            if *from_operator && open_literal(ctx, recv_tv).is_some() {
+                crate::solver::project_operator_shape(ctx, recv_tv, result_tv, method_str, &arg_tvs);
+            }
             // Resolve method on the protocol
             ctx.member(
                 recv_tv,
@@ -1222,6 +1229,17 @@ fn gen_stmt(ctx: &mut InferCtx<'_>, hir: &HirBody, id: HirStmtId) {
                     // the new local — it is defined after the init lowers.)
                     ctx.local_types.insert(*local, val_tv);
                 } else {
+                    // An unannotated binding is a value context (bidi §9: "an
+                    // unannotated `let` decays"): a ref initializer whose type
+                    // is already known gives the binding its pointee here,
+                    // instead of the end-of-body ref-decay default.
+                    if ty.is_none()
+                        && let TySlot::Resolved(TyKind::Ref { pointee, .. }) =
+                            ctx.slot(ctx.resolve(val_tv))
+                    {
+                        let pointee = *pointee;
+                        let _ = unify::unify(ctx, local_tv, pointee);
+                    }
                     // Value flows to the binding (allows promotion)
                     ctx.coerce_because(val_tv, local_tv, *val, span.clone(), reason);
                 }
