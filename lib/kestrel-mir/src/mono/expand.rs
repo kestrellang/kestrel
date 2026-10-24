@@ -850,7 +850,7 @@ fn expand_function(
                 // path `lang.drop_in_place` lowers to — so dropping array
                 // elements (e.g. the `(String, String)` pairs in `Headers`)
                 // flows through here.
-                InstKind::DestroyAddr { address, ty } => {
+                InstKind::DestroyAddr { address, ty, .. } => {
                     let address = remap_value(*address, &value_remap);
                     let ty = *ty;
                     let span = inst.span.clone();

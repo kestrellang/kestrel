@@ -302,7 +302,7 @@ impl OssaBuilder {
     }
 
     pub fn emit_destroy_addr(&mut self, address: ValueId, ty: TyId) {
-        self.emit(InstKind::DestroyAddr { address, ty });
+        self.emit(InstKind::DestroyAddr { address, ty, user_deinit: false });
     }
 
     pub fn emit_discriminant(&mut self, operand: ValueId) -> ValueId {

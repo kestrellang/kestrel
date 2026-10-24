@@ -1420,6 +1420,7 @@ pub(crate) fn try_intrinsic(
             bctx.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
                 address: arg,
                 ty: ty_arg,
+                user_deinit: false,
             });
             return Some(bctx.emit_literal(Immediate::unit()));
         },

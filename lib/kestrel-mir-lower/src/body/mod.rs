@@ -1488,7 +1488,11 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
     }
 
     pub fn emit_destroy_addr(&mut self, address: ValueId, ty: TyId) {
-        self.push_inst(InstKind::DestroyAddr { address, ty });
+        self.push_inst(InstKind::DestroyAddr {
+            address,
+            ty,
+            user_deinit: false,
+        });
     }
 
     /// Emit `if load(flag) { destroy_addr(slot) }` — Swift's drop-flag-guarded
@@ -1716,6 +1720,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                         self.push_inst(InstKind::DestroyAddr {
                             address: *addr,
                             ty: *ty,
+                            user_deinit: false,
                         });
                     },
                     _ => {},
@@ -1787,6 +1792,7 @@ impl<'a, 'w> OssaBodyCtx<'a, 'w> {
                     self.push_inst(InstKind::DestroyAddr {
                         address: *addr,
                         ty: *ty,
+                        user_deinit: false,
                     });
                 },
                 _ => {},

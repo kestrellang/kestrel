@@ -124,6 +124,10 @@ pub enum InstKind {
     DestroyAddr {
         address: ValueId,
         ty: TyId,
+        /// A source-level `deinit x;` (vs. compiler cleanup at scope exit).
+        /// Only these are checked against live refs (E498): a scope-exit
+        /// destroy under a live ref is the escape E494 already reports.
+        user_deinit: bool,
     },
 
     // -- Enum discriminant --

@@ -1302,6 +1302,39 @@ impl<'a> FlowVerifier<'a> {
         }
     }
 
+    /// E498 for `deinit x` (a `DestroyAddr`) while a borrow into `x`'s
+    /// storage is live — `let rc = &c.name; deinit c;`. Destroying the owner
+    /// is a consume with no destination, so it gets the consume rule.
+    /// Reassignment and mutating access are NOT checked: refs are may-alias
+    /// with no exclusivity rule (references stage 2 requirements).
+    fn check_destroy_while_ref_live(&mut self, addr: ValueId, inst: Option<u32>) {
+        let Some(storage) = self.storage_of(addr) else {
+            return;
+        };
+        let blocking = self.borrows.iter().find_map(|(&b, info)| {
+            let mut cur = info.source;
+            for _ in 0..=self.borrows.len() {
+                if self.storage_of(cur) == Some(storage) {
+                    return Some(b);
+                }
+                cur = self.borrows.get(&cur)?.source;
+            }
+            None
+        });
+        if let Some(b) = blocking {
+            self.err_consume_while_ref_live(addr, inst, b);
+        }
+    }
+
+    /// The storage (`Uninit` root) an address names, seeing through field
+    /// projections, so `&c.name` and `c` share one storage.
+    fn storage_of(&self, v: ValueId) -> Option<ValueId> {
+        if let Some(&(root, _)) = self.aliases.field_of.get(&v) {
+            return Some(root);
+        }
+        self.aliases.resolve(v)
+    }
+
     /// Find a live reference (@guaranteed call result) whose borrow-source
     /// chain reaches `v`. Walks `borrows` from the ref's immediate source;
     /// the chain is acyclic (each borrow's source precedes it), but the walk
@@ -1723,8 +1756,15 @@ impl<'a> FlowVerifier<'a> {
                 self.try_consume(*value, idx);
                 self.addr_store_assign(*address, idx);
             },
-            InstKind::DestroyAddr { address, .. } => {
+            InstKind::DestroyAddr {
+                address,
+                user_deinit,
+                ..
+            } => {
                 self.addr_require_init(*address, idx);
+                if *user_deinit {
+                    self.check_destroy_while_ref_live(*address, idx);
+                }
                 self.addr_set_uninit(*address, idx);
             },
 

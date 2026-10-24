@@ -89,7 +89,11 @@ impl OssaBodyCtx<'_, '_> {
                 if self.is_var_local(hir_local) {
                     let addr = self.map_local(*hir_local);
                     let ty = self.resolve_local_type(*hir_local);
-                    self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr { address: addr, ty });
+                    self.push_inst(kestrel_mir::inst::InstKind::DestroyAddr {
+                        address: addr,
+                        ty,
+                        user_deinit: true,
+                    });
                     // The slot no longer owns a value: record it (state +
                     // in-memory flag) so scope exit doesn't destroy again.
                     self.set_var_init(*hir_local, super::VarInit::DefUninit);

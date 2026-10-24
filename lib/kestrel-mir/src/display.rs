@@ -463,7 +463,7 @@ fn fmt_inst(
             )
             .unwrap();
         },
-        InstKind::DestroyAddr { address, ty } => {
+        InstKind::DestroyAddr { address, ty, .. } => {
             write!(
                 out,
                 "destroy_addr {}, {}",
