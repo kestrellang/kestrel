@@ -7,7 +7,7 @@ use kestrel_hecs::{Entity, QueryContext, QueryFn, World};
 use kestrel_mir::{FieldIdx, MirModule, MirTy, TyId, VariantIdx, WitnessMethodKey};
 use kestrel_name_res::ExtensionTargetEntity;
 
-use crate::name::qualified_name;
+use kestrel_ast_builder::qualified_name;
 
 /// Central state maintained during lowering.
 pub struct LowerCtx<'w> {

@@ -305,7 +305,7 @@ retain/release shims are built (`synthesize_env_shims`,
 calling-convention difference, such as a by-value `Copyable` self.
 
 **Composition.** `rawany P and Q` gets a table with an empty slot section
-and parents `(B, T, P)` and `(B, T, Q)`, in canonical (sorted) order. Its methods
+and parents `(B, T, P)` and `(B, T, Q)`, in canonical order (by qualified name). Its methods
 dispatch through those parent tables. Upcasting to `any P` is just loading a
 parent pointer. Composition is therefore an anonymous protocol with parents
 `P` and `Q`.

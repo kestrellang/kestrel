@@ -179,7 +179,7 @@ the change and its reason:
   arrive in M2 with the protocols they name.
 - **HIR.** `HirTy::RawExistential { bounds, bindings: Vec<HirAssocBinding>,
   span }`; `any[B] P` lowers to `Struct { B, [RawExistential] }` in
-  `hir-lower/src/ty.rs::lower_any_type`, bounds sorted by entity. E404 for
+  `hir-lower/src/ty.rs::lower_any_type`, bounds sorted by qualified name. E404 for
   an applied or non-name box, E141 when there is no default box, E154 for
   a non-protocol bound, **E150 for an unknown binding (moved up from M3:
   the binding is resolved here).**
@@ -354,7 +354,7 @@ new call kind:
 - **Tables** (`kestrel-mir/src/item/vtable.rs`). Header: drop thunk (also
   the type's identity for `as?`), size, align, clone (filled only when the
   bounds refine `Cloneable`). A single-protocol table then holds one table
-  pointer per declared ancestor (canonical entity order), then its own
+  pointer per declared ancestor (by qualified name), then its own
   dispatchable requirements in `ExistentialLayout` order. A composition
   table holds the header and one table pointer per bound. Templates are
   built in mir-lower, generic over the payload; a `VTable { template,

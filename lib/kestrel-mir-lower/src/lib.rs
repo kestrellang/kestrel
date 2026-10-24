@@ -2,7 +2,6 @@ pub(crate) mod body;
 mod context;
 mod existential;
 mod items;
-mod name;
 pub mod ty;
 mod validate;
 

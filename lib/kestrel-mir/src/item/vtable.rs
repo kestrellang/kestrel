@@ -17,7 +17,7 @@
 //! | 3 | clone thunk, or null when the existential isn't `Cloneable` |
 //!
 //! A single-protocol table then holds a pointer to each declared ancestor's
-//! table (canonical order), then the protocol's own dispatchable
+//! table (by qualified name), then the protocol's own dispatchable
 //! requirements in [`kestrel_semantics::ExistentialLayout`] order. A
 //! composition table holds a pointer to each bound's table instead.
 

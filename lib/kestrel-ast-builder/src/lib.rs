@@ -11,6 +11,7 @@ pub mod build;
 pub mod builders;
 pub mod components;
 pub mod lang_module;
+pub mod qualified_name;
 pub mod syntax;
 
 // Re-export the type syntax declarations are built from.
@@ -19,3 +20,4 @@ pub use kestrel_ast::{AstType, FnTypeKind, PathSegment};
 pub use build::build_declarations;
 pub use components::*;
 pub use lang_module::seed_lang_module;
+pub use qualified_name::{EntityTree, qualified_name};

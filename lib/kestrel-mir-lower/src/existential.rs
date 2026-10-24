@@ -44,14 +44,15 @@ pub struct ExistentialState {
 }
 
 /// The declared ancestors of `protocol` (transitively, through `: Parent`
-/// edges only), in canonical entity order. A single-protocol table holds one
-/// pointer per ancestor, in this order, right after the header.
+/// edges only), ordered by qualified name. A single-protocol table holds one
+/// pointer per ancestor, in this order, right after the header. A name, not
+/// the entity index, so the layout doesn't depend on entity numbering.
 pub(crate) fn ancestors(ctx: &LowerCtx, protocol: Entity) -> Vec<Entity> {
     let mut out: Vec<Entity> = kestrel_semantics::bound_closure(&ctx.query, &[protocol], ctx.root)
         .into_iter()
         .filter(|&p| p != protocol)
         .collect();
-    out.sort_by_key(|p| p.index());
+    out.sort_by_cached_key(|&p| kestrel_ast_builder::qualified_name(ctx.world, p));
     out
 }
 

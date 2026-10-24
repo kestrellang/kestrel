@@ -24,7 +24,11 @@ impl OssaBodyCtx<'_, '_> {
     ) -> Option<ValueId> {
         let bounds = bounds_of(self.ctx, receiver_ty);
         let (hops, slot) = dispatch_path(self.ctx, &bounds, requirement)?;
-        kestrel_debug::ktrace!("vtable", "dynamic call slot {slot} via {hops:?}");
+        kestrel_debug::ktrace!(
+            "vtable",
+            "dynamic call {} slot {slot} via {hops:?}",
+            kestrel_ast_builder::qualified_name(self.ctx.world, requirement)
+        );
         let raw = self.raw_ptr_ty();
         let recv = args.first()?.value;
         let data = self.emit_op1(Op::FatWord(0), recv, raw);

@@ -334,15 +334,17 @@ fn lower_any_type(
         };
         lowered.push((protocol, ty, bindings));
     }
-    // Canonical order: `any P and Q` is the same type as `any Q and P`.
-    lowered.sort_by_key(|(entity, ..)| entity.index());
+    // Canonical order: `any P and Q` is the same type as `any Q and P`. By
+    // qualified name, not entity index: the order is the composition table's
+    // layout, which must not depend on how entities happen to be numbered.
+    lowered.sort_by_cached_key(|(entity, ..)| kestrel_ast_builder::qualified_name(ctx, *entity));
     let mut bindings: Vec<HirAssocBinding> = Vec::new();
     let mut hir_bounds = Vec::with_capacity(lowered.len());
     for (_, ty, pins) in lowered {
         hir_bounds.push(ty);
         bindings.extend(pins);
     }
-    bindings.sort_by_key(|b| b.assoc.index());
+    bindings.sort_by_cached_key(|b| kestrel_ast_builder::qualified_name(ctx, b.assoc));
     let raw = HirTy::RawExistential {
         bounds: hir_bounds,
         bindings,
