@@ -99,7 +99,7 @@ scope for `_`, and every closure literal closes all scopes.
 | Hole (`_` is the whole argument) | the **nearest enclosing call**: callee, receiver and every other argument | `obj.m(_, g())` | `{ p in obj.m(p, g()) }` |
 | `_` inside a larger argument (`_.x`, `_ * 2`, `-_`, `_?.x`, `_(…)`) | the **whole nearest enclosing argument value** (not its label), operators included | `filter(_.age >= 18)` | `filter({ p in p.age >= 18 })` |
 | Several `_` in one argument | still the whole argument, **one** parameter | `map(_.first + " " + _.last)` | `map({ p in p.first + " " + p.last })` |
-| Argument placeholder in a nested call | that inner call's argument | `xs.map(f(_.x))` | `xs.map(f({ p in p.x }))` (see Q2) |
+| Argument placeholder in a nested call | that inner call's argument | `xs.map(f(_.x))` | `xs.map(f({ p in p.x }))` (see Decisions) |
 | Hole in a nested call | that inner call | `f(g(_))` | `f({ p in g(p) })` |
 
 What **does not** reset the scope (so the closure covers it): operators,
@@ -283,21 +283,20 @@ About 3–5 days: parser with `arg_depth` (1 day), HIR hole and member lowering
 - **Q1.** In `f(g(_))`, should a hole inside a nested call be an error
   ("ambiguous placeholder") instead of binding to `g`? This design binds to the
   nearest call, like Scala.
-- **Q2. Argument placeholders inside a nested call.** `xs.map(f(_.x))` can
-  mean either of these:
-
-  | Rule | `xs.map(f(_.x))` | `xs.map(_.items.filter(_.ok))` | Needs types? |
-  |---|---|---|---|
-  | **Nearest argument** (this design) | `xs.map(f({ p in p.x }))` | `xs.map({ p in p.items.filter({ q in q.ok }) })` ✓ | no |
-  | **Outermost argument** | `xs.map({ p in f(p.x) })` ✓ | `xs.map({ p in p.items.filter(p.ok) })` ✗ (both `_` are `p`) | no |
-  | **Nearest argument that expects a function** | `xs.map({ p in f(p.x) })` ✓ | `…filter({ q in q.ok })` ✓ | yes: lowering would need inference |
-
-  Outermost breaks nested placeholders, which are common
-  (`groups.map(_.members.filter(_.active))`). The type-directed rule reads
-  best but can't be decided in HIR lowering, which runs before inference,
-  and it makes the meaning of `_` change when a signature changes.
-  **Recommendation:** nearest argument. When the inner parameter isn't a
-  function type, add a note to the error: "`_` binds to the innermost
-  argument; write `{ f(it.x) }`".
 - **Q3. Pipe interaction.** See the pipe design, Q2: inside a pipe's right
   side, `_` is the piped value, not a placeholder.
+
+## Decisions
+
+- **Every `_` in one argument is the same parameter** (2026-10-25). `_ + _` is
+  `{ x in x + x }`. Multi-parameter sections aren't supported.
+- **Argument placeholders bind to the nearest argument** (2026-10-25).
+  `xs.map(f(_.x))` is `xs.map(f({ p in p.x }))`. When the inner parameter isn't
+  a function type, the type error carries the note "`_` binds to the innermost
+  argument; write `{ f(it.x) }`". Rejected: the outermost argument (breaks
+  nested placeholders like `groups.map(_.members.filter(_.active))`), and the
+  nearest argument that expects a function (needs types during HIR lowering,
+  and meaning shifts when signatures change).
+- **`_` passes through string interpolation, `if`/`match`, literals and all
+  operators** (2026-10-25). Only argument lists and closure literals are
+  boundaries.
