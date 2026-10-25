@@ -242,7 +242,7 @@ should exempt `Optional[()]`.
 - **`??`:** `a?.b ?? d` works as expected.
 - **`try`:** `try a?.b()` where `b` throws gives `try` an
   `Optional[Result[…]]`, and `try` unwraps the Optional. That's legal but
-  surprising, so it's documented, with a lint as a follow-up.
+  surprising, so it's documented. There's no lint in 0.19.
 - **`!`:** `a?.b!` force-unwraps `b` inside the chain. `(a?.b)!` unwraps the
   result.
 - **Placeholders:** `xs.map(_?.name)` is a placeholder closure whose body is
@@ -358,9 +358,11 @@ mutate". Only the first half is cheap, so it's worth prototyping
 - **A new `?.` token.** Equivalent, but it interacts with `as?` and with `T?`
   followed by `.`.
 
-## Open questions
+## Implementation notes to confirm in the prototype
 
-- **Q2.** Should the `try a?.b()` interaction (§6) get a lint in 0.19?
+These have a chosen answer. A prototype must confirm it holds.
+
+
 - **Q3. The binder's type before the mode is known.** §2 types `$o` as
   `&W` provisionally and may switch the mode to `chainMutate` later. If
   `unify` distinguishes `&W` from `&mutating W`, the switch invalidates
@@ -388,3 +390,5 @@ mutate". Only the first half is cheap, so it's worth prototyping
 
 - **`Result` conforms to `OptionalChain`** (2026-10-25). `r?.x` chains on the
   `Ok` value and gives `Optional`, dropping the error.
+- **No lint for `try a?.b()` in 0.19** (2026-10-25). The interaction in §6 is
+  documented only.

@@ -85,8 +85,8 @@ let r = xs
 
 | `rhs` is | Lowers to |
 |---|---|
-| A call with exactly one bare `_` argument: `f(a, _, b)` | `f(a, lhs, b)` (no closure) |
-| A call with two or more bare `_`: `f(_, _)` | **error E156** |
+| A call with a `_` anywhere in its **top-level** arguments: `f(a, _)`, `f(_.name)`, `f(_ + 1)` | every such `_` is `lhs`: `f(a, lhs)`, `f(lhs.name)`, `f(lhs + 1)`. No closure |
+| Same, with `_` used more than once: `f(_, _.id)` | `{ let $pipe = lhs; f($pipe, $pipe.id) }` for an rvalue `lhs`; a place `lhs` is substituted at each use (borrowed) |
 | Anything else: a path, member path, a call with no `_` (`makeAdder(1)`), closure literal, parenthesized expression, `OverloadSet` | `Call { callee: rhs, args: [lhs] }`: `rhs` is evaluated, then called with `lhs` |
 
 The result is wrapped in `HirExpr::Sugar { kind: SugarKind::Pipe }`, so
@@ -94,8 +94,11 @@ diagnostics anchor on the `|>` token and inner errors don't cascade.
 
 The call-with-slot case reuses the placeholder helper
 (`lower_call_with_holes`, see the placeholder design) with a fill that returns
-the lowered `lhs` instead of a fresh closure parameter. That gives every call
-form (method, static, initializer, subscript) for free.
+the lowered `lhs` instead of a fresh closure parameter. The fill applies to
+holes and to `_` inside top-level arguments alike. That gives every call form
+(method, static, initializer, subscript) for free. **Nested** argument lists
+keep the ordinary placeholder meaning: in `x |> f(g(_.y))`, `_.y` is a closure
+passed to `g`.
 
 ### 2. Evaluation order and ownership
 
@@ -117,10 +120,12 @@ order and only changes ownership for rvalues, which are owned anyway:
 | Place (`buf`, `self.items`) | ✓ borrow preserved | ✗ moves the place |
 | Rvalue (`load()`) | order: after earlier args | order: first ✓; ownership: same (already owned) |
 
-**Recommendation:** substitute places directly, and bind rvalues to a `$pipe`
+**Decided:** substitute places directly, and bind rvalues to a `$pipe`
 temporary in a `Block` before the call. Both rules are local to HIR lowering
-(a place is `Local` / `Field` / `TupleIndex` chains of those). *Open question
-Q1.*
+(a place is `Local` / `Field` / `TupleIndex` chains of those, the same check
+as `is_place_syntax` in `kestrel-hir-lower/src/desugar.rs:26`). An rvalue used
+more than once through `$pipe` must be Copyable or Cloneable; otherwise the
+existing use-after-move error fires on the second use.
 
 ### 3. Types
 
@@ -163,7 +168,6 @@ Codes are proposals. Confirm they're still free when implementing.
 
 | Code | Where | Message |
 |---|---|---|
-| E156 | HIR lower | `` `\|>` target has more than one `_` `` |
 | — | type infer | Existing "not callable" / argument mismatch, anchored by the `Pipe` sugar on the `\|>`, with the "did you mean `f(_, a)`?" note when `rhs` is a call with no `_` (§3) |
 
 ## Edge cases
@@ -191,9 +195,12 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/pipe/`:
   labeled slot, method / static / initializer / subscript targets, closure
   literal target, precedence against `+`, `??`, `or`.
 - Execution: a non-Copyable place piped into a borrowing function is still
-  usable afterwards. Rvalue evaluation order (depends on Q1).
+  usable afterwards. An rvalue left side runs before the other arguments
+  (`x() |> f(a(), _)` calls `x()` first).
+- Execution: `x |> f(_.name)`, `x |> f(_ + 1)`, `x |> f(_, _.id)` (one
+  evaluation of an rvalue `x`), and `x |> f(g(_.y))` (nested stays a closure).
 - Execution: `x |> makeAdder(1)` (a call with no `_` is called with `x`).
-- Diagnostics: E156, the "did you mean `f(_, a)`?" note on `x |> f(a)`,
+- Diagnostics: the "did you mean `f(_, a)`?" note on `x |> f(a)`,
   labeled-first-param suggestion, non-callable rhs, `x |> f ?? d` precedence
   note.
 - Parser: a line starting with `|>` continues the expression.
@@ -203,23 +210,15 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/pipe/`:
 About 1–2 days once placeholder arguments are in: token and precedence (an
 hour), HIR lowering (half a day), tests and diagnostics (1 day).
 
-## Open questions
+## Decisions
 
-- **Q1.** Evaluation order for rvalue left sides: substitute (argument order)
-  or temporary (reading order)? This design recommends temporary for rvalues
-  and direct substitution for places.
-- **Q2. `_.member` on the right of `|>`.** Under the placeholder rules,
-  `x |> f(_.name)` makes `_.name` its own closure and then calls
-  `f({ p in p.name })(x)`. Most readers would expect `f(x.name)`.
-  **Recommendation:** inside the top-level argument list of a pipe's right
-  side, *every* `_` (a hole or one inside a larger argument, like `_.name` or `_ + 1`) is the piped value, Hack-style.
-  So `x |> f(_.name)` is `f(x.name)` and `x |> f(_, _.id)` is `f(x, x.id)`.
-  When `_` is used more than once, `x` is bound to a temporary first, which
-  needs `x` to be Copyable or a place (borrowed). Nested argument lists keep
-  the ordinary placeholder meaning: in `x |> f(g(_.y))`, `_.y` is a closure.
-  This replaces E156 (more than one `_`) with the temporary rule.
-- **Q3. Trailing closures on the right.** `xs |> map { it * 2 }` is a call
-  with no `_`, so by §1 it means `map({ … })(xs)`, not `xs.map { … }`.
-  **Recommendation:** keep the rule, which is consistent, and add a targeted
-  note when the callee is a method name that exists on the piped type: "did you
-  mean `xs.map { … }`?".
+- **Rvalue left sides are evaluated first** (2026-10-25). Places are
+  substituted directly, and rvalues go through a `$pipe` temporary (§2).
+- **Every `_` in the right-hand call's top-level arguments is the piped
+  value** (2026-10-25). `x |> f(_.name)` is `f(x.name)`, and `x |> f(_, _.id)`
+  is `f(x, x.id)`. Nested argument lists keep the placeholder meaning. This
+  removed the "more than one `_`" error.
+- **Trailing closures on the right keep the general rule** (per the design's
+  recommendation, not separately reviewed). `xs |> map { it * 2 }` is
+  `map({ … })(xs)`. A note suggests `xs.map { … }` when `map` is a method on the
+  piped type.

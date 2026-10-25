@@ -123,7 +123,7 @@ statement `_.f()`), and in patterns and types. The first is E811. Patterns and
 types keep their meaning.
 
 Inside the top-level arguments of a pipe's right-hand call, `_` is the piped
-value instead (pipe design, Q2).
+value instead (see the pipe design's Decisions).
 
 ### 1. Desugaring holes
 
