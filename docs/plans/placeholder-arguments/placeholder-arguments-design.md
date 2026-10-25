@@ -84,6 +84,35 @@ type. Labels stay on the inner call.
 
 ## Semantics
 
+### 0. Boundaries: what a `_` closes over
+
+The boundary is purely syntactic. Every `(` of an argument list opens a new
+scope for `_`, and every closure literal closes all scopes.
+
+| `_` form | Closes over | Example | Means |
+|---|---|---|---|
+| Hole (`_` is the whole argument) | the **nearest enclosing call**: callee, receiver and every other argument | `obj.m(_, g())` | `{ p in obj.m(p, g()) }` |
+| Chain head (`_.x`, `_?.x`, `_(…)`, `_!`) | the **whole nearest enclosing argument value** (not its label), operators included | `filter(_.age >= 18)` | `filter({ p in p.age >= 18 })` |
+| Chain head + more operators | still the whole argument | `map(_.first + " " + _.last)` | error: two heads in one argument (E159) |
+| Chain head in a nested call | that inner call's argument | `xs.map(f(_.x))` | `xs.map(f({ p in p.x }))` |
+| Hole in a nested call | that inner call | `f(g(_))` | `f({ p in g(p) })` |
+
+What **does not** reset the scope (so the closure covers it): operators,
+parentheses, `if` / `match` expressions, string interpolation, and array,
+dictionary or tuple literals inside the argument.
+`f("\(_.name)")` is `f({ p in "\(p.name)" })`, and `f([_.a, 1])` is
+`f({ p in [p.a, 1] })`.
+
+What **does** reset it: a closure literal, including trailing closures.
+`f({ _.x })` and `f { _.x }` are E811, and the fix is `it`.
+
+Where `_` is never a placeholder: outside any argument list (`let g = _.x`,
+statement `_.f()`), as a bare operand (`f(_ + 1)`), and in patterns and types.
+All of these are E811 except patterns and types, which keep their meaning.
+
+Inside the top-level arguments of a pipe's right-hand call, `_` is the piped
+value instead (pipe design, Q2).
+
 ### 1. Desugaring holes
 
 `f(a₁, …, aₙ)` where the arguments at positions `i₁ < … < iₖ` are holes
