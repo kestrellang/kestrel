@@ -767,20 +767,22 @@ mod tests {
         let shim = find_shim_by_name(&module, "__drop$MyType");
         let body = shim.body.as_ref().unwrap();
 
-        // Should have: BeginMutBorrow, Call(deinit), EndMutBorrow, DestructureStruct, DestroyValue, Literal
+        // Should have: Uninit/StoreInit slot, BeginMutBorrowAddr, Call(deinit),
+        // EndBorrow, Take, then the field drops. `deinit` mutates the slot so
+        // its field writes reach the drops.
         let has_borrow = body.blocks[0]
             .insts
             .iter()
-            .any(|i| matches!(&i.kind, InstKind::BeginMutBorrow { .. }));
+            .any(|i| matches!(&i.kind, InstKind::BeginMutBorrowAddr { .. }));
         let has_call = body.blocks[0].insts.iter()
             .any(|i| matches!(&i.kind, InstKind::Call { callee: Callee::Direct { func, .. }, .. } if *func == deinit_entity));
         let has_end_borrow = body.blocks[0]
             .insts
             .iter()
-            .any(|i| matches!(&i.kind, InstKind::EndMutBorrow { .. }));
-        assert!(has_borrow, "should have BeginMutBorrow");
+            .any(|i| matches!(&i.kind, InstKind::EndBorrow { .. }));
+        assert!(has_borrow, "should have BeginMutBorrowAddr");
         assert!(has_call, "should have deinit Call");
-        assert!(has_end_borrow, "should have EndMutBorrow");
+        assert!(has_end_borrow, "should have EndBorrow");
 
         verify_shim(&module, shim);
     }

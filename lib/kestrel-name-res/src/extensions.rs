@@ -222,6 +222,17 @@ fn collect_extensions(
     }
 }
 
+/// The lang item and standard type name a piece of type sugar denotes.
+pub fn sugar_builtin(ty: &kestrel_ast::AstType) -> Option<(kestrel_hir::Builtin, &'static str)> {
+    use kestrel_hir::Builtin;
+    Some(match ty {
+        kestrel_ast::AstType::Array(..) => (Builtin::ArrayTypeOperator, "Array"),
+        kestrel_ast::AstType::Optional(..) => (Builtin::OptionalTypeOperator, "Optional"),
+        kestrel_ast::AstType::Dictionary(..) => (Builtin::DictionaryTypeOperator, "Dictionary"),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,15 +353,4 @@ mod tests {
         });
         assert!(exts.is_empty());
     }
-}
-
-/// The lang item and standard type name a piece of type sugar denotes.
-pub fn sugar_builtin(ty: &kestrel_ast::AstType) -> Option<(kestrel_hir::Builtin, &'static str)> {
-    use kestrel_hir::Builtin;
-    Some(match ty {
-        kestrel_ast::AstType::Array(..) => (Builtin::ArrayTypeOperator, "Array"),
-        kestrel_ast::AstType::Optional(..) => (Builtin::OptionalTypeOperator, "Optional"),
-        kestrel_ast::AstType::Dictionary(..) => (Builtin::DictionaryTypeOperator, "Dictionary"),
-        _ => return None,
-    })
 }
