@@ -36,11 +36,14 @@
 | [Monomorphization Witness Fix](monomorphization-witness-fix-plan.md) | Shipped (unverified — believed resolved by later witness work) | monomorphization-witness-fix-plan |
 | [Null Coalescing](null-coalescing/) | Shipped | null-coalescing-design, null-coalescing-plan |
 | [Opaque Types (`some P`)](opaque-types/) | Shipped | design, implementation-spec |
+| [Optional Chaining (`a?.b`)](optional-chaining/) | Design (0.19) | optional-chaining-design |
 | [Operators](operators/) | Shipped | operator-protocols |
 | [Optional/Result Promotion](optional-result-promotion/) | Shipped | optional-result-promotion-design, optional-result-promotion-plan, optional-result-promotion-plan-v2 |
 | [Optional/Throwing Inits](optional-throwing-inits.md) | Shipped | optional-throwing-inits |
 | [Partial Ranges](partial-ranges.md) | Shipped | partial-ranges |
 | [Pattern Matching](pattern-matching/) | Shipped | pattern-matching-plan |
+| [Pipe Operator (`\|>`)](pipe-operator/) | Design (0.19) | pipe-operator-design |
+| [Placeholder Arguments (`f(_, 1)`)](placeholder-arguments/) | Design (0.19) | placeholder-arguments-design |
 | [Range Matchable](range-matchable/) | Shipped | range-matchable-design, range-matchable-plan |
 | [References (`&T`)](references/) | Shipped (2026-06; closures/capture stage still in progress) | README, stage0.5 → stage3 |
 | [Short Circuit (`and`/`or`)](short-circuit/) | Shipped | short-circuit-design, short-circuit-plan |
