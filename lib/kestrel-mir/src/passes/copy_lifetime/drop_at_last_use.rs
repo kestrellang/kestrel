@@ -12,6 +12,13 @@
 //!
 //! Copies of observable types never qualify (see [`TypeFacts::observable`]), and a copy
 //! that a raw pointer or view was derived from keeps its scope-end drop.
+//!
+//! **`let` slots.** A `let` lives at a stack slot (uniform binding lowering),
+//! so `let b = a` is `y = copy_value ..; store_init slot, y` and `b`'s drop is
+//! the slot's `destroy_addr` at scope exit. A slot that is initialized once
+//! with such a copy and afterwards only read (borrowed in place, directly or
+//! through field addresses) in its own block gets the same treatment: its
+//! `destroy_addr` moves to just after the last read. See [`shorten_let_slots`].
 
 use kestrel_debug::ktrace;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -29,7 +36,7 @@ pub(super) fn run(mono: &mut MonoModule, facts: &mut TypeFacts) -> usize {
     let mut funcs = std::mem::take(&mut mono.functions);
     for func in funcs.iter_mut() {
         let Some(body) = &mut func.body else { continue };
-        let n = shorten_in_function(mono, body, facts);
+        let n = shorten_in_function(mono, body, facts) + shorten_let_slots(mono, body, facts);
         if n > 0 {
             ktrace!(
                 "copy-lifetime",
@@ -339,4 +346,130 @@ fn scan_copy(
         destroy,
         forwards,
     })
+}
+
+/// Move the `destroy_addr` of each `let` slot holding an implicit copy to just
+/// after the slot's last read, within its block (see the module doc).
+///
+/// A slot qualifies when, in its defining block and nowhere else:
+/// - it is initialized by exactly one `store_init` whose value is a
+///   `copy_value` (an implicit copy; the original keeps its scope-end drop);
+/// - every other use of it, or of a field address projected from it, is a
+///   `begin_borrow_addr` (an in-place read), a further `field_addr`, a
+///   trivial `destroy_value` of the address, or its single `destroy_addr`;
+/// - no borrow derived from it yields a raw pointer or view (that could
+///   outlive the move), and no borrow or address leaves the block;
+/// - its type is not observable.
+fn shorten_let_slots(mono: &MonoModule, body: &mut OssaBody, facts: &mut TypeFacts) -> usize {
+    let mut moved = 0;
+    for bi in 0..body.blocks.len() {
+        let slots: Vec<(ValueId, usize)> = body.blocks[bi]
+            .insts
+            .iter()
+            .enumerate()
+            .filter_map(|(i, inst)| match inst.kind {
+                InstKind::Uninit { result, .. } => Some((result, i)),
+                _ => None,
+            })
+            .collect();
+        for (slot, def_i) in slots {
+            if let Some((destroy_i, last_use)) = scan_let_slot(mono, facts, body, bi, slot, def_i) {
+                let insts = &mut body.blocks[bi].insts;
+                let destroy = insts.remove(destroy_i);
+                insts.insert(last_use + 1, destroy);
+                moved += 1;
+            }
+        }
+    }
+    moved
+}
+
+/// The (destroy index, last-read index) of a qualifying slot, or `None`.
+fn scan_let_slot(
+    mono: &MonoModule,
+    facts: &mut TypeFacts,
+    body: &OssaBody,
+    bi: usize,
+    slot: ValueId,
+    def_i: usize,
+) -> Option<(usize, usize)> {
+    // Every use of the slot's addresses must be in this block.
+    let mut addrs: FxHashSet<ValueId> = FxHashSet::from_iter([slot]);
+    for (b, block) in body.blocks.iter().enumerate() {
+        let term_uses = block.terminator.kind.operands();
+        if b != bi && block.insts.iter().any(|i| i.kind.operands().contains(&slot)) {
+            return None;
+        }
+        if term_uses.contains(&slot) {
+            return None;
+        }
+    }
+    let block = &body.blocks[bi];
+    let mut family: FxHashSet<ValueId> = FxHashSet::default(); // borrows and their projections
+    let mut store = None;
+    let mut destroy = None;
+    let mut last_use = def_i;
+    for (j, inst) in block.insts.iter().enumerate().skip(def_i + 1) {
+        let ops = inst.kind.operands();
+        let touches_addr = ops.iter().any(|o| addrs.contains(o));
+        let touches_family = ops.iter().any(|o| family.contains(o));
+        if !touches_addr && !touches_family {
+            continue;
+        }
+        match inst.kind {
+            InstKind::StoreInit { address, value } if address == slot && store.is_none() => {
+                let is_copy = block.insts[..j].iter().any(|d| {
+                    matches!(d.kind, InstKind::CopyValue { result, .. } if result == value)
+                });
+                if !is_copy || facts.observable(mono, body.value(value).ty) {
+                    return None;
+                }
+                store = Some(j);
+                // An unread copy drops right after it is stored, never before.
+                last_use = j;
+                continue;
+            },
+            InstKind::DestroyAddr { address, .. } if address == slot && destroy.is_none() => {
+                destroy = Some(j);
+                continue;
+            },
+            // Dropping an address value is free and reads nothing.
+            InstKind::DestroyValue { operand } if addrs.contains(&operand) => continue,
+            InstKind::FieldAddr { result, base, .. } if addrs.contains(&base) => {
+                addrs.insert(result);
+                continue;
+            },
+            InstKind::BeginBorrowAddr { result, address, .. } if addrs.contains(&address) => {
+                family.insert(result);
+            },
+            _ if touches_addr => return None, // a write, take, or escape of the address
+            _ if !super::reads_only(&inst.kind)
+                && !matches!(inst.kind, InstKind::Call { .. } | InstKind::EndBorrow { .. }) =>
+            {
+                return None;
+            },
+            _ => {},
+        }
+        if store.is_none() || destroy.is_some() {
+            return None; // read before init, or after the drop
+        }
+        last_use = j;
+        for r in inst.kind.results() {
+            let def = body.value(r);
+            if facts.holds_raw_pointer(mono, def.ty) {
+                return None;
+            }
+            if def.ownership == Ownership::Guaranteed {
+                family.insert(r);
+            }
+        }
+    }
+    let destroy_i = destroy?;
+    store?;
+    // A borrow (or projection) carried out of the block outlives the move.
+    let term = &block.terminator.kind;
+    if term.operands().iter().any(|o| family.contains(o) || addrs.contains(o)) {
+        return None;
+    }
+    (last_use < destroy_i).then_some((destroy_i, last_use))
 }
