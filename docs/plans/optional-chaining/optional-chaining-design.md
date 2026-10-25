@@ -113,8 +113,19 @@ modes are part of the method signature. The returns use `Optional[&T]` /
 (`Optional.asRef`, `lang/std/result/optional.ks:126`, and
 `PointerIterator.next() -> Optional[&mutating T]`, `lang/std/memory/pointer.ks:615`).
 
-`Result` does **not** conform. A `?.` on a `Result` would silently drop the
-error. `r.ok()?.x` says that explicitly.
+`Result[T, E]` **also conforms**, chaining on the `Ok` value
+(`Wrapped = T`). Since the chain's result is always `Optional`, an `.Err`
+becomes `.None` and **the error is dropped**: `parse(s)?.count` is `Int64?`.
+Users who need the error write `r.map { … }` or `match`.
+
+```kestrel
+extend Result[T, E]: OptionalChain {
+    type Wrapped = T
+    func chainBorrow() -> Optional[&T] { self.okRef() }       // result.ks:135
+    mutating func chainMutate() -> Optional[&mutating T] { … } // match self { .Ok(&mutating v) => .Some(v), .Err(_) => .None }
+    consuming func chainTake() -> Optional[T] { self.ok() }   // result.ks:368
+}
+```
 
 ## Semantics
 
@@ -261,7 +272,7 @@ On `def25459`:
 |-------|--------|
 | **Lexer** | None (two existing tokens, joined) |
 | **Parser / CST** | `ExprOptionalBind` node: wraps the operand and holds `?`. `ExprOptionalChain` node: wraps the whole chain. In `tight_ops` (`exprs.rs:354`): on `Question` joined to a following `Dot`, close the chain, wrap it in `ExprOptionalBind`, set a "saw bind" flag, then continue with `member()` or, if `(` follows the `.`, `call()`. In `postfix()` (`exprs.rs:330`): include the line-continued `.member` loop. When closing a chain whose flag is set, wrap it in `ExprOptionalChain`. Same in the `cond` path (`if let x = a?.b`). The assignment statement parser accepts an `ExprOptionalChain` LHS. Add both kinds to `kinds.txt`; regenerate |
-| **Stdlib** | `OptionalChain` protocol plus `Optional` conformance (above). Builtins `OptionalChainProtocol`, `OptionalChainBorrowMethod`, `OptionalChainMutateMethod`, `OptionalChainTakeMethod` in `kestrel-hir/src/builtin.rs` |
+| **Stdlib** | `OptionalChain` protocol plus `Optional` and `Result` conformances (above). Builtins `OptionalChainProtocol`, `OptionalChainBorrowMethod`, `OptionalChainMutateMethod`, `OptionalChainTakeMethod` in `kestrel-hir/src/builtin.rs` |
 | **HIR** | `MatchSource::OptionalChain`, `SugarKind::OptionalChain`. Chain frame stack on the lowering context. Scrutinees are `ProtocolCall(base, OptionalChain, "chainBorrow")`. Assignment and compound assignment lowered into the innermost arm (§1). No new `HirExpr` variant, so the walker sweep is zero |
 | **Type infer** | `Match` arm: when `source == OptionalChain`, check arms against `Optional[α]` (§3). `ChainMode` decision per bind, recorded in `TypedBody.chain_modes` (§2), including outward propagation. `mark_synth_pending` covers `Field` / `TupleIndex`. Missing-conformance error E157 via the `Sugar` cascade-suppression hook (the primary `Conforms` on `OptionalChain`), like `for` / `try` |
 | **Analyzers** | `access_mode` reads `chain_modes` for exclusivity and `let`-base mutability. A consuming chain on a place is E158 |
@@ -304,6 +315,8 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/optional_chainin
 - Execution, mutate: `a?.push(x)`, `a?.n = 1`, `a?.n += 1`, `a?.b?.push(x)`
   (outward propagation), the RHS not evaluated on `.None`.
 - Execution, take: `load()?.consume()`.
+- Execution, `Result`: `ok?.x` is `.Some`, `err?.x` is `.None`, and the tail
+  doesn't run on `.Err`; mutation through `r?.n += 1`.
 - Execution, protocol: a user type conforming to `OptionalChain`; a generic
   `O: OptionalChain`.
 - Diagnostics: E157 on a non-conforming type, E158, mutating through a `let`
@@ -347,8 +360,6 @@ mutate". Only the first half is cheap, so it's worth prototyping
 
 ## Open questions
 
-- **Q1.** Should `Result` conform to `OptionalChain` (dropping the error)? This
-  design says no.
 - **Q2.** Should the `try a?.b()` interaction (§6) get a lint in 0.19?
 - **Q3. The binder's type before the mode is known.** §2 types `$o` as
   `&W` provisionally and may switch the mode to `chainMutate` later. If
@@ -372,3 +383,8 @@ mutate". Only the first half is cheap, so it's worth prototyping
 - **Q6. Smaller syntax points (no decision needed).** `a?.0` (tuple index)
   works through `member()`, so it's added to the tests.
   `x as? T?.y` stays a parse error, as today; write `(x as? T)?.y`.
+
+## Decisions
+
+- **`Result` conforms to `OptionalChain`** (2026-10-25). `r?.x` chains on the
+  `Ok` value and gives `Optional`, dropping the error.
