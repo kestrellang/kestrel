@@ -177,3 +177,4 @@ fn check_ast_type(
         AstType::Unit(_) | AstType::Never(_) | AstType::Inferred(_) => {},
     }
 }
+

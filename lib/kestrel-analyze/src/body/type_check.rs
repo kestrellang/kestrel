@@ -100,11 +100,7 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         InferError::AmbiguousMember { receiver, name, .. } => {
             // Receiver-less (overloaded free-function call) is a "call", not a
             // "member" (#210). `detail` already avoids the synthetic receiver.
-            let kind = if receiver.is_some() {
-                "member"
-            } else {
-                "call to"
-            };
+            let kind = if receiver.is_some() { "member" } else { "call to" };
             (
                 format!("ambiguous {} '{}': {}", kind, name, detail),
                 "multiple candidates".into(),
@@ -248,7 +244,8 @@ fn format_error(err: &InferError, detail: &str) -> (String, String) {
         ),
         InferError::RefFunctionAsValue { .. } => (
             "a reference-returning function cannot be used as a value".into(),
-            "call it instead; its return convention is not expressible in a function type".into(),
+            "call it instead; its return convention is not expressible in a function type"
+                .into(),
         ),
         InferError::RefInTypeArgument { .. } => (
             "a reference cannot be a generic type argument".into(),

@@ -167,11 +167,9 @@ impl DeclCheck for PlaceAccessorAnalyzer {
                     message: "add a `get` or `ref` accessor".into(),
                     is_primary: true,
                 }],
-                notes: vec![
-                    "reads always go through `get` or `ref`; a `mutating ref` or `set` \
+                notes: vec!["reads always go through `get` or `ref`; a `mutating ref` or `set` \
                              alone leaves reads unprovided"
-                        .into(),
-                ],
+                    .into()],
             });
         }
 
@@ -192,7 +190,9 @@ fn in_protocol_scope(cx: &DeclContext<'_>) -> bool {
                 extension: parent,
                 root: cx.root,
             })
-            .is_some_and(|target| cx.query.get::<NodeKind>(target) == Some(&NodeKind::Protocol)),
+            .is_some_and(|target| {
+                cx.query.get::<NodeKind>(target) == Some(&NodeKind::Protocol)
+            }),
         _ => false,
     }
 }

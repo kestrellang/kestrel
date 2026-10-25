@@ -174,8 +174,7 @@ impl BodyCheck for ClosureAnalyzer {
                     continue;
                 };
                 let is_ref = matches!(ty, ResolvedTy::Ref { .. });
-                if !is_ref
-                    && crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root)
+                if !is_ref && crate::staticness::resolved_ty_is_static(cx.query, ty, cx.entity, cx.root)
                 {
                     continue;
                 }
