@@ -1,4 +1,4 @@
-# Placeholder Arguments (`f(_, 1)`, `map(_.name)`) Design
+# Placeholder Arguments (`f(_, 1)`, `map(_.name)`, `map(_ * 2)`) Design
 
 > **Status: design, not started.** Milestone 0.19 ("Expression sugar").
 > Base commit `def25459` (`future/0.18`). File and line anchors refer to that
@@ -15,9 +15,12 @@ forms, told apart by what follows the `_`:
 let addOne = add(_, 1)                    // { (a) in add(a, 1) }
 let parseHex = Int64.parse(_, radix: 16)
 
-// 2. Member placeholder: `_` heading a chain makes that ARGUMENT a closure.
+// 2. Argument placeholder: `_` anywhere inside a larger argument makes that
+//    ARGUMENT a closure. Every `_` in it is the same value.
 let names = users.map(_.name)             // users.map({ (u) in u.name })
 let adults = users.filter(_.age >= 18)    // users.filter({ (u) in u.age >= 18 })
+let doubled = xs.map(_ * 2)               // xs.map({ (x) in x * 2 })
+let full = users.map(_.first + " " + _.last)
 let byAge = users.sorted(by: _.age)
 let cities = users.map(_.address?.city)
 ```
@@ -25,7 +28,7 @@ let cities = users.map(_.address?.city)
 | Form | Spelled | Closure covers | Params |
 |---|---|---|---|
 | **Hole** | `_` as the whole argument | the **call** | one per hole, left to right |
-| **Member placeholder** | `_` followed by `.`, `?.`, `(`, `!` inside an argument | that **argument** | exactly one |
+| **Argument placeholder** | `_` anywhere inside an argument that is more than just `_` | that **argument** | exactly one; every `_` in the argument is that parameter |
 
 Both are pure sugar for a closure literal. Nothing after HIR lowering knows `_`
 was written: inference, captures, closure kinds and MIR see a closure.
@@ -35,10 +38,9 @@ fills: `x |> f(a, _)` substitutes `x` directly and builds no closure.
 
 ### Non-goals
 
-- **Bare operator sections** (`_ + 1`, `_ < limit` with no member access).
-  `{ it + 1 }` covers them, and `_ + 1` reads too much like a hole.
-- **Several member placeholders in one argument** (Scala's `_.a + _.b` taking
-  two parameters). That's an error, and you write a closure instead.
+- **Multi-parameter sections** (Scala's `_ + _` meaning `{ (a, b) in a + b }`).
+  Here every `_` in one argument is the same parameter, so `_ + _` is
+  `{ (x) in x + x }`. Write `reduce(0, { (a, b) in a + b })` or pass `add`.
 - **`_` outside call arguments** (`let f = _.name`). There's no expected type
   to give the parameter a type, and `{ it.name }` works.
 - **Placeholders in type position.** `_` in types already means "infer". That's
@@ -49,8 +51,8 @@ fills: `x |> f(a, _)` substitutes `x` directly and builds no closure.
 ```
 argument     ::= (label ':')? (hole | expr)
 hole         ::= '_'                         // followed by ',' or ')'
-primary      ::= … | placeholder_head        // only inside an argument (see below)
-placeholder_head ::= '_'                     // must be followed by '.', '?.', '(' or '!'
+primary      ::= … | placeholder             // only inside an argument (see below)
+placeholder  ::= '_'                         // any operand position: `_.x`, `_ * 2`, `-_`, `f(_)` inside a larger argument
 ```
 
 | Written | Means |
@@ -66,9 +68,12 @@ placeholder_head ::= '_'                     // must be followed by '.', '?.', '
 | `xs.map(_?.name)` | `xs.map({ ($p0) in $p0?.name })` |
 | `fs.map(_(x))` | `fs.map({ ($p0) in $p0(x) })` (call each function) |
 | `f(g(_))` | `f({ ($p0) in g($p0) })`: a hole binds to the nearest call |
-| `f(g(_.x))` | `f(g({ ($p0) in $p0.x }))`: a member placeholder binds to the nearest argument |
-| `xs.map(_.a + _.b)` | error E159 (two member placeholders in one argument) |
-| `f(_ + 1)` | error E811 (`_` is neither a whole argument nor a chain head) |
+| `f(g(_.x))` | `f(g({ ($p0) in $p0.x }))`: a argument placeholder binds to the nearest argument |
+| `xs.map(_ * 2)` | `xs.map({ ($p0) in $p0 * 2 })` |
+| `xs.filter(_ > 0 and _ < 10)` | `xs.filter({ ($p0) in $p0 > 0 and $p0 < 10 })` (one parameter) |
+| `xs.map(-_)` | `xs.map({ ($p0) in -$p0 })` |
+| `xs.map(_.a + _.b)` | `xs.map({ ($p0) in $p0.a + $p0.b })` |
+| `xs.map(_ + _)` | `xs.map({ ($p0) in $p0 + $p0 })`, not a two-parameter sum |
 | `let y = _` | error E811 |
 
 **What "inside an argument" means.** The parser counts open argument lists.
@@ -92,9 +97,9 @@ scope for `_`, and every closure literal closes all scopes.
 | `_` form | Closes over | Example | Means |
 |---|---|---|---|
 | Hole (`_` is the whole argument) | the **nearest enclosing call**: callee, receiver and every other argument | `obj.m(_, g())` | `{ p in obj.m(p, g()) }` |
-| Chain head (`_.x`, `_?.x`, `_(…)`, `_!`) | the **whole nearest enclosing argument value** (not its label), operators included | `filter(_.age >= 18)` | `filter({ p in p.age >= 18 })` |
-| Chain head + more operators | still the whole argument | `map(_.first + " " + _.last)` | error: two heads in one argument (E159) |
-| Chain head in a nested call | that inner call's argument | `xs.map(f(_.x))` | `xs.map(f({ p in p.x }))` |
+| `_` inside a larger argument (`_.x`, `_ * 2`, `-_`, `_?.x`, `_(…)`) | the **whole nearest enclosing argument value** (not its label), operators included | `filter(_.age >= 18)` | `filter({ p in p.age >= 18 })` |
+| Several `_` in one argument | still the whole argument, **one** parameter | `map(_.first + " " + _.last)` | `map({ p in p.first + " " + p.last })` |
+| Argument placeholder in a nested call | that inner call's argument | `xs.map(f(_.x))` | `xs.map(f({ p in p.x }))` (see Q2) |
 | Hole in a nested call | that inner call | `f(g(_))` | `f({ p in g(p) })` |
 
 What **does not** reset the scope (so the closure covers it): operators,
@@ -106,9 +111,16 @@ dictionary or tuple literals inside the argument.
 What **does** reset it: a closure literal, including trailing closures.
 `f({ _.x })` and `f { _.x }` are E811, and the fix is `it`.
 
+**Operators never create a boundary.** An argument placeholder always covers
+the whole argument, so precedence doesn't matter: `f(_ * 2 + 1)` and
+`f(1 + _ * 2)` both close over the full argument. That includes the
+short-circuit operators (`and`, `or`, `??`). They desugar their right side
+into a closure internally, but that's not a closure *literal*, so it doesn't
+reset the scope: `f(_.a ?? _.b)` is `f({ p in p.a ?? p.b })`.
+
 Where `_` is never a placeholder: outside any argument list (`let g = _.x`,
-statement `_.f()`), as a bare operand (`f(_ + 1)`), and in patterns and types.
-All of these are E811 except patterns and types, which keep their meaning.
+statement `_.f()`), and in patterns and types. The first is E811. Patterns and
+types keep their meaning.
 
 Inside the top-level arguments of a pipe's right-hand call, `_` is the piped
 value instead (pipe design, Q2).
@@ -128,10 +140,12 @@ HirExpr::Sugar {
 }
 ```
 
-### 2. Desugaring member placeholders
+### 2. Desugaring argument placeholders
 
-An argument whose expression contains exactly one `ExprPlaceholderHead` (not
-counting any nested inside an inner argument list) lowers to:
+An argument (other than a bare hole) whose expression contains one or more
+`ExprPlaceholderUse` nodes, not counting any inside an inner argument list or a
+closure literal, lowers to the following, with **every** use mapped to the
+same `$p0`:
 
 ```
 HirCallArg {
@@ -169,10 +183,10 @@ The synthesized closure goes through `gen_closure`
   inference (borrow, `MutBorrow` upgrade) applies.
 - With an expected function type (`xs.map(_.name)`, `xs.map(add(_, 1))`),
   parameter types and the closure kind come from the expectation. This is
-  what makes member placeholders work, since `_.name` needs to know `_`'s type.
+  what makes argument placeholders work, since `_.name` needs to know `_`'s type.
   It's the same mechanism as `xs.map { it.name }`.
 - With no expectation, hole parameters get their types from the call
-  (`let g = add(_, 1)`). A member placeholder with no expectation is the
+  (`let g = add(_, 1)`). A argument placeholder with no expectation is the
   existing "could not infer type" error, as for `let f = { it.name }`
   (`testdata/expressions/closures/cannot_infer_it_type_without_context.ks`).
 - An overloaded callee with no expectation (`let g = print(_)`) may also be
@@ -206,9 +220,9 @@ On `def25459`:
 | Stage | Change |
 |-------|--------|
 | **Lexer** | None |
-| **Parser / CST** | Two nodes: `ExprPlaceholder` (a hole) and `ExprPlaceholderHead` (a chain head). A parser field `arg_depth: u32`: `argument_list_body` increments it and `closure()` saves and zeroes it. In `argument()` (`exprs.rs:439`), after an optional label: at `Underscore` followed by `,` or `)`, emit `ExprPlaceholder`. In `primary()` (`exprs.rs:511`): at `Underscore` with `arg_depth > 0` and the next token **joined** and one of `.`, `?`, `(`, `!`, emit `ExprPlaceholderHead` and return it as the chain start, so the normal postfix loop continues. Otherwise `_` at expression start reports E811 instead of the generic E803. `argument_list_body`'s "expected expression" check accepts `Underscore`. Add both kinds to `kinds.txt`; regenerate |
+| **Parser / CST** | Two nodes: `ExprPlaceholder` (a hole) and `ExprPlaceholderUse` (a `_` inside a larger argument). A parser field `arg_depth: u32`: `argument_list_body` increments it and `closure()` saves and zeroes it. In `argument()` (`exprs.rs:439`), after an optional label: at `Underscore` followed by `,` or `)`, emit `ExprPlaceholder`. In `primary()` (`exprs.rs:511`): at `Underscore` with `arg_depth > 0`, emit `ExprPlaceholderUse` and return it as a chain start, so postfix and binary operators continue normally. With `arg_depth == 0`, report E811 instead of the generic E803. Also add `Underscore` to `at_expr_start` behind the same `arg_depth > 0` check, so `-_` and `not _` parse. `argument_list_body`'s "expected expression" check accepts `Underscore`. Add both kinds to `kinds.txt`; regenerate |
 | **Decls (ECS)** | None |
-| **HIR** | `SugarKind::Placeholder`. (a) In `lower_call_args` (`kestrel-hir-lower/src/expr.rs:1400`): for each argument, count `ExprPlaceholderHead` nodes in its subtree, stopping at nested `ArgumentList`s and `ExprClosure`s. If there's one, push a scope, define `$p0`, lower the argument with the head mapped to `Local($p0)`, pop the scope, and wrap it as `Closure` + `Sugar`. If there are two or more, report E159. (b) In `lower_call` (`expr.rs:731`): if any argument is an `ExprPlaceholder`, define `$p0…`, lower the call with `Local($pᵢ)` in those slots (going through the existing `lower_member_call` / `lower_path_call` / direct paths unchanged), and wrap it. Factor (b) as `lower_call_with_holes(node, fill: impl FnMut(i) -> HirExprId)` so the pipe operator reuses it with a fill that returns the piped value |
+| **HIR** | `SugarKind::Placeholder`. (a) In `lower_call_args` (`kestrel-hir-lower/src/expr.rs:1400`): for each argument, look for `ExprPlaceholderUse` nodes in its subtree, stopping at nested `ArgumentList`s and `ExprClosure`s. If there are any, push a scope, define `$p0`, lower the argument with every use mapped to `Local($p0)`, pop the scope, and wrap it as `Closure` + `Sugar`. (b) In `lower_call` (`expr.rs:731`): if any argument is an `ExprPlaceholder`, define `$p0…`, lower the call with `Local($pᵢ)` in those slots (going through the existing `lower_member_call` / `lower_path_call` / direct paths unchanged), and wrap it. Factor (b) as `lower_call_with_holes(node, fill: impl FnMut(i) -> HirExprId)` so the pipe operator reuses it with a fill that returns the piped value |
 | **Type infer** | None beyond closures. Anchor "could not infer" for a placeholder closure on the `_` span |
 | **Captures / analyzers / MIR / codegen** | None. `Sugar` is transparent |
 | **LSP** | Hover on `_` shows the parameter type. Completion after `_.` lists members of the expected parameter type (the same path as `it.`) |
@@ -221,14 +235,13 @@ are assigned only in `kestrel-parser/src/syntax_error.rs`; E810 was the last).
 
 | Code | Where | Message |
 |---|---|---|
-| E811 | parser | `` `_` here isn't a placeholder `` + note "`_` is a placeholder only as a whole call argument (`f(_, 1)`) or at the start of a member chain inside an argument (`map(_.name)`); use `{ it … }` otherwise" |
-| E159 | HIR lower | `` an argument can contain only one `_.` placeholder `` + note "write a closure: `{ (a) in a.x + a.y }`" |
+| E811 | parser | `` `_` here isn't a placeholder `` + note "`_` is a placeholder only inside a call's arguments (`f(_, 1)`, `map(_.name)`, `map(_ * 2)`); use `{ it … }` otherwise" |
 | — | type infer | Existing "could not infer type" when there's no expectation |
 
 ## Edge cases
 
 - **Nested calls.** In `f(g(_))` the hole binds to `g`. In `f(g(_.x))` the
-  member placeholder binds to `g`'s argument. Both follow "nearest". When `f`
+  argument placeholder binds to `g`'s argument. Both follow "nearest". When `f`
   expected a value, the mismatch error gets a note: "`_` binds to the
   innermost call".
 - **Implicit `it` and `_` together.** `xs.map({ it + _.x })` is E811, because
@@ -249,11 +262,14 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/placeholders/`:
 
 - Execution, holes: single, multiple, labeled, method, static, initializer,
   subscript. Passing to `map`/`filter`. A per-call side-effect counter.
-- Execution, member: `map(_.name)`, `filter(_.age >= 18)`, `sorted(by: _.age)`,
-  `map(_?.city)`, `map(_(x))`, `map(_.name.count)`, mixed with a hole.
+- Execution, argument placeholders: `map(_.name)`, `filter(_.age >= 18)`,
+  `sorted(by: _.age)`, `map(_?.city)`, `map(_(x))`, `map(_.name.count)`,
+  `map(_ * 2)`, `map(-_)`, `filter(_ > 0 and _ < 10)` (one parameter),
+  `map(_.first + " " + _.last)`, `map(_ + _)` (doubles), `f("\(_.name)")`,
+  `map(_.a ?? _.b)`, mixed with a hole.
 - Execution: capturing a non-Copyable local, `escaping` expectation.
-- Diagnostics: E811 (`let x = _`, `f(_ + 1)`, `{ _.x }` in an argument),
-  E159, no-context member placeholder, overloaded callee with no context,
+- Diagnostics: E811 (`let x = _`, `{ _.x }` in an argument), no-context
+  argument placeholder, overloaded callee with no context,
   nested-call note.
 - MIR snapshot: `xs.map(_.name)` lowers the same as `xs.map { it.name }`.
 
@@ -267,11 +283,21 @@ About 3–5 days: parser with `arg_depth` (1 day), HIR hole and member lowering
 - **Q1.** In `f(g(_))`, should a hole inside a nested call be an error
   ("ambiguous placeholder") instead of binding to `g`? This design binds to the
   nearest call, like Scala.
-- **Q2. Member placeholders inside a nested call.** `xs.map(f(_.x))` binds
-  `_.x` to `f`'s argument, giving `xs.map(f({ p in p.x }))`, not
-  `xs.map({ p in f(p.x) })`. The second is usually what's meant.
-  **Recommendation:** keep "nearest argument" because it's predictable and
-  needs no types. When `f`'s parameter isn't a function type, emit a note:
-  "`_` binds to the innermost argument; write `{ f(it.x) }`".
+- **Q2. Argument placeholders inside a nested call.** `xs.map(f(_.x))` can
+  mean either of these:
+
+  | Rule | `xs.map(f(_.x))` | `xs.map(_.items.filter(_.ok))` | Needs types? |
+  |---|---|---|---|
+  | **Nearest argument** (this design) | `xs.map(f({ p in p.x }))` | `xs.map({ p in p.items.filter({ q in q.ok }) })` ✓ | no |
+  | **Outermost argument** | `xs.map({ p in f(p.x) })` ✓ | `xs.map({ p in p.items.filter(p.ok) })` ✗ (both `_` are `p`) | no |
+  | **Nearest argument that expects a function** | `xs.map({ p in f(p.x) })` ✓ | `…filter({ q in q.ok })` ✓ | yes: lowering would need inference |
+
+  Outermost breaks nested placeholders, which are common
+  (`groups.map(_.members.filter(_.active))`). The type-directed rule reads
+  best but can't be decided in HIR lowering, which runs before inference,
+  and it makes the meaning of `_` change when a signature changes.
+  **Recommendation:** nearest argument. When the inner parameter isn't a
+  function type, add a note to the error: "`_` binds to the innermost
+  argument; write `{ f(it.x) }`".
 - **Q3. Pipe interaction.** See the pipe design, Q2: inside a pipe's right
   side, `_` is the piped value, not a placeholder.

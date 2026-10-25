@@ -212,7 +212,7 @@ hour), HIR lowering (half a day), tests and diagnostics (1 day).
   `x |> f(_.name)` makes `_.name` its own closure and then calls
   `f({ p in p.name })(x)`. Most readers would expect `f(x.name)`.
   **Recommendation:** inside the top-level argument list of a pipe's right
-  side, *every* `_` (a hole or a chain head) is the piped value, Hack-style.
+  side, *every* `_` (a hole or one inside a larger argument, like `_.name` or `_ + 1`) is the piped value, Hack-style.
   So `x |> f(_.name)` is `f(x.name)` and `x |> f(_, _.id)` is `f(x, x.id)`.
   When `_` is used more than once, `x` is bound to a temporary first, which
   needs `x` to be Copyable or a place (borrowed). Nested argument lists keep
