@@ -283,7 +283,7 @@ On `def25459`:
 ## Error cases
 
 Codes are proposals. Confirm they're still free when implementing (the next
-free E1xx on the base commit was E156, and the pipe design proposes E156).
+free E1xx on the base commit was E156; the pipe design no longer needs one).
 
 | Code | Where | Message |
 |---|---|---|
