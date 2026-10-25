@@ -67,7 +67,7 @@ placeholder_head ::= '_'                     // must be followed by '.', '?.', '
 | `fs.map(_(x))` | `fs.map({ ($p0) in $p0(x) })` (call each function) |
 | `f(g(_))` | `f({ ($p0) in g($p0) })`: a hole binds to the nearest call |
 | `f(g(_.x))` | `f(g({ ($p0) in $p0.x }))`: a member placeholder binds to the nearest argument |
-| `xs.map(_.a + _.b)` | error E812 (two member placeholders in one argument) |
+| `xs.map(_.a + _.b)` | error E159 (two member placeholders in one argument) |
 | `f(_ + 1)` | error E811 (`_` is neither a whole argument nor a chain head) |
 | `let y = _` | error E811 |
 
@@ -179,7 +179,7 @@ On `def25459`:
 | **Lexer** | None |
 | **Parser / CST** | Two nodes: `ExprPlaceholder` (a hole) and `ExprPlaceholderHead` (a chain head). A parser field `arg_depth: u32`: `argument_list_body` increments it and `closure()` saves and zeroes it. In `argument()` (`exprs.rs:439`), after an optional label: at `Underscore` followed by `,` or `)`, emit `ExprPlaceholder`. In `primary()` (`exprs.rs:511`): at `Underscore` with `arg_depth > 0` and the next token **joined** and one of `.`, `?`, `(`, `!`, emit `ExprPlaceholderHead` and return it as the chain start, so the normal postfix loop continues. Otherwise `_` at expression start reports E811 instead of the generic E803. `argument_list_body`'s "expected expression" check accepts `Underscore`. Add both kinds to `kinds.txt`; regenerate |
 | **Decls (ECS)** | None |
-| **HIR** | `SugarKind::Placeholder`. (a) In `lower_call_args` (`kestrel-hir-lower/src/expr.rs:1400`): for each argument, count `ExprPlaceholderHead` nodes in its subtree, stopping at nested `ArgumentList`s and `ExprClosure`s. If there's one, push a scope, define `$p0`, lower the argument with the head mapped to `Local($p0)`, pop the scope, and wrap it as `Closure` + `Sugar`. If there are two or more, report E812. (b) In `lower_call` (`expr.rs:731`): if any argument is an `ExprPlaceholder`, define `$p0…`, lower the call with `Local($pᵢ)` in those slots (going through the existing `lower_member_call` / `lower_path_call` / direct paths unchanged), and wrap it. Factor (b) as `lower_call_with_holes(node, fill: impl FnMut(i) -> HirExprId)` so the pipe operator reuses it with a fill that returns the piped value |
+| **HIR** | `SugarKind::Placeholder`. (a) In `lower_call_args` (`kestrel-hir-lower/src/expr.rs:1400`): for each argument, count `ExprPlaceholderHead` nodes in its subtree, stopping at nested `ArgumentList`s and `ExprClosure`s. If there's one, push a scope, define `$p0`, lower the argument with the head mapped to `Local($p0)`, pop the scope, and wrap it as `Closure` + `Sugar`. If there are two or more, report E159. (b) In `lower_call` (`expr.rs:731`): if any argument is an `ExprPlaceholder`, define `$p0…`, lower the call with `Local($pᵢ)` in those slots (going through the existing `lower_member_call` / `lower_path_call` / direct paths unchanged), and wrap it. Factor (b) as `lower_call_with_holes(node, fill: impl FnMut(i) -> HirExprId)` so the pipe operator reuses it with a fill that returns the piped value |
 | **Type infer** | None beyond closures. Anchor "could not infer" for a placeholder closure on the `_` span |
 | **Captures / analyzers / MIR / codegen** | None. `Sugar` is transparent |
 | **LSP** | Hover on `_` shows the parameter type. Completion after `_.` lists members of the expected parameter type (the same path as `it.`) |
@@ -193,7 +193,7 @@ are assigned only in `kestrel-parser/src/syntax_error.rs`; E810 was the last).
 | Code | Where | Message |
 |---|---|---|
 | E811 | parser | `` `_` here isn't a placeholder `` + note "`_` is a placeholder only as a whole call argument (`f(_, 1)`) or at the start of a member chain inside an argument (`map(_.name)`); use `{ it … }` otherwise" |
-| E812 | HIR lower | `` an argument can contain only one `_.` placeholder `` + note "write a closure: `{ (a) in a.x + a.y }`" |
+| E159 | HIR lower | `` an argument can contain only one `_.` placeholder `` + note "write a closure: `{ (a) in a.x + a.y }`" |
 | — | type infer | Existing "could not infer type" when there's no expectation |
 
 ## Edge cases
@@ -224,7 +224,7 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/placeholders/`:
   `map(_?.city)`, `map(_(x))`, `map(_.name.count)`, mixed with a hole.
 - Execution: capturing a non-Copyable local, `escaping` expectation.
 - Diagnostics: E811 (`let x = _`, `f(_ + 1)`, `{ _.x }` in an argument),
-  E812, no-context member placeholder, overloaded callee with no context,
+  E159, no-context member placeholder, overloaded callee with no context,
   nested-call note.
 - MIR snapshot: `xs.map(_.name)` lowers the same as `xs.map { it.name }`.
 
