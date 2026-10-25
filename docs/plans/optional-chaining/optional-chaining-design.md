@@ -7,300 +7,346 @@
 
 ## Overview
 
-Optional chaining reaches through an `Optional` without unwrapping it by hand:
+Optional chaining reaches through an optional-like value without unwrapping it
+by hand:
 
 ```kestrel
 let theme = user?.profile?.settings.theme ?? Theme.default
 let n = cache?.lookup(key)?.count         // Int64?
+inventory?.items.push(item)               // mutates in place; type ()?
+player?.score += 10
+let r = callback?.(event)                 // call an optional function
 ```
 
-`a?.rest` evaluates `a` once. If it's `.None`, **the rest of the postfix
-chain is skipped** and the whole expression is `.None`. Otherwise the chain
-continues on the payload, and the result is wrapped in `Optional`, unless it
-already is one, in which case it's **flattened**: `a?.b` with `b: Int64?` is
-`Int64?`, not `Int64??`.
+`a?.rest` evaluates `a` once and asks it for its payload. If there's none,
+**the rest of the postfix chain is skipped** and the whole expression is
+`.None`. Otherwise the chain continues on the payload, and its result is
+wrapped in `Optional`. If the result is already an `Optional`, it's
+**flattened** instead: `a?.b` with `b: Int64?` is `Int64?`, not `Int64??`.
 
-The feature is sugar over `match` with `&` binder patterns, both of which
-already exist. The design adds **no new `HirExpr` variant**. It adds one
-`MatchSource` and one inference rule (check mode against `Optional[α]`). That
-keeps the walker sweep (captures, analyzers, MIR, LSP) at zero.
+Like every other Kestrel operator, `?.` is **backed by a protocol**,
+`OptionalChain`. `Optional` conforms to it in the stdlib. Other types can
+conform too: a future `@weak` reference (0.22), a lazily loaded handle, or a
+user's own `Maybe`-like type.
 
-### Phasing
-
-| Phase | Milestone | Contents |
-|---|---|---|
-| **1. Read-only chaining** | 0.19 | `?.` member, method and subscript access; `?(…)` calls; place bases borrowed with `&`; rvalue bases owned; flattening |
-| **2. Mutating chaining** | 0.20 (with `mutating get`) | `a?.push(x)`, `a?.field = v`, `a?.n += 1`; `&mutating` binder chosen from the resolved members |
-
-Phase 2 is designed here (§7) so phase 1 doesn't paint it into a corner, but
-it isn't part of the 0.19 work. *See open question Q1.*
+The chain's result is **always `Optional`**, whatever the base type is. That's
+the same rule Swift uses. A "same container, new payload" result, where
+`res?.x` stays a `Result`, would need higher-kinded types. Users who want that
+use `map`.
 
 ### Non-goals
 
-- **`Result` chaining.** `?.` is Optional-only. Generalizing via `Tryable`
-  doesn't work: `tryExtract()` is `consuming` (it would move a place base),
-  and "same container, new payload" needs higher-kinded types. Use
-  `r.ok()?.x` to go through Optional.
-- **Optional pattern sugar** (`case let x?`). Not in 0.19.
+- **Container-preserving chains** (see above).
+- **Optional pattern sugar** (`case let x?`).
 
 ## Syntax
 
 ```
-postfix_op ::= … | '?' '.' member | '?' '(' args ')'   // '?' joined to the following token
+postfix_op ::= … | '?.' member | '?.' '(' args ')'
 ```
 
-`?.` and `?(` are **two tokens**, `Question` then `Dot` / `LParen`, with no
-whitespace between them (`p.joined_at`, `kestrel-parser/src/core.rs:214`).
-There's no new lexer token: `?` is unused in expression position today. It
-only appears in types (`Int?`) and in `func f() ?`. Keeping it two tokens
-avoids a lexer interaction with `as?` and `??`.
+`?.` is two tokens, `Question` then `Dot`, **joined** with no whitespace
+between them (`p.joined_at`, `kestrel-parser/src/core.rs:214`). There's no new
+lexer token. `?` is unused in expression position today: it only appears in
+types (`Int?`) and in `func f() ?`. Two joined tokens avoid any lexer
+interaction with `as?` and `??`.
 
 | Written | Means |
 |---|---|
-| `a?.b` | `match a { .Some(&$o) => $o.b, .None => .None }` + flatten/wrap |
-| `a?.b.c()` | `match a { .Some(&$o) => $o.b.c(), … }` (whole tail skipped) |
-| `a?.b?.c` | nested: the second bind runs inside the first `.Some` arm |
-| `a?.items(0)` | subscript (call syntax) on the payload |
-| `f?(x)` | call an optional function value: `match f { .Some(&$o) => $o(x), … }` |
+| `a?.b` | payload's `b`, wrapped or flattened |
+| `a?.b.c()` | whole tail runs on the payload, or is skipped |
+| `a?.b?.c` | the second bind runs only if the first succeeded |
+| `a?.items(0)` | subscript (call syntax) on the payload's `items` |
+| `f?.(x)` | call the payload: an optional function, or an optional value with a subscript |
+| `a?.b = v` | assign through the chain; type `()?` |
+| `a?.n += 1` | compound-assign through the chain; type `()?` |
+| `a?.push(x)` | `mutating` method on the payload, in place |
 | `(a?.b).c` | parentheses end the chain: `.c` applies to the `Optional` |
-| `a?.b ?? d` | `(a?.b) ?? d`: `??` (power 15) is a binary operator, the chain is postfix |
+| `a?.b ?? d` | `(a?.b) ?? d`: `??` is a binary operator, the chain is postfix |
 | `a ? .b` | not a chain (`?` must be joined): parse error |
 
 ### Where a chain ends
 
-The chain is the **maximal postfix chain** containing the `?`: member
+The chain is the **maximal postfix chain** containing the `?.`: member
 accesses, tuple indexes, calls, trailing closures, `!`, `..`, and line-continued
 `.member`s. It ends at any binary operator, `as?`/`is`, a closing delimiter,
-or the end of the expression. This is Swift's rule.
+or the end of the expression. For assignment, the chain is the left side,
+and the right side is evaluated **only if** the chain reaches its target
+(Swift's rule): `a?.b = expensive()` doesn't call `expensive()` when `a` is
+`.None`.
+
+## The protocol
+
+```kestrel
+// lang/std/core/optional_chain.ks
+/// Backs the `?.` operator. A conforming type can hand out its payload
+/// three ways; the compiler picks one per chain from what the chain does.
+@builtin(.OptionalChainProtocol)
+public protocol OptionalChain {
+    /// The type the chain continues on.
+    type Wrapped
+
+    /// Read-only chains: `a?.count`, `a?.describe()`.
+    @builtin(.OptionalChainBorrowMethod)
+    func chainBorrow() -> Optional[&Wrapped]
+
+    /// Chains that mutate the payload: `a?.push(x)`, `a?.n = 1`.
+    @builtin(.OptionalChainMutateMethod)
+    mutating func chainMutate() -> Optional[&mutating Wrapped]
+
+    /// Chains on a temporary: `load()?.consume()`.
+    @builtin(.OptionalChainTakeMethod)
+    consuming func chainTake() -> Optional[Wrapped]
+}
+
+extend Optional[T]: OptionalChain {
+    type Wrapped = T
+    func chainBorrow() -> Optional[&T] { self.asRef() }
+    mutating func chainMutate() -> Optional[&mutating T] { … }   // match self { .Some(&mutating v) => .Some(v), .None => .None }
+    consuming func chainTake() -> Optional[T] { self }
+}
+```
+
+These are three requirements, not one generic one, because Kestrel's access
+modes are part of the method signature. The returns use `Optional[&T]` /
+`Optional[&mutating T]`, which already exist in the stdlib
+(`Optional.asRef`, `lang/std/result/optional.ks:126`, and
+`PointerIterator.next() -> Optional[&mutating T]`, `lang/std/memory/pointer.ks:615`).
+
+`Result` does **not** conform. A `?.` on a `Result` would silently drop the
+error. `r.ok()?.x` says that explicitly.
 
 ## Semantics
 
 ### 1. Desugaring
 
-The parser marks the chain (§Pipeline). HIR lowering turns each `?` bind into
-a nested match. For binds `b₁ … bₙ` in evaluation order, with `bᵢ` scrutinizing
-`sᵢ`:
+The parser marks the chain (§Pipeline). HIR lowering turns each `?.` bind into
+a nested match on a protocol call. For binds `b₁ … bₙ` in evaluation order,
+with `bᵢ` on base `sᵢ`:
 
 ```
 Sugar(OptionalChain,
-  Match(source: OptionalChain, scrutinee: s₁, arms: [
-    .Some(<binder> $o₁) => Match(OptionalChain, s₂[$o₁], [
-        .Some(<binder> $o₂) => … tail[$oₙ] …,
+  Match(source: OptionalChain, scrutinee: ProtocolCall(s₁, OptionalChain, <mode₁>), arms: [
+    .Some($o₁) => Match(OptionalChain, ProtocolCall(s₂[$o₁], OptionalChain, <mode₂>), [
+        .Some($o₂) => … tail[$oₙ] …,
         .None => .None ]),
     .None => .None ]))
 ```
 
-`sᵢ₊₁` is lowered with `Local($oᵢ)` in place of the bound sub-expression, so
-it's only evaluated inside the `.Some` arm. Lowering is bottom-up, like the
-CST: lowering `ExprOptionalChain` pushes a frame on a lowering-context stack;
-lowering each `ExprOptionalBind(inner)` lowers `inner`, defines a fresh local
-`$o`, records `(inner, $o)` in the frame and returns `Local($o)`; when the
-chain's tail is lowered, the frame is popped and the matches are built from the
-last bind outwards.
+- `$oᵢ` is an ordinary owned binding of the method's result: a `&Wrapped`, a
+  `&mutating Wrapped`, or a `Wrapped`. No `&` binder patterns are needed,
+  because the protocol method already produced the reference.
+- `sᵢ₊₁` is lowered with `Local($oᵢ)` in place of the bound sub-expression,
+  so it's only evaluated inside the `.Some` arm.
+- `<modeᵢ>` is the method. HIR lowering emits `chainBorrow` as a
+  provisional name, and inference settles it (§2).
 
-### 2. Binder mode: borrow places, own rvalues
+Lowering is bottom-up, like the CST. Lowering `ExprOptionalChain` pushes a
+frame on a lowering-context stack. Lowering each `ExprOptionalBind(inner)`
+lowers `inner`, defines a fresh local `$o`, records `(inner, $o)` in the frame
+and returns `Local($o)`. When the chain's tail is lowered, the frame is popped
+and the matches are built from the last bind outwards.
 
-| Base `sᵢ` | Binder | Why |
+**Assignment.** `a?.b = v` lowers the left side as a chain whose innermost
+arm body is `Assign { target: $oₙ.b, value: v }`. `v` is lowered inside that
+arm, so it only runs on success. Compound assignment rewrites the same way
+(`SugarKind::CompoundAssign` inside the arm). The place check for assignment
+targets accepts an `ExprOptionalChain` whose tail is a place.
+
+### 2. Choosing the mode (the hard part)
+
+Which method a bind calls depends on what the chain does with the payload,
+and that's only known **after member resolution**: `a?.push(x)` mutates only
+because `push` resolves to a `mutating` method.
+
+| The chain after bind `bᵢ` … | and the base `sᵢ` is | Mode |
 |---|---|---|
-| A place (`Local`, `Field`, `TupleIndex` chains of those, `self`) | `&$o` (borrow, `HirPat::Binding { by_ref: Some(false) }`) | `a?.count` must not move `a` |
-| Anything else (call result, literal, an inner `$o` read through a method) | `$o` (owned) | The value is a temporary. Owning it means `makeOpt()?.consume()` works and the payload drops at the arm's end, with no spill |
+| Only reads (fields, borrowing methods, subscript `get`) | anything | `chainBorrow` |
+| Calls a `mutating` member, is an assignment target, or passes a `&mutating` / `mutating` argument rooted at `$oᵢ` | a `var` place | `chainMutate` |
+| Same | a `let` place | `chainMutate`, then the existing immutability error (E200 family) at the base |
+| Calls a `consuming` member on `$oᵢ`, or moves it | an rvalue (call result, literal) | `chainTake` |
+| Same | a place | E158 "can't consume through `?.` on a place"; suggest `.take()?.` |
 
-This is decided **syntactically in HIR lowering** with `is_place_syntax`
-(`kestrel-hir-lower/src/desugar.rs:26`), the same classifier compound
-assignment uses. Phase 2
-adds `&mutating` (§7).
+Inference records the decision per bind in `TypedBody` as
+`chain_modes: HashMap<HirExprId, ChainMode>`, keyed by the scrutinee
+`ProtocolCall`. The decision is made when the member constraints in the arm
+resolve. That's the same point where a method call's receiver access mode is
+known today. The binding's type follows the mode (`&W` / `&mutating W` /
+`W`). Since mutability of a reference is analyze's job, not unify's, the
+provisional `&W` typing doesn't block resolution.
+
+`ChainMode` is the **single source of truth**. MIR lowering calls the method
+it names, and `access_mode` checks exclusivity and mutability against it.
+
+Nested binds decide independently. In `a?.b?.push(x)`, the inner bind mutates,
+so the outer bind must also mutate: the mutation propagates **outward**. An
+outer bind takes the strongest mode of anything rooted at its `$o`, including
+inner binds.
 
 ### 3. Typing and flattening
 
-The match's result is checked against `Optional[α]` (fresh `α`). If there's
-an outer expectation (`let x: Int64? = a?.b`), it's unified with
-`Optional[α]` first. In `generate.rs`'s `HirExpr::Match` arm
-(`generate.rs:741`) that's the existing **check mode** path: each arm body
-goes through `check_leaf`, which emits `Coerce(body → Optional[α])`.
-`Coerce` already tries `unify` first and falls back to `FromValue` promotion:
+The match's result is checked against `Optional[α]` (fresh `α`). If there's an
+outer expectation (`let x: Int64? = a?.b`), it's unified with `Optional[α]`
+first. In `generate.rs`'s `HirExpr::Match` arm (`generate.rs:741`) that's the
+existing **check mode** path. Each arm body goes through `check_leaf`, which
+emits `Coerce(body → Optional[α])`. `Coerce` already tries `unify` first and
+falls back to `FromValue` promotion:
 
 | Tail type | `Coerce(tail → Optional[α])` | Result |
 |---|---|---|
-| `U` (not Optional) | unify fails → promote via `FromValue` | `Optional[U]`, wrapped with `.from` |
+| `U` (not Optional) | unify fails → promote via `FromValue` | `Optional[U]` |
 | `Optional[U]` | unify succeeds, `α = U` | `Optional[U]` (flattened) |
-| Generic `T` (rigid) | unify fails → promote | `Optional[T]`, also after mono when `T = Optional[X]` (correct: the generic body decided) |
-| `Never` (`a?.fail()`) | `Never` arm doesn't pin | `Optional[α]`, `α` from context or defaulted |
+| Generic `T` (rigid) | unify fails → promote | `Optional[T]`, even after mono when `T = Optional[X]` (the generic body decided) |
+| `()` (mutation, assignment) | promote | `Optional[()]` |
+| `Never` | `Never` arm doesn't pin | `Optional[α]`, `α` from context or defaulted |
 
-The `.None` arm is an `ImplicitMember` checked against `Optional[α]`.
-
-**One required change.** `check_leaf` only defers the coerce for leaves whose
-own constraint produces their type (`mark_synth_pending`, `generate.rs:149`,
-which covers `Call`, `MethodCall` and `ProtocolCall`). A chain tail that's a
+**One required change.** `check_leaf` defers the coerce only for leaves whose
+own constraint produces their type (`mark_synth_pending`, `generate.rs:149`).
+That covers `Call`, `MethodCall` and `ProtocolCall`. A chain tail that's a
 **field access** (`a?.name`) is a `Field`, so its coerce would unify the
-still-unresolved field type with `Optional[α]` before member resolution runs.
-Then `name: String` collides with `Optional`. Fix: `mark_synth_pending` also
-covers `Field` and `TupleIndex` (their `Member` constraint produces the type).
-That's a general bidi fix: `let x: Int64? = s.count` has the same latent
-order dependence. Until the gate drops at the stall-breaker, a tail of
-unknown type waits.
+still-unresolved field type with `Optional[α]` before member resolution.
+`name: String` then collides with `Optional`. Fix: `mark_synth_pending` also
+covers `Field` and `TupleIndex`. That's a general bidi fix:
+`let x: Int64? = s.count` has the same latent order dependence.
 
 ### 4. Values out of a borrowed payload
 
-With a `&$o` binder, the tail reads through a reference. The arm value then
-**decays** like any match-arm value (`docs/language/references.md`, "Decay"):
+In `chainBorrow` / `chainMutate` mode the tail reads through a reference. The
+arm value then **decays** like any match-arm value
+(`docs/language/references.md`, "Decay"):
 
 - `Copyable` → copied.
-- `Cloneable` → cloned (for example `user?.name` with `name: String`).
-- Neither → E503 "move out of a borrow", as for
-  `match a { .Some(&x) => x.handle, … }` today. The user writes
-  `a?.handle.asRef()`-style access or matches by hand.
-
-Method calls on `$o` use the method's own receiver mode. Borrowing methods
-just work, `consuming` ones are E503 on a place base (fine on an rvalue base),
-and `mutating` ones are E159 in phase 1 (§Errors).
+- `Cloneable` → cloned (`user?.name` with `name: String`).
+- Neither → E503 "move out of a borrow". The user matches by hand or uses
+  `chainTake` on an owned value.
 
 ### 5. Statement position
 
 `log?.write(line);` has type `Optional[()]` and is discarded. There's no
-unused-value analyzer on the base commit, so nothing warns. If one is added
-later, it should exempt `Optional[()]`.
+unused-value analyzer on the base commit, so nothing warns. A future one
+should exempt `Optional[()]`.
 
 ### 6. Interactions
 
-- **`??`:** `a?.b ?? d` works as expected, since `??` binds looser than any
-  postfix.
+- **`??`:** `a?.b ?? d` works as expected.
 - **`try`:** `try a?.b()` where `b` throws gives `try` an
-  `Optional[Result[…]]`. Its `Tryable` is Optional's, so `try` unwraps the
-  Optional and yields the `Result`. That's legal but surprising. Phase 1
-  documents it; a lint can follow.
-- **`!`:** `a?.b!` force-unwraps `b` *inside* the chain (`!` is a chain
-  postfix). `(a?.b)!` unwraps the chain's result.
-- **Placeholders:** `a?.f(_)` builds a closure inside the arm. That's legal.
-- **Pipe:** `a?.b |> f` pipes the chain's `Optional`, since `|>` ends the
-  chain.
-- **Closures:** a chain inside a closure captures `a` by the closure's kind
-  rules. The `$o` binders are locals of the closure body.
-- **`Optional[&T]` base:** binding `&$o` against a `&T` payload gives
-  `& &T`, which peels to `&T` under the existing ref-of-ref rules. Needs a
-  test.
-
-### 7. Phase 2: mutating chains (0.20, designed here)
-
-`a?.push(x)` and `a?.field = v` need `&mutating $o`, and that's only known after
-member resolution in type inference. Phase 2:
-
-1. HIR lowering emits the binder for a **`var` place** base with a new
-   "inferred" binder mode (`by_ref` grows from `Option<bool>` to a three-way
-   enum). Everything else stays as in §2.
-2. Inference resolves `Inferred` to `&mutating` if any member resolved in the
-   arm's tail is `mutating`, or the chain is an assignment target. Otherwise
-   it resolves to `&`. This mirrors how a method call's receiver access mode
-   is already chosen after resolution.
-3. Assignment `a?.b = v` lowers to the match with `$o.b = v` in the `.Some` arm
-   (type `Optional[()]`). Compound assignment rewrites the same way. The
-   place check accepts an `OptionalChain` match whose tail is a place.
-4. Exclusivity (`a?.f(a.count)`) is the existing access-mode analyzer's job.
-
-Phase 1 must not foreclose this. The binder choice lives in one helper, and
-E159/E160 are the phase-1 stand-ins for the phase-2 paths.
+  `Optional[Result[…]]`, and `try` unwraps the Optional. That's legal but
+  surprising, so it's documented, with a lint as a follow-up.
+- **`!`:** `a?.b!` force-unwraps `b` inside the chain. `(a?.b)!` unwraps the
+  result.
+- **Placeholders:** `xs.map(_?.name)` is a placeholder closure whose body is
+  a chain (see the placeholder design).
+- **Pipe:** `a?.b |> f` pipes the chain's `Optional`, since `|>` ends the chain.
+- **Closures:** a chain inside a closure follows the closure's kind rules. A
+  mutating chain on a captured `var` makes it a `mutating`-kind capture.
+- **Exclusivity:** `a?.push(a.count)` has a `&mutating` bind on `a` live while
+  `a.count` reads `a`. That's the existing access-mode analyzer's error, as for
+  `a.push(a.count)` today.
 
 ## Current state
 
 On `def25459`:
 
 - `Question` (`?`) is a token used only in types and after `func f()`.
-  Expression grammar never sees it.
-- `&` / `&mutating` binder patterns exist (`HirPat::Binding::by_ref`,
-  `kestrel-hir/src/body.rs:420`). So do arm-value decay and E503.
-- `FromValue` promotion through `Coerce` exists. Check-mode match arms use
+- `Optional[&T]` / `Optional[&mutating T]` returns exist, as do arm-value
+  decay and E503.
+- `FromValue` promotion through `Coerce` exists, and check-mode match arms use
   `check_leaf`.
-- `Optional`, `.Some`, `.None` resolve as builtins (`Builtin::OptionalEnum`,
-  `OptionalSomeCase`, `OptionalNoneCase`).
+- Operators already desugar to builtin protocols resolved through
+  `resolve_builtin` (`kestrel-hir/src/builtin.rs`).
 
 ## Pipeline impact
 
 | Stage | Change |
 |-------|--------|
 | **Lexer** | None (two existing tokens, joined) |
-| **Parser / CST** | `ExprOptionalBind` node: wraps the operand and holds `?`. `ExprOptionalChain` node: wraps the whole postfix chain. In `tight_ops` (`exprs.rs:354`): on `Question` joined to a following `Dot` or `LParen`, close the chain, wrap it in `ExprOptionalBind` (bump `?`), set a "saw bind" flag, and continue (`member` / `call`). In `postfix()` (`exprs.rs:330`): include the line-continued `.member` loop. When closing a chain whose flag is set, wrap the result in `ExprOptionalChain`. The `cond` variant (`cond_primary`) gets the same treatment, so `if let x = a?.b { }` works. Add both kinds to `kinds.txt`; regenerate |
-| **Decls (ECS)** | None |
-| **HIR** | `MatchSource::OptionalChain` and `SugarKind::OptionalChain`. A chain frame stack on the lowering context. Lowering for both nodes as in §1. The binder choice (§2) uses `is_place_syntax`. `MatchSource::is_desugared()` already returns true, so exhaustiveness analysis skips it |
-| **Type infer** | In the `Match` arm: when `source == OptionalChain`, build `Optional[α]` (unify with `expect` if present) and run the check-mode loop against it. Add `Field` / `TupleIndex` to `mark_synth_pending` (§3). A "`?.` on non-Optional" error when the scrutinee resolves to a non-Optional (E158) instead of the generic pattern mismatch |
-| **Analyzers** | `access_mode`: a `mutating` member through a `&` binder from an `OptionalChain` match reports E159 (phase 1) instead of the generic mutability error. The assignment-target check reports E160 for an `OptionalChain` target |
-| **MIR / codegen** | None expected: a `Match` with `&` / owned `Some` binders and a promotion-wrapped arm already lowers. Verify with MIR snapshot tests (a place base must produce a borrow, not a copy, of the scrutinee) |
-| **LSP** | Completion after `?.` lists the **payload's** members (the receiver at the cursor is the bind, whose type is `T`). Hover on `?` shows `Optional[T] → T` |
-| **Docs** | `docs/language/` (Optional section of types or a new `optionals.md`), `kestrel-hir/docs/desugaring.md`, `docs/language/syntax.md` |
+| **Parser / CST** | `ExprOptionalBind` node: wraps the operand and holds `?`. `ExprOptionalChain` node: wraps the whole chain. In `tight_ops` (`exprs.rs:354`): on `Question` joined to a following `Dot`, close the chain, wrap it in `ExprOptionalBind`, set a "saw bind" flag, then continue with `member()` or, if `(` follows the `.`, `call()`. In `postfix()` (`exprs.rs:330`): include the line-continued `.member` loop. When closing a chain whose flag is set, wrap it in `ExprOptionalChain`. Same in the `cond` path (`if let x = a?.b`). The assignment statement parser accepts an `ExprOptionalChain` LHS. Add both kinds to `kinds.txt`; regenerate |
+| **Stdlib** | `OptionalChain` protocol plus `Optional` conformance (above). Builtins `OptionalChainProtocol`, `OptionalChainBorrowMethod`, `OptionalChainMutateMethod`, `OptionalChainTakeMethod` in `kestrel-hir/src/builtin.rs` |
+| **HIR** | `MatchSource::OptionalChain`, `SugarKind::OptionalChain`. Chain frame stack on the lowering context. Scrutinees are `ProtocolCall(base, OptionalChain, "chainBorrow")`. Assignment and compound assignment lowered into the innermost arm (§1). No new `HirExpr` variant, so the walker sweep is zero |
+| **Type infer** | `Match` arm: when `source == OptionalChain`, check arms against `Optional[α]` (§3). `ChainMode` decision per bind, recorded in `TypedBody.chain_modes` (§2), including outward propagation. `mark_synth_pending` covers `Field` / `TupleIndex`. Missing-conformance error E157 via the `Sugar` cascade-suppression hook (the primary `Conforms` on `OptionalChain`), like `for` / `try` |
+| **Analyzers** | `access_mode` reads `chain_modes` for exclusivity and `let`-base mutability. A consuming chain on a place is E158 |
+| **MIR** | Lower the scrutinee `ProtocolCall` with the method named by `chain_modes`, not the provisional name. The rest is ordinary match lowering. MIR snapshot tests pin each mode |
+| **LSP** | Completion after `?.` lists `Wrapped`'s members. Hover on `?.` shows the chosen mode |
+| **Docs** | New `docs/language/optional-chaining.md`, the operator table in `kestrel-hir/docs/desugaring.md`, `docs/language/syntax.md` |
 
 ## Error cases
 
 Codes are proposals. Confirm they're still free when implementing (the next
-free E1xx was E156 on the base commit, and the pipe design proposes
-E156–E157).
+free E1xx on the base commit was E156, and the pipe design proposes E156).
 
 | Code | Where | Message |
 |---|---|---|
-| E158 | type infer | `` `?.` requires an Optional, found `T` `` + note "use `.` for a non-optional value" |
-| E159 | analyzer | `` mutating method `push` can't be called through `?.` yet `` + note "unwrap with `if let` and call it on a `var` binding" (removed in phase 2) |
-| E160 | analyzer | `` assignment through `?.` isn't supported yet `` (removed in phase 2) |
-| E503 | existing | Tail value is neither Copyable nor Cloneable (§4) |
-| — | parser | `?` not joined to `.`/`(` in expression position: the existing "unexpected token" error is enough |
+| E157 | type infer | `` `?.` requires a type that conforms to `OptionalChain`, found `T` `` + note "use `.` for a non-optional value" |
+| E158 | analyzer | `` can't consume through `?.` on a place `` + note "use `a.take()?.…` to move the value out" |
+| E200 family | existing | mutating through `?.` on a `let` base |
+| E503 | existing | tail value is neither Copyable nor Cloneable (§4) |
 
 ## Edge cases
 
-- **Nested optionals:** `a: Int64??`, `a?.description` binds `$o: Int64?` and
-  calls `description` on the inner `Optional`. That's correct and needs a test.
-- **Chain inside a condition:** `if let n = a?.count { }` relies on the
-  `cond_primary` path.
-- **Generic tail:** `func f[T](o: Box[T]?) -> T? { o?.value }` promotes
-  (rigid `T`). With `T = Int64?` at the call site, the result is
-  `Optional[Optional[Int64]]` represented as `T?`. Expected, and it needs a
-  test.
-- **Never tail:** `a?.crash()` has type `Optional[α]`. Defaults apply.
-- **Implicit `it`:** `{ it?.name }` works. The chain is inside the closure body.
-- **Static members:** `Type?.x` isn't valid. `?` after a type path in
-  expression position is a parse error (same as today).
+- **Nested optionals:** `a: Int64??`. `a?.description` binds `Int64?` and calls
+  `description` on the inner `Optional`. Needs a test.
+- **Generic tail:** `func f[T](o: Box[T]?) -> T? { o?.value }` promotes (rigid
+  `T`). Needs a test with `T = Int64?`.
+- **Generic base:** `func g[O: OptionalChain](o: O) -> O.Wrapped? …` works
+  through the protocol, which is the payoff of making it a protocol.
+- **Implicit `it`:** `{ it?.name }` works.
+- **`?.` on a type path** (`Type?.x`): parse error, as today.
+- **Short-circuit side effects:** `a?.f(sideEffect())` doesn't run
+  `sideEffect()` when `a` is `.None`. Needs a test.
 
 ## Test plan
 
 Tests first, under `lib/kestrel-test-suite/testdata/expressions/optional_chaining/`:
 
-- Execution: field, method, subscript, `?(…)` call, multi-level `a?.b?.c`,
-  flattening (`Optional[U]` tail), promotion (`U` tail), `??` fallback, `.None`
-  short-circuit skipping side effects in the tail (a counter), rvalue base,
-  `if let` with a chain, chain inside a closure.
-- Execution: a `Cloneable` tail (`user?.name`) is cloned, and the base is still
-  usable after.
-- Diagnostics: E158, E159 (`a?.push(1)`), E160 (`a?.x = 1`), E503 on a
-  non-Cloneable tail, `consuming` method on a place base.
-- MIR snapshot: a place base is borrowed, not copied. An rvalue base is owned
-  and dropped in the arm.
-- Inference: `let x: Int64? = s.count` (the `mark_synth_pending` fix,
-  independent of `?.`).
+- Execution, read: field, method, subscript `a?.items(0)`, `f?.(x)`,
+  multi-level, flattening, promotion, `??` fallback, `.None` skipping tail
+  side effects, `if let` with a chain, inside a closure.
+- Execution, mutate: `a?.push(x)`, `a?.n = 1`, `a?.n += 1`, `a?.b?.push(x)`
+  (outward propagation), the RHS not evaluated on `.None`.
+- Execution, take: `load()?.consume()`.
+- Execution, protocol: a user type conforming to `OptionalChain`; a generic
+  `O: OptionalChain`.
+- Diagnostics: E157 on a non-conforming type, E158, mutating through a `let`
+  base, E503 on a non-Cloneable tail, exclusivity `a?.push(a.count)`.
+- MIR snapshot: each mode calls its method, and a borrowed place is never
+  copied.
+- Inference: `let x: Int64? = s.count` (the `mark_synth_pending` fix).
 
 ## Effort
 
-Phase 1, about 1 week: parser (1 day), HIR lowering with the chain frame stack
-(1–2 days), inference rule and `mark_synth_pending` fix (1 day), analyzer
-diagnostics (1 day), tests, LSP completion and docs (1–2 days).
+About 2 weeks:
 
-Phase 2 (0.20), about another week: inferred binder (2–3 days), assignment and
-compound assignment through chains (2 days), tests.
+| Work | Estimate |
+|---|---|
+| Parser (chain marking, `?.(`, assignment LHS) | 1 day |
+| Stdlib protocol, builtins, `Optional` conformance | 0.5 day |
+| HIR lowering (frame stack, nested matches, assignment) | 2 days |
+| Inference (check-mode rule, `mark_synth_pending`, `ChainMode` + propagation) | 3–4 days |
+| Analyzer and MIR (mode-driven method choice, E157/E158) | 1–2 days |
+| Tests, LSP, docs | 2 days |
 
-Reusing `Match` instead of a new `HirExpr::OptionalChain` node is what keeps
-phase 1 near a week. The earlier scoping estimate (1.5–3 weeks) assumed a new
-node plus phase 2.
+`ChainMode` is the risk. If the decision point turns out not to be clean in
+the solver, the fallback is a syntactic pre-pass. Any `=`, compound-assign or
+`&mutating` argument in the tail forces `chainMutate`, and otherwise mutating
+*methods* are found by a post-inference re-check that reports "re-run with
+mutate". Only the first half is cheap, so it's worth prototyping
+`ChainMode` first.
 
 ## Alternatives considered
 
-- **New `HirExpr::OptionalChain { base, binding, body }`.** Clearer intent in
-  HIR, but every `HirExpr` walker (captures, move tracking, access mode,
-  control flow, MIR, LSP) needs a new arm. `Match` + `MatchSource` gets the
-  same information with no sweep.
-- **Desugar to `a.asRef().flatMap { … }`.** The tail would run in a closure,
-  so `return`/`break` in the tail would change meaning, and `flatMap` needs
-  the tail to already be Optional.
-- **A new token `?.`.** Equivalent, but it interacts with `as?` and with types
-  like `T?` followed by `.`. Two joined tokens are simpler.
+- **Optional-only, `&` binder patterns, no protocol.** Simpler (no stdlib
+  addition), but it goes against "operators are protocols" and rules out weak
+  references and user types.
+- **Reuse `Tryable`.** `tryExtract()` is `consuming`, so it would move a place
+  base, and its residual model is about early return, not a per-expression
+  result.
+- **New `HirExpr::OptionalChain` node.** Clearer HIR, but every `HirExpr`
+  walker needs an arm. `Match` + `MatchSource` carries the same information.
+- **A new `?.` token.** Equivalent, but it interacts with `as?` and with `T?`
+  followed by `.`.
 
 ## Open questions
 
-- **Q1.** Phase 1 only in 0.19 (recommended), or both phases?
-- **Q2.** Include `f?(x)` (optional call / direct subscript) in phase 1? It
-  costs one extra parser arm. This design says yes.
-- **Q3.** Should the `try a?.b()` interaction (§6) get a lint in 0.19, or wait
-  until it bites someone?
+- **Q1.** Should `Result` conform to `OptionalChain` (dropping the error)? This
+  design says no.
+- **Q2.** Should the `try a?.b()` interaction (§6) get a lint in 0.19?

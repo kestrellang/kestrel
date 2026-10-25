@@ -24,6 +24,16 @@ let n = text |> Int64.parse(_, radix: 16) |> clamp(_, min: 0, max: 255)
 The operator is a purely syntactic rewrite into a call that already exists.
 Nothing after HIR lowering knows `|>` was written.
 
+The right side is **any expression that evaluates to something callable with
+the left value**. The one special case is a call with a `_` slot, which takes
+the value in that slot directly:
+
+```kestrel
+x |> f                 // f(x)
+x |> makeAdder(1)      // makeAdder(1)(x): call the result
+x |> f(_, 1)           // f(x, 1): fill the slot, no closure
+```
+
 ### Non-goals
 
 - **A `Pipeable` protocol / user overloading.** Every other binary operator
@@ -75,10 +85,9 @@ let r = xs
 
 | `rhs` is | Lowers to |
 |---|---|
-| A call with exactly one `_` argument: `f(a, _, b)` | `f(a, lhs, b)` (no closure) |
-| A call with no `_`: `f(a)` | **error E156** (see Q1) |
-| A call with two or more `_`: `f(_, _)` | **error E157** |
-| Anything else: a path, member path, closure literal, parenthesized expression or `OverloadSet` | `Call { callee: rhs, args: [lhs] }` |
+| A call with exactly one bare `_` argument: `f(a, _, b)` | `f(a, lhs, b)` (no closure) |
+| A call with two or more bare `_`: `f(_, _)` | **error E156** |
+| Anything else: a path, member path, a call with no `_` (`makeAdder(1)`), closure literal, parenthesized expression, `OverloadSet` | `Call { callee: rhs, args: [lhs] }`: `rhs` is evaluated, then called with `lhs` |
 
 The result is wrapped in `HirExpr::Sugar { kind: SugarKind::Pipe }`, so
 diagnostics anchor on the `|>` token and inner errors don't cascade.
@@ -111,13 +120,21 @@ order and only changes ownership for rvalues, which are owned anyway:
 **Recommendation:** substitute places directly, and bind rvalues to a `$pipe`
 temporary in a `Block` before the call. Both rules are local to HIR lowering
 (a place is `Local` / `Field` / `TupleIndex` chains of those). *Open question
-Q2.*
+Q1.*
 
 ### 3. Types
 
 There's no new inference. `Call` / `MethodCall` constraints do everything.
 Calling a closure literal directly (`x |> { it * 2 }`) works through the same
 `Call` path as `{ it * 2 }(x)`.
+
+A call with no `_` is called **as a function value**. So `x |> f(a)` type-checks
+only if `f(a)` returns something callable with `x`'s type. That's the curried
+case (`x |> makeAdder(1)`). When it fails because `f(a)` isn't a function, or
+doesn't take `x`'s type, the `Pipe` sugar turns the error into one with a
+fix-it: "`f(a)` returns `R`, which can't be called with `X`; did you mean
+`f(_, a)`?". Kestrel's labeled, method-first APIs make guessing "the first
+argument" unreliable, which is why `|>` never inserts `x` implicitly.
 
 ## Current state
 
@@ -146,9 +163,8 @@ Codes are proposals. Confirm they're still free when implementing.
 
 | Code | Where | Message |
 |---|---|---|
-| E156 | HIR lower | `` call on the right of `\|>` needs a `_` to mark where the value goes `` + note "`x \|> f(a)` → `x \|> f(_, a)`" |
-| E157 | HIR lower | `` `\|>` target has more than one `_` `` |
-| — | type infer | Existing "not callable" / argument mismatch, anchored by the `Pipe` sugar on the `\|>` |
+| E156 | HIR lower | `` `\|>` target has more than one `_` `` |
+| — | type infer | Existing "not callable" / argument mismatch, anchored by the `Pipe` sugar on the `\|>`, with the "did you mean `f(_, a)`?" note when `rhs` is a call with no `_` (§3) |
 
 ## Edge cases
 
@@ -175,9 +191,11 @@ Tests first, under `lib/kestrel-test-suite/testdata/expressions/pipe/`:
   labeled slot, method / static / initializer / subscript targets, closure
   literal target, precedence against `+`, `??`, `or`.
 - Execution: a non-Copyable place piped into a borrowing function is still
-  usable afterwards. Rvalue evaluation order (depends on Q2).
-- Diagnostics: E156, E157, labeled-first-param suggestion, non-callable rhs,
-  `x |> f ?? d` precedence note.
+  usable afterwards. Rvalue evaluation order (depends on Q1).
+- Execution: `x |> makeAdder(1)` (a call with no `_` is called with `x`).
+- Diagnostics: E156, the "did you mean `f(_, a)`?" note on `x |> f(a)`,
+  labeled-first-param suggestion, non-callable rhs, `x |> f ?? d` precedence
+  note.
 - Parser: a line starting with `|>` continues the expression.
 
 ## Effort
@@ -187,10 +205,6 @@ hour), HIR lowering (half a day), tests and diagnostics (1 day).
 
 ## Open questions
 
-- **Q1.** A pipe into a call with no `_`: error (this design) or insert as the
-  first argument (Elixir)? Kestrel APIs are labeled and method-first, so
-  "first argument" is often the wrong parameter, and an error with a fix-it is
-  clearer.
-- **Q2.** Evaluation order for rvalue left sides: substitute (argument order)
+- **Q1.** Evaluation order for rvalue left sides: substitute (argument order)
   or temporary (reading order)? This design recommends temporary for rvalues
   and direct substitution for places.

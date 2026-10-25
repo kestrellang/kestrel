@@ -1,4 +1,4 @@
-# Placeholder Arguments (`f(_, 1)`) Design
+# Placeholder Arguments (`f(_, 1)`, `map(_.name)`) Design
 
 > **Status: design, not started.** Milestone 0.19 ("Expression sugar").
 > Base commit `def25459` (`future/0.18`). File and line anchors refer to that
@@ -7,45 +7,51 @@
 
 ## Overview
 
-A placeholder argument turns a call into a function value with the
-placeholder positions left open:
+A placeholder `_` in a call's arguments builds a function value. It has two
+forms, told apart by what follows the `_`:
 
 ```kestrel
-let addOne = add(_, 1)              // { (a) in add(a, 1) }
+// 1. Hole: a bare `_` argument leaves that slot of the call open.
+let addOne = add(_, 1)                    // { (a) in add(a, 1) }
 let parseHex = Int64.parse(_, radix: 16)
-xs.map(clamp(_, min: 0, max: 255))
+
+// 2. Member placeholder: `_` heading a chain makes that ARGUMENT a closure.
+let names = users.map(_.name)             // users.map({ (u) in u.name })
+let adults = users.filter(_.age >= 18)    // users.filter({ (u) in u.age >= 18 })
+let byAge = users.sorted(by: _.age)
+let cities = users.map(_.address?.city)
 ```
 
-Each `_` in a call's argument list becomes one parameter of a synthesized
-closure, in left-to-right order. Everything else in the call stays exactly as
-written. Nothing after HIR lowering knows that `_` was written. The feature
-is pure sugar for a closure literal, and inference, captures, closure kinds and
-MIR treat it as one.
+| Form | Spelled | Closure covers | Params |
+|---|---|---|---|
+| **Hole** | `_` as the whole argument | the **call** | one per hole, left to right |
+| **Member placeholder** | `_` followed by `.`, `?.`, `(`, `!` inside an argument | that **argument** | exactly one |
 
-Placeholders are also the hole that the [pipe operator](../pipe-operator/pipe-operator-design.md)
-fills: `x |> f(a, _)` substitutes `x` directly into the slot and builds no
-closure.
+Both are pure sugar for a closure literal. Nothing after HIR lowering knows `_`
+was written: inference, captures, closure kinds and MIR see a closure.
+
+Holes are also the slot that the [pipe operator](../pipe-operator/pipe-operator-design.md)
+fills: `x |> f(a, _)` substitutes `x` directly and builds no closure.
 
 ### Non-goals
 
-- **`_.member` / `_.method()`** (Scala's `users.map(_.name)`). Closures already
-  have an implicit `it` parameter (`users.map { it.name }`, see
-  `lower_closure` in `kestrel-hir-lower/src/expr.rs:1607`), which covers this.
-- **Operator sections** (`_ + 1`, `(_ < limit)`). `{ it + 1 }` covers them.
-- **Placeholders for the callee or receiver** (`_(x)`, `_.f()`).
-- **Placeholders in type position.** `_` in types already means "infer"; that's
+- **Bare operator sections** (`_ + 1`, `_ < limit` with no member access).
+  `{ it + 1 }` covers them, and `_ + 1` reads too much like a hole.
+- **Several member placeholders in one argument** (Scala's `_.a + _.b` taking
+  two parameters). That's an error, and you write a closure instead.
+- **`_` outside call arguments** (`let f = _.name`). There's no expected type
+  to give the parameter a type, and `{ it.name }` works.
+- **Placeholders in type position.** `_` in types already means "infer". That's
   unchanged.
 
 ## Syntax
 
 ```
-argument ::= (label ':')? (expr | '_')
+argument     ::= (label ':')? (hole | expr)
+hole         ::= '_'                         // followed by ',' or ')'
+primary      ::= … | placeholder_head        // only inside an argument (see below)
+placeholder_head ::= '_'                     // must be followed by '.', '?.', '(' or '!'
 ```
-
-A bare `_` is accepted **only as the whole value of a call argument**. That
-includes plain calls, method calls, static calls, initializer calls and
-subscript calls (subscripts use call syntax, so `table(_)` is
-`{ (i) in table(i) }`).
 
 | Written | Means |
 |---|---|
@@ -53,23 +59,34 @@ subscript calls (subscripts use call syntax, so `table(_)` is
 | `f(_, 1)` | `{ ($p0) in f($p0, 1) }` |
 | `f(_, _)` | `{ ($p0, $p1) in f($p0, $p1) }` |
 | `f(x: _, y: 2)` | `{ ($p0) in f(x: $p0, y: 2) }` |
-| `obj.m(_)` | `{ ($p0) in obj.m($p0) }` |
 | `Point(x: _, y: _)` | `{ ($p0, $p1) in Point(x: $p0, y: $p1) }` |
-| `f(g(_))` | `f({ ($p0) in g($p0) })` (binds to the nearest call) |
-| `f(_ + 1)` | error E811 (`_` is not the whole argument) |
+| `xs.map(_.name)` | `xs.map({ ($p0) in $p0.name })` |
+| `xs.filter(_.age >= 18)` | `xs.filter({ ($p0) in $p0.age >= 18 })` (the whole argument) |
+| `xs.map(_.name.count)` | `xs.map({ ($p0) in $p0.name.count })` |
+| `xs.map(_?.name)` | `xs.map({ ($p0) in $p0?.name })` |
+| `fs.map(_(x))` | `fs.map({ ($p0) in $p0(x) })` (call each function) |
+| `f(g(_))` | `f({ ($p0) in g($p0) })`: a hole binds to the nearest call |
+| `f(g(_.x))` | `f(g({ ($p0) in $p0.x }))`: a member placeholder binds to the nearest argument |
+| `xs.map(_.a + _.b)` | error E812 (two member placeholders in one argument) |
+| `f(_ + 1)` | error E811 (`_` is neither a whole argument nor a chain head) |
 | `let y = _` | error E811 |
+
+**What "inside an argument" means.** The parser counts open argument lists.
+Closure bodies, blocks and parenthesized sub-expressions *inside* the argument
+don't reset the count, but **closure literals do**. `f({ _.x })` is an error,
+because the closure already has `it`.
 
 Trailing closures are unaffected. `f(_) { body }` is
 `{ ($p0) in f($p0) { body } }`.
 
-The closure's type is unlabeled, `(A, B) -> R`, like every Kestrel function
+The closure's type is unlabeled (`(A, B) -> R`), like every Kestrel function
 type. Labels stay on the inner call.
 
 ## Semantics
 
-### 1. Desugaring
+### 1. Desugaring holes
 
-`f(a₁, …, aₙ)` where the arguments at positions `i₁ < … < iₖ` are `_`
+`f(a₁, …, aₙ)` where the arguments at positions `i₁ < … < iₖ` are holes
 lowers to:
 
 ```
@@ -82,134 +99,142 @@ HirExpr::Sugar {
 }
 ```
 
+### 2. Desugaring member placeholders
+
+An argument whose expression contains exactly one `ExprPlaceholderHead` (not
+counting any nested inside an inner argument list) lowers to:
+
+```
+HirCallArg {
+    label,
+    value: Sugar(Placeholder, Closure { params: [$p0], body: { <arg with _ ↦ $p0> } }),
+}
+```
+
+A call can mix the forms. In `zip(_, with: _.id)`, the second argument
+becomes a closure first, then the hole makes the whole call a closure:
+`{ ($p0) in zip($p0, with: { ($p1) in $p1.id }) }`.
+
 The `$p` names are synthetic and can't collide with user names (the `$`
 prefix is the existing convention: `$try_value`, `$cast`, `$iter`).
 
-### 2. Evaluation of the other arguments
+### 3. Evaluation of the other arguments
 
-The non-placeholder arguments are **inside the closure body**, so they are
+Everything that isn't the placeholder is **inside the closure body**, so it's
 evaluated **on every call**, not when the closure is created:
 
 ```kestrel
-let f = log(_, timestamp())   // timestamp() runs each time f is called
+let f = log(_, timestamp())        // timestamp() runs each time f is called
+xs.filter(_.score > threshold())   // threshold() runs once per element
 ```
 
-This is the same rule as Scala. It falls out of the desugaring with no extra
-machinery. The alternative (evaluate once, when the closure is created) needs
-temporaries that outlive the expression, and normal closures capture **views
-of the frame** (`docs/design/closures.md`). That's awkward for temporaries,
-and `let` + `it` already expresses it:
+This is the same rule as Scala, and it falls out of the desugaring. To
+evaluate once, bind it first: `let t = threshold(); xs.filter(_.score > t)`.
 
-```kestrel
-let ts = timestamp()
-let f = { log(it, ts) }
-```
-
-*Open question Q1 asks to confirm this.*
-
-### 3. Types and closure kind
+### 4. Types and closure kind
 
 The synthesized closure goes through `gen_closure`
 (`kestrel-type-infer/src/generate.rs:915`) like any closure literal:
 
-- It is inserted into `closure_literal_exprs`, so the parameter-convention
-  inference (borrow, `MutBorrow` upgrade) applies to it.
-- With an expected function type (`xs.map(add(_, 1))`), parameter types and
-  the closure kind come from the expectation. `escaping` / `consuming`
-  expectations make it an owning closure, and capture rules apply as usual.
-- With no expectation (`let g = add(_, 1)`), parameter types come from the
-  call. The closure is a normal (frame-bound) closure.
-- If the callee is an overload set and there's no expectation
-  (`let g = print(_)`), inference may not be able to pick an overload. That
-  reports the existing "could not infer type" error, anchored on the `_`.
+- It's inserted into `closure_literal_exprs`, so the parameter-convention
+  inference (borrow, `MutBorrow` upgrade) applies.
+- With an expected function type (`xs.map(_.name)`, `xs.map(add(_, 1))`),
+  parameter types and the closure kind come from the expectation. This is
+  what makes member placeholders work, since `_.name` needs to know `_`'s type.
+  It's the same mechanism as `xs.map { it.name }`.
+- With no expectation, hole parameters get their types from the call
+  (`let g = add(_, 1)`). A member placeholder with no expectation is the
+  existing "could not infer type" error, as for `let f = { it.name }`
+  (`testdata/expressions/closures/cannot_infer_it_type_without_context.ks`).
+- An overloaded callee with no expectation (`let g = print(_)`) may also be
+  "could not infer type", anchored on the `_`.
 
-### 4. Captures
+### 5. Captures
 
-The non-placeholder arguments and the callee are free variables of the
-closure body. `ClosureCaptures` (`kestrel-type-infer/src/captures.rs`)
-captures them by place, exactly as for a hand-written closure. Nothing new.
+Free variables of the closure body are captured by place through
+`ClosureCaptures` (`kestrel-type-infer/src/captures.rs`), exactly as for a
+hand-written closure.
 
-### 5. Interaction with pipe
+### 6. Interaction with pipe
 
-When a call containing `_` is the right side of `|>`, the pipe lowering
-substitutes the left side into the slot and **does not** build a closure. The
-shared helper is described under [Pipeline impact](#pipeline-impact).
+When a call with **holes** is the right side of `|>`, the pipe lowering
+substitutes the left side into the (single) hole and builds no closure. Member
+placeholders inside that call's other arguments still become closures:
+`users |> sortBy(_, key: _.age)` → `sortBy(users, key: { (p) in p.age })`.
 
 ## Current state
 
 On `def25459`:
 
 - `Underscore` is already a token (`kestrel-lexer/src/lib.rs:170`).
-- `_` is not in `at_expr_start` (`kestrel-parser/src/grammar/exprs.rs:44`), so
-  `f(_)` currently fails with E803 "expected expression".
-- Closures with unannotated params and the implicit `it` parameter are fully
-  supported, as are all four closure kinds.
+- `_` isn't in `at_expr_start` (`kestrel-parser/src/grammar/exprs.rs:44`),
+  so `f(_)` currently fails with E803 "expected expression".
+- Closures with unannotated params, the implicit `it` parameter and all four
+  closure kinds are fully supported.
 
 ## Pipeline impact
 
 | Stage | Change |
 |-------|--------|
 | **Lexer** | None |
-| **Parser / CST** | `argument()` (`exprs.rs:439`): after an optional label, if at `Underscore` *and* the next token is `,` or `)`, emit an `ExprPlaceholder` node wrapping the token. Otherwise fall through to `expr()`. `_` stays out of `at_expr_start`, so every other position keeps failing. Add `ExprPlaceholder` to `kinds.txt` and regenerate. `argument_list_body`'s "expected expression" check must accept `Underscore` |
+| **Parser / CST** | Two nodes: `ExprPlaceholder` (a hole) and `ExprPlaceholderHead` (a chain head). A parser field `arg_depth: u32`: `argument_list_body` increments it and `closure()` saves and zeroes it. In `argument()` (`exprs.rs:439`), after an optional label: at `Underscore` followed by `,` or `)`, emit `ExprPlaceholder`. In `primary()` (`exprs.rs:511`): at `Underscore` with `arg_depth > 0` and the next token **joined** and one of `.`, `?`, `(`, `!`, emit `ExprPlaceholderHead` and return it as the chain start, so the normal postfix loop continues. Otherwise `_` at expression start reports E811 instead of the generic E803. `argument_list_body`'s "expected expression" check accepts `Underscore`. Add both kinds to `kinds.txt`; regenerate |
 | **Decls (ECS)** | None |
-| **HIR** | `SugarKind::Placeholder`. In `lower_call` (`kestrel-hir-lower/src/expr.rs:731`), before lowering args: if any `ArgSyntax` is a placeholder, push a scope, define `$p0…`, lower the call with `HirExpr::Local($pᵢ)` in those slots (going through the existing `lower_member_call` / `lower_path_call` / direct paths unchanged), pop the scope, and wrap the result as `Closure` + `Sugar`. Factor this as `lower_call_with_holes(node, fill: impl FnMut(i) -> HirExprId)` so the pipe operator can reuse it with a fill that returns the piped value. An `ExprPlaceholder` reached any other way (it can't, by grammar, but be defensive) lowers to `HirExpr::Error` with E811 |
-| **Type infer** | None beyond what closures already do. Anchor "could not infer" for a placeholder closure on the first `_` span |
-| **Captures / analyzers** | None. `Sugar` is transparent to every consumer |
-| **MIR / codegen** | None |
-| **LSP** | Hover on `_` shows the parameter type; signature help works unchanged since the inner call is a normal call |
-| **Docs** | `docs/language/closures.md` (new "Placeholder arguments" section), `docs/language/functions.md` cross-link, `kestrel-hir/docs/desugaring.md` |
+| **HIR** | `SugarKind::Placeholder`. (a) In `lower_call_args` (`kestrel-hir-lower/src/expr.rs:1400`): for each argument, count `ExprPlaceholderHead` nodes in its subtree, stopping at nested `ArgumentList`s and `ExprClosure`s. If there's one, push a scope, define `$p0`, lower the argument with the head mapped to `Local($p0)`, pop the scope, and wrap it as `Closure` + `Sugar`. If there are two or more, report E812. (b) In `lower_call` (`expr.rs:731`): if any argument is an `ExprPlaceholder`, define `$p0…`, lower the call with `Local($pᵢ)` in those slots (going through the existing `lower_member_call` / `lower_path_call` / direct paths unchanged), and wrap it. Factor (b) as `lower_call_with_holes(node, fill: impl FnMut(i) -> HirExprId)` so the pipe operator reuses it with a fill that returns the piped value |
+| **Type infer** | None beyond closures. Anchor "could not infer" for a placeholder closure on the `_` span |
+| **Captures / analyzers / MIR / codegen** | None. `Sugar` is transparent |
+| **LSP** | Hover on `_` shows the parameter type. Completion after `_.` lists members of the expected parameter type (the same path as `it.`) |
+| **Docs** | `docs/language/closures.md` (new "Placeholders" section), cross-link from `functions.md`, `kestrel-hir/docs/desugaring.md` |
 
 ## Error cases
 
-Codes are proposals. Confirm they're still free in
-`lib/kestrel-analyze/AGENTS.md` when implementing, since other work
-allocates concurrently.
+Codes are proposals. Confirm they're still free when implementing (parser codes
+are assigned only in `kestrel-parser/src/syntax_error.rs`; E810 was the last).
 
 | Code | Where | Message |
 |---|---|---|
-| E811 | parser | `` `_` placeholder must be a whole call argument `` (for `_` in any other expression position, including `f(_ + 1)`). Note: "use `{ it + 1 }` for an expression" |
-| — | type infer | Existing "could not infer type" when the placeholder closure has no expectation and an overloaded callee |
+| E811 | parser | `` `_` here isn't a placeholder `` + note "`_` is a placeholder only as a whole call argument (`f(_, 1)`) or at the start of a member chain inside an argument (`map(_.name)`); use `{ it … }` otherwise" |
+| E812 | HIR lower | `` an argument can contain only one `_.` placeholder `` + note "write a closure: `{ (a) in a.x + a.y }`" |
+| — | type infer | Existing "could not infer type" when there's no expectation |
 
 ## Edge cases
 
-- **Nested calls.** `f(g(_))` binds to `g`, giving `f({ (p) in g(p) })`. This
-  is almost never what's wanted when `f` expects a value, and the error then
-  is an ordinary type mismatch. Consider a note on that mismatch: "`_` binds to
-  the innermost call".
-- **Placeholder inside a closure.** `{ f(_) }` is a closure returning a
-  closure. That's legal.
-- **`mutating` parameters.** `swap(_, &mutating b)` → the closure body
-  contains `&mutating b`, which makes it a `mutating`-kind capture. The usual
-  closure-kind rules apply (E624/E625).
-- **Labels that are keywords** (`f(in: _)`): `at_label` already accepts keyword
-  labels.
-- **Default parameters.** `f(_)` where `f` has trailing defaulted params:
-  defaults are filled inside the body as usual.
-- **Generic callee.** `identity(_)` with no expectation leaves `T` unresolved:
-  that's the existing "could not infer" error.
+- **Nested calls.** In `f(g(_))` the hole binds to `g`. In `f(g(_.x))` the
+  member placeholder binds to `g`'s argument. Both follow "nearest". When `f`
+  expected a value, the mismatch error gets a note: "`_` binds to the
+  innermost call".
+- **Implicit `it` and `_` together.** `xs.map({ it + _.x })` is E811, because
+  closures reset `arg_depth`. Inside a placeholder closure, `it` still refers to
+  any enclosing closure's `it`.
+- **`mutating` parameters.** `xs.forEach(_.reset())` with `reset` `mutating`
+  needs a `mutating (T) -> ()` expectation, which the closure-kind rules
+  already handle (E624/E625).
+- **Keyword labels** (`f(in: _)`): `at_label` already accepts them.
+- **Default parameters.** Trailing defaults are filled inside the body.
+- **Generic callee.** `identity(_)` with no expectation: "could not infer".
+- **`_` as a pattern inside an argument** (`f(match x { _ => 1 })`): patterns
+  are parsed by the pattern grammar, never `primary()`, so they're unaffected.
 
 ## Test plan
 
-Write tests first under `lib/kestrel-test-suite/testdata/expressions/placeholders/`:
+Tests first, under `lib/kestrel-test-suite/testdata/expressions/placeholders/`:
 
-- Execution: single, multiple, labeled, method, static, initializer and
-  subscript placeholders. Passing to `map`/`filter`. A per-call side-effect
-  counter that proves the other arguments run once per call.
-- Execution: captures of a non-Copyable local through a placeholder closure
-  (frame view). `escaping` expectation (owned capture).
-- Diagnostics: E811 for `let x = _`, `f(_ + 1)`, `return _`, and `_` as a
-  callee. Overloaded callee with no context. `f(g(_))` mismatch.
-- MIR snapshot: one placeholder call lowers to the same MIR as the
-  hand-written closure.
+- Execution, holes: single, multiple, labeled, method, static, initializer,
+  subscript. Passing to `map`/`filter`. A per-call side-effect counter.
+- Execution, member: `map(_.name)`, `filter(_.age >= 18)`, `sorted(by: _.age)`,
+  `map(_?.city)`, `map(_(x))`, `map(_.name.count)`, mixed with a hole.
+- Execution: capturing a non-Copyable local, `escaping` expectation.
+- Diagnostics: E811 (`let x = _`, `f(_ + 1)`, `{ _.x }` in an argument),
+  E812, no-context member placeholder, overloaded callee with no context,
+  nested-call note.
+- MIR snapshot: `xs.map(_.name)` lowers the same as `xs.map { it.name }`.
 
 ## Effort
 
-About 2–4 days: parser (half a day), HIR helper and sugar kind (1 day), tests
-and diagnostics (1–2 days), docs.
+About 3–5 days: parser with `arg_depth` (1 day), HIR hole and member lowering
+(1–1.5 days), tests and diagnostics (1–2 days), docs.
 
 ## Open questions
 
-- **Q1.** Confirm the other arguments run on every call (§2).
-- **Q2.** Should `f(g(_))` be an error ("ambiguous placeholder") instead of
-  binding to `g`? This design says no: the rule is simple and Scala users
-  know it.
+- **Q1.** In `f(g(_))`, should a hole inside a nested call be an error
+  ("ambiguous placeholder") instead of binding to `g`? This design binds to the
+  nearest call, like Scala.
